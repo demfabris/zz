@@ -1091,6 +1091,15 @@ nobody intends to drain. `accepted` plus `native` means zz's own surface serves 
 - `formats.terminal-runtime` (native): the 28 VT runtime names keep the pin's inactive or default
   value, which the [status line reference](/tmux/status-line.md) already records as default state
   rather than support.
+- `messages.tty-model` (never): `show-messages -T` dumps the server's per-terminal terminfo
+  capability table and `-J` its internal job fds; zz's daemon drives no client terminal through
+  terminfo and publishes no job registry, so both reports describe a server zz is not.
+- `mouse.bound-context` (native): `copy-mode -S`, `resize-pane -M`, `move-pane -M`, and
+  `send-keys -M` consume the mouse event that invoked them, and zz's pointer gestures belong to the
+  rendering client rather than to a key table.
+- `prompt.pane-rendered` (native): `command-prompt -P` paints into pane cells, while zz's prompts
+  are client surfaces and its copy-mode numeric prefix already uses the native per-client repeat
+  shape.
 
 # Related
 

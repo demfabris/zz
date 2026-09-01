@@ -1919,10 +1919,10 @@
     {
       "id": "messages.tty-model",
       "title": "Model tmux message and TTY reports",
-      "decision": "park",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "hard",
+      "decision": "never",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "admin",
         "remote"
@@ -1934,22 +1934,24 @@
         "flag:show-messages:-t"
       ],
       "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
         "resource:crates/zz-protocol/src/catalog.rs",
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "The daemon retains job and terminal capability records with target-aware output matching the pin."
+        "`show-messages` keeps the pin's message log behavior, and `-J`, `-T`, and `-t` stay loudly unsupported.",
+        "The divergence matrix keeps the absent TTY capability and job-report model visible as a permanent exclusion."
       ],
       "depends_on": [],
-      "reason": "zz does not retain tmux's TTY capability and job-message model."
+      "reason": "`show-messages -T` prints one block per entry in the server's `tty_terms` list, naming the terminal, its owning client, and every terminfo capability tmux resolved for it; a probe against the pin answers `Terminal 0: tmux-256color for /dev/ttys033, flags=0x31:` followed by the capability dump, and `-t` filters that list to one client's terminal. zz's daemon never opens or drives a client terminal through terminfo, because clients receive published frames and render themselves, so there is no capability table to filter or print. `-J` belongs with them: zz's `shell_jobs` map is internal spawn-cap bookkeeping, and the pin's `Job n: cmd [fd=, pid=, status=]` line publishes libevent internals rather than a modeled job. A terminfo-driven server renderer or a published job registry would be new scope, not this gap reopening."
     },
     {
       "id": "mouse.bound-context",
       "title": "Carry bound mouse event context",
-      "decision": "park",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "hard",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "daily",
         "scripts",
@@ -1964,13 +1966,14 @@
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:knowledge/tmux/key-tables.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
       "acceptance": [
-        "A normalized mouse record reaches bound commands without changing direct GUI mouse behavior."
+        "Native pointer handling keeps scrollbar, border, and drag gestures without installing tmux mouse key tables, and the four mouse-context flags stay loudly unsupported."
       ],
       "depends_on": [],
-      "reason": "These flags depend on the input event that invoked the command."
+      "reason": "`copy-mode -S`, `resize-pane -M`, `move-pane -M`, and `send-keys -M` all consume the mouse event that invoked the command, so the pin resolves the target from the event and drives a scrollbar slider drag, a border drag, or a mouse-keyed send. zz installs no tmux mouse key tables, so no command is ever invoked from a mouse event; the same gestures are handled directly by each rendering client, already accepted under `keys.root-native-mouse` and `keys.copy-mode-native-mouse`. The four flags stay loudly unsupported instead of quietly falling back to a keyboard path. Reopen only if zz installs tmux mouse key tables and a normalized event record travels with bound commands."
     },
     {
       "id": "options.lock-program",
@@ -2462,10 +2465,10 @@
     {
       "id": "prompt.pane-rendered",
       "title": "Defer pane-rendered prompts",
-      "decision": "park",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "hard",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "daily"
       ],
@@ -2478,12 +2481,10 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "A product need defines how pane-rendered prompts coexist with native prompt surfaces."
+        "Native client prompt surfaces keep the prompt contract, and `command-prompt -P` stays loudly unsupported rather than being accepted as a no-op."
       ],
-      "depends_on": [
-        "clients.interactive-refresh"
-      ],
-      "reason": "zz prompts are native client surfaces rather than pane cell overlays."
+      "depends_on": [],
+      "reason": "`command-prompt -P` draws the prompt in the target pane's cells rather than on the status line, and the pin uses it for the copy-mode numeric prefix. zz's prompts are client surfaces: the raw TUI replaces its `message_line` row and the GPUI client draws a native prompt, while the copy-mode numeric prefix already uses zz's own per-client `copy-mode-repeat` command shape, accepted under `keys.copy-mode-native-numeric-prefix`. Painting a prompt into pane cells would mean the daemon writing another client's grid, so the flag stays loudly unsupported. Reopen only if a product need appears for a prompt anchored to a pane rather than to the client."
     },
     {
       "id": "protocol.binary-streams",

@@ -1626,7 +1626,7 @@ Pinned tmux routes -K through the selected client's key handler and reuses the i
 
 ### `terminal.key-reset`: Reset terminal input and palette state
 
-Pinned tmux clears the pane palette, hard-resets terminal input state, marks style, theme, and redraw state, and still delivers any supplied keys. Implementers need protocol-catalog, daemon-core, and terminal-engine reset behavior.
+Pinned tmux clears the pane palette, hard-resets terminal input state, marks style, theme, and redraw state, and still delivers any supplied keys. cmd-send-keys.c's -R block and input.c's INPUT_ESC_RIS run the same colour_palette_clear plus screen_write_reset pair, so -R is RIS applied to the pane from the command side. zz drives every pane-level screen operation by writing VT bytes, and libghostty's only reset entry point is ghostty_terminal_reset, whose RIS also drops scrollback. Measured on 2026-09-01 with a 6-row pane printing 20 lines: the pin's RIS leaves history_size 17 -> 23 with the visible rows pushed into history and capture-pane -S - still holding every line, while zz's RIS leaves capture-pane -S - holding only the fresh prompt. Implementing -R on that primitive would ship history loss the pin does not have, and a composed DECSTR plus scroll-up prelude still cannot restore default tab stops. This needs a scrollback-preserving screen reset in the terminal engine before the catalog flag and the send-keys command surface are worth promoting.
 
 - Decision: `adopt`
 - Status: `open`
@@ -1639,6 +1639,7 @@ Pinned tmux clears the pane palette, hard-resets terminal input state, marks sty
   - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:crates/zz-terminal/src/session.rs`
+  - `resource:third_party/ghostty-reference/UPSTREAM.md`
   - `resource:knowledge/tmux/divergences.md`
   - `resource:third_party/tmux-reference/UPSTREAM.md`
 - Acceptance:

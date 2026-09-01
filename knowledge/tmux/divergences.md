@@ -1135,6 +1135,35 @@ template is ordinary undone work rather than a model difference: the chooser tem
 that substitutes the selected value and runs the result already shipped on 2026-08-28, so wiring the
 overlay's selection to it is a delivery question, not a disposition. It stays blocked.
 
+## Window runtime formats split (2026-09-01)
+
+`formats.window-runtime` held five names in one container. They are three producer families, and the
+first is done.
+
+`window_cell_width` and `window_cell_height` publish the window's cell pixel size. `window_create`
+and `window_resize` default it to `DEFAULT_XPIXEL` 16 and `DEFAULT_YPIXEL` 32, and `default_window_size`
+otherwise fills it from the sizing client's `c->tty.xpixel`, which a pty client leaves at the default.
+zz delegates both names to the daemon, answering the format client's reported cell pixels and falling
+back to the pin's defaults, gated on a window in context exactly as `format_cb_window_cell_width`
+gates on `ft->w`. Both sides answer 16 and 32 from `display-message` with and without an attached
+client and from every `list-windows` row, and null from a `list-sessions` row.
+
+`window_bigger` and the two offsets are per-client and stay open on a measured blocker. In the pin
+they read the client's cached tty viewport through `tty_window_offset`, so `format_cb_window_bigger`
+answers null whenever the format tree carries no client. `cmd_list_windows_exec` builds its rows with
+a null client, so a `list-windows` row answers null even while a client is attached, and the value
+follows the client's own current window rather than the row's. The boolean itself already agrees: a
+live comparison of the pin against a headless zz daemon answered null with no client, `0` for a
+viewport-sized window with the status line on and off, `1` after `resize-window` widened the window
+past the viewport, and null again after detach, on both sides. What does not agree is the no-client
+row: zz resolves a format client for every command expansion through `current_format_client`, where
+the pin decides per command in `format_defaults`, so zz would answer `1` where the pin answers null.
+That row context has to land before `window_bigger` can close.
+
+The offsets need more than that. `tty_window_offset1` centres the viewport on the cursor and honours
+a pan window, and zz has no viewport pan or server-side cursor-follow, so today both names answer
+null on both sides only because the pin also answers null whenever the window is not bigger.
+
 ## Format expansion budgets settled (2026-09-01)
 
 The two budgets registered on 2026-09-01 both resolved toward the pin, in opposite directions.

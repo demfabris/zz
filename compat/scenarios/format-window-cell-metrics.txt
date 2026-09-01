@@ -1,0 +1,8 @@
+fmt: [#{window_cell_width}|#{window_cell_height}]
+fmt: [#{window_bigger}|#{window_offset_x}|#{window_offset_y}]
+out: list-windows -F [#{window_cell_width}|#{window_cell_height}|#{window_bigger}|#{window_offset_x}|#{window_offset_y}]
+new-window -n second
+out: list-windows -F [#{window_index}|#{window_cell_width}x#{window_cell_height}]
+out: display-message -p [#{n:#{window_cell_width}}|#{e|*|:#{window_cell_width},#{window_cell_height}}]
+out: display-message -p [#{?window_cell_width,set,unset}|#{?window_bigger,set,unset}|#{?window_offset_x,set,unset}]
+out: list-sessions -F [#{window_cell_width}|#{window_bigger}]

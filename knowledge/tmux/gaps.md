@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **83**. Classified items: **561**.
+Tracked gap groups: **83**. Classified items: **559**.
 
 - Status: open: 40, blocked: 6, accepted: 37.
 - Decision: adopt: 45, native: 29, park: 1, never: 8.
 - Priority: later: 46, none: 37.
 - Closed history entries: 130.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 88, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 69, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 88, presentation: 8, protocol: 2.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 66 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 71 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 2 currently documented hook-producer gaps, 110 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 66 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 69 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 2 currently documented hook-producer gaps, 110 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -918,19 +918,23 @@ These 28 names report live VT state the pin reads straight from its own screen: 
 
 ### `formats.window-runtime`: Expose remaining window formats
 
-This is a discovery container, not one implementation slice: window_bigger and viewport offsets are per-client, while cell metrics come from terminal geometry. Split those producer families before scheduling runtime work.
+The discovery container is now split into its three producer families, and the cell metrics are done. window_cell_width and window_cell_height publish w->xpixel and w->ypixel, which window.c defaults to DEFAULT_XPIXEL 16 and DEFAULT_YPIXEL 32 when no client reports a cell size and resize.c otherwise fills from the sizing client's c->tty.xpixel. zz delegates both to the daemon, which answers the format client's reported cell pixels and falls back to the pin's defaults, and gates them on a window in context the way format_cb_window_cell_width gates on ft->w. Measured against the pin on the strict format-window-cell-metrics differential, both sides answer 16 and 32 from display-message with and without an attached client, from every list-windows row, and null from a list-sessions row that carries no window. window_bigger and the offsets are the per-client family and stay open on one blocker that is now measured rather than guessed. In the pin they read the client's cached tty viewport, so format_cb_window_bigger answers null whenever the format tree has no client: cmd_list_windows_exec builds its rows with a null client, so a list-windows row answers null even while a client is attached, and the value follows the client's own current window rather than the row's. A live comparison on a throwaway server and a headless zz daemon showed the boolean itself already agrees across five states, both answering null with no client, 0 for a viewport-sized window with the status line on and off, 1 after resize-window widened the window past the viewport, and null again after detach. It also showed zz would answer 1 for the list-windows row the pin leaves null, because the daemon resolves a format client for every command expansion through current_format_client rather than per command like format_defaults. Closing window_bigger needs that no-client row context first. The two offsets need more than that: tty_window_offset1 centres the viewport on the cursor and honours a pan window, and zz has no viewport pan or server-side cursor-follow, so both names answer null on both sides today only because the pin also answers null whenever the window is not bigger.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `medium`
 - Owner: `daemon`
 - User impact: scripts, remote
-- Items: `format:window_bigger`, `format:window_cell_height`, `format:window_cell_width`, `format:window_offset_x`, `format:window_offset_y`
+- Items: `format:window_bigger`, `format:window_offset_x`, `format:window_offset_y`
 - Depends on: none
 - Evidence:
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:crates/zz-daemon/src/status.rs`
+  - `scenario:compat/scenarios/format-window-cell-metrics.txt`
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
-  - `Window cell metrics and each client's viewport and bigger state expand in the correct target context.`
+  - `Window cell metrics answer the pin's window pixel size in every window-scoped context and stay null where the pin has no window, with a differential covering display-message, list-windows rows, and a session-scoped format.`
+  - `window_bigger and the two viewport offsets answer only where the pin's format tree carries a client, which means a list-windows or list-sessions row keeps the pin's null while a client is attached.`
 
 ### `history.hyperlink-reset`: Reset hyperlink history
 

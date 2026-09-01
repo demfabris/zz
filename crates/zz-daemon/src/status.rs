@@ -119,6 +119,13 @@ pub(crate) struct ClientFormatFacts {
     pub(crate) environment: Vec<FormatEnvironRow>,
 }
 
+/// window.c `window_create` and `window_resize`: a window keeps the cell pixel
+/// size of the client that sized it, and falls back to `DEFAULT_XPIXEL` and
+/// `DEFAULT_YPIXEL` when no client reports one, which is what a pty client
+/// leaves the pin reporting.
+const DEFAULT_XPIXEL: u32 = 16;
+const DEFAULT_YPIXEL: u32 = 32;
+
 /// A client's own process environment as `#{Vc:}` rows. A client store has no
 /// hidden or removed entries: the client sends what it has.
 pub(crate) fn client_environment_rows(
@@ -432,6 +439,34 @@ fn render(
         message_line,
         customized: request.customized,
     }
+}
+
+/// The pin's window-scope availability rule: `format_cb_window_cell_width` and
+/// its height twin answer null unless a window is in the format's context.
+fn window_scoped(context: &StatusContext) -> bool {
+    !context.window_id.is_empty()
+        || !context.window_name.is_empty()
+        || context.window_width.is_some()
+}
+
+fn window_cell_pixels(client: Option<&ClientFormatFacts>, width: bool) -> String {
+    let default = if width {
+        DEFAULT_XPIXEL
+    } else {
+        DEFAULT_YPIXEL
+    };
+    client
+        .map(|client| {
+            if width {
+                &client.cell_width
+            } else {
+                &client.cell_height
+            }
+        })
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|pixels| *pixels != 0)
+        .unwrap_or(default)
+        .to_string()
 }
 
 /// `MAX_STATUS_TEXT_BYTES` is the wire bound `StatusLine` enforces on its own
@@ -885,6 +920,11 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "client_utf8" => Some(self.facts.client.as_ref()?.utf8.clone()),
             "client_width" => Some(self.facts.client.as_ref()?.width.clone()),
             "client_written" => Some(self.facts.client.as_ref()?.written.clone()),
+            "window_cell_height" => window_scoped(context)
+                .then(|| window_cell_pixels(self.facts.client.as_ref(), false)),
+            "window_cell_width" => {
+                window_scoped(context).then(|| window_cell_pixels(self.facts.client.as_ref(), true))
+            }
             _ if name == list_clients_line => Some(self.facts.client.as_ref()?.line.to_string()),
             _ if name == message_number => Some(self.facts.message.as_ref()?.number.to_string()),
             _ if name == message_text => Some(self.facts.message.as_ref()?.text.clone()),
@@ -1258,7 +1298,7 @@ mod tests {
     #[test]
     fn daemon_delegated_format_consumers_match_mux_inventory() {
         let delegated = zz_mux::delegated_format_variable_names().collect::<Vec<_>>();
-        assert_eq!(delegated.len(), 32);
+        assert_eq!(delegated.len(), 34);
 
         let session = SessionId(1);
         let facts = FormatHookFacts {
@@ -1273,6 +1313,7 @@ mod tests {
         };
         let context = StatusContext {
             session_id: session.to_string(),
+            window_id: "@1".to_owned(),
             ..StatusContext::default()
         };
         let mut hooks = DaemonFormatHooks::command(&facts);
@@ -1894,6 +1935,55 @@ mod tests {
                 &mut hooks,
             ),
             "2|2|3|0"
+        );
+    }
+
+    /// `format_cb_window_cell_width` and its height twin publish `w->xpixel`
+    /// and `w->ypixel`, which `window_create` and `window_resize` default to
+    /// `DEFAULT_XPIXEL` and `DEFAULT_YPIXEL` when no client reports a cell size
+    /// and `default_window_size` otherwise fills from `c->tty.xpixel`. Measured
+    /// live against the pin on a throwaway server, both a CLI `display-message`
+    /// with no client and one beside a pty client answer 16 and 32, and a
+    /// `list-windows -F` row answers the same, while a format with no window in
+    /// context answers null.
+    #[test]
+    fn window_cell_metrics_default_to_the_pin_size_and_follow_a_reporting_client() {
+        let format = "#{window_cell_width}|#{window_cell_height}";
+        let window = StatusContext {
+            window_id: "@1".to_owned(),
+            ..StatusContext::default()
+        };
+
+        let bare = FormatHookFacts::default();
+        let mut hooks = DaemonFormatHooks::command(&bare);
+        assert_eq!(expand_format_values(format, &window, &mut hooks), "16|32");
+
+        let unsized_client = FormatHookFacts {
+            client: Some(ClientFormatFacts {
+                cell_width: "0".to_owned(),
+                cell_height: String::new(),
+                ..ClientFormatFacts::default()
+            }),
+            ..FormatHookFacts::default()
+        };
+        let mut hooks = DaemonFormatHooks::command(&unsized_client);
+        assert_eq!(expand_format_values(format, &window, &mut hooks), "16|32");
+
+        let reporting_client = FormatHookFacts {
+            client: Some(ClientFormatFacts {
+                cell_width: "9".to_owned(),
+                cell_height: "18".to_owned(),
+                ..ClientFormatFacts::default()
+            }),
+            ..FormatHookFacts::default()
+        };
+        let mut hooks = DaemonFormatHooks::command(&reporting_client);
+        assert_eq!(expand_format_values(format, &window, &mut hooks), "9|18");
+
+        let mut hooks = DaemonFormatHooks::command(&reporting_client);
+        assert_eq!(
+            expand_format_values(format, &StatusContext::default(), &mut hooks),
+            "|"
         );
     }
 

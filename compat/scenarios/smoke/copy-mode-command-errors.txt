@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/copy-mode-command-errors.sh ~/copy-mode-command-errors.sh
+stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+out: set-environment -gu COPY_MODE_COMMAND_ERRORS
+run-shell 'sh ~/copy-mode-command-errors.sh'
+out: show-environment -g COPY_MODE_COMMAND_ERRORS

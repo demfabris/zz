@@ -7156,7 +7156,16 @@ impl Shared {
                         pane,
                         count,
                         target_client,
+                        require_mode,
                     } => {
+                        if *require_mode && !pane_carries_a_mode_command(&inner, client, *pane) {
+                            return Err(
+                                ServerError::InvalidCommand("not in a mode".to_owned()).into()
+                            );
+                        }
+                        if *count == 0 {
+                            continue;
+                        }
                         let selected =
                             selected_effect_client(&inner, client, target_client.as_deref());
                         let owners: Vec<ClientId> = match selected {
@@ -7187,7 +7196,13 @@ impl Shared {
                         pane,
                         action,
                         target_client,
+                        require_mode,
                     } => {
+                        if *require_mode && !pane_carries_a_mode_command(&inner, client, *pane) {
+                            return Err(
+                                ServerError::InvalidCommand("not in a mode".to_owned()).into()
+                            );
+                        }
                         let command_output = inner
                             .command_outputs
                             .get(&client)
@@ -7228,6 +7243,7 @@ impl Shared {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
                         for target in targets {
+                            let action = &counted_copy_mode_action(&mut inner, target, action);
                             deferred_terminal_commands.push(DeferredTerminalCommand::ViewAction {
                                 terminal: Arc::clone(&terminal),
                                 view: TerminalViewId(target.0),
@@ -26533,6 +26549,55 @@ fn enter_copy_session(
         },
     );
     Ok(())
+}
+
+/// `cmd_send_keys_exec` answers `not in a mode` at status 1 whenever the target
+/// pane has no mode entry whose mode carries a command, which is the only
+/// guard `send-keys -X` runs before handing the arguments to that command.
+/// tmux keeps the mode entry on the pane; zz keeps copy mode on the client's
+/// terminal view, so the pane carries a mode command exactly while some client
+/// is still in copy mode on it, or while the caller is reading a command
+/// output overlay.
+fn pane_carries_a_mode_command(inner: &ServerState, client: ClientId, pane: PaneId) -> bool {
+    inner.command_outputs.contains_key(&client)
+        || inner
+            .copy_sessions
+            .values()
+            .any(|session| session.pane == pane && !session.exiting)
+}
+
+/// Spend the pending copy-mode repeat prefix on one mode command. tmux keeps
+/// that count on the pane's mode entry as `wme->prefix`, so `send-keys -N 5`
+/// with no key and `send-keys -N 5 -X` with no action both leave it armed for
+/// whichever command runs next, and `window_copy_command` resets it to 1 after
+/// running one. zz keeps the same count on the client's key engine, which is
+/// where a copy-mode digit prefix typed by the client lands too, so a mode
+/// command arriving as an effect has to read and clear it the same way.
+fn counted_copy_mode_action(
+    inner: &mut ServerState,
+    client: ClientId,
+    action: &zz_terminal::TerminalViewAction,
+) -> zz_terminal::TerminalViewAction {
+    let pending = match action {
+        zz_terminal::TerminalViewAction::CopyMode(_)
+        | zz_terminal::TerminalViewAction::CopyModeCounted { .. } => inner
+            .key_engines
+            .get_mut(&client)
+            .and_then(KeyEngine::take_repeat_count),
+        _ => return action.clone(),
+    };
+    match (pending, action) {
+        (Some(count), zz_terminal::TerminalViewAction::CopyMode(inner_action))
+            if count > 1
+                && inner_action.count_policy() != zz_terminal::CopyModeCountPolicy::Once =>
+        {
+            zz_terminal::TerminalViewAction::CopyModeCounted {
+                action: inner_action.clone(),
+                count,
+            }
+        }
+        _ => action.clone(),
+    }
 }
 
 fn terminal_view_action_arms_scroll_exit(action: &zz_terminal::TerminalViewAction) -> bool {
@@ -66598,6 +66663,48 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[cfg(unix)]
     #[test]
+    fn a_pending_repeat_prefix_is_spent_by_one_mode_command() {
+        // Measured on pinned tmux d77c9dc6 on 2026-09-01 with an attached
+        // client: a pane entering copy mode reports #{copy_cursor_y} 22, then
+        // `send-keys -N 5` with no positional key followed by a plain
+        // `send-keys -X cursor-up` leaves it at 17 and the next cursor-up at
+        // 16. window.c keeps the count on the pane's mode entry and
+        // window_copy_command resets it to 1 once a command has run.
+        let (shared, client, _context, pane, _terminal, _mailbox) =
+            copy_mode_fixture("copy-repeat-prefix", ":");
+        let mut inner = shared.inner.lock();
+        enter_copy_session(&mut inner, client, pane).expect("claim copy mode");
+        inner
+            .key_engines
+            .entry(client)
+            .or_default()
+            .set_repeat_count(5);
+
+        let up = zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Up);
+        assert_eq!(
+            counted_copy_mode_action(&mut inner, client, &up),
+            zz_terminal::TerminalViewAction::CopyModeCounted {
+                action: zz_terminal::CopyModeAction::Up,
+                count: 5,
+            }
+        );
+        assert_eq!(counted_copy_mode_action(&mut inner, client, &up), up);
+
+        // A count-once action spends the prefix without repeating, the way
+        // window_copy_command runs it once and still resets wme->prefix.
+        let stop =
+            zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::StopSelection);
+        inner
+            .key_engines
+            .entry(client)
+            .or_default()
+            .set_repeat_count(4);
+        assert_eq!(counted_copy_mode_action(&mut inner, client, &stop), stop);
+        assert_eq!(counted_copy_mode_action(&mut inner, client, &up), up);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn exiting_copy_session_stays_claimed_until_live_mode_is_published() {
         let (shared, client, _context, pane, _terminal, _mailbox) =
             copy_mode_fixture("copy-exit-order", ":");
@@ -76777,6 +76884,12 @@ bind - split-window -v -c "#{pane_current_path}"
             ));
             assert!(take_browser_literals(&mailbox, browser).is_empty());
         }
+        // cmd_send_keys_exec skips the read-only guard under -X and runs its
+        // own mode check first, so a read-only client reaching a peer pane that
+        // is in no mode gets the pin's `not in a mode` rather than the
+        // read-only refusal. Measured on the pin with a read-only client
+        // selected by -c: `send-keys -c <read-only tty> -X cursor-up` answers
+        // `not in a mode` at status 1.
         let peer_target = peer_pane.to_string();
         assert!(matches!(
             shared.execute_command_request(
@@ -76792,7 +76905,7 @@ bind - split-window -v -c "#{pane_current_path}"
             CommandResponse::Error {
                 error: ServerError::InvalidCommand(message),
                 ..
-            } if message == "client is read-only"
+            } if message == "not in a mode"
         ));
 
         assert!(matches!(

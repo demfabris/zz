@@ -860,11 +860,19 @@ pub enum MuxEffect {
         pane: PaneId,
         count: u32,
         target_client: Option<String>,
+        /// `send-keys -X` answers `not in a mode` at status 1 before it reaches
+        /// the mode command whenever the pane has no mode entry carrying one.
+        /// Every other copy-mode entry point skips that check. A `count` of
+        /// zero leaves the pending count alone, which is what a bare
+        /// `send-keys -X` with no `-N` and no action does on the pin.
+        require_mode: bool,
     },
     TerminalView {
         pane: PaneId,
         action: TerminalViewAction,
         target_client: Option<String>,
+        /// See [`MuxEffect::CopyModeRepeat::require_mode`].
+        require_mode: bool,
     },
     TerminalUi {
         pane: PaneId,
@@ -7027,6 +7035,7 @@ impl MuxEngine {
                 pane,
                 count: repeat,
                 target_client: target_client.clone(),
+                require_mode: false,
             });
             if options.has("-R") {
                 execution.effects.push(MuxEffect::ResetPane { pane });
@@ -7035,15 +7044,16 @@ impl MuxEngine {
         }
         if options.has("-X") {
             let Some(command) = positional.first() else {
-                return Ok(if options.value("-N").is_some() {
-                    Execution::effect(MuxEffect::CopyModeRepeat {
-                        pane,
-                        count: repeat,
-                        target_client,
-                    })
-                } else {
-                    Execution::default()
-                });
+                return Ok(Execution::effect(MuxEffect::CopyModeRepeat {
+                    pane,
+                    count: if options.value("-N").is_some() {
+                        repeat
+                    } else {
+                        0
+                    },
+                    target_client,
+                    require_mode: true,
+                }));
             };
             let Some(action) = copy_mode_action(
                 command,
@@ -7056,6 +7066,7 @@ impl MuxEngine {
                     pane,
                     count: 1,
                     target_client,
+                    require_mode: true,
                 }));
             };
             let action = match action.count_policy() {
@@ -7070,6 +7081,7 @@ impl MuxEngine {
                 pane,
                 action,
                 target_client,
+                require_mode: true,
             }));
         }
         let reset = options.has("-R");
@@ -7159,6 +7171,7 @@ impl MuxEngine {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
                 target_client: None,
+                require_mode: false,
             }));
         }
         if options.has("-M") {
@@ -7177,12 +7190,14 @@ impl MuxEngine {
                 TerminalViewAction::EnterCopyMode
             },
             target_client: None,
+            require_mode: false,
         }];
         if options.has("-u") {
             effects.push(MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::PageUp),
                 target_client: None,
+                require_mode: false,
             });
         }
         if options.has("-d") {
@@ -7194,6 +7209,7 @@ impl MuxEngine {
                     CopyModeAction::PageDown
                 }),
                 target_client: None,
+                require_mode: false,
             });
         }
         Ok(Execution {
@@ -7339,6 +7355,7 @@ impl MuxEngine {
             pane,
             action: TerminalViewAction::ClearHistory,
             target_client: None,
+            require_mode: false,
         }))
     }
 
@@ -22882,14 +22899,25 @@ mod tests {
                     pane: terminal,
                     count: 1,
                     target_client: None,
+                    require_mode: true,
                 }],
                 "{action} accepted {flag}"
             );
         }
+        // A bare -X still runs cmd_send_keys_exec's mode guard, which answers
+        // `not in a mode` at status 1 on the pin, but carries no count and no
+        // action of its own.
         let execution = engine
             .execute(&mut context, &command("send-keys", &["-X"]))
             .unwrap();
-        assert!(execution.effects.is_empty());
+        assert!(matches!(
+            execution.effects.as_slice(),
+            [MuxEffect::CopyModeRepeat {
+                count: 0,
+                require_mode: true,
+                ..
+            }]
+        ));
         for arguments in [
             &["-X", "unknown-action"][..],
             &["-X", "copy-selection", "one", "two"][..],
@@ -22909,6 +22937,7 @@ mod tests {
                     pane: terminal,
                     count: 1,
                     target_client: None,
+                    require_mode: true,
                 }]
             );
         }
@@ -23118,6 +23147,7 @@ mod tests {
                     reverse: false,
                 }),
                 target_client: None,
+                require_mode: true,
             }]
         );
     }
@@ -23447,6 +23477,7 @@ mod tests {
                     },
                 )),
                 target_client: None,
+                require_mode: true,
             }]
         );
 

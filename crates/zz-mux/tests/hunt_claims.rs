@@ -1215,7 +1215,8 @@ fn send_keys_dash_n_without_keys_arms_the_copy_mode_repeat() {
         [MuxEffect::CopyModeRepeat {
             pane,
             count: 5,
-            target_client: None
+            target_client: None,
+            require_mode: false,
         }]
     );
 }
@@ -1337,11 +1338,13 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
                 pane,
                 action: TerminalViewAction::EnterCopyMode,
                 target_client: None,
+                require_mode: false,
             },
             MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::PageDown),
                 target_client: None,
+                require_mode: false,
             },
         ]
     );
@@ -1354,6 +1357,7 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
             pane,
             action: TerminalViewAction::EnterCopyModeScrollExit,
             target_client: None,
+            require_mode: false,
         }]
     );
     let immediate_scroll_exit = engine
@@ -1366,11 +1370,13 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
                 pane,
                 action: TerminalViewAction::EnterCopyModeScrollExit,
                 target_client: None,
+                require_mode: false,
             },
             MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::PageDownScrollExit),
                 target_client: None,
+                require_mode: false,
             },
         ]
     );
@@ -1385,6 +1391,7 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
         pane,
         action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
         target_client: None,
+        require_mode: false,
     }];
     assert_eq!(quit.effects, cancel);
     assert_eq!(quit_with_dead_flag.effects, cancel);
@@ -1403,6 +1410,7 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
             pane,
             action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
             target_client: None,
+            require_mode: false,
         }]
     );
 }
@@ -1428,6 +1436,7 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
             pane,
             action: TerminalViewAction::EnterCopyMode,
             target_client: None,
+            require_mode: false,
         }]
     );
     assert_eq!(
@@ -1436,6 +1445,7 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
             pane,
             action: TerminalViewAction::EnterCopyModeScrollExit,
             target_client: None,
+            require_mode: false,
         }]
     );
     assert_eq!(
@@ -1447,6 +1457,7 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
                 hide_position: true,
             },
             target_client: None,
+            require_mode: false,
         }]
     );
     for flags in [&["-eH"][..], &["-He"][..], &["-e", "-H"][..]] {
@@ -1459,6 +1470,7 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
                     hide_position: true,
                 },
                 target_client: None,
+                require_mode: false,
             }],
             "copy-mode {flags:?} composes both flags"
         );
@@ -1474,11 +1486,13 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
                     hide_position: true,
                 },
                 target_client: None,
+                require_mode: false,
             },
             MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::PageDown),
                 target_client: None,
+                require_mode: false,
             },
         ]
     );
@@ -1488,6 +1502,7 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
             pane,
             action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
             target_client: None,
+            require_mode: false,
         }]
     );
 }
@@ -2241,6 +2256,7 @@ fn send_keys_carries_its_target_client_onto_the_mode_effects() {
             pane,
             count: 5,
             target_client: Some("/dev/pts/9".to_owned()),
+            require_mode: false,
         }]
     );
 
@@ -2299,13 +2315,22 @@ fn send_keys_empty_copy_command_keeps_the_count_it_was_given() {
             pane,
             count: 4,
             target_client: None,
+            require_mode: true,
         }]
     );
 
     let bare = engine
         .execute(&mut context, &command("send-keys", &["-X"]))
         .unwrap();
-    assert_eq!(bare.effects, []);
+    assert_eq!(
+        bare.effects,
+        [MuxEffect::CopyModeRepeat {
+            pane,
+            count: 0,
+            target_client: None,
+            require_mode: true,
+        }]
+    );
 }
 
 #[test]
@@ -2488,6 +2513,7 @@ fn selection_mode_takes_the_pins_names_abbreviations_and_silent_no_op() {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::SelectionMode(unit)),
                 target_client: None,
+                require_mode: true,
             }],
             "{argument:?}"
         );
@@ -2504,7 +2530,8 @@ fn selection_mode_takes_the_pins_names_abbreviations_and_silent_no_op() {
             [MuxEffect::CopyModeRepeat {
                 pane,
                 count: 1,
-                target_client: None
+                target_client: None,
+                require_mode: true,
             }],
             "{arguments:?}"
         );
@@ -2532,6 +2559,7 @@ fn stop_selection_is_typed_apart_from_clear_selection() {
                 pane,
                 action: TerminalViewAction::CopyMode(action),
                 target_client: None,
+                require_mode: true,
             }],
             "{name}"
         );
@@ -2573,6 +2601,7 @@ fn the_scroll_exit_family_maps_to_typed_latch_and_forced_exit_actions() {
                 pane,
                 action: TerminalViewAction::CopyMode(action.clone()),
                 target_client: None,
+                require_mode: true,
             }],
             "{name}"
         );
@@ -2593,6 +2622,7 @@ fn the_scroll_exit_family_maps_to_typed_latch_and_forced_exit_actions() {
                 pane,
                 action: expected,
                 target_client: None,
+                require_mode: true,
             }],
             "counted {name}"
         );

@@ -653,6 +653,15 @@ impl KeyEngine {
         self.table.as_deref()
     }
 
+    /// Consume the copy-mode repeat prefix the way `window_copy_command` reads
+    /// `wme->prefix` and then resets it to 1: one command spends the count and
+    /// the next one starts over.
+    pub fn take_repeat_count(&mut self) -> Option<u32> {
+        self.repeat_count
+            .take()
+            .map(|prefix| u32::from(prefix.count()))
+    }
+
     pub fn set_repeat_count(&mut self, count: u32) {
         self.repeat_count = if count <= 1 {
             None

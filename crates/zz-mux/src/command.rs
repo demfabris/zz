@@ -952,6 +952,9 @@ pub enum MuxEffect {
     Attach {
         session: SessionId,
         detach_others: bool,
+        /// `attach-session -x` and `new-session -X`: evict peers with the
+        /// parent-hangup exit action instead of an ordinary detach.
+        detach_others_hangup: bool,
         read_only: bool,
         flags: Option<String>,
         update_environment: bool,
@@ -4122,7 +4125,8 @@ impl MuxEngine {
                 )?;
                 return Ok(Execution::effect(MuxEffect::Attach {
                     session,
-                    detach_others: options.has("-D"),
+                    detach_others: options.has("-D") || options.has("-X"),
+                    detach_others_hangup: options.has("-X"),
                     read_only: false,
                     flags: options.value("-f").map(str::to_owned),
                     update_environment: !options.has("-E"),
@@ -4238,6 +4242,7 @@ impl MuxEngine {
             effects.push(MuxEffect::Attach {
                 session,
                 detach_others: false,
+                detach_others_hangup: false,
                 read_only: false,
                 flags: options.value("-f").map(str::to_owned),
                 update_environment: false,
@@ -4456,7 +4461,7 @@ impl MuxEngine {
         if context.has_no_client() {
             return Ok(Execution::default());
         }
-        let detach_others = options.has("-d");
+        let detach_others = options.has("-d") || options.has("-x");
         let active_session = context.session;
         let (session, window, pane) = match options.value("-t") {
             Some(target) if target.contains([':', '.']) => {
@@ -4493,6 +4498,7 @@ impl MuxEngine {
         Ok(Execution::effect(MuxEffect::Attach {
             session,
             detach_others,
+            detach_others_hangup: options.has("-x"),
             read_only: options.has("-r"),
             flags: options.value("-f").map(str::to_owned),
             update_environment: !options.has("-E"),
@@ -15824,6 +15830,7 @@ mod tests {
                 MuxEffect::Attach {
                     session: attached,
                     detach_others: false,
+                    detach_others_hangup: false,
                     read_only: false,
                     flags: None,
                     update_environment: false,
@@ -16239,6 +16246,7 @@ mod tests {
                 MuxEffect::Attach {
                     session,
                     detach_others: false,
+                    detach_others_hangup: false,
                     read_only: false,
                     flags: None,
                     update_environment: true,
@@ -16293,6 +16301,7 @@ mod tests {
                 MuxEffect::Attach {
                     session,
                     detach_others: false,
+                    detach_others_hangup: false,
                     read_only: false,
                     flags: Some(flags),
                     update_environment: true,
@@ -16361,6 +16370,7 @@ mod tests {
             [MuxEffect::Attach {
                 session,
                 detach_others: false,
+                detach_others_hangup: false,
                 read_only: false,
                 flags: Some("active-pane".to_owned()),
                 update_environment: true,
@@ -17430,6 +17440,7 @@ mod tests {
             [MuxEffect::Attach {
                 session,
                 detach_others: false,
+                detach_others_hangup: false,
                 read_only: false,
                 flags: None,
                 update_environment: true,
@@ -17464,6 +17475,7 @@ mod tests {
             [MuxEffect::Attach {
                 session,
                 detach_others: false,
+                detach_others_hangup: false,
                 read_only: false,
                 flags: None,
                 update_environment: true,
@@ -17481,6 +17493,7 @@ mod tests {
             [MuxEffect::Attach {
                 session,
                 detach_others: true,
+                detach_others_hangup: false,
                 read_only: false,
                 flags: None,
                 update_environment: true,
@@ -19154,6 +19167,7 @@ mod tests {
             [MuxEffect::Attach {
                 session,
                 detach_others: true,
+                detach_others_hangup: false,
                 read_only: false,
                 flags: None,
                 update_environment: true,

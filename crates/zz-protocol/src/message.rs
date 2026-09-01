@@ -2626,11 +2626,20 @@ impl EventPayload {
 
     #[must_use]
     pub fn detached_evicted(session: SessionId, by: Option<String>) -> Self {
+        Self::detached_evicted_with_action(session, by, ClientExitAction::Exit)
+    }
+
+    #[must_use]
+    pub fn detached_evicted_with_action(
+        session: SessionId,
+        by: Option<String>,
+        action: ClientExitAction,
+    ) -> Self {
         Self::Detached {
             session,
             by,
             reason: DetachReason::Evicted,
-            action: ClientExitAction::Exit,
+            action,
         }
     }
 

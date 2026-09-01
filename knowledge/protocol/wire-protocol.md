@@ -616,7 +616,8 @@ now validate on both encode and decode.
   ask the presentation process to do, matching the pin's `MSG_EXEC` and `MSG_DETACHKILL`: `Exec`
   replaces the client process with `shell -c command` and prints no notice, `ParentHangup` prints
   the SIGHUP notice and signals the client's parent, and `Exit` is the ordinary detach every other
-  producer sends. A v90 peer cannot decode the appended field.
+  producer sends. `attach-session -x` and an attaching `new-session -X` put `ParentHangup` on the
+  eviction path the same way. A v90 peer cannot decode the appended field.
 - v91 appends `EventPayload::ControlConfigError { text }` at tail tag 51. A configuration
   diagnostic now carries typed identity from where it was raised instead of arriving as a generic
   `ClientMessage` warning that Control had to recognize by English prose, so `%config-error`

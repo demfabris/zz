@@ -186,6 +186,7 @@ fn parse_daemon_bootstrap_arguments(
 struct NativeAttachArguments {
     restart_daemon: bool,
     detach_others: bool,
+    detach_others_hangup: bool,
     no_update_environment: bool,
     read_only: bool,
     client_flags: Option<String>,
@@ -1085,8 +1086,11 @@ fn run_command_mode(
             eprintln!("zz: --restart-daemon is only supported for the local daemon");
             return Some(ExitCode::FAILURE);
         }
-        let needs_command_attach =
-            options.no_update_environment || options.working_directory.is_some();
+        // -x has no RunOptions field: route it through the real attach command so
+        // the daemon sees the flag that picks the parent-hangup eviction.
+        let needs_command_attach = options.no_update_environment
+            || options.working_directory.is_some()
+            || options.detach_others_hangup;
         let attach_command = native_attach_command(&options);
         let options = zz_tui::RunOptions {
             socket_path: socket_path.to_path_buf(),
@@ -1581,13 +1585,13 @@ fn parse_native_attach_arguments(
     let spec = catalog_command_spec("attach-session").expect("attach-session catalog");
     let mut restart_daemon = false;
     let mut detach_others = false;
+    let mut detach_others_hangup = false;
     let mut no_update_environment = false;
     let mut read_only = false;
     let mut client_flags = None;
     let mut working_directory = None;
     let mut target = None;
     let mut positional = None;
-    let mut unsupported = None;
     let mut options_done = false;
     let mut explicit_boundary = false;
     let mut arguments = arguments.into_iter();
@@ -1658,7 +1662,7 @@ fn parse_native_attach_arguments(
                     }
                     break;
                 }
-                'x' => unsupported = Some(name),
+                'x' => detach_others_hangup = true,
                 _ => {
                     return Err(NativeAttachArgumentError::Command(
                         ServerError::CommandParse(format!(
@@ -1672,14 +1676,10 @@ fn parse_native_attach_arguments(
     if target.is_some() && positional.is_some() {
         return Err(NativeAttachArgumentError::Usage);
     }
-    if let Some(name) = unsupported {
-        return Err(NativeAttachArgumentError::Command(
-            ServerError::UnsupportedCommand(format!("attach-session {name}")),
-        ));
-    }
     Ok(NativeAttachArguments {
         restart_daemon,
         detach_others,
+        detach_others_hangup,
         no_update_environment,
         read_only,
         client_flags,
@@ -1703,6 +1703,9 @@ fn native_attach_command(options: &NativeAttachArguments) -> CommandInvocation {
     let mut args = Vec::new();
     if options.detach_others {
         args.push("-d".to_owned());
+    }
+    if options.detach_others_hangup {
+        args.push("-x".to_owned());
     }
     if options.no_update_environment {
         args.push("-E".to_owned());
@@ -3280,12 +3283,13 @@ mod tests {
                 Err(NativeAttachArgumentError::Command(expected))
             );
         }
-        assert_eq!(
-            parse_native_attach_arguments(["-x"].map(str::to_owned)),
-            Err(NativeAttachArgumentError::Command(
-                ServerError::UnsupportedCommand("attach-session -x".to_owned())
-            ))
-        );
+        // -x is -d with the parent-hangup exit action, so the native parser
+        // forwards it the way it forwards -d.
+        let hangup = parse_native_attach_arguments(["-x"].map(str::to_owned))
+            .expect("attach-session -x parses");
+        assert!(hangup.detach_others_hangup);
+        assert!(!hangup.detach_others);
+        assert_eq!(native_attach_command(&hangup).args, ["-x".to_owned()]);
         assert_eq!(
             parse_native_attach_arguments(["-t", "-?"].map(str::to_owned))
                 .unwrap()

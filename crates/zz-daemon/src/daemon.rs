@@ -7740,6 +7740,7 @@ impl Shared {
                     MuxEffect::Attach {
                         session,
                         detach_others,
+                        detach_others_hangup,
                         read_only,
                         flags,
                         update_environment,
@@ -7747,6 +7748,7 @@ impl Shared {
                         attach = Some((
                             *session,
                             *detach_others,
+                            *detach_others_hangup,
                             *read_only,
                             flags.clone(),
                             *update_environment,
@@ -8043,7 +8045,20 @@ impl Shared {
                 }
             }
         }
-        if let Some((session, detach_others, read_only, flags, update_environment)) = attach {
+        if let Some((
+            session,
+            detach_others,
+            detach_others_hangup,
+            read_only,
+            flags,
+            update_environment,
+        )) = attach
+        {
+            let eviction = if detach_others_hangup {
+                ClientExitAction::ParentHangup
+            } else {
+                ClientExitAction::Exit
+            };
             self.set_requested_client_flags(client, flags.as_deref(), read_only);
             if invoking_client_terminal == ClientTerminal::Absent {
                 return Err(ServerError::InvalidCommand(
@@ -8065,7 +8080,12 @@ impl Shared {
                 self.refresh_control_output_taps();
                 pending_hook_events.extend(attach_hook_events);
                 if detach_others {
-                    self.evict_clients_with_event_hooks(Some(session), client, event_hooks_enabled);
+                    self.evict_clients_with_event_hooks(
+                        Some(session),
+                        client,
+                        event_hooks_enabled,
+                        &eviction,
+                    );
                     let inner = self.inner.lock();
                     snapshot = inner.engine.state.snapshot();
                     let presence = snapshot_presence(&inner);
@@ -8077,7 +8097,12 @@ impl Shared {
                 }
                 self.publish_snapshot();
             } else if detach_others {
-                self.evict_clients_with_event_hooks(Some(session), client, event_hooks_enabled);
+                self.evict_clients_with_event_hooks(
+                    Some(session),
+                    client,
+                    event_hooks_enabled,
+                    &eviction,
+                );
                 self.publish_snapshot();
             }
         }
@@ -13954,6 +13979,7 @@ impl Shared {
         session: Option<SessionId>,
         stealer: ClientId,
         event_hooks_enabled: bool,
+        action: &ClientExitAction,
     ) {
         let (victims, by) = {
             let inner = self.inner.lock();
@@ -13977,7 +14003,11 @@ impl Shared {
         for (session, victim) in victims {
             self.publish_to_client(
                 victim,
-                EventPayload::detached_evicted(session, Some(by.clone())),
+                EventPayload::detached_evicted_with_action(
+                    session,
+                    Some(by.clone()),
+                    action.clone(),
+                ),
             );
             self.detach_with_event_hooks(victim, event_hooks_enabled);
         }

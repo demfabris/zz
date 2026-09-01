@@ -1953,7 +1953,7 @@
     },
     {
       "id": "options.lock-program",
-      "title": "Defer tmux lock process execution",
+      "title": "Keep locking off the client terminal",
       "decision": "native",
       "status": "accepted",
       "priority": "none",
@@ -2272,7 +2272,7 @@
     },
     {
       "id": "pane.floating-model",
-      "title": "Defer tmux floating panes",
+      "title": "Keep floating panes out of the mux model",
       "decision": "native",
       "status": "accepted",
       "priority": "none",
@@ -2447,7 +2447,7 @@
     },
     {
       "id": "prompt.pane-rendered",
-      "title": "Defer pane-rendered prompts",
+      "title": "Keep prompts on client surfaces",
       "decision": "native",
       "status": "accepted",
       "priority": "none",
@@ -2505,7 +2505,7 @@
     },
     {
       "id": "protocol.socket-acl",
-      "title": "Defer multi-user socket ACLs",
+      "title": "Keep the daemon socket single-user",
       "decision": "never",
       "status": "accepted",
       "priority": "none",

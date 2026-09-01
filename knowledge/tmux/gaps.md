@@ -129,15 +129,15 @@ structure as proof.
 | `list-keys.deterministic-sort-ties` | Keep list-keys sorting total and deterministic | never | accepted | none | mux | scripts | none |
 | `messages.tty-model` | Model tmux message and TTY reports | never | accepted | none | daemon | admin, remote | none |
 | `mouse.bound-context` | Carry bound mouse event context | native | accepted | none | protocol | daily, scripts, gui | none |
-| `options.lock-program` | Defer tmux lock process execution | native | accepted | none | client | remote, admin | none |
+| `options.lock-program` | Keep locking off the client terminal | native | accepted | none | client | remote, admin | none |
 | `options.native-mode-styles` | Keep native mode styling | native | accepted | none | client | daily, gui | none |
 | `options.native-overlay-styles` | Keep native overlay styling | native | accepted | none | client | daily, gui | none |
 | `options.theme-palette` | Map tmux theme palette options | native | accepted | none | client | gui | none |
-| `pane.floating-model` | Defer tmux floating panes | native | accepted | none | mux | daily, scripts, gui | none |
+| `pane.floating-model` | Keep floating panes out of the mux model | native | accepted | none | mux | daily, scripts, gui | none |
 | `presentation.native-status` | Keep native status and lifecycle presentation | native | accepted | none | client | daily, gui, remote | none |
-| `prompt.pane-rendered` | Defer pane-rendered prompts | native | accepted | none | client | daily | none |
+| `prompt.pane-rendered` | Keep prompts on client surfaces | native | accepted | none | client | daily | none |
 | `protocol.binary-streams` | Design one bounded command stream | native | accepted | none | protocol | scripts, remote | none |
-| `protocol.socket-acl` | Defer multi-user socket ACLs | never | accepted | none | daemon | admin, remote | none |
+| `protocol.socket-acl` | Keep the daemon socket single-user | never | accepted | none | daemon | admin, remote | none |
 | `protocol.socket-interop` | Do not speak tmux private protocol | never | accepted | none | protocol | admin | none |
 | `sessions.linked-groups` | Do not add linked session groups | never | accepted | none | mux | scripts, admin | none |
 
@@ -1262,7 +1262,7 @@ The pin's comparator truncates 64-bit key differences into int, returns equality
 - Acceptance:
   - `Native pointer handling keeps scrollbar, border, and drag gestures without installing tmux mouse key tables, and the four mouse-context flags stay loudly unsupported.`
 
-### `options.lock-program`: Defer tmux lock process execution
+### `options.lock-program`: Keep locking off the client terminal
 
 The pin's `lock-after-time` arms a server timer per client and `lock-command`, default `lock -np`, is spawned onto that client's tty, which works because tmux's server owns the terminal. zz's daemon publishes frames and its clients draw them, so it cannot run a program on a client's terminal, and a GPUI window running `lock -np` has no meaning. `lock-server`, `lock-session`, and `lock-client` already parse with the pin's clientless error shapes and fire `after-lock-server`, while both options stay store-only. A zz lock, when it is wanted, is a client-rendered surface plus a daemon idle timer, not a spawned tty process. Reopen when that native lock surface is specified, including ownership, cancellation, and what a raw-terminal client shows.
 
@@ -1431,7 +1431,7 @@ Pinned tmux closes the successful Control guard immediately, parks later queue i
   - `A bounded two-phase command lifecycle closes a successful Control guard as soon as split-window -W creates its pane, then parks later items from that command queue until the pane exits.`
   - `Pane exit or signal resumes the parked queue before remain-on-exit retention or pane removal and propagates the exact exit status or 128 plus signal status to the originating unattached client.`
 
-### `pane.floating-model`: Defer tmux floating panes
+### `pane.floating-model`: Keep floating panes out of the mux model
 
 In the pin a floating pane is a mux object: `new-pane` creates one by default, `move-pane` places it with `-P`, `-X`, `-Y`, `-z`, and the directional forms, `pane_floating_flag` reports it, and `move-pane` answers `pane is not floating` for a tiled target. zz's floating things are presentation objects that clients draw, its panes are leaves of a layout tree, and `move-pane` stays an alias of `join-pane` that deliberately moves tiled panes where the pin refuses. `new-pane` keeps the tmux name reserved and unimplemented, which is why the phase-1 picker verb was renamed off it. Reopen only when a separate mux floating-pane model is approved on its own terms rather than by reusing native overlays.
 
@@ -1522,7 +1522,7 @@ Native chrome and a persistent daemon need explicit behavior where tmux assumes 
 - Acceptance:
   - `Attached-client tests cover format expansion, prompt chains, labels, key answers, vi editing, fanout, and queue order.`
 
-### `prompt.pane-rendered`: Defer pane-rendered prompts
+### `prompt.pane-rendered`: Keep prompts on client surfaces
 
 `command-prompt -P` draws the prompt in the target pane's cells rather than on the status line, and the pin uses it for the copy-mode numeric prefix. zz's prompts are client surfaces: the raw TUI replaces its `message_line` row and the GPUI client draws a native prompt, while the copy-mode numeric prefix already uses zz's own per-client `copy-mode-repeat` command shape, accepted under `keys.copy-mode-native-numeric-prefix`. Painting a prompt into pane cells would mean the daemon writing another client's grid, so the flag stays loudly unsupported. Reopen only if a product need appears for a prompt anchored to a pane rather than to the client.
 
@@ -1559,7 +1559,7 @@ Five pinned forms move raw bytes between the invoking client's standard streams 
   - `The typed UTF-8 command protocol stays the contract, with the bounded stdin payload serving zz's own verbs while every tmux stream form stays loudly refused.`
   - `Any later stream support arrives as one reviewed channel covering stdin, stdout, binary bytes, backpressure, cancellation, and process lifetime, not as five separate transports.`
 
-### `protocol.socket-acl`: Defer multi-user socket ACLs
+### `protocol.socket-acl`: Keep the daemon socket single-user
 
 `server-access` grants other Unix users read or write access to a shared tmux server socket, with a per-user ACL the server enforces on every connection. zz's daemon is single-user by construction: it creates its socket and identity at mode 0600, keeps no peer identity, and holds live PTYs, ssh sessions, browser profiles with imported cookies, and agent sessions inside one account, so admitting a second user would hand over all of it. The pin's same-uid check when re-marking a read-only client is already skipped for the same reason. This joins linked windows and tmux's private socket protocol as a permanent exclusion; a multi-user deployment would be a different product with its own identity, authorization, revocation, and audit design.
 

@@ -66,3 +66,23 @@ Code restart killed the gate mid-corpus; the journal cache kept all six worker a
 and the gate had already pushed two lanes, so the third lane was finished by hand (its fix commit
 already existed; only the sharded delta corpus, push, ledger, and board were left).
 `compat/.cache/corpus` does not exist; the plugin corpus is `compat/.cache/plugins`.
+
+## 2026-09-01 late: cycle 5 on the ubuntu box, meter 54.9% to 65.8%
+
+First cycle after the machine move. The handoff recipe held: script paths, 8-core etiquette (workers
+`--jobs 4`, gate `--jobs 8`, four shards), SSH origin, holder `ubuntu/orchestrator`; 3h55m wall,
+2.04M subagent tokens, seven agents. Merges: terminal `8c1da05` (options.terminal-behavior settled
+as 7 native, 8 parked engine knobs, 2 parked client options, `editor` onto the floating stance;
+`send-keys -R` closed as a scrollback-preserving reset composed from VT bytes; options.pane-chrome
+settled as 4 native scrollbars plus 7 parked border-chrome items), panes `887a372` (server-global
+marked pane with its four formats, select-pane input and style controls, special pane target aliases,
+exact-match slot classification, split-window `-k`/`-m`, break-pane placement flags onto the native
+floating stance; catalog 452/51), daemon `9cab1fa` (Control tildes parsed against the daemon
+environment through a batched HomeDirectory round trip, ClientHello cwd as bytes, v92; the pane
+focus hooks close reverted at the gate), ledger `bbc09f5`. Every review was approve-with-fixes and
+every fix was pin-side: DECSTR is a no-op in the pinned libghostty (the reset now clears each mode
+explicitly), the mark must die on a cross-session `move-window`, and the pin gates pane-focus hooks
+behind `focus-events` and queues them ahead of the change notifications. Gate lore: a mux-only lane
+broke two daemon tests nobody had run (the downstream rule is now in the prompts); `--delta --list`
+came back stale once; three new load-only flakes joined the list. Rebased campaign branches stay at
+their old tips on origin because forcing is forbidden.

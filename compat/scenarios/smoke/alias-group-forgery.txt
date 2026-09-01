@@ -1,0 +1,9 @@
+corpus: none
+stage: fixtures/alias-group-forgery.sh ~/alias-group-forgery.sh
+run-shell 'sh ~/alias-group-forgery.sh'
+out: show-environment -g FORGERY_CLI
+out: show-environment -g FORGERY_CONFIG
+out: show-environment -g FORGERY_CONTROL
+out: show-environment -g FORGERY_CONTROL_SOURCE
+out: show-environment -g FORGERY_EFFECTS
+out: show-environment -g FORGERY_GENUINE

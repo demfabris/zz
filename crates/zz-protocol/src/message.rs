@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 92;
+pub const PROTOCOL_VERSION: u16 = 93;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -1268,6 +1268,7 @@ pub struct CommandInvocation {
     pub args: Vec<String>,
     pub source: Option<SourceSpan>,
     command_blocks: Vec<u32>,
+    expanded_alias_group: bool,
 }
 
 impl CommandInvocation {
@@ -1278,6 +1279,7 @@ impl CommandInvocation {
             args: args.into_iter().map(Into::into).collect(),
             source: None,
             command_blocks: Vec::new(),
+            expanded_alias_group: false,
         }
     }
 
@@ -1297,6 +1299,20 @@ impl CommandInvocation {
         self.command_blocks.sort_unstable();
         self.command_blocks.dedup();
         self
+    }
+
+    /// Mark an invocation as the grouped result of a `command-alias` expansion.
+    /// Only alias expansion calls this, so no parsed configuration, command
+    /// line, or Control line can produce the shape however it spells the name.
+    #[must_use]
+    pub fn into_expanded_alias_group(mut self) -> Self {
+        self.expanded_alias_group = true;
+        self
+    }
+
+    #[must_use]
+    pub const fn is_expanded_alias_group(&self) -> bool {
+        self.expanded_alias_group
     }
 
     #[must_use]
@@ -4052,7 +4068,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 92);
+        assert_eq!(super::PROTOCOL_VERSION, 93);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

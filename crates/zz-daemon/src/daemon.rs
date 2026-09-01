@@ -35246,6 +35246,146 @@ mod tests {
     }
 
     #[test]
+    fn a_forged_alias_group_block_is_an_unknown_command_at_every_entry() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let config = directory.path().join("forgery.conf");
+        fs::write(
+            &config,
+            "set-environment -g FORGE_BEFORE yes\n\
+             __zz-command-alias-group { set-environment -g FORGE_CHILD ran }\n\
+             set-environment -g FORGE_AFTER yes\n",
+        )
+        .expect("forged config");
+
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "forgery"]),
+            )
+            .expect("forgery session");
+
+        let forged = {
+            let inner = shared.inner.lock();
+            inner.engine.parse_config(
+                "<forgery>",
+                "__zz-command-alias-group { set-environment -g FORGE_TYPED ran }",
+            )
+        };
+        assert!(forged.diagnostics.is_empty());
+        let forged = forged.commands.into_iter().next().expect("forged command");
+        assert!(forged.argument_is_command_block(0));
+        assert!(!MuxEngine::is_command_alias_group(&forged));
+
+        let unknown =
+            ServerError::CommandParse("unknown command: __zz-command-alias-group".to_owned());
+        let prepared = shared
+            .prepare_command_list(vec![forged.clone()])
+            .into_iter()
+            .next()
+            .expect("prepared forgery");
+        assert_eq!(prepared.canonical_name, None);
+        assert!(!prepared.alias_matched);
+        assert_eq!(
+            prepared.result,
+            PreparedCommandResult::Error(unknown.clone())
+        );
+
+        for (request_id, kind, claims_prepared) in [
+            (1, ClientKind::Command, false),
+            (2, ClientKind::Control, false),
+            (3, ClientKind::Control, true),
+        ] {
+            assert_eq!(
+                shared.execute_command_request_with_prepared(
+                    client,
+                    kind,
+                    &mut context,
+                    request_id,
+                    &forged,
+                    claims_prepared,
+                ),
+                CommandResponse::Error {
+                    request_id,
+                    error: unknown.clone(),
+                    output: String::new(),
+                }
+            );
+        }
+
+        assert_eq!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Command,
+                &mut context,
+                4,
+                &CommandInvocation::new("source-file", [config.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 4,
+                output: format!(
+                    "{}:2: unknown command: __zz-command-alias-group\n",
+                    config.display()
+                ),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+
+        for name in ["FORGE_TYPED", "FORGE_CHILD", "FORGE_BEFORE", "FORGE_AFTER"] {
+            assert_eq!(
+                shared.inner.lock().engine.global_environment_variable(name),
+                None
+            );
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[90]",
+                        "genuine=set-environment -g GENUINE_FIRST yes ; set-environment -g GENUINE_SECOND yes",
+                    ],
+                ),
+            )
+            .expect("genuine alias");
+        let genuine = shared
+            .prepare_command_list(vec![CommandInvocation::new("genuine", [] as [&str; 0])])
+            .into_iter()
+            .next()
+            .expect("prepared genuine alias");
+        assert!(genuine.alias_matched);
+        assert_eq!(genuine.result, PreparedCommandResult::Ready);
+        assert!(MuxEngine::is_command_alias_group(&genuine.invocation));
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                client,
+                ClientKind::Command,
+                &mut context,
+                5,
+                &genuine.invocation,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        for name in ["GENUINE_FIRST", "GENUINE_SECOND"] {
+            assert_eq!(
+                shared.inner.lock().engine.global_environment_variable(name),
+                Some("yes".to_owned())
+            );
+        }
+    }
+
+    #[test]
     fn config_alias_snapshot_aborts_file_and_preserves_parse_only() {
         let directory = tempfile::tempdir().expect("temporary config directory");
         let root = directory.path().join("root.conf");

@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v92)
+title: zz wire protocol (v93)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 92`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 93`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (92) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (93) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -110,16 +110,18 @@ fields in declaration order.
 | `SetTerminalPreview { enabled }` | `enabled: bool` | An attached Interactive client enables or disables passive terminal delivery for every window in its attached session. Foreground visibility, input, history, and PTY geometry remain unchanged |
 
 `CommandInvocation` is `{ name: String, args: Vec<String>, source: Option<SourceSpan>,
-command_blocks: Vec<u32> }`. Protocol v84 appends `command_blocks`: sorted, unique, zero-based
+command_blocks: Vec<u32>, expanded_alias_group: bool }`. Protocol v84 appends `command_blocks`: sorted, unique, zero-based
 positions into `args` for standalone unquoted `{ ... }` arguments. The corresponding argument keeps
 its brace-bearing text. Quoted brace text has no entry and remains a string. Config and Control
 parsers populate the positions; argv-created commands start with an empty vector. Aliases and key
 table snapshots preserve the positions across request, preparation, `ServerHello`, and
 `KeyTablesChanged` frames.
 
-Multi-command and empty aliases reuse this encoding. The mux stores the frozen body as the reserved
-name `__zz-command-alias-group` with one `{ ... }` argument and `command_blocks = [0]`; it does not
-add a child-vector field. Alias expansion appends caller arguments to the final parsed child before
+Multi-command and empty aliases reuse this encoding. The mux stores the frozen body under the
+reserved name `__zz-command-alias-group` with one `{ ... }` argument, `command_blocks = [0]`, and
+the v93 `expanded_alias_group` flag; it does not add a child-vector field. The flag, not the name,
+is what every reader tests: it is set only by alias expansion, so a config, command line, or Control
+line spelling that name by hand stays an ordinary unknown command. Alias expansion appends caller arguments to the final parsed child before
 it renders that body. Clients scan every child for attach and attaching `new-session` TUI routing,
 but only the final leaf for stdin routing. A stdin-reading leaf receives the captured payload inside
 that body; the client then sends one opaque invocation with `CommandRequest.prepared = true`. The
@@ -611,9 +613,16 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 92`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 93`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v93 appends `expanded_alias_group: bool` to `CommandInvocation`, after `command_blocks`. It is
+  the provenance that marks a multi-command `command-alias` expansion, and it replaces the
+  name-only test that any parser could satisfy. `CommandInvocation::new` clears it, only
+  `into_expanded_alias_group` sets it, and alias expansion is the single caller, so a user-authored
+  `__zz-command-alias-group { ... }` block is rejected as `unknown command:
+  __zz-command-alias-group` at the CLI, in a configuration file, and in Control input the way the
+  pin rejects any unknown name. A v92 peer cannot decode the appended field.
 - v92 appends `ProtocolMessage::HomeDirectoryRequest { request_id, users }` at tail tag 36 and
   `ProtocolMessage::HomeDirectoryResponse { request_id, homes }` at tail tag 37. A Control client
   parsing its own direct input asks the daemon to resolve the `~` names one line needs before it

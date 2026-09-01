@@ -373,8 +373,7 @@ const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[(
         "hook_window_name",
     ],
 )];
-const MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] =
-    &[("window-neighbour-user-option", &[], &["next_@*", "prev_@*"])];
+const MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[];
 
 #[doc(hidden)]
 pub fn mux_literal_format_context_scopes()
@@ -9365,6 +9364,20 @@ impl MuxEngine {
             _ => None,
         }?;
         Some((parent, true))
+    }
+
+    /// The user options stored directly on one window, which is exactly what
+    /// `format_add_window_neighbour` copies out of `wl->window->options`.
+    pub(crate) fn format_window_user_options(&self, window: WindowId) -> Vec<(String, String)> {
+        self.window_user_options
+            .get(&window)
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub(crate) fn format_global_environment_rows(&self) -> Vec<FormatEnvironRow> {

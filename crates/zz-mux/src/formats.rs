@@ -40,6 +40,8 @@ const WINDOW_LOOP_CONTEXT_FORMATS: &[&str] = &["window_after_active", "window_be
 const WINDOW_NEIGHBOUR_INDEX_CONTEXT_FORMATS: &[&str] = &["next_window_index", "prev_window_index"];
 const WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS: &[&str] =
     &["next_window_active", "prev_window_active"];
+const WINDOW_NEIGHBOUR_USER_OPTION_PREFIXES: [&str; 2] = ["next_", "prev_"];
+const WINDOW_NEIGHBOUR_USER_OPTION_CONTEXT_PATTERNS: &[&str] = &["next_@*", "prev_@*"];
 
 const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
     (
@@ -78,6 +80,11 @@ const DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[
         "window-neighbour-active",
         WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS,
         &[],
+    ),
+    (
+        "window-neighbour-user-option",
+        &[],
+        WINDOW_NEIGHBOUR_USER_OPTION_CONTEXT_PATTERNS,
     ),
 ];
 
@@ -242,6 +249,7 @@ pub struct FormatUniverse {
     panes: BTreeMap<String, Vec<FormatLoopItem>>,
     options: FormatOptionScopes,
     environments: FormatEnvironmentScopes,
+    window_user_options: BTreeMap<String, Vec<(String, String)>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1361,6 +1369,10 @@ impl MuxEngine {
                     window.id.to_string(),
                     self.format_option_rows(TmuxOptionTarget::Window(window.id)),
                 );
+                universe.window_user_options.insert(
+                    window.id.to_string(),
+                    self.format_window_user_options(window.id),
+                );
                 universe.panes.insert(window.id.to_string(), panes);
             }
             windows.sort_by_key(|item| item.context.window_index);
@@ -2209,6 +2221,12 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                         WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS[0].to_owned(),
                         bool_string(next.active).to_owned(),
                     );
+                    insert_window_neighbour_user_options(
+                        &mut dynamic,
+                        &universe,
+                        next,
+                        WINDOW_NEIGHBOUR_USER_OPTION_PREFIXES[0],
+                    );
                 }
                 if index > 0 {
                     let previous = &items[index - 1];
@@ -2219,6 +2237,12 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     dynamic.insert(
                         WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS[1].to_owned(),
                         bool_string(previous.active).to_owned(),
+                    );
+                    insert_window_neighbour_user_options(
+                        &mut dynamic,
+                        &universe,
+                        previous,
+                        WINDOW_NEIGHBOUR_USER_OPTION_PREFIXES[1],
                     );
                 }
             }
@@ -2848,6 +2872,26 @@ impl<'a> ModifierFlags<'a> {
             }
         }
         flags
+    }
+}
+
+/// `format_add_window_neighbour` walks the neighbour window's own options
+/// object, so only a user option stored directly on that window is copied under
+/// the prefix. An inherited value of the same name is not the window's.
+fn insert_window_neighbour_user_options(
+    dynamic: &mut BTreeMap<String, String>,
+    universe: &FormatUniverse,
+    neighbour: &FormatLoopItem,
+    prefix: &str,
+) {
+    let Some(options) = universe
+        .window_user_options
+        .get(&neighbour.context.window_id)
+    else {
+        return;
+    };
+    for (name, value) in options {
+        dynamic.insert(format!("{prefix}{name}"), value.clone());
     }
 }
 

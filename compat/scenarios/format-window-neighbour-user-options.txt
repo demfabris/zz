@@ -1,0 +1,29 @@
+# A W row copies the user options stored directly on the window beside it in the
+# sorted list, never a same-named value it merely inherits, and the edges and
+# missing names expand empty.
+new-session -d -s wn -n w0
+new-window -d -t wn -n w1
+new-window -d -t wn -n w2
+set-option -g @glob global-value
+set-option -t wn @sess session-value
+set-option -w -t wn:0 @local zero
+set-option -w -t wn:1 @local one
+set-option -w -t wn:1 @onlyone solo
+set-option -w -t wn:2 @local two
+set-option -w -t wn:1 @glob window-glob
+set-option -p -t wn:1.0 @pane pane-value
+out: display-message -p -t wn [#{W:<#{window_index}|#{next_@local}|#{prev_@local}>}]
+out: display-message -p -t wn [#{W:<#{next_@onlyone}|#{prev_@onlyone}>}]
+out: display-message -p -t wn [#{W:<#{next_@glob}|#{prev_@glob}|#{next_@sess}|#{prev_@sess}|#{next_@pane}|#{prev_@pane}>}]
+out: display-message -p -t wn [#{W:<#{window_index}|#{next_window_index}|#{prev_window_index}|#{next_window_active}|#{prev_window_active}>}]
+out: display-message -p -t wn [#{Wr:<#{window_index}|#{next_@local}|#{prev_@local}>}]
+out: display-message -p -t wn [#{Wn:<#{window_name}|#{next_@local}|#{prev_@local}>}]
+out: display-message -p -t wn [#{Wnr:<#{window_name}|#{next_@local}|#{prev_@local}>}]
+out: display-message -p -t wn [#{W:<#{window_index}:#{next_@local}>,(#{window_index}:#{next_@local})}]
+out: display-message -p -t wn [#{next_@local}|#{prev_@local}|#{@glob}|#{@local}]
+out: display-message -p -t wn [#{W:<#{next_@local}#{P:.}>}]
+out: display-message -p -t wn [#{W:<#{next_@local}#{W:(#{next_@local})}#{next_@local}>}]
+out: display-message -p -t wn [#{S:#{W:<#{next_@local}>}}]
+set-option -w -t wn:1 -u @local
+out: display-message -p -t wn [#{W:<#{window_index}|#{next_@local}|#{prev_@local}>}]
+out: display-message -p -t wn [#{?#{next_@onlyone},set,unset}#{W:#{?#{next_@onlyone},set,unset}}]

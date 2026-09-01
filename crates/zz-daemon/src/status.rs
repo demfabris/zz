@@ -346,15 +346,7 @@ fn render(
                 tmux_shim,
                 zz_executable,
             );
-            let mut title = expand_status(format, &request.context, &mut hooks);
-            if title.len() > MAX_STATUS_TEXT_BYTES {
-                let mut end = MAX_STATUS_TEXT_BYTES;
-                while !title.is_char_boundary(end) {
-                    end -= 1;
-                }
-                title.truncate(end);
-            }
-            title
+            clamp_status_text(expand_status(format, &request.context, &mut hooks))
         });
     if !request.formats.enabled {
         return StatusLine {
@@ -409,7 +401,7 @@ fn render(
                 .row_formats
                 .get(&index)
                 .map_or_else(String::new, |format| {
-                    expand_status(format, &request.context, &mut hooks)
+                    clamp_status_text(expand_status(format, &request.context, &mut hooks))
                 })
         })
         .collect::<Vec<_>>();
@@ -442,12 +434,27 @@ fn render(
     }
 }
 
+/// `MAX_STATUS_TEXT_BYTES` is the wire bound `StatusLine` enforces on its own
+/// rows, so it belongs here rather than on every finished format expansion: a
+/// command-facing expansion never rides this message.
+fn clamp_status_text(mut value: String) -> String {
+    if value.len() <= MAX_STATUS_TEXT_BYTES {
+        return value;
+    }
+    let boundary = (0..=MAX_STATUS_TEXT_BYTES)
+        .rev()
+        .find(|index| value.is_char_boundary(*index))
+        .unwrap_or_default();
+    value.truncate(boundary);
+    value
+}
+
 fn expand_base_status_style(
     formats: &StatusFormats,
     context: &StatusContext,
     hooks: &mut DaemonFormatHooks<'_>,
 ) -> String {
-    let mut style = expand_status(&formats.style, context, hooks);
+    let mut style = clamp_status_text(expand_status(&formats.style, context, hooks));
     if zz_protocol::parse_style(&style).is_none() {
         style = String::new();
     }

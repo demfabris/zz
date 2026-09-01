@@ -1495,7 +1495,7 @@ pub fn expand_status(
         time: true,
         client_row: None,
     };
-    truncate_output(expander.expand(format, 0))
+    expander.expand(format, 0)
 }
 
 pub fn expand_format_values(
@@ -1509,7 +1509,7 @@ pub fn expand_format_values(
         time: false,
         client_row: None,
     };
-    truncate_output(expander.expand(format, 0))
+    expander.expand(format, 0)
 }
 
 pub(crate) struct CommandHooks {
@@ -1597,7 +1597,7 @@ fn expand_format_inner(
         time,
         client_row: None,
     };
-    truncate_output(expander.expand(format, 0))
+    expander.expand(format, 0)
 }
 
 struct OptionFormatHooks<'a, H> {
@@ -4088,18 +4088,6 @@ fn format_datetime(time: &chrono::DateTime<Local>, format: &str) -> String {
     }
 }
 
-fn truncate_output(mut value: String) -> String {
-    if value.len() <= MAX_STATUS_TEXT_BYTES {
-        return value;
-    }
-    let boundary = (0..=MAX_STATUS_TEXT_BYTES)
-        .rev()
-        .find(|index| value.is_char_boundary(*index))
-        .unwrap_or_default();
-    value.truncate(boundary);
-    value
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4890,6 +4878,39 @@ mod tests {
         }
         assert_eq!(expand("before#{R:x}after"), "before");
         assert_eq!(expand("before#{R:#{R:x,5000},10000}after"), "before");
+    }
+
+    /// The pin has no output cap. Measured on the pin, `#{p-9000:#{l:tail}}`
+    /// prints 9000 bytes ending in `tail` and `#{R:x,10000}` prints 10000, both
+    /// far past the 4096-byte `StatusLine` wire bound zz used to apply to every
+    /// finished expansion.
+    #[test]
+    fn expansion_output_keeps_every_byte_past_the_status_wire_bound() {
+        let padded = expand("#{p-9000:#{l:tail}}");
+        assert_eq!(padded.len(), 9000);
+        assert!(padded.ends_with("tail"));
+        assert_eq!(expand("#{n:#{p-9000:#{l:tail}}}"), "9000");
+        assert_eq!(expand("#{R:x,10000}").len(), 10_000);
+        assert_eq!(
+            expand_format_values("#{p-9000:#{l:tail}}", &context(), &mut Stub).len(),
+            9000
+        );
+    }
+
+    /// The pin threads `FORMAT_LOOP_LIMIT` as a recursion depth: `es->loop` is
+    /// incremented on entry to `format_expand1` and decremented on the way out,
+    /// so a hundred sibling expansions cost one level, not a hundred.
+    #[test]
+    fn the_loop_limit_counts_recursion_depth_and_not_a_running_total() {
+        let siblings = "#{l:x}".repeat(200);
+        assert_eq!(expand(&siblings).len(), 200);
+
+        let mut nested = "#{l:deep}".to_owned();
+        for _ in 0..FORMAT_LOOP_LIMIT - 1 {
+            nested = format!("#{{s/x/x/:{nested}}}");
+        }
+        assert_eq!(expand(&nested), "deep");
+        assert_eq!(expand(&format!("#{{s/x/x/:{nested}}}")), "");
     }
 
     #[test]

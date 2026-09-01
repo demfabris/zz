@@ -892,29 +892,32 @@
     },
     {
       "id": "formats.expansion-budgets",
-      "title": "Settle the format expansion budgets",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
+      "title": "Keep format expansion deterministic",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "scripts"
       ],
       "owner": "mux",
       "items": [
-        "semantic:format-expansion-output-clamp",
         "semantic:format-expansion-time-budget"
       ],
       "evidence": [
         "resource:crates/zz-mux/src/formats.rs",
-        "resource:crates/zz-protocol/src/message.rs"
+        "resource:crates/zz-daemon/src/status.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "scenario:compat/scenarios/format-expansion-output-clamp.txt",
+        "resource:knowledge/tmux/status-line.md",
+        "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "Format expansion stops clamping command-facing output at MAX_STATUS_TEXT_BYTES, so display-message and format-values print the pin's whole string and the 4096-byte bound stays on the status-line message that owns it.",
-        "The pin's wall-clock expansion budget is settled explicitly, either by adopting an abort with the pin's observable truncation or by recording the divergence as accepted, with the recursion depth guard left matching at 100 on both sides."
+        "Command-facing expansion stays uncapped and MAX_STATUS_TEXT_BYTES stays on the status-line message that owns it, with a differential proving both sides print the whole string.",
+        "The engine stays deterministic with no wall-clock abort, and the recursion depth guard keeps matching the pin at 100 on both sides."
       ],
       "depends_on": [],
-      "reason": "Two expansion budgets differ, in opposite directions. zz clamps every finished expansion to MAX_STATUS_TEXT_BYTES, 4096, in truncate_output, which runs at all three entry points in crates/zz-mux/src/formats.rs, so command-facing output loses everything past 4096 bytes; the pin has no output cap. Measured on a global option roster through the O loop modifier, `#{Ogs:#{option}=#{option_value};}` followed by the same body under Ogw and Ov, the pin prints 7036 bytes and zz prints exactly 4096 while `#{n:}` of the same format reports 7050, so the clamp is invisible to the length modifier and the 14-byte roster gap against the pin is separate O-loop content work. The clamp is a status-line wire bound, since StatusLine rejects rows longer than MAX_STATUS_TEXT_BYTES in crates/zz-protocol/src/message.rs, applied to output that never rides that message. Going the other way, the pin aborts an expansion that exceeds FORMAT_TIME_LIMIT, 100 milliseconds of wall clock checked in format_expand1 and again inside format_unescape, so a large nested loop returns a truncated result whose length moves run to run: `#{n:#{Ogs:#{Ogs:#{l:x}}}}` measured 10893, 11721, 11751, 11939, 12036, 12068, 12357, and 12461 across eight pin runs against the uncapped 127 by 127 product of 16129, a third nesting level did not lower it, and the command took about 150 milliseconds, which is a time budget rather than a count. zz has no time budget: it answered 16129 on every run and 127 cubed, 2048383, at three nesting levels. FORMAT_LOOP_LIMIT is not the divergence: it is 100 on both sides and a recursion depth on both sides, incremented and decremented around format_expand1 in the pin and threaded as depth through Expander::expand in zz. Adopting the pin's nondeterministic abort verbatim is arguably the wrong fix and that call belongs to this gap, but the 4096-byte clamp on command output raises no such question."
+      "reason": "The output clamp is fixed and the wall clock is refused, each on its own evidence. zz used to clamp every finished expansion to MAX_STATUS_TEXT_BYTES, 4096, in truncate_output at all three entry points, so command-facing output lost everything past 4096 bytes while `#{n:}` of the same format already reported the full length. truncate_output is gone and the bound moved to where StatusLine enforces it: clamp_status_text bounds the status title, base style, and every status row as that message is built, beside the left and right sides wrap_status_style already bounded. The strict format-expansion-output-clamp differential now agrees with the pin at 9000 bytes for `#{p-9000:#{l:tail}}`, 10000 for `#{R:x,10000}`, and 6000 for a 6000-byte user option read back through `#{E:}`. The pin's FORMAT_TIME_LIMIT, 100 milliseconds of wall clock checked on entry to format_expand1, is deliberately not adopted. It was implemented and measured first: threading one FormatBudget from each entry point into every nested expander reproduced the pin's shape exactly, where after `#{n:#{Ogs:#{Ogs:#{l:x}}}}` burns the budget the trailing literal text still lands, `#{l:lit}` still expands because format_unescape only samples the clock every 10000 characters, and `#{?session_name,yes,no}` beside them expands empty. It also made zz's own command semantics load-sensitive, because zz expands option values and command arguments through the same engine and an emptied argument is a failure rather than a truncation: with the budget in place, daemon::tests::attached_client_extents_clamp_retained_and_default_dimensions failed 5 of 5 runs under eight spinning cores and passed 6 of 6 idle, while the same test on the same load passed 3 of 3 without it, and forcing the budget spent failed it deterministically inside a `set-option status off`. Trading a benign output difference for a load-dependent command failure is the wrong side of that bargain, so the divergence is accepted: a runaway expansion in zz runs to completion and answers the same string every time, where the pin returns a truncated result whose length moves run to run. FORMAT_LOOP_LIMIT was never part of this and did not change: measured on the pin, 200 sibling `#{l:x}` replacements all expand, 99 nested `#{s/x/x/:}` wrappers still reach their body, and the hundredth answers empty, which is a recursion depth of 100 on both sides rather than a running total. The 40,960,000-byte repeat ceiling stays the allocation guard it always was."
     },
     {
       "id": "formats.modifier-fidelity",

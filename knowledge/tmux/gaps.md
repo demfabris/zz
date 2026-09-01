@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **83**. Classified items: **562**.
+Tracked gap groups: **83**. Classified items: **561**.
 
-- Status: open: 41, blocked: 6, accepted: 36.
-- Decision: adopt: 46, native: 28, park: 1, never: 8.
-- Priority: later: 47, none: 36.
+- Status: open: 40, blocked: 6, accepted: 37.
+- Decision: adopt: 45, native: 29, park: 1, never: 8.
+- Priority: later: 46, none: 37.
 - Closed history entries: 130.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 89, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 88, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -57,7 +57,6 @@ structure as proof.
 | `control-mode.diagnostic-typing` | Type Control-mode config diagnostics | adopt | open | medium | protocol | scripts | none |
 | `display-message.format-listing` | List display-message format variables | adopt | open | medium | daemon | scripts, admin | formats.mouse-context, formats.pane-process, formats.pane-runtime, formats.terminal-cells, formats.terminal-runtime, formats.window-runtime |
 | `display-message.pane-target-grammar` | Complete display-message pane target grammar | adopt | open | medium | mux | scripts | pane.selection-state |
-| `formats.expansion-budgets` | Settle the format expansion budgets | adopt | open | medium | mux | scripts | none |
 | `formats.window-runtime` | Expose remaining window formats | adopt | open | medium | daemon | scripts, remote | none |
 | `history.hyperlink-reset` | Reset hyperlink history | adopt | blocked | medium | terminal | daily | none |
 | `keys.copy-mode-prompt-defaults` | Add prompt-backed emacs copy-mode defaults | adopt | open | medium | daemon | daily, remote, scripts | prompt.command-fidelity |
@@ -109,6 +108,7 @@ structure as proof.
 | `clients.read-only-and-focus` | Retain native client focus semantics | native | accepted | none | daemon | daily, remote | none |
 | `commands.native-client-tools` | Use native client tools | native | accepted | none | gui | daily, gui | none |
 | `commands.native-superset` | Keep the zz-native command namespace explicit | native | accepted | none | protocol | daily, gui, scripts | none |
+| `formats.expansion-budgets` | Keep format expansion deterministic | native | accepted | none | mux | scripts | none |
 | `formats.mouse-context` | Expose mouse event formats | native | accepted | none | protocol | scripts, gui | none |
 | `formats.native-modes` | Keep native mode row formats | native | accepted | none | client | daily, gui | none |
 | `formats.native-typed-context-producers` | Keep typed native context producers explicit | native | accepted | none | client | gui | none |
@@ -719,23 +719,27 @@ Schema 5 classified 41 missing literal producer/name tuples plus current_file an
   - `Split the source-registered missing partition by producer before implementation: option and array loops, environment and client loops, monitor hooks, current_file, and next or previous user-option copying retain independent value and context tests.`
   - `Each implemented producer moves its exact path:function/name tuples or derived family out of the active-gap partition without weakening the exhaustive schema-5 gate or treating a same-spelled global format as context proof.`
 
-### `formats.expansion-budgets`: Settle the format expansion budgets
+### `formats.expansion-budgets`: Keep format expansion deterministic
 
-Two expansion budgets differ, in opposite directions. zz clamps every finished expansion to MAX_STATUS_TEXT_BYTES, 4096, in truncate_output, which runs at all three entry points in crates/zz-mux/src/formats.rs, so command-facing output loses everything past 4096 bytes; the pin has no output cap. Measured on a global option roster through the O loop modifier, `#{Ogs:#{option}=#{option_value};}` followed by the same body under Ogw and Ov, the pin prints 7036 bytes and zz prints exactly 4096 while `#{n:}` of the same format reports 7050, so the clamp is invisible to the length modifier and the 14-byte roster gap against the pin is separate O-loop content work. The clamp is a status-line wire bound, since StatusLine rejects rows longer than MAX_STATUS_TEXT_BYTES in crates/zz-protocol/src/message.rs, applied to output that never rides that message. Going the other way, the pin aborts an expansion that exceeds FORMAT_TIME_LIMIT, 100 milliseconds of wall clock checked in format_expand1 and again inside format_unescape, so a large nested loop returns a truncated result whose length moves run to run: `#{n:#{Ogs:#{Ogs:#{l:x}}}}` measured 10893, 11721, 11751, 11939, 12036, 12068, 12357, and 12461 across eight pin runs against the uncapped 127 by 127 product of 16129, a third nesting level did not lower it, and the command took about 150 milliseconds, which is a time budget rather than a count. zz has no time budget: it answered 16129 on every run and 127 cubed, 2048383, at three nesting levels. FORMAT_LOOP_LIMIT is not the divergence: it is 100 on both sides and a recursion depth on both sides, incremented and decremented around format_expand1 in the pin and threaded as depth through Expander::expand in zz. Adopting the pin's nondeterministic abort verbatim is arguably the wrong fix and that call belongs to this gap, but the 4096-byte clamp on command output raises no such question.
+The output clamp is fixed and the wall clock is refused, each on its own evidence. zz used to clamp every finished expansion to MAX_STATUS_TEXT_BYTES, 4096, in truncate_output at all three entry points, so command-facing output lost everything past 4096 bytes while `#{n:}` of the same format already reported the full length. truncate_output is gone and the bound moved to where StatusLine enforces it: clamp_status_text bounds the status title, base style, and every status row as that message is built, beside the left and right sides wrap_status_style already bounded. The strict format-expansion-output-clamp differential now agrees with the pin at 9000 bytes for `#{p-9000:#{l:tail}}`, 10000 for `#{R:x,10000}`, and 6000 for a 6000-byte user option read back through `#{E:}`. The pin's FORMAT_TIME_LIMIT, 100 milliseconds of wall clock checked on entry to format_expand1, is deliberately not adopted. It was implemented and measured first: threading one FormatBudget from each entry point into every nested expander reproduced the pin's shape exactly, where after `#{n:#{Ogs:#{Ogs:#{l:x}}}}` burns the budget the trailing literal text still lands, `#{l:lit}` still expands because format_unescape only samples the clock every 10000 characters, and `#{?session_name,yes,no}` beside them expands empty. It also made zz's own command semantics load-sensitive, because zz expands option values and command arguments through the same engine and an emptied argument is a failure rather than a truncation: with the budget in place, daemon::tests::attached_client_extents_clamp_retained_and_default_dimensions failed 5 of 5 runs under eight spinning cores and passed 6 of 6 idle, while the same test on the same load passed 3 of 3 without it, and forcing the budget spent failed it deterministically inside a `set-option status off`. Trading a benign output difference for a load-dependent command failure is the wrong side of that bargain, so the divergence is accepted: a runaway expansion in zz runs to completion and answers the same string every time, where the pin returns a truncated result whose length moves run to run. FORMAT_LOOP_LIMIT was never part of this and did not change: measured on the pin, 200 sibling `#{l:x}` replacements all expand, 99 nested `#{s/x/x/:}` wrappers still reach their body, and the hundredth answers empty, which is a recursion depth of 100 on both sides rather than a running total. The 40,960,000-byte repeat ceiling stays the allocation guard it always was.
 
-- Decision: `adopt`
-- Status: `open`
-- Priority and ease: `later` / `medium`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `mux`
 - User impact: scripts
-- Items: `semantic:format-expansion-output-clamp`, `semantic:format-expansion-time-budget`
+- Items: `semantic:format-expansion-time-budget`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:crates/zz-daemon/src/status.rs`
   - `resource:crates/zz-protocol/src/message.rs`
+  - `scenario:compat/scenarios/format-expansion-output-clamp.txt`
+  - `resource:knowledge/tmux/status-line.md`
+  - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
-  - `Format expansion stops clamping command-facing output at MAX_STATUS_TEXT_BYTES, so display-message and format-values print the pin's whole string and the 4096-byte bound stays on the status-line message that owns it.`
-  - `The pin's wall-clock expansion budget is settled explicitly, either by adopting an abort with the pin's observable truncation or by recording the divergence as accepted, with the recursion depth guard left matching at 100 on both sides.`
+  - `Command-facing expansion stays uncapped and MAX_STATUS_TEXT_BYTES stays on the status-line message that owns it, with a differential proving both sides print the whole string.`
+  - `The engine stays deterministic with no wall-clock abort, and the recursion depth guard keeps matching the pin at 100 on both sides.`
 
 ### `formats.modifier-fidelity`: Implement remaining format modifiers
 

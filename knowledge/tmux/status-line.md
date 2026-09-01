@@ -120,7 +120,18 @@ negative, or oversized count produces an empty expansion. A body without a comma
 replacement and discards later format output. The engine runs repeat before the post
 transformations, so byte length and truncation can wrap it as `#{n;R:...}` and `#{R;=/N/...:...}`.
 The engine rejects a nested repeat before allocation when it would exceed 40,960,000 intermediate
-bytes. tmux uses an elapsed-time budget for this case; zz uses the deterministic byte bound.
+bytes, which is an allocation ceiling rather than a budget.
+
+`FORMAT_LOOP_LIMIT` is a recursion depth of 100 on both sides: 200 sibling `#{l:x}` replacements all
+expand, 99 nested `#{s/x/x/:}` wrappers still reach their body, and the hundredth answers empty. The
+pin's second budget, `FORMAT_TIME_LIMIT`, is 100 milliseconds of wall clock that abandons the rest of
+an expansion. zz does not adopt it, so a runaway expansion runs to completion and answers the same
+string every time where the pin returns a truncated result whose length moves run to run. The
+[divergence matrix](/tmux/divergences.md) records the measurement behind that decision.
+
+Nothing clamps a finished expansion. `MAX_STATUS_TEXT_BYTES` is the wire bound `StatusLine`
+enforces, so the daemon applies it to the title, the base style, and each status row as it builds
+that message; command-facing output never rides it and prints whole.
 
 The shipped second and third `status-format[]` defaults use `R` with `n` to indent their `P:` and
 `S:` rows. `n` returns the session name's byte length, and the expander emits that many spaces

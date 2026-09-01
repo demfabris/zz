@@ -1135,6 +1135,41 @@ template is ordinary undone work rather than a model difference: the chooser tem
 that substitutes the selected value and runs the result already shipped on 2026-08-28, so wiring the
 overlay's selection to it is a delivery question, not a disposition. It stays blocked.
 
+## Format expansion budgets settled (2026-09-01)
+
+The two budgets registered on 2026-09-01 both resolved toward the pin, in opposite directions.
+
+zz used to clamp every finished expansion to `MAX_STATUS_TEXT_BYTES` in `truncate_output`, which ran
+at all three entry points, so command-facing output lost everything past 4096 bytes even though
+`#{n:}` of the same format already reported the full length. `truncate_output` is gone. The bound
+now lives where the wire enforces it: `clamp_status_text` in `crates/zz-daemon/src/status.rs` bounds
+the status title, the base style, and every status row as `StatusLine` is built, beside the left and
+right sides `wrap_status_style` already bounded. Measured on a strict differential, both sides print
+9000 bytes for `#{p-9000:#{l:tail}}`, 10000 for `#{R:x,10000}`, and 6000 for a 6000-byte user option
+read back through `#{E:}`.
+
+Going the other way, the pin's `FORMAT_TIME_LIMIT` is refused, and the refusal is measured rather
+than assumed. The budget was implemented first: one deadline stamped at the outermost entry point and
+copied into every nested expander, checked on entry to `Expander::expand` exactly where
+`format_expand1` calls `format_check_time`. It reproduced the pin's shape, where after
+`#{n:#{Ogs:#{Ogs:#{l:x}}}}` burns the budget the trailing literal text still lands and `#{l:lit}`
+still expands, because `format_unescape` only samples the clock every 10,000 characters, while
+`#{?session_name,yes,no}` beside them expands empty.
+
+It also made zz's command semantics load-sensitive. zz expands option values and command arguments
+through the same engine, where an emptied argument is a failure rather than a truncated string. With
+the budget in place, `daemon::tests::attached_client_extents_clamp_retained_and_default_dimensions`
+failed 5 of 5 runs under eight spinning cores and passed 6 of 6 idle; the same test under the same
+load passed 3 of 3 without it, and forcing the budget spent failed it deterministically inside a
+`set-option status off`. Trading a benign output difference for a load-dependent command failure is
+the wrong side of that bargain, so zz keeps a deterministic engine: a runaway expansion runs to
+completion and answers the same string every time, where the pin returns a truncated result whose
+length moves run to run. The 40,960,000-byte repeat ceiling remains the one allocation guard.
+
+`FORMAT_LOOP_LIMIT` was never part of the divergence and did not change. Measured on the pin, 200
+sibling `#{l:x}` replacements all expand, 99 nested `#{s/x/x/:}` wrappers still reach their body, and
+the hundredth answers empty: a recursion depth of 100 on both sides, not a running total.
+
 # Related
 
 - [live tmux compatibility gaps](/tmux/gaps.md) — generated TODO, decision, and status report.

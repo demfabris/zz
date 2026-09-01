@@ -1,0 +1,7 @@
+fmt: [#{n:#{p-9000:#{l:tail}}}]
+fmt: [#{p-9000:#{l:tail}}]
+fmt: [#{n:#{R:x,10000}}]
+fmt: [#{R:x,10000}]
+set-option -g @clamp-probe "#{R:y,6000}"
+fmt: [#{n:#{E:@clamp-probe}}]
+fmt: [#{E:@clamp-probe}]

@@ -1,0 +1,9 @@
+corpus: none
+# Two real pty clients share one pane on a probe server. Pane focus is the OR
+# across attached, focused clients, so only the first client to gain focus and
+# the last one to lose it move the pane's flag, and each move emits exactly one
+# hook. Focus is driven by writing CSI I and CSI O into each client's own tty.
+stage: fixtures/hooks-pane-focus.sh ~/hooks-pane-focus.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+run-shell 'sh ~/hooks-pane-focus.sh'
+out: show-environment -g HOOKS_PANE_FOCUS

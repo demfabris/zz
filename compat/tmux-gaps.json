@@ -1133,34 +1133,6 @@
       "reason": "The terminal API lacks a distinct hyperlink-registry reset."
     },
     {
-      "id": "hooks.pane-events",
-      "title": "Produce pane focus and clipboard hooks",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts",
-        "gui"
-      ],
-      "owner": "daemon",
-      "items": [
-        "hook:pane-focus-in",
-        "hook:pane-focus-out"
-      ],
-      "evidence": [
-        "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-mux/src/tmux_options.rs",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "scenario:compat/scenarios/hooks-pane-clipboard.txt"
-      ],
-      "acceptance": [
-        "Each pane transition emits once with a defined client when multiple clients view the pane."
-      ],
-      "depends_on": [],
-      "reason": "Focus is per client and needs attached, focused clients to transition. pane-set-clipboard now fires from both pinned producers: an OSC 52 write from a pane under set-clipboard on (differential coverage in hooks-pane-clipboard), and a copy-mode copy that asks for the clipboard under any non-off set-clipboard."
-    },
-    {
       "id": "hooks.shutdown-window-unlinked-order",
       "title": "Preserve forced-shutdown window-unlinked order",
       "decision": "adopt",
@@ -3721,6 +3693,19 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Windows now retain tmux's Unix-second `activity_time` apart from zz's logical MRU counter. Creation, parsed nonempty pane output, and the existing pinned current-window transition producers update both values from the injected engine clock. The independent audit found and repaired the direct daemon `switch-client` selection path so it refreshes that clock before changing the current window. Same-window selection, pane selection, pane creation, splits, and layout-only changes without output leave the timestamp unchanged. The direct Time format backing expands empty without a window and preserves the same seconds through plain, boolean, comparison, list-row, and time-modified forms. Focused model, command, format, daemon, and differential coverage preserves the pin's move-window and swap-window transition details while proving target isolation and output-driven updates. No wire protocol or snapshot field changed."
+    },
+    {
+      "id": "hooks.pane-events",
+      "title": "Produce pane focus and clipboard hooks",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-mux/src/tmux_options.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/hooks-pane-clipboard.txt",
+        "scenario:compat/scenarios/smoke/hooks-pane-focus.txt"
+      ],
+      "resolution": "pane-focus-in and pane-focus-out now fire from the pin's own predicate. window.c's window_pane_update_focus makes a pane focused only while it is its window's active pane and some attached client with the focused flag and no overlay has that window current, and it notifies only on a transition of that pane-level flag. The daemon keeps the same set in ServerState and settles it after every input dispatch, command execution, attach, and client unregister; the stored set is written before the hooks run, so a hook body that settles again sees no further transition. Measured on both binaries with two real pty clients sharing one pane and CSI I / CSI O written straight into each client's tty: the first attach emits one pane-focus-in, a redundant focus-in from either client emits nothing, a focus-out from one of two focused clients emits nothing, the last focused client's focus-out emits one pane-focus-out, and the next focus-in emits one pane-focus-in. Four hooks, same order, same pane, on both sides in smoke/hooks-pane-focus. The hook carries no client, matching notify_pane's NULL client: #{hook_client} is empty on both. pane-set-clipboard already fired from both pinned producers."
     },
     {
       "id": "hooks.queue",

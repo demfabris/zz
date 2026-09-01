@@ -2812,6 +2812,8 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
     "command-error",
     "pane-died",
     "pane-exited",
+    "pane-focus-in",
+    "pane-focus-out",
     "pane-mode-changed",
     "pane-set-clipboard",
     "pane-title-changed",
@@ -5072,6 +5074,7 @@ impl Shared {
             let _ = waiter.try_send(false);
         }
         self.refresh_control_output_taps();
+        self.settle_pane_focus();
         if shutdown {
             self.request_shutdown_without_hooks();
         }
@@ -6269,6 +6272,40 @@ impl Shared {
 
     fn run_shutdown_event_hooks(self: &Arc<Self>, events: Vec<PendingHookEvent>) {
         self.run_event_hooks_with_control(events, false);
+    }
+
+    /// Emit `pane-focus-out` then `pane-focus-in` for every pane whose focus
+    /// changed, once per transition, the way `window_pane_update_focus` does.
+    /// The stored set is updated before the hooks run, so a hook body that
+    /// settles again sees no further transition.
+    fn settle_pane_focus(self: &Arc<Self>) {
+        let events = {
+            let mut inner = self.inner.lock();
+            let focused = focused_panes(&inner);
+            if focused == inner.pane_focus {
+                return;
+            }
+            let snapshot = MuxHookSnapshot::capture(&inner.engine);
+            let pane_event = |name: &'static str, pane: &PaneId| {
+                snapshot
+                    .panes
+                    .get(pane)
+                    .map(|state| PendingHookEvent::pane(name, *pane, state, &snapshot))
+            };
+            let events = inner
+                .pane_focus
+                .difference(&focused)
+                .filter_map(|pane| pane_event("pane-focus-out", pane))
+                .chain(
+                    focused
+                        .difference(&inner.pane_focus)
+                        .filter_map(|pane| pane_event("pane-focus-in", pane)),
+                )
+                .collect();
+            inner.pane_focus = focused;
+            events
+        };
+        self.run_event_hooks(events);
     }
 
     fn run_event_hooks_with_control(
@@ -8650,6 +8687,7 @@ impl Shared {
         } else {
             self.run_event_hooks(pending_hook_events);
         }
+        self.settle_pane_focus();
         // `prompt_incremental_start` fires the callback from inside
         // `status_prompt_set`, and the callback queues its command behind the
         // item that raised the prompt. Running it last is that ordering.
@@ -11951,6 +11989,7 @@ impl Shared {
             self.sync_prefix_armed(target_client);
         }
         self.run_event_hooks(attach_events);
+        self.settle_pane_focus();
         if target_client == invoking_client {
             retarget_context_to_attachment(&self.inner.lock(), target_client, context);
         }
@@ -13623,6 +13662,7 @@ impl Shared {
         self.enforce_destroy_unattached();
         self.refresh_control_output_taps();
         self.run_event_hooks(events);
+        self.settle_pane_focus();
         Ok(snapshot)
     }
 
@@ -14692,6 +14732,7 @@ impl Shared {
             }
             self.run_event_hooks(events);
         }
+        self.settle_pane_focus();
         log::trace!(
             target: "zz_daemon::diagnostics::input",
             "dispatch end client={client} success={} elapsed_us={} context={context:#?}",
@@ -24183,6 +24224,7 @@ struct ServerState {
     client_activity_times: BTreeMap<ClientId, u64>,
     client_created_times: BTreeMap<ClientId, u64>,
     client_focused: BTreeMap<ClientId, bool>,
+    pane_focus: BTreeSet<PaneId>,
     window_latest_clients: BTreeMap<WindowId, ClientId>,
     session_last_attached: BTreeMap<SessionId, u64>,
     activity_sequence: u64,
@@ -27419,6 +27461,25 @@ fn client_focused_window(
         .copied()
         .filter(|focused| session.windows.contains(focused))
         .unwrap_or(session.active_window)
+}
+
+/// The panes the pin would call focused: `window_pane_update_focus` marks a
+/// pane focused only while it is its window's active pane and some attached,
+/// focused client with no overlay has that window current.
+fn focused_panes(inner: &ServerState) -> BTreeSet<PaneId> {
+    inner
+        .client_focused
+        .iter()
+        .filter(|(_, focused)| **focused)
+        .map(|(client, _)| *client)
+        .filter(|client| !any_overlay_present(inner, *client))
+        .filter_map(|client| {
+            let session = client_attached_session(inner, client)?;
+            let session_state = inner.engine.state.sessions.get(&session)?;
+            let window = client_focused_window(inner, client, session_state);
+            Some(inner.engine.state.windows.get(&window)?.active_pane)
+        })
+        .collect()
 }
 
 fn client_focused_window_for_attachment(inner: &ServerState, client: ClientId) -> Option<WindowId> {
@@ -33621,7 +33682,7 @@ mod tests {
         );
         assert_eq!(
             produced_non_after_hooks.len(),
-            28,
+            30,
             "explicit hook producer count changed"
         );
         assert!(
@@ -33646,13 +33707,9 @@ mod tests {
                 }
             }
         }
-        let expected_tracked_hooks = ["pane-focus-in", "pane-focus-out"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<BTreeSet<_>>();
-        assert_eq!(
-            tracked_hooks, expected_tracked_hooks,
-            "runtime hook gap roster changed"
+        assert!(
+            tracked_hooks.is_empty(),
+            "runtime hook gap roster changed: {tracked_hooks:?}"
         );
 
         let produced_hooks = produced_after_hooks
@@ -33663,13 +33720,13 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect::<BTreeSet<_>>();
-        assert_eq!(produced_hooks.len(), 65, "produced hook count changed");
+        assert_eq!(produced_hooks.len(), 67, "produced hook count changed");
         assert_eq!(
             explicit_only_hooks.len(),
             1,
             "explicit-only hook count changed"
         );
-        assert_eq!(tracked_hooks.len(), 2, "tracked hook count changed");
+        assert!(tracked_hooks.is_empty(), "tracked hook count changed");
         assert!(
             produced_hooks.is_disjoint(&tracked_hooks),
             "produced and tracked hooks overlap"
@@ -42298,6 +42355,7 @@ mod tests {
                     | "client-session-changed"
                     | "client-attached"
                     | "window-renamed"
+                    | "pane-focus-in"
                     | "pane-title-changed"
             )),
             "unexpected control hook sequence: {hook_names:?}"
@@ -42745,6 +42803,89 @@ mod tests {
 
         assert_eq!(client_format_name(&inner, client), "client-4242");
         assert_eq!(find_attached_client(&inner, "client-4242"), Some(client));
+    }
+
+    #[test]
+    fn pane_focus_hooks_follow_the_pinned_any_focused_client_predicate() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "pane-focus", "focus");
+        let (first, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("first-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (second, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("second-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(first, session).expect("attach first client");
+        shared
+            .attach(second, session)
+            .expect("attach second client");
+        assert_eq!(
+            shared.inner.lock().pane_focus,
+            BTreeSet::from([pane]),
+            "an attached client starts focused like the pin's CLIENT_FOCUSED default"
+        );
+
+        let mut hook_context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane focus hook context");
+        install_client_event_log_hooks(
+            &shared,
+            &mut hook_context,
+            &["pane-focus-in", "pane-focus-out"],
+        );
+        let context_ids = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut hook_context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-p", "#{session_id}|#{window_id}|#{pane_id}"],
+                ),
+            )
+            .expect("expand pane focus context")
+            .output;
+        shared.inner.lock().message_log.clear();
+
+        let report = |client, focused| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    InputMessage::ClientFocus { focused },
+                )
+                .expect("report client focus");
+        };
+
+        report(first, true);
+        report(first, false);
+        assert!(
+            client_event_log(&shared).is_empty(),
+            "the pane stays focused while the second client still is"
+        );
+
+        report(second, false);
+        report(second, false);
+        report(first, true);
+        report(second, true);
+        report(first, false);
+        report(second, false);
+
+        assert_eq!(
+            client_event_log(&shared),
+            [
+                format!("pane-focus-out||{context_ids}"),
+                format!("pane-focus-in||{context_ids}"),
+                format!("pane-focus-out||{context_ids}"),
+            ]
+        );
+        assert!(shared.inner.lock().pane_focus.is_empty());
     }
 
     #[test]

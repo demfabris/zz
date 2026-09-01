@@ -31416,43 +31416,19 @@ fn any_overlay_present(inner: &ServerState, client: ClientId) -> bool {
     popup_other_overlay_present(inner, client) || inner.popups.contains_key(&client)
 }
 
+/// The one key a menu row can carry that `input_key_name` never spells:
+/// `resolve_menu_key` rewrites a shifted Tab to it before matching rows, so a
+/// `BTab` row is pressable here even though no other surface emits the name.
+const MENU_BACK_TAB_KEY: &str = "BTab";
+
+/// A row shortcut becomes a key only when a client attached to the menu can
+/// press it. The spelling goes through the pin's own parser first — `^A`, hex
+/// codes and the named table all resolve there — and the pin drops what is
+/// left the same way: `key_string_lookup_string` answers `KEYC_UNKNOWN` and
+/// `menu_add_item` then renders no key at all.
 fn menu_shortcut(value: &str) -> Option<String> {
-    let key = zz_protocol::canonical_key(value);
-    let mut base = key.as_str();
-    while let Some(rest) = base.strip_prefix("C-").or_else(|| base.strip_prefix("M-")) {
-        base = rest;
-    }
-    let named = matches!(
-        base,
-        "Enter"
-            | "Escape"
-            | "Space"
-            | "Tab"
-            | "BTab"
-            | "BSpace"
-            | "Up"
-            | "Down"
-            | "Left"
-            | "Right"
-            | "Home"
-            | "End"
-            | "PPage"
-            | "NPage"
-            | "DC"
-            | "IC"
-    );
-    let function = base
-        .strip_prefix('F')
-        .and_then(|number| number.parse::<u8>().ok())
-        .is_some_and(|number| number > 0);
-    let character = {
-        let mut characters = base.chars();
-        characters
-            .next()
-            .is_some_and(|character| !character.is_control())
-            && characters.next().is_none()
-    };
-    (named || function || character).then_some(key)
+    let key = zz_protocol::canonical_key(&zz_mux::parse_tmux_key(value)?);
+    (is_key_name(&key) || key == MENU_BACK_TAB_KEY).then_some(key)
 }
 
 enum MenuStartingChoice {

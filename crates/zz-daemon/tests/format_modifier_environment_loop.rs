@@ -149,7 +149,10 @@ fn the_client_store_is_the_invoking_clients_own_environment() {
     // cmd-display-message.c creates the tree with cmdq_get_client, so the store
     // is the connection that ran the command, not whoever is attached.
     let detached = clients.format("base", "#{Vc:<#{environ_name}>}");
-    assert!(!detached.is_empty(), "the command client has an environment");
+    assert!(
+        !detached.is_empty(),
+        "the command client has an environment"
+    );
 
     let attached = clients.attach_interactive("base");
     assert_eq!(clients.format("base", "#{Vc:<#{environ_name}>}"), detached);

@@ -359,11 +359,6 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
 const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
     (
         "format.c",
-        "format_loop_clients",
-        &["loop_index", "loop_last_flag"],
-    ),
-    (
-        "format.c",
         "format_loop_environ",
         &[
             "environ_hidden",

@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/format-client-loop-context.sh ~/format-client-loop-context.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu FORMAT_CLIENT_LOOP_CONTEXT
+run-shell 'sh ~/format-client-loop-context.sh'
+out: show-environment -g FORMAT_CLIENT_LOOP_CONTEXT

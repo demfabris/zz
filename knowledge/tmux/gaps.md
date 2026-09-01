@@ -19,9 +19,9 @@ Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
 Tracked gap groups: **82**. Classified items: **563**.
 
-- Status: open: 40, blocked: 9, accepted: 33.
-- Decision: adopt: 45, native: 26, park: 4, never: 7.
-- Priority: later: 49, none: 33.
+- Status: open: 40, blocked: 8, accepted: 34.
+- Decision: adopt: 45, native: 27, park: 3, never: 7.
+- Priority: later: 48, none: 34.
 - Closed history entries: 129.
 - Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 90, presentation: 8, protocol: 2.
 
@@ -97,7 +97,6 @@ structure as proof.
 | `pane.selection-state` | Model pane selection controls | adopt | open | hard | daemon | daily, scripts | none |
 | `prompt.command-fidelity` | Complete command-prompt semantics | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
 | `terminal.key-control` | Complete send-keys injection and mode behavior | adopt | open | hard | daemon | scripts, daily | none |
-| `pane.floating-model` | Defer tmux floating panes | park | blocked | hardest | mux | daily, scripts, gui | none |
 | `protocol.binary-streams` | Design one bounded command stream | park | blocked | hardest | protocol | scripts, remote | none |
 | `protocol.socket-acl` | Defer multi-user socket ACLs | park | blocked | hardest | daemon | admin, remote | none |
 
@@ -134,6 +133,7 @@ structure as proof.
 | `options.native-mode-styles` | Keep native mode styling | native | accepted | none | client | daily, gui | none |
 | `options.native-overlay-styles` | Keep native overlay styling | native | accepted | none | client | daily, gui | none |
 | `options.theme-palette` | Map tmux theme palette options | native | accepted | none | client | gui | none |
+| `pane.floating-model` | Defer tmux floating panes | native | accepted | none | mux | daily, scripts, gui | none |
 | `presentation.native-status` | Keep native status and lifecycle presentation | native | accepted | none | client | daily, gui, remote | none |
 | `prompt.pane-rendered` | Defer pane-rendered prompts | native | accepted | none | client | daily | none |
 | `protocol.socket-interop` | Do not speak tmux private protocol | never | accepted | none | protocol | admin | none |
@@ -1413,20 +1413,23 @@ Pinned tmux closes the successful Control guard immediately, parks later queue i
 
 ### `pane.floating-model`: Defer tmux floating panes
 
-tmux floating panes are mux objects; zz native floating surfaces are presentation objects.
+In the pin a floating pane is a mux object: `new-pane` creates one by default, `move-pane` places it with `-P`, `-X`, `-Y`, `-z`, and the directional forms, `pane_floating_flag` reports it, and `move-pane` answers `pane is not floating` for a tiled target. zz's floating things are presentation objects that clients draw, its panes are leaves of a layout tree, and `move-pane` stays an alias of `join-pane` that deliberately moves tiled panes where the pin refuses. `new-pane` keeps the tmux name reserved and unimplemented, which is why the phase-1 picker verb was renamed off it. Reopen only when a separate mux floating-pane model is approved on its own terms rather than by reusing native overlays.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hardest`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `mux`
 - User impact: daily, scripts, gui
 - Items: `command:new-pane`, `flag:move-pane:-D`, `flag:move-pane:-L`, `flag:move-pane:-P`, `flag:move-pane:-R`, `flag:move-pane:-U`, `flag:move-pane:-X`, `flag:move-pane:-Y`, `flag:move-pane:-z`, `format:pane_floating_flag`, `semantic:floating-pane-model`, `semantic:move-pane-tiled-extension`
 - Depends on: none
 - Evidence:
+  - `resource:crates/zz-mux/src/command.rs`
   - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:knowledge/tmux/divergences.md`
   - `resource:knowledge/designs/tmux-superset-roadmap.md`
 - Acceptance:
-  - `A separate mux floating-pane model earns approval without reusing native GUI overlays.`
+  - `Native floating surfaces stay presentation objects, `new-pane` stays reserved and unimplemented, and the floating `move-pane` placement flags stay loudly unsupported.`
+  - ``pane_floating_flag` keeps the pin's inactive default, and zz's tiled `move-pane` extension stays a recorded superset behavior.`
 
 ### `pane.selection-state`: Model pane selection controls
 

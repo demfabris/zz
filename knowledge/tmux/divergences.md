@@ -1119,6 +1119,9 @@ nobody intends to drain. `accepted` plus `native` means zz's own surface serves 
 - `options.theme-palette` (native): zz already resolves the pin's ten `theme*` style colour names,
   into zz theme tokens in the GUI and through the pin's own fallback indices in the daemon and raw
   TUI, while the twenty-one options that would override those slots stay store-only.
+- `pane.floating-model` (native): a tmux floating pane is a mux object placed by `new-pane` and
+  `move-pane`, while zz's floating things are presentation objects its clients draw and its panes
+  are layout-tree leaves.
 
 # Related
 

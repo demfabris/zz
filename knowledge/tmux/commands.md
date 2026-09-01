@@ -189,8 +189,9 @@ first session, window, and pane ids are `$0`, `@0`, and `%0`.
 
 Implemented client-selector flags share one attached-client matcher. `detach-client -t`,
 `switch-client -c`, `display-message -c`, `display-panes -t`, `display-popup -c`,
-`display-menu -c`, `confirm-before -t`, `refresh-client -t`, `lock-client -t`, and
-`load-buffer -t` accept an exact registered name, the exact published `#{client_name}`, a full tty,
+`display-menu -c`, `confirm-before -t`, `refresh-client -t`, `lock-client -t`,
+`load-buffer -t`, and `set-buffer -t` accept an exact registered name, the exact published
+`#{client_name}`, a full tty,
 or the tty after removing exactly one leading `/dev/` prefix, with exactly one optional trailing
 colon. Published names follow the tty, registered-name, `client-PID`, and `device-N` ladder, so a
 nameless Control client can be targeted by the value returned from `list-clients`. They do not
@@ -199,8 +200,7 @@ client name.
 Collisions choose the globally oldest attached client regardless of session. The shared native
 `device-N` alias remains; popup, menu, confirm, refresh, and lock also retain numeric `N` and
 `client-N` aliases. Unsupported `command-prompt -t`, `show-messages -t`, `send-keys -c`, and
-`suspend-client -t` stay with their existing gaps. Accepted `set-buffer -t` remains inert and is
-not a selector. A local Control client contributes a tty to this matcher only when stdin is a
+`suspend-client -t` stay with their existing gaps. A local Control client contributes a tty to this matcher only when stdin is a
 terminal; piped Control stdin contributes none.
 
 | Command | Aliases | Purpose |
@@ -397,8 +397,10 @@ it does not install a `#{line}` format variable. `load-buffer` and `save-buffer`
 once in the selected client context before `~/` handling and file access. The expansion receives the
 canonical `#{command}` value after aliases and unique prefixes, while explicit item state wins.
 `load-buffer -t` uses the supported attached-client selector for session, focused-window, and active-pane facts; a
-missing client stays quiet and falls back to the most-recent mux context. `set-buffer -t` remains
-inert. `-w` remains rejected rather than pretending to update a client clipboard. `set-buffer -n`
+missing client stays quiet and falls back to the most-recent mux context. `-w` writes the stored
+buffer to the selected client's clipboard through the same selector, quietly doing nothing when the
+target does not resolve or advertises no clipboard terminal feature; like the pin it bypasses
+`set-clipboard` and raises no `pane-set-clipboard` hook. `set-buffer -n`
 renames the explicit `-b` source or the newest automatic buffer, replaces an existing destination,
 and ignores its optional data argument on the rename path.
 Daemon-preempted format arguments still receive the canonical `#{command}` item name: this includes

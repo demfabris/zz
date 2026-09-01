@@ -2506,7 +2506,7 @@ mod daemon_autostart {
                 ),
                 (
                     &["-x"][..],
-                    b"unsupported command: attach-session -x\n".as_slice(),
+                    b"can't find session: current session\n".as_slice(),
                 ),
             ] {
                 let mut invocation = vec![command];

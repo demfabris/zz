@@ -8033,9 +8033,16 @@ impl Shared {
             // An empty -E is the pin's `server_client_exec` early return: the
             // victim is neither replaced nor detached.
             Some((_, exit)) if exit.exec.as_deref() == Some("") => {}
+            // The pin's `MSG_EXEC` only acts in the pty client's attached
+            // dispatch, so a Control victim of `-E` stays attached and running.
             Some((scope, exit)) => {
                 let victims = requested_detach_victims(&self.inner.lock(), scope);
                 for (session, victim) in victims {
+                    if exit.exec.is_some()
+                        && self.inner.lock().client_kinds.get(&victim) == Some(&ClientKind::Control)
+                    {
+                        continue;
+                    }
                     let action = self.client_exit_action(session, &exit);
                     self.publish_to_client(
                         victim,
@@ -70389,6 +70396,74 @@ bind - split-window -v -c "#{pane_current_path}"
             "-a must never detach its own client"
         );
         assert!(!inner.attached[&session].contains(&peer));
+    }
+
+    #[test]
+    fn detach_client_exec_leaves_control_victims_attached() {
+        let shared = Arc::new(Shared::new(1));
+        let mine = OutboundMailbox::new();
+        let theirs = OutboundMailbox::new();
+        let (caller, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("desktop".to_owned()),
+            None,
+            Arc::clone(&mine),
+        );
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("observer".to_owned()),
+            None,
+            Arc::clone(&theirs),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "work"]),
+            )
+            .expect("create session");
+        let session = context.session.expect("created session");
+        shared.attach(caller, session).expect("attach caller");
+        shared
+            .attach(control, session)
+            .expect("attach control client");
+        take_reliable_messages(&mine);
+        take_reliable_messages(&theirs);
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("detach-client", ["-a", "-E", "exit 5"]),
+            )
+            .expect("exec every other client");
+
+        assert!(
+            !take_reliable_messages(&theirs).iter().any(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::Detached { .. },
+                        ..
+                    })
+                )
+            }),
+            "MSG_EXEC only acts in the pty client's attached dispatch"
+        );
+        assert!(shared.inner.lock().attached[&session].contains(&control));
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("detach-client", ["-a"]),
+            )
+            .expect("plain detach still evicts the control victim");
+        assert!(!shared.inner.lock().attached[&session].contains(&control));
     }
 
     #[test]

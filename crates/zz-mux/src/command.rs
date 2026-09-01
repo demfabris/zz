@@ -23530,8 +23530,8 @@ mod tests {
         assert_eq!(
             engine
                 .execute(&mut context, &command("attach", &["-x"]))
-                .expect_err("known unsupported flag"),
-            ServerError::UnsupportedCommand("attach-session -x".to_owned())
+                .expect_err("no session to steal"),
+            ServerError::SessionNotFound("current session".to_owned())
         );
 
         engine
@@ -23823,10 +23823,7 @@ mod tests {
         assert!(attaches(&["-At", "existing"]));
         assert!(!attaches(&["-dsfoo"]));
         assert!(!attaches(&["-d", "-t", "group"]));
-        assert_eq!(
-            MuxEngine::new_session_attaches(&arguments(&["-X"])).unwrap_err(),
-            ServerError::UnsupportedCommand("new-session -X".to_owned())
-        );
+        assert!(attaches(&["-X"]));
         assert!(MuxEngine::new_session_attaches(&arguments(&["-t"])).is_err());
     }
 

@@ -1748,22 +1748,29 @@ fn next_and_previous_window_target_a_session_and_follow_alerts() {
 }
 
 #[test]
-fn attach_session_reports_the_remaining_client_flag_it_cannot_honor() {
+fn attach_session_routes_the_steal_hangup_flag_through_the_attach_effect() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
-    let error = engine
+    let session = context.session.unwrap();
+    let execution = engine
         .execute(
             &mut context,
             &command("attach-session", &["-x", "-t", "work"]),
         )
-        .unwrap_err();
-    assert!(
-        matches!(&error, ServerError::UnsupportedCommand(message)
-            if message == "attach-session -x"),
-        "{error:?}"
+        .unwrap();
+    assert_eq!(
+        execution.effects,
+        [MuxEffect::Attach {
+            session,
+            detach_others: true,
+            detach_others_hangup: true,
+            read_only: false,
+            flags: None,
+            update_environment: true,
+        }]
     );
     engine
         .execute(

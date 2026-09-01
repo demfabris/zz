@@ -610,6 +610,17 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   keystroke for — `M-C-a` and other orderings, `Space`, key names zz does not model — is
   drawn by the pin and blank in zz. Conservative by choice: a key zz could never deliver
   would be a dead shortcut.
+- `display-menu` row shortcuts run the same two-stage gate: `zz_mux::parse_tmux_key` answers
+  the pin's `key_string_lookup_string` question (so `^A`, `C-M-x`, `Space`, `BTab`, `F1`-`F12`
+  and the named table all resolve, and `Ctrl-Alt-x`, `F13`, `F0` and unknown words resolve to
+  nothing), then `zz_protocol::is_key_name` keeps only what a client attached to the menu can
+  press. `BTab` is kept beside that gate because `zz_client::resolve_menu_key` spells a shifted
+  Tab `BTab` before it matches rows. What the pin parses but zz drops is the same narrowing the
+  chooser `-K` rule takes: `S-` chords, keypad names, and the `0x..` spellings, none of which
+  any attached client emits — and none of which the pin can press either, since
+  `key_string_lookup_string` packs a `0x41` through `utf8_from_data` into a key no keystroke
+  equals. Measured key by key against the pin in
+  `compat/scenarios/smoke/display-menu-shortcut-grammar.txt`.
 - `command-prompt` never comma-splits `-p` or `-I`, so `-p 'a,b'` raises ONE prompt labelled
   `a,b` where the pin chains two and feeds their answers to `%1` and `%2`. zz's behaviour is
   exactly the pin's `-l`, which is why `-l` stays REJECTED rather than accepted as a no-op:

@@ -673,7 +673,6 @@
         "semantic:display-menu-rendered-width",
         "semantic:display-menu-resize-lifecycle",
         "semantic:display-menu-shortcut-display",
-        "semantic:display-menu-shortcut-grammar",
         "semantic:display-menu-style-refresh"
       ],
       "evidence": [
@@ -683,6 +682,7 @@
         "resource:crates/zz-tui/src/input.rs",
         "resource:crates/zz-tui/src/render.rs",
         "file:compat/attached-client.sh",
+        "scenario:compat/scenarios/smoke/display-menu-shortcut-grammar.txt",
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
@@ -691,7 +691,7 @@
         "Pinned input probes cover mouse policy and paste bytes when the menu closes during a paste sequence, without pane leakage or duplicate action execution."
       ],
       "depends_on": [],
-      "reason": "Slice 10o consumes the daemon-published descriptor in raw zz-tui and proves a bounded keyboard contract. Descriptor construction, action queues, refresh behavior, mouse handling, and close-mid-paste ordering still need focused comparison with the pin."
+      "reason": "Row shortcuts now go through the pin's own key parser and keep only the spellings a client attached to the menu can press, proved key by key against the pin in scenario display-menu-shortcut-grammar. Descriptor construction, action queues, refresh behavior, mouse handling, resize lifecycle, and close-mid-paste ordering still need focused comparison with the pin."
     },
     {
       "id": "display-message.format-listing",

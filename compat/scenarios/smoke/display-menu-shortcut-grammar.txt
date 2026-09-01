@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/display-menu-shortcut-grammar.sh ~/display-menu-shortcut-grammar.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu DISPLAY_MENU_SHORTCUT_GRAMMAR
+run-shell 'sh ~/display-menu-shortcut-grammar.sh'
+out: show-environment -g DISPLAY_MENU_SHORTCUT_GRAMMAR

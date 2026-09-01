@@ -12953,7 +12953,12 @@ fn mouse_key_identity(base: &str) -> Option<(u32, u8, u8)> {
     None
 }
 
-fn parse_tmux_key(value: &str) -> Option<String> {
+/// Fold one tmux key spelling into the name the key tables carry, or `None`
+/// when nothing in `key_string_lookup_string`'s vocabulary spells it. Callers
+/// outside the tables — `display-menu` row shortcuts, for one — need the same
+/// answer the pin's parser gives before they decide what a row can be pressed
+/// with.
+pub fn parse_tmux_key(value: &str) -> Option<String> {
     if value.eq_ignore_ascii_case("none") {
         return Some("None".to_owned());
     }

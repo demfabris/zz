@@ -728,12 +728,12 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
     assert_eq!(upstream_modifiers.len(), 36);
     assert_eq!(upstream_modifiers.len(), oracle.format_modifiers.len());
     let implemented_modifiers = format_modifier_names().collect::<BTreeSet<_>>();
-    assert_eq!(implemented_modifiers.len(), 32);
+    assert_eq!(implemented_modifiers.len(), 33);
     let missing_modifiers = upstream_modifiers
         .difference(&implemented_modifiers)
         .copied()
         .collect::<BTreeSet<_>>();
-    assert_eq!(missing_modifiers, BTreeSet::from(["I", "L", "O", "V"]));
+    assert_eq!(missing_modifiers, BTreeSet::from(["I", "L", "V"]));
     assert!(implemented_modifiers.is_subset(&upstream_modifiers));
 
     let missing_modifier_items = BTreeMap::from([
@@ -748,13 +748,6 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             "L",
             (
                 "semantic:format-modifier-client-loop",
-                "formats.modifier-fidelity",
-            ),
-        ),
-        (
-            "O",
-            (
-                "semantic:format-modifier-option-loop",
                 "formats.modifier-fidelity",
             ),
         ),

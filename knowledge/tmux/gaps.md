@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **84**. Classified items: **572**.
+Tracked gap groups: **84**. Classified items: **571**.
 
 - Status: open: 42, blocked: 20, accepted: 22.
 - Decision: adopt: 47, native: 16, park: 15, never: 6.
 - Priority: later: 62, none: 22.
 - Closed history entries: 127.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 99, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 98, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -743,14 +743,14 @@ Schema 5 classifies 41 missing literal producer/name tuples plus current_file an
 
 ### `formats.modifier-fidelity`: Implement remaining format modifiers
 
-The post-10v rerank split the six-token umbrella and selected R separately. w is implemented: it replaces the value with its display-cell width after the substitution, length-limit, padding, and n transforms, counts an escaped hash run as its rendered hashes, skips a #[...] style span, returns 0 for an unterminated span, and gives control characters no width. The remaining I, L, O, and V tokens require client, option, or environment-specific behavior and can still return plausible wrong output instead of an error.
+The post-10v rerank split the six-token umbrella and selected R separately. w reports display-cell width after the substitution, length-limit, padding, and n transforms. O loops the options stored at the selected scope with the pin's flag precedence (v wins, then w, s, p, with g choosing the global object and gp selecting nothing), name order, one row per array item, and the array, hook, and user row fields. The remaining I, L, and V tokens require client or environment-specific behavior and can still return plausible wrong output instead of an error.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `hard`
 - Owner: `mux`
 - User impact: scripts
-- Items: `semantic:format-modifier-client-interrogation`, `semantic:format-modifier-client-loop`, `semantic:format-modifier-environment-loop`, `semantic:format-modifier-option-loop`
+- Items: `semantic:format-modifier-client-interrogation`, `semantic:format-modifier-client-loop`, `semantic:format-modifier-environment-loop`
 - Depends on: none
 - Evidence:
   - `resource:compat/tmux-oracle.json`
@@ -758,6 +758,8 @@ The post-10v rerank split the six-token umbrella and selected R separately. w is
   - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
   - `resource:knowledge/tmux/divergences.md`
   - `scenario:compat/scenarios/format-modifier-width.txt`
+  - `file:crates/zz-mux/tests/format_modifier_option_loop.rs`
+  - `scenario:compat/scenarios/format-modifier-option-loop.txt`
 - Acceptance:
   - `Implement the pinned w, I, L, O, and V tokens with focused source or live proofs for display-cell width, client interrogation, client loops, option loops, and environment loops.`
   - `Every token moves from the active-gap partition into the parser-owned support roster only when its runtime behavior is implemented; malformed and nested modifier fallback remains pinned.`

@@ -7,13 +7,27 @@ use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{CommandSpec, MAX_STATUS_TEXT_BYTES, PaneId, SessionId, WindowId};
 pub use zz_protocol::{TmuxColour, parse_tmux_colour};
 
-use crate::{MuxEngine, PaneKind, WindowSize, layout::CellLayout};
+use crate::{MuxEngine, PaneKind, WindowSize, command::TmuxOptionTarget, layout::CellLayout};
 
 const FORMAT_LOOP_LIMIT: usize = 100;
 const FORMAT_MAX_REPEAT: usize = 10_000;
 const FORMAT_MAX_REPEAT_BYTES: usize = MAX_STATUS_TEXT_BYTES * FORMAT_MAX_REPEAT;
 const FORMAT_MAX_WIDTH: isize = 10_000;
 const LOOP_CONTEXT_FORMATS: &[&str] = &["loop_index", "loop_last_flag"];
+pub(crate) const OPTION_LOOP_CONTEXT_FORMATS: &[&str] = &[
+    "loop_index",
+    "loop_last_flag",
+    "option_array_count",
+    "option_array_first",
+    "option_array_index",
+    "option_array_key",
+    "option_array_last",
+    "option_is_array",
+    "option_is_hook",
+    "option_is_user",
+    "option_name",
+    "option_value",
+];
 const WINDOW_LOOP_CONTEXT_FORMATS: &[&str] = &["window_after_active", "window_before_active"];
 const WINDOW_NEIGHBOUR_INDEX_CONTEXT_FORMATS: &[&str] = &["next_window_index", "prev_window_index"];
 const WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS: &[&str] =
@@ -202,6 +216,31 @@ pub struct FormatUniverse {
     sessions: Vec<FormatLoopItem>,
     windows: BTreeMap<String, Vec<FormatLoopItem>>,
     panes: BTreeMap<String, Vec<FormatLoopItem>>,
+    options: FormatOptionScopes,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FormatOptionScopes {
+    pub(crate) server: Vec<FormatOptionRow>,
+    pub(crate) global_session: Vec<FormatOptionRow>,
+    pub(crate) global_window: Vec<FormatOptionRow>,
+    pub(crate) sessions: BTreeMap<String, Vec<FormatOptionRow>>,
+    pub(crate) windows: BTreeMap<String, Vec<FormatOptionRow>>,
+    pub(crate) panes: BTreeMap<String, Vec<FormatOptionRow>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FormatOptionRow {
+    pub(crate) name: String,
+    pub(crate) value: String,
+    pub(crate) is_array: bool,
+    pub(crate) array_key: String,
+    pub(crate) array_index: String,
+    pub(crate) array_first: bool,
+    pub(crate) array_last: bool,
+    pub(crate) array_count: usize,
+    pub(crate) is_hook: bool,
+    pub(crate) is_user: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1193,7 +1232,14 @@ impl MuxEngine {
     ) -> Arc<FormatUniverse> {
         let active_session = format_client.attached_session();
         let mut universe = FormatUniverse::default();
+        universe.options.server = self.format_option_rows(TmuxOptionTarget::Server);
+        universe.options.global_session = self.format_option_rows(TmuxOptionTarget::GlobalSession);
+        universe.options.global_window = self.format_option_rows(TmuxOptionTarget::GlobalWindow);
         for session in self.state.sessions.values() {
+            universe.options.sessions.insert(
+                session.id.to_string(),
+                self.format_option_rows(TmuxOptionTarget::Session(session.id)),
+            );
             let active_window = self.state.windows.get(&session.active_window);
             let session_context = self.build_status_context(
                 Some(session.id),
@@ -1237,6 +1283,16 @@ impl MuxEngine {
                     })
                     .collect::<Vec<_>>();
                 panes.sort_by_key(|item| pane_number(&item.context.pane_id));
+                for pane in window.panes.values() {
+                    universe.options.panes.insert(
+                        pane.id.to_string(),
+                        self.format_option_rows(TmuxOptionTarget::Pane(pane.id)),
+                    );
+                }
+                universe.options.windows.insert(
+                    window.id.to_string(),
+                    self.format_option_rows(TmuxOptionTarget::Window(window.id)),
+                );
                 universe.panes.insert(window.id.to_string(), panes);
             }
             windows.sort_by_key(|item| item.context.window_index);
@@ -1664,6 +1720,8 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             self.expand_loop(copy, depth, LoopTarget::Windows, &flags)?
         } else if flags.loop_panes {
             self.expand_loop(copy, depth, LoopTarget::Panes, &flags)?
+        } else if let Some(loop_flags) = flags.loop_options {
+            self.expand_option_loop(copy, depth, loop_flags)
         } else if flags.name_window {
             self.expand_name_exists(copy, depth, true)?
         } else if flags.name_session {
@@ -2090,6 +2148,32 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         Ok(output)
     }
 
+    fn expand_option_loop(&mut self, copy: &str, depth: usize, loop_flags: &str) -> String {
+        let values = self.context.values();
+        let universe = Arc::clone(&values.format_universe);
+        let Some(rows) = option_loop_rows(&universe.options, loop_flags, values) else {
+            return String::new();
+        };
+        let mut context = values.clone();
+        context.format_universe = Arc::clone(&universe);
+        let mut output = String::new();
+        let last = rows.len().saturating_sub(1);
+        for (index, row) in rows.iter().enumerate() {
+            let variables = LoopVariables {
+                context: context.clone(),
+                format_type: FormatType::None,
+                dynamic: option_loop_variables(row, index, index == last),
+            };
+            let mut expander = Expander {
+                context: &variables,
+                hooks: &mut *self.hooks,
+                time: self.time,
+            };
+            output.push_str(&expander.expand(copy, depth));
+        }
+        output
+    }
+
     fn expand_boolean(&mut self, copy: &str, depth: usize, and: bool) -> String {
         let mut result = and;
         let mut rest = copy;
@@ -2229,6 +2313,7 @@ enum ModifierKind {
     Sessions,
     Windows,
     Panes,
+    Options,
     ContentSearch,
     Repeat,
 }
@@ -2250,7 +2335,7 @@ impl FormatModifierSpec {
     }
 }
 
-const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 32] = [
+const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 33] = [
     FormatModifierSpec::new("||", ModifierKind::Or, false),
     FormatModifierSpec::new("&&", ModifierKind::And, false),
     FormatModifierSpec::new("!!", ModifierKind::NotNot, false),
@@ -2281,6 +2366,7 @@ const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 32] = [
     FormatModifierSpec::new("S", ModifierKind::Sessions, true),
     FormatModifierSpec::new("W", ModifierKind::Windows, true),
     FormatModifierSpec::new("P", ModifierKind::Panes, true),
+    FormatModifierSpec::new("O", ModifierKind::Options, true),
     FormatModifierSpec::new("C", ModifierKind::ContentSearch, true),
     FormatModifierSpec::new("R", ModifierKind::Repeat, true),
 ];
@@ -2394,6 +2480,7 @@ struct ModifierFlags<'a> {
     loop_sessions: bool,
     loop_windows: bool,
     loop_panes: bool,
+    loop_options: Option<&'a str>,
     loop_sort: Option<LoopSort>,
     loop_reversed: bool,
     content_search: Option<&'a str>,
@@ -2547,6 +2634,9 @@ impl<'a> ModifierFlags<'a> {
                         LoopSort::Creation
                     });
                     flags.loop_reversed = value.contains('r');
+                }
+                ModifierKind::Options => {
+                    flags.loop_options = Some(modifier.args.first().map_or("", String::as_str));
                 }
                 ModifierKind::ContentSearch => {
                     flags.content_search = Some(modifier.args.first().map_or("", String::as_str));
@@ -2786,6 +2876,95 @@ fn find_format_end(text: &str, start: usize) -> Option<usize> {
         position += 1;
     }
     None
+}
+
+fn option_loop_rows<'a>(
+    scopes: &'a FormatOptionScopes,
+    loop_flags: &str,
+    values: &StatusContext,
+) -> Option<&'a Vec<FormatOptionRow>> {
+    let loop_flags = if loop_flags.is_empty() {
+        "s"
+    } else {
+        loop_flags
+    };
+    if loop_flags.contains('v') {
+        return Some(&scopes.server);
+    }
+    let global = loop_flags.contains('g');
+    if loop_flags.contains('w') {
+        return if global {
+            Some(&scopes.global_window)
+        } else {
+            scopes.windows.get(&values.window_id)
+        };
+    }
+    if loop_flags.contains('s') {
+        return if global {
+            Some(&scopes.global_session)
+        } else {
+            scopes.sessions.get(&values.session_id)
+        };
+    }
+    if loop_flags.contains('p') {
+        return if global {
+            None
+        } else {
+            scopes.panes.get(&values.pane_id)
+        };
+    }
+    global.then_some(&scopes.global_session)
+}
+
+fn option_loop_variables(
+    row: &FormatOptionRow,
+    index: usize,
+    last: bool,
+) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (OPTION_LOOP_CONTEXT_FORMATS[0].to_owned(), index.to_string()),
+        (
+            OPTION_LOOP_CONTEXT_FORMATS[1].to_owned(),
+            bool_string(last).to_owned(),
+        ),
+        (
+            OPTION_LOOP_CONTEXT_FORMATS[2].to_owned(),
+            row.array_count.to_string(),
+        ),
+        (
+            OPTION_LOOP_CONTEXT_FORMATS[3].to_owned(),
+            bool_string(row.array_first).to_owned(),
+        ),
+        (
+            OPTION_LOOP_CONTEXT_FORMATS[4].to_owned(),
+            row.array_index.clone(),
+        ),
+        (
+            OPTION_LOOP_CONTEXT_FORMATS[5].to_owned(),
+            row.array_key.clone(),
+        ),
+        (
+            OPTION_LOOP_CONTEXT_FORMATS[6].to_owned(),
+            bool_string(row.array_last).to_owned(),
+        ),
+        (
+            OPTION_LOOP_CONTEXT_FORMATS[7].to_owned(),
+            bool_string(row.is_array).to_owned(),
+        ),
+        (
+            OPTION_LOOP_CONTEXT_FORMATS[8].to_owned(),
+            bool_string(row.is_hook).to_owned(),
+        ),
+        (
+            OPTION_LOOP_CONTEXT_FORMATS[9].to_owned(),
+            bool_string(row.is_user).to_owned(),
+        ),
+        (OPTION_LOOP_CONTEXT_FORMATS[10].to_owned(), row.name.clone()),
+        (
+            OPTION_LOOP_CONTEXT_FORMATS[11].to_owned(),
+            row.value.clone(),
+        ),
+    ])
 }
 
 fn styled_display_width(value: &str) -> usize {

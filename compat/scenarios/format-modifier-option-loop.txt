@@ -1,0 +1,17 @@
+new-session -d -s oloop
+out: display-message -p -t oloop [#{O:#{loop_index}:#{option_name};}]
+set-option -t oloop status-left L
+set-option -t oloop @user U
+set-option -t oloop status-format[0] A
+set-option -t oloop status-format[1] B
+set-hook -t oloop after-new-window "display-message x"
+out: display-message -p -t oloop [#{O:#{loop_index}|#{option_name}|#{option_value}|#{option_is_array}|#{option_array_key}|#{option_array_index}|#{option_array_first}|#{option_array_last}|#{option_array_count}|#{option_is_hook}|#{option_is_user}|#{loop_last_flag};}]
+out: display-message -p -t oloop [#{Os:#{option_name};}]
+set-option -t oloop update-environment ""
+out: display-message -p -t oloop [#{O:#{option_name}=(#{option_value})#{option_array_count}#{option_array_first}#{option_array_last};}]
+set-option -w -t oloop:0 @wuser W
+set-option -p -t oloop:0.0 @puser P
+out: display-message -p -t oloop:0.0 [#{Ow:#{option_name}=#{option_value};}|#{Op:#{option_name}=#{option_value};}]
+out: display-message -p -t oloop:0.0 [#{Osw:#{option_name};}|#{Osp:#{option_name};}|#{Owp:#{option_name};}]
+out: display-message -p -t oloop [#{Oz:#{option_name};}|#{Ogp:#{option_name};}]
+out: display-message -p -t oloop [#{n:#{Ov:#{l:x}}}|#{n:#{Og:#{l:x}}}|#{n:#{Ogs:#{l:x}}}|#{n:#{Ogw:#{l:x}}}|#{n:#{Ovgw:#{l:x}}}|#{n:#{Ogsw:#{l:x}}}]

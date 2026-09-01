@@ -4,7 +4,7 @@ use std::{
     fmt::{self, Write as _},
     path::{Path, PathBuf},
     str::FromStr as _,
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 
 use parking_lot::Mutex;
@@ -32,7 +32,7 @@ use crate::{
     canonical_command, command_spec,
     copy_actions::pinned_copy_action,
     formats::{
-        CommandHooks, FormatClient, FormatContext, FormatType, StatusHooks,
+        CommandHooks, FormatClient, FormatContext, FormatOptionRow, FormatType, StatusHooks,
         expand_format_time_with_hooks, expand_format_with_hooks, format_true, parse_tmux_colour,
     },
     honest_knobs::{
@@ -1317,7 +1317,7 @@ impl SetClipboard {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TmuxOptionTarget {
+pub(crate) enum TmuxOptionTarget {
     Server,
     GlobalSession,
     Session(SessionId),
@@ -9344,6 +9344,57 @@ impl MuxEngine {
         Some((parent, true))
     }
 
+    pub(crate) fn format_option_rows(&self, target: TmuxOptionTarget) -> Vec<FormatOptionRow> {
+        let mut rows = Vec::new();
+        if let Some(values) = self.user_options_at_target(target) {
+            for (name, value) in values {
+                rows.push(FormatOptionRow {
+                    name: name.clone(),
+                    value: value.clone(),
+                    is_user: true,
+                    ..FormatOptionRow::default()
+                });
+            }
+        }
+        for option in tmux_options_for_listing(target, true) {
+            let is_hook = tmux_option_is_hook(option.name);
+            if is_hook {
+                if let Some((hook, _)) = self.hook_array_readback(target, option.name, false) {
+                    let items = hook
+                        .iter()
+                        .map(|(index, commands)| {
+                            (
+                                index.display(),
+                                commands
+                                    .iter()
+                                    .map(format_command)
+                                    .collect::<Vec<_>>()
+                                    .join(" ; "),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    push_option_loop_array(&mut rows, option.name, &items, true);
+                }
+            } else if tmux_stored_array(option.name).is_some() {
+                if let Some((array, _)) = self.array_option_readback(target, option.name, false) {
+                    let items = array
+                        .iter()
+                        .map(|(index, value)| (index.display(), value.clone()))
+                        .collect::<Vec<_>>();
+                    push_option_loop_array(&mut rows, option.name, &items, false);
+                }
+            } else if let Ok(Some((value, _))) = self.tmux_option_readback(option, target, false) {
+                rows.push(FormatOptionRow {
+                    name: option.name.to_owned(),
+                    value,
+                    ..FormatOptionRow::default()
+                });
+            }
+        }
+        rows.sort_by(|left, right| left.name.cmp(&right.name));
+        rows
+    }
+
     fn tmux_option_readback(
         &self,
         option: TmuxOption,
@@ -11976,20 +12027,82 @@ fn tmux_option_is_implemented(option: TmuxOption) -> bool {
         || PaneOption::from_name(option.name).is_some()
 }
 
-fn tmux_options_for_listing(target: TmuxOptionTarget, include_hooks: bool) -> Vec<TmuxOption> {
-    let mut options = tmux_options()
-        .filter(|option| option_scope_matches_target(option.scope, target))
-        .filter(|option| {
-            if tmux_option_is_hook(option.name) {
-                include_hooks
-            } else {
-                tmux_stored_array(option.name).is_some()
-                    || !option.is_array && tmux_option_is_implemented(*option)
-            }
-        })
-        .collect::<Vec<_>>();
-    options.sort_unstable_by_key(|option| tmux_option_table_order(option.name));
-    options
+fn push_option_loop_array(
+    rows: &mut Vec<FormatOptionRow>,
+    name: &str,
+    items: &[(String, String)],
+    is_hook: bool,
+) {
+    if items.is_empty() {
+        rows.push(FormatOptionRow {
+            name: name.to_owned(),
+            is_array: true,
+            array_first: true,
+            array_last: true,
+            is_hook,
+            ..FormatOptionRow::default()
+        });
+        return;
+    }
+    let last = items.len() - 1;
+    for (index, (key, value)) in items.iter().enumerate() {
+        rows.push(FormatOptionRow {
+            name: name.to_owned(),
+            value: value.clone(),
+            is_array: true,
+            array_key: key.clone(),
+            array_index: key.clone(),
+            array_first: index == 0,
+            array_last: index == last,
+            array_count: items.len(),
+            is_hook,
+            is_user: false,
+        });
+    }
+}
+
+static TMUX_OPTION_LISTINGS: LazyLock<[Vec<TmuxOption>; 12]> = LazyLock::new(|| {
+    std::array::from_fn(|slot| {
+        let include_hooks = slot % 2 == 1;
+        let target = match slot / 2 {
+            0 => TmuxOptionTarget::Server,
+            1 => TmuxOptionTarget::GlobalSession,
+            2 => TmuxOptionTarget::Session(SessionId(0)),
+            3 => TmuxOptionTarget::GlobalWindow,
+            4 => TmuxOptionTarget::Window(WindowId(0)),
+            _ => TmuxOptionTarget::Pane(PaneId(0)),
+        };
+        let mut options = tmux_options()
+            .filter(|option| option_scope_matches_target(option.scope, target))
+            .filter(|option| {
+                if tmux_option_is_hook(option.name) {
+                    include_hooks
+                } else {
+                    tmux_stored_array(option.name).is_some()
+                        || !option.is_array && tmux_option_is_implemented(*option)
+                }
+            })
+            .collect::<Vec<_>>();
+        options.sort_unstable_by_key(|option| tmux_option_table_order(option.name));
+        options
+    })
+});
+
+fn tmux_options_for_listing(
+    target: TmuxOptionTarget,
+    include_hooks: bool,
+) -> impl Iterator<Item = TmuxOption> {
+    let slot = match target {
+        TmuxOptionTarget::Server => 0,
+        TmuxOptionTarget::GlobalSession => 1,
+        TmuxOptionTarget::Session(_) => 2,
+        TmuxOptionTarget::GlobalWindow => 3,
+        TmuxOptionTarget::Window(_) => 4,
+        TmuxOptionTarget::Pane(_) => 5,
+    };
+    TMUX_OPTION_LISTINGS[slot * 2 + usize::from(include_hooks)]
+        .iter()
+        .copied()
 }
 
 fn tmux_option_value_is_string(option: TmuxOption) -> bool {

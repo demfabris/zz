@@ -1,12 +1,12 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **THREE OPUS BATCHES INTEGRATED (FORMAT LOOPS, DAEMON BYTE LOADERS + MENU LAYOUT, REGISTRY HYGIENE); CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **CYCLE 4 INTEGRATED (FORMAT BUDGETS + CELL METRICS, COPY-MODE KEY VOCABULARY, CLIENT EXIT ACTIONS + PROTOCOL V91); CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **47 UNRESOLVED GROUPS (41 OPEN + 6 BLOCKED = 47)**
+> Live work: **41 UNRESOLVED GROUPS (35 OPEN + 6 BLOCKED = 41)**
 >
-> Ledger settlement: **77.9% (166 of 213 known groups: 100 x (130 CLOSED + 36 ACCEPTED) / (130 CLOSED + 83 LIVE)); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **80.8% (172 of 213 known groups: 100 x (135 CLOSED + 37 ACCEPTED) / (135 CLOSED + 78 LIVE)); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **139 SCENARIOS, 2,038 STEPS, ATTACHED-CLIENT PASS, 2 APPROVED GEO ROWS**
+> Exit evidence: **145 SCENARIOS, 2,094 STEPS, ATTACHED-CLIENT PASS, 2 APPROVED GEO ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 
@@ -106,11 +106,11 @@ found during that wave.
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
 | New residual groups | `F-ALIASES-MULTI-BODY`: 1; Wave 2: 0; prior trial: 3 |
 | Unresolved movement | Wave 2: 65 at freeze, 62 at close |
-| Live unresolved | 40 open + 6 blocked = 46 |
+| Live unresolved | 35 open + 6 blocked = 41 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 120 scenarios, 1,862 steps, attached-client `PASS`, 2 registered GEO rows, and all other channels clean |
-| Differential SHA-256 | `1ff63ef2beb89731a84708681be491e6f0cb67ac2de42a6cb48fe5e2117862c0` |
-| Ledger settlement | 165 of 211 known groups = 78.2% |
+| Latest differential | 145 scenarios, 2,094 steps, attached-client `PASS`, 2 registered GEO rows, and all other channels clean |
+| Differential SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+| Ledger settlement | 172 of 213 known groups = 80.8% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -124,7 +124,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(129 + 36) / (129 + 82) = 165 / 211 = 78.2%
+(135 + 37) / (135 + 78) = 172 / 213 = 80.8%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -159,6 +159,17 @@ campaign decision.
 | Differential | Formats delta: 112 scenarios; daemon delta: 95 scenarios; every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 139 scenarios, 2,038 steps, attached-client `PASS` |
 | Summary SHA-256 | `628db7750e3691570b2da02d01770420c886c9c58beddc4b3d64ca96bc4cbaa7` |
+
+### 2026-09-01 cycle-4 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `747acb39` (format expansion budgets + window cell metrics), `ad539f4c` (copy-mode key vocabulary: stock action keys, emacs digit prefixes, pinned goto-line), `21ef482c` (client clipboard writes, typed Control config diagnostics, detach-client -E/-P and attach -x/new-session -X exit actions, protocol v91) |
+| Review stage | One Fable reviewer per lane; every close verified against the pin; six confirmed defects (one blocker: four test expectations orphaned by the last daemon commit) fixed by the gate with the reviewer's failing probe re-run as proof |
+| Workspace gates | Full workspace tests and clippy with warnings denied, green on all three lanes; every red row was a known timing flake that passed exact-solo |
+| Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
+| Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
+| Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
 
 ## Source-of-truth order
 

@@ -1347,7 +1347,12 @@ impl Renderer {
                 };
                 let indent = "  ".repeat(usize::from(item.depth));
                 let key = chooser_key_cell(&item.key, key_column);
-                let text = format!("{marker} {key}{indent}{}  {}", item.label, item.detail);
+                let row_text = if item.text.is_empty() {
+                    format!("{}  {}", item.label, item.detail)
+                } else {
+                    item.text.clone()
+                };
+                let text = format!("{marker} {key}{indent}{row_text}");
                 write_colored_text(
                     &mut self.output,
                     0,
@@ -1401,10 +1406,12 @@ impl Renderer {
                     " "
                 };
                 let key = chooser_key_cell(&item.key, key_column);
-                let text = format!(
-                    "{marker} {key}{}  {} bytes  {}",
-                    item.name, item.size_bytes, item.preview
-                );
+                let row_text = if item.text.is_empty() {
+                    format!("{}  {} bytes  {}", item.name, item.size_bytes, item.preview)
+                } else {
+                    item.text.clone()
+                };
+                let text = format!("{marker} {key}{row_text}");
                 write_colored_text(
                     &mut self.output,
                     0,
@@ -3101,6 +3108,7 @@ mod tests {
                     flags: 0,
                     pane_kind: None,
                     key: "0".to_owned(),
+                    text: String::new(),
                 },
                 zz_protocol::ChooseTreeItem {
                     label: "beta".to_owned(),
@@ -3110,6 +3118,7 @@ mod tests {
                     flags: 0,
                     pane_kind: None,
                     key: "M-a".to_owned(),
+                    text: String::new(),
                 },
                 zz_protocol::ChooseTreeItem {
                     label: "gamma".to_owned(),
@@ -3119,6 +3128,7 @@ mod tests {
                     flags: 0,
                     pane_kind: None,
                     key: String::new(),
+                    text: String::new(),
                 },
             ],
             search: None,
@@ -3136,6 +3146,54 @@ mod tests {
     }
 
     #[test]
+    fn a_row_format_takes_over_the_row_the_chooser_would_have_composed() {
+        let mut model = block_model(60, 12);
+        model.choose_tree = Some(zz_protocol::ChooseTreeState {
+            items: vec![zz_protocol::ChooseTreeItem {
+                label: "alpha".to_owned(),
+                detail: "1 window".to_owned(),
+                target: zz_protocol::ChooseTreeTarget::Session(zz_protocol::SessionId(1)),
+                depth: 0,
+                flags: 0,
+                pane_kind: None,
+                key: "0".to_owned(),
+                text: "ZZTREE<%3>".to_owned(),
+            }],
+            search: None,
+            selected: 0,
+            kind: zz_protocol::ChooseTreeKind::Windows,
+            filter_no_matches: false,
+        });
+        let mut renderer = Renderer::new();
+        renderer.paint_chooser(&model);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.contains("(0) ZZTREE<%3>"), "{output}");
+        assert!(!output.contains("alpha"), "{output}");
+        assert!(!output.contains("1 window"), "{output}");
+
+        let mut model = block_model(60, 12);
+        model.choose_buffer = Some(zz_protocol::ChooseBufferState {
+            items: vec![zz_protocol::ChooseBufferItem {
+                name: "buffer0".to_owned(),
+                preview: "hello".to_owned(),
+                size_bytes: 5,
+                created_unix_seconds: 0,
+                key: "0".to_owned(),
+                text: "ZZBUF<buffer0>".to_owned(),
+            }],
+            search: None,
+            selected: 0,
+            filter_no_matches: false,
+        });
+        let mut renderer = Renderer::new();
+        renderer.paint_chooser(&model);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.contains("(0) ZZBUF<buffer0>"), "{output}");
+        assert!(!output.contains("5 bytes"), "{output}");
+        assert!(!output.contains("hello"), "{output}");
+    }
+
+    #[test]
     fn chooser_fallback_status_keeps_fully_keyless_rows_selectable_without_a_gutter() {
         let mut model = block_model(60, 12);
         model.choose_buffer = Some(zz_protocol::ChooseBufferState {
@@ -3145,6 +3203,7 @@ mod tests {
                 size_bytes: 1,
                 created_unix_seconds: 0,
                 key: String::new(),
+                text: String::new(),
             }],
             search: None,
             selected: 0,

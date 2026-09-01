@@ -125,15 +125,16 @@ fn buffer_row(
     mux: Entity<MuxClient>,
     theme: ChooserRowTheme,
 ) -> AnyElement {
+    let (name, preview, size, age) = buffer_row_text(&item);
     buffer_chooser_row(
         BufferChooser::ROW_ID,
         index,
         item.key,
         show_key_gutter,
-        item.name,
-        item.preview,
-        format_buffer_size(item.size_bytes),
-        format_buffer_age(item.created_unix_seconds),
+        name,
+        preview,
+        size,
+        age,
         selected,
         theme,
         TERMINAL_FONT,
@@ -151,6 +152,24 @@ fn buffer_row(
         cx.stop_propagation();
     })
     .into_any_element()
+}
+
+fn buffer_row_text(item: &ChooseBufferItem) -> (String, String, String, String) {
+    if item.text.is_empty() {
+        (
+            item.name.clone(),
+            item.preview.clone(),
+            format_buffer_size(item.size_bytes),
+            format_buffer_age(item.created_unix_seconds),
+        )
+    } else {
+        (
+            item.text.clone(),
+            String::new(),
+            String::new(),
+            String::new(),
+        )
+    }
 }
 
 fn format_buffer_size(bytes: u64) -> String {
@@ -194,5 +213,32 @@ mod tests {
         assert_eq!(format_buffer_size(999), "999 B");
         assert_eq!(format_buffer_size(1_536), "1.5 KiB");
         assert_eq!(format_buffer_age(u64::MAX), "0s");
+    }
+
+    #[test]
+    fn a_row_format_replaces_the_whole_row_the_way_mode_tree_add_does() {
+        let mut item = ChooseBufferItem {
+            name: "buffer0".to_owned(),
+            preview: "hello".to_owned(),
+            size_bytes: 5,
+            created_unix_seconds: 0,
+            key: "0".to_owned(),
+            text: String::new(),
+        };
+        let (name, preview, size, _) = buffer_row_text(&item);
+        assert_eq!(
+            (name, preview, size),
+            ("buffer0".to_owned(), "hello".to_owned(), "5 B".to_owned())
+        );
+        item.text = "<<buffer0>>".to_owned();
+        assert_eq!(
+            buffer_row_text(&item),
+            (
+                "<<buffer0>>".to_owned(),
+                String::new(),
+                String::new(),
+                String::new()
+            )
+        );
     }
 }

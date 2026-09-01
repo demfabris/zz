@@ -170,14 +170,15 @@ fn tree_row_element(
         ChooseTreePaneKind::Editor => ChooserPaneKind::Editor,
     });
     let active = item.active();
+    let (label, detail) = tree_row_text(&item);
     tree_chooser_row(
         TreeChooser::ROW_ID,
         index,
         item.key,
         show_key_gutter,
         target,
-        item.label,
-        item.detail,
+        label,
+        detail,
         item.depth,
         disclosure,
         pane_kind,
@@ -186,4 +187,37 @@ fn tree_row_element(
         theme,
         TERMINAL_FONT,
     )
+}
+
+fn tree_row_text(item: &ChooseTreeItem) -> (String, String) {
+    if item.text.is_empty() {
+        (item.label.clone(), item.detail.clone())
+    } else {
+        (item.text.clone(), String::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_row_format_replaces_the_whole_row_the_way_mode_tree_add_does() {
+        let mut item = ChooseTreeItem {
+            label: "dev".to_owned(),
+            detail: "2 windows".to_owned(),
+            target: zz_protocol::ChooseTreeTarget::Session(zz_protocol::SessionId(1)),
+            depth: 0,
+            flags: 0,
+            pane_kind: None,
+            key: "0".to_owned(),
+            text: String::new(),
+        };
+        assert_eq!(
+            tree_row_text(&item),
+            ("dev".to_owned(), "2 windows".to_owned())
+        );
+        item.text = "<<dev>>".to_owned();
+        assert_eq!(tree_row_text(&item), ("<<dev>>".to_owned(), String::new()));
+    }
 }

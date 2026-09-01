@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **84**. Classified items: **572**.
+Tracked gap groups: **84**. Classified items: **571**.
 
 - Status: open: 42, blocked: 20, accepted: 22.
 - Decision: adopt: 47, native: 16, park: 15, never: 6.
 - Priority: later: 62, none: 22.
 - Closed history entries: 127.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 99, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 98, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -562,14 +562,14 @@ Copy mode lives per client in zz and needs explicit target-client semantics.
 
 ### `display-menu.behavior-fidelity`: Match remaining display-menu behavior
 
-Row shortcuts now go through the pin's own key parser and keep only the spellings a client attached to the menu can press, proved key by key against the pin in scenario display-menu-shortcut-grammar. Descriptor construction, action queues, refresh behavior, mouse handling, resize lifecycle, and close-mid-paste ordering still need focused comparison with the pin.
+Row shortcuts now go through the pin's own key parser and keep only the spellings a client attached to the menu can press, and an owning-client resize re-fits the live descriptor the way menu_resize_cb does: the box keeps its width, rows, selection, stay-open policy and commands, takes the new client and cell geometry, slides back inside the viewport, parks at the origin when it no longer fits, and never closes. Descriptor construction, action queues, refresh behavior, mouse handling, and close-mid-paste ordering still need focused comparison with the pin.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `hard`
 - Owner: `daemon`
 - User impact: daily, remote, scripts
-- Items: `semantic:display-menu-action-context-and-errors`, `semantic:display-menu-mouse-policy`, `semantic:display-menu-paste-close-ordering`, `semantic:display-menu-queue-ordering`, `semantic:display-menu-rendered-width`, `semantic:display-menu-resize-lifecycle`, `semantic:display-menu-shortcut-display`, `semantic:display-menu-style-refresh`
+- Items: `semantic:display-menu-action-context-and-errors`, `semantic:display-menu-mouse-policy`, `semantic:display-menu-paste-close-ordering`, `semantic:display-menu-queue-ordering`, `semantic:display-menu-rendered-width`, `semantic:display-menu-shortcut-display`, `semantic:display-menu-style-refresh`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-mux/src/command.rs`
@@ -579,6 +579,7 @@ Row shortcuts now go through the pin's own key parser and keep only the spelling
   - `resource:crates/zz-tui/src/render.rs`
   - `file:compat/attached-client.sh`
   - `scenario:compat/scenarios/smoke/display-menu-shortcut-grammar.txt`
+  - `scenario:compat/scenarios/smoke/display-menu-resize-lifecycle.txt`
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
   - `Pinned attached probes cover selected-action client context, error delivery, overlay-close order, and blocking or -b command-queue continuation.`

@@ -79,13 +79,17 @@ impl Overlays {
     }
 
     pub fn resize(&self, columns: u16, rows: u16) {
+        self.resize_cells(columns, rows, 8, 16);
+    }
+
+    pub fn resize_cells(&self, columns: u16, rows: u16, cell_width_px: u32, cell_height_px: u32) {
         self.client
             .send_input(InputMessage::ResizeTerminal {
                 pane: self.pane,
                 columns,
                 rows,
-                cell_width_px: 8,
-                cell_height_px: 16,
+                cell_width_px,
+                cell_height_px,
             })
             .expect("resize the attached client");
     }
@@ -131,6 +135,14 @@ impl Overlays {
             EventPayload::Menu { state: None } => Some(()),
             _ => None,
         });
+    }
+
+    /// The next menu descriptor of any kind, open or closed.
+    pub fn next_menu_event(&self) -> Option<MenuState> {
+        self.await_event(|payload| match payload {
+            EventPayload::Menu { state } => Some(state),
+            _ => None,
+        })
     }
 
     pub fn await_popup(&self) -> PopupState {

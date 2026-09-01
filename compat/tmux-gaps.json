@@ -671,7 +671,6 @@
         "semantic:display-menu-paste-close-ordering",
         "semantic:display-menu-queue-ordering",
         "semantic:display-menu-rendered-width",
-        "semantic:display-menu-resize-lifecycle",
         "semantic:display-menu-shortcut-display",
         "semantic:display-menu-style-refresh"
       ],
@@ -683,6 +682,7 @@
         "resource:crates/zz-tui/src/render.rs",
         "file:compat/attached-client.sh",
         "scenario:compat/scenarios/smoke/display-menu-shortcut-grammar.txt",
+        "scenario:compat/scenarios/smoke/display-menu-resize-lifecycle.txt",
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
@@ -691,7 +691,7 @@
         "Pinned input probes cover mouse policy and paste bytes when the menu closes during a paste sequence, without pane leakage or duplicate action execution."
       ],
       "depends_on": [],
-      "reason": "Row shortcuts now go through the pin's own key parser and keep only the spellings a client attached to the menu can press, proved key by key against the pin in scenario display-menu-shortcut-grammar. Descriptor construction, action queues, refresh behavior, mouse handling, resize lifecycle, and close-mid-paste ordering still need focused comparison with the pin."
+      "reason": "Row shortcuts now go through the pin's own key parser and keep only the spellings a client attached to the menu can press, and an owning-client resize re-fits the live descriptor the way menu_resize_cb does: the box keeps its width, rows, selection, stay-open policy and commands, takes the new client and cell geometry, slides back inside the viewport, parks at the origin when it no longer fits, and never closes. Descriptor construction, action queues, refresh behavior, mouse handling, and close-mid-paste ordering still need focused comparison with the pin."
     },
     {
       "id": "display-message.format-listing",

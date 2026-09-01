@@ -5870,8 +5870,14 @@ impl MuxEngine {
             .expect("new pane belongs to a window");
         if apply_tmux_zoom {
             let active_pane = self.state.windows[&window].active_pane;
-            self.state.windows.get_mut(&window).unwrap().zoomed_pane =
-                options.has("-Z").then_some(active_pane);
+            let state = self.state.windows.get_mut(&window).expect("split window");
+            state.zoomed_pane = options.has("-Z").then_some(active_pane);
+            if state.zoomed_pane.is_some_and(|zoomed| zoomed != pane) {
+                let extent = state.layout.extent();
+                if let Some(state) = state.panes.get_mut(&pane) {
+                    state.screen_extent = Some(extent);
+                }
+            }
         }
         if options.value("-s").is_some()
             || options.value("-S").is_some()

@@ -2574,19 +2574,19 @@
       ],
       "owner": "client",
       "items": [
-        "semantic:attached-gui-pane-width",
-        "semantic:split-window-zoom-hidden-width"
+        "semantic:attached-gui-pane-width"
       ],
       "evidence": [
         "resource:knowledge/tmux/divergences.md",
         "scenario:compat/scenarios/split-window-zoom.txt",
-        "scenario:compat/scenarios/manual-window-size-transition.txt"
+        "scenario:compat/scenarios/manual-window-size-transition.txt",
+        "scenario:compat/scenarios/split-window-zoom-hidden-width.txt"
       ],
       "acceptance": [
         "Client convergence and differential tests pin cell geometry during measurement, zoom, and manual policy transitions."
       ],
       "depends_on": [],
-      "reason": "These mismatches occur where client measurements meet durable mux geometry. The manual policy transition is closed: a window keeps the extent resize-window stored, an automatic policy is free to reach a different measured size, and returning to manual restores the stored extent and reports it through window_manual_width and window_manual_height. Attached-pane width and the hidden zoom split stay open."
+      "reason": "These mismatches occur where client measurements meet durable mux geometry. The manual policy transition is closed: a window keeps the extent resize-window stored, an automatic policy is free to reach a different measured size, and returning to manual restores the stored extent and reports it through window_manual_width and window_manual_height. A detached split-window -Z is closed too: the new pane keeps the screen it was created with while the zoom hides it, and the next layout fix takes it back. Attached-pane width stays open, and with it the measured half of the manual transition: the attached-client fixture shows zz does not re-measure a window when window-size changes to an automatic policy, and the grid it would measure is the chrome-reduced one, so that trigger belongs with the attached-pane width work."
     },
     {
       "id": "sessions.linked-groups",

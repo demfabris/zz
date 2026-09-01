@@ -1200,6 +1200,8 @@ impl MuxEngine {
         let geometry = if context.pane_zoomed {
             let (sx, sy) = window.layout.extent();
             Some((sx, sy, 0, 0))
+        } else if let Some((sx, sy)) = pane.screen_extent.filter(|_| window.zoomed_pane.is_some()) {
+            Some((sx, sy, 0, 0))
         } else {
             window
                 .layout

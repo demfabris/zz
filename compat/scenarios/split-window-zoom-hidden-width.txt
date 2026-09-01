@@ -1,0 +1,21 @@
+new-session -d -s zhidden -x 80 -y 24
+split-window -d -h -t zhidden:0.0
+out: list-panes -t zhidden:0 -F #{pane_index}:#{pane_width}x#{pane_height}:l#{pane_left}t#{pane_top}r#{pane_right}b#{pane_bottom}:x#{pane_x}y#{pane_y}:#{pane_at_left}#{pane_at_top}#{pane_at_right}#{pane_at_bottom}:#{pane_active}#{window_zoomed_flag}
+split-window -d -hZ -t zhidden:0.0
+out: list-panes -t zhidden:0 -F #{pane_index}:#{pane_width}x#{pane_height}:l#{pane_left}t#{pane_top}r#{pane_right}b#{pane_bottom}:x#{pane_x}y#{pane_y}:#{pane_at_left}#{pane_at_top}#{pane_at_right}#{pane_at_bottom}:#{pane_active}#{window_zoomed_flag}
+split-window -d -v -t zhidden:0.2
+out: list-panes -t zhidden:0 -F #{pane_index}:#{pane_width}x#{pane_height}:l#{pane_left}t#{pane_top}r#{pane_right}b#{pane_bottom}:x#{pane_x}y#{pane_y}:#{pane_at_left}#{pane_at_top}#{pane_at_right}#{pane_at_bottom}:#{pane_active}#{window_zoomed_flag}
+resize-pane -Z -t zhidden:0.0
+out: list-panes -t zhidden:0 -F #{pane_index}:#{pane_width}x#{pane_height}:l#{pane_left}t#{pane_top}r#{pane_right}b#{pane_bottom}:x#{pane_x}y#{pane_y}:#{pane_at_left}#{pane_at_top}#{pane_at_right}#{pane_at_bottom}:#{pane_active}#{window_zoomed_flag}
+resize-pane -Z -t zhidden:0.0
+out: list-panes -t zhidden:0 -F #{pane_index}:#{pane_width}x#{pane_height}:#{pane_active}#{window_zoomed_flag}
+new-session -d -s zkill -x 80 -y 24
+split-window -d -h -t zkill:0.0
+split-window -d -hZ -t zkill:0.0
+kill-pane -t zkill:0.2
+out: list-panes -t zkill:0 -F #{pane_index}:#{pane_width}x#{pane_height}:#{pane_active}#{window_zoomed_flag}
+new-session -d -s zselect -x 80 -y 24
+split-window -d -h -t zselect:0.0
+split-window -d -hZ -t zselect:0.0
+select-pane -t zselect:0.1
+out: list-panes -t zselect:0 -F #{pane_index}:#{pane_width}x#{pane_height}:#{pane_active}#{window_zoomed_flag}

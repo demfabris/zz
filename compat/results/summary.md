@@ -72,6 +72,7 @@
 | source-file-format | 40 | yes | 0 | yes | yes | yes |
 | source-file-output | 12 | yes | 0 | yes | yes | yes |
 | split-window-zoom | 11 | yes | 0 | yes | yes | yes |
+| split-window-zoom-hidden-width | 21 | yes | 0 | yes | yes | yes |
 | splits-sized | 5 | yes | 0 | yes | yes | yes |
 | status-options | 79 | yes | 0 | yes | yes | yes |
 | strict-key-validation | 40 | yes | 0 | yes | yes | yes |

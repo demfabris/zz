@@ -216,6 +216,11 @@ pub struct Pane {
     pub dead_time: Option<u64>,
     pub(crate) input_off: bool,
     pub(crate) empty: bool,
+    /// The pin's `wp->sx`/`wp->sy` when `layout_fix_panes` skipped this pane:
+    /// a `split-window -Z` assigns the new pane's cell with `do_not_resize`,
+    /// so it keeps the screen it was created with until the next layout fix
+    /// (spawn.c `spawn_pane`, layout.c `layout_assign_pane`).
+    pub(crate) screen_extent: Option<(u16, u16)>,
     input_options: InputOptions,
 }
 
@@ -320,8 +325,19 @@ impl Window {
         if self.zoomed_pane == Some(pane) {
             return Some(self.layout.extent());
         }
+        if self.zoomed_pane.is_some()
+            && let Some(extent) = self.panes.get(&pane).and_then(|pane| pane.screen_extent)
+        {
+            return Some(extent);
+        }
         let geometry = self.layout.pane_geometry(pane)?;
         Some((geometry.sx, geometry.sy))
+    }
+
+    fn clear_pane_screen_extents(&mut self) {
+        for pane in self.panes.values_mut() {
+            pane.screen_extent = None;
+        }
     }
 
     #[must_use]
@@ -440,6 +456,7 @@ impl MuxState {
             dead_status: None,
             dead_time: None,
             input_off: false,
+            screen_extent: None,
             empty: false,
             input_options: InputOptions::default(),
         };
@@ -564,6 +581,7 @@ impl MuxState {
             dead_status: None,
             dead_time: None,
             input_off: false,
+            screen_extent: None,
             empty: false,
             input_options: InputOptions::default(),
         };
@@ -1077,6 +1095,7 @@ impl MuxState {
                 dead_status: None,
                 dead_time: None,
                 input_off: false,
+                screen_extent: None,
                 empty: false,
                 input_options: InputOptions::default(),
             },
@@ -1091,6 +1110,7 @@ impl MuxState {
         if !placement.detached {
             activate_window_pane(window, pane_id, false);
         }
+        window.clear_pane_screen_extents();
         self.bump_generation();
         Ok(pane_id)
     }
@@ -1297,6 +1317,7 @@ impl MuxState {
         if window.panes.len() <= 1 {
             return Ok(());
         }
+        window.clear_pane_screen_extents();
         if window.zoomed_pane.is_some() {
             window.zoomed_pane = None;
         } else {
@@ -1388,6 +1409,7 @@ impl MuxState {
         let before = window.layout.extent();
         window.layout.resize(columns, rows);
         window.last_extent_probe = None;
+        window.clear_pane_screen_extents();
         if window.layout.extent() != before {
             self.bump_generation();
         }
@@ -3943,11 +3965,13 @@ fn activate_window_pane(window: &mut Window, pane: PaneId, preserve_zoom: bool) 
         .truncate(window.panes.len().saturating_sub(1));
     window.active_pane = pane;
     window.zoomed_pane = (preserve_zoom && was_zoomed).then_some(pane);
+    window.clear_pane_screen_extents();
     true
 }
 
 fn repair_window_after_pane_removal(window: &mut Window, pane: PaneId) {
     window.zoomed_pane = None;
+    window.clear_pane_screen_extents();
     lose_window_pane(window, pane);
     window.pane_order.retain(|candidate| *candidate != pane);
     normalize_window_history(window);

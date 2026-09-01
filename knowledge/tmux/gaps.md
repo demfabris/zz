@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **84**. Classified items: **570**.
+Tracked gap groups: **84**. Classified items: **569**.
 
 - Status: open: 42, blocked: 20, accepted: 22.
 - Decision: adopt: 47, native: 16, park: 15, never: 6.
 - Priority: later: 62, none: 22.
 - Closed history entries: 127.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 97, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 96, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -1580,19 +1580,20 @@ Private socket compatibility would replace zz's cross-client protocol without im
 
 ### `rendering.geometry-residue`: Close bounded geometry reporting gaps
 
-These mismatches occur where client measurements meet durable mux geometry. The manual policy transition is closed: a window keeps the extent resize-window stored, an automatic policy is free to reach a different measured size, and returning to manual restores the stored extent and reports it through window_manual_width and window_manual_height. Attached-pane width and the hidden zoom split stay open.
+These mismatches occur where client measurements meet durable mux geometry. The manual policy transition is closed: a window keeps the extent resize-window stored, an automatic policy is free to reach a different measured size, and returning to manual restores the stored extent and reports it through window_manual_width and window_manual_height. A detached split-window -Z is closed too: the new pane keeps the screen it was created with while the zoom hides it, and the next layout fix takes it back. Attached-pane width stays open, and with it the measured half of the manual transition: the attached-client fixture shows zz does not re-measure a window when window-size changes to an automatic policy, and the grid it would measure is the chrome-reduced one, so that trigger belongs with the attached-pane width work.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `medium`
 - Owner: `client`
 - User impact: scripts, gui
-- Items: `semantic:attached-gui-pane-width`, `semantic:split-window-zoom-hidden-width`
+- Items: `semantic:attached-gui-pane-width`
 - Depends on: none
 - Evidence:
   - `resource:knowledge/tmux/divergences.md`
   - `scenario:compat/scenarios/split-window-zoom.txt`
   - `scenario:compat/scenarios/manual-window-size-transition.txt`
+  - `scenario:compat/scenarios/split-window-zoom-hidden-width.txt`
 - Acceptance:
   - `Client convergence and differential tests pin cell geometry during measurement, zoom, and manual policy transitions.`
 

@@ -1,0 +1,12 @@
+corpus: none
+# choose-tree -h drops the invoking pane's row the way window_tree_build_window
+# does, after the filter has already counted it, and -F becomes the text every
+# visible row draws in its own session, window, pane, or buffer context while
+# the row keeps the shortcut and the target it had without the flag. Both facts
+# need a client attached to the chooser, so the probe presses a root binding on
+# a real pty and reads back which row ran the template.
+stage: fixtures/chooser-row-flags.sh ~/chooser-row-flags.sh
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+out: set-environment -gu CHOOSER_ROW_FLAGS
+run-shell 'sh ~/chooser-row-flags.sh'
+out: show-environment -g CHOOSER_ROW_FLAGS

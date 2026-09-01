@@ -629,6 +629,13 @@ now validate on both encode and decode.
   `__zz-command-alias-group { ... }` block is rejected as `unknown command:
   __zz-command-alias-group` at the CLI, in a configuration file, and in Control input the way the
   pin rejects any unknown name. A v92 peer cannot decode the appended field.
+- v93 appends `text: String` to `ChooseTreeItem` and to `ChooseBufferItem`. It carries the
+  `choose-tree -F` / `choose-buffer -F` product the daemon expanded in that row's own session,
+  window, pane, or paste-buffer context, and an attached client draws it in place of the row it
+  would otherwise compose from `label`/`detail` or `name`/size/`preview`. The field is empty when
+  the command carried no `-F`, so a chooser without the flag draws exactly what it drew on v92.
+  Both fields are bounded by `MAX_CHOOSE_ITEM_TEXT_BYTES` (512) on decode. A v92 peer cannot
+  decode the appended field.
 - v92 appends `ProtocolMessage::HomeDirectoryRequest { request_id, users }` at tail tag 36 and
   `ProtocolMessage::HomeDirectoryResponse { request_id, homes }` at tail tag 37. A Control client
   parsing its own direct input asks the daemon to resolve the `~` names one line needs before it

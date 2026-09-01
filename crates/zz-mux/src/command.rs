@@ -913,6 +913,9 @@ pub enum MuxEffect {
         kind: ChooseTreeKind,
         sessions_only: bool,
         filter: Option<String>,
+        format: Option<String>,
+        hide_source: bool,
+        kill_source: bool,
         sort: TmuxSort,
         key_format: Option<String>,
         template: Option<String>,
@@ -923,6 +926,8 @@ pub enum MuxEffect {
     ChooseBuffer {
         pane: PaneId,
         filter: Option<String>,
+        format: Option<String>,
+        kill_source: bool,
         sort: TmuxSort,
         key_format: Option<String>,
         template: Option<String>,
@@ -7466,6 +7471,9 @@ impl MuxEngine {
             },
             sessions_only: options.has("-s"),
             filter: options.value("-f").map(str::to_owned),
+            format: options.value("-F").map(str::to_owned),
+            hide_source: options.has("-h"),
+            kill_source: options.has("-k"),
             sort,
             key_format: options.value("-K").map(str::to_owned),
             template: chooser_command_template(invocation, positional_start, &positional),
@@ -7508,6 +7516,8 @@ impl MuxEngine {
         Ok(Execution::effect(MuxEffect::ChooseBuffer {
             pane,
             filter: options.value("-f").map(str::to_owned),
+            format: options.value("-F").map(str::to_owned),
+            kill_source: options.has("-k"),
             sort,
             key_format: options.value("-K").map(str::to_owned),
             template: chooser_command_template(invocation, positional_start, &positional),
@@ -36779,6 +36789,9 @@ mod tests {
                 kind: ChooseTreeKind::Windows,
                 sessions_only: true,
                 filter: None,
+                format: None,
+                hide_source: false,
+                kill_source: false,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
@@ -36800,6 +36813,9 @@ mod tests {
                 kind: ChooseTreeKind::Windows,
                 sessions_only: false,
                 filter: Some("#{pane_active}".to_owned()),
+                format: None,
+                hide_source: false,
+                kill_source: false,
                 sort: TmuxSort::parse(Some("name"), true, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
@@ -36823,6 +36839,9 @@ mod tests {
                 kind: ChooseTreeKind::Panes,
                 sessions_only: false,
                 filter: None,
+                format: None,
+                hide_source: false,
+                kill_source: false,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
@@ -36839,6 +36858,9 @@ mod tests {
                 kind: ChooseTreeKind::Windows,
                 sessions_only: true,
                 filter: None,
+                format: None,
+                hide_source: false,
+                kill_source: false,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
@@ -36891,6 +36913,62 @@ mod tests {
     }
 
     #[test]
+    fn chooser_row_flags_parse_the_way_cmd_choose_tree_reads_them() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let pane = context.pane.unwrap();
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("choose-tree", &["-hk", "-F", "<#{pane_id}>"]),
+                )
+                .unwrap()
+                .effects,
+            vec![MuxEffect::ChooseTree {
+                pane,
+                kind: ChooseTreeKind::Panes,
+                sessions_only: false,
+                filter: None,
+                format: Some("<#{pane_id}>".to_owned()),
+                hide_source: true,
+                kill_source: true,
+                sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+                key_format: None,
+                template: None,
+            }]
+        );
+
+        let control = engine
+            .execute(&mut context, &command("choose-buffer", &[]))
+            .unwrap()
+            .effects;
+        for args in [
+            &["-y"][..],
+            &["-yy"][..],
+            &["-y", "-y"][..],
+            &["-y", "-y", "-y"][..],
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("choose-buffer", args))
+                    .unwrap()
+                    .effects,
+                control,
+                "choose-buffer {args:?}"
+            );
+        }
+        assert!(matches!(
+            engine.execute(&mut context, &command("choose-tree", &["-y"])),
+            Err(ServerError::UnsupportedCommand(message)) if message == "choose-tree -y"
+        ));
+    }
+
+    #[test]
     fn choose_buffer_builds_native_and_command_template_effects() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -36907,18 +36985,27 @@ mod tests {
             vec![MuxEffect::ChooseBuffer {
                 pane,
                 filter: None,
+                format: None,
+                kill_source: false,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Creation)).unwrap(),
                 key_format: None,
                 template: None,
             }]
         );
         assert!(matches!(
-            engine.execute(
-                &mut context,
-                &command("choose-buffer", &["-F", "#{buffer_name}"])
-            ),
-            Err(ServerError::UnsupportedCommand(message))
-                if message == "choose-buffer -F"
+            engine
+                .execute(
+                    &mut context,
+                    &command("choose-buffer", &["-F", "#{buffer_name}", "-k", "-y"]),
+                )
+                .unwrap()
+                .effects
+                .as_slice(),
+            [MuxEffect::ChooseBuffer {
+                format: Some(format),
+                kill_source: true,
+                ..
+            }] if format == "#{buffer_name}"
         ));
         let typed_overflow = CommandInvocation::new(
             "choose-buffer",

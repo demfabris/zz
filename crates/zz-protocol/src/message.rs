@@ -39,6 +39,7 @@ pub const MAX_STATUS_ROWS: usize = 5;
 pub const MAX_PANE_INDICATOR_LABEL_BYTES: usize = 1024;
 /// Longest shortcut key spelling one chooser row may carry.
 pub const MAX_CHOOSE_ITEM_KEY_BYTES: usize = 64;
+pub const MAX_CHOOSE_ITEM_TEXT_BYTES: usize = 512;
 /// Longest payload `agent-send` may push into a GUI-owned composer or prompt.
 pub const MAX_AGENT_SEND_BYTES: usize = 1024 * 1024;
 /// Longest path or human-readable message carried by a GUI request or its reply.
@@ -1928,6 +1929,10 @@ pub struct ChooseTreeItem {
     /// The row's shortcut key in tmux-grammar spelling, empty for none.
     #[serde(deserialize_with = "deserialize_choose_item_key")]
     pub key: String,
+    /// The expanded `-F` row text, empty when the command carried no format
+    /// and the client draws its own row from `label` and `detail`.
+    #[serde(deserialize_with = "deserialize_choose_item_text")]
+    pub text: String,
 }
 
 fn deserialize_choose_item_key<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -1935,6 +1940,13 @@ where
     D: Deserializer<'de>,
 {
     deserialize_bounded_text(deserializer, MAX_CHOOSE_ITEM_KEY_BYTES)
+}
+
+fn deserialize_choose_item_text<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_CHOOSE_ITEM_TEXT_BYTES)
 }
 
 impl ChooseTreeItem {
@@ -2011,6 +2023,10 @@ pub struct ChooseBufferItem {
     /// The row's shortcut key in tmux-grammar spelling, empty for none.
     #[serde(deserialize_with = "deserialize_choose_item_key")]
     pub key: String,
+    /// The expanded `-F` row text, empty when the command carried no format
+    /// and the client draws its own row from `name`, size, and `preview`.
+    #[serde(deserialize_with = "deserialize_choose_item_text")]
+    pub text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -3717,6 +3733,7 @@ mod tests {
             flags: 0,
             pane_kind: None,
             key: "M".repeat(super::MAX_CHOOSE_ITEM_KEY_BYTES),
+            text: "t".repeat(super::MAX_CHOOSE_ITEM_TEXT_BYTES),
         };
         let bytes = postcard::to_stdvec(&tree).expect("tree item");
         assert_eq!(
@@ -3730,6 +3747,7 @@ mod tests {
             size_bytes: 5,
             created_unix_seconds: 42,
             key: "0".to_owned(),
+            text: String::new(),
         };
         let bytes = postcard::to_stdvec(&buffer).expect("buffer item");
         assert_eq!(
@@ -3744,6 +3762,7 @@ mod tests {
             size_bytes: u64,
             created_unix_seconds: u64,
             key: String,
+            text: String,
         }
         let oversized = postcard::to_stdvec(&UnboundedBufferItem {
             name: String::new(),
@@ -3751,6 +3770,17 @@ mod tests {
             size_bytes: 0,
             created_unix_seconds: 0,
             key: "k".repeat(super::MAX_CHOOSE_ITEM_KEY_BYTES + 1),
+            text: String::new(),
+        })
+        .expect("oversized shape");
+        assert!(postcard::from_bytes::<super::ChooseBufferItem>(&oversized).is_err());
+        let oversized = postcard::to_stdvec(&UnboundedBufferItem {
+            name: String::new(),
+            preview: String::new(),
+            size_bytes: 0,
+            created_unix_seconds: 0,
+            key: String::new(),
+            text: "t".repeat(super::MAX_CHOOSE_ITEM_TEXT_BYTES + 1),
         })
         .expect("oversized shape");
         assert!(postcard::from_bytes::<super::ChooseBufferItem>(&oversized).is_err());
@@ -3764,6 +3794,7 @@ mod tests {
             flags: u8,
             pane_kind: Option<super::ChooseTreePaneKind>,
             key: String,
+            text: String,
         }
         let oversized = postcard::to_stdvec(&UnboundedTreeItem {
             label: String::new(),
@@ -3773,6 +3804,19 @@ mod tests {
             flags: 0,
             pane_kind: None,
             key: "k".repeat(super::MAX_CHOOSE_ITEM_KEY_BYTES + 1),
+            text: String::new(),
+        })
+        .expect("oversized shape");
+        assert!(postcard::from_bytes::<super::ChooseTreeItem>(&oversized).is_err());
+        let oversized = postcard::to_stdvec(&UnboundedTreeItem {
+            label: String::new(),
+            detail: String::new(),
+            target: super::ChooseTreeTarget::Session(crate::SessionId(2)),
+            depth: 0,
+            flags: 0,
+            pane_kind: None,
+            key: String::new(),
+            text: "t".repeat(super::MAX_CHOOSE_ITEM_TEXT_BYTES + 1),
         })
         .expect("oversized shape");
         assert!(postcard::from_bytes::<super::ChooseTreeItem>(&oversized).is_err());

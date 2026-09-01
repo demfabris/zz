@@ -1,0 +1,11 @@
+corpus: none
+# choose-buffer accepts -y and never reads it: window_buffer_init copies only
+# -F, -K and the template out of the args, and the 'y' that window_tree_init
+# turns into PROMPT_ACCEPT has no buffer-mode counterpart because buffer-mode
+# deletes without asking. Every spelling of the flag has to leave the paste and
+# the delete exactly where the no-flag control puts them.
+stage: fixtures/chooser-buffer-confirm-flag.sh ~/chooser-buffer-confirm-flag.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu CHOOSER_BUFFER_CONFIRM
+run-shell 'sh ~/chooser-buffer-confirm-flag.sh'
+out: show-environment -g CHOOSER_BUFFER_CONFIRM

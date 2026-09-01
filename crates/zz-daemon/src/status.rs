@@ -1848,6 +1848,26 @@ mod tests {
         assert!(status.left.is_char_boundary(status.left.len()));
     }
 
+    /// The engine no longer clamps a finished expansion, because the pin has no
+    /// output cap, so every `StatusLine` field this message owns has to hold the
+    /// bound itself. Each of these formats expands well past it.
+    #[test]
+    fn oversized_row_title_and_base_style_stay_inside_the_wire_limit() {
+        let overflow = "#{R:x,9000}";
+        let mut request = request(1, overflow, overflow);
+        request.formats.lines = 2;
+        request.formats.style = format!("bold,{}", "italics,".repeat(900));
+        request.title_format = Some(overflow.to_owned());
+        request.row_formats = BTreeMap::from([(0, overflow.to_owned()), (1, overflow.to_owned())]);
+        let status = StatusRenderer::default().render_initial(&request);
+        assert_eq!(status.validate(), Ok(()));
+        assert_eq!(status.title.len(), MAX_STATUS_TEXT_BYTES);
+        assert_eq!(status.rows.len(), 2);
+        for row in &status.rows {
+            assert_eq!(row.len(), MAX_STATUS_TEXT_BYTES);
+        }
+    }
+
     #[test]
     fn a_disabled_status_renders_empty() {
         let mut renderer = StatusRenderer::default();

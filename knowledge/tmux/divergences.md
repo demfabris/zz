@@ -1135,6 +1135,35 @@ template is ordinary undone work rather than a model difference: the chooser tem
 that substitutes the selected value and runs the result already shipped on 2026-08-28, so wiring the
 overlay's selection to it is a delivery question, not a disposition. It stays blocked.
 
+## What the last two format gaps need (2026-09-01)
+
+The `I` modifier and the `notify_monitor_cb` producer are both measured now, and neither is a format
+engine slice.
+
+`I` takes one flag word. Against the pin with an 80 by 24 pty client and `FOO` in its environment,
+`#{I/f:RGB}` and `#{I/f:256}` answer `1`, `#{I/f:nosuchfeature}` answers `0`, `#{I/c:smcup}` and
+`#{I/c:colors}` answer `1`, `#{I/c:nosuchcap}` answers `0`, and `#{I/e:FOO}` answers `barvalue`
+while an unset name answers empty. Detached, every form answers empty. The body is a literal name,
+so `#{I/c:#{l:smcup}}` answers `0` where `#{I/c:smcup}` answers `1`. Flags combine last-wins in the
+source order `c`, `f`, `e`, so `#{I/cf:RGB}` answers the feature and `#{I/cfe:FOO}` the environment
+value. A missing or unknown flag word falls back to a plain lookup: `#{I:HOME}` answers what
+`#{HOME}` answers and `#{I/z:RGB}` answers empty. zz already has two of the three backings, the
+client feature list and the client environment store `#{Vc:}` walks. The `c` flag is the blocker:
+`tty_term_has_name` reads the per-client terminfo table tmux builds for the client's `TERM`, and
+zz's daemon loads no terminfo, the same fact that already parks `messages.tty-model`. Answering `0`
+for every capability would look like support and disagree with the pin on the common case.
+
+`notify_monitor_cb` fires only from a format monitor. `set-hook -B name:what:format` routes into
+`notify_monitor_add`; the middle field is `%*`, `%N`, `@*`, `@N`, or a session, and a one-second
+timer re-expands the format per subscribed object and calls back only on a change. Measured on the
+pin, `set-hook -B '@watch:@*:#{window_name}'` fired nothing when it armed, because
+`notify_monitor_add` passes no `MONITOR_NOTIFY_INITIAL` and the first sample is only a baseline, then
+fired once after `rename-window` with `hook=@watch`, `hook_value=renamed`, `hook_last=bash`,
+`hook_window=@0`, `hook_window_name=renamed`, `hook_window_index=0`, `hook_session=$0`,
+`hook_session_name=mon`, and an empty `hook_pane` for a window-scoped monitor. zz answers
+`invalid flag -B` and exits 1, so the nine names have no monitor to be produced by. Closing it needs
+the monitor subsystem in the daemon and the `-B` grammar in the command layer.
+
 ## Window runtime formats split (2026-09-01)
 
 `formats.window-runtime` held five names in one container. They are three producer families, and the

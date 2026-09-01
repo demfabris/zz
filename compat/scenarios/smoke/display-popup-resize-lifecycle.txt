@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/display-popup-resize-lifecycle.sh ~/display-popup-resize-lifecycle.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu DISPLAY_POPUP_RESIZE_LIFECYCLE
+run-shell 'sh ~/display-popup-resize-lifecycle.sh'
+out: show-environment -g DISPLAY_POPUP_RESIZE_LIFECYCLE

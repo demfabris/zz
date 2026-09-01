@@ -12506,6 +12506,12 @@ impl Shared {
                 PopupSession {
                     terminal: Arc::clone(&terminal),
                     state: state.clone(),
+                    preferred: PopupPlacement {
+                        left: state.left,
+                        top: state.top,
+                        width: state.width,
+                        height: state.height,
+                    },
                     cell_width_px: geometry.cell_width_px,
                     cell_height_px: geometry.cell_height_px,
                     waiter: matches!(kind, ClientKind::Command | ClientKind::Control)
@@ -12545,15 +12551,22 @@ impl Shared {
     }
 
     /// Re-fit the overlays a client owns after its own terminal geometry
-    /// changed. The pin runs `menu_resize_cb` from `MSG_RESIZE` and closes
-    /// nothing: the menu keeps its rows, its width, its selection and its
-    /// stay-open policy, and only slides back inside the viewport.
+    /// changed. The pin runs `menu_resize_cb` and `popup_resize_cb` from
+    /// `MSG_RESIZE` and closes neither: a menu keeps its rows, its width, its
+    /// selection and its stay-open policy and only slides back inside the
+    /// viewport, and a popup takes the smaller of the size it asked for and
+    /// the viewport, returning to its preferred origin whenever that fits.
     fn refit_client_overlays(self: &Arc<Self>, client: ClientId) {
+        let Ok(Some(geometry)) = popup_client_geometry(&self.inner.lock(), client) else {
+            return;
+        };
+        self.refit_client_menu(client, geometry);
+        self.refit_client_popup(client, geometry);
+    }
+
+    fn refit_client_menu(self: &Arc<Self>, client: ClientId, geometry: TerminalGeometry) {
         let menu = {
             let mut inner = self.inner.lock();
-            let Ok(Some(geometry)) = popup_client_geometry(&inner, client) else {
-                return;
-            };
             let Some(menu) = inner.menus.get_mut(&client) else {
                 return;
             };
@@ -12577,6 +12590,52 @@ impl Shared {
             refit
         };
         self.publish_to_client(client, EventPayload::Menu { state: Some(menu) });
+    }
+
+    fn refit_client_popup(self: &Arc<Self>, client: ClientId, geometry: TerminalGeometry) {
+        let (state, resize) = {
+            let mut inner = self.inner.lock();
+            let Some(popup) = inner.popups.get_mut(&client) else {
+                return;
+            };
+            let preferred = popup.preferred;
+            let width = preferred.width.min(geometry.columns);
+            let height = preferred.height.min(geometry.rows);
+            let refit = PopupState {
+                left: overlay_origin_for_viewport(preferred.left, width, geometry.columns),
+                top: overlay_origin_for_viewport(preferred.top, height, geometry.rows),
+                width,
+                height,
+                client_columns: geometry.columns,
+                client_rows: geometry.rows,
+                cell_width_px: geometry.cell_width_px,
+                cell_height_px: geometry.cell_height_px,
+                ..popup.state.clone()
+            };
+            if refit == popup.state {
+                return;
+            }
+            popup.state = refit.clone();
+            popup.cell_width_px = geometry.cell_width_px;
+            popup.cell_height_px = geometry.cell_height_px;
+            let resize = (!refit.dead)
+                .then(|| popup_content_size(&refit))
+                .flatten()
+                .map(|(columns, rows)| {
+                    (
+                        Arc::clone(&popup.terminal),
+                        columns,
+                        rows,
+                        geometry.cell_width_px,
+                        geometry.cell_height_px,
+                    )
+                });
+            (refit, resize)
+        };
+        if let Some((terminal, columns, rows, cell_width_px, cell_height_px)) = resize {
+            terminal.resize(columns, rows, cell_width_px, cell_height_px);
+        }
+        self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
     }
 
     fn display_menu(
@@ -25188,9 +25247,21 @@ struct PopupWaiter {
 struct PopupSession {
     terminal: Arc<TerminalSession>,
     state: PopupState,
+    /// The position and size the popup asked for, kept for the life of the
+    /// popup. The pin holds the same four numbers in `ppx`/`ppy`/`psx`/`psy`
+    /// so a client that shrinks and grows again lands back where it started.
+    preferred: PopupPlacement,
     cell_width_px: u32,
     cell_height_px: u32,
     waiter: Option<PopupWaiter>,
+}
+
+#[derive(Clone, Copy)]
+struct PopupPlacement {
+    left: u16,
+    top: u16,
+    width: u16,
+    height: u16,
 }
 
 struct MenuSession {

@@ -14496,7 +14496,36 @@ fn copy_selection_mode(argument: Option<&str>) -> Option<CopySelectionMode> {
 
 fn copy_goto_line_action(arguments: &[String]) -> Option<CopyModeAction> {
     let [line] = arguments else { return None };
-    Some(CopyModeAction::GotoLine(line.parse::<u32>().ok()?))
+    let target = pinned_strtonum(line, -1, i64::from(i32::MAX)).map_or(u32::MAX, |parsed| {
+        u32::try_from(parsed).unwrap_or(i32::MAX.unsigned_abs())
+    });
+    Some(CopyModeAction::GotoLine(target))
+}
+
+/// The pin's `strtonum` grammar: `strtoll` base ten over the whole string,
+/// leading whitespace and one sign allowed, then an inclusive range test.
+fn pinned_strtonum(value: &str, minimum: i64, maximum: i64) -> Option<i64> {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while bytes
+        .get(index)
+        .is_some_and(|byte| byte.is_ascii_whitespace() || *byte == 0x0b)
+    {
+        index += 1;
+    }
+    let start = index;
+    if matches!(bytes.get(index), Some(b'+' | b'-')) {
+        index += 1;
+    }
+    let digits = index;
+    while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+        index += 1;
+    }
+    if index == digits || index != bytes.len() {
+        return None;
+    }
+    let parsed = value.get(start..index)?.parse::<i64>().ok()?;
+    (minimum..=maximum).contains(&parsed).then_some(parsed)
 }
 
 fn copy_pipe_action(
@@ -22672,7 +22701,8 @@ mod tests {
             &["-X", "next-prompt", "extra"][..],
             &["-X", "cursor-left", "extra"][..],
             &["-X", "next-prompt", "--", "-o"][..],
-            &["-X", "goto-line", "bogus"][..],
+            &["-X", "goto-line"][..],
+            &["-X", "goto-line", "5", "9"][..],
             &["-X", "jump-forward", ""][..],
         ] {
             let execution = engine
@@ -23097,6 +23127,80 @@ mod tests {
                 ..
             }]
         ));
+    }
+
+    #[test]
+    fn goto_line_reads_the_pins_strtonum_grammar_and_range() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &[]))
+            .unwrap();
+        let terminal = context.pane.expect("new session terminal");
+        let goto = |engine: &mut MuxEngine, context: &mut ExecutionContext, argument: &str| {
+            engine
+                .execute(
+                    context,
+                    &command(
+                        "send-keys",
+                        &[
+                            "-t",
+                            &terminal.to_string(),
+                            "-X",
+                            "goto-line",
+                            "--",
+                            argument,
+                        ],
+                    ),
+                )
+                .expect("goto-line always exits zero on the pin")
+        };
+
+        for (argument, line) in [
+            ("0", 0_u32),
+            ("5", 5),
+            ("+6", 6),
+            (" 13", 13),
+            ("2147483647", 2_147_483_647),
+            ("-1", 2_147_483_647),
+        ] {
+            let execution = goto(&mut engine, &mut context, argument);
+            assert!(
+                matches!(
+                    execution.effects.as_slice(),
+                    [MuxEffect::TerminalView {
+                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine(actual)),
+                        ..
+                    }] if *actual == line
+                ),
+                "goto-line {argument:?}"
+            );
+        }
+
+        for argument in [
+            "",
+            "abc",
+            "3x",
+            "0x10",
+            "13 ",
+            "2147483648",
+            "-2",
+            "-5",
+            "1.0",
+            "\u{661}\u{663}",
+        ] {
+            let execution = goto(&mut engine, &mut context, argument);
+            assert!(
+                matches!(
+                    execution.effects.as_slice(),
+                    [MuxEffect::TerminalView {
+                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine(actual)),
+                        ..
+                    }] if i32::try_from(*actual).is_err()
+                ),
+                "goto-line {argument:?} must still reach the mode with no target"
+            );
+        }
     }
 
     #[test]

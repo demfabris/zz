@@ -17,6 +17,7 @@
 | command-alias | 16 | yes | 0 | yes | yes | yes |
 | command-item-format | 125 | yes | 0 | yes | yes | yes |
 | copy-mode-cursor-view | 13 | yes | 0 | yes | yes | yes |
+| copy-mode-goto-line | 18 | yes | 0 | yes | yes | yes |
 | copy-mode-previous-bracket | 23 | yes | 0 | yes | yes | yes |
 | copy-mode-recentre | 8 | yes | 0 | yes | yes | yes |
 | copy-mode-scroll-exit | 11 | yes | 0 | yes | yes | yes |

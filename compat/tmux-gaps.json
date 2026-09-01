@@ -604,7 +604,7 @@
       "decision": "adopt",
       "status": "open",
       "priority": "later",
-      "ease": "medium",
+      "ease": "hard",
       "impact": [
         "scripts"
       ],
@@ -615,6 +615,7 @@
       "evidence": [
         "resource:crates/zz-mux/src/model.rs",
         "resource:crates/zz-mux/src/command.rs",
+        "file:compat/scenarios/pane-target-grammar.txt",
         "resource:knowledge/tmux/tmux-compat.md",
         "resource:knowledge/tmux/divergences.md"
       ],
@@ -622,7 +623,7 @@
         "display-message -t matches CMD_FIND_PANE for relative window offsets and the pin's special window, pane, active, current, and marked target aliases, while preserving the same componentwise CANFAIL state after a miss."
       ],
       "depends_on": [],
-      "reason": "The closed target-client slice proves exact session, window, and pane names plus numeric pane misses. zz's shared pane resolver still models only part of tmux's relative and special target vocabulary. The marked aliases now have their prerequisite: pane.selection-state is closed and supplies marked-pane identity."
+      "reason": "Everything the shared resolver can answer without a client now matches, proved by the pane-target-grammar differential: relative pane offsets and their wrap, the window-slot offsets and start, end, and last aliases behind a colon, the `{up-of}`, `{down-of}`, `{left-of}`, and `{right-of}` searches from the window's own active pane, the eight case-insensitive `window_find_string` compass words in both bare and braced spellings, the `~` and `{marked}` whole-target aliases in the session, window, and pane slots, and the componentwise CANFAIL residue (`nope`, `%999`, `9.9`, and `{marked}.0` retain nothing while `:nope` and the wrapping `+99` fall forward to the session's current window and active pane). What stays open is the client slot. Measured on the pin from an unattached CLI client, `display-message -p -t @`, `-t {active}`, and `-t {current}` each answer `no current client` on stderr and exit 1 rather than failing quietly under CANFAIL, because cmd-find.c resolves them from `cmdq_get_client(item)->session->curw->window->active`. zz's mux resolver takes no client handle: `MuxState::resolve_pane` and `resolve_window` receive only a current window and pane, the invoking client's attached context reaches commands through `ExecutionContext::attached_client_context`, and the client roster plus every existing `no current client` diagnostic live in zz-daemon. Closing this needs either a client-aware resolver signature across roughly fifty call sites in zz-mux and zz-daemon or daemon-side pre-resolution of the three client aliases, so the clause is scoped to that decision rather than to grammar work."
     },
     {
       "id": "display-message.verbose-trace",

@@ -1,0 +1,84 @@
+# CMD_FIND_PANE reads a colon-less token in the pane slot, so the relative and
+# special forms below search panes first and only fall back to the window and
+# session slots (cmd-find.c cmd_find_get_pane). The compass words go through
+# window_find_string and window_get_active_at, which include a pane's right and
+# bottom borders.
+split-window -d -h -t w:0.0
+split-window -d -v -t w:0.0
+new-window -d -t w:1 -n second
+new-window -d -t w:2 -n third
+select-window -t w:0
+select-pane -t w:0.1
+select-pane -t w:0.0
+out: display-message -p -t w:0 #{window_width}x#{window_height}
+out: list-panes -t w:0 -F #{pane_index}:#{pane_left},#{pane_top},#{pane_right},#{pane_bottom}
+out: display-message -p -t ! #{window_index}.#{pane_index}
+out: display-message -p -t {last} #{window_index}.#{pane_index}
+out: display-message -p -t + #{window_index}.#{pane_index}
+out: display-message -p -t - #{window_index}.#{pane_index}
+out: display-message -p -t +2 #{window_index}.#{pane_index}
+out: display-message -p -t -2 #{window_index}.#{pane_index}
+out: display-message -p -t {next} #{window_index}.#{pane_index}
+out: display-message -p -t {previous} #{window_index}.#{pane_index}
+out: display-message -p -t top #{window_index}.#{pane_index}
+out: display-message -p -t bottom #{window_index}.#{pane_index}
+out: display-message -p -t left #{window_index}.#{pane_index}
+out: display-message -p -t right #{window_index}.#{pane_index}
+out: display-message -p -t top-left #{window_index}.#{pane_index}
+out: display-message -p -t top-right #{window_index}.#{pane_index}
+out: display-message -p -t bottom-left #{window_index}.#{pane_index}
+out: display-message -p -t bottom-right #{window_index}.#{pane_index}
+out: display-message -p -t TOP-RIGHT #{window_index}.#{pane_index}
+out: display-message -p -t {top} #{window_index}.#{pane_index}
+out: display-message -p -t {bottom} #{window_index}.#{pane_index}
+out: display-message -p -t {left} #{window_index}.#{pane_index}
+out: display-message -p -t {right} #{window_index}.#{pane_index}
+out: display-message -p -t {top-left} #{window_index}.#{pane_index}
+out: display-message -p -t {top-right} #{window_index}.#{pane_index}
+out: display-message -p -t {bottom-left} #{window_index}.#{pane_index}
+out: display-message -p -t {bottom-right} #{window_index}.#{pane_index}
+out: display-message -p -t {up-of} #{window_index}.#{pane_index}
+out: display-message -p -t {down-of} #{window_index}.#{pane_index}
+out: display-message -p -t {left-of} #{window_index}.#{pane_index}
+out: display-message -p -t {right-of} #{window_index}.#{pane_index}
+
+# A colon moves the token into the window slot, where the offsets and the
+# start, end, and last aliases apply instead.
+out: display-message -p -t :+ #{window_index}.#{pane_index}
+out: display-message -p -t :- #{window_index}.#{pane_index}
+out: display-message -p -t :+2 #{window_index}.#{pane_index}
+out: display-message -p -t :{next} #{window_index}.#{pane_index}
+out: display-message -p -t :{previous} #{window_index}.#{pane_index}
+out: display-message -p -t :{start} #{window_index}.#{pane_index}
+out: display-message -p -t :{end} #{window_index}.#{pane_index}
+out: display-message -p -t :{last} #{window_index}.#{pane_index}
+out: display-message -p -t :^ #{window_index}.#{pane_index}
+out: display-message -p -t :! #{window_index}.#{pane_index}
+out: display-message -p -t +.0 #{window_index}.#{pane_index}
+out: display-message -p -t -.0 #{window_index}.#{pane_index}
+out: display-message -p -t {next}.0 #{window_index}.#{pane_index}
+out: display-message -p -t w:+ #{window_index}.#{pane_index}
+out: display-message -p -t w:{next} #{window_index}.#{pane_index}
+out: display-message -p -t w:0.{last} #{window_index}.#{pane_index}
+out: display-message -p -t w:0.+ #{window_index}.#{pane_index}
+
+# CMD_FIND_CANFAIL keeps whatever componentwise state the miss left behind, so
+# a colon-less pane miss answers with nothing while a window-slot miss falls
+# forward to the session's current window.
+out: display-message -p -t nope #{session_name}:#{window_index}.#{pane_index}
+out: display-message -p -t :nope #{session_name}:#{window_index}.#{pane_index}
+out: display-message -p -t %999 #{session_name}:#{window_index}.#{pane_index}
+out: display-message -p -t 9.9 #{session_name}:#{window_index}.#{pane_index}
+out: display-message -p -t +99 #{session_name}:#{window_index}.#{pane_index}
+
+# The marked aliases resolve the whole find state, and a miss clears it.
+out: display-message -p -t {marked} #{session_name}:#{window_index}.#{pane_index}
+out: display-message -p -t ~ #{session_name}:#{window_index}.#{pane_index}
+kill-pane -t {marked}
+select-window -t {marked}
+select-pane -m -t w:0.2
+out: display-message -p -t {marked} #{session_name}:#{window_index}.#{pane_index}
+out: display-message -p -t ~ #{session_name}:#{window_index}.#{pane_index}
+out: list-panes -t {marked} -F #{pane_index}
+out: display-message -p -t {marked}.0 #{session_name}:#{window_index}.#{pane_index}
+select-pane -M -t w:0.0

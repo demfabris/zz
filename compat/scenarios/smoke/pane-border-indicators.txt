@@ -1,0 +1,14 @@
+corpus: none
+# pane-border-indicators is two independent switches, not four modes.
+# redraw_mark_border_arrows marks an arrow cell on every side of every pane only
+# under arrows or both, and redraw_draw_border_arrow then draws one wherever the
+# active pane owns that cell. redraw_mark_two_pane_colours only runs under
+# colour or both, and only for a window with exactly two tiled panes: it hands
+# each half of the single divider to the pane on that side, which outranks the
+# active pane the way style_wp outranks active in
+# redraw_get_pane_for_border_style. Both are client drawing, so the probe reads
+# an attached client's screen back out of a recorder server.
+stage: fixtures/pane-border-indicators.sh ~/pane-border-indicators.sh
+out: set-environment -gu PANE_BORDER_INDICATORS
+run-shell 'sh ~/pane-border-indicators.sh'
+out: show-environment -g PANE_BORDER_INDICATORS

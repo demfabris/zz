@@ -176,6 +176,10 @@
 | smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |
 | smoke/oh-my-tmux | 15 | yes | 0 | yes | yes | yes |
 | smoke/own-conf | 6 | yes | 0 | yes | yes | yes |
+| smoke/pane-border-indicators | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-border-lines | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-border-status | 34 | yes | 0 | yes | yes | yes |
+| smoke/pane-border-zorder | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-colours-palette | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-engine-knobs | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-engine-knobs-input | 3 | yes | 0 | yes | yes | yes |

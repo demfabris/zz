@@ -29932,6 +29932,53 @@ fn stamp_snapshot_for_client(
         format_client,
         snapshot,
     );
+    stamp_pane_border_chrome(
+        &inner.engine,
+        &inner.config_files,
+        &facts,
+        format_client,
+        snapshot,
+    );
+}
+
+/// Carries the window's pane border chrome to the client: the resolved
+/// `pane-border-status`, `pane-border-lines` and `pane-border-indicators`, and
+/// the `pane-border-format` expanded once per pane the way
+/// `window_make_pane_status` expands it before `format_draw` writes the row.
+fn stamp_pane_border_chrome(
+    engine: &MuxEngine,
+    config_files: &str,
+    facts: &FormatHookFacts,
+    format_client: FormatClient,
+    snapshot: &mut MuxSnapshot,
+) {
+    for session in &mut snapshot.sessions {
+        for window in &mut session.windows {
+            window.pane_border_status = engine.pane_border_status(window.id);
+            window.pane_border_lines = engine.pane_border_lines(window.id);
+            window.pane_border_indicators = engine.pane_border_indicators(window.id);
+            if !window.pane_border_status.is_on() {
+                continue;
+            }
+            for (pane, pane_snapshot) in &mut window.panes {
+                let format = engine.pane_border_format(*pane);
+                if format.is_empty() {
+                    continue;
+                }
+                let context = server_format_context_with_format_client(
+                    engine,
+                    config_files,
+                    Some(session.id),
+                    Some(window.id),
+                    Some(*pane),
+                    Some(session.id),
+                    format_client,
+                );
+                let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(engine);
+                pane_snapshot.border_status_text = expand_status(&format, &context, &mut hooks);
+            }
+        }
+    }
 }
 
 fn stamp_pane_border_colours(

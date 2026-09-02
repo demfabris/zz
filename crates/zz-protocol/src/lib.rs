@@ -66,8 +66,8 @@ pub use snapshot::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, BrowserProfileNameError,
     DEFAULT_BROWSER_PROFILE, EditorDescriptor, EditorDescriptorError, LayoutNode,
     MAX_BROWSER_PROFILE_NAME_BYTES, MAX_EDITOR_PATH_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
-    MuxSnapshot, PaneKindSnapshot, PaneSnapshot, SessionSnapshot, SessionViewer, WindowSnapshot,
-    normalize_browser_profile_name,
+    MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneKindSnapshot,
+    PaneSnapshot, SessionSnapshot, SessionViewer, WindowSnapshot, normalize_browser_profile_name,
 };
 pub use style::{
     StyledSegment, TmuxAlign, TmuxAttributeState, TmuxAttributes, TmuxColour, TmuxDefaultType,

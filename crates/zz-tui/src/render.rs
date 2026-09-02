@@ -1,13 +1,14 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fmt::Write as _,
     io::{self, Write as _},
 };
 
 use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
-    Axis, PaneId, PaneKindSnapshot, PopupBorderLines, StyledSegment, TmuxAttributeState,
-    TmuxColour, TmuxStyle, parse_style, parse_styled_segments,
+    PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
+    PopupBorderLines, StyledSegment, TmuxAttributeState, TmuxColour, TmuxStyle, parse_style,
+    parse_styled_segments,
 };
 use zz_terminal::{
     CellWidth, Color, CursorStyle, Glyph, KittyPlacement, PackedCell, PackedStyle, SearchDirection,
@@ -17,7 +18,10 @@ use zz_terminal::{
 use crate::{
     browser::{BROWSER_IMAGE_ID, BrowserFrameUpdate},
     kitty::{FrameTransport, KittyBridge, KittyImageData},
-    layout::{FloatingSpec, Rect, resolve_floating},
+    layout::{
+        BORDER_D, BORDER_L, BORDER_R, BORDER_U, CELL_LR, Divider, FloatingSpec, Rect, border_glyph,
+        cell_type_of, resolve_floating,
+    },
     picker, sidebar,
     state::Model,
 };
@@ -148,6 +152,7 @@ pub(crate) struct Renderer {
     browser_placements: HashMap<PaneId, KittyPlacement>,
     browser_painted: HashMap<PaneId, bool>,
     last_title: String,
+    border_chrome: Option<(PaneBorderStatus, PaneBorderLines, PaneBorderIndicators)>,
     kitty: KittyBridge,
 }
 
@@ -167,6 +172,7 @@ impl Renderer {
             browser_placements: HashMap::new(),
             browser_painted: HashMap::new(),
             last_title: String::new(),
+            border_chrome: None,
             kitty: KittyBridge::default(),
         }
     }
@@ -180,6 +186,7 @@ impl Renderer {
         self.status_geometry = None;
         self.damage.clear();
         self.browser_painted.clear();
+        self.border_chrome = None;
         self.kitty.invalidate();
     }
 
@@ -394,41 +401,49 @@ impl Renderer {
     }
 
     fn paint_workspace(&mut self, model: &Model, force: bool) {
+        let lines = model.pane_border_lines();
+        let indicators = model.pane_border_indicators();
+        let chrome = (model.pane_border_status(), lines, indicators);
+        let force = force || self.border_chrome != Some(chrome);
+        self.border_chrome = Some(chrome);
         if force {
+            let cells = divider_cells(&model.layout.dividers);
             for divider in &model.layout.dividers {
-                let fallback = if divider.highlighted {
+                let highlighted = divider.highlighted;
+                let fallback = if highlighted {
                     model.appearance.link_color
                 } else {
                     model.appearance.foreground
                 };
                 let color = divider
                     .style_pane
-                    .and_then(|pane| model.pane_border_colour(pane, divider.highlighted))
+                    .and_then(|pane| model.pane_border_colour(pane, highlighted))
                     .map_or(fallback, |colour| {
                         resolve_tmux_colour(colour, fallback, &model.appearance)
                     });
-                match divider.axis {
-                    Axis::Horizontal => {
-                        for row in
-                            divider.rect.y..divider.rect.y.saturating_add(divider.rect.height)
-                        {
-                            write_colored_text(
-                                &mut self.output,
-                                divider.rect.x,
-                                row,
-                                "│",
-                                color,
-                                model.appearance.background,
-                            );
+                let index = divider.style_pane.and_then(|pane| model.pane_index(pane));
+                for row in divider.rect.y..divider.rect.y.saturating_add(divider.rect.height) {
+                    for column in divider.rect.x..divider.rect.x.saturating_add(divider.rect.width)
+                    {
+                        let mut mask = 0;
+                        for (present, bit) in [
+                            (cells.contains(&(column.wrapping_sub(1), row)), BORDER_L),
+                            (cells.contains(&(column.saturating_add(1), row)), BORDER_R),
+                            (cells.contains(&(column, row.wrapping_sub(1))), BORDER_U),
+                            (cells.contains(&(column, row.saturating_add(1))), BORDER_D),
+                        ] {
+                            if present {
+                                mask |= bit;
+                            }
                         }
-                    }
-                    Axis::Vertical => {
-                        let line = "─".repeat(usize::from(divider.rect.width));
+                        let cell_type = cell_type_of(mask);
+                        let glyph = border_arrow(model, indicators, column, row)
+                            .map_or_else(|| border_glyph(lines, cell_type, index), str::to_owned);
                         write_colored_text(
                             &mut self.output,
-                            divider.rect.x,
-                            divider.rect.y,
-                            &line,
+                            column,
+                            row,
+                            &glyph,
                             color,
                             model.appearance.background,
                         );
@@ -443,19 +458,31 @@ impl Renderer {
                 continue;
             };
             let active = active == Some(entry.pane);
-            let header = pane_header(model, entry.pane, &pane.title);
+            let status_row = model.pane_border_status().is_on();
+            let header = if status_row {
+                pane.border_status_text.clone()
+            } else {
+                pane_header(model, entry.pane, &pane.title)
+            };
             let header_changed = self.headers.get(&entry.pane) != Some(&header);
             if force || header_changed {
-                self.paint_header_segment(
-                    entry.rect,
-                    &header,
-                    active,
-                    model.pane_border_colour(entry.pane, active),
-                    model,
-                );
+                let border = model.pane_border_colour(entry.pane, active);
+                if status_row {
+                    self.paint_border_status_row(
+                        entry.status_row(),
+                        &header,
+                        active,
+                        border,
+                        lines,
+                        model.pane_index(entry.pane),
+                        model,
+                    );
+                } else {
+                    self.paint_header_segment(entry.rect, &header, active, border, model);
+                }
                 self.headers.insert(entry.pane, header);
             }
-            let content = entry.rect.content();
+            let content = entry.content();
             let browser_live = matches!(pane.kind, PaneKindSnapshot::Browser(_))
                 && self.browser_frame_live(entry.pane);
             let browser_state_changed = if matches!(pane.kind, PaneKindSnapshot::Browser(_)) {
@@ -594,17 +621,13 @@ impl Renderer {
                     let viewport = model.viewports.get(&entry.pane)?;
                     Some((
                         entry.pane,
-                        entry.rect.content(),
+                        entry.content(),
                         viewport.kitty_placements.as_ref(),
                     ))
                 }
                 PaneKindSnapshot::Browser(_) => {
                     let placement = browser_placements.get(&entry.pane)?;
-                    Some((
-                        entry.pane,
-                        entry.rect.content(),
-                        std::slice::from_ref(placement),
-                    ))
+                    Some((entry.pane, entry.content(), std::slice::from_ref(placement)))
                 }
                 _ => None,
             }
@@ -782,6 +805,51 @@ impl Renderer {
             &line,
             color,
             model.appearance.background,
+        );
+    }
+
+    /// `window_make_pane_status` fills the row with border cells first and then
+    /// lets `format_draw` write the expanded `pane-border-format` over it,
+    /// starting two columns right of the pane's left edge (`wp->xoff + 2`).
+    fn paint_border_status_row(
+        &mut self,
+        rect: Rect,
+        expanded: &str,
+        active: bool,
+        border: Option<TmuxColour>,
+        lines: PaneBorderLines,
+        index: Option<u32>,
+        model: &Model,
+    ) {
+        if rect.height == 0 || rect.width == 0 {
+            return;
+        }
+        let fallback = if active {
+            model.appearance.link_color
+        } else {
+            model.appearance.foreground
+        };
+        let color = border.map_or(fallback, |colour| {
+            resolve_tmux_colour(colour, fallback, &model.appearance)
+        });
+        let glyph = border_glyph(lines, CELL_LR, index);
+        let lead = 2.min(rect.width);
+        let width = rect.width.saturating_sub(lead);
+        let underlay = vec![glyph.clone(); usize::from(width)];
+        let composed = zz_client::compose_status_row_over(expanded, &underlay, "");
+        let mut line = StyledLine::default();
+        for _ in 0..lead {
+            line.push_plain(&glyph);
+        }
+        line.append(&StyledLine::from_segments(composed.segments));
+        write_styled_text(
+            &mut self.output,
+            rect.x,
+            rect.y,
+            &line.truncate(usize::from(rect.width)),
+            color,
+            model.appearance.background,
+            &model.appearance,
         );
     }
 
@@ -1521,7 +1589,7 @@ impl Renderer {
             self.hide_cursor();
             return;
         };
-        self.place_viewport_cursor(pane, viewport, entry.rect.content(), model);
+        self.place_viewport_cursor(pane, viewport, entry.content(), model);
     }
 
     fn place_popup_cursor(&mut self, model: &Model) {
@@ -1684,6 +1752,64 @@ fn pane_header(model: &Model, pane: PaneId, title: &str) -> String {
             viewport.columns, viewport.rows
         )
     }
+}
+
+fn divider_cells(dividers: &[Divider]) -> BTreeSet<(u16, u16)> {
+    let mut cells = BTreeSet::new();
+    for divider in dividers {
+        for row in divider.rect.y..divider.rect.y.saturating_add(divider.rect.height) {
+            for column in divider.rect.x..divider.rect.x.saturating_add(divider.rect.width) {
+                cells.insert((column, row));
+            }
+        }
+    }
+    cells
+}
+
+/// `redraw_mark_border_arrows` marks one cell on each side of every pane, at
+/// `xoff + 1` on the rows above and below it and at `yoff + 1` on the columns
+/// left and right of it, and `redraw_draw_border_arrow` then draws an arrow
+/// there only when the active pane is one of that cell's owners, pointing at
+/// it: left owner is a left arrow, then right, then top, then bottom.
+fn border_arrow(
+    model: &Model,
+    indicators: PaneBorderIndicators,
+    column: u16,
+    row: u16,
+) -> Option<&'static str> {
+    if !indicators.arrows() {
+        return None;
+    }
+    let marked = model.layout.panes.iter().any(|entry| {
+        let rect = entry.rect;
+        let vertical = column == rect.x.saturating_add(1)
+            && ((rect.y > 0 && row == rect.y.saturating_sub(1))
+                || row == rect.y.saturating_add(rect.height));
+        let horizontal = row == rect.y.saturating_add(1)
+            && ((rect.x > 0 && column == rect.x.saturating_sub(1))
+                || column == rect.x.saturating_add(rect.width));
+        vertical || horizontal
+    });
+    if !marked {
+        return None;
+    }
+    let rect = model.pane_rect(model.active_pane()?)?.rect;
+    let within_columns =
+        column >= rect.x.saturating_sub(1) && column <= rect.x.saturating_add(rect.width);
+    let within_rows = row >= rect.y.saturating_sub(1) && row <= rect.y.saturating_add(rect.height);
+    if column == rect.x.saturating_add(rect.width) && within_rows {
+        return Some("←");
+    }
+    if rect.x > 0 && column == rect.x.saturating_sub(1) && within_rows {
+        return Some("→");
+    }
+    if row == rect.y.saturating_add(rect.height) && within_columns {
+        return Some("↑");
+    }
+    if rect.y > 0 && row == rect.y.saturating_sub(1) && within_columns {
+        return Some("↓");
+    }
+    None
 }
 
 fn placeholder_text(kind: &PaneKindSnapshot) -> (&'static str, String) {

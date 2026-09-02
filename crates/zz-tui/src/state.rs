@@ -8,8 +8,9 @@ use zz_client::ClientCore;
 use zz_daemon::{Endpoint, HostEntry};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, CommandPromptState, ConfirmState, DisplayPanesState,
-    InputMessage, MenuState, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, PopupState,
-    SessionId, SessionSnapshot, StatusLine, StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
+    InputMessage, MenuState, MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus,
+    PaneId, PaneKindSnapshot, PaneSnapshot, PopupState, SessionId, SessionSnapshot, StatusLine,
+    StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
 };
 use zz_terminal::{KeyCode, SearchQuery, TerminalAppearance, TerminalViewport};
 
@@ -737,6 +738,33 @@ impl Model {
         self.window()?.panes.get(&pane)
     }
 
+    pub fn pane_border_status(&self) -> PaneBorderStatus {
+        self.window()
+            .map_or(PaneBorderStatus::Off, |window| window.pane_border_status)
+    }
+
+    pub fn pane_border_lines(&self) -> PaneBorderLines {
+        self.window()
+            .map_or(PaneBorderLines::Single, |window| window.pane_border_lines)
+    }
+
+    pub fn pane_border_indicators(&self) -> PaneBorderIndicators {
+        self.window()
+            .map_or(PaneBorderIndicators::Colour, |window| {
+                window.pane_border_indicators
+            })
+    }
+
+    /// The pin's `window_pane_index`: the pane's position in `w->panes`.
+    pub fn pane_index(&self, pane: PaneId) -> Option<u32> {
+        let position = self
+            .window()?
+            .pane_order
+            .iter()
+            .position(|candidate| *candidate == pane)?;
+        u32::try_from(position).ok()
+    }
+
     pub fn pane_border_colour(&self, pane: PaneId, active: bool) -> Option<TmuxColour> {
         let snapshot = self.pane_snapshot(pane)?;
         if active {
@@ -821,13 +849,25 @@ impl Model {
         self.layout = self
             .window()
             .map_or_else(ResolvedLayout::default, |window| {
+                let status_at_bottom = window.pane_border_status == PaneBorderStatus::Bottom;
                 if let Some(pane) = window.zoomed_pane {
                     ResolvedLayout {
-                        panes: vec![PaneRect { pane, rect: canvas }],
+                        panes: vec![PaneRect {
+                            pane,
+                            rect: canvas,
+                            status_at_bottom,
+                        }],
                         dividers: Vec::new(),
                     }
                 } else {
-                    resolve(&window.layout, canvas, window.active_pane)
+                    resolve(
+                        &window.layout,
+                        canvas,
+                        window.active_pane,
+                        window.pane_border_status,
+                        &window.pane_z_order,
+                        window.pane_border_indicators,
+                    )
                 }
             });
     }

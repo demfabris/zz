@@ -14,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_ninety_four() {
-    assert_eq!(PROTOCOL_VERSION, 94);
+fn protocol_version_on_this_commit_is_ninety_five() {
+    assert_eq!(PROTOCOL_VERSION, 95);
 }
 
 #[test]
@@ -208,11 +208,16 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
         visible_layout_dump: "V".to_owned(),
         status_label: "S".to_owned(),
         activity: true,
+        pane_border_status: zz_protocol::PaneBorderStatus::Bottom,
+        pane_border_lines: zz_protocol::PaneBorderLines::Heavy,
+        pane_border_indicators: zz_protocol::PaneBorderIndicators::Both,
+        pane_order: vec![pane],
+        pane_z_order: vec![pane],
     };
     assert_eq!(
         postcard::to_stdvec(&window).expect("encode window"),
         [
-            1, 2, 1, b'w', 1, 3, 0, 0, 3, 0, 1, b'L', 1, b'V', 1, b'S', 1
+            1, 2, 1, b'w', 1, 3, 0, 0, 3, 0, 1, b'L', 1, b'V', 1, b'S', 1, 2, 2, 3, 1, 3, 1, 3
         ]
     );
 }
@@ -313,7 +318,7 @@ fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5E, 0x00, 0x00, 0x5E, 0x00, 0x00, 0x00, 0x00,
+            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5F, 0x00, 0x00, 0x5F, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00, 0x00, 0x07,
         ]
     );
@@ -411,6 +416,7 @@ fn pane_snapshot_carries_bell() {
         dead_status: None,
         border_colour: None,
         active_border_colour: None,
+        border_status_text: String::new(),
     };
     assert!(snapshot.bell);
 }
@@ -427,6 +433,7 @@ fn pane_snapshot_border_colours_round_trip_and_reject_invalid_rgb() {
         dead_status: None,
         border_colour: Some(TmuxColour::Rgb(0x00ff_00ff)),
         active_border_colour: Some(TmuxColour::Basic(1)),
+        border_status_text: String::new(),
     };
     let bytes = postcard::to_stdvec(&snapshot).expect("pane snapshot encodes");
     assert_eq!(

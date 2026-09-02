@@ -722,6 +722,7 @@ fn terminal_worker_options(
             allow_rename: options.allow_rename,
             erase_byte: options.erase_byte,
             verase_byte: options.verase_byte,
+            mode_keys_vi: options.mode_keys_vi,
         },
         wrap_search: options.wrap_search,
     })
@@ -8214,6 +8215,30 @@ impl Shared {
                     }
                     MuxEffect::ModeKeysChanged { window } => {
                         retarget_copy_mode_tables(&mut inner, *window);
+                        // window-copy.c reads mode-keys live in its cursor
+                        // geometry, so the panes it governs need the new value
+                        // before their next copy action.
+                        let windows = window.map_or_else(
+                            || inner.engine.state.windows.keys().copied().collect(),
+                            |window| BTreeSet::from([window]),
+                        );
+                        for pane in panes_for_windows(&inner, &windows) {
+                            let Some(terminal) = inner.terminals.get(&pane) else {
+                                continue;
+                            };
+                            let options = terminal_worker_options(
+                                &inner.engine,
+                                &inner.appearance,
+                                &inner.config_files,
+                                pane,
+                            )?;
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetEngineKnobs {
+                                    terminal: Arc::clone(terminal),
+                                    knobs: options.knobs,
+                                },
+                            );
+                        }
                     }
                     MuxEffect::ResizeWindowFromClients { window, mode } => {
                         let (columns, rows) = attached_client_window_extent(&inner, *window, *mode)

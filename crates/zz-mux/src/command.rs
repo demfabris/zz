@@ -1857,6 +1857,9 @@ pub struct TerminalWorkerOptions {
     pub scroll_on_clear: bool,
     pub erase_byte: Option<u8>,
     pub verase_byte: u8,
+    /// `mode-keys` for the pane's window; window-copy.c reads it live in the
+    /// cursor geometry, so the worker carries it as a knob.
+    pub mode_keys_vi: bool,
     /// The unexpanded `remain-on-exit-format` a retained pane draws after its
     /// child exits; empty when the pane is not retained at all.
     pub remain_on_exit_format: String,
@@ -2993,6 +2996,7 @@ impl MuxEngine {
             scroll_on_clear: pane_options.scroll_on_clear,
             erase_byte: self.backspace_byte(),
             verase_byte: self.verase_byte(),
+            mode_keys_vi: self.mode_keys_for_window(window) == ModeKeys::Vi,
             remain_on_exit_format: self.remain_on_exit_format_for_pane(pane),
             wrap_search: self.window_knobs(window).wrap_search,
             cursor_style: pane_options.cursor_style.as_str(),
@@ -30212,6 +30216,7 @@ mod tests {
                 scroll_on_clear: false,
                 erase_byte: Some(0x7f),
                 verase_byte: 0x7f,
+                mode_keys_vi: false,
                 remain_on_exit_format: concat!(
                     "Pane is dead (#{?#{!=:#{pane_dead_status},},",
                     "status #{pane_dead_status},}",

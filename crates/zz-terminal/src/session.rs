@@ -222,6 +222,10 @@ pub struct EngineKnobs {
     pub allow_rename: bool,
     pub erase_byte: Option<u8>,
     pub verase_byte: u8,
+    /// `mode-keys` resolved for the pane's window. window-copy.c reads the
+    /// option live in the cursor geometry, so it rides here rather than only
+    /// being latched when a mode opens.
+    pub mode_keys_vi: bool,
 }
 
 impl Default for EngineKnobs {
@@ -232,6 +236,7 @@ impl Default for EngineKnobs {
             allow_rename: false,
             erase_byte: Some(0x7f),
             verase_byte: 0x7f,
+            mode_keys_vi: false,
         }
     }
 }
@@ -2643,6 +2648,10 @@ struct CopyModeState {
     /// `window_copy_refresh_start` refuses to re-sync it.
     sourced: bool,
     kind: FrozenModeKind,
+    /// `data->lastcx` and `data->lastsx`: the desired column a row change keeps
+    /// and the length of the row it was taken from.
+    last_cx: u16,
+    last_sx: u16,
 }
 
 /// `window_copy_clone_screen` with `trim`: one pane's screen, its trailing
@@ -4145,6 +4154,7 @@ fn run_output_view(
     let mut writer: Box<dyn Write + Send> = Box::new(std::io::sink());
     let mut word_separators = WordSeparators::default();
     let mut wrap_search = true;
+    let mut mode_keys_vi = false;
     let mut active_views = ActiveTerminalViews::new();
     let mut inactive_views = InactiveTerminalViews::new();
     let bound_pasted_images = HashSet::new();
@@ -4336,6 +4346,7 @@ fn run_output_view(
                         &mut input_bytes,
                         &mut search_worker,
                         wrap_search,
+                        mode_keys_vi,
                         &word_separators,
                         &bound_pasted_images,
                         &mut None,
@@ -4423,13 +4434,15 @@ fn run_output_view(
                 Ok(Command::KittyImageGeneration(request)) => {
                     let _ = request.reply.send(None);
                 }
+                // The overlay has no pty, so only the copy geometry's own knob
+                // is taken off this command.
+                Ok(Command::SetEngineKnobs(next)) => mode_keys_vi = next.mode_keys_vi,
                 Ok(
                     Command::Text { .. }
                     | Command::Key { .. }
                         | Command::PastePreparedBytes { .. }
                         | Command::RawInput(_)
                         | Command::SetAllowPassthrough(_)
-                        | Command::SetEngineKnobs(_)
                         | Command::SetPendingCopySource(_)
                         | Command::WriteDeadNotice(_)
                         | Command::PendingPasteOpened { .. }
@@ -5492,6 +5505,7 @@ fn run_terminal(
                                 &mut input_bytes,
                                 &mut search_worker,
                                 wrap_search,
+                                engine_knobs.mode_keys_vi,
                                 &word_separators,
                                 pasted_image_bindings.bound_numbers(),
                                 &mut pending_copy_source,
@@ -6422,6 +6436,7 @@ fn apply_view_action(
     input_bytes: &mut Vec<u8>,
     search_worker: &mut SearchWorker,
     wrap_search: bool,
+    mode_keys_vi: bool,
     word_separators: &WordSeparators,
     bound_pasted_images: &HashSet<u32>,
     pending_copy_source: &mut Option<Box<CapturedCopySource>>,
@@ -6706,6 +6721,7 @@ fn apply_view_action(
                     action,
                     count,
                     word_separators,
+                    mode_keys_vi,
                 )?
             };
             if was_frozen && copy_mode.is_none() {
@@ -6769,6 +6785,7 @@ fn apply_view_action(
                 unseen_output,
                 action,
                 word_separators,
+                mode_keys_vi,
             )?;
             if was_frozen && copy_mode.is_none() {
                 drop_view_search(
@@ -7166,6 +7183,8 @@ fn enter_copy_mode(
         refresh: false,
         sourced,
         kind: FrozenModeKind::Copy,
+        last_cx: 0,
+        last_sx: 0,
     }));
     Ok(())
 }
@@ -8414,6 +8433,7 @@ fn apply_copy_mode_action(
     unseen_output: &mut u32,
     action: CopyModeAction,
     word_separators: &WordSeparators,
+    mode_keys_vi: bool,
 ) -> Result<ViewActionResult, WorkerError> {
     let Some(mut mode) = copy_mode.take() else {
         return Ok(ViewActionResult::None);
@@ -8461,7 +8481,7 @@ fn apply_copy_mode_action(
             if scroll_exit && copy_mode_scroll_exit_ready(&mode) {
                 return cancel_copy_mode(terminal, selection, unseen_output);
             }
-            move_copy_cursor(&mut mode, movement, word_separators);
+            move_copy_cursor(&mut mode, movement, word_separators, mode_keys_vi);
             if mode.selecting {
                 update_copy_selection(&mut mode, Some(word_separators));
             }
@@ -8491,6 +8511,7 @@ fn apply_copy_mode_action(
                 unseen_output,
                 1,
                 word_separators,
+                mode_keys_vi,
             )
         }
         scroll_exit_action @ (CopyModeAction::ScrollExitOn
@@ -8782,6 +8803,7 @@ fn apply_copy_mode_action(
                 unseen_output,
                 CopyModeAction::CopySelection(copy),
                 word_separators,
+                mode_keys_vi,
             )
         }
         CopyModeAction::CopyLine(copy) => {
@@ -8794,6 +8816,7 @@ fn apply_copy_mode_action(
                 unseen_output,
                 CopyModeAction::CopySelection(copy),
                 word_separators,
+                mode_keys_vi,
             )
         }
         CopyModeAction::SelectionMode(unit) => {
@@ -8846,6 +8869,7 @@ fn apply_counted_copy_mode_action(
     action: CopyModeAction,
     count: u32,
     word_separators: &WordSeparators,
+    mode_keys_vi: bool,
 ) -> Result<ViewActionResult, WorkerError> {
     if count == 0 {
         return Ok(ViewActionResult::None);
@@ -8863,6 +8887,7 @@ fn apply_counted_copy_mode_action(
                     unseen_output,
                     action.clone(),
                     word_separators,
+                    mode_keys_vi,
                 )?;
                 if copy_mode.is_none() {
                     break;
@@ -8878,6 +8903,7 @@ fn apply_counted_copy_mode_action(
             unseen_output,
             action,
             word_separators,
+            mode_keys_vi,
         ),
         CopyModeCountPolicy::CursorDownAndCancel => cursor_down_and_cancel(
             terminal,
@@ -8886,6 +8912,7 @@ fn apply_counted_copy_mode_action(
             unseen_output,
             count,
             word_separators,
+            mode_keys_vi,
         ),
         CopyModeCountPolicy::SelectLine => {
             let Some(mode) = copy_mode.as_mut() else {
@@ -8910,6 +8937,7 @@ fn apply_counted_copy_mode_action(
                 unseen_output,
                 CopyModeAction::CopySelection(copy),
                 word_separators,
+                mode_keys_vi,
             )
         }
         CopyModeCountPolicy::CopyLine => {
@@ -8928,6 +8956,7 @@ fn apply_counted_copy_mode_action(
                 unseen_output,
                 CopyModeAction::CopySelection(copy),
                 word_separators,
+                mode_keys_vi,
             )
         }
     }
@@ -9028,6 +9057,7 @@ fn cursor_down_and_cancel(
     unseen_output: &mut u32,
     count: u32,
     word_separators: &WordSeparators,
+    mode_keys_vi: bool,
 ) -> Result<ViewActionResult, WorkerError> {
     let Some(start) = copy_mode.as_deref().map(|mode| mode.cursor.y) else {
         return Ok(ViewActionResult::None);
@@ -9040,6 +9070,7 @@ fn cursor_down_and_cancel(
             unseen_output,
             CopyModeAction::Down,
             word_separators,
+            mode_keys_vi,
         )?;
     }
     let Some(mode) = copy_mode.as_deref() else {
@@ -9116,30 +9147,21 @@ fn move_copy_cursor(
     mode: &mut CopyModeState,
     action: &CopyModeAction,
     word_separators: &WordSeparators,
+    vi: bool,
 ) {
     let mut point = mode.cursor;
-    let columns = mode.revision.columns;
     let total = mode.revision.total_rows();
     let page = u32::from(mode.revision.viewport_rows);
     match action {
         CopyModeAction::Left => {
-            if point.x > 0 {
-                point.x -= 1;
-            } else if point.y > 0 {
-                point.y -= 1;
-                point.x = columns - 1;
-            }
+            reader_cursor_left(&mode.revision, &mut point, true);
         }
         CopyModeAction::Right => {
-            if point.x + 1 < columns {
-                point.x += 1;
-            } else if point.y + 1 < total {
-                point.y += 1;
-                point.x = 0;
-            }
+            let all = mode.selection.is_some() && mode.rectangle;
+            reader_cursor_right(&mode.revision, &mut point, true, all, !vi);
         }
-        CopyModeAction::Up => point.y = point.y.saturating_sub(1),
-        CopyModeAction::Down => point.y = point.y.saturating_add(1).min(total - 1),
+        CopyModeAction::Up => move_copy_cursor_row(mode, &mut point, false, vi),
+        CopyModeAction::Down => move_copy_cursor_row(mode, &mut point, true, vi),
         CopyModeAction::PageUp => point.y = point.y.saturating_sub(page),
         CopyModeAction::PageDown | CopyModeAction::PageDownScrollExit => {
             point.y = point.y.saturating_add(page).min(total - 1);
@@ -9181,19 +9203,28 @@ fn move_copy_cursor(
                 .saturating_add(page.saturating_sub(1))
                 .min(total - 1);
         }
-        CopyModeAction::StartOfLine => point.x = 0,
+        CopyModeAction::StartOfLine => {
+            point.y = reader_logical_line_start(&mode.revision, point.y);
+            point.x = 0;
+        }
         CopyModeAction::BackToIndentation => {
+            point.y = reader_logical_line_start(&mode.revision, point.y);
             point.x = revision_first_non_whitespace(&mode.revision, point.y);
         }
         CopyModeAction::EndOfLine => {
-            point.x = revision_copy_line_end(&mode.revision, point.y);
+            point.y = reader_logical_line_end(&mode.revision, point.y);
+            point.x = revision_line_length(&mode.revision, point.y);
+        }
+        CopyModeAction::NextWordEnd => {
+            point = move_revision_word_end(&mode.revision, point, Some(word_separators), vi);
+        }
+        CopyModeAction::NextSpaceEnd => {
+            point = move_revision_word_end(&mode.revision, point, None, vi);
         }
         CopyModeAction::NextWord
         | CopyModeAction::PreviousWord
-        | CopyModeAction::NextWordEnd
         | CopyModeAction::NextSpace
-        | CopyModeAction::PreviousSpace
-        | CopyModeAction::NextSpaceEnd => {
+        | CopyModeAction::PreviousSpace => {
             point = move_revision_word(&mode.revision, point, action, word_separators);
         }
         CopyModeAction::PreviousMatchingBracket => {
@@ -9233,7 +9264,7 @@ fn move_copy_cursor(
         }
         _ => return,
     }
-    mode.cursor = mode.revision.clamp_point(point);
+    place_copy_cursor(mode, point, vi);
     reveal_copy_cursor(mode);
 }
 
@@ -9278,6 +9309,259 @@ fn revision_copy_line_end(revision: &ModeRevision, row: u32) -> u16 {
         }
     }
     0
+}
+
+/// `grid_line_length`: the used width of a row, trailing blanks trimmed, so an
+/// empty row answers zero and a full one answers the column count.
+fn revision_line_length(revision: &ModeRevision, row: u32) -> u16 {
+    for column in (0..revision.columns).rev() {
+        if !revision_cell_is_whitespace(revision, PointCoordinate { x: column, y: row }) {
+            return column.saturating_add(1);
+        }
+    }
+    0
+}
+
+/// `window_copy_cursor_limit`: the rightmost column the copy cursor may hold on
+/// one row. emacs parks one past the last cell, vi stops on it, and a
+/// rectangle selection is allowed the emacs answer whatever the keys say.
+fn copy_cursor_limit(revision: &ModeRevision, row: u32, vi: bool, allow_onemore: bool) -> u16 {
+    let length = revision_line_length(revision, row);
+    if allow_onemore || !vi {
+        length
+    } else {
+        length.saturating_sub(1)
+    }
+}
+
+/// `window_copy_update_cursor` clamps every placement to that limit, and skips
+/// the clamp outright while a rectangle is being dragged so the cursor can
+/// stand past the line the way `virtualedit=block` does.
+fn copy_cursor_clamp(mode: &CopyModeState, point: PointCoordinate, vi: bool) -> PointCoordinate {
+    let y = point.y.min(mode.revision.total_rows().saturating_sub(1));
+    if mode.rectangle {
+        return PointCoordinate {
+            x: point.x.min(mode.revision.columns),
+            y,
+        };
+    }
+    PointCoordinate {
+        x: point.x.min(copy_cursor_limit(&mode.revision, y, vi, false)),
+        y,
+    }
+}
+
+fn place_copy_cursor(mode: &mut CopyModeState, point: PointCoordinate, vi: bool) {
+    mode.cursor = copy_cursor_clamp(mode, point, vi);
+}
+
+fn revision_cell_is_padding(revision: &ModeRevision, point: PointCoordinate) -> bool {
+    matches!(
+        revision.cell(point).width(),
+        CellWidth::SpacerTail | CellWidth::SpacerHead
+    )
+}
+
+/// `grid_reader_cursor_right` with wrapping: the row's own limit decides where
+/// the cursor stops, and reaching it walks onto the start of the next row
+/// rather than into the blanks past the text.
+fn reader_cursor_right(
+    revision: &ModeRevision,
+    point: &mut PointCoordinate,
+    wrap: bool,
+    all: bool,
+    onemore: bool,
+) {
+    let limit = if all {
+        revision.columns
+    } else {
+        copy_cursor_limit(revision, point.y, !onemore, false)
+    };
+    if wrap && point.x >= limit && point.y.saturating_add(1) < revision.total_rows() {
+        point.x = 0;
+        point.y += 1;
+    } else if point.x < limit {
+        point.x += 1;
+        while point.x < limit && revision_cell_is_padding(revision, *point) {
+            point.x += 1;
+        }
+    }
+}
+
+/// `grid_reader_cursor_left` with wrapping: column zero steps onto the end of
+/// the row above, which `window_copy_update_cursor` then clamps.
+fn reader_cursor_left(revision: &ModeRevision, point: &mut PointCoordinate, wrap: bool) {
+    while point.x > 0 && revision_cell_is_padding(revision, *point) {
+        point.x -= 1;
+    }
+    if point.x == 0 && point.y > 0 && (wrap || revision.row(point.y - 1).wrapped()) {
+        point.y -= 1;
+        while point.x > 0 && revision_cell_is_padding(revision, *point) {
+            point.x -= 1;
+        }
+        point.x = revision_line_length(revision, point.y);
+    } else if point.x > 0 {
+        point.x -= 1;
+    }
+}
+
+/// `grid_reader_cursor_end_of_line(gr, 1, 0)`: a wrapped row belongs to the row
+/// below it, so the walk ends on the last row of the logical line.
+fn reader_logical_line_end(revision: &ModeRevision, row: u32) -> u32 {
+    let mut row = row;
+    let last = revision.total_rows().saturating_sub(1);
+    while row < last && revision.row(row).wrapped() {
+        row += 1;
+    }
+    row
+}
+
+/// `grid_reader_cursor_start_of_line(gr, 1)`: the mirror walk, up through the
+/// rows a wrap continued onto.
+fn reader_logical_line_start(revision: &ModeRevision, row: u32) -> u32 {
+    let mut row = row;
+    while row > 0 && revision.row(row - 1).wrapped() {
+        row -= 1;
+    }
+    row
+}
+
+/// `grid_reader_handle_wrap`: keep the cursor inside the row's own bounds,
+/// stepping onto the next row when it runs past them, and answer false when
+/// there is no next row. A wrapped row bounds at the last column rather than at
+/// its used width, which is what keeps a wrapped word whole.
+fn reader_handle_wrap(
+    revision: &ModeRevision,
+    point: &mut PointCoordinate,
+    bound: &mut u16,
+    last_row: u32,
+) -> bool {
+    while point.x > *bound {
+        if point.y >= last_row {
+            return false;
+        }
+        point.x = 0;
+        point.y += 1;
+        *bound = reader_row_bound(revision, point.y);
+    }
+    true
+}
+
+fn reader_row_bound(revision: &ModeRevision, row: u32) -> u16 {
+    if revision.row(row).wrapped() {
+        revision.columns.saturating_sub(1)
+    } else {
+        revision_line_length(revision, row)
+    }
+}
+
+/// `grid_reader_cursor_next_word_end`: whitespace is stepped over one cell at a
+/// time, a run of separators counts as a word, and anything else runs to the
+/// first separator or blank. The cursor lands one past the word, which is the
+/// emacs answer; vi's wrapper pulls it back.
+fn reader_next_word_end(
+    revision: &ModeRevision,
+    point: &mut PointCoordinate,
+    separators: Option<&WordSeparators>,
+) {
+    let last_row = revision.total_rows().saturating_sub(1);
+    let mut bound = reader_row_bound(revision, point.y);
+    let is_blank = |point: PointCoordinate| revision_cell_is_whitespace(revision, point);
+    let is_separator = |point: PointCoordinate| {
+        separators.is_some_and(|separators| {
+            revision
+                .first_char(point)
+                .is_some_and(|character| separators.contains_separator(character))
+        })
+    };
+    while reader_handle_wrap(revision, point, &mut bound, last_row) {
+        if is_blank(*point) {
+            let Some(next) = point.x.checked_add(1) else {
+                return;
+            };
+            point.x = next;
+        } else if is_separator(*point) {
+            loop {
+                let Some(next) = point.x.checked_add(1) else {
+                    return;
+                };
+                point.x = next;
+                if !(reader_handle_wrap(revision, point, &mut bound, last_row)
+                    && is_separator(*point)
+                    && !is_blank(*point))
+                {
+                    return;
+                }
+            }
+        } else {
+            loop {
+                let Some(next) = point.x.checked_add(1) else {
+                    return;
+                };
+                point.x = next;
+                if !(reader_handle_wrap(revision, point, &mut bound, last_row)
+                    && !(is_blank(*point) || is_separator(*point)))
+                {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// `window_copy_cursor_next_word_end`: emacs takes the reader's answer, and vi
+/// steps off the current cell first and pulls the cursor back onto the last
+/// cell of the word afterwards.
+fn move_revision_word_end(
+    revision: &ModeRevision,
+    mut point: PointCoordinate,
+    separators: Option<&WordSeparators>,
+    vi: bool,
+) -> PointCoordinate {
+    if vi {
+        if !revision_cell_is_whitespace(revision, point) {
+            reader_cursor_right(revision, &mut point, false, false, false);
+        }
+        reader_next_word_end(revision, &mut point, separators);
+        reader_cursor_left(revision, &mut point, true);
+    } else {
+        reader_next_word_end(revision, &mut point, separators);
+    }
+    point
+}
+
+/// `window_copy_cursor_up` and `window_copy_cursor_down` share one desired
+/// column: the column the cursor last held on a row it did not fill, kept with
+/// that row's own length. On the new row the desired column is clamped to the
+/// row's limit and then pushed to the line end whenever it had reached the
+/// remembered one.
+fn move_copy_cursor_row(
+    mode: &mut CopyModeState,
+    point: &mut PointCoordinate,
+    down: bool,
+    vi: bool,
+) {
+    let rectangle_selection = mode.selection.is_some() && mode.rectangle;
+    let length = revision_line_length(&mode.revision, point.y);
+    if !rectangle_selection && point.x != length {
+        mode.last_cx = point.x;
+        mode.last_sx = length;
+    }
+    let total = mode.revision.total_rows();
+    point.y = if down {
+        point.y.saturating_add(1).min(total.saturating_sub(1))
+    } else {
+        point.y.saturating_sub(1)
+    };
+    if rectangle_selection {
+        return;
+    }
+    point.x = mode.last_cx;
+    *point = copy_cursor_clamp(mode, *point, vi);
+    let end = revision_line_length(&mode.revision, point.y);
+    if (point.x >= mode.last_sx && point.x != end) || point.x > end {
+        point.x = end;
+    }
 }
 
 fn revision_matching_bracket(
@@ -11701,7 +11985,16 @@ fn publish_active_views<'alloc: 'callbacks, 'callbacks>(
 /// stores in `selx`, `sely`, `endselx` and `endsely` are absolute grid rows,
 /// which is what the retained revision already indexes by.
 fn copy_mode_facts(mode: &CopyModeState, word_separators: &WordSeparators) -> CopyModeFacts {
-    let cursor = mode.revision.clamp_point(mode.cursor);
+    // `data->cx` is reported as it stands: emacs parks it one past the last
+    // cell, which on a filled row is the column count itself, so the row clamp
+    // here would answer one short.
+    let cursor = PointCoordinate {
+        x: mode.cursor.x,
+        y: mode
+            .cursor
+            .y
+            .min(mode.revision.total_rows().saturating_sub(1)),
+    };
     CopyModeFacts {
         view_mode: mode.kind == FrozenModeKind::View,
         cursor_x: u32::from(cursor.x),
@@ -12946,6 +13239,7 @@ mod tests {
             &mut unseen_output,
             action,
             &WordSeparators::default(),
+            false,
         )
         .expect("copy mode action");
         assert!(matches!(result, ViewActionResult::Snapshot));
@@ -16060,23 +16354,56 @@ mod tests {
             .expect("fixture row");
 
         mode.cursor = PointCoordinate { x: 0, y: row };
-        move_copy_cursor(mode, &CopyModeAction::NextWord, &WordSeparators::default());
+        move_copy_cursor(
+            mode,
+            &CopyModeAction::NextWord,
+            &WordSeparators::default(),
+            false,
+        );
         assert_eq!(mode.cursor.x, 3, "separator run is its own word");
-        move_copy_cursor(mode, &CopyModeAction::NextWord, &WordSeparators::default());
+        move_copy_cursor(
+            mode,
+            &CopyModeAction::NextWord,
+            &WordSeparators::default(),
+            false,
+        );
         assert_eq!(mode.cursor.x, 5, "next word follows the separator run");
 
         mode.cursor = PointCoordinate { x: 0, y: row };
-        move_copy_cursor(mode, &CopyModeAction::NextWord, &WordSeparators::new(""));
+        move_copy_cursor(
+            mode,
+            &CopyModeAction::NextWord,
+            &WordSeparators::new(""),
+            false,
+        );
         assert_eq!(mode.cursor.x, 9, "empty separators stop only at whitespace");
 
+        // `next-space-end` is window_copy_cursor_next_word_end with empty
+        // separators, so it carries that function's mode-keys branch: emacs
+        // takes the reader's landing one past the word, vi is pulled back onto
+        // its last cell.
         mode.cursor = PointCoordinate { x: 0, y: row };
         move_copy_cursor(
             mode,
             &CopyModeAction::NextSpaceEnd,
             &WordSeparators::default(),
+            false,
         );
-        assert_eq!(mode.cursor.x, 7, "E treats punctuation as part of the word");
-        move_copy_cursor(mode, &CopyModeAction::NextSpace, &WordSeparators::default());
+        assert_eq!(mode.cursor.x, 8, "E treats punctuation as part of the word");
+        mode.cursor = PointCoordinate { x: 0, y: row };
+        move_copy_cursor(
+            mode,
+            &CopyModeAction::NextSpaceEnd,
+            &WordSeparators::default(),
+            true,
+        );
+        assert_eq!(mode.cursor.x, 7, "vi stops on the word's last cell");
+        move_copy_cursor(
+            mode,
+            &CopyModeAction::NextSpace,
+            &WordSeparators::default(),
+            false,
+        );
         assert_eq!(
             mode.cursor.x, 9,
             "W advances to the next whitespace-delimited word"
@@ -16085,6 +16412,7 @@ mod tests {
             mode,
             &CopyModeAction::PreviousSpace,
             &WordSeparators::default(),
+            false,
         );
         assert_eq!(
             mode.cursor.x, 0,
@@ -16122,12 +16450,14 @@ mod tests {
             mode,
             &CopyModeAction::NextMatchingBracket,
             &WordSeparators::default(),
+            false,
         );
         assert_eq!(mode.cursor, PointCoordinate { x: 19, y: row });
         move_copy_cursor(
             mode,
             &CopyModeAction::NextMatchingBracket,
             &WordSeparators::default(),
+            false,
         );
         assert_eq!(mode.cursor, PointCoordinate { x: 13, y: row });
     }
@@ -16184,6 +16514,7 @@ mod tests {
             CopyModeAction::OtherEnd,
             2,
             &separators,
+            false,
         )
         .expect("even other-end");
         let mode = copy_mode.as_ref().expect("mode");
@@ -16200,6 +16531,7 @@ mod tests {
             CopyModeAction::OtherEnd,
             3,
             &separators,
+            false,
         )
         .expect("odd other-end");
         let mode = copy_mode.as_ref().expect("mode");
@@ -16217,6 +16549,7 @@ mod tests {
             CopyModeAction::NextMatchingBracket,
             2,
             &separators,
+            false,
         )
         .expect("two bracket transitions");
         assert_eq!(
@@ -16231,6 +16564,7 @@ mod tests {
             CopyModeAction::NextMatchingBracket,
             3,
             &separators,
+            false,
         )
         .expect("three bracket transitions");
         assert_eq!(
@@ -16247,6 +16581,7 @@ mod tests {
             CopyModeAction::SelectLine,
             3,
             &separators,
+            false,
         )
         .expect("three-line selection");
         let mode = copy_mode.as_ref().expect("mode");
@@ -16288,6 +16623,7 @@ mod tests {
             CopyModeAction::ToggleRectangle,
             2,
             &separators,
+            false,
         )
         .expect("toggle once");
         assert!(copy_mode.as_ref().expect("mode").rectangle);
@@ -16300,6 +16636,7 @@ mod tests {
             CopyModeAction::StartSelection,
             2,
             &separators,
+            false,
         )
         .expect("selection once");
         assert!(copy_mode.as_ref().expect("mode").selection.is_some());
@@ -16319,6 +16656,7 @@ mod tests {
             }),
             2,
             &separators,
+            false,
         )
         .expect("copy once");
         assert!(matches!(
@@ -16344,6 +16682,7 @@ mod tests {
             CopyModeAction::Cancel,
             2,
             &separators,
+            false,
         )
         .expect("cancel once");
         assert!(copy_mode.is_none());
@@ -16518,7 +16857,7 @@ mod tests {
         )
         .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
-        move_copy_cursor(mode, &CopyModeAction::Up, &WordSeparators::default());
+        move_copy_cursor(mode, &CopyModeAction::Up, &WordSeparators::default(), false);
         let point = mode.cursor;
         assert!(point.y < u32::try_from(terminal.total_rows().expect("rows")).unwrap());
     }
@@ -16559,7 +16898,7 @@ mod tests {
             ),
         ] {
             mode.cursor = PointCoordinate { x: 6, y: viewport };
-            move_copy_cursor(mode, &action, &WordSeparators::default());
+            move_copy_cursor(mode, &action, &WordSeparators::default(), false);
             assert_eq!(mode.cursor, PointCoordinate { x: 0, y }, "{action:?}");
             assert_eq!(mode.viewport_offset, viewport, "{action:?}");
         }
@@ -16953,6 +17292,7 @@ mod tests {
                 cancel: false,
             }),
             &WordSeparators::default(),
+            false,
         )
         .expect("copy");
         let ViewActionResult::Copy(copy) = result else {
@@ -16980,6 +17320,7 @@ mod tests {
                 cancel: false,
             }),
             &WordSeparators::default(),
+            false,
         )
         .expect("copy to end of line");
         assert!(matches!(
@@ -17036,6 +17377,7 @@ mod tests {
             }),
             3,
             &WordSeparators::default(),
+            false,
         )
         .expect("counted copy to end of line");
 
@@ -17100,6 +17442,7 @@ mod tests {
                 cancel: false,
             }),
             &word_separators,
+            false,
         )
         .expect("copy without clear");
         assert!(matches!(
@@ -17127,6 +17470,7 @@ mod tests {
                 cancel: false,
             }),
             &word_separators,
+            false,
         )
         .expect("copy and clear");
         assert!(matches!(
@@ -17156,6 +17500,7 @@ mod tests {
                 cancel: true,
             }),
             &word_separators,
+            false,
         )
         .expect("append and cancel");
         assert!(matches!(
@@ -17225,6 +17570,7 @@ mod tests {
             &mut unseen_output,
             CopyModeAction::SetMark,
             &word_separators,
+            false,
         )
         .expect("set mark");
         copy_mode.as_mut().expect("mode").cursor = PointCoordinate { x: 0, y: one };
@@ -17235,6 +17581,7 @@ mod tests {
             &mut unseen_output,
             CopyModeAction::JumpToMark,
             &word_separators,
+            false,
         )
         .expect("jump to mark");
         assert_eq!(
@@ -17245,12 +17592,27 @@ mod tests {
         {
             let mode = copy_mode.as_mut().expect("mode");
             mode.cursor = PointCoordinate { x: 0, y: one };
-            move_copy_cursor(mode, &CopyModeAction::BackToIndentation, &word_separators);
+            move_copy_cursor(
+                mode,
+                &CopyModeAction::BackToIndentation,
+                &word_separators,
+                false,
+            );
             assert_eq!(mode.cursor.x, 2);
             mode.cursor = PointCoordinate { x: 0, y: two };
-            move_copy_cursor(mode, &CopyModeAction::NextParagraph, &word_separators);
+            move_copy_cursor(
+                mode,
+                &CopyModeAction::NextParagraph,
+                &word_separators,
+                false,
+            );
             assert_eq!(mode.cursor.y, four);
-            move_copy_cursor(mode, &CopyModeAction::PreviousParagraph, &word_separators);
+            move_copy_cursor(
+                mode,
+                &CopyModeAction::PreviousParagraph,
+                &word_separators,
+                false,
+            );
             assert_eq!(mode.cursor.y, two);
             mode.cursor = PointCoordinate { x: 3, y: one };
         }
@@ -17262,6 +17624,7 @@ mod tests {
             &mut unseen_output,
             CopyModeAction::SelectWord,
             &word_separators,
+            false,
         )
         .expect("select word");
         let selection = copy_mode
@@ -17279,6 +17642,7 @@ mod tests {
             &mut unseen_output,
             CopyModeAction::OtherEnd,
             &word_separators,
+            false,
         )
         .expect("switch active end");
         assert_eq!(copy_mode.as_ref().expect("mode").cursor.x, 2);
@@ -17290,6 +17654,7 @@ mod tests {
             &mut unseen_output,
             CopyModeAction::ClearSelection,
             &word_separators,
+            false,
         )
         .expect("clear selection");
         apply_copy_mode_action(
@@ -17299,6 +17664,7 @@ mod tests {
             &mut unseen_output,
             CopyModeAction::ToggleRectangle,
             &word_separators,
+            false,
         )
         .expect("enable rectangle before selection");
         apply_copy_mode_action(
@@ -17308,6 +17674,7 @@ mod tests {
             &mut unseen_output,
             CopyModeAction::StartSelection,
             &word_separators,
+            false,
         )
         .expect("start rectangle selection");
         assert!(
@@ -17331,6 +17698,7 @@ mod tests {
                 to: false,
             }),
             &word_separators,
+            false,
         )
         .expect("jump forward");
         assert_eq!(copy_mode.as_ref().expect("mode").cursor.x, 3);
@@ -17341,6 +17709,7 @@ mod tests {
             &mut unseen_output,
             CopyModeAction::RepeatJump { reverse: false },
             &word_separators,
+            false,
         )
         .expect("repeat jump");
         assert_eq!(copy_mode.as_ref().expect("mode").cursor.x, 4);
@@ -17351,6 +17720,7 @@ mod tests {
             &mut unseen_output,
             CopyModeAction::RepeatJump { reverse: true },
             &word_separators,
+            false,
         )
         .expect("reverse jump");
         assert_eq!(copy_mode.as_ref().expect("mode").cursor.x, 3);
@@ -17396,6 +17766,7 @@ mod tests {
             copy_mode.as_mut().expect("copy mode"),
             &CopyModeAction::Up,
             &WordSeparators::default(),
+            false,
         );
         let moved_point = copy_mode.as_ref().expect("copy mode").cursor;
         assert_ne!(moved_point, initial_point);
@@ -19435,6 +19806,7 @@ mod tests {
                 &mut unseen_output,
                 action.clone(),
                 &WordSeparators::default(),
+                false,
             )
             .expect("copy action");
         }
@@ -19740,6 +20112,7 @@ mod tests {
             action,
             count,
             &WordSeparators::default(),
+            false,
         )
         .expect("counted copy action");
         copy_mode
@@ -19803,6 +20176,7 @@ mod tests {
                 &mut unseen_output,
                 action,
                 &WordSeparators::default(),
+                false,
             )
             .expect("copy action");
         }
@@ -19880,16 +20254,17 @@ mod tests {
         .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
         let viewport = mode.viewport_offset;
-        mode.cursor = PointCoordinate { x: 7, y: viewport };
+        mode.cursor = PointCoordinate { x: 1, y: viewport };
         move_copy_cursor(
             mode,
             &CopyModeAction::CursorCentreVertical,
             &WordSeparators::default(),
+            false,
         );
         assert_eq!(
             mode.cursor,
             PointCoordinate {
-                x: 7,
+                x: 1,
                 y: viewport + 2,
             }
         );
@@ -19898,6 +20273,24 @@ mod tests {
             mode,
             &CopyModeAction::CursorCentreHorizontal,
             &WordSeparators::default(),
+            false,
+        );
+        assert_eq!(
+            mode.cursor,
+            PointCoordinate {
+                x: 4,
+                y: viewport + 2,
+            }
+        );
+        // Both commands place through window_copy_update_cursor, so a column
+        // past the row it lands on is clamped to that row's own limit; the
+        // fourth row holds `four`.
+        mode.cursor = PointCoordinate { x: 7, y: viewport };
+        move_copy_cursor(
+            mode,
+            &CopyModeAction::CursorCentreVertical,
+            &WordSeparators::default(),
+            false,
         );
         assert_eq!(
             mode.cursor,
@@ -19952,6 +20345,7 @@ mod tests {
                 &mut unseen_output,
                 action.clone(),
                 &WordSeparators::default(),
+                false,
             )
             .expect("copy action");
             let mode = copy_mode.as_ref().expect("mode");
@@ -20010,6 +20404,7 @@ mod tests {
                 unseen_output,
                 CopyModeAction::GotoLine(line),
                 &WordSeparators::default(),
+                false,
             )
             .expect("goto-line");
         };
@@ -20087,6 +20482,7 @@ mod tests {
                 &mut unseen_output,
                 action.clone(),
                 &WordSeparators::default(),
+                false,
             )
             .expect("copy action");
             let mode = copy_mode.as_ref().expect("mode");
@@ -20158,6 +20554,7 @@ mod tests {
                 &mut unseen_output,
                 CopyModeAction::RecentreTopBottom,
                 &WordSeparators::default(),
+                false,
             )
             .expect("recentre");
             let mode = copy_mode.as_ref().expect("mode");

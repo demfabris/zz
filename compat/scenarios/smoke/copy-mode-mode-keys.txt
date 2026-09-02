@@ -1,0 +1,13 @@
+corpus: none
+# The copy cursor's per-line geometry and the mode-keys branches that steer it.
+# window_copy_update_cursor clamps every placement to the row's own limit, which
+# is the last cell under vi and one past it under emacs; cursor-left and
+# cursor-right read that limit and wrap on it; cursor-up and cursor-down keep a
+# desired column against it; and next-word-end lands one past the word under
+# emacs while vi is pulled back onto it. A wrapped row belongs to the row below,
+# so the reader treats the pair as one logical line.
+stage: fixtures/copy-mode-mode-keys.sh ~/copy-mode-mode-keys.sh
+stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+out: set-environment -gu COPY_MODE_MODE_KEYS
+run-shell 'sh ~/copy-mode-mode-keys.sh'
+out: show-environment -g COPY_MODE_MODE_KEYS

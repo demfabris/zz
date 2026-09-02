@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 5 INTEGRATED (TERMINAL BEHAVIOR + PANE CHROME BASKETS AND SEND-KEYS -R, PANE SELECTION STATE + EXACT TARGET PREFIX + SPLIT RETENTION, CONTROL TILDE ENVIRONMENT + CLIENT CWD BYTES + PROTOCOL V92); CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **CYCLE 6 INTEGRATED (SEND-KEYS -c/-H BYTES + COPY-MODE MODE ERRORS, UNFORGEABLE ALIAS GROUP + COMMAND-PROMPT CHAINS + EDITOR-DERIVED STATUS-KEYS, CHOOSER -F/-h/-k/-y + PANE-COLOURS + LIVE MENU/POPUP RESTYLE, PROTOCOL V93); CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **36 UNRESOLVED GROUPS (27 OPEN + 9 BLOCKED = 36)**
+> Live work: **35 UNRESOLVED GROUPS (26 OPEN + 9 BLOCKED = 35)**
 >
-> Ledger settlement: **83.4% (181 of 217 known groups: 100 x (142 CLOSED + 39 ACCEPTED) / (142 CLOSED + 75 LIVE)); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **83.9% (182 of 217 known groups: 100 x (143 CLOSED + 39 ACCEPTED) / (143 CLOSED + 74 LIVE)); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **154 SCENARIOS, 2,361 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
+> Exit evidence: **167 SCENARIOS, 2,402 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 6 IN FLIGHT, PAUSED 2026-09-02 FOR A MACHINE MOVE; CONTINUE FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) WITH `opus-compat-run-6-continue.js`**
+> Orchestration: **CYCLE 6 INTEGRATED 2026-09-02 ON THE MACBOOK; THE NEXT CYCLE STARTS FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,23 +76,23 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | `origin/main` at `9cab1fa4` (cycle-5 daemon merge) plus this ledger recompute |
+| Published branch | `origin/main` at `0d727e36` (cycle-6 client merge) plus this ledger recompute |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Cycle 5 of the orchestrated Opus/Fable loop: terminal behavior and pane chrome option baskets settled plus `send-keys -R` (`8c1da05e`), pane selection state, the exact-match target prefix scoped by slot, and `split-window -k`/`-m` (`887a372e`), Control tilde parsing against the daemon environment and a byte-preserving client cwd with protocol v92 (`9cab1fa4`) |
-| Orchestration | Cycle 6 launched 2026-09-01 on the Ubuntu box and paused after 80 minutes for a machine move: the keys and daemon lane branches are pushed and reported, the client lane is snapshotted on its wip branch. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table and the machine-independent continuation script `opus-compat-run-6-continue.js`; the cycle-6 lock fronts are READY on the board |
+| Delivery | Cycle 6 of the orchestrated Opus/Fable loop: `send-keys -c` target-client selection with the read-only guard following it, `-H` raw bytes above 0x7f, and the pin's `not in a mode` errors (`b1c80f66`); an unforgeable alias group, command-prompt chains, labels and pass order, `command-prompt -l`, and editor-derived `status-keys` (`0201a5e9`); chooser `-F`/`-h`/`-k`/`-y`, `pane-colours`, menu action context and queue ordering, and live menu and popup restyle with protocol v93 (`0d727e36`) |
+| Orchestration | Cycle 6 launched 2026-09-01 on the Ubuntu box, paused for a machine move, and finished 2026-09-02 on the macbook through `opus-compat-run-6-continue.js`: three Opus lanes, one Fable reviewer per lane, one Fable gate. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; the cycle-6 lock fronts are INTEGRATED and released on the board |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
-| Agreed-scope meter | 65.8% (200 of 304 items frozen on 2026-08-31), 30 of 65 groups done; `python3 compat/progress.py` |
-| Completed fixed cohort | Cycle 5: 3 of 3 lanes integrated, agreed-scope meter 54.9% to 65.8%, unresolved groups 41 to 36 |
-| Previous completed cohort | Cycle 4: 3 of 3 lanes integrated, agreed-scope meter 46.1% to 54.9% |
-| Campaign point | `send-keys -R` composes the pin's reset from VT bytes; select-pane carries the pin's mark, input, and style controls and the four marked formats; the exact-match prefix is scoped by slot; `split-window -k`/`-m` retain exited panes; Control tildes resolve against the daemon environment and the client cwd crosses the wire as bytes; the biggest remaining baskets are the parked terminal engine knobs and pane border chrome, pane focus hooks, prompt fidelity, and choosers |
-| Live registry | 75 active groups, 527 active items, 142 closed records |
-| Active status | 27 open, 9 blocked, 39 accepted |
+| Agreed-scope meter | 71.7% (218 of 304 items frozen on 2026-08-31), 31 of 65 groups done; `python3 compat/progress.py` |
+| Completed fixed cohort | Cycle 6: 3 of 3 lanes integrated, agreed-scope meter 65.8% to 71.7%, unresolved groups 36 to 35 |
+| Previous completed cohort | Cycle 5: 3 of 3 lanes integrated, agreed-scope meter 54.9% to 65.8% |
+| Campaign point | `send-keys -c` selects the pin's target client and the read-only guard follows it on the CLI and in bound-key chains; `-H` lands raw bytes; `send-keys -X` answers the pin's `not in a mode`; the alias group cannot be forged by a parser; command-prompt walks chains, labels and pass order like the pin and derives `status-keys` from the editor; choosers carry `-F`/`-h`/`-k`/`-y`, `pane-colours` reaches the cells, and a live menu or popup repaints when its style option moves; the biggest remaining baskets are the parked terminal engine knobs and pane border chrome, pane focus hooks, `send-keys -K`, prompt `-t` routing, and the chooser key vocabulary |
+| Live registry | 74 active groups, 508 active items, 143 closed records |
+| Active status | 26 open, 9 blocked, 39 accepted |
 | Known differentials | 3 registered cases: two geometry, one geometry plus output |
 
-Cycles 2 through 5 reached `origin/main` through the board's MAIN lock; cycle 5 ends at the
-ledger recompute that follows `9cab1fa4`. Resolve the commit containing the latest tracker update with
+Cycles 2 through 6 reached `origin/main` through the board's MAIN lock; cycle 6 ends at the
+ledger recompute that follows `0d727e36`. Resolve the commit containing the latest tracker update with
 `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -106,15 +106,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 5: 3 of 3 lanes integrated |
-| Previous completed cohort | Cycle 4: 3 of 3 lanes integrated |
-| New residual groups | Since the 2026-08-31 freeze: 3 items across 3 groups, tracked outside the agreed-scope meter |
-| Unresolved movement | Cycle 5: 41 at launch, 36 at close |
-| Live unresolved | 27 open + 9 blocked = 36 |
+| Completed fixed cohort | Cycle 6: 3 of 3 lanes integrated |
+| Previous completed cohort | Cycle 5: 3 of 3 lanes integrated |
+| New residual groups | Since the 2026-08-31 freeze: 2 items across 2 groups, tracked outside the agreed-scope meter |
+| Unresolved movement | Cycle 6: 36 at launch, 35 at close |
+| Live unresolved | 26 open + 9 blocked = 35 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 154 scenarios, 2,361 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
-| Differential SHA-256 | `a13fe7ad9f3fc5c1e60ae9b2b905fdaa37db1aaa45db846723025ca538db532a` |
-| Ledger settlement | 181 of 217 known groups = 83.4% |
+| Latest differential | 167 scenarios, 2,402 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
+| Differential SHA-256 | `878c2299436a3f6dbffd1cb1947cd5d72750d5fea51662087e60dea8dd58d7b6` |
+| Ledger settlement | 182 of 217 known groups = 83.9% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -128,7 +128,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(142 + 39) / (142 + 75) = 181 / 217 = 83.4%
+(143 + 39) / (143 + 74) = 182 / 217 = 83.9%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -174,6 +174,17 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-02 cycle-6 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `b1c80f66` (send-keys `-c` target client with the read-only guard following it on the CLI and in bound-key chains, `-H` raw bytes, copy-mode `not in a mode` errors, protocol v93 `KeyToken::Raw`), `0201a5e9` (unforgeable alias group with `CommandInvocation.expanded_alias_group`, command-prompt chains, labels, pass order and `-l`, editor-derived `status-keys`; the client-resized context close reverted and re-scoped), `0d727e36` (chooser `-F`/`-h`/`-k`/`-y` with `ChooseTreeItem.text`/`ChooseBufferItem.text`, `pane-colours`, menu action context and queue ordering, live menu and popup restyle) |
+| Review stage | One Fable reviewer per lane; every close verified against the pin; seven confirmed defects, all acted on by the gate with the reviewer's probe re-run: bound-key send-keys chains preflighted the invoker instead of the `-c` client (fixed, scenario drives the bindings from a read-only pty client); the client-resized hook context rested on a mechanism the pin lacks, so `4b8d5b8b` was reverted and `clients.event-resize-context` reopened with the two-client measurement and a re-scoped acceptance; the status-keys fixture shared one socket across eight probes (each probe now owns its socket); a restyled menu reset both clients' cursor (kept now, scenario presses Down first); `-k` ran the chooser template before the kill (kill first now, scenario measures `#{window_panes}`); `pane-colours[N] default` recorded as a residue instead of asserted as pin behaviour |
+| Workspace gates | Full workspace tests and clippy with warnings denied, green on all three lanes; every red row was a timing flake that passed exact-solo (the known daemon list plus `display_menu_resize_lifecycle`, whose show-environment raced the chosen row's command and now polls for it) |
+| Differential | Keys delta: 72 scenarios; daemon delta: 111 scenarios; client delta: 111 scenarios (each eight shards plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` and the known rows at their registered tuples, except `smoke/client-non-utf8-cwd`, whose fixture cannot `mkdir` a non-UTF-8 name on APFS and fails identically on both binaries (macOS environment, not a divergence) |
+| Records gate | Tracker check, board fold tests, and the stored summary check pass: 167 scenarios, 2,402 steps, attached-client `PASS` |
+| Summary SHA-256 | `878c2299436a3f6dbffd1cb1947cd5d72750d5fea51662087e60dea8dd58d7b6` |
 
 ### 2026-09-01 cycle-5 integration checkpoint
 

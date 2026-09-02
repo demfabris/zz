@@ -1,0 +1,12 @@
+corpus: none
+# The pane process formats. pane_pipe answers 0 or 1 off wp->pipe_fd while
+# pane_pipe_pid declines unless a pipe is attached and otherwise names the job's
+# own process. pane_unseen_changes is not "output nobody has seen": input.c
+# raises PANE_UNSEENCHANGES only for output that lands while the pane holds a
+# mode, and window.c drops it when the last mode goes, so a re-entry starts
+# clean.
+stage: fixtures/format-pane-process.sh ~/format-pane-process.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu FORMAT_PANE_PROCESS
+run-shell 'sh ~/format-pane-process.sh'
+out: show-environment -g FORMAT_PANE_PROCESS

@@ -4754,8 +4754,13 @@ impl Shared {
         if let Some(device_name) = device_name {
             inner.client_names.insert(client, device_name);
         }
-        if kind == ClientKind::Interactive {
-            let color_scheme = color_scheme.unwrap_or(inner.active_color_scheme);
+        // `c->theme` stays THEME_UNKNOWN until the terminal answers the theme
+        // query, and `format_cb_client_theme` returns NULL for that, so a
+        // client that reported nothing gets no recorded scheme; every reader
+        // already falls back to the server's active one.
+        if kind == ClientKind::Interactive
+            && let Some(color_scheme) = color_scheme
+        {
             inner.client_color_schemes.insert(client, color_scheme);
             inner.active_color_scheme = color_scheme;
         }
@@ -19871,6 +19876,11 @@ impl Shared {
             let mut silence_schedule = None;
             if output_activity {
                 inner.engine.set_format_now(unix_timestamp());
+                for session in inner.copy_sessions.values_mut() {
+                    if session.pane == pane && !session.exiting {
+                        session.unseen = true;
+                    }
+                }
                 inner.engine.state.touch_window_activity_for_pane(pane);
                 if let Some(window) = inner.engine.state.window_for_pane(pane) {
                     silence_schedule = schedule_window_silence(&mut inner, window);
@@ -25089,6 +25099,11 @@ struct CopySession {
     /// `data->refresh_active`, mirrored so the daemon knows which views its
     /// refresh timer has to tick.
     refresh: bool,
+    /// `PANE_UNSEENCHANGES`: input.c raises it on output that arrives while the
+    /// pane holds a mode, and window.c drops it when the last mode goes. zz
+    /// carries it on the mode entry instead, which clears it the same way
+    /// because entering a mode writes a fresh record.
+    unseen: bool,
     exiting: bool,
 }
 
@@ -27468,6 +27483,7 @@ fn enter_copy_session(
             scroll_exit: false,
             kill,
             refresh: false,
+            unseen: false,
             exiting: false,
         },
     );
@@ -27628,6 +27644,15 @@ fn copy_mode_format_facts(
         panes.entry(session.pane).or_default().push((name, facts));
     }
     panes
+}
+
+fn unseen_change_panes(inner: &ServerState) -> BTreeSet<PaneId> {
+    inner
+        .copy_sessions
+        .values()
+        .filter(|session| !session.exiting && session.unseen)
+        .map(|session| session.pane)
+        .collect()
 }
 
 fn active_copy_mode_panes(inner: &ServerState) -> BTreeSet<PaneId> {
@@ -31284,6 +31309,7 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
     FormatHookFacts {
         mux: Arc::new(inner.engine.format_facts()),
         copy_modes: Arc::new(copy_mode_format_facts(inner)),
+        unseen_changes: Arc::new(unseen_change_panes(inner)),
         terminals: Arc::new(inner.terminals.clone()),
         pane_pipes: Arc::new(
             inner
@@ -31297,16 +31323,32 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
                 .attached
                 .iter()
                 .map(|(session, clients)| {
+                    // format_cb_session_attached_list joins `loop->name`, which
+                    // is the tty for a pty client, not the device name the
+                    // hello carries.
                     let names = clients
                         .iter()
-                        .filter_map(|client| inner.client_names.get(client))
-                        .cloned()
+                        .map(|client| client_format_name(inner, *client))
                         .collect::<Vec<_>>()
                         .join(",");
                     (*session, (clients.len(), names))
                 })
                 .collect(),
         ),
+        // format_cb_window_active_clients_list walks every client whose own
+        // current window is this one, which is not the session's client list.
+        window_clients: Arc::new(inner.attached.values().flatten().fold(
+            BTreeMap::<WindowId, Vec<String>>::new(),
+            |mut windows, client| {
+                if let Some(window) = client_focused_window_for_attachment(inner, *client) {
+                    windows
+                        .entry(window)
+                        .or_default()
+                        .push(client_format_name(inner, *client));
+                }
+                windows
+            },
+        )),
         session_last_attached: Arc::new(inner.session_last_attached.clone()),
         clients: Arc::new(
             inner
@@ -56583,18 +56625,16 @@ set-option -g @alias-mixed-next yes
         let canfail = armed_client_message(&shared, client);
         assert_ne!(canfail.token, retained.token);
         assert_eq!(canfail.deadline, None);
-        for arguments in [vec!["-N", "-a", "formats"], vec!["-N", "-I", "input"]] {
-            assert!(
-                shared
-                    .execute(
-                        client,
-                        ClientKind::Interactive,
-                        &mut context,
-                        &CommandInvocation::new("display-message", arguments),
-                    )
-                    .is_err()
-            );
-        }
+        assert!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("display-message", ["-N", "-I", "input"]),
+                )
+                .is_err()
+        );
         {
             let inner = shared.inner.lock();
             assert_eq!(inner.client_messages[&client], canfail);

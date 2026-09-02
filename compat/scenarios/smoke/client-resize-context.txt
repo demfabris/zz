@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/client-resize-context.sh ~/client-resize-context.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu CLIENT_RESIZE_CONTEXT
+run-shell 'sh ~/client-resize-context.sh'
+out: show-environment -g CLIENT_RESIZE_CONTEXT

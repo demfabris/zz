@@ -8304,6 +8304,7 @@ impl Shared {
         if mode_styles_changed {
             self.refresh_published_appearance();
         }
+        self.restyle_client_overlays();
         for channel in option_signals {
             self.signal_wait_channel(&channel);
         }
@@ -12478,6 +12479,8 @@ impl Shared {
             };
             let (terminal, state, resize) = {
                 let mut inner = self.inner.lock();
+                let options = client_overlay_style_window(&inner, target_client)
+                    .and_then(|window| inner.engine.popup_options_for_window(window).ok());
                 let Some(popup) = inner.popups.get_mut(&target_client) else {
                     return Ok(Execution::default());
                 };
@@ -12488,11 +12491,25 @@ impl Shared {
                     return Ok(Execution::default());
                 }
                 popup.state.title = title;
-                if let Some(style) = &parsed.style {
-                    popup.state.style.clone_from(style);
+                if parsed.style.is_some() {
+                    popup.styles.style.clone_from(&parsed.style);
                 }
-                if let Some(style) = &parsed.border_style {
-                    popup.state.border_style.clone_from(style);
+                if parsed.border_style.is_some() {
+                    popup.styles.border_style.clone_from(&parsed.border_style);
+                }
+                if let Some(options) = options {
+                    popup.state.style = overlay_style(&options.style, popup.styles.style.as_deref());
+                    popup.state.border_style = overlay_style(
+                        &options.border_style,
+                        popup.styles.border_style.as_deref(),
+                    );
+                } else {
+                    if let Some(style) = &parsed.style {
+                        popup.state.style.clone_from(style);
+                    }
+                    if let Some(style) = &parsed.border_style {
+                        popup.state.border_style.clone_from(style);
+                    }
                 }
                 let previous_lines = popup.state.border_lines;
                 if let Some(lines) = border_lines {
@@ -12645,8 +12662,8 @@ impl Shared {
                 "PWD".to_owned(),
                 Some(working_directory.to_string_lossy().into_owned()),
             ));
-            let style = parsed.style.clone().unwrap_or(defaults.style);
-            let border_style = parsed.border_style.clone().unwrap_or(defaults.border_style);
+            let style = overlay_style(&defaults.style, parsed.style.as_deref());
+            let border_style = overlay_style(&defaults.border_style, parsed.border_style.as_deref());
             let (close_on_exit, close_on_exit_zero, close_on_any_key) =
                 popup_close_flags(&parsed, false).expect("new popup has close flags");
             let state = PopupState {
@@ -12723,6 +12740,11 @@ impl Shared {
                     },
                     cell_width_px: geometry.cell_width_px,
                     cell_height_px: geometry.cell_height_px,
+                    styles: OverlayStyleOverrides {
+                        style: parsed.style.clone(),
+                        border_style: parsed.border_style.clone(),
+                        selected_style: None,
+                    },
                     waiter: matches!(kind, ClientKind::Command | ClientKind::Control)
                         .then_some(PopupWaiter { client, wake }),
                 },
@@ -12909,6 +12931,90 @@ impl Shared {
         self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
     }
 
+    /// Re-read the overlay style options the way `menu_reapply_styles` and
+    /// `popup_reapply_styles` do on every draw, so a `set-option` that lands
+    /// while an overlay is up repaints it with no key pressed. Both read the
+    /// current window of the session their own client is attached to and give
+    /// up when that client has no session. `menu-border-lines` and
+    /// `popup-border-lines` are deliberately absent: the pin copies those into
+    /// the overlay when it is created and never looks at them again.
+    fn restyle_client_overlays(self: &Arc<Self>) {
+        let clients = {
+            let inner = self.inner.lock();
+            if inner.menus.is_empty() && inner.popups.is_empty() {
+                return;
+            }
+            inner
+                .menus
+                .keys()
+                .chain(inner.popups.keys())
+                .copied()
+                .collect::<BTreeSet<_>>()
+        };
+        for client in clients {
+            self.restyle_client_menu(client);
+            self.restyle_client_popup(client);
+        }
+    }
+
+    fn restyle_client_menu(self: &Arc<Self>, client: ClientId) {
+        let state = {
+            let mut inner = self.inner.lock();
+            let Some(window) = client_overlay_style_window(&inner, client) else {
+                return;
+            };
+            let Ok(options) = inner.engine.menu_options_for_window(window) else {
+                return;
+            };
+            let Some(menu) = inner.menus.get_mut(&client) else {
+                return;
+            };
+            let style = overlay_style(&options.style, menu.styles.style.as_deref());
+            let selected_style = overlay_style(
+                &options.selected_style,
+                menu.styles.selected_style.as_deref(),
+            );
+            let border_style =
+                overlay_style(&options.border_style, menu.styles.border_style.as_deref());
+            if style == menu.state.style
+                && selected_style == menu.state.selected_style
+                && border_style == menu.state.border_style
+            {
+                return;
+            }
+            menu.state.style = style;
+            menu.state.selected_style = selected_style;
+            menu.state.border_style = border_style;
+            menu.state.clone()
+        };
+        self.publish_to_client(client, EventPayload::Menu { state: Some(state) });
+    }
+
+    fn restyle_client_popup(self: &Arc<Self>, client: ClientId) {
+        let state = {
+            let mut inner = self.inner.lock();
+            let Some(window) = client_overlay_style_window(&inner, client) else {
+                return;
+            };
+            let Ok(options) = inner.engine.popup_options_for_window(window) else {
+                return;
+            };
+            let Some(popup) = inner.popups.get_mut(&client) else {
+                return;
+            };
+            let style = overlay_style(&options.style, popup.styles.style.as_deref());
+            let border_style =
+                overlay_style(&options.border_style, popup.styles.border_style.as_deref());
+            if style == popup.state.style && border_style == popup.state.border_style {
+                return;
+            }
+            popup.state.style = style;
+            popup.state.border_style = border_style;
+            popup.state.clone()
+        };
+        self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
+    }
+
     fn display_menu(
         self: &Arc<Self>,
         client: ClientId,
@@ -12957,7 +13063,9 @@ impl Shared {
             let window = target
                 .window
                 .ok_or_else(|| ServerError::MissingTarget("current window".to_owned()))?;
-            let defaults = inner.engine.menu_options_for_window(window)?;
+            let defaults = inner
+                .engine
+                .menu_options_for_window(client_overlay_style_window(&inner, target_client).unwrap_or(window))?;
             let title = parsed.title.as_deref().map_or_else(String::new, |title| {
                 expand_popup_value(
                     &inner,
@@ -13062,12 +13170,12 @@ impl Shared {
             } else {
                 defaults.border_lines
             };
-            let style = parsed.style.clone().unwrap_or(defaults.style);
-            let selected_style = parsed
-                .selected_style
-                .clone()
-                .unwrap_or(defaults.selected_style);
-            let border_style = parsed.border_style.clone().unwrap_or(defaults.border_style);
+            let style = overlay_style(&defaults.style, parsed.style.as_deref());
+            let selected_style = overlay_style(
+                &defaults.selected_style,
+                parsed.selected_style.as_deref(),
+            );
+            let border_style = overlay_style(&defaults.border_style, parsed.border_style.as_deref());
             let variables = popup_position_variables(
                 &inner.engine,
                 &target,
@@ -13129,6 +13237,11 @@ impl Shared {
                     state: state.clone(),
                     commands,
                     target,
+                    styles: OverlayStyleOverrides {
+                        style: parsed.style.clone(),
+                        selected_style: parsed.selected_style.clone(),
+                        border_style: parsed.border_style.clone(),
+                    },
                     waiter: matches!(kind, ClientKind::Command | ClientKind::Control)
                         .then_some(MenuWaiter { client, wake }),
                 },
@@ -25943,7 +26056,21 @@ struct PopupSession {
     preferred: PopupPlacement,
     cell_width_px: u32,
     cell_height_px: u32,
+    /// The `-s` and `-S` styles the command carried. The pin keeps them beside
+    /// the popup because `popup_reapply_styles` rebuilds the cell from the
+    /// option on every draw and lets only these two replace its foreground and
+    /// background.
+    styles: OverlayStyleOverrides,
     waiter: Option<PopupWaiter>,
+}
+
+/// The overlay styles a `display-menu` or `display-popup` command named, kept
+/// apart from the option-derived cell they override.
+#[derive(Clone, Debug, Default)]
+struct OverlayStyleOverrides {
+    style: Option<String>,
+    selected_style: Option<String>,
+    border_style: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -25958,6 +26085,7 @@ struct MenuSession {
     state: MenuState,
     commands: Vec<Option<String>>,
     target: ExecutionContext,
+    styles: OverlayStyleOverrides,
     waiter: Option<MenuWaiter>,
 }
 
@@ -27062,6 +27190,61 @@ fn reconcile_copy_session(
         }
         _ => (None, false),
     }
+}
+
+/// The window `menu_reapply_styles` and `popup_reapply_styles` read their
+/// options from: the current window of the session the overlay's own client is
+/// attached to, which is not always the window the command targeted.
+fn client_overlay_style_window(inner: &ServerState, client: ClientId) -> Option<WindowId> {
+    let session = client_attached_session(inner, client)?;
+    inner
+        .engine
+        .state
+        .sessions
+        .get(&session)
+        .map(|state| state.active_window)
+}
+
+/// Fold a command line overlay style into the option-derived one the way
+/// `menu_reapply_styles` and `popup_reapply_styles` do: the option supplies the
+/// whole cell, and `style_parse` is read back for its foreground and background
+/// alone, both of which land on the default when the command line style never
+/// names them. An attribute the option asked for therefore survives a `-s` that
+/// carries none, and a colour the option asked for is dropped by a `-s` that
+/// only names the other half. A command line style `style_parse` rejects is
+/// dropped whole and leaves the option's cell alone.
+fn overlay_style(option: &str, explicit: Option<&str>) -> String {
+    let Some(explicit) = explicit.filter(|explicit| zz_protocol::valid_style(explicit)) else {
+        return option.to_owned();
+    };
+    let mut foreground = Some("fg=default");
+    let mut background = Some("bg=default");
+    for token in explicit
+        .split([' ', ',', '\n'])
+        .filter(|token| !token.is_empty())
+    {
+        if token.eq_ignore_ascii_case("default") {
+            foreground = None;
+            background = None;
+        } else if style_field_is(token, "fg=") {
+            foreground = Some(token);
+        } else if style_field_is(token, "bg=") {
+            background = Some(token);
+        }
+    }
+    let mut composed = option.to_owned();
+    for field in [foreground, background].into_iter().flatten() {
+        if !composed.is_empty() {
+            composed.push(',');
+        }
+        composed.push_str(field);
+    }
+    composed
+}
+
+fn style_field_is(token: &str, field: &str) -> bool {
+    token.len() > field.len()
+        && token.as_bytes()[..field.len()].eq_ignore_ascii_case(field.as_bytes())
 }
 
 fn client_attached_session(inner: &ServerState, client: ClientId) -> Option<SessionId> {
@@ -74571,7 +74754,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("invalid inline styles fall back silently");
         assert_eq!(
             shared.inner.lock().menus[&client].state.style,
-            "bogus".to_owned()
+            "bg=themedarkgrey,fg=themewhite".to_owned()
         );
         shared.input_menu(client, &context, MenuAction::Cancel);
 
@@ -75564,6 +75747,144 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("clear target popup");
     }
 
+    #[test]
+    fn a_command_line_overlay_style_replaces_only_the_option_colours() {
+        assert_eq!(overlay_style("bold,bg=colour17", None), "bold,bg=colour17");
+        assert_eq!(
+            overlay_style("bold,bg=colour17", Some("fg=colour160")),
+            "bold,bg=colour17,fg=colour160,bg=default"
+        );
+        assert_eq!(
+            overlay_style("bold,bg=colour17", Some("bg=colour52,dim")),
+            "bold,bg=colour17,fg=default,bg=colour52"
+        );
+        assert_eq!(overlay_style("bold,bg=colour17", Some("default")), "bold,bg=colour17");
+        assert_eq!(overlay_style("bold,bg=colour17", Some("bogus")), "bold,bg=colour17");
+        assert_eq!(overlay_style("", Some("fg=red")), "fg=red,bg=default");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn overlay_styles_follow_their_options_while_the_overlay_is_up() {
+        let (shared, client, mailbox, mut context) = popup_test_workspace("restyle");
+        for (option, value) in [
+            ("menu-style", "bg=colour17"),
+            ("menu-selected-style", "fg=colour46"),
+            ("menu-border-style", "fg=colour201"),
+            ("popup-style", "bg=colour18"),
+            ("popup-border-style", "fg=colour129"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("set-window-option", [option, value]),
+                )
+                .expect("set overlay style option");
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-menu",
+                    ["-x", "0", "-y", "0", "alpha", "a", "display-message -p alpha"],
+                ),
+            )
+            .expect("open menu");
+        let state = wait_for_menu_state(&shared, client);
+        assert_eq!(state.style, "bg=colour17");
+        assert_eq!(state.selected_style, "fg=colour46");
+        assert_eq!(state.border_style, "fg=colour201");
+        assert_eq!(state.border_lines, PopupBorderLines::Single);
+        let _ = take_reliable_messages(&mailbox);
+
+        for (option, value) in [
+            ("menu-style", "bg=colour52"),
+            ("menu-selected-style", "fg=colour214"),
+            ("menu-border-style", "fg=colour45"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("set-window-option", [option, value]),
+                )
+                .expect("restyle the live menu");
+        }
+        let state = shared.inner.lock().menus[&client].state.clone();
+        assert_eq!(state.style, "bg=colour52");
+        assert_eq!(state.selected_style, "fg=colour214");
+        assert_eq!(state.border_style, "fg=colour45");
+        assert!(
+            take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::Menu { state: Some(_) },
+                        ..
+                    })
+                ))
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["menu-border-lines", "double"]),
+            )
+            .expect("set menu border lines");
+        assert_eq!(
+            shared.inner.lock().menus[&client].state.border_lines,
+            PopupBorderLines::Single
+        );
+        shared.input_menu(client, &context, MenuAction::Cancel);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-x", "0", "-y", "0", "-S", "fg=cyan"]),
+            )
+            .expect("open popup");
+        let state = wait_for_popup_state(&shared, client, |state| !state.style.is_empty());
+        assert_eq!(state.style, "bg=colour18");
+        assert_eq!(state.border_style, "fg=colour129,fg=cyan,bg=default");
+        assert_eq!(state.border_lines, PopupBorderLines::Single);
+        for (option, value) in [
+            ("popup-style", "bg=colour52"),
+            ("popup-border-style", "fg=colour118"),
+            ("popup-border-lines", "double"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("set-window-option", [option, value]),
+                )
+                .expect("restyle the live popup");
+        }
+        let state = shared.inner.lock().popups[&client].state.clone();
+        assert_eq!(state.style, "bg=colour52");
+        assert_eq!(state.border_style, "fg=colour118,fg=cyan,bg=default");
+        assert_eq!(state.border_lines, PopupBorderLines::Single);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-C"]),
+            )
+            .expect("clear popup");
+    }
+
     #[cfg(unix)]
     #[test]
     fn display_popup_creates_modifies_and_clears_one_dead_overlay_safely() {
@@ -75606,8 +75927,14 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!((state.client_columns, state.client_rows), (80, 24));
         assert_eq!((state.cell_width_px, state.cell_height_px), (8, 18));
         assert_eq!(state.title, "first-display-popup");
-        assert_eq!(state.style, "bg=red,fg=white");
-        assert_eq!(state.border_style, "fg=cyan");
+        assert_eq!(
+            state.style,
+            "bg=themedarkgrey,fg=themewhite,fg=white,bg=red"
+        );
+        assert_eq!(
+            state.border_style,
+            "bg=themedarkgrey,fg=themelightgrey,fg=cyan,bg=default"
+        );
         assert_eq!(state.border_lines, PopupBorderLines::Rounded);
         assert!(!state.close_on_exit);
         assert!(state.close_on_exit_zero);

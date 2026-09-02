@@ -7465,6 +7465,12 @@ impl Shared {
                                 .push(DeferredTerminalCommand::ResetScreen { terminals });
                         }
                     }
+                    MuxEffect::ArmCopyModeSource { pane, source } => {
+                        if !inner.terminals.contains_key(source) {
+                            return Err(ServerError::PaneExited(*source).into());
+                        }
+                        inner.pending_copy_source = Some((*pane, *source));
+                    }
                     MuxEffect::ArmCopyModeKill { pane } => {
                         if !inner
                             .copy_sessions
@@ -7572,8 +7578,23 @@ impl Shared {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
                         inner.pending_copy_kill = armed_copy_kill;
+                        let copy_source = inner
+                            .pending_copy_source
+                            .take()
+                            .filter(|(armed, _)| armed == pane)
+                            .and_then(|(_, source)| inner.terminals.get(&source).cloned());
                         for target in targets {
                             let action = &counted_copy_mode_action(&mut inner, target, action);
+                            if let Some(source) = &copy_source
+                                && terminal_view_action_enters_copy_mode(action)
+                            {
+                                deferred_terminal_commands.push(
+                                    DeferredTerminalCommand::ArmCopySource {
+                                        terminal: Arc::clone(&terminal),
+                                        source: Arc::clone(source),
+                                    },
+                                );
+                            }
                             deferred_terminal_commands.push(DeferredTerminalCommand::ViewAction {
                                 terminal: Arc::clone(&terminal),
                                 view: TerminalViewId(target.0),
@@ -7581,6 +7602,12 @@ impl Shared {
                             });
                             if terminal_view_action_enters_copy_mode(action) {
                                 enter_copy_session(&mut inner, target, *pane)?;
+                                if copy_source.is_some()
+                                    && let Some(session) = inner.copy_sessions.get_mut(&target)
+                                {
+                                    session.sourced = true;
+                                    session.refresh = false;
+                                }
                             } else if terminal_view_action_exits_copy_mode(action) {
                                 begin_exit_copy_session(&mut inner, target);
                             } else if terminal_view_action_arms_scroll_exit(action)
@@ -7593,7 +7620,8 @@ impl Shared {
                                 && let Some(session) = inner.copy_sessions.get_mut(&target)
                                 && session.pane == *pane
                             {
-                                session.refresh = refresh.applied(session.refresh);
+                                session.refresh =
+                                    !session.sourced && refresh.applied(session.refresh);
                                 refresh_armed |= session.refresh;
                             }
                         }
@@ -25178,6 +25206,8 @@ struct ServerState {
     /// The pane a `copy-mode -k` in the current effect batch armed, consumed
     /// by the entry that follows it.
     pending_copy_kill: Option<PaneId>,
+    /// `wme->swp`: the pane whose screen the next copy-mode entry clones.
+    pending_copy_source: Option<(PaneId, PaneId)>,
     /// Panes whose `copy-mode -k` session has ended, waiting for the kill that
     /// `window_pane_reset_mode` runs.
     copy_kill_panes: Vec<PaneId>,
@@ -25323,6 +25353,9 @@ struct CopySession {
     /// carries it on the mode entry instead, which clears it the same way
     /// because entering a mode writes a fresh record.
     unseen: bool,
+    /// `wme->swp != wme->wp`: the backing came from another pane, so
+    /// `window_copy_refresh_start` refuses to arm the timer.
+    sourced: bool,
     exiting: bool,
 }
 
@@ -27773,6 +27806,7 @@ fn enter_copy_session(
             kill,
             refresh: false,
             unseen: false,
+            sourced: false,
             exiting: false,
         },
     );
@@ -31131,6 +31165,10 @@ enum DeferredTerminalCommand {
         terminal: Arc<TerminalSession>,
         knobs: EngineKnobs,
     },
+    ArmCopySource {
+        terminal: Arc<TerminalSession>,
+        source: Arc<TerminalSession>,
+    },
     SetAllowPassthrough {
         terminal: Arc<TerminalSession>,
         enabled: bool,
@@ -31186,6 +31224,13 @@ impl DeferredTerminalCommand {
             }
             Self::SetWrapSearch { terminal, enabled } => terminal.set_wrap_search(enabled),
             Self::SetEngineKnobs { terminal, knobs } => terminal.set_engine_knobs(knobs),
+            Self::ArmCopySource { terminal, source } => match source.capture_copy_source() {
+                Ok(captured) => terminal.set_pending_copy_source(Some(Box::new(captured))),
+                Err(error) => log::warn!(
+                    target: "zz_daemon::diagnostics::terminal",
+                    "could not clone the copy-mode source screen: {error}"
+                ),
+            },
             Self::SetAppearance {
                 terminal,
                 appearance,

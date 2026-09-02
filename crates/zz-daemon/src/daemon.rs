@@ -1389,14 +1389,17 @@ fn accept_connections<T: Transport>(
         match listener.accept() {
             Ok(stream) => {
                 let shared = Arc::clone(shared);
-                thread::Builder::new()
-                    .name("zz-client".to_owned())
-                    .spawn(move || {
-                        if let Err(error) = handle_connection(stream, &shared) {
-                            log::debug!("client disconnected: {error}");
-                        }
-                    })
-                    .map_err(|error| DaemonError::Thread(error.to_string()))?;
+                if let Err(error) =
+                    thread::Builder::new()
+                        .name("zz-client".to_owned())
+                        .spawn(move || {
+                            if let Err(error) = handle_connection(stream, &shared) {
+                                log::debug!("client disconnected: {error}");
+                            }
+                        })
+                {
+                    log::warn!("could not start client connection thread: {error}");
+                }
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
                 listener.wait_for_incoming(ACCEPT_WAIT_TIMEOUT)?;
@@ -30767,6 +30770,7 @@ fn run_shell_job(
     started: Option<&mpsc::SyncSender<()>>,
 ) -> Result<ShellJobResult, ()> {
     use std::{
+        net::Shutdown,
         os::{fd::OwnedFd, unix::net::UnixStream, unix::process::CommandExt as _},
         process::Stdio,
     };
@@ -30802,6 +30806,8 @@ fn run_shell_job(
     } else {
         process.stderr(Stdio::null());
     }
+    output.shutdown(Shutdown::Write).map_err(|_| ())?;
+    output.set_nonblocking(true).map_err(|_| ())?;
     let child = process.spawn().map_err(|_| ())?;
     drop(process);
     drop(child_socket);
@@ -30810,15 +30816,80 @@ fn run_shell_job(
         let _ = started.send(());
     }
     let mut bytes = Vec::new();
-    if output.read_to_end(&mut bytes).is_err() {
-        terminate_managed_process(job_process);
-        return Err(());
-    }
-    let status = wait_shell_job_process(job_process)?;
+    let mut buffer = [0_u8; 8192];
+    let status = loop {
+        let reached_eof = read_available_shell_job_output(&mut output, &mut bytes, &mut buffer)
+            .map_err(|()| {
+                terminate_managed_process(job_process);
+            })?;
+        if reached_eof {
+            break wait_shell_job_process(job_process)?;
+        }
+
+        let mut process = job_process.lock();
+        let Some(child) = process.as_mut() else {
+            return Err(());
+        };
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                process.take();
+                drop(process);
+                read_available_shell_job_output(&mut output, &mut bytes, &mut buffer)?;
+                break status;
+            }
+            Ok(None) => drop(process),
+            Err(_) => {
+                let mut child = process.take().expect("shell job process was present");
+                drop(process);
+                let _ = terminate_copy_pipe(&mut child);
+                return Err(());
+            }
+        }
+        thread::sleep(COPY_PIPE_POLL_INTERVAL);
+    };
     Ok(ShellJobResult {
         output: bytes,
         status,
     })
+}
+
+#[cfg(unix)]
+fn read_available_shell_job_output(
+    output: &mut std::os::unix::net::UnixStream,
+    bytes: &mut Vec<u8>,
+    buffer: &mut [u8],
+) -> Result<bool, ()> {
+    let mut available = usize::try_from(rustix::io::ioctl_fionread(&*output).map_err(|_| ())?)
+        .unwrap_or(usize::MAX);
+    if available == 0 {
+        return loop {
+            match output.read(&mut buffer[..1]) {
+                Ok(0) => break Ok(true),
+                Ok(1) => {
+                    bytes.push(buffer[0]);
+                    break Ok(false);
+                }
+                Ok(_) => unreachable!("one-byte read returned more than one byte"),
+                Err(error) if error.kind() == ErrorKind::WouldBlock => break Ok(false),
+                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                Err(_) => break Err(()),
+            }
+        };
+    }
+    while available != 0 {
+        let length = available.min(buffer.len());
+        match output.read(&mut buffer[..length]) {
+            Ok(0) => return Ok(true),
+            Ok(length) => {
+                bytes.extend_from_slice(&buffer[..length]);
+                available = available.saturating_sub(length);
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+            Err(error) if error.kind() == ErrorKind::Interrupted => {}
+            Err(_) => return Err(()),
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(not(unix))]
@@ -64079,6 +64150,53 @@ set-option -g @alias-mixed-next yes
             )
             .expect("interactive background inserted command");
         assert_eq!(wait_for_error(&mailbox), "Unknown command: not-a-command");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_job_closes_stdin_and_ignores_inherited_output_descriptors_after_exit() {
+        let process = Arc::new(Mutex::new(None));
+        let worker_process = Arc::clone(&process);
+        let (finished, result) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || {
+            let stopping = AtomicBool::new(false);
+            let result = run_shell_job(
+                "if read value; then exit 9; fi; trap '' HUP; sleep 30 & printf '%s detached' \"$!\"",
+                Path::new("/"),
+                "",
+                &[],
+                "tmux-256color",
+                Path::new("/tmp/zz-shell-job-test"),
+                None,
+                None,
+                None,
+                false,
+                &worker_process,
+                &stopping,
+                false,
+                None,
+            );
+            let _ = finished.send(result);
+        });
+        let result = match result.recv_timeout(Duration::from_secs(2)) {
+            Ok(result) => result.expect("shell job"),
+            Err(error) => {
+                terminate_managed_process(&process);
+                worker.join().expect("shell job worker");
+                panic!("shell job did not finish after its direct child exited: {error}");
+            }
+        };
+        worker.join().expect("shell job worker");
+        assert!(result.status.success());
+        let output = String::from_utf8(result.output).expect("UTF-8 shell output");
+        let pid = output
+            .strip_suffix(" detached")
+            .expect("detached output marker")
+            .parse::<i32>()
+            .expect("detached child pid");
+        if let Some(pid) = rustix::process::Pid::from_raw(pid) {
+            let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+        }
     }
 
     #[cfg(unix)]

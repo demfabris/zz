@@ -78,6 +78,8 @@ const MAX_OUTPUT_VIEW_SCROLLBACK: usize = 100_000;
 const MAX_STARTUP_OUTPUT_VIEW_SCROLLBACK: usize = 64 * 1024 * 1024;
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
 const SEARCH_REFRESH_DEBOUNCE: Duration = Duration::from_millis(80);
+const TERMINATION_GRACE: Duration = Duration::from_millis(500);
+const TERMINATION_KILL_WAIT: Duration = Duration::from_millis(500);
 const MAX_SEARCH_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_WHEEL_REPEAT: u32 = 32;
 const MAX_KITTY_PLACEMENTS: usize = 512;
@@ -3682,6 +3684,18 @@ fn warn_and_skip_view_ghostty<T>(
     }
 }
 
+fn normalize_view_action_result(
+    result: Result<ViewActionResult, WorkerError>,
+) -> Result<ViewActionResult, WorkerError> {
+    match result {
+        Err(error @ (WorkerError::SearchSnapshotTooLarge | WorkerError::ModeRevisionTooLarge)) => {
+            log::warn!("skipping terminal view action: {error}");
+            Ok(ViewActionResult::Snapshot)
+        }
+        result => result,
+    }
+}
+
 #[derive(Clone)]
 struct Publisher {
     event_tx: async_channel::Sender<TerminalEvent>,
@@ -4334,7 +4348,7 @@ fn run_output_view(
                     let Some(state) = active_views.get_mut(&view) else {
                         continue;
                     };
-                    let result = apply_view_action(
+                    let result = normalize_view_action_result(apply_view_action(
                         &mut terminal,
                         view,
                         state,
@@ -4350,7 +4364,7 @@ fn run_output_view(
                         &word_separators,
                         &bound_pasted_images,
                         &mut None,
-                    )?;
+                    ))?;
                     let closed = frozen && state.copy_mode.is_none();
                     match result {
                         ViewActionResult::Snapshot | ViewActionResult::ContentSnapshot if !closed => {
@@ -4926,6 +4940,8 @@ fn run_terminal(
     let mut reader_eof = false;
     let mut exit_status = None;
     let mut terminating = false;
+    let mut termination_deadline = None::<Instant>;
+    let mut termination_escalated = false;
     let no_exit = crossbeam_channel::never();
     #[cfg(any(target_os = "linux", not(unix)))]
     let no_output = crossbeam_channel::never();
@@ -4965,6 +4981,21 @@ fn run_terminal(
             drain_effects_if_writer_ready(&effects, &mut writer)?;
         }
         let now = Instant::now();
+        if termination_deadline.is_some_and(|deadline| now >= deadline) {
+            if termination_escalated {
+                return Ok(());
+            }
+            #[cfg(unix)]
+            signal_terminal_process_groups(
+                &master,
+                shell_process_id,
+                rustix::process::Signal::KILL,
+            );
+            #[cfg(not(unix))]
+            let _ = killer.kill();
+            termination_escalated = true;
+            termination_deadline = Some(now + TERMINATION_KILL_WAIT);
+        }
         if search_refresh_due.is_some_and(|due| now >= due) {
             search_refresh_due = None;
             let mut view_ids = active_views.keys().copied().collect::<Vec<_>>();
@@ -5052,6 +5083,9 @@ fn run_terminal(
             deadline = deadline.min(due);
         }
         if let Some(due) = pasted_image_bindings.next_deadline() {
+            deadline = deadline.min(due);
+        }
+        if let Some(due) = termination_deadline {
             deadline = deadline.min(due);
         }
         if !raw_output_parse_backlog.is_empty() {
@@ -5489,7 +5523,7 @@ fn run_terminal(
                                 .get_mut(&view)
                                 .expect("active view was checked above");
                             restore_view_state(&mut terminal, state, &word_separators)?;
-                            apply_view_action(
+                            normalize_view_action_result(apply_view_action(
                                 &mut terminal,
                                 view,
                                 state,
@@ -5505,7 +5539,7 @@ fn run_terminal(
                                 &word_separators,
                                 pasted_image_bindings.bound_numbers(),
                                 &mut pending_copy_source,
-                            )?
+                            ))?
                         };
                         let is_in_copy_mode = active_views
                             .get(&view)
@@ -5683,22 +5717,18 @@ fn run_terminal(
                     }
                 }
                 Command::Terminate => {
-                    terminating = true;
-                    #[cfg(unix)]
-                    if let Some(pid) = master
-                        .lock()
-                        .process_group_leader()
-                        .and_then(|group| u32::try_from(group).ok())
-                        .filter(|process_id| *process_id != 0)
-                        .or(shell_process_id)
-                        .and_then(|pid| i32::try_from(pid).ok())
-                        .and_then(rustix::process::Pid::from_raw)
-                    {
-                        let _ =
-                            rustix::process::kill_process_group(pid, rustix::process::Signal::TERM);
+                    if !terminating {
+                        terminating = true;
+                        termination_deadline = Some(Instant::now() + TERMINATION_GRACE);
+                        #[cfg(unix)]
+                        signal_terminal_process_groups(
+                            &master,
+                            shell_process_id,
+                            rustix::process::Signal::TERM,
+                        );
+                        #[cfg(not(unix))]
+                        let _ = killer.kill();
                     }
-                    #[cfg(not(unix))]
-                    let _ = killer.kill();
                 }
                 Command::Shutdown => {
                     let _ = killer.kill();
@@ -5707,7 +5737,20 @@ fn run_terminal(
             },
             Wake::CommandsClosed => {
                 if terminating {
-                    let _ = exit_rx.recv();
+                    let remaining = termination_deadline
+                        .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+                        .unwrap_or_default();
+                    if exit_rx.recv_timeout(remaining).is_err() && !termination_escalated {
+                        #[cfg(unix)]
+                        signal_terminal_process_groups(
+                            &master,
+                            shell_process_id,
+                            rustix::process::Signal::KILL,
+                        );
+                        #[cfg(not(unix))]
+                        let _ = killer.kill();
+                        let _ = exit_rx.recv_timeout(TERMINATION_KILL_WAIT);
+                    }
                 } else {
                     let _ = killer.kill();
                 }
@@ -6085,6 +6128,36 @@ fn signal_number(description: &str) -> Option<u8> {
 #[cfg(not(unix))]
 fn signal_number(_description: &str) -> Option<u8> {
     None
+}
+
+#[cfg(unix)]
+fn signal_terminal_process_groups(
+    master: &parking_lot::Mutex<Box<dyn portable_pty::MasterPty + Send>>,
+    shell_process_id: Option<u32>,
+    signal: rustix::process::Signal,
+) {
+    let mut groups = SmallVec::<[rustix::process::Pid; 2]>::new();
+    if let Some(group) = master
+        .lock()
+        .process_group_leader()
+        .and_then(|group| u32::try_from(group).ok())
+        .filter(|group| *group != 0)
+        .and_then(|group| i32::try_from(group).ok())
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        groups.push(group);
+    }
+    if let Some(group) = shell_process_id
+        .filter(|group| *group != 0)
+        .and_then(|group| i32::try_from(group).ok())
+        .and_then(rustix::process::Pid::from_raw)
+        && !groups.contains(&group)
+    {
+        groups.push(group);
+    }
+    for group in groups {
+        let _ = rustix::process::kill_process_group(group, signal);
+    }
 }
 
 enum ViewActionResult {
@@ -13478,6 +13551,94 @@ mod tests {
             pending.try_recv().expect("pending command"),
             Command::Shutdown
         ));
+    }
+
+    #[test]
+    fn view_action_size_limits_are_nonfatal() {
+        for error in [
+            WorkerError::SearchSnapshotTooLarge,
+            WorkerError::ModeRevisionTooLarge,
+        ] {
+            assert!(matches!(
+                normalize_view_action_result(Err(error)),
+                Ok(ViewActionResult::Snapshot)
+            ));
+        }
+        assert!(matches!(
+            normalize_view_action_result(Err(WorkerError::Thread("stopped".to_owned()))),
+            Err(WorkerError::Thread(message)) if message == "stopped"
+        ));
+    }
+
+    #[cfg(unix)]
+    fn term_ignoring_test_session(view: TerminalViewId, command: &str) -> TerminalSession {
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(vec![command.to_owned()]),
+                ..TerminalSpawn::default()
+            },
+        );
+        session.attach_view(view);
+        wait_for_test_viewport(&session, |viewport| {
+            let mut contents = String::new();
+            for cell in viewport.cells.iter() {
+                viewport.push_glyph(*cell, &mut contents);
+            }
+            contents.contains("TERMINATION_READY")
+        });
+        session
+    }
+
+    #[cfg(unix)]
+    fn kill_test_process_group(process_id: u32) {
+        if let Some(group) = i32::try_from(process_id)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        {
+            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminate_escalates_while_session_is_retained() {
+        let session = term_ignoring_test_session(
+            TerminalViewId(301),
+            "sh -c 'trap \"\" TERM HUP; while :; do sleep 1; done' & printf 'TERMINATION_READY\\r\\n'",
+        );
+        let process_id = session.process_id().expect("shell process id");
+        session.terminate();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while session.completion().is_none() {
+            if Instant::now() >= deadline {
+                kill_test_process_group(process_id);
+                panic!("terminal did not escalate termination");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_a_terminating_session_never_waits_forever() {
+        let session = term_ignoring_test_session(
+            TerminalViewId(302),
+            "trap '' TERM HUP; printf 'TERMINATION_READY\\r\\n'; while :; do sleep 1; done",
+        );
+        let process_id = session.process_id().expect("shell process id");
+        let events = session.events();
+        session.terminate();
+        drop(session);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !events.receiver.is_closed() {
+            if Instant::now() >= deadline {
+                kill_test_process_group(process_id);
+                panic!("terminating terminal worker did not stop");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[cfg(all(unix, not(target_os = "linux")))]

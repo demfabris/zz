@@ -12577,25 +12577,6 @@ impl MuxEngine {
     /// Re-point a connection's context at live ids. Any command path that
     /// returns before [`MuxEngine::execute`] reaches this must call it itself.
     pub fn repair_context(&self, context: &mut ExecutionContext) {
-        let valid = context
-            .pane
-            .and_then(|pane| ExecutionContext::for_pane(&self.state, pane));
-        if let Some(valid) = valid {
-            context.retarget(&valid);
-        } else if let Some((session, window, pane)) = self.state.default_context() {
-            context.retarget(&ExecutionContext::new(
-                Some(session),
-                Some(window),
-                Some(pane),
-            ));
-        } else {
-            context.session = None;
-            context.window = None;
-            context.pane = None;
-        }
-    }
-
-    pub fn repair_event_context(&self, context: &mut ExecutionContext) {
         if let Some(pane) = context.pane
             && let Some(valid) = ExecutionContext::for_pane(&self.state, pane)
         {
@@ -12623,6 +12604,20 @@ impl MuxEngine {
             ));
             return;
         }
+        if let Some((session, window, pane)) = self.state.default_context() {
+            context.retarget(&ExecutionContext::new(
+                Some(session),
+                Some(window),
+                Some(pane),
+            ));
+        } else {
+            context.session = None;
+            context.window = None;
+            context.pane = None;
+        }
+    }
+
+    pub fn repair_event_context(&self, context: &mut ExecutionContext) {
         self.repair_context(context);
     }
 }
@@ -40188,6 +40183,58 @@ mod tests {
             assert_eq!(context, original_context, "{name}");
             assert!(engine.state.validate().is_ok(), "{name}");
         }
+    }
+
+    #[test]
+    fn killing_current_pane_keeps_command_context_in_its_session() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "zero"]))
+            .expect("default session");
+        let default_session = context.session.expect("default session id");
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("work session");
+        let work_session = context.session.expect("work session id");
+        let work_window = context.window.expect("work window");
+        engine
+            .execute(&mut context, &command("split-window", &[]))
+            .expect("second work pane");
+        let killed = context.pane.expect("active work pane");
+
+        engine
+            .execute(
+                &mut context,
+                &command("kill-pane", &["-t", &killed.to_string()]),
+            )
+            .expect("kill active work pane");
+
+        assert_ne!(work_session, default_session);
+        assert_eq!(context.session, Some(work_session));
+        assert_eq!(context.window, Some(work_window));
+        assert_eq!(
+            context.pane,
+            Some(engine.state.windows[&work_window].active_pane)
+        );
+
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "doomed"]))
+            .expect("second work window");
+        let doomed_pane = context.pane.expect("doomed pane");
+        engine
+            .execute(
+                &mut context,
+                &command("kill-pane", &["-t", &doomed_pane.to_string()]),
+            )
+            .expect("kill sole pane in second work window");
+
+        assert_eq!(context.session, Some(work_session));
+        assert_eq!(context.window, Some(work_window));
+        assert_eq!(
+            context.pane,
+            Some(engine.state.windows[&work_window].active_pane)
+        );
     }
 
     #[test]

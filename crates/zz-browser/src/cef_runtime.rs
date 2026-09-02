@@ -894,7 +894,7 @@ impl BrowserRuntime {
             skipped: batch.skipped,
             manager: manager.clone(),
             results,
-            operation: ActiveDataOperation::new(Arc::clone(&self.active_data_operations)),
+            operation: ActiveCountGuard::new(Arc::clone(&self.active_data_operations)),
         }));
 
         for cookie in batch.cookies {
@@ -946,6 +946,7 @@ impl BrowserRuntime {
         let element_pick = ElementPickState::default();
         let pending_capture = PendingCapture::default();
         let accelerated_paint = AcceleratedPaintTracker::default();
+        let active_session = ActiveCountGuard::new(Arc::clone(&self.active_sessions));
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let accelerated_frames = AcceleratedFrameProducer::new(gpu_context, *viewport.lock());
         #[cfg(target_os = "windows")]
@@ -971,6 +972,7 @@ impl BrowserRuntime {
             shared_texture_fallback_notified: Arc::new(AtomicBool::new(false)),
             element_pick: element_pick.clone(),
             pending_capture: Arc::clone(&pending_capture),
+            active_session: active_session.clone(),
         };
         let message_router = BrowserSideRouter::new(element_picker_router_config());
         let picker_available = message_router
@@ -1048,7 +1050,7 @@ impl BrowserRuntime {
             pending_capture,
             pending_site_data_clears: BTreeMap::new(),
             _request_context: request_context,
-            active_sessions: Arc::clone(&self.active_sessions),
+            active_session,
             active_data_operations: Arc::clone(&self.active_data_operations),
             accelerated_paint,
             #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -1057,9 +1059,7 @@ impl BrowserRuntime {
             metal_frames,
             #[cfg(target_os = "windows")]
             d3d11_frames,
-            counted_open: true,
         };
-        self.active_sessions.fetch_add(1, Ordering::Relaxed);
         // CEF builds the OSR surface before consuming our screen info, so force one
         // ordered screen/resize sync.
         session.apply_viewport(initial_viewport, true);
@@ -1111,21 +1111,21 @@ struct CookieImportProgress {
     skipped: usize,
     manager: CookieManager,
     results: Sender<CookieImportResult>,
-    operation: ActiveDataOperation,
+    operation: ActiveCountGuard,
 }
 
 #[derive(Clone)]
-struct ActiveDataOperation(Arc<ActiveDataOperationState>);
+struct ActiveCountGuard(Arc<ActiveCountGuardState>);
 
-struct ActiveDataOperationState {
+struct ActiveCountGuardState {
     active: Arc<AtomicU64>,
     finished: AtomicBool,
 }
 
-impl ActiveDataOperation {
+impl ActiveCountGuard {
     fn new(active: Arc<AtomicU64>) -> Self {
         active.fetch_add(1, Ordering::AcqRel);
-        Self(Arc::new(ActiveDataOperationState {
+        Self(Arc::new(ActiveCountGuardState {
             active,
             finished: AtomicBool::new(false),
         }))
@@ -1140,7 +1140,7 @@ impl ActiveDataOperation {
     }
 }
 
-impl Drop for ActiveDataOperationState {
+impl Drop for ActiveCountGuardState {
     fn drop(&mut self) {
         if !self.finished.swap(true, Ordering::AcqRel) {
             self.active.fetch_sub(1, Ordering::AcqRel);
@@ -1299,7 +1299,7 @@ pub struct BrowserSession {
     pending_capture: PendingCapture,
     pending_site_data_clears: BTreeMap<i32, Registration>,
     _request_context: RequestContext,
-    active_sessions: Arc<AtomicU64>,
+    active_session: ActiveCountGuard,
     active_data_operations: Arc<AtomicU64>,
     accelerated_paint: AcceleratedPaintTracker,
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -1308,7 +1308,6 @@ pub struct BrowserSession {
     metal_frames: MetalFrameProducer,
     #[cfg(target_os = "windows")]
     d3d11_frames: D3d11FrameProducer,
-    counted_open: bool,
 }
 
 impl BrowserSession {
@@ -1415,7 +1414,7 @@ impl BrowserSession {
 
         let (results, result_rx) = async_channel::bounded(1);
         let expected_id = Arc::new(AtomicI32::new(0));
-        let operation = ActiveDataOperation::new(Arc::clone(&self.active_data_operations));
+        let operation = ActiveCountGuard::new(Arc::clone(&self.active_data_operations));
         let mut observer = SiteDataClearObserver::new(Arc::clone(&expected_id), results, operation);
         let registration = host
             .add_dev_tools_message_observer(Some(&mut observer))
@@ -1466,10 +1465,7 @@ impl BrowserSession {
 
     pub fn mark_closed(&mut self) {
         self.phase = SessionPhase::Closed;
-        if self.counted_open {
-            self.active_sessions.fetch_sub(1, Ordering::Release);
-            self.counted_open = false;
-        }
+        self.active_session.finish();
         self.mailbox.clear();
         self.element_pick.cancel();
     }
@@ -3145,6 +3141,7 @@ struct SessionBridge {
     shared_texture_fallback_notified: Arc<AtomicBool>,
     element_pick: ElementPickState,
     pending_capture: PendingCapture,
+    active_session: ActiveCountGuard,
 }
 
 type PendingCapture = Arc<Mutex<Option<Registration>>>;
@@ -3669,7 +3666,7 @@ cef::wrap_completion_callback! {
 struct CookieImportFlushCallback {
         result: CookieImportResult,
         results: Sender<CookieImportResult>,
-        operation: ActiveDataOperation,
+        operation: ActiveCountGuard,
     }
 
     impl CompletionCallback {
@@ -3731,7 +3728,7 @@ cef::wrap_dev_tools_message_observer! {
 struct SiteDataClearObserver {
         expected_id: Arc<AtomicI32>,
         results: Sender<SiteDataClearResult>,
-        operation: ActiveDataOperation,
+        operation: ActiveCountGuard,
     }
 
     impl DevToolsMessageObserver {
@@ -4184,6 +4181,7 @@ cef::wrap_life_span_handler! {
             self.message_router
                 .on_before_close(browser.as_deref().cloned());
             self.bridge.cancel_element_pick();
+            self.bridge.active_session.finish();
             self.bridge.emit(BrowserEvent::Closed {
                 session: self.bridge.id,
             });
@@ -4605,7 +4603,7 @@ mod tests {
     #[test]
     fn active_data_operations_prevent_global_shutdown() {
         let active = Arc::new(AtomicU64::new(0));
-        let operation = ActiveDataOperation::new(Arc::clone(&active));
+        let operation = ActiveCountGuard::new(Arc::clone(&active));
         assert!(matches!(
             ensure_no_active_data_operations(&active),
             Err(BrowserError::DataOperationsStillActive(1))
@@ -4618,8 +4616,19 @@ mod tests {
     #[test]
     fn dropped_data_operation_releases_shutdown_guard() {
         let active = Arc::new(AtomicU64::new(0));
-        drop(ActiveDataOperation::new(Arc::clone(&active)));
+        drop(ActiveCountGuard::new(Arc::clone(&active)));
         assert!(ensure_no_active_data_operations(&active).is_ok());
+    }
+
+    #[test]
+    fn active_count_guard_finishes_once_across_clones() {
+        let active = Arc::new(AtomicU64::new(0));
+        let first = ActiveCountGuard::new(Arc::clone(&active));
+        let second = first.clone();
+        assert_eq!(active.load(Ordering::Acquire), 1);
+        assert!(second.finish());
+        assert!(!first.finish());
+        assert_eq!(active.load(Ordering::Acquire), 0);
     }
 
     #[test]
@@ -5124,6 +5133,7 @@ mod tests {
             shared_texture_fallback_notified: Arc::new(AtomicBool::new(false)),
             element_pick: ElementPickState::default(),
             pending_capture: PendingCapture::default(),
+            active_session: ActiveCountGuard::new(Arc::new(AtomicU64::new(0))),
         };
 
         assert!(!bridge.shared_texture_fallback_requested());

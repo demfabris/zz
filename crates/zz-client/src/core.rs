@@ -294,14 +294,47 @@ impl ClientCore {
                 self.attached_client_flags = client_flags;
                 self.snapshot = Arc::new(snapshot);
                 self.viewports.clear();
-                self.agent_states.clear();
                 self.full_pending.clear();
-                self.command_output = None;
-                self.popup = None;
-                self.menu = None;
-                self.confirm = None;
+                let prefix_changed = self.prefix_armed;
+                let command_prompt_changed = self.command_prompt.is_some();
+                let command_output_changed = self.command_output.is_some();
+                let choose_tree_changed = self.choose_tree.is_some();
+                let choose_buffer_changed = self.choose_buffer.is_some();
+                let display_panes_changed = self.display_panes.is_some();
+                let popup_changed = self.popup.is_some();
+                let menu_changed = self.menu.is_some();
+                let confirm_changed = self.confirm.is_some();
+                self.reset_session();
                 self.events.push_back(CoreEvent::Attached { session });
                 self.events.push_back(CoreEvent::SnapshotChanged);
+                if prefix_changed {
+                    self.events
+                        .push_back(CoreEvent::PrefixArmed { armed: false });
+                }
+                if command_prompt_changed {
+                    self.events.push_back(CoreEvent::CommandPromptChanged);
+                }
+                if command_output_changed {
+                    self.events.push_back(CoreEvent::CommandOutputChanged);
+                }
+                if choose_tree_changed {
+                    self.events.push_back(CoreEvent::ChooseTreeChanged);
+                }
+                if choose_buffer_changed {
+                    self.events.push_back(CoreEvent::ChooseBufferChanged);
+                }
+                if display_panes_changed {
+                    self.events.push_back(CoreEvent::DisplayPanesChanged);
+                }
+                if popup_changed {
+                    self.events.push_back(CoreEvent::PopupChanged);
+                }
+                if menu_changed {
+                    self.events.push_back(CoreEvent::MenuChanged);
+                }
+                if confirm_changed {
+                    self.events.push_back(CoreEvent::ConfirmChanged);
+                }
             }
             ProtocolMessage::Event(Event {
                 sequence: _,
@@ -1629,5 +1662,134 @@ mod tests {
         });
         assert_eq!(core.menu(), None);
         assert_eq!(core.confirm(), None);
+        assert_eq!(
+            drain(&mut core),
+            vec![
+                CoreEvent::Attached {
+                    session: SessionId(0)
+                },
+                CoreEvent::SnapshotChanged,
+                CoreEvent::MenuChanged,
+                CoreEvent::ConfirmChanged,
+            ]
+        );
+    }
+
+    #[test]
+    fn attachment_clears_session_state_and_notifies_changes() {
+        let pane = PaneId(7);
+        let mut core = ClientCore::new();
+        core.prefix_armed = true;
+        core.command_prompt = Some(CommandPromptState {
+            prompt: ":".to_owned(),
+            input: "echo".to_owned(),
+            cursor: 4,
+            kind: zz_protocol::CommandPromptKind::Command,
+            history: Vec::new(),
+            prompt_type: zz_protocol::CommandPromptType::Command,
+            mode: zz_protocol::CommandPromptMode::Text,
+            no_freeze: false,
+        });
+        core.command_output = Some((
+            3,
+            pane,
+            TerminalViewport::blank(8, 4, zz_terminal::SessionStatus::Running),
+        ));
+        core.choose_tree = Some(ChooseTreeState {
+            items: Vec::new(),
+            search: None,
+            selected: 0,
+            kind: zz_protocol::ChooseTreeKind::Windows,
+            filter_no_matches: false,
+        });
+        core.choose_buffer = Some(ChooseBufferState {
+            items: Vec::new(),
+            search: None,
+            selected: 0,
+            filter_no_matches: false,
+        });
+        core.display_panes = Some(DisplayPanesState {
+            window: zz_protocol::WindowId(2),
+            duration_ms: 1000,
+            indicators: Vec::new(),
+        });
+        core.popup = Some(PopupState {
+            pane,
+            left: 1,
+            top: 1,
+            width: 8,
+            height: 4,
+            client_columns: 80,
+            client_rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 18,
+            title: String::new(),
+            style: String::new(),
+            border_style: String::new(),
+            border_lines: zz_protocol::PopupBorderLines::Single,
+            close_on_exit: false,
+            close_on_exit_zero: false,
+            close_on_any_key: false,
+            dead: false,
+        });
+        core.menu = Some(MenuState {
+            left: 1,
+            top: 1,
+            width: 8,
+            height: 4,
+            client_columns: 80,
+            client_rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 18,
+            title: String::new(),
+            style: String::new(),
+            selected_style: String::new(),
+            border_style: String::new(),
+            border_lines: zz_protocol::PopupBorderLines::Single,
+            items: Vec::new(),
+            selected: None,
+            stay_open: false,
+            mouse_keys: false,
+        });
+        core.confirm = Some(ConfirmState {
+            prompt: "continue?".to_owned(),
+            confirm_key: b'y',
+            default_yes: false,
+        });
+
+        core.handle_message(ProtocolMessage::Attached {
+            session: SessionId(9),
+            snapshot: snapshot_with(&[]),
+            read_only: false,
+            client_flags: String::new(),
+        });
+
+        assert!(!core.prefix_armed());
+        assert!(core.command_prompt().is_none());
+        assert!(core.command_output().is_none());
+        assert!(core.choose_tree().is_none());
+        assert!(core.choose_buffer().is_none());
+        assert!(core.display_panes().is_none());
+        assert!(core.popup().is_none());
+        assert!(core.menu().is_none());
+        assert!(core.confirm().is_none());
+        assert_eq!(
+            drain(&mut core),
+            vec![
+                CoreEvent::Attached {
+                    session: SessionId(9)
+                },
+                CoreEvent::SnapshotChanged,
+                CoreEvent::PrefixArmed { armed: false },
+                CoreEvent::CommandPromptChanged,
+                CoreEvent::CommandOutputChanged,
+                CoreEvent::ChooseTreeChanged,
+                CoreEvent::ChooseBufferChanged,
+                CoreEvent::DisplayPanesChanged,
+                CoreEvent::PopupChanged,
+                CoreEvent::MenuChanged,
+                CoreEvent::ConfirmChanged,
+            ]
+        );
     }
 }

@@ -911,6 +911,14 @@ pub enum MuxEffect {
         active_session: Option<SessionId>,
         format_client: FormatClient,
     },
+    /// `split-window -W`. `cmd_split_window_exec` parks its own queue item on
+    /// the new pane (`new_wp->wait_item`) and returns `CMD_RETURN_WAIT`;
+    /// `window_pane_wait_finish` hands the child's exit status, or 128 plus
+    /// its signal, back to an unattached client before the pane is retained or
+    /// removed.
+    PaneWaitForExit {
+        pane: PaneId,
+    },
     PanesRemoved(Vec<PaneId>),
     PaneRelocated {
         pane: PaneId,
@@ -6316,6 +6324,9 @@ impl MuxEngine {
                 active_session,
                 format_client: target_format_client,
             });
+        }
+        if options.has("-W") {
+            effects.push(MuxEffect::PaneWaitForExit { pane });
         }
         Ok(Execution {
             output: self.pane_creation_output(

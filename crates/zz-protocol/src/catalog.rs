@@ -1597,7 +1597,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "split-window",
         aliases: &["splitw"],
         description: "Split a pane with a terminal",
-        usage: "[-bdEfhkPvZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
+        usage: "[-bdEfhkPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
@@ -1619,7 +1619,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-s", FreeForm, "pane style"),
             CommandOptionSpec::value("-S", FreeForm, "active pane border style"),
             CommandOptionSpec::value("-T", FreeForm, "pane title"),
-            CommandOptionSpec::unsupported_flag("-W"),
+            CommandOptionSpec::flag("-W", "wait for the pane's command to finish"),
             CommandOptionSpec::flag("-Z", "zoom the active pane after splitting"),
         ],
         positionals: &[],
@@ -2816,7 +2816,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (467, 36));
+        assert_eq!((supported, unsupported), (468, 35));
         assert_eq!(usage_overrides.len(), 21);
         assert_eq!(
             usage_overrides,

@@ -701,26 +701,15 @@ fn execute_command<W: Write>(
                 } if parked_request == request_id => {
                     parked = true;
                     if release_parked_queue_at_client_exit(state, pending_stdin) {
-                        render_command_response(
+                        return close_parked_request(
                             output,
                             frame.as_ref(),
                             flags,
                             command_guard_frames,
-                            CommandResponse::Success {
-                                request_id,
-                                output: String::new(),
-                                exit_code: 0,
-                                stderr: String::new(),
-                            },
-                        )?;
-                        if exit_held {
-                            output.release_exit()?;
-                        }
-                        return Ok(CommandResult {
-                            exit_code: 0,
+                            request_id,
+                            exit_held,
                             exit,
-                            abort_line: true,
-                        });
+                        );
                     }
                 }
                 ProtocolMessage::CommandResponse(response)
@@ -805,26 +794,15 @@ fn execute_command<W: Write>(
                     );
                 }
                 if parked && release_parked_queue_at_client_exit(state, pending_stdin) {
-                    render_command_response(
+                    return close_parked_request(
                         output,
                         frame.as_ref(),
                         flags,
                         command_guard_frames,
-                        CommandResponse::Success {
-                            request_id,
-                            output: String::new(),
-                            exit_code: 0,
-                            stderr: String::new(),
-                        },
-                    )?;
-                    if exit_held {
-                        output.release_exit()?;
-                    }
-                    return Ok(CommandResult {
-                        exit_code: 0,
+                        request_id,
+                        exit_held,
                         exit,
-                        abort_line: true,
-                    });
+                    );
                 }
             }
             MainEvent::Disconnected => {
@@ -1347,6 +1325,41 @@ fn capture_pending_return<W: Write>(
         }
         Err(stdin) => pending_stdin.push_back(stdin),
     }
+}
+
+/// The pin prints a parked command's `%end` when the command fires, with
+/// nothing in the block, and the client that leaves at end of file never sees
+/// what the command produces later. Everything queued behind it dies with the
+/// queue, which is what `abort_line` says.
+fn close_parked_request<W: Write>(
+    output: &mut ControlWriter<W>,
+    frame: Option<&Frame>,
+    flags: u8,
+    command_guard_frames: u64,
+    request_id: u64,
+    exit_held: bool,
+    exit: ExitSignal,
+) -> io::Result<CommandResult> {
+    render_command_response(
+        output,
+        frame,
+        flags,
+        command_guard_frames,
+        CommandResponse::Success {
+            request_id,
+            output: String::new(),
+            exit_code: 0,
+            stderr: String::new(),
+        },
+    )?;
+    if exit_held {
+        output.release_exit()?;
+    }
+    Ok(CommandResult {
+        exit_code: 0,
+        exit,
+        abort_line: true,
+    })
 }
 
 /// A parked request holds the daemon's queue for this client, so the input that

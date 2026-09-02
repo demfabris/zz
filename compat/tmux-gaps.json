@@ -1521,37 +1521,6 @@
       "reason": "The pin's `theme` choice plus the twenty `dark-theme-*` and `light-theme-*` colour options fill ten named style slots, `themeblack` through `thememagenta`, that any style string can reference, with a fixed ANSI index per slot as the fallback. zz already resolves all ten names: `parse_tmux_colour` maps them to `TmuxColour::Theme`, the GPUI client resolves each into a zz theme token, and the daemon and raw TUI resolve them through the pin's own fallback indices into the terminal palette. What stays unmapped is the twenty-one options that would override those slots, because zz's palette authority is its own theme and light or dark selection follows the client rather than a server option. Reopen when a real configuration workload names the mapping it wants from those option values into zz theme tokens."
     },
     {
-      "id": "pane.command-completion",
-      "title": "Complete two-phase pane command completion",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts",
-        "daily"
-      ],
-      "owner": "daemon",
-      "items": [
-        "flag:split-window:-W"
-      ],
-      "evidence": [
-        "resource:crates/zz-protocol/src/catalog.rs",
-        "resource:crates/zz-protocol/src/message.rs",
-        "resource:crates/zz-mux/src/command.rs",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz/src/control_mode.rs",
-        "resource:knowledge/tmux/divergences.md",
-        "resource:third_party/tmux-reference/UPSTREAM.md"
-      ],
-      "acceptance": [
-        "A bounded two-phase command lifecycle closes a successful Control guard as soon as split-window -W creates its pane, then parks later items from that command queue until the pane exits.",
-        "Pane exit or signal resumes the parked queue before remain-on-exit retention or pane removal and propagates the exact exit status or 128 plus signal status to the originating unattached client."
-      ],
-      "depends_on": [],
-      "reason": "Pinned tmux closes the successful Control guard immediately, parks later queue items on the pane wait item, then propagates exit or signal status and wakes the queue before retention or removal. -W stays loudly unsupported until this foundation integrates across protocol-message, control-client, daemon-core, mux-command, and protocol-catalog. 2026-09-02, from the command-prompt -t and display-panes waits: the parked-item half of that foundation now exists in two places and is cheap. A `crossbeam_channel::Sender<()>` lives on the overlay state (CommandPrompt.waiter, DisplayPanesSession.waiter), the issuing thread installs it under the same lock that proves the overlay is still up and then blocks on the receiver, and dropping the overlay wakes it, so every exit path (answer, cancel, dismissal, timer, detach, disconnect) is covered without touching each one. An answer hands the sender out to the outcome so it is released only after the answer's own commands have run, which is cmdq_insert_after before cmdq_continue. What that mechanism does NOT give either of these groups is the other half: it parks a whole daemon thread, so it is only installed for Command and Control invokers and never for an Interactive one, whose commands run on the very thread that would deliver the key that unparks them. A per-connection worker that can yield a request and resume it later is still what both of these need, and neither the prompt nor the display-panes wait moves toward it. That foundation also owns the display-panes template residue recorded at the 2026-09-02 gate: on the pin cmd_display_panes_key inserts the chosen template after the issuing item with cmdq_get_state(item), so the template's printed output and error status reach the command client that raised the overlay (`display-panes -t C -d 0 'display-message -p \"chose %%%\"'` prints `chose %1` on that CLI's stdout, and a failing template exits 1 with its message on that CLI's stderr), while zz runs the template in the interactive client's context and the CLI sees nothing at exit 0. Routing a chosen template's output and status back to the parked invoker needs the same per-connection worker."
-    },
-    {
       "id": "pane.floating-model",
       "title": "Keep floating panes, their placement flags, and the floating editor out of the mux model",
       "decision": "native",
@@ -3683,6 +3652,22 @@
         "resource:knowledge/tmux/status-line.md"
       ],
       "resolution": "The daemon expands `window-status-separator` after each nonfinal item in the `status-format[]` window loop. It resolves the separator in that window's option and format context, including per-window overrides, nested formats, and style directives; the last item emits no separator. The TUI owns exact tmux row output. The native GUI derives its window controls from snapshot state and does not paint this separator."
+    },
+    {
+      "id": "pane.command-completion",
+      "title": "Complete two-phase pane command completion",
+      "closed_on": "2026-09-02",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz/src/control_mode.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "scenario:compat/scenarios/smoke/split-window-wait.txt"
+      ],
+      "resolution": "split-window -W is a real flag now. catalog.rs promotes it out of unsupported_flag (the supported/unsupported pair moves 467/36 to 468/35 and zz's own usage gains W), the mux emits MuxEffect::PaneWaitForExit for it beside PaneCreated, and the daemon parks the invoking Command or Control thread on that pane between the raw execution and the after-split-window hook, which is where cmd_split_window_exec parks: the hook is already inserted after the item, so the pin runs it after the wait and so does zz. The waiter lives in ServerState.pane_exit_waiters (new_wp->wait_item) and close_exited_terminal wakes it with the child's status before retention or removal, the way server_child_exited calls window_pane_wait_finish before window_pane_destroy_ready; a pane removed some other way wakes it with 0 the way window_pane_destroy does. The status is WEXITSTATUS, or WTERMSIG plus 128, and it only becomes the client's exit status when that client has no session, which is window_pane_wait_finish's own `c->session == NULL` guard. One divergence stays and is deliberate: only a Command or Control invoker parks. An Interactive client's commands run on the daemon thread that would deliver the wake, so parking it would deadlock the client that has to keep drawing; the pin parks any client's queue. This is the same line every existing overlay wait draws (display-popup, display-menu, confirm-before, command-prompt, display-panes) and the GUI has no queue a user can observe the way a script can. A child that is already gone when the waiter would be installed answers from the terminal's status under the same lock, and a parked wait gives up if the queue that owns it is freed, so a client that dies with a live pane cannot strand the worker. Measured on tmux d77c9dc6 and reproduced in smoke/split-window-wait: `split-window -d -W -t =s: 'exit 3'` answers 3 with empty channels, `-W true` answers 0, `-W 'kill -TERM $$'` answers 143, `-P -F '#{pane_index}' -W 'exit 5'` prints 1 and answers 5, `split-window -d -W 'sleep 1; touch M' ; display-message -p AFTER` prints AFTER with M already present, and while a `-W 'sleep 1'` item is parked the client has not returned and the pane is still there, which is the detached-client shape. Every -W pane is gone at the end because remain-on-exit is off. RE-SCOPED: the first acceptance clause read `A bounded two-phase command lifecycle closes a successful Control guard as soon as split-window -W creates its pane, then parks later items from that command queue until the pane exits.` The parking half is what landed. The guard half is not a -W fact at all: cmdq_fire_command prints `%end` for any command whose exec returns CMD_RETURN_WAIT, so on the pin a blocking `run-shell` closes its guard immediately too, while zz's control guard is the client's own request frame and closes when the response arrives. Measured on 2026-09-02: `printf \"run-shell 'sleep 2; touch M'\\n\" | tmux -C attach-session` prints %begin/%end and exits with M landing seconds later, and zz now matches that only because the client releases a parked request at end of file (control-mode.disconnect-cancels-command-queue). A live Control client still sees zz's guard close late for every parking command, -W included. That is one divergence, it belongs to the control guard rather than to this flag, and it is recorded here and in that group's closure rather than left implied. The clause now names what -W owns. STILL OPEN, recorded here and in control-mode.disconnect-cancels-command-queue's closure: the display-panes template residue. cmd_display_panes_key inserts the chosen template after the issuing item with cmdq_get_state(item), so `display-panes -t C -d 0 'display-message -p \"chose %%%\"'` prints `chose %1` on the invoking CLI's stdout and a failing template exits 1 with its message on that CLI's stderr; zz runs the template through submit_template with the interactive client that pressed the key, so the CLI still sees nothing at exit 0. The pieces it needs now exist -- DisplayPanesSession.waiter already parks a Command or Control invoker, and the per-connection worker this cycle added means the invoker is no longer the connection reader -- so what is left is carrying the invoker's (client, kind) on the overlay, running the template in that context in select_display_pane, and widening the waiter's channel from () to the template's output and status. smoke/display-panes-template's failing-template case still says its exit status is not asserted, which is the same residue seen from the other side."
     },
     {
       "id": "pane.selection-state",

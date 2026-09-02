@@ -5409,6 +5409,92 @@ impl Shared {
         let _ = writer.enqueue_reliable(&ProtocolMessage::CommandQueueParked { request_id });
     }
 
+    /// `cmd_split_window_exec`'s `-W` tail: the item that created the pane
+    /// parks on it, and `window_pane_wait_finish` gives an unattached client
+    /// the child's exit status, or 128 plus its signal, once the child is
+    /// gone. Only a Command or Control invoker can park, the way the overlay
+    /// waits do, because an Interactive client's commands run on the thread
+    /// that would deliver the wake.
+    fn wait_for_pane_command(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        result: Result<Execution, DaemonError>,
+    ) -> Result<Execution, DaemonError> {
+        let Ok(execution) = result else {
+            return result;
+        };
+        let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
+            MuxEffect::PaneWaitForExit { pane } => Some(*pane),
+            _ => None,
+        }) else {
+            return Ok(execution);
+        };
+        if !matches!(kind, ClientKind::Command | ClientKind::Control) {
+            return Ok(execution);
+        }
+        // The status is read and the waiter installed under one lock, so a child
+        // that is already gone answers here and one that exits next wakes the
+        // waiter it can now see.
+        let wait = {
+            let mut inner = self.inner.lock();
+            let Some(terminal) = inner.terminals.get(&pane).cloned() else {
+                return Ok(execution);
+            };
+            let status = terminal.latest_viewport().status.clone();
+            if terminal_status_should_close(&status) {
+                let exit_code = pane_wait_exit_code(&terminal, &status);
+                drop(inner);
+                return self.finish_pane_command(client, execution, exit_code);
+            }
+            let (wake, wait) = crossbeam_channel::bounded(1);
+            inner.pane_exit_waiters.entry(pane).or_default().push(wake);
+            wait
+        };
+        self.report_command_queue_park();
+        let exit_code = loop {
+            match wait.recv_timeout(PANE_WAIT_POLL_INTERVAL) {
+                Ok(exit_code) => break exit_code,
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break 0,
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                    if self.command_queue_cancelled(client) {
+                        break 0;
+                    }
+                }
+            }
+        };
+        self.inner.lock().pane_exit_waiters.remove(&pane);
+        self.finish_pane_command(client, execution, exit_code)
+    }
+
+    /// `window_pane_wait_finish` only sets `c->retval` when the client has no
+    /// session, so an attached client keeps the command's own status.
+    fn finish_pane_command(
+        &self,
+        client: ClientId,
+        execution: Execution,
+        exit_code: u8,
+    ) -> Result<Execution, DaemonError> {
+        let attached = {
+            let inner = self.inner.lock();
+            client_attached_session(&inner, client).is_some()
+        };
+        if exit_code == 0 || attached {
+            Ok(execution)
+        } else {
+            Err(DaemonError::CommandExit {
+                output: execution.output,
+                exit_code,
+            })
+        }
+    }
+
+    fn wake_pane_exit_waiters(&self, inner: &mut ServerState, pane: PaneId, exit_code: u8) {
+        for wake in inner.pane_exit_waiters.remove(&pane).unwrap_or_default() {
+            let _ = wake.send(exit_code);
+        }
+    }
+
     /// Whether the connection that owns this client's command queue has gone.
     /// `server_client_lost` frees the queue, so a loop that is between items
     /// stops here and the items it has not started never run.
@@ -5785,6 +5871,7 @@ impl Shared {
             client_terminal,
             queue_execution,
         );
+        let result = self.wait_for_pane_command(client, kind, result);
         set_context_client_terminal(context, previous_client_terminal);
         context.copy_client_attachment(&original_context);
         let suppress_after_hook = matches!(
@@ -7353,7 +7440,8 @@ impl Shared {
                         kind: PaneKindSnapshot::Browser(_) | PaneKindSnapshot::Picker,
                         ..
                     }
-                    | MuxEffect::SuppressAfterHook => {}
+                    | MuxEffect::SuppressAfterHook
+                    | MuxEffect::PaneWaitForExit { .. } => {}
                     MuxEffect::PaneCreated {
                         pane,
                         kind: PaneKindSnapshot::Agent(descriptor),
@@ -7445,6 +7533,7 @@ impl Shared {
                             if let Some(pipe) = inner.pane_pipes.remove(pane) {
                                 pipes_to_close.push(pipe);
                             }
+                            self.wake_pane_exit_waiters(&mut inner, *pane, 0);
                             inner.terminals.remove(pane);
                             inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
@@ -20006,6 +20095,11 @@ impl Shared {
 
     fn close_exited_terminal(self: &Arc<Self>, pane: PaneId, terminal: &Arc<TerminalSession>) {
         let status = terminal.latest_viewport().status.clone();
+        {
+            let exit_code = pane_wait_exit_code(terminal, &status);
+            let mut inner = self.inner.lock();
+            self.wake_pane_exit_waiters(&mut inner, pane, exit_code);
+        }
         let (failed, dead_status, dead_signal) = match status {
             zz_terminal::SessionStatus::Exited(status) => {
                 let failed = status.code != 0 || status.signal.is_some();
@@ -25378,6 +25472,10 @@ struct ServerState {
         HashMap<(ClientId, thread::ThreadId), Vec<CapturedControlCommandEvents>>,
     subscribers: BTreeMap<ClientId, Arc<OutboundMailbox>>,
     client_file_waiters: BTreeMap<u64, ClientFileWaiter>,
+    /// `new_wp->wait_item` for `split-window -W`: the queues parked on each
+    /// pane, woken with the child's status before the pane is retained or
+    /// removed.
+    pane_exit_waiters: BTreeMap<PaneId, Vec<crossbeam_channel::Sender<u8>>>,
     next_client_file_request: u64,
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
     visible_terminals: BTreeMap<ClientId, BTreeSet<PaneId>>,
@@ -34482,6 +34580,22 @@ fn parse_popup_number(value: &str, minimum: u64, maximum: u64) -> Result<u64, &'
     }
 }
 
+/// `window_pane_wait_finish`: `WEXITSTATUS`, or `WTERMSIG` plus 128.
+fn pane_wait_exit_code(terminal: &TerminalSession, status: &zz_terminal::SessionStatus) -> u8 {
+    if let Some(completion) = terminal.completion() {
+        return completion.signal.map_or_else(
+            || u8::try_from(completion.code).unwrap_or(u8::MAX),
+            |signal| signal.saturating_add(128),
+        );
+    }
+    match status {
+        zz_terminal::SessionStatus::Exited(status) => {
+            u8::try_from(status.code).unwrap_or(u8::MAX)
+        }
+        _ => 0,
+    }
+}
+
 fn popup_exit_code(terminal: &TerminalSession) -> Option<u8> {
     terminal.completion().map(|completion| {
         completion
@@ -35125,6 +35239,10 @@ fn ensure_browser_attached(inner: &ServerState, pane: PaneId) -> Result<(), Serv
         Err(ServerError::PaneNotAttached(pane))
     }
 }
+
+/// How often a parked `split-window -W` rechecks whether the queue that owns it
+/// was freed while its pane is still alive.
+const PANE_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 thread_local! {
     /// The request the calling thread is running for a Control client, until

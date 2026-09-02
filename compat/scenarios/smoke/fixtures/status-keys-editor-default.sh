@@ -21,6 +21,7 @@ bin="$(probe_bin)"
 probe() {
     label="$1"
     shift
+    socket="/tmp/zz-status-keys-$side-$$-$label.sock"
     rm -f "$socket"
     env -u TMUX -u TMUX_PANE -u VISUAL -u EDITOR "$@" \
         "$bin" -f /dev/null -S "$socket" new-session -d -s probe >/dev/null 2>&1 || true
@@ -28,6 +29,7 @@ probe() {
     mode="$("$bin" -S "$socket" show-options -gwv mode-keys 2>&1 || true)"
     editor="$("$bin" -S "$socket" show-options -gv editor 2>&1 || true)"
     "$bin" -S "$socket" kill-server >/dev/null 2>&1 || true
+    rm -f "$socket"
     printf '%s=%s/%s/%s' "$label" "$status" "$mode" "$editor"
 }
 

@@ -126,12 +126,23 @@ fn a_resize_moves_the_menu_and_keeps_everything_else() {
         .expect("the display-menu thread")
         .expect("display-menu");
 
-    let chosen = overlays
-        .commands
-        .execute(CommandInvocation::new(
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let chosen = loop {
+        let chosen = overlays.commands.execute(CommandInvocation::new(
             "show-environment",
             ["-g", "MENU_RESIZE_ROW"],
-        ))
-        .expect("read the chosen row");
+        ));
+        match chosen {
+            Ok(chosen) => break chosen,
+            Err(error) if std::time::Instant::now() < deadline => {
+                assert!(
+                    error.to_string().contains("unknown variable"),
+                    "read the chosen row: {error}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(error) => panic!("read the chosen row: {error}"),
+        }
+    };
     assert_eq!(chosen.trim(), "MENU_RESIZE_ROW=row-4");
 }

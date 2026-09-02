@@ -145,6 +145,7 @@
 | smoke/copy-mode-formats | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-mode-keys | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-mode-keys-tail | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-search | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-prompt-bindings | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-refresh | 3 | yes | 0 | yes | yes | yes |

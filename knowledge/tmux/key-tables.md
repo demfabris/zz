@@ -228,8 +228,9 @@ their normal behavior from a Browser pane. Terminal input continues to resolve t
 
 `copy-mode` and `copy-mode-vi` seed the native movement, selection, search, and copy actions. The vi
 table includes `B/E/W`, `J/K`, `C-e/C-y`, `z`, `%`, `D`, `#/*`, `1` through `9`, `:`, and the stock
-control/named-key aliases. Search keys `/`,`?` (vi) and `C-s`,`C-r` (emacs) bind
-`copy-mode-search-prompt`. Stock vi Escape clears the selection; `q` and `C-c` cancel.
+control/named-key aliases. Search keys `/`,`?` (vi) and `C-s`,`C-r` (emacs) carry the pin's
+`command-prompt -P` shapes, the emacs pair incremental with `-I "#{pane_search_string}"`. Stock vi
+Escape clears the selection; `q` and `C-c` cancel.
 
 The emacs table includes the pin's direct navigation aliases for scroll lines, prompt marks,
 matching brackets, line and history endpoints, half pages, top-line positioning, and page-down. The
@@ -263,14 +264,15 @@ Copy-mode movement, jump capture, and numeric repetition do not read the binding
 digit bindings and the nine emacs `M-1` through `M-9` bindings retain zz's per-client
 `copy-mode-repeat` command shape instead of tmux's pane-cell numeric prompt, and a bare digit typed
 after either extends the count in either table. Prefix-table and user-created `bind-key -r` bindings
-still carry and use their repeat bit. The remaining open shared-binding command-shape group contains
-16 cursor-word, search, goto-line, and jump bindings. Fourteen of them (vi `/`, `?`, `:`, `f`,
-`F`, `t`, `T` and emacs `g`, `C-r`, `C-s`, `f`, `F`, `t`, `T`) render through `command-prompt -P`
-on the pin, the pane-cell prompt flag that `prompt.pane-rendered` accepted as unsupported; only
-the two goto-line keys (vi `:` and emacs `g`) store a command identical to the pin's apart from
-`-P`, while the search and jump keys store native copy-mode-search-prompt and jump-capture
-command shapes whose shared blocker is that same `-P` prompt. The remaining two, vi `#` and `*`,
-need `send-keys -F` with `#{copy_cursor_word}`.
+still carry and use their repeat bit. The 16 cursor-word, search, goto-line and jump bindings that
+were the last divergent shared shapes now store the pin's exact commands. Fourteen of them (vi `/`,
+`?`, `:`, `f`, `F`, `t`, `T` and emacs `g`, `C-r`, `C-s`, `f`, `F`, `t`, `T`) render through
+`command-prompt -P`; the pin draws that prompt over the target pane's last row at redraw time, and zz
+takes the flag as a presentation hint its own client surface honours, so the stored command matches
+and only the drawing differs. The remaining two, vi `#` and `*`, carry
+`send-keys -FX search-backward -- "#{copy_cursor_word}"` and its forward twin. `#{pane_search_string}`
+in the emacs `-I` value still expands empty in zz, so `C-s` and `C-r` open with an empty input rather
+than the last search.
 See [copy mode](/tmux/copy-mode.md).
 
 # Shifted key spellings

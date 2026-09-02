@@ -40029,7 +40029,21 @@ mod tests {
             &copy_table,
             CommandInvocation::new("rename-session", ["--", "copy-focus-any"]),
         );
-        assert_eq!(shared.key_decision(client, "f", false), KeyDecision::Ignore);
+        // The stock jump keys are the pin's prompts now, so the native
+        // one-following-key capture is armed from a binding this test makes.
+        shared.inner.lock().engine.keys.bind(
+            &copy_table,
+            "C-M-f",
+            zz_mux::Binding {
+                commands: vec![CommandInvocation::new("send-keys", ["-X", "jump-forward"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        assert_eq!(
+            shared.key_decision(client, "C-M-f", false),
+            KeyDecision::Ignore
+        );
 
         shared
             .input(

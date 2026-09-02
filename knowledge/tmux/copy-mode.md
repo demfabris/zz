@@ -45,11 +45,20 @@ actor executes both against the frozen revision. `-X` actions never reach the PT
 - **mode-keys:** the active table (`copy-mode` = emacs, `copy-mode-vi` = vi) is resolved per pane via
   the window's `mode-keys` option (`copy_mode_table_for_pane`), a window option with global
   inheritance, defaulting to emacs.
-- **Search:** `copy-mode-search-prompt` (bound to `/`,`?` in vi and `C-s`,`C-r` in emacs; `-b` =
-  backward) opens the native GPUI search prompt via `MuxEffect::TerminalUi { BeginSearch { direction }}`;
-  `search-again`/`search-reverse` repeat it, while vi `*`/`#` search forward/backward for the word
-  under the copy cursor. `word-separators` (a session option) and `set-clipboard` /`copy-command`
-  shape word selection and copy destinations.
+- **Search:** the six pinned entry points that carry a string (`search-forward`, `search-backward`,
+  their `-text` and `-incremental` spellings) are daemon copy actions: the engine runs the search
+  synchronously against the frozen revision, keeps the string and its direction on the copy session,
+  and places the cursor by mode-keys — vi steps past the mark it is on and lands on the next match's
+  start, emacs may find the mark it is already on and parks one cell past it. `search-again` and
+  `search-reverse` re-run the stored string with the stored or flipped direction. The stock keys are
+  the pin's `command-prompt -P` bindings (`/`,`?` in vi; `C-s`,`C-r` in emacs, both incremental),
+  where `-P` is a presentation hint zz's clients own rather than a pane-cell prompt; vi `*`/`#` carry
+  `send-keys -FX search-forward/-backward -- "#{copy_cursor_word}"`, and `-F` is the one place the
+  pin expands a key argument as a format. `search_present`, `search_match`, `search_count`,
+  `search_count_partial` and `search_timed_out` answer off the copy session. The native
+  `copy-mode-search-prompt` command still exists for the client's own search box; nothing stock binds
+  it. `word-separators` (a session option) and `set-clipboard` /`copy-command` shape word selection
+  and copy destinations.
 
 # TUI command-output navigation
 

@@ -547,7 +547,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(mux_literals.len(), 58);
+    assert_eq!(mux_literals.len(), 68);
     assert!(mux_literals.is_subset(&upstream_literals));
 
     let mut accepted_native_literals = BTreeSet::new();
@@ -563,7 +563,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(accepted_native_literals.len(), 54);
+    assert_eq!(accepted_native_literals.len(), 44);
     assert!(accepted_native_literals.is_subset(&upstream_literals));
     assert!(mux_literals.is_disjoint(&accepted_native_literals));
 
@@ -1216,11 +1216,11 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     let direct_formats = direct_format_variable_names().collect::<BTreeSet<_>>();
     let delegated_formats = delegated_format_variable_names().collect::<BTreeSet<_>>();
     assert_eq!(formats.len(), 198, "pinned global format count changed");
-    assert_eq!(constant_formats.len(), 65, "tracked format count changed");
+    assert_eq!(constant_formats.len(), 63, "tracked format count changed");
     assert_eq!(direct_formats.len(), 99, "direct format count changed");
     assert_eq!(
         delegated_formats.len(),
-        34,
+        36,
         "delegated format count changed"
     );
     assert!(
@@ -1241,7 +1241,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         nonconstant_formats.len(),
-        133,
+        135,
         "nonconstant format registration count changed"
     );
     let tracked_formats = items

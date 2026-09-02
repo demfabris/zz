@@ -22,7 +22,7 @@ use zz_protocol::{
     ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, SessionId, StatusLine,
     WindowId,
 };
-use zz_terminal::{CellWidth, TerminalSession, TerminalViewport};
+use zz_terminal::{CellWidth, CopyModeFacts, TerminalSession, TerminalViewport};
 
 use crate::{configure_shell_job_environment, paths::home_directory, shell_process};
 
@@ -37,6 +37,21 @@ enum ShellCacheScope {
 
 type ShellCacheKey = (ShellCacheScope, PathBuf, String);
 pub(crate) const LIST_CLIENTS_CONTEXT_FORMATS: [&str; 1] = ["line"];
+/// The `window_copy_formats` names zz answers. tmux adds them to the format
+/// tree from the pane's mode entry; zz reads them off the client view that
+/// holds the copy session, because copy mode is per client here.
+pub(crate) const COPY_MODE_CONTEXT_FORMATS: [&str; 10] = [
+    "copy_cursor_line",
+    "copy_cursor_word",
+    "copy_cursor_x",
+    "copy_cursor_y",
+    "scroll_position",
+    "selection_end_x",
+    "selection_end_y",
+    "selection_present",
+    "selection_start_x",
+    "selection_start_y",
+];
 pub(crate) const SHOW_MESSAGES_CONTEXT_FORMATS: [&str; 3] =
     ["message_number", "message_text", "message_time"];
 
@@ -78,6 +93,9 @@ pub(crate) struct FormatHookFacts {
     pub(crate) client_environment: Arc<Vec<FormatEnvironRow>>,
     pub(crate) message: Option<MessageFormatFacts>,
     pub(crate) mux: Arc<zz_mux::FormatFacts>,
+    /// Every pane some client holds a live copy session on, with that client's
+    /// name beside the facts, ordered by client id.
+    pub(crate) copy_modes: Arc<BTreeMap<PaneId, Vec<(String, Arc<CopyModeFacts>)>>>,
 }
 
 #[derive(Clone)]
@@ -742,6 +760,74 @@ impl<'a> DaemonFormatHooks<'a> {
     }
 }
 
+impl DaemonFormatHooks<'_> {
+    /// The clients holding a live copy session on this context's pane, in
+    /// client order.
+    fn copy_mode_rows(
+        &self,
+        context: &StatusContext,
+    ) -> Option<&Vec<(String, Arc<CopyModeFacts>)>> {
+        self.facts.copy_modes.get(&context.pane_id.parse().ok()?)
+    }
+
+    /// tmux reads `window_copy_formats` off the pane's single mode entry. zz
+    /// keeps copy mode on the client's terminal view, so the format tree
+    /// answers from the client it carries when that client is in the mode on
+    /// this pane, and from the earliest client in the mode otherwise.
+    fn copy_mode_view(&self, context: &StatusContext) -> Option<&CopyModeFacts> {
+        let rows = self.copy_mode_rows(context)?;
+        let client = self
+            .facts
+            .client
+            .as_ref()
+            .map(|client| client.name.as_str());
+        client
+            .and_then(|client| rows.iter().find(|(name, _)| name == client))
+            .or_else(|| rows.first())
+            .map(|(_, facts)| facts.as_ref())
+    }
+
+    fn copy_mode_variable(&self, name: &str, context: &StatusContext) -> Option<String> {
+        let view = self.copy_mode_view(context)?;
+        let [
+            cursor_line,
+            cursor_word,
+            cursor_x,
+            cursor_y,
+            scroll_position,
+            selection_end_x,
+            selection_end_y,
+            selection_present,
+            selection_start_x,
+            selection_start_y,
+        ] = COPY_MODE_CONTEXT_FORMATS;
+        if name == selection_present {
+            return Some(
+                if view.selection.is_some_and(|selection| {
+                    selection.start_x != selection.end_x || selection.start_y != selection.end_y
+                }) {
+                    "1"
+                } else {
+                    "0"
+                }
+                .to_owned(),
+            );
+        }
+        match name {
+            _ if name == cursor_line => Some(view.cursor_line.clone()),
+            _ if name == cursor_word => Some(view.cursor_word.clone()),
+            _ if name == cursor_x => Some(view.cursor_x.to_string()),
+            _ if name == cursor_y => Some(view.cursor_y.to_string()),
+            _ if name == scroll_position => Some(view.scroll_position.to_string()),
+            _ if name == selection_start_x => Some(view.selection?.start_x.to_string()),
+            _ if name == selection_start_y => Some(view.selection?.start_y.to_string()),
+            _ if name == selection_end_x => Some(view.selection?.end_x.to_string()),
+            _ if name == selection_end_y => Some(view.selection?.end_y.to_string()),
+            _ => None,
+        }
+    }
+}
+
 impl StatusHooks for DaemonFormatHooks<'_> {
     /// Byte parity with the pin requires the PLATFORM's strftime: tmux's
     /// `format_strftime` is plain libc strftime, and libcs disagree about
@@ -874,7 +960,26 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         }
         let [list_clients_line] = LIST_CLIENTS_CONTEXT_FORMATS;
         let [message_number, message_text, message_time] = SHOW_MESSAGES_CONTEXT_FORMATS;
+        if COPY_MODE_CONTEXT_FORMATS.contains(&name) {
+            return self.copy_mode_variable(name, context);
+        }
         match name {
+            "pane_in_mode" => Some(
+                if self.copy_mode_rows(context).is_some() {
+                    "1"
+                } else {
+                    "0"
+                }
+                .to_owned(),
+            ),
+            "pane_mode" => Some(
+                if self.copy_mode_view(context)?.view_mode {
+                    "view-mode"
+                } else {
+                    "copy-mode"
+                }
+                .to_owned(),
+            ),
             "pane_kind" => self
                 .facts
                 .mux
@@ -1298,9 +1403,10 @@ mod tests {
     #[test]
     fn daemon_delegated_format_consumers_match_mux_inventory() {
         let delegated = zz_mux::delegated_format_variable_names().collect::<Vec<_>>();
-        assert_eq!(delegated.len(), 34);
+        assert_eq!(delegated.len(), 36);
 
         let session = SessionId(1);
+        let pane = PaneId(1);
         let facts = FormatHookFacts {
             session_last_attached: Arc::new(BTreeMap::from([(session, 1)])),
             buffer: Some(BufferFormatFacts {
@@ -1309,11 +1415,16 @@ mod tests {
                 created: UNIX_EPOCH,
             }),
             client: Some(ClientFormatFacts::default()),
+            copy_modes: Arc::new(BTreeMap::from([(
+                pane,
+                vec![(String::new(), Arc::new(CopyModeFacts::default()))],
+            )])),
             ..FormatHookFacts::default()
         };
         let context = StatusContext {
             session_id: session.to_string(),
             window_id: "@1".to_owned(),
+            pane_id: pane.to_string(),
             ..StatusContext::default()
         };
         let mut hooks = DaemonFormatHooks::command(&facts);

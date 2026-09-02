@@ -1990,9 +1990,6 @@ mod tests {
         ));
         assert_eq!(pointer_of(&model, scroll).button, PopupPointerButton::None);
 
-        // The border and the cells outside the box are the daemon's, not the
-        // job's: the client reports where the pointer landed and carries no
-        // action for the popup's application.
         let border = MouseEvent {
             column: layout.frame.x,
             row: layout.frame.y,

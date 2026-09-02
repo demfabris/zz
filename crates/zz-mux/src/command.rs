@@ -176,6 +176,21 @@ const DEFAULT_NEW_SESSION_FORMAT: &str = "#{session_name}:";
 const DEFAULT_PANE_CREATION_FORMAT: &str = "#{session_name}:#{window_index}.#{pane_index}";
 const COMMAND_ITEM_CONTEXT_FORMATS: &[&str] = &["command"];
 const ROW_CONTEXT_FORMATS: &[&str] = &["line"];
+/// The `window_copy_formats` names the daemon answers from the client view
+/// holding the copy session. The rest of that producer's vocabulary stays in
+/// the accepted-native partition.
+const COPY_MODE_CONTEXT_FORMATS: &[&str] = &[
+    "copy_cursor_line",
+    "copy_cursor_word",
+    "copy_cursor_x",
+    "copy_cursor_y",
+    "scroll_position",
+    "selection_end_x",
+    "selection_end_y",
+    "selection_present",
+    "selection_start_x",
+    "selection_start_y",
+];
 const DEFAULT_LIST_COMMANDS_FORMAT: &str =
     "#{command_list_name}#{?command_list_alias, (#{command_list_alias}),} #{command_list_usage}";
 const LIST_COMMAND_CONTEXT_FORMATS: &[&str] = &[
@@ -254,6 +269,11 @@ const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
         COMMAND_ITEM_CONTEXT_FORMATS,
     ),
     ("notify.c", "notify_hook", &[HOOK_CONTEXT_FORMAT]),
+    (
+        "window-copy.c",
+        "window_copy_formats",
+        COPY_MODE_CONTEXT_FORMATS,
+    ),
 ];
 
 const DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[
@@ -308,26 +328,16 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
         "window_copy_formats",
         &[
             "copy_cursor_hyperlink",
-            "copy_cursor_line",
-            "copy_cursor_word",
-            "copy_cursor_x",
-            "copy_cursor_y",
             "copy_position",
             "copy_position_limit",
             "rectangle_toggle",
-            "scroll_position",
             "search_count",
             "search_count_partial",
             "search_match",
             "search_present",
             "search_timed_out",
             "selection_active",
-            "selection_end_x",
-            "selection_end_y",
             "selection_mode",
-            "selection_present",
-            "selection_start_x",
-            "selection_start_y",
             "top_line_time",
         ],
     ),

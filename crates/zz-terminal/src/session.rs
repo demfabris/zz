@@ -591,6 +591,7 @@ fn terminal_event_channel(
 struct PublishedViewports {
     fallback: Arc<TerminalViewport>,
     by_view: HashMap<TerminalViewId, Arc<TerminalViewport>>,
+    copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
 }
 
 impl PublishedViewports {
@@ -598,8 +599,42 @@ impl PublishedViewports {
         Self {
             fallback: Arc::new(viewport),
             by_view: HashMap::new(),
+            copy_facts: HashMap::new(),
         }
     }
+}
+
+/// What `window_copy_formats` reads off one pane's mode entry, computed for
+/// one client's frozen view. tmux keeps this on the pane because the mode
+/// entry is the pane's; zz keeps it per view because copy mode is per client,
+/// so the daemon reads whichever view the format tree's client owns.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CopyModeFacts {
+    /// `view-mode` rather than `copy-mode` for the read-only output overlay.
+    pub view_mode: bool,
+    /// `data->cx`.
+    pub cursor_x: u32,
+    /// `data->cy`, the cursor's row inside the visible screen.
+    pub cursor_y: u32,
+    /// `window_copy_get_line`: the cursor's row with trailing blanks trimmed.
+    pub cursor_line: String,
+    /// `window_copy_get_word`: the word the cursor sits in, or the one after
+    /// it when the cursor is on a single separator.
+    pub cursor_word: String,
+    /// `data->oy`, rows between the visible screen and the bottom.
+    pub scroll_position: u32,
+    /// `data->screen.sel`, whose absence removes the four coordinates too.
+    pub selection: Option<CopyModeSelectionFacts>,
+}
+
+/// `data->selx`, `sely`, `endselx` and `endsely`: grid rows counted from the
+/// top of the history, not from the top of the visible screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CopyModeSelectionFacts {
+    pub start_x: u32,
+    pub start_y: u32,
+    pub end_x: u32,
+    pub end_y: u32,
 }
 
 /// What a terminal pane runs and the environment it starts with.
@@ -1018,6 +1053,13 @@ impl TerminalSession {
     #[must_use]
     pub fn latest_viewports(&self) -> HashMap<TerminalViewId, Arc<TerminalViewport>> {
         self.latest.read().by_view.clone()
+    }
+
+    /// The copy-mode facts published for one view, absent whenever that view
+    /// holds no frozen mode.
+    #[must_use]
+    pub fn copy_mode_facts(&self, view: TerminalViewId) -> Option<Arc<CopyModeFacts>> {
+        self.latest.read().copy_facts.get(&view).cloned()
     }
 
     /// Copy one stored Kitty image from the actor-owned VT as premultiplied BGRA8.
@@ -2977,8 +3019,13 @@ impl Publisher {
             let mut latest = self.latest.write();
             latest.fallback = Arc::clone(&viewport);
             latest.by_view.clear();
+            latest.copy_facts.clear();
         }
         self.notify_viewports(&viewport, 0);
+    }
+
+    fn publish_copy_facts(&self, facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>) {
+        self.latest.write().copy_facts = facts;
     }
 
     fn publish_viewports(&self, viewports: Vec<(TerminalViewId, TerminalViewport)>) {
@@ -10569,6 +10616,7 @@ fn publish_active_views<'alloc: 'callbacks, 'callbacks>(
     let mut view_ids = active.keys().copied().collect::<Vec<_>>();
     view_ids.sort_by_key(|view| view.0);
     let mut viewports = Vec::with_capacity(view_ids.len());
+    let mut copy_facts = HashMap::with_capacity(view_ids.len());
     for view_id in view_ids {
         let view = active
             .get_mut(&view_id)
@@ -10589,10 +10637,153 @@ fn publish_active_views<'alloc: 'callbacks, 'callbacks>(
             Some(view),
             status.clone(),
         )?;
+        if let Some(facts) = view
+            .copy_mode
+            .as_deref()
+            .map(|mode| copy_mode_facts(mode, word_separators))
+        {
+            copy_facts.insert(view_id, Arc::new(facts));
+        }
         viewports.push((view_id, viewport));
     }
+    publisher.publish_copy_facts(copy_facts);
     publisher.publish_viewports(viewports);
     Ok(())
+}
+
+/// `window_copy_formats` read off one frozen view. `data->cy` and `data->oy`
+/// are screen-relative and bottom-relative; the selection coordinates the pin
+/// stores in `selx`, `sely`, `endselx` and `endsely` are absolute grid rows,
+/// which is what the retained revision already indexes by.
+fn copy_mode_facts(mode: &CopyModeState, word_separators: &WordSeparators) -> CopyModeFacts {
+    let cursor = mode.revision.clamp_point(mode.cursor);
+    CopyModeFacts {
+        view_mode: mode.kind == FrozenModeKind::View,
+        cursor_x: u32::from(cursor.x),
+        cursor_y: cursor.y.saturating_sub(mode.viewport_offset),
+        cursor_line: mode_format_line(&mode.revision, cursor.y),
+        cursor_word: mode_format_word(&mode.revision, cursor, word_separators),
+        scroll_position: mode
+            .revision
+            .maximum_offset()
+            .saturating_sub(mode.viewport_offset),
+        selection: mode.selection.map(|selection| CopyModeSelectionFacts {
+            start_x: u32::from(selection.anchor.x),
+            start_y: selection.anchor.y,
+            end_x: u32::from(selection.focus.x),
+            end_y: selection.focus.y,
+        }),
+    }
+}
+
+/// `grid_line_length`: the row's width with trailing blank cells trimmed. An
+/// unwritten cell reads as a space in the pin's grid, so it trims too.
+fn mode_format_line_length(revision: &ModeRevision, row: u32) -> u32 {
+    (0..revision.columns)
+        .rev()
+        .find(|column| {
+            let point = PointCoordinate { x: *column, y: row };
+            !matches!(revision.first_char(point), None | Some(' '))
+        })
+        .map_or(0, |column| u32::from(column).saturating_add(1))
+}
+
+/// `format_grid_line`: one row's text, trailing blanks trimmed, wraps not
+/// followed. An empty row answers NULL on the pin, which expands empty.
+fn mode_format_line(revision: &ModeRevision, row: u32) -> String {
+    let mut text = String::new();
+    for column in 0..mode_format_line_length(revision, row) {
+        let point = PointCoordinate {
+            x: u16::try_from(column).unwrap_or(u16::MAX),
+            y: row,
+        };
+        revision.push_cell_text(revision.cell(point), &mut text);
+    }
+    text
+}
+
+/// `format_is_word_separator`: the configured set, plus tab and space, plus
+/// the unwritten cell the pin reads back as a space. Padding halves are never
+/// separators; the pin skips them before the test.
+fn mode_format_is_word_separator(
+    revision: &ModeRevision,
+    point: PointCoordinate,
+    word_separators: &WordSeparators,
+) -> bool {
+    if matches!(
+        revision.cell(point).width(),
+        CellWidth::SpacerTail | CellWidth::SpacerHead
+    ) {
+        return false;
+    }
+    match revision.first_char(point) {
+        None => true,
+        Some(character) => {
+            character == ' ' || character == '\t' || word_separators.contains_separator(character)
+        }
+    }
+}
+
+/// `format_grid_word`: walk back to the start of the word the cursor sits in,
+/// crossing a wrap, then collect forward to the next separator. A cursor on a
+/// separator collects the word that follows it, and answers empty when the
+/// next cell is a separator too.
+fn mode_format_word(
+    revision: &ModeRevision,
+    cursor: PointCoordinate,
+    word_separators: &WordSeparators,
+) -> String {
+    let mut x = cursor.x;
+    let mut y = cursor.y;
+    let mut found = false;
+    loop {
+        if mode_format_is_word_separator(revision, PointCoordinate { x, y }, word_separators) {
+            found = true;
+            break;
+        }
+        if x == 0 {
+            if y == 0 {
+                break;
+            }
+            if !revision.row(y.saturating_sub(1)).wrapped() {
+                break;
+            }
+            y -= 1;
+            let length = mode_format_line_length(revision, y);
+            if length == 0 {
+                break;
+            }
+            x = u16::try_from(length).unwrap_or(u16::MAX);
+        }
+        x -= 1;
+    }
+    let mut text = String::new();
+    let last_row = revision.total_rows().saturating_sub(1);
+    loop {
+        if found {
+            let end = mode_format_line_length(revision, y);
+            if end == 0 || u32::from(x) == end.saturating_sub(1) {
+                if y == last_row || !revision.row(y).wrapped() {
+                    break;
+                }
+                y += 1;
+                x = 0;
+            } else {
+                x += 1;
+            }
+        }
+        found = true;
+        let point = PointCoordinate { x, y };
+        let cell = revision.cell(point);
+        if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+            continue;
+        }
+        if mode_format_is_word_separator(revision, point, word_separators) {
+            break;
+        }
+        revision.push_cell_text(cell, &mut text);
+    }
+    text
 }
 
 fn snapshot<'alloc: 'callbacks, 'callbacks>(

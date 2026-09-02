@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/copy-mode-formats.sh ~/copy-mode-formats.sh
+stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+out: set-environment -gu COPY_MODE_FORMATS
+run-shell 'sh ~/copy-mode-formats.sh'
+out: show-environment -g COPY_MODE_FORMATS

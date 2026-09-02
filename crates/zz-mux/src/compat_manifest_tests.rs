@@ -1470,9 +1470,6 @@ fn missing_copy_actions_keep_their_behavior_item_open() {
     for entry in crate::copy_actions::missing_copy_mode_actions() {
         missing.insert(entry.category);
     }
-    // Vocabulary is where a name sits when a product decision closed it rather
-    // than an implementation, so it carries no behavior item. Every other
-    // category has one, and an unmapped action there has to keep it open.
     assert!(
         missing
             .iter()

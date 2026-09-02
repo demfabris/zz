@@ -1062,10 +1062,7 @@ fn copy_mode_action_command(command: &CommandInvocation) -> bool {
 }
 
 fn copy_mode_prefix_consuming_prompt(command: &CommandInvocation) -> bool {
-    matches!(
-        command.name.as_str(),
-        "copy-mode-search-prompt" | "command-prompt"
-    )
+    command.name == "copy-mode-search-prompt"
 }
 
 fn copy_mode_action_options(command: &CommandInvocation) -> Option<(usize, bool)> {
@@ -3283,6 +3280,7 @@ mod tests {
                 .with_command_blocks([3])
             ])
         );
+        assert_eq!(engine.take_repeat_count(), Some(3));
 
         for (key, action) in [
             ("%", "next-matching-bracket"),
@@ -3386,6 +3384,7 @@ mod tests {
                 .with_command_blocks([3])
             ])
         );
+        assert_eq!(engine.take_repeat_count(), Some(2));
         assert_eq!(
             engine.handle(&tables, "C-n"),
             KeyDecision::Commands(vec![CommandInvocation::new(
@@ -3647,7 +3646,7 @@ mod tests {
     }
 
     #[test]
-    fn copy_mode_prompts_consume_native_prefixes_without_leaking_into_later_motion() {
+    fn copy_mode_prompts_keep_the_armed_prefix_for_their_answer() {
         let tables = KeyTables::default();
 
         for (key, command) in [
@@ -3685,8 +3684,9 @@ mod tests {
             assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
             assert_eq!(
                 engine.handle(&tables, key),
-                KeyDecision::Commands(vec![command])
+                KeyDecision::Commands(vec![command.clone()])
             );
+            assert_eq!(engine.take_repeat_count(), Some(3), "copy-mode {key}");
             assert_eq!(
                 engine.handle(&tables, "E"),
                 KeyDecision::Commands(vec![CommandInvocation::new(
@@ -3694,6 +3694,22 @@ mod tests {
                     ["-X", "next-space-end"],
                 )]),
                 "copy-mode {key}",
+            );
+
+            let mut cancelled = KeyEngine::default();
+            cancelled.switch_table(Some("copy-mode-vi".to_owned()));
+            assert_eq!(cancelled.handle(&tables, "3"), KeyDecision::Ignore);
+            assert_eq!(
+                cancelled.handle(&tables, key),
+                KeyDecision::Commands(vec![command])
+            );
+            assert_eq!(
+                cancelled.handle(&tables, "E"),
+                KeyDecision::Commands(vec![CommandInvocation::new(
+                    "send-keys",
+                    ["-N", "3", "-X", "next-space-end"],
+                )]),
+                "copy-mode {key} cancelled",
             );
         }
     }

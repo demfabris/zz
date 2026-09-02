@@ -40029,8 +40029,6 @@ mod tests {
             &copy_table,
             CommandInvocation::new("rename-session", ["--", "copy-focus-any"]),
         );
-        // The stock jump keys are the pin's prompts now, so the native
-        // one-following-key capture is armed from a binding this test makes.
         shared.inner.lock().engine.keys.bind(
             &copy_table,
             "C-M-f",

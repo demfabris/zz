@@ -37419,8 +37419,6 @@ mod tests {
                 no_freeze: false,
             }]
         );
-        // `-P` is a presentation hint the client owns, so the daemon raises
-        // the same prompt with it as without it.
         let with_pane_flag = engine
             .execute(
                 &mut context,

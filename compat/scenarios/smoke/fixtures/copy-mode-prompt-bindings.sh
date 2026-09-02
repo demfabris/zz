@@ -201,6 +201,21 @@ check_equal 'vi-jump-backward' '9,0' "$(xy)"
 drive 54
 drive 61
 check_equal 'vi-jump-to-backward' '5,0' "$(xy)"
+
+# The armed count survives the prompt the way wme->prefix does: the pin's
+# numeric prompt hands the first non-digit key on with send-keys -N already
+# run, and window_copy_command resets the prefix only after the answer ran.
+top
+drive 33
+drive 66
+drive 61
+check_equal 'vi-counted-jump-forward' '12,0' "$(xy)"
+top
+drive 32
+drive 2f
+drive 616c706861
+drive 0d
+check_equal 'vi-counted-slash-search' '5,2' "$(xy)"
 probe send-keys -t "$pane" -X cancel
 
 # 'C-s' and 'C-r' are the incremental prompts: the search runs on every
@@ -276,7 +291,7 @@ probe send-keys -t "$pane" -X cancel
 
 printf 'quit\n' >"$work/steps/step-$((step + 1))"
 
-if [ "$check_count" -ne 26 ]; then
+if [ "$check_count" -ne 28 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then

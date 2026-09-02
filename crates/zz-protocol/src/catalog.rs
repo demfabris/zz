@@ -2002,7 +2002,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-N", FreeForm, "repeat count"),
             CommandOptionSpec::flag("-X", "copy-mode command"),
             CommandOptionSpec::flag("-H", "keys are hexadecimal character codes"),
-            CommandOptionSpec::flag("-F", "compatibility no-op"),
+            CommandOptionSpec::flag(
+                "-F",
+                "expand the search string as a format in the target pane",
+            ),
             CommandOptionSpec::flag("-l", "literal text"),
             CommandOptionSpec::value("-c", FreeForm, "target client"),
             CommandOptionSpec::flag("-K", "inject keys into the target client"),

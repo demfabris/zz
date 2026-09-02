@@ -5,6 +5,43 @@ asked for a pause: nothing is minted, claimed, or launched. The board is idle (M
 free, no leases held by `macbook/orchestrator`), the lease renewer and `caffeinate` are stopped,
 and local `main` matches `origin/main`.
 
+## What this campaign is
+
+The goal is `alias tmux=zz`: a tmux user brings their config, plugins, scripts and habits to zz and
+nothing breaks. zz is a superset of tmux (a GPU desktop app with browser and agent panes over a
+tmux-shaped daemon), and nobody switches multiplexers if their setup stops working, so
+compatibility is the adoption story. It is also the cheapest bug finder there is: every
+difference from tmux is either a defect or a decision we have to own in writing.
+
+The pieces, in the order a new reader meets them:
+
+- **The oracle** is a pinned tmux build (`d77c9dc6`, next-3.8) under `compat/.cache/tmux-src/`.
+  Real tmux is the truth, not the man page; workers read its C source freely.
+- **The harness**, `compat/run.sh`, runs the same scenario script against tmux and zz and diffs the
+  answers: layout geometry, format expansions, command output, hooks. `compat/scenarios/` holds
+  the corpus (199 scenarios at the pause), `smoke/` the ones with real pty clients.
+- **The registry**, `compat/tmux-gaps.json`, lists every known difference in groups, each item with
+  the exact proof that closes it. Closing an item means removing it after that proof; a difference
+  we keep on purpose is relocated into an accepted group with the measured tmux behaviour and the
+  reason. `knowledge/tmux/gaps.md` is generated from it (`compat/tmux-tracker.py write-report`).
+- **The meter**, `compat/progress.py`, scores the registry against a list of 304 items frozen on
+  2026-08-31 (`compat/progress-baseline.json`), so the percentage cannot be gamed by moving goalposts.
+- **The board**, GitHub issue #7 driven by `compat/board.py`, is the work ledger: fronts are
+  minted, claimed, gated and integrated as comments, with zone locks so parallel agents do not
+  collide. `TMUX_COMPAT_TRACKER.md` at the repo root is the human-readable checkpoint.
+- **The cycles**: each one runs three implementor agents in parallel worktrees, one adversarial
+  reviewer per lane that tries to disprove the closes against the pin, and one gate that rebases,
+  runs the workspace tests, clippy and the differential corpus, pushes main and ledgers the board.
+  An orchestrator session writes each cycle's script from a fresh census. `CAMPAIGN-LOG.md` has
+  the history; the `opus-compat-run-N.js` files beside it are the scripts.
+
+What gets compared is the daemon, not the screen. Both binaries receive the same commands and
+their observable answers are diffed (`list-panes`, `capture-pane`, `display-message` formats,
+hooks, options, key tables, copy-mode state, control-mode output). The zz raw TUI draws a sidebar
+and chrome rows around a pane, so it is never cell-compared to tmux's 80x24; it is used as a real
+pty client to drive copy mode, prompts, choosers, mouse and paste, after which daemon facts are
+read. The desktop GPUI app keeps its own look entirely.
+
 ## State now
 
 | Fact | Value |
@@ -85,36 +122,59 @@ renew them and MAIN while the gate runs), launch, verify `origin/main`, the boar
 fronts under TRIAGE, commit the orchestration records under MAIN (a records-only push is ledgered as
 `integrated MAIN --merge <sha>`), and repeat.
 
-## This machine (`macbook`)
+## Resuming on another machine
 
-16 cores, 48 GB, macOS 27. `origin` is HTTPS (gh's credential helper) since the SSH security keys
-went away mid-cycle-7 ("device not found" on the ED25519-SK identities); SSH worked non-interactively
-before that and will again with the YubiKey. Unattended runs need two Claude Code settings that are
-in place: a global `Bash(rm:*)` allow rule, and the PreToolUse hook `~/.claude/scripts/guard-rm-home.py`
-that denies `rm -rf $HOME` (the built-in critical-path guard prompts on that shape and no allow rule
-bypasses it). `caffeinate -is -w <claude pid>` keeps the Mac awake for a running cycle (stopped at the
-pause; start it again with the next launch); the lid must stay open. `gh` is logged in with repo scope. Holder identity
-`macbook/orchestrator`. Caches are populated (`compat/.cache/tmux-src/tmux` at `d77c9dc6`,
-`compat/.cache/plugins`, eight plugins); the `formats` scenario ran clean here. Worktrees: `~/dev/zz-opus-dint`,
-`~/dev/zz-opus-panes` and `~/dev/zz-opus-termopts` exist, clean and warm at the cycle-9 lane tips
-(`4858798a`, `f1dfad97`, `399629e9`); the gate removed its `zz-gate-*` worktrees and the shared
-`zz-gate-target` build dir; the reviewers reuse `zz-review-*` when present. Machine traps the prompts already
-carry: `/bin/bash` is 3.2 (no `mapfile`; shard runners use `/opt/homebrew/bin/bash` or python3),
-APFS refuses non-UTF-8 file names (`smoke/client-non-utf8-cwd` guards for it since cycle 7), and the user has a live tmux server (sessions `clairvo`, `home`, `zz`)
-and a live `/Applications/zz.app` daemon that no worker may kill. The Ubuntu box still holds the
-cycle-6 worktrees `zz-opus-panes`, `zz-opus-dint`, `zz-review-dint` with 15-29 GB `target/` dirs.
+1. Clone `https://github.com/demfabris/zz.git` (SSH is fine wherever the keys work; the macbook
+   sits on HTTPS only because its security keys went away). Toolchain per `mise.toml`; the campaign
+   only needs debug builds, `cargo test`, and `cargo clippy`.
+2. Populate the caches once: `compat/fetch-tmux.sh` builds the pinned tmux, `compat/fetch-corpus.sh`
+   clones the plugin corpus, and any scenario through `compat/run.sh` triggers both. The readiness
+   check is the `formats` scenario running clean:
+   `ZZ_COMPAT_TMUX=<checkout>/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=<checkout>/compat/.cache/plugins compat/run.sh --strict-geometry formats`
+   (cold build, several minutes). Those two variables are preset in every prompt so sharded runs
+   never race the clone.
+3. `gh auth login` with repo scope; `python3 compat/board.py status` must list the fronts. Pick a
+   holder identity like `<host>/orchestrator` and use it for every board call
+   (`ZZ_BOARD_HOLDER=<host>/orchestrator`).
+4. Claude Code settings for an unattended run, in `~/.claude/settings.json`: the allow rule
+   `"Bash(rm:*)"` under `permissions.allow` (the auto-mode classifier prompts on `rm -rf` otherwise),
+   and a PreToolUse hook on `Bash` running `python3 <checkout>/compat/orchestration/guard-rm-home.py`
+   with a 10 s timeout. The hook denies the `rm -rf $HOME` shape with a rewrite hint, because
+   Claude Code's built-in critical-path guard prompts on it and no allow rule bypasses that.
+   Open `/hooks` once after editing so the session reloads the file.
+5. Keep the machine awake for the four-hour gate: `caffeinate -is -w <claude pid>` on macOS,
+   `systemd-inhibit` or suspend disabled on Linux. A sleeping machine kills the gate agent
+   ("computer went to sleep"); the journal cache then lets `Workflow({scriptPath, resumeFromRunId})`
+   replay finished agents in the same session.
+6. Optional: carry the orchestrator's memory over as described under "Moving the Claude Code
+   session itself". The repository and the board are the durable state; the memory only saves
+   re-reading `CAMPAIGN-LOG.md`.
+7. First task: read the census above and decide. Either write `opus-compat-run-10.js` from
+   `opus-compat-run-9.js` (same `M` block, three new lane batches, new lock names, protocol 95 to
+   96), mint the lock fronts under TRIAGE, commit the records under MAIN, claim, launch with the
+   machine facts as `args`, and run a lease renewer; or settle the twenty stuck items first (the
+   `-P` stance, the two design fronts, the GUI harness). Nothing in the scripts needs editing for
+   a new machine: `args` carries the paths, holder, core etiquette, shard count, the
+   protected-server sentence, and the bash for helpers. On Linux pass `bash: "/bin/bash"`.
 
-## Before launching on a new machine
+## Machine notes
 
-- Pass the machine facts as `args` (see above): paths, holder, core etiquette, shard count, the
-  protected-server sentence, and the bash to use for helpers. Nothing in the script needs editing.
-- The git transport lines assume SSH works non-interactively; the prompts carry the HTTPS fallback.
-- Populate the caches once: the pinned tmux builds through `compat/fetch-tmux.sh`, the plugin corpus
-  through `compat/fetch-corpus.sh`; running any scenario through `compat/run.sh` triggers both.
-  `ZZ_COMPAT_TMUX` and `ZZ_COMPAT_CORPUS` are preset in every prompt so sharded runs never race the
-  clone.
-- `gh auth login` with repo scope for `compat/board.py`; pick a holder identity like
-  `<host>/orchestrator` and claim the three lock fronts under it before launching.
+- **macbook** (16 cores, 48 GB, macOS 27): `origin` is HTTPS through gh's credential helper.
+  `/bin/bash` is 3.2 (no `mapfile`; helpers use `/opt/homebrew/bin/bash` or python3). APFS refuses
+  non-UTF-8 file names (`smoke/client-non-utf8-cwd` guards for it). The user has a live tmux server
+  (sessions `clairvo`, `home`, `zz`) and a live `/Applications/zz.app` daemon that no worker may
+  kill. Caches populated (`d77c9dc6`, eight plugins). Worktrees `~/dev/zz-opus-dint`,
+  `~/dev/zz-opus-panes`, `~/dev/zz-opus-termopts` are clean and warm at the cycle-9 lane tips
+  (`4858798a`, `f1dfad97`, `399629e9`); reuse with `git checkout --detach origin/main`. The gate's
+  `zz-gate-*` worktrees and the shared `zz-gate-target` build dir are gone. The allow rule and the
+  hook (pointing at `~/.claude/scripts/guard-rm-home.py`, same file) are in place; `caffeinate`
+  was stopped at the pause.
+- **ubuntu box**: ran cycles 5 and 6. Still holds the cycle-6 worktrees `zz-opus-panes`,
+  `zz-opus-dint`, `zz-review-dint` with 15-29 GB `target/` dirs; reuse a worktree if
+  `git status --short` is empty, otherwise remove it. Needs the settings from step 4 before an
+  unattended run; the SSH remote worked there.
+- **A worker's prompt** already carries the traps above for both boxes; a new machine with a new
+  trap gets it added to `COMMON` in the next script.
 
 ## Board tool quirks
 
@@ -189,4 +249,8 @@ invoker's read-only bit instead of the `-c` client's (cycle 6); a fixture step t
 wrong snapshot on both binaries and so looked like a divergence (cycle 6). Gate lore:
 `compat/run.sh --delta --list` once returned a stale selection, so list twice and reconcile against
 `git diff --name-only`; grep the tree for conflict markers after every rebase (one got committed
-into `catalog.rs`); a shard runner under bash 3.2 ran the whole corpus eight times at once.
+into `catalog.rs`); a shard runner under bash 3.2 ran the whole corpus eight times at once; when a gate rebase
+conflicts on `compat/tmux-gaps.json`, `compat/orchestration/gaps-merge.py BASE OURS THEIRS OUT`
+merges the two lanes' closes by record id and exits 2 on a record both sides changed differently
+(feed it `git show :1:compat/tmux-gaps.json`, `:2:`, `:3:`), then regenerate `gaps.md` and recount
+`catalog.rs` and `compat_manifest_tests.rs`, which move every cycle.

@@ -10,7 +10,7 @@
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 8 INTEGRATED 2026-09-02 ON THE MACBOOK (2 OF 3 LANES; TERMINAL SKIPPED); THE NEXT CYCLE STARTS FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **CYCLE 9 INTEGRATED 2026-09-02 ON THE MACBOOK (3 OF 3 LANES), CAMPAIGN PAUSED; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -265,7 +265,8 @@ Two modes continue the campaign; both start from published `origin/main` and spe
    script in [`compat/orchestration/`](compat/orchestration/) (three Opus implementor lanes, one
    Fable reviewer per lane, one Fable integration gate). Read
    [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) first; it holds the pause
-   state, the ready cycle-5 script, the machine-move checklist, and the board tool quirks.
+   state, the census of what is left, the checklist for resuming on another machine, and the board
+   tool quirks.
 2. A single autonomous worker: the `zz-worker` skill in `.agents/skills/zz-worker/` claims a front
    from the board, proves it in a worktree, and integrates through the MAIN lock.
 

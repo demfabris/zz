@@ -889,6 +889,15 @@ pub enum MuxEffect {
     ResetPane {
         pane: PaneId,
     },
+    /// `copy-mode -k`. window.c stores the flag on the mode entry as
+    /// `wme->kill` and `window_pane_reset_mode` kills the pane once the mode
+    /// is torn down, so the effect only arms the bit; the kill runs when the
+    /// copy session actually ends. `window_pane_set_mode` returns before that
+    /// assignment when the pane already holds the mode, so this effect is
+    /// emitted before the entry and refuses to arm a pane already in the mode.
+    ArmCopyModeKill {
+        pane: PaneId,
+    },
     CopyModeRepeat {
         pane: PaneId,
         count: u32,
@@ -7259,7 +7268,11 @@ impl MuxEngine {
         if options.has("-M") {
             return Ok(Execution::default());
         }
-        let mut effects = vec![MuxEffect::TerminalView {
+        let mut effects = Vec::new();
+        if options.has("-k") {
+            effects.push(MuxEffect::ArmCopyModeKill { pane });
+        }
+        effects.push(MuxEffect::TerminalView {
             pane,
             action: if options.has("-H") {
                 TerminalViewAction::EnterCopyModeWith {
@@ -7273,7 +7286,7 @@ impl MuxEngine {
             },
             target_client: None,
             require_mode: false,
-        }];
+        });
         if options.has("-u") {
             effects.push(MuxEffect::TerminalView {
                 pane,

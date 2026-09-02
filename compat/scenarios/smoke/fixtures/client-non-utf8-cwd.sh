@@ -25,6 +25,16 @@ mkdir -p "$root"
 # under test, so the directory name holds it and every probe below is a
 # relative path resolved against that cwd.
 work="$root/$(printf 'cwd-\377-dir')"
+encoding=bytes
+if ! mkdir "$work" 2>/dev/null; then
+    # APFS and every other filesystem that enforces UTF-8 file names refuses
+    # the 0xff byte with EILSEQ before either binary is involved. Detect the
+    # refusal once, take the UTF-8 control name on both sides, and record which
+    # name ran so the two outputs stay identical either way.
+    encoding=utf8-control
+    work="$root/cwd-utf8-dir"
+    mkdir "$work"
+fi
 mkdir -p "$work/nested"
 printf '%s\n' 'set-environment -g NON_UTF8_CWD_DIRECT hit' >"$work/rel.conf"
 printf '%s\n' 'set-environment -g NON_UTF8_CWD_NESTED hit' >"$work/nested/leaf.conf"
@@ -67,6 +77,10 @@ if [ "$direct_rc" -eq 0 ] &&
     [ ! -s "$root/quiet.err" ] &&
     grep -q 'No such file or directory' "$root/missing.err"; then
     result=clean:12
+fi
+
+if [ "$encoding" != bytes ]; then
+    result="$result/$encoding"
 fi
 
 main_client set-environment -g NON_UTF8_CWD "$result"

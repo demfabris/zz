@@ -1,0 +1,12 @@
+corpus: none
+# window_bigger and the two viewport offsets are the per-client window family:
+# format_cb_window_bigger answers null without a client in the format tree,
+# tty_window_offset1 compares the client's own tty minus its status lines with
+# the client's current window, and the offsets centre on the active pane's
+# cursor. A list-windows or list-panes row is built with a null client, so all
+# three answer null on a row even while a client is attached.
+stage: fixtures/format-window-bigger.sh ~/format-window-bigger.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu FORMAT_WINDOW_BIGGER
+run-shell 'sh ~/format-window-bigger.sh'
+out: show-environment -g FORMAT_WINDOW_BIGGER

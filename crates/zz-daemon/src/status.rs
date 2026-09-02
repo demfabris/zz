@@ -135,6 +135,54 @@ pub(crate) struct ClientFormatFacts {
     pub(crate) written: String,
     pub(crate) line: usize,
     pub(crate) environment: Vec<FormatEnvironRow>,
+    pub(crate) viewport: Option<ClientViewportFacts>,
+}
+
+/// tty.c `tty_window_offset1`: the client's viewport over its own current
+/// window, with the cursor of the pane that window is showing. `sx`/`sy` are
+/// the tty minus the status lines, which is what the pin compares against the
+/// window before it centres anything.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ClientViewportFacts {
+    pub(crate) columns: u16,
+    pub(crate) rows: u16,
+    pub(crate) window_width: u16,
+    pub(crate) window_height: u16,
+    /// The active pane's cursor in window coordinates, `wp->xoff + cx` and
+    /// `wp->yoff + cy`, absent while `MODE_CURSOR` is off.
+    pub(crate) cursor: Option<(u16, u16)>,
+}
+
+impl ClientViewportFacts {
+    fn bigger(self) -> bool {
+        self.columns < self.window_width || self.rows < self.window_height
+    }
+
+    /// The `else` half of `tty_window_offset1`, which zz reaches with no pan
+    /// window because `refresh-client -U/-D/-L/-R` is not implemented here.
+    fn offsets(self) -> Option<(u16, u16)> {
+        if !self.bigger() {
+            return None;
+        }
+        let Some((cursor_x, cursor_y)) = self.cursor else {
+            return Some((0, 0));
+        };
+        let offset_x = if cursor_x < self.columns {
+            0
+        } else if cursor_x > self.window_width.saturating_sub(self.columns) {
+            self.window_width.saturating_sub(self.columns)
+        } else {
+            cursor_x.saturating_sub(self.columns / 2)
+        };
+        let offset_y = if cursor_y < self.rows {
+            0
+        } else if cursor_y > self.window_height.saturating_sub(self.rows) {
+            self.window_height.saturating_sub(self.rows)
+        } else {
+            cursor_y.saturating_sub(self.rows).saturating_add(1)
+        };
+        Some((offset_x, offset_y))
+    }
 }
 
 /// window.c `window_create` and `window_resize`: a window keeps the cell pixel
@@ -1025,6 +1073,32 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "client_utf8" => Some(self.facts.client.as_ref()?.utf8.clone()),
             "client_width" => Some(self.facts.client.as_ref()?.width.clone()),
             "client_written" => Some(self.facts.client.as_ref()?.written.clone()),
+            "window_bigger" => Some(
+                if self.facts.client.as_ref()?.viewport?.bigger() {
+                    "1"
+                } else {
+                    "0"
+                }
+                .to_owned(),
+            ),
+            "window_offset_x" => Some(
+                self.facts
+                    .client
+                    .as_ref()?
+                    .viewport?
+                    .offsets()?
+                    .0
+                    .to_string(),
+            ),
+            "window_offset_y" => Some(
+                self.facts
+                    .client
+                    .as_ref()?
+                    .viewport?
+                    .offsets()?
+                    .1
+                    .to_string(),
+            ),
             "window_cell_height" => window_scoped(context)
                 .then(|| window_cell_pixels(self.facts.client.as_ref(), false)),
             "window_cell_width" => {
@@ -1403,7 +1477,7 @@ mod tests {
     #[test]
     fn daemon_delegated_format_consumers_match_mux_inventory() {
         let delegated = zz_mux::delegated_format_variable_names().collect::<Vec<_>>();
-        assert_eq!(delegated.len(), 36);
+        assert_eq!(delegated.len(), 39);
 
         let session = SessionId(1);
         let pane = PaneId(1);
@@ -1414,7 +1488,18 @@ mod tests {
                 data: Arc::from([]),
                 created: UNIX_EPOCH,
             }),
-            client: Some(ClientFormatFacts::default()),
+            client: Some(ClientFormatFacts {
+                // The offsets only answer while the window is bigger than the
+                // client viewport, which is the state this inventory needs.
+                viewport: Some(ClientViewportFacts {
+                    columns: 80,
+                    rows: 23,
+                    window_width: 200,
+                    window_height: 60,
+                    cursor: None,
+                }),
+                ..ClientFormatFacts::default()
+            }),
             copy_modes: Arc::new(BTreeMap::from([(
                 pane,
                 vec![(String::new(), Arc::new(CopyModeFacts::default()))],

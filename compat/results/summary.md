@@ -122,6 +122,7 @@
 | smoke/cli-chain-parse-abort | 3 | yes | 0 | yes | yes | yes |
 | smoke/client-exit-actions | 3 | yes | 0 | yes | yes | yes |
 | smoke/client-non-utf8-cwd | 4 | yes | 0 | yes | yes | yes |
+| smoke/client-resized-context | 3 | yes | 0 | yes | yes | yes |
 | smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |
 | smoke/command-prompt-chain | 2 | yes | 0 | yes | yes | yes |
 | smoke/command-prompt-target | 3 | yes | 0 | yes | yes | yes |
@@ -157,6 +158,7 @@
 | smoke/format-environment-loop-context | 3 | yes | 0 | yes | yes | yes |
 | smoke/format-modifier-client-loop | 3 | yes | 0 | yes | yes | yes |
 | smoke/format-modifier-environment-loop | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-window-bigger | 3 | yes | 0 | yes | yes | yes |
 | smoke/fpp-init | 2 | yes | 0 | yes | yes | yes |
 | smoke/jobs-command-environment | 3 | yes | 0 | yes | yes | yes |
 | smoke/jobs-display-popup-environment | 3 | yes | 0 | yes | yes | yes |

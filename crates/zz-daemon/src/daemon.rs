@@ -84,9 +84,9 @@ use crate::{
     paths::{default_mux_config, home_directory},
     shell_process,
     status::{
-        BufferFormatFacts, ClientFormatFacts, DaemonFormatHooks, FormatHookFacts,
-        MessageFormatFacts, StatusRenderer, StatusRequest, client_environment_rows, host_names,
-        status_context,
+        BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
+        FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest,
+        client_environment_rows, host_names, status_context,
     },
     transport::{LocalTransport, Transport, TransportListener, TransportStream},
 };
@@ -2813,6 +2813,8 @@ struct PendingHookEvent {
 const CURRENT_FILE_CONTEXT_FORMAT: &str = "current_file";
 const HOOK_CONTEXT_FORMAT: &str = "hook";
 const HOOK_CLIENT_CONTEXT_FORMAT: &str = "hook_client";
+/// The commands whose rows the pin builds with a null format client.
+const CLIENTLESS_ROW_COMMANDS: [&str; 3] = ["list-windows", "list-sessions", "list-panes"];
 const HOOK_PANE_CONTEXT_FORMAT: &str = "hook_pane";
 const HOOK_SESSION_CONTEXT_FORMAT: &str = "hook_session";
 const HOOK_SESSION_NAME_CONTEXT_FORMAT: &str = "hook_session_name";
@@ -6704,6 +6706,12 @@ impl Shared {
                 }
             }
             let mut facts = format_hook_facts_for_client(&inner, client, context);
+            // cmd-list-windows.c, cmd-list-sessions.c and cmd-list-panes.c all
+            // call `format_defaults(ft, NULL, ...)`, so a row answers null for
+            // every client-scoped name even while a client is attached.
+            if CLIENTLESS_ROW_COMMANDS.contains(&command_name) {
+                facts.client = None;
+            }
             if command_name == "display-message" {
                 let (target, target_client) = inner
                     .engine
@@ -28548,7 +28556,43 @@ fn client_format_facts(
         written: written.to_string(),
         line: 0,
         environment: client_environment_rows(inner.client_environments.get(&client)),
+        viewport: has_terminal
+            .then(|| client_viewport_facts(inner, client, session, window))
+            .flatten(),
     }
+}
+
+/// `tty_window_offset1` reads `c->session->curw->window` and
+/// `server_client_get_pane(c)`, so the comparison is the client's own current
+/// window and the pane that window is showing, never the format's window.
+fn client_viewport_facts(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    window: WindowId,
+) -> Option<ClientViewportFacts> {
+    let (columns, rows) = interactive_client_window_extent(inner, client, session, window)?;
+    let pane = inner.engine.state.windows.get(&window)?.active_pane;
+    let geometry = inner
+        .engine
+        .format_status_context(Some(session), Some(window), Some(pane));
+    let cursor = inner.terminals.get(&pane).and_then(|terminal| {
+        let cursor = terminal
+            .latest_viewport()
+            .cursor
+            .filter(|cursor| cursor.visible())?;
+        Some((
+            geometry.pane_left?.saturating_add(cursor.column()),
+            geometry.pane_top?.saturating_add(cursor.row()),
+        ))
+    });
+    Some(ClientViewportFacts {
+        columns,
+        rows,
+        window_width: geometry.window_width?,
+        window_height: geometry.window_height?,
+        cursor,
+    })
 }
 
 fn client_format_name(inner: &ServerState, client: ClientId) -> String {
@@ -31306,14 +31350,32 @@ fn format_hook_facts_for_client(
             inner.client_environments.get(&invoking),
         ));
     }
-    if !context.has_no_client()
-        && let Some(client) = format_provenance_client(context, client)
+    let format_client = if context.has_no_client() {
+        hook_body_format_client(inner)
+    } else {
+        format_provenance_client(context, client)
             .and_then(|client| current_format_client(inner, client))
-    {
+    };
+    if let Some(client) = format_client {
         facts.client = client_attached_session(inner, client)
             .map(|session| client_format_facts(inner, client, session));
     }
     facts
+}
+
+/// `notify_insert_one_hook` appends a hook body with `client = NULL`, so
+/// `cmdq_fire_command` resolves it through `cmd_find_client(item, NULL, 1)` ->
+/// `cmd_find_current_client` -> `cmd_find_best_client`: a pure activity
+/// comparison over the most recently active session, which the resize arm of
+/// `server_client_dispatch` never updates. The reporting client reaches the
+/// body as `#{hook_client}` and nothing else.
+fn hook_body_format_client(inner: &ServerState) -> Option<ClientId> {
+    inner
+        .engine
+        .state
+        .most_recent_context()
+        .and_then(|(session, _, _)| best_client_on_session(inner, session))
+        .or_else(|| best_attached_client(inner))
 }
 
 fn format_provenance_client(
@@ -68407,7 +68469,9 @@ bind - split-window -v -c "#{pane_current_path}"
             "an errored copy-mode -k left the kill armed"
         );
 
-        shared.attach(client, session).expect("attach after the error");
+        shared
+            .attach(client, session)
+            .expect("attach after the error");
         shared
             .execute(
                 client,
@@ -77440,6 +77504,9 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(&fields[23..27], ["1", "132", "1234", "333"]);
         assert_eq!(fields[27], "1");
 
+        // cmd-list-panes.c passes a null client to format_defaults, so a row
+        // answers null for every client-scoped name even from an attached
+        // client; the pin answers the same empty pair here.
         let ordinary = shared
             .execute(
                 client,
@@ -77451,7 +77518,24 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .expect("ordinary target client facts");
-        assert_eq!(ordinary.output, "/dev/pts/42|4242");
+        assert_eq!(ordinary.output, "|");
+        let targeted = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::new(Some(session), Some(window), Some(pane)),
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-t",
+                        "=format-client:",
+                        "#{client_name}|#{client_pid}",
+                    ],
+                ),
+            )
+            .expect("targeted client facts");
+        assert_eq!(targeted.output, "/dev/pts/42|4242");
 
         shared
             .execute(

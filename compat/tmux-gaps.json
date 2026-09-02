@@ -152,34 +152,6 @@
       "reason": "The requested flag is retained and reported, but zz still has one window-global active pane while pinned tmux can select a pane per client and window."
     },
     {
-      "id": "clients.event-resize-context",
-      "title": "Defer client-resized until geometry settles",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts",
-        "remote"
-      ],
-      "owner": "protocol",
-      "items": [
-        "semantic:client-resized-post-geometry-context"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz-tui/src/app.rs",
-        "resource:knowledge/tmux/divergences.md",
-        "file:compat/attached-client.sh"
-      ],
-      "acceptance": [
-        "A changed Interactive outer-resize report emits client-resized once with the client size current and the window geometry one resize behind, an unchanged report emits nothing, a resulting client-active still precedes it, and Control refresh-client -C emits neither hook.",
-        "Hook bodies expand #{client_tty} and #{client_width} against the session's most-recently-active client, the cmd_find_best_client activity_time winner, while #{hook_client} names the reporter; the differential attaches two pty clients and resizes the older one."
-      ],
-      "depends_on": [],
-      "reason": "Remeasured 2026-09-01 against the pin with a real pty client (pty-drive.py) on both binaries, and the acceptance clause as written does not describe the pin. server-client.c's MSG_RESIZE arm runs server_client_update_latest, tty_resize, recalculate_sizes and the redraw before notify_client(\"client-resized\"), but recalculate_sizes only marks the window; the actual layout resize lands in a later server-loop pass, after the hook's queued command has already expanded its formats. Measured on a client driven 80x24 -> 100x30 -> 61x19 with the hook body reading '#{client_width}x#{client_height}' and '#{window_width}x#{window_height}': the pin reports 80x24/80x23, then 100x30/80x23, then 61x19/100x29. The client size is current and the window and pane geometry is exactly one resize behind. zz reports the same one-resize window and pane lag (51x22 then 71x28 for the same drive, its own chrome reserving 29 columns and 2 rows), so deferring the hook to the end of the input batch would make zz lead the pin rather than match it. The two clauses that are testable already hold: a changed Interactive outer resize emits client-resized exactly once on both, and Control refresh-client -C 120,40 emits neither client-resized nor client-active on either binary while still resizing the window to 120x40 (repeat invocations included). One real divergence was found and it is not this group's: the pin's hook body carries the resized client as its format client, so '#{client_tty}' and '#{client_width}' answer, while zz populates only '#{hook_client}' and leaves the client-scoped variables empty. That producer gap belongs to formats.context-producer-fidelity. This group needs re-scoping to the client-context clause plus the measured lag before it can be closed. The cycle-6 close of this group was reverted at the gate. It rested on a mechanism the pin does not have: it said notify_client puts the notified client in the queued item's format tree, but struct cmd_find_state (tmux.h:1911-1920) has no client member, notify_insert_one_hook appends hook items with client = NULL, and cmdq_fire_command resolves both item->client and the target client through cmd_find_client(item, NULL, 1) -> cmd_find_current_client -> cmd_find_best_client, a pure activity_time comparison the MSG_RESIZE arm (server-client.c:2455-2471) never updates. Measured on the pin with two pty clients and a client-resized hook printing `#{client_tty} #{client_width}x#{client_height} #{hook_client}`: resizing the older client A to 100x30 logged B's tty and B's 80x24 with hook_client naming A; after one key in A, resizing B to 90x28 logged A's tty and 100x30 with hook_client naming B. The reverted branch answered the notified client every time and its single-client differential could not see the difference, which is why the second acceptance clause now demands two clients with the older one resizing. cmd_display_message_exec's tc is the same best client, so the display-message half of that change was wrong for the same reason. A re-close must give hook bodies the session's most-recently-active client, which zz's Interactive key input already tracks, and keep #{hook_client} as the reporter."
-    },
-    {
       "id": "clients.interactive-refresh",
       "title": "Complete interactive client commands",
       "decision": "native",
@@ -502,8 +474,7 @@
         "formats.pane-process",
         "formats.pane-runtime",
         "formats.terminal-cells",
-        "formats.terminal-runtime",
-        "formats.window-runtime"
+        "formats.terminal-runtime"
       ],
       "reason": "The format expander resolves named lookups but exposes no ordered enumeration of the variables defined for one expansion context. Measured against the pin on 2026-09-01, which narrows what an enumeration has to answer. format_each walks two passes: the 198-entry format_table in declaration order, which is alphabetical, skipping every entry whose callback returns NULL, and then ft->tree in RB order, which is the format_add entries the command itself contributed. `display-message -a -t %0` on a fresh detached server prints 143 lines of plain `key=value` with no quoting: 142 table entries in alphabetical order and then `command=display-message` out of order at the end, which is the tree pass. zz's FORMAT_VARIABLES carries the same 198 names in the same order, so the walk itself is cheap. The blocker is that zz's expander models no null: a name whose pin callback declines still resolves to an empty string, so an ordered walk would emit all 198 names plus zz's own context entries where the pin emits 143. The acceptance clause about the set difference does not survive contact either: 46 of the pin's 143 names are themselves tracked format gaps, and zz answers several of them today, pane_in_mode, pane_pipe and wrap_flag among them, so the difference between the two listings is not the tracked gap list. A per-variable, per-context null-versus-empty distinction is the prerequisite, and it has to land before either item can be proved. Re-measured on 2026-09-02 on a throwaway server, and the acceptance was re-scoped onto that measurement. The old clause asked for `every defined variable and its current target-context value`; both halves are refuted. `display-message -a -t %0` prints 143 lines, 142 table names plus `command=display-message` from the tree pass, not 198, and the values cannot be the contract because 46 of those names are themselves tracked format gaps. The listing is also stable against state that might have been expected to move it: setting a paste buffer, setting a pane user option and splitting the window each left it at exactly 143 lines with the same names, and a user option never appears at all, because the tree pass walks only what the command itself contributed. The line shape is `name=value` split at the first `=`; two values in the base listing contain further `=` characters. The table pass is alphabetical and `command=display-message` is last. The 56 table names that decline with a pane and no client are buffer_created, buffer_full, buffer_name, buffer_sample, buffer_size, the 24 client_* names client_activity, client_cell_height, client_cell_width, client_colours, client_control_mode, client_created, client_discarded, client_flags, client_height, client_key_table, client_last_session, client_name, client_pid, client_prefix, client_readonly, client_session, client_termfeatures, client_termname, client_termtype, client_theme, client_tty, client_uid, client_user, client_utf8, client_width and client_written, mouse_hyperlink, mouse_line, mouse_pane, mouse_status_line, mouse_status_range, mouse_word, mouse_x, mouse_y, pane_dead_signal, pane_dead_status, pane_dead_time, pane_mode, pane_pipe_pid, session_active, session_attached_list, session_group, session_group_attached, session_group_attached_list, session_group_list, session_group_many_attached, session_group_size, window_active_clients_list, window_bigger, window_offset_x and window_offset_y. Attaching a client adds exactly 28 of those back: the 24 client_* names except client_last_session and client_theme, plus session_active, session_attached_list, window_active_clients_list and window_bigger. The other 28 decline in both contexts. `pane_pipe` answers 0 and is printed, while `pane_pipe_pid` declines, so the split is per name and not per family. Nothing was implemented in this pass: the prerequisite is still a per-variable, per-context declines answer in the expander, which now has an exact target rather than a forecast, and the ordered walk plus the `-a` flag promotion on top of it."
     },
@@ -957,36 +928,6 @@
       ],
       "depends_on": [],
       "reason": "These 28 names report live VT state the pin reads straight from its own screen: cursor position and shape, alternate screen and saved cursor, DEC private modes, mouse reporting modes, history byte counts, scroll region, and graphics support. zz keeps that state in the terminal worker and the clients that draw it, so the mux publishes the pin's inactive or default value for each name, with `cursor_flag` and `wrap_flag` enabled and the rest zero, which the status-line reference already records as pinned default state rather than support. Zero is also the true answer for `sixel_support`, which zz does not implement. Reopen through the same bounded terminal-fact channel `formats.terminal-cells` names, once a workload asks for live VT facts in formats."
-    },
-    {
-      "id": "formats.window-runtime",
-      "title": "Expose remaining window formats",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "scripts",
-        "remote"
-      ],
-      "owner": "daemon",
-      "items": [
-        "format:window_bigger",
-        "format:window_offset_x",
-        "format:window_offset_y"
-      ],
-      "evidence": [
-        "resource:crates/zz-mux/src/formats.rs",
-        "resource:crates/zz-daemon/src/status.rs",
-        "scenario:compat/scenarios/format-window-cell-metrics.txt",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "Window cell metrics answer the pin's window pixel size in every window-scoped context and stay null where the pin has no window, with a differential covering display-message, list-windows rows, and a session-scoped format.",
-        "window_bigger and the two viewport offsets answer only where the pin's format tree carries a client, which means a list-windows or list-sessions row keeps the pin's null while a client is attached."
-      ],
-      "depends_on": [],
-      "reason": "The discovery container is now split into its three producer families, and the cell metrics are done. window_cell_width and window_cell_height publish w->xpixel and w->ypixel, which window.c defaults to DEFAULT_XPIXEL 16 and DEFAULT_YPIXEL 32 when no client reports a cell size and resize.c otherwise fills from the sizing client's c->tty.xpixel. zz delegates both to the daemon, which answers the format client's reported cell pixels and falls back to the pin's defaults, and gates them on a window in context the way format_cb_window_cell_width gates on ft->w. Measured against the pin on the strict format-window-cell-metrics differential, both sides answer 16 and 32 from display-message with and without an attached client, from every list-windows row, and from a list-sessions row as well, because format_defaults fills wl = s->curw when no winlink is given, so a session row reads the metrics through its current window. Null appears only for a format tree with no window at all, the case the StatusContext::default() unit test exercises. window_bigger and the offsets are the per-client family and stay open on one blocker that is now measured rather than guessed. In the pin they read the client's cached tty viewport, so format_cb_window_bigger answers null whenever the format tree has no client: cmd_list_windows_exec builds its rows with a null client, so a list-windows row answers null even while a client is attached, and the value follows the client's own current window rather than the row's. A live comparison on a throwaway server and a headless zz daemon showed the boolean itself already agrees across five states, both answering null with no client, 0 for a viewport-sized window with the status line on and off, 1 after resize-window widened the window past the viewport, and null again after detach. It also showed zz would answer 1 for the list-windows row the pin leaves null, because the daemon resolves a format client for every command expansion through current_format_client rather than per command like format_defaults. Closing window_bigger needs that no-client row context first. The two offsets need more than that: tty_window_offset1 centres the viewport on the cursor and honours a pan window, and zz has no viewport pan or server-side cursor-follow, so both names answer null on both sides today only because the pin also answers null whenever the window is not bigger."
     },
     {
       "id": "history.hyperlink-reset",
@@ -2639,6 +2580,18 @@
       "resolution": "The daemon now retains the latest attached client for each window and produces client-active, client-focus-in, client-focus-out, client-resized, client-light-theme, and client-dark-theme at their retained report boundaries. client-active fires only when the window's latest client changes; repeated focus, theme, and positive Interactive size reports each fire, even when the retained value is unchanged. Focus-in precedes a resulting active event, resize follows a resulting active event, focus-out never changes the latest client, and loss of the latest client promotes the remaining client with greatest activity before client-detached. Control clients do not originate focus, theme, resize, or input-driven active events, but an attached Control client can win loss promotion. Hooks remain clientless: hook_client identifies the reporter, client notifications expose no hook-specific session variables, copied session, window, and shared active-pane state supplies ordinary target formats, and ordinary client facts keep their independent selection rules. Per-client active-pane behavior remains under clients.active-pane. Focused daemon tests cover all six names, duplicate reports, ordering, suppression, Control exclusions, and loss promotion; the real two-client fixture proves the TUI-drivable active, focus, and resize sequence against pinned tmux without a protocol change. Post-geometry format timing for changed resize reports remains under clients.event-resize-context."
     },
     {
+      "id": "clients.event-resize-context",
+      "title": "Defer client-resized until geometry settles",
+      "closed_on": "2026-09-02",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-tui/src/app.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "file:compat/attached-client.sh"
+      ],
+      "resolution": "Both re-scoped clauses are proved by compat/scenarios/smoke/client-resized-context.txt on both binaries, and the group closes without deferring anything. The report clause holds as measured: one changed Interactive outer resize raises client-resized exactly once with `#{client_width}` current and `#{window_width}x#{window_height}` equal to the geometry the resize replaced, an unchanged report of the same size raises nothing at all, and two Control `refresh-client -C 120,40` connections resize the window to 120x40 while raising neither client-resized nor client-active. The client clause needed the fix the cycle-6 revert asked for. `notify_insert_one_hook` appends a hook body with client NULL, so `cmdq_fire_command` resolves it through `cmd_find_client(item, NULL, 1)` -> `cmd_find_current_client` -> `cmd_find_best_client`, a pure activity_time comparison the MSG_RESIZE arm of server-client.c never updates; the reporting client reaches the body only as `#{hook_client}`. zz now resolves a hook body's format client the same way, through the most recently active session's activity winner rather than through the invoking client, in `format_hook_facts_for_client`. With two pty clients attached and both hooks logging `h:#{hook_client} t:#{client_tty}`, resizing the older client A logs `active h:A t:B` then `resized h:A t:B c:80x24`, and after one key in A, resizing B logs `active h:B t:A` then `resized h:B t:A c:100x30`: the body reads the other client's tty and size while hook_client names the reporter, and the client-active the resize provokes precedes the client-resized, on both binaries. Two identity facts the fixture had to work around are recorded here rather than claimed: zz names a pty client by its tty exactly as the pin does, so client_tty and hook_client are comparable, but `#{session_attached_list}` answers the device name in zz where the pin answers the tty, and the window geometry a zz hook body sees is smaller than the pin's for the same pty because the raw client reserves chrome, so the fixture compares the lag rather than the measurement. The hook body still carries no format client SESSION: `#{session_active}` stays empty in a zz hook body where the pin answers 1, because `ExecutionContext::has_no_client` forces FormatClient::NoClient; that is a separate producer question and belongs to formats.context-producer-fidelity."
+    },
+    {
       "id": "clients.local-control-terminal-facts",
       "title": "Publish local Control terminal facts",
       "closed_on": "2026-08-25",
@@ -3529,6 +3482,18 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Windows now retain tmux's Unix-second `activity_time` apart from zz's logical MRU counter. Creation, parsed nonempty pane output, and the existing pinned current-window transition producers update both values from the injected engine clock. The independent audit found and repaired the direct daemon `switch-client` selection path so it refreshes that clock before changing the current window. Same-window selection, pane selection, pane creation, splits, and layout-only changes without output leave the timestamp unchanged. The direct Time format backing expands empty without a window and preserves the same seconds through plain, boolean, comparison, list-row, and time-modified forms. Focused model, command, format, daemon, and differential coverage preserves the pin's move-window and swap-window transition details while proving target isolation and output-driven updates. No wire protocol or snapshot field changed."
+    },
+    {
+      "id": "formats.window-runtime",
+      "title": "Expose remaining window formats",
+      "closed_on": "2026-09-02",
+      "evidence": [
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:crates/zz-daemon/src/status.rs",
+        "scenario:compat/scenarios/format-window-cell-metrics.txt",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "The per-client window family is done and the group's three producer families are all closed. window_bigger and the two viewport offsets are answered by the daemon from the format client's retained viewport, which is `interactive_client_window_extent`: the client's reported columns and its rows minus the session's status lines, the same `tty->sx` and `tty->sy - status_line_size(c)` that `tty_window_offset1` compares. The comparison is against the CLIENT's own current window and the pane that window is showing, never the format's window, because tty.c reads `c->session->curw->window` and `server_client_get_pane(c)`. The offsets reproduce the else branch of `tty_window_offset1`: x is 0 while the cursor is left of sx, `w->sx - sx` once it is past `w->sx - sx`, and `cx - sx/2` between them; y is 0, `w->sy - sy`, or `cy - sy + 1` on the same three branches, and both are 0 when the pane's cursor is hidden, which is the `~MODE_CURSOR` arm. All three names moved from constant backings to the delegated partition, so the mux answers empty and the daemon answers the value, which is exactly the pin's NULL-versus-string split. Measured on a throwaway pin server and on a headless zz daemon, and proved by compat/scenarios/smoke/format-window-bigger.txt on both binaries: null with no client, 0 for a window that fits with the status line on and with it off, 1 after resize-window widened the window to 200x60 past an 80x24 client, and null again after detach. The three offset branches were driven by parking the pane cursor with a direct write to `#{pane_tty}`: (151,31) answers ox 120 oy 8, (61,3) answers ox 0 oy 0, and (101,26) answers ox 60 oy 3, identical on both binaries with sx 80 and sy 23. A list-windows and a list-panes row answer null for all three even while the client is attached and the window is bigger, which is the null format client cmd-list-windows.c and cmd-list-panes.c pass to format_defaults; the daemon now drops the format client for those commands and for list-sessions. Two things stay unmatched and are recorded rather than claimed. The pan window branch of tty_window_offset1, which `refresh-client -U/-D/-L/-R` arms by setting `c->pan_window`, has no zz equivalent: zz has no viewport pan, so it always reaches the cursor branch, and a panned pin client would answer `c->pan_ox`/`c->pan_oy` where zz answers the centred offsets. And `#{window_width}` itself is not comparable between the binaries, because the zz raw client reserves about 29 columns and 2 rows of chrome, so the differential compares the boolean and the offsets rather than the window measurement they are derived from; the middle band this opens, a window wider than the zz pane area but narrower than the pty, answers 0 in zz while the pane area really does scroll. Only an Interactive client with a terminal carries a viewport; a Control client sized by refresh-client -C answers null for all three, which the pin does not."
     },
     {
       "id": "hooks.queue",

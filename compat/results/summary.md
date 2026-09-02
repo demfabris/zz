@@ -179,6 +179,7 @@
 | smoke/pane-engine-knobs-input | 3 | yes | 0 | yes | yes | yes |
 | smoke/positional-maximums | 3 | yes | 0 | yes | yes | yes |
 | smoke/positional-minimums | 3 | yes | 0 | yes | yes | yes |
+| smoke/remain-on-exit-format | 3 | yes | 0 | yes | yes | yes |
 | smoke/resurrect-init | 3 | yes | 0 | yes | yes | yes |
 | smoke/send-keys-client-selection | 3 | yes | 0 | yes | yes | yes |
 | smoke/send-keys-control | 3 | yes | 0 | yes | yes | yes |

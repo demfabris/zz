@@ -166,6 +166,7 @@ drive "snap opened"
 # run bravo.
 drive "keys 1b5b42"
 sleep 0.5
+drive "snap moved"
 
 # menu_reapply_styles runs from menu_draw_cb, so a set-option that lands while
 # the menu is up repaints it with the new colours and no key pressed. The box

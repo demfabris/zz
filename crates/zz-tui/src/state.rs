@@ -358,6 +358,36 @@ impl Model {
         evicted
     }
 
+    /// The box `menu_key_cb` measures a pointer report against: the origin and
+    /// size `menu_draw_cb` gives `screen_write_box`, resolved against this
+    /// client's own viewport.
+    pub fn menu_box(&self) -> Option<zz_client::MenuBox> {
+        let menu = self.menu.as_ref()?;
+        let layout = resolve_floating(
+            FloatingSpec {
+                left: menu.left,
+                top: menu.top,
+                width: menu.width,
+                height: menu.height,
+                client_columns: menu.client_columns,
+                client_rows: menu.client_rows,
+                border_lines: menu.border_lines,
+            },
+            Rect {
+                x: 0,
+                y: 0,
+                width: self.size.columns,
+                height: self.size.rows,
+            },
+        )?;
+        Some(zz_client::MenuBox {
+            left: layout.frame.x,
+            top: layout.frame.y,
+            width: layout.frame.width,
+            items: menu.items.len(),
+        })
+    }
+
     pub fn popup_layout(&self) -> Option<FloatingLayout> {
         let popup = self.popup.as_ref()?;
         resolve_floating(
@@ -863,6 +893,7 @@ mod tests {
             })],
             selected,
             stay_open: false,
+            mouse_keys: false,
         }
     }
 

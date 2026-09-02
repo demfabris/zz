@@ -199,6 +199,7 @@ mod tests {
             ],
             selected: Some(0),
             stay_open: false,
+            mouse_keys: false,
         }
     }
 

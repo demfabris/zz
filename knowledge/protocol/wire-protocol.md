@@ -616,6 +616,14 @@ now validate on both encode and decode.
 - **`PROTOCOL_VERSION: u16 = 94`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v94 appends `MenuState.mouse_keys` after `stay_open`. It is the pin's
+  `MENU_NOMOUSE` inverted: `cmd_display_menu_exec` sets that flag whenever the
+  command has no invoking mouse event and no `-M`, and such a menu answers only
+  button 1, which it ignores, while any other button leaves it. The flag has to
+  reach the client because the client owns the live pointer route, and
+  `menu_prepare` also resolves a starting choice only for a `MENU_NOMOUSE` menu,
+  so a `-M` menu opens with no highlight and the daemon now publishes `selected`
+  as `None` for one. A v93 peer cannot decode the appended field.
 - v94 appends `MuxOptionKey::FocusFollowsMouse` after `Prefix2`, taking `MuxOptionKey::ALL` from
   seventeen keys to eighteen. `MuxOptions` must carry every key exactly once, so the appended key
   changes the map on `EventPayload::MuxOptionsChanged` and a v93 peer decodes neither the variant

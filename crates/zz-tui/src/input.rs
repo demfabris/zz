@@ -1,4 +1,6 @@
-use zz_client::{ChromeAction, ChromeKeymap, MenuKeyResult, SIDEBAR_TABLE, resolve_menu_key};
+use zz_client::{
+    ChromeAction, ChromeKeymap, MenuKeyResult, MenuPointerKind, SIDEBAR_TABLE, resolve_menu_key,
+};
 use zz_daemon::{
     Endpoint, InteractiveClient, configured_fleet_hosts, validate_fleet_host, write_fleet_host,
 };
@@ -48,10 +50,13 @@ pub(crate) fn handle(
     pixel_mouse: bool,
     key_releases: bool,
 ) -> Result<InputOutcome, String> {
+    let menu_box = model.menu_box();
     let event = match menu_input_route(
         model.menu.as_ref(),
         model.menu_selection,
         model.menu_action_pending,
+        menu_box,
+        pixel_mouse_position(model, pixel_mouse),
         &mut model.menu_swallowed_key,
         event,
     ) {
@@ -71,6 +76,25 @@ pub(crate) fn handle(
             model.menu_action_pending = true;
             model.menu_swallowed_key = swallowed_key;
             return Ok(InputOutcome::None);
+        }
+        MenuInputRoute::Paste {
+            selection,
+            action,
+            remainder,
+        } => {
+            model.menu_selection = selection;
+            let Some(action) = action else {
+                return Ok(InputOutcome::Repaint);
+            };
+            client
+                .send_input(InputMessage::Menu { action })
+                .map_err(|error| error.to_string())?;
+            model.menu_action_pending = true;
+            model.menu_swallowed_key = None;
+            if remainder.is_empty() {
+                return Ok(InputOutcome::None);
+            }
+            return handle_paste(model, client, remainder);
         }
     };
     let event = match confirm_input_route(
@@ -242,12 +266,50 @@ enum MenuInputRoute {
         action: MenuAction,
         swallowed_key: Option<KeyCode>,
     },
+    Paste {
+        selection: Option<usize>,
+        action: Option<MenuAction>,
+        remainder: String,
+    },
+}
+
+fn menu_pointer_kind(kind: MouseEventKind) -> MenuPointerKind {
+    match kind {
+        MouseEventKind::Down(_) => MenuPointerKind::Press,
+        MouseEventKind::Up(_) => MenuPointerKind::Release,
+        MouseEventKind::Drag(_) => MenuPointerKind::Drag,
+        MouseEventKind::Moved => MenuPointerKind::Motion,
+        MouseEventKind::ScrollUp
+        | MouseEventKind::ScrollDown
+        | MouseEventKind::ScrollLeft
+        | MouseEventKind::ScrollRight => MenuPointerKind::Wheel,
+    }
+}
+
+/// `MOUSE_BUTTONS(b)` for one report: a press or drag carries its button, a
+/// release and a motion with no button held both encode 3, and a wheel report
+/// encodes 64 upwards.
+fn menu_pointer_buttons(kind: MouseEventKind) -> u8 {
+    match kind {
+        MouseEventKind::Down(button) | MouseEventKind::Drag(button) => match button {
+            MouseButton::Left => 0,
+            MouseButton::Middle => 1,
+            MouseButton::Right => 2,
+        },
+        MouseEventKind::Up(_) | MouseEventKind::Moved => 3,
+        MouseEventKind::ScrollUp => 64,
+        MouseEventKind::ScrollDown => 65,
+        MouseEventKind::ScrollLeft => 66,
+        MouseEventKind::ScrollRight => 67,
+    }
 }
 
 fn menu_input_route(
     state: Option<&MenuState>,
     selection: Option<usize>,
     action_pending: bool,
+    menu_box: Option<zz_client::MenuBox>,
+    pointer_cells: PointerCells,
     swallowed_key: &mut Option<KeyCode>,
     event: TerminalEvent,
 ) -> MenuInputRoute {
@@ -276,8 +338,66 @@ fn menu_input_route(
             MenuKeyResult::Select(selection) => MenuInputRoute::Select(selection),
             MenuKeyResult::Consumed => MenuInputRoute::Consume,
         },
-        TerminalEvent::Paste(_) | TerminalEvent::Mouse(_) => MenuInputRoute::Consume,
+        TerminalEvent::Paste(text) => {
+            let paste = zz_client::resolve_menu_paste(state, selection, &text);
+            MenuInputRoute::Paste {
+                selection: paste.selection,
+                action: paste.action,
+                remainder: paste.remainder,
+            }
+        }
+        TerminalEvent::Mouse(event) => {
+            let Some(menu_box) = menu_box else {
+                return MenuInputRoute::Consume;
+            };
+            let (column, row) = pointer_cells.cells(event);
+            match zz_client::resolve_menu_mouse(
+                state,
+                selection,
+                menu_box,
+                menu_pointer_kind(event.kind),
+                menu_pointer_buttons(event.kind),
+                column,
+                row,
+            ) {
+                MenuKeyResult::Action(action) => MenuInputRoute::Action {
+                    action,
+                    swallowed_key: None,
+                },
+                MenuKeyResult::Select(selection) => MenuInputRoute::Select(selection),
+                MenuKeyResult::Consumed => MenuInputRoute::Consume,
+            }
+        }
         event => MenuInputRoute::Forward(event),
+    }
+}
+
+/// The cell divisors a pointer report needs when the client asked the terminal
+/// for pixel coordinates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PointerCells {
+    pixels: bool,
+    cell_width_px: u32,
+    cell_height_px: u32,
+}
+
+impl PointerCells {
+    fn cells(self, event: MouseEvent) -> (u16, u16) {
+        if !self.pixels {
+            return (event.column, event.row);
+        }
+        (
+            u16::try_from(u32::from(event.column) / self.cell_width_px.max(1)).unwrap_or(u16::MAX),
+            u16::try_from(u32::from(event.row) / self.cell_height_px.max(1)).unwrap_or(u16::MAX),
+        )
+    }
+}
+
+fn pixel_mouse_position(model: &Model, pixel_mouse: bool) -> PointerCells {
+    PointerCells {
+        pixels: pixel_mouse,
+        cell_width_px: model.size.cell_width_px,
+        cell_height_px: model.size.cell_height_px,
     }
 }
 
@@ -1986,15 +2106,39 @@ mod tests {
             ],
             selected,
             stay_open,
+            mouse_keys: true,
         }
     }
+
+    fn test_menu_box(state: &MenuState) -> zz_client::MenuBox {
+        zz_client::MenuBox {
+            left: 5,
+            top: 5,
+            width: state.width,
+            items: state.items.len(),
+        }
+    }
+
+    const TEST_POINTER_CELLS: PointerCells = PointerCells {
+        pixels: false,
+        cell_width_px: 8,
+        cell_height_px: 16,
+    };
 
     fn menu_route(
         state: &MenuState,
         selection: Option<usize>,
         event: TerminalEvent,
     ) -> MenuInputRoute {
-        menu_input_route(Some(state), selection, false, &mut None, event)
+        menu_input_route(
+            Some(state),
+            selection,
+            false,
+            Some(test_menu_box(state)),
+            TEST_POINTER_CELLS,
+            &mut None,
+            event,
+        )
     }
 
     #[test]
@@ -2106,6 +2250,8 @@ mod tests {
                 Some(&state),
                 Some(0),
                 true,
+                Some(test_menu_box(&state)),
+                TEST_POINTER_CELLS,
                 &mut None,
                 TerminalEvent::Key(KeyEvent {
                     kind: KeyEventKind::Repeat,
@@ -2119,6 +2265,8 @@ mod tests {
                 Some(&state),
                 Some(0),
                 true,
+                Some(test_menu_box(&state)),
+                TEST_POINTER_CELLS,
                 &mut None,
                 TerminalEvent::Paste("q".to_owned()),
             ),
@@ -2129,6 +2277,8 @@ mod tests {
                 Some(&state),
                 Some(0),
                 true,
+                Some(test_menu_box(&state)),
+                TEST_POINTER_CELLS,
                 &mut None,
                 TerminalEvent::Mouse(MouseEvent {
                     kind: MouseEventKind::Down(MouseButton::Left),
@@ -2144,6 +2294,8 @@ mod tests {
                 Some(&state),
                 Some(0),
                 true,
+                Some(test_menu_box(&state)),
+                TEST_POINTER_CELLS,
                 &mut None,
                 TerminalEvent::CellSize {
                     width_px: 8,
@@ -2157,26 +2309,206 @@ mod tests {
         );
     }
 
+    /// Measured on pinned tmux d77c9dc6 on 2026-09-02 with a client attached on
+    /// a real pty: a bracketed paste of `ZaXY` over a two-row menu ran the row
+    /// `a` names, left the menu closed, and put `XY` in the pane, so the
+    /// bracket markers are swallowed, each character is answered as if typed,
+    /// and the tail after the close reaches the pane.
     #[test]
-    fn menu_consumes_pointer_paste_releases_and_the_action_key_lifecycle() {
+    fn menu_paste_answers_every_character_and_hands_the_tail_back() {
         let state = menu_state(Some(0), false);
         assert_eq!(
-            menu_route(&state, Some(0), TerminalEvent::Paste("q".to_owned())),
-            MenuInputRoute::Consume
+            menu_route(&state, Some(0), TerminalEvent::Paste("Zq XY".to_owned())),
+            MenuInputRoute::Paste {
+                selection: Some(0),
+                action: Some(MenuAction::Choose(0)),
+                remainder: " XY".to_owned(),
+            }
         );
         assert_eq!(
+            menu_route(&state, Some(0), TerminalEvent::Paste("ZY".to_owned())),
+            MenuInputRoute::Paste {
+                selection: Some(0),
+                action: None,
+                remainder: String::new(),
+            },
+            "a run with no row key and no navigation key leaves the menu up"
+        );
+        assert_eq!(
+            menu_route(&state, None, TerminalEvent::Paste("jZ".to_owned())),
+            MenuInputRoute::Paste {
+                selection: Some(0),
+                action: None,
+                remainder: String::new(),
+            },
+            "a navigation character moves the highlight the way a typed one does"
+        );
+    }
+
+    #[test]
+    fn menu_pointer_reports_follow_the_pin_hit_box() {
+        let state = menu_state(Some(0), false);
+        let frame = test_menu_box(&state);
+        let report = |kind, column, row| {
             menu_route(
                 &state,
                 Some(0),
                 TerminalEvent::Mouse(MouseEvent {
-                    kind: MouseEventKind::Down(MouseButton::Left),
-                    column: 2,
-                    row: 1,
+                    kind,
+                    column,
+                    row,
                     modifiers: KeyModifiers::NONE,
                 }),
+            )
+        };
+        let inside_row = frame.top + 1;
+        assert_eq!(
+            report(
+                MouseEventKind::Down(MouseButton::Left),
+                frame.left + 2,
+                inside_row + 3
             ),
-            MenuInputRoute::Consume
+            MenuInputRoute::Select(Some(3)),
+            "a press inside the box moves the highlight without choosing"
         );
+        assert_eq!(
+            report(MouseEventKind::Moved, frame.left + 2, inside_row + 3),
+            MenuInputRoute::Select(Some(3)),
+            "a motion with no button held is highlight-only"
+        );
+        assert_eq!(
+            report(
+                MouseEventKind::Up(MouseButton::Left),
+                frame.left + 2,
+                inside_row + 3
+            ),
+            MenuInputRoute::Action {
+                action: MenuAction::Choose(0),
+                swallowed_key: None,
+            },
+            "a release chooses the row the highlight already sits on"
+        );
+        assert_eq!(
+            report(MouseEventKind::Up(MouseButton::Left), frame.left, frame.top),
+            MenuInputRoute::Action {
+                action: MenuAction::Cancel,
+                swallowed_key: None,
+            },
+            "the title row sits outside the box, so a release there closes"
+        );
+        assert_eq!(
+            report(MouseEventKind::Moved, 0, 0),
+            MenuInputRoute::Select(None),
+            "a motion outside the box only clears the highlight"
+        );
+        assert_eq!(
+            report(MouseEventKind::Down(MouseButton::Left), 0, 0),
+            MenuInputRoute::Select(None),
+            "a press outside the box is not a release, so it does not close"
+        );
+        assert_eq!(
+            report(
+                MouseEventKind::Up(MouseButton::Left),
+                frame.left + frame.width,
+                inside_row,
+            ),
+            MenuInputRoute::Action {
+                action: MenuAction::Choose(0),
+                swallowed_key: None,
+            },
+            "px + 4 + width is the pin's inclusive right limit"
+        );
+
+        let stay_open = menu_state(Some(0), true);
+        let stay_frame = test_menu_box(&stay_open);
+        let stay_report = |kind, column, row| {
+            menu_input_route(
+                Some(&stay_open),
+                Some(0),
+                false,
+                Some(stay_frame),
+                TEST_POINTER_CELLS,
+                &mut None,
+                TerminalEvent::Mouse(MouseEvent {
+                    kind,
+                    column,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                }),
+            )
+        };
+        assert_eq!(
+            stay_report(MouseEventKind::Up(MouseButton::Left), 0, 0),
+            MenuInputRoute::Select(None),
+            "a stay-open menu ignores a release outside the box"
+        );
+        assert_eq!(
+            stay_report(MouseEventKind::Down(MouseButton::Left), 0, 0),
+            MenuInputRoute::Action {
+                action: MenuAction::Cancel,
+                swallowed_key: None,
+            },
+            "a stay-open menu closes on a report that is neither release, wheel nor drag"
+        );
+    }
+
+    /// Measured on pinned tmux d77c9dc6 on 2026-09-02: a `display-menu` typed on
+    /// a command line has no invoking mouse event, so it is MENU_NOMOUSE and
+    /// answers only button 1. A button-1 press left it up with `Enter` still
+    /// running its starting row, while a release, a motion with no button held
+    /// and a button-3 press each closed it with nothing run.
+    #[test]
+    fn a_nomouse_menu_answers_only_button_one() {
+        let mut state = menu_state(Some(0), false);
+        state.mouse_keys = false;
+        let frame = test_menu_box(&state);
+        let report = |kind, column, row| {
+            menu_input_route(
+                Some(&state),
+                Some(0),
+                false,
+                Some(frame),
+                TEST_POINTER_CELLS,
+                &mut None,
+                TerminalEvent::Mouse(MouseEvent {
+                    kind,
+                    column,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                }),
+            )
+        };
+        let inside_row = frame.top + 1;
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+        ] {
+            assert_eq!(
+                report(kind, frame.left + 2, inside_row),
+                MenuInputRoute::Consume,
+                "button 1 is ignored whole"
+            );
+        }
+        for kind in [
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Moved,
+            MouseEventKind::Down(MouseButton::Right),
+            MouseEventKind::ScrollUp,
+        ] {
+            assert_eq!(
+                report(kind, frame.left + 2, inside_row),
+                MenuInputRoute::Action {
+                    action: MenuAction::Cancel,
+                    swallowed_key: None,
+                },
+                "any other button leaves the menu"
+            );
+        }
+    }
+
+    #[test]
+    fn menu_release_and_action_key_lifecycle() {
+        let state = menu_state(Some(0), false);
         let press = KeyEvent::new(TerminalKeyCode::Char('q'), KeyModifiers::NONE);
         assert_eq!(
             menu_route(
@@ -2202,6 +2534,8 @@ mod tests {
                 None,
                 Some(0),
                 false,
+                None,
+                TEST_POINTER_CELLS,
                 &mut swallowed,
                 TerminalEvent::Key(KeyEvent {
                     kind: KeyEventKind::Repeat,
@@ -2215,6 +2549,8 @@ mod tests {
                 None,
                 Some(0),
                 false,
+                None,
+                TEST_POINTER_CELLS,
                 &mut swallowed,
                 TerminalEvent::Key(KeyEvent {
                     kind: KeyEventKind::Release,
@@ -2229,6 +2565,8 @@ mod tests {
                 None,
                 Some(0),
                 false,
+                None,
+                TEST_POINTER_CELLS,
                 &mut swallowed,
                 TerminalEvent::Key(press),
             ),

@@ -13162,7 +13162,9 @@ impl Shared {
             if width > geometry.columns || height > geometry.rows {
                 return Ok(Execution::default());
             }
-            let selected = menu_starting_selection(&starting_choice, &items);
+            let selected = (!parsed.mouse)
+                .then(|| menu_starting_selection(&starting_choice, &items))
+                .flatten();
             let border_lines = if let Some(value) = parsed.border_lines.as_deref() {
                 value.parse().map_err(|()| {
                     ServerError::InvalidCommand(format!("menu-border-lines unknown value: {value}"))
@@ -13220,6 +13222,7 @@ impl Shared {
                     items,
                     selected,
                     stay_open: parsed.stay_open,
+                    mouse_keys: parsed.mouse,
                 },
                 commands,
             )

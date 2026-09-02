@@ -1,0 +1,13 @@
+corpus: none
+# menu_key_cb's mouse arm: a press or a motion with no button held only moves
+# the highlight, a release runs the row the highlight already sits on rather
+# than the row under the pointer, a release outside the px..px+4+width by
+# py+1..py+1+count-1 box closes a menu that is not stay-open while a press there
+# does not, and a motion outside clears the highlight so Enter closes with
+# nothing to run. The reports are written to the client's own pty because only
+# an attached client resolves them.
+stage: fixtures/display-menu-mouse.sh ~/display-menu-mouse.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu DISPLAY_MENU_MOUSE
+run-shell 'sh ~/display-menu-mouse.sh'
+out: show-environment -g DISPLAY_MENU_MOUSE

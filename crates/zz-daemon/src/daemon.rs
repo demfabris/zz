@@ -123,6 +123,8 @@ const MAX_COPY_PIPE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_COPY_PIPE_COMMAND_BYTES: usize = 8 * 1024;
 const COPY_PIPE_TIMEOUT: Duration = Duration::from_secs(30);
 const COPY_PIPE_POLL_INTERVAL: Duration = Duration::from_millis(20);
+/// `WINDOW_COPY_REFRESH_INTERVAL`.
+const COPY_MODE_REFRESH_INTERVAL: Duration = Duration::from_millis(50);
 const CONTROL_BUFFER_HIGH: usize = 8192;
 const CONTROL_WRITE_MINIMUM: usize = 32;
 const CONTROL_PENDING_MESSAGE_LIMIT: usize = MAX_RELIABLE_MESSAGES / 2;
@@ -2753,6 +2755,7 @@ struct Shared {
     client_message_deadline_rx:
         Mutex<Option<crossbeam_channel::Receiver<ClientMessageDeadlineCommand>>>,
     stopping: AtomicBool,
+    copy_refresh_running: AtomicBool,
     shutdown_pending: AtomicBool,
     shutdown_forced: AtomicBool,
     shutdown_announced: AtomicBool,
@@ -3815,6 +3818,7 @@ impl Shared {
             client_message_deadline_tx,
             client_message_deadline_rx: Mutex::new(Some(client_message_deadline_rx)),
             stopping: AtomicBool::new(false),
+            copy_refresh_running: AtomicBool::new(false),
             shutdown_pending: AtomicBool::new(false),
             shutdown_forced: AtomicBool::new(false),
             shutdown_announced: AtomicBool::new(false),
@@ -6407,6 +6411,7 @@ impl Shared {
         let mut retired_command_outputs = Vec::new();
         let mut retired_popups = Vec::new();
         let mut deferred_terminal_commands = Vec::new();
+        let mut refresh_armed = false;
         let mut unfocused_copy_mode_exits = Vec::new();
         let mut pipes_to_close = Vec::new();
         let mut pipe_taps_to_rearm = Vec::new();
@@ -7301,6 +7306,13 @@ impl Shared {
                                 && session.pane == *pane
                             {
                                 session.scroll_exit = true;
+                            } else if let Some(refresh) =
+                                terminal_view_action_refresh_request(action)
+                                && let Some(session) = inner.copy_sessions.get_mut(&target)
+                                && session.pane == *pane
+                            {
+                                session.refresh = refresh.applied(session.refresh);
+                                refresh_armed |= session.refresh;
                             }
                         }
                     }
@@ -8133,6 +8145,9 @@ impl Shared {
             if let Some(enabled) = wrap_search {
                 self.delivered_wrap_search_commands.lock().push(enabled);
             }
+        }
+        if refresh_armed {
+            self.arm_copy_mode_refresh();
         }
         for (client, terminal) in unfocused_copy_mode_exits {
             terminal.view_action(
@@ -16669,6 +16684,60 @@ impl Shared {
         }
     }
 
+    /// `window_copy_refresh_timer` is a 50ms libevent timer per mode entry.
+    /// zz has one frozen view per client and the terminal worker owns no
+    /// timers, so the daemon runs one thread for every armed view and lets the
+    /// engine decide which ticks do anything. The thread lives only while some
+    /// copy session still asks for a refresh.
+    fn arm_copy_mode_refresh(self: &Arc<Self>) {
+        if self.copy_refresh_running.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let shared = Arc::downgrade(self);
+        if let Err(error) = thread::Builder::new()
+            .name("zz-copy-refresh".to_owned())
+            .spawn(move || {
+                loop {
+                    thread::sleep(COPY_MODE_REFRESH_INTERVAL);
+                    let Some(shared) = shared.upgrade() else {
+                        return;
+                    };
+                    if shared.stopping.load(Ordering::Acquire) {
+                        shared.copy_refresh_running.store(false, Ordering::Release);
+                        return;
+                    }
+                    let ticks = copy_mode_refresh_ticks(&shared.inner.lock());
+                    if ticks.is_empty() {
+                        shared.copy_refresh_running.store(false, Ordering::Release);
+                        // An arm that raced the store above would have found
+                        // the thread still running and skipped its own spawn,
+                        // so look once more before letting the thread go.
+                        if copy_mode_refresh_ticks(&shared.inner.lock()).is_empty()
+                            || shared.copy_refresh_running.swap(true, Ordering::AcqRel)
+                        {
+                            return;
+                        }
+                        continue;
+                    }
+                    for (client, terminal) in ticks {
+                        terminal.view_action(
+                            TerminalViewId(client.0),
+                            zz_terminal::TerminalViewAction::CopyMode(
+                                zz_terminal::CopyModeAction::RefreshRevision,
+                            ),
+                        );
+                    }
+                }
+            })
+        {
+            self.copy_refresh_running.store(false, Ordering::Release);
+            log::error!(
+                target: "zz_daemon::diagnostics::terminal",
+                "failed to start the copy-mode refresh timer: {error}"
+            );
+        }
+    }
+
     /// `window_pane_reset_mode` kills a `copy-mode -k` pane once the mode is
     /// gone, with every consequence killing the last pane of a window,
     /// session, or server has.
@@ -24724,6 +24793,9 @@ struct CopySession {
     scroll_exit: bool,
     /// `wme->kill`: the pane goes when this mode is torn down.
     kill: bool,
+    /// `data->refresh_active`, mirrored so the daemon knows which views its
+    /// refresh timer has to tick.
+    refresh: bool,
     exiting: bool,
 }
 
@@ -27022,6 +27094,7 @@ fn enter_copy_session(
             observed: false,
             scroll_exit: false,
             kill,
+            refresh: false,
             exiting: false,
         },
     );
@@ -27074,6 +27147,55 @@ fn counted_copy_mode_action(
             }
         }
         _ => action.clone(),
+    }
+}
+
+/// Every client view whose copy session still asks for the refresh timer.
+fn copy_mode_refresh_ticks(inner: &ServerState) -> Vec<(ClientId, Arc<TerminalSession>)> {
+    inner
+        .copy_sessions
+        .iter()
+        .filter(|(_, session)| session.refresh && !session.exiting)
+        .filter_map(|(client, session)| {
+            inner
+                .terminals
+                .get(&session.pane)
+                .map(|terminal| (*client, Arc::clone(terminal)))
+        })
+        .collect()
+}
+
+/// Which of the three refresh actions a view action carries, if any.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CopyModeRefreshRequest {
+    On,
+    Off,
+    Toggle,
+}
+
+impl CopyModeRefreshRequest {
+    const fn applied(self, current: bool) -> bool {
+        match self {
+            Self::On => true,
+            Self::Off => false,
+            Self::Toggle => !current,
+        }
+    }
+}
+
+fn terminal_view_action_refresh_request(
+    action: &zz_terminal::TerminalViewAction,
+) -> Option<CopyModeRefreshRequest> {
+    let (zz_terminal::TerminalViewAction::CopyMode(action)
+    | zz_terminal::TerminalViewAction::CopyModeCounted { action, .. }) = action
+    else {
+        return None;
+    };
+    match action {
+        zz_terminal::CopyModeAction::RefreshOn => Some(CopyModeRefreshRequest::On),
+        zz_terminal::CopyModeAction::RefreshOff => Some(CopyModeRefreshRequest::Off),
+        zz_terminal::CopyModeAction::RefreshToggle => Some(CopyModeRefreshRequest::Toggle),
+        _ => None,
     }
 }
 

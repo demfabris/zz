@@ -209,7 +209,7 @@ mod tests {
             .iter()
             .filter(|entry| copy_mode_action_is_mapped(entry.name))
             .count();
-        assert_eq!(mapped, 81);
+        assert_eq!(mapped, 84);
         for entry in PINNED_COPY_MODE_ACTIONS {
             let Some(action) = copy_mode_probe_action(entry.name) else {
                 continue;
@@ -233,9 +233,6 @@ mod tests {
             (
                 CopyActionCategory::Vocabulary,
                 vec![
-                    "refresh-off",
-                    "refresh-on",
-                    "refresh-toggle",
                     "scroll-to-mouse",
                     "search-backward",
                     "search-backward-incremental",

@@ -1974,6 +1974,9 @@ struct CopyModeState {
     last_jump: Option<CopyJump>,
     selecting: bool,
     rectangle: bool,
+    /// `data->refresh_active`: the timer re-clones the backing from the live
+    /// pane while this is set.
+    refresh: bool,
     kind: FrozenModeKind,
 }
 
@@ -6268,6 +6271,7 @@ fn enter_copy_mode(
         last_jump: None,
         selecting: false,
         rectangle: false,
+        refresh: false,
         kind: FrozenModeKind::Copy,
     }));
     Ok(())
@@ -7660,6 +7664,62 @@ fn apply_copy_mode_action(
         }
         CopyModeAction::TogglePosition => {
             mode.hide_position = !mode.hide_position;
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        // `window_copy_refresh_start` refuses a view of another pane and
+        // view-mode, and does nothing when the refresh is already running;
+        // `window_copy_refresh_stop` always clears the bit.
+        toggle @ (CopyModeAction::RefreshOn
+        | CopyModeAction::RefreshOff
+        | CopyModeAction::RefreshToggle) => {
+            let start = match toggle {
+                CopyModeAction::RefreshOn => true,
+                CopyModeAction::RefreshOff => false,
+                _ => !mode.refresh,
+            };
+            mode.refresh = start && mode.kind == FrozenModeKind::Copy;
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        // `window_copy_refresh_timer`: skip the tick unless the pane has
+        // unseen output and no selection or cursor drag is live, then
+        // `window_copy_do_refresh` re-clones the backing, keeps the view on
+        // the row it was already showing, and only follows new output when the
+        // view is at the bottom with the cursor on the last row.
+        CopyModeAction::RefreshRevision => {
+            if !mode.refresh
+                || mode.kind != FrozenModeKind::Copy
+                || mode.selection.is_some()
+                || mode.selecting
+                || *unseen_output == 0
+            {
+                *copy_mode = Some(mode);
+                return Ok(ViewActionResult::None);
+            }
+            let rows = u32::from(mode.revision.viewport_rows.saturating_sub(1));
+            let follow = mode.viewport_offset == mode.revision.maximum_offset()
+                && mode.cursor.y == mode.viewport_offset.saturating_add(rows);
+            let offset_from_top = mode.viewport_offset;
+            mode.revision = ModeRevision::capture(terminal)?;
+            if follow {
+                mode.viewport_offset = mode.revision.maximum_offset();
+                mode.cursor = mode.revision.clamp_point(PointCoordinate {
+                    x: mode.cursor.x,
+                    y: mode
+                        .viewport_offset
+                        .saturating_add(u32::from(mode.revision.viewport_rows.saturating_sub(1))),
+                });
+                mode.cursor.x = mode
+                    .cursor
+                    .x
+                    .min(revision_copy_line_end(&mode.revision, mode.cursor.y));
+            } else {
+                mode.viewport_offset = offset_from_top.min(mode.revision.maximum_offset());
+                mode.cursor = mode.revision.clamp_point(mode.cursor);
+            }
+            mode.recentre = None;
+            *unseen_output = 0;
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }

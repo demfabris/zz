@@ -14507,6 +14507,10 @@ pub fn copy_mode_action_is_read_only_safe(action: &CopyModeAction) -> bool {
             | CopyModeAction::CursorCentreVertical
             | CopyModeAction::CursorCentreHorizontal
             | CopyModeAction::TogglePosition
+            | CopyModeAction::RefreshOn
+            | CopyModeAction::RefreshOff
+            | CopyModeAction::RefreshToggle
+            | CopyModeAction::RefreshRevision
             | CopyModeAction::RecentreTopBottom
             | CopyModeAction::NextMatchingBracket
             | CopyModeAction::PreviousMatchingBracket
@@ -14612,6 +14616,9 @@ fn copy_mode_action(
         "cursor-centre-vertical" => Some(CopyModeAction::CursorCentreVertical),
         "cursor-centre-horizontal" => Some(CopyModeAction::CursorCentreHorizontal),
         "toggle-position" => Some(CopyModeAction::TogglePosition),
+        "refresh-on" => Some(CopyModeAction::RefreshOn),
+        "refresh-off" => Some(CopyModeAction::RefreshOff),
+        "refresh-toggle" => Some(CopyModeAction::RefreshToggle),
         "recentre-top-bottom" => Some(CopyModeAction::RecentreTopBottom),
         "scroll-exit-on" => Some(CopyModeAction::ScrollExitOn),
         "scroll-exit-off" => Some(CopyModeAction::ScrollExitOff),

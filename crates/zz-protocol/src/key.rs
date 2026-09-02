@@ -215,6 +215,7 @@ impl Default for KeyTables {
             ("copy-mode-vi", "}", "next-paragraph"),
             ("copy-mode-vi", "%", "next-matching-bracket"),
             ("copy-mode-vi", "P", "toggle-position"),
+            ("copy-mode-vi", "r", "refresh-toggle"),
             ("copy-mode-vi", "Space", "begin-selection"),
             ("copy-mode-vi", "V", "select-line"),
             ("copy-mode-vi", "o", "other-end"),
@@ -257,6 +258,7 @@ impl Default for KeyTables {
             ("copy-mode", "C-l", "recentre-top-bottom"),
             ("copy-mode", "M-l", "cursor-centre-horizontal"),
             ("copy-mode", "P", "toggle-position"),
+            ("copy-mode", "r", "refresh-toggle"),
             ("copy-mode", "M-v", "page-up"),
             ("copy-mode", "PPage", "page-up"),
             ("copy-mode", "C-v", "page-down"),
@@ -2935,7 +2937,7 @@ mod tests {
             "C-v", "C-w", "Down", "End", "Enter", "Escape", "F", "Home", "Left", "M-<", "M->",
             "M-1", "M-2", "M-3", "M-4", "M-5", "M-6", "M-7", "M-8", "M-9", "M-Down", "M-R", "M-Up",
             "M-b", "M-f", "M-l", "M-m", "M-r", "M-v", "M-w", "M-x", "M-{", "M-}", "N", "NPage",
-            "P", "PPage", "R", "Right", "T", "Up", "X", "f", "g", "n", "q", "t",
+            "P", "PPage", "R", "Right", "T", "Up", "X", "f", "g", "n", "q", "r", "t",
         ]
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
@@ -3043,8 +3045,8 @@ mod tests {
             "C-y", "Escape", "C-[", " ", "$", ",", "/", "0", "1", "2", "3", "4", "5", "6", "7",
             "8", "9", ":", ";", "?", "A", "B", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N",
             "P", "T", "V", "W", "X", "^", "b", "e", "f", "g", "h", "j", "k", "z", "l", "n", "o",
-            "q", "t", "v", "w", "{", "}", "%", "Home", "End", "BSpace", "NPage", "PPage", "Up",
-            "Down", "Left", "Right", "M-x", "C-Up", "C-Down",
+            "q", "r", "t", "v", "w", "{", "}", "%", "Home", "End", "BSpace", "NPage", "PPage",
+            "Up", "Down", "Left", "Right", "M-x", "C-Up", "C-Down",
         ]
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
@@ -3054,7 +3056,7 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
 
         assert_eq!(actual, expected);
-        assert_eq!(actual.len(), 80);
+        assert_eq!(actual.len(), 81);
     }
 
     #[test]

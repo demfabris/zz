@@ -498,10 +498,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "choose-tree",
         "[-GhkNrswZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
     ),
-    (
-        "command-prompt",
-        "[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]",
-    ),
     ("copy-mode", "[-dekHMqSu] [-s src-pane] [-t target-pane]"),
     (
         "display-message",
@@ -2064,7 +2060,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "command-prompt",
         aliases: &[],
         description: "Open a command prompt",
-        usage: "[-1CbeFiklN] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]",
+        usage: "[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]",
         options: &[
             CommandOptionSpec::value("-I", FreeForm, "initial input"),
             CommandOptionSpec::value("-p", FreeForm, "prompt label"),
@@ -2079,7 +2075,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-k", "submit the name of the first key pressed"),
             CommandOptionSpec::flag("-l", "one prompt and one input, commas kept literal"),
             CommandOptionSpec::flag("-N", "collect digits and pass the first non-digit on"),
-            CommandOptionSpec::unsupported_flag("-P"),
+            CommandOptionSpec::flag("-P", "presentation hint: the prompt is the pane's"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -2816,8 +2812,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (468, 35));
-        assert_eq!(usage_overrides.len(), 21);
+        assert_eq!((supported, unsupported), (469, 34));
+        assert_eq!(usage_overrides.len(), 20);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

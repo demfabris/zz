@@ -16,6 +16,7 @@
 | collapse | 4 | yes | 0 | yes | yes | yes |
 | command-alias | 16 | yes | 0 | yes | yes | yes |
 | command-item-format | 125 | yes | 0 | yes | yes | yes |
+| copy-mode-bindings | 20 | yes | 0 | yes | yes | yes |
 | copy-mode-cursor-view | 13 | yes | 0 | yes | yes | yes |
 | copy-mode-goto-line | 18 | yes | 0 | yes | yes | yes |
 | copy-mode-previous-bracket | 23 | yes | 0 | yes | yes | yes |
@@ -145,6 +146,7 @@
 | smoke/copy-mode-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-mode-keys | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-search | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-prompt-bindings | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-refresh | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-source-pane | 3 | yes | 0 | yes | yes | yes |
 | smoke/daemon-invalid-flags | 3 | yes | 0 | yes | yes | yes |

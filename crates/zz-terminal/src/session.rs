@@ -185,12 +185,14 @@ enum EngineState {
     Csi,
     CsiOverflow,
     Rename,
-    RenameEscape,
 }
 
 /// Rewrites the byte stream ahead of `vt_write` for the knobs libghostty has
 /// no switch for: it scrolls a full-screen erase into history, drops the
-/// alternate-screen mode switches, and takes `ESC k` off the wire.
+/// alternate-screen mode switches, and takes `ESC k` off the wire. Everything
+/// else reaches the engine in the spans it arrived in: a chunk is scanned for
+/// the two rewrite points and handed over whole when it has none, and only a
+/// sequence that straddles two chunks is buffered.
 #[derive(Default)]
 struct EngineFilter {
     state: EngineState,
@@ -209,15 +211,7 @@ impl EngineFilter {
         while !bytes.is_empty() {
             match self.state {
                 EngineState::Ground => {
-                    let Some(escape) = find_escape(bytes) else {
-                        terminal.vt_write(bytes);
-                        return;
-                    };
-                    if escape > 0 {
-                        terminal.vt_write(&bytes[..escape]);
-                    }
-                    bytes = &bytes[escape + 1..];
-                    self.state = EngineState::Escape;
+                    bytes = self.write_ground(bytes, knobs, terminal);
                 }
                 EngineState::Escape => match bytes[0] {
                     b'[' => {
@@ -237,27 +231,42 @@ impl EngineFilter {
                 },
                 EngineState::Csi => {
                     let byte = bytes[0];
-                    bytes = &bytes[1..];
-                    if byte < 0x20 {
-                        terminal.vt_write(&[byte]);
-                    } else if (0x20..0x40).contains(&byte) {
-                        if self.sequence.len() >= MAX_ENGINE_SEQUENCE_BYTES {
-                            terminal.vt_write(b"\x1b[");
-                            terminal.vt_write(&self.sequence);
-                            terminal.vt_write(&[byte]);
-                            self.sequence.clear();
-                            self.state = EngineState::CsiOverflow;
-                        } else {
-                            self.sequence.push(byte);
-                        }
-                    } else {
-                        write_engine_csi(&self.sequence, byte, knobs, terminal);
+                    if byte == 0x1b {
+                        terminal.vt_write(b"\x1b[");
+                        terminal.vt_write(&self.sequence);
                         self.sequence.clear();
                         self.state = EngineState::Ground;
+                        continue;
+                    }
+                    bytes = &bytes[1..];
+                    if byte >= 0x40 {
+                        if csi_needs_rewrite(&self.sequence, byte, knobs) {
+                            write_engine_csi(&self.sequence, byte, knobs, terminal);
+                        } else {
+                            let mut raw = Vec::with_capacity(self.sequence.len() + 3);
+                            raw.extend_from_slice(b"\x1b[");
+                            raw.extend_from_slice(&self.sequence);
+                            raw.push(byte);
+                            terminal.vt_write(&raw);
+                        }
+                        self.sequence.clear();
+                        self.state = EngineState::Ground;
+                    } else if self.sequence.len() >= MAX_ENGINE_SEQUENCE_BYTES {
+                        terminal.vt_write(b"\x1b[");
+                        terminal.vt_write(&self.sequence);
+                        terminal.vt_write(&[byte]);
+                        self.sequence.clear();
+                        self.state = EngineState::CsiOverflow;
+                    } else {
+                        self.sequence.push(byte);
                     }
                 }
                 EngineState::CsiOverflow => {
                     let byte = bytes[0];
+                    if byte == 0x1b {
+                        self.state = EngineState::Ground;
+                        continue;
+                    }
                     bytes = &bytes[1..];
                     terminal.vt_write(&[byte]);
                     if byte >= 0x40 {
@@ -267,35 +276,130 @@ impl EngineFilter {
                 EngineState::Rename => {
                     let byte = bytes[0];
                     bytes = &bytes[1..];
-                    if byte == 0x1b {
-                        self.state = EngineState::RenameEscape;
-                    } else if self.title.len() < MAX_ENGINE_RENAME_BYTES {
-                        self.title.push(byte);
+                    match byte {
+                        0x1b => {
+                            self.finish_rename(knobs, renames);
+                            self.state = EngineState::Escape;
+                        }
+                        0x18 | 0x1a => {
+                            self.finish_rename(knobs, renames);
+                            self.state = EngineState::Ground;
+                        }
+                        0x00..=0x1f => {}
+                        _ => {
+                            if self.title.len() < MAX_ENGINE_RENAME_BYTES {
+                                self.title.push(byte);
+                            }
+                        }
                     }
                 }
-                EngineState::RenameEscape => match bytes[0] {
-                    b'\\' => {
-                        bytes = &bytes[1..];
-                        if knobs.allow_rename
-                            && let Ok(name) = std::str::from_utf8(&self.title)
-                        {
-                            renames.push(name.to_owned());
-                        }
-                        self.title.clear();
-                        self.state = EngineState::Ground;
-                    }
-                    b'k' => {
-                        bytes = &bytes[1..];
-                        self.title.clear();
-                        self.state = EngineState::Rename;
-                    }
-                    _ => {
-                        self.title.clear();
-                        self.state = EngineState::Escape;
-                    }
-                },
             }
         }
+    }
+
+    /// Scan a chunk from the ground state: text and sequences that need no
+    /// rewrite accumulate into one span, a rewrite point flushes the span and
+    /// writes its replacement, and the remainder of a chunk that ends inside
+    /// a sequence is handed back with the state set to resume it.
+    fn write_ground<'b>(
+        &mut self,
+        bytes: &'b [u8],
+        knobs: EngineKnobs,
+        terminal: &mut Terminal<'_, '_>,
+    ) -> &'b [u8] {
+        let mut start = 0;
+        let mut cursor = 0;
+        loop {
+            let Some(offset) = find_escape(&bytes[cursor..]) else {
+                terminal.vt_write(&bytes[start..]);
+                return &[];
+            };
+            let escape = cursor + offset;
+            let Some(&next) = bytes.get(escape + 1) else {
+                terminal.vt_write(&bytes[start..escape]);
+                self.state = EngineState::Escape;
+                return &[];
+            };
+            match next {
+                b'[' => {
+                    let mut end = escape + 2;
+                    while end < bytes.len() && bytes[end] < 0x40 && bytes[end] != 0x1b {
+                        end += 1;
+                    }
+                    if end >= bytes.len() {
+                        let parameters = &bytes[escape + 2..];
+                        if parameters.len() >= MAX_ENGINE_SEQUENCE_BYTES {
+                            terminal.vt_write(&bytes[start..]);
+                            self.state = EngineState::CsiOverflow;
+                        } else {
+                            terminal.vt_write(&bytes[start..escape]);
+                            self.sequence.clear();
+                            self.sequence.extend_from_slice(parameters);
+                            self.state = EngineState::Csi;
+                        }
+                        return &[];
+                    }
+                    if bytes[end] == 0x1b {
+                        cursor = end;
+                        continue;
+                    }
+                    let final_byte = bytes[end];
+                    let parameters = &bytes[escape + 2..end];
+                    if csi_needs_rewrite(parameters, final_byte, knobs) {
+                        terminal.vt_write(&bytes[start..escape]);
+                        write_engine_csi(parameters, final_byte, knobs, terminal);
+                        start = end + 1;
+                    }
+                    cursor = end + 1;
+                }
+                b'k' => {
+                    terminal.vt_write(&bytes[start..escape]);
+                    self.title.clear();
+                    self.state = EngineState::Rename;
+                    return &bytes[escape + 2..];
+                }
+                _ => {
+                    cursor = escape + 1;
+                }
+            }
+        }
+    }
+
+    /// `input_exit_rename`: every way out of the rename state applies the
+    /// collected name, and `allow-rename` decides whether it lands.
+    fn finish_rename(&mut self, knobs: EngineKnobs, renames: &mut Vec<String>) {
+        if knobs.allow_rename
+            && let Ok(name) = std::str::from_utf8(&self.title)
+        {
+            renames.push(name.to_owned());
+        }
+        self.title.clear();
+    }
+}
+
+/// The two sequences the filter ever rewrites, decided from the bytes alone
+/// so that a chunk with neither passes through in one write: a non-private
+/// erase that may cover the whole screen while `scroll-on-clear` is on, and a
+/// private mode switch naming an alternate-screen mode while
+/// `alternate-screen` is off.
+fn csi_needs_rewrite(parameters: &[u8], final_byte: u8, knobs: EngineKnobs) -> bool {
+    let private = parameters
+        .first()
+        .is_some_and(|byte| (0x3c..0x40).contains(byte));
+    match final_byte {
+        b'J' if knobs.scroll_on_clear && !private => {
+            let first = parameters
+                .split(|byte| *byte == b';')
+                .next()
+                .unwrap_or(&[]);
+            matches!(engine_parameter(first).unwrap_or(0), 0 | 2)
+        }
+        b'h' | b'l' if !knobs.alternate_screen && parameters.first() == Some(&b'?') => {
+            parameters[1..]
+                .split(|byte| *byte == b';')
+                .any(|parameter| matches!(engine_parameter(parameter), Some(47 | 1047 | 1049)))
+        }
+        _ => false,
     }
 }
 
@@ -310,6 +414,23 @@ fn write_engine_csi(
     knobs: EngineKnobs,
     terminal: &mut Terminal<'_, '_>,
 ) {
+    let controls = sequence
+        .iter()
+        .copied()
+        .filter(|byte| *byte < 0x20)
+        .collect::<Vec<u8>>();
+    let cleaned;
+    let sequence = if controls.is_empty() {
+        sequence
+    } else {
+        terminal.vt_write(&controls);
+        cleaned = sequence
+            .iter()
+            .copied()
+            .filter(|byte| *byte >= 0x20)
+            .collect::<Vec<u8>>();
+        cleaned.as_slice()
+    };
     let private = sequence
         .first()
         .is_some_and(|byte| (0x3c..0x40).contains(byte));
@@ -346,9 +467,11 @@ fn write_engine_csi(
         terminal.vt_write(&rewritten);
         return;
     }
-    terminal.vt_write(b"\x1b[");
-    terminal.vt_write(sequence);
-    terminal.vt_write(&[final_byte]);
+    let mut raw = Vec::with_capacity(sequence.len() + 3);
+    raw.extend_from_slice(b"\x1b[");
+    raw.extend_from_slice(sequence);
+    raw.push(final_byte);
+    terminal.vt_write(&raw);
 }
 
 fn engine_parameter(parameter: &[u8]) -> Option<u32> {
@@ -5634,13 +5757,30 @@ fn run_terminal(
 /// `server_destroy_pane` resets the scroll region, parks the cursor on the
 /// last row, linefeeds once so the screen scrolls, draws the expanded
 /// `remain-on-exit-format` clipped to the pane width rather than wrapped, and
-/// then hides the cursor.
+/// then hides the cursor; an empty template only hides the cursor. The text
+/// arrives with the daemon's SGR runs for its `#[...]` styles, which take no
+/// width and pass through the clip.
 fn write_dead_notice(terminal: &mut Terminal<'_, '_>, text: &str) -> Result<(), WorkerError> {
+    if text.is_empty() {
+        terminal.vt_write(b"\x1b[?25l");
+        return Ok(());
+    }
     let columns = usize::from(terminal.cols()?);
     let rows = terminal.rows()?;
     let mut drawn = String::with_capacity(text.len());
     let mut width = 0_usize;
-    for character in text.chars() {
+    let mut characters = text.chars();
+    while let Some(character) = characters.next() {
+        if character == '\x1b' {
+            drawn.push(character);
+            for control in characters.by_ref() {
+                drawn.push(control);
+                if control == 'm' {
+                    break;
+                }
+            }
+            continue;
+        }
         let advance = usize::from(libghostty_vt::unicode::codepoint_width(character));
         if width + advance > columns {
             break;
@@ -5650,7 +5790,7 @@ fn write_dead_notice(terminal: &mut Terminal<'_, '_>, text: &str) -> Result<(), 
     }
     terminal.vt_write(format!("\x1b[r\x1b[{rows};1H\n").as_bytes());
     terminal.vt_write(drawn.as_bytes());
-    terminal.vt_write(b"\x1b[?25l");
+    terminal.vt_write(b"\x1b[0m\x1b[?25l");
     Ok(())
 }
 
@@ -11988,6 +12128,161 @@ fn resolve_style_color(value: StyleColor, palette: &[RgbColor; 256]) -> Option<C
 
 #[cfg(test)]
 mod tests {
+    fn engine_filter_screen(knobs: EngineKnobs, chunks: &[&[u8]]) -> (String, Vec<String>) {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 20,
+            rows: 4,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        let mut filter = EngineFilter::default();
+        let mut renames = Vec::new();
+        for chunk in chunks {
+            filter.write(chunk, knobs, &mut terminal, &mut renames);
+        }
+        let revision = ModeRevision::capture(&mut terminal).expect("revision");
+        let rows = revision.total_rows();
+        (
+            revision.capture_rows(0, rows.saturating_sub(1), false, false, false),
+            renames,
+        )
+    }
+
+    #[test]
+    fn engine_filter_rename_follows_the_pin_table() {
+        let knobs = EngineKnobs {
+            allow_rename: true,
+            ..EngineKnobs::default()
+        };
+        let (text, renames) = engine_filter_screen(
+            knobs,
+            &[
+                b"\x1bkESCCSI\x1b[0m",
+                b"\x1bkCAN\x18",
+                b"\x1bkA\x07B\x1b\\",
+                b"\x1b",
+                b"kSPLIT",
+                b"\x1b",
+                b"\\",
+                b"\x1bkQUIET\x1b\\",
+            ],
+        );
+        assert_eq!(renames, ["ESCCSI", "CAN", "AB", "SPLIT", "QUIET"]);
+        assert_eq!(text.trim(), "");
+        let (_, refused) = engine_filter_screen(EngineKnobs::default(), &[b"\x1bkNAME\x1b\\"]);
+        assert!(refused.is_empty(), "allow-rename off still renamed: {refused:?}");
+    }
+
+    #[test]
+    fn engine_filter_hands_an_aborted_csi_to_the_engine() {
+        let (text, _) = engine_filter_screen(
+            EngineKnobs::default(),
+            &[b"hello \x1b[2\x1b[2Jworld"],
+        );
+        assert!(!text.contains("2J"), "the aborted CSI leaked: {text:?}");
+        assert!(text.contains("world"), "{text:?}");
+    }
+
+    #[test]
+    fn engine_filter_passes_split_sequences_through_untouched() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 20,
+            rows: 4,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        let mut filter = EngineFilter::default();
+        let mut renames = Vec::new();
+        for chunk in [
+            b"a\x1b[".as_slice(),
+            b"1",
+            b"mb\x1b[0m",
+            b"c\x1b",
+            b"[2",
+            b"Cd",
+        ] {
+            filter.write(chunk, EngineKnobs::default(), &mut terminal, &mut renames);
+        }
+        assert_eq!(terminal.cursor_x().expect("cursor"), 6);
+        let revision = ModeRevision::capture(&mut terminal).expect("revision");
+        assert_eq!(revision.capture_rows(0, 0, false, false, false), "abcd");
+        assert!(revision.cell_matches_text(PointCoordinate { x: 5, y: 0 }, "d"));
+    }
+
+    #[test]
+    fn engine_filter_scrolls_a_split_clear_into_history() {
+        let (text, _) = engine_filter_screen(
+            EngineKnobs::default(),
+            &[b"one\r\ntwo\r\n", b"\x1b[H\x1b[", b"2J", b"three"],
+        );
+        assert_eq!(text, "one\ntwo\nthree\n\n\n");
+        let (kept, _) = engine_filter_screen(
+            EngineKnobs {
+                scroll_on_clear: false,
+                ..EngineKnobs::default()
+            },
+            &[b"one\r\ntwo\r\n", b"\x1b[H\x1b[2Jthree"],
+        );
+        assert_eq!(kept.lines().next().unwrap_or(""), "three", "{kept:?}");
+        assert!(!kept.contains("one"), "{kept:?}");
+    }
+
+    #[test]
+    #[ignore = "throughput measurement; run with --ignored --nocapture"]
+    fn engine_filter_throughput() {
+        use std::time::Instant;
+        let mut coloured = Vec::new();
+        while coloured.len() < 26 << 20 {
+            coloured.extend_from_slice(
+                b"\x1b[0m\x1b[1;34mdrwxr-xr-x\x1b[0m  12 user staff   384 Sep  2 07:00 \x1b[1;36msome-directory\x1b[0m\r\n",
+            );
+        }
+        let mut plain = Vec::new();
+        while plain.len() < 26 << 20 {
+            plain.extend_from_slice(b"the quick brown fox jumps over the lazy dog 0123456789\r\n");
+        }
+        let mut clears = Vec::new();
+        while clears.len() < 512 << 10 {
+            clears.extend_from_slice(b"\x1b[H\x1b[2J");
+        }
+        for (name, input) in [("coloured", &coloured), ("plain", &plain), ("clears", &clears)] {
+            for round in 0..3 {
+                let mut terminal = Terminal::new(TerminalOptions {
+                    cols: 200,
+                    rows: 50,
+                    max_scrollback: 1000,
+                })
+                .expect("terminal");
+                let mut passthrough = PassthroughFilter::default();
+                let started = Instant::now();
+                for chunk in input.chunks(65536) {
+                    passthrough.write(chunk, |bytes| terminal.vt_write(bytes));
+                }
+                let base = started.elapsed();
+                let mut terminal = Terminal::new(TerminalOptions {
+                    cols: 200,
+                    rows: 50,
+                    max_scrollback: 1000,
+                })
+                .expect("terminal");
+                let mut passthrough = PassthroughFilter::default();
+                let mut filter = EngineFilter::default();
+                let mut renames = Vec::new();
+                let mut engine = EngineOutput {
+                    filter: &mut filter,
+                    knobs: EngineKnobs::default(),
+                    renames: &mut renames,
+                };
+                let started = Instant::now();
+                for chunk in input.chunks(65536) {
+                    feed_pty_output(&mut terminal, &mut passthrough, &mut engine, chunk);
+                }
+                let filtered = started.elapsed();
+                println!("{name} round {round}: passthrough {base:?} filtered {filtered:?}");
+            }
+        }
+    }
+
 
     use super::*;
     use crate::DEFAULT_HISTORY_LIMIT;

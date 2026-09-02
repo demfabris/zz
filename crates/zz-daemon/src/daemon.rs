@@ -924,12 +924,86 @@ fn expanded_style_value(
     window: Option<WindowId>,
     pane: Option<PaneId>,
 ) -> String {
-    if !value.contains("#{") {
+    if !value.contains("#{") && !value.contains("#(") {
         return value.to_owned();
     }
     let context = server_format_context(engine, config_files, session, window, pane);
     let mut hooks = InertFormatHooks::with_option_engine(engine);
     expand_format_values(value, &context, &mut hooks)
+}
+
+/// `format_draw` paints the expanded `remain-on-exit-format` with its
+/// `#[...]` styles; the notice carries them to the pane as SGR runs, one
+/// reset-and-set per segment, so the worker can clip by width and draw.
+fn dead_notice_text(expanded: &str) -> String {
+    let mut output = String::with_capacity(expanded.len());
+    for segment in zz_protocol::parse_styled_segments(expanded) {
+        if segment.text.is_empty() {
+            continue;
+        }
+        let mut parameters = Vec::new();
+        let attributes = &segment.style.attributes;
+        if attributes.noattr != zz_protocol::TmuxAttributeState::On {
+            for (state, code) in [
+                (attributes.bold, "1"),
+                (attributes.dim, "2"),
+                (attributes.italics, "3"),
+                (attributes.underscore, "4"),
+                (attributes.double_underscore, "4:2"),
+                (attributes.curly_underscore, "4:3"),
+                (attributes.dotted_underscore, "4:4"),
+                (attributes.dashed_underscore, "4:5"),
+                (attributes.blink, "5"),
+                (attributes.reverse, "7"),
+                (attributes.hidden, "8"),
+                (attributes.strikethrough, "9"),
+                (attributes.overline, "53"),
+            ] {
+                if state == zz_protocol::TmuxAttributeState::On {
+                    parameters.push(code.to_owned());
+                }
+            }
+        }
+        if let Some(colour) = segment.style.fg {
+            push_notice_colour(&mut parameters, colour, 30);
+        }
+        if let Some(colour) = segment.style.bg {
+            push_notice_colour(&mut parameters, colour, 40);
+        }
+        output.push_str("\x1b[0");
+        for parameter in &parameters {
+            output.push(';');
+            output.push_str(parameter);
+        }
+        output.push('m');
+        output.push_str(&segment.text);
+    }
+    output
+}
+
+fn push_notice_colour(parameters: &mut Vec<String>, colour: zz_protocol::TmuxColour, base: u8) {
+    match colour {
+        zz_protocol::TmuxColour::Basic(index) if index < 8 => {
+            parameters.push((base + index).to_string());
+        }
+        zz_protocol::TmuxColour::Basic(index) => {
+            parameters.push((base + 60 + index.saturating_sub(8)).to_string());
+        }
+        zz_protocol::TmuxColour::Indexed(index) => {
+            parameters.push(format!("{};5;{index}", base + 8));
+        }
+        zz_protocol::TmuxColour::Rgb(rgb) => parameters.push(format!(
+            "{};2;{};{};{}",
+            base + 8,
+            (rgb >> 16) & 0xff,
+            (rgb >> 8) & 0xff,
+            rgb & 0xff
+        )),
+        zz_protocol::TmuxColour::Default | zz_protocol::TmuxColour::Terminal => {
+            parameters.push((base + 9).to_string());
+        }
+        zz_protocol::TmuxColour::Theme(_) => {}
+    }
 }
 
 fn published_appearance(inner: &ServerState) -> Arc<TerminalAppearance> {
@@ -7501,13 +7575,15 @@ impl Shared {
                         target_client,
                         require_mode,
                     } => {
-                        // A `copy-mode -k` arms `pending_copy_kill` in the
-                        // effect before this one; only a real mode entry on the
-                        // pane may consume it, so an entry that errors or is
-                        // redirected to a command output must not leave it armed
-                        // for the next unrelated entry. Take it up front and
-                        // restore it only on the path that reaches the entry.
+                        // A `copy-mode -k` arms `pending_copy_kill` and a
+                        // `copy-mode -s` arms `pending_copy_source` in the
+                        // effects before this one; only a real mode entry on the
+                        // pane may consume them, so an entry that errors or is
+                        // redirected to a command output must not leave either
+                        // armed for the next unrelated entry. Take both up front
+                        // and use them only on the path that reaches the entry.
                         let armed_copy_kill = inner.pending_copy_kill.take();
+                        let armed_copy_source = inner.pending_copy_source.take();
                         if *require_mode && !pane_carries_a_mode_command(&inner, client, *pane) {
                             return Err(
                                 ServerError::InvalidCommand("not in a mode".to_owned()).into()
@@ -7553,9 +7629,7 @@ impl Shared {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
                         inner.pending_copy_kill = armed_copy_kill;
-                        let copy_source = inner
-                            .pending_copy_source
-                            .take()
+                        let copy_source = armed_copy_source
                             .filter(|(armed, _)| armed == pane)
                             .and_then(|(_, source)| inner.terminals.get(&source).cloned());
                         for target in targets {
@@ -19856,22 +19930,25 @@ impl Shared {
             let notice = {
                 let inner = self.inner.lock();
                 let template = inner.engine.remain_on_exit_format_for_pane(pane);
-                (!template.is_empty()).then(|| {
+                if template.is_empty() {
+                    Arc::<str>::from("")
+                } else {
                     let window = inner.engine.state.window_for_pane(pane);
                     let session = window
                         .and_then(|window| inner.engine.state.windows.get(&window))
                         .map(|window| window.session);
-                    Arc::<str>::from(expanded_style_value(
+                    let expanded = expanded_style_value(
                         &inner.engine,
                         &inner.config_files,
                         &template,
                         session,
                         window,
                         Some(pane),
-                    ))
-                })
+                    );
+                    Arc::<str>::from(dead_notice_text(&expanded))
+                }
             };
-            terminal.write_dead_notice(notice);
+            terminal.write_dead_notice(Some(notice));
             if changed {
                 self.publish_snapshot();
             }
@@ -19965,6 +20042,9 @@ impl Shared {
 
     /// `input_exit_rename` clears `automatic-rename` and sets the window name;
     /// an empty name removes the local `automatic-rename` override instead.
+    /// The pin writes both straight into the option and window tables, so the
+    /// two commands run with their after-command hooks suppressed and only the
+    /// `window-renamed` event reaches hooks.
     fn rename_window_from_pane(
         self: &Arc<Self>,
         pane: PaneId,
@@ -19990,21 +20070,54 @@ impl Shared {
                 CommandInvocation::new("rename-window", ["-t", target.as_str(), name]),
             ]
         };
+        let queue = CommandQueueExecution {
+            draining: false,
+            wait_yields: false,
+            detached: false,
+            deferred_shutdown: Cell::new(DeferredShutdown::None),
+            deferred_control_exit: Cell::new(None),
+            yielded: Cell::new(CommandQueueYield::None),
+            yield_boundary: false,
+            shutdown_blocker: RefCell::new(None),
+            pending_event_hooks: RefCell::new(Vec::new()),
+            deferred_shell_jobs: RefCell::new(Vec::new()),
+            callback_parse_failures: RefCell::new(Vec::new()),
+            deferred_config_replay_issues: RefCell::new(Vec::new()),
+            reported_failures: Cell::new(false),
+            suppress_after_hooks: Cell::new(true),
+            suppress_output: Cell::new(false),
+        };
         for command in &commands {
-            if let Err(error) = self.execute(
+            if let Err(error) = self.execute_with_mux_source_in_queue(
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut context,
                 command,
+                MuxOptionSource::RuntimeCommand,
+                Some(&queue),
             ) {
                 log::warn!(
                     target: "zz_daemon::diagnostics::terminal",
                     "allow-rename request failed pane={pane} name={name:?} error={error}"
                 );
-                return;
+                break;
             }
         }
+        let events = queue
+            .pending_event_hooks
+            .borrow_mut()
+            .drain(..)
+            .collect::<Vec<_>>();
+        let jobs = queue
+            .deferred_shell_jobs
+            .borrow_mut()
+            .drain(..)
+            .collect::<Vec<_>>();
         self.publish_snapshot();
+        self.run_event_hooks(events);
+        for launch in jobs {
+            launch(self);
+        }
     }
 
     fn synchronize_pane_runtime(
@@ -69442,6 +69555,50 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(
             !shared.inner.lock().copy_sessions[&client].kill,
             "a plain copy-mode inherited a kill from an earlier errored entry"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_mode_source_does_not_survive_an_errored_entry() {
+        let (shared, client, mut context, pane, _terminal, _mailbox) = copy_mode_fixture(
+            "source-error",
+            "i=0; while [ $i -lt 12 ]; do printf 'line-%02d\\n' \"$i\"; i=$((i+1)); done",
+        );
+        let target = pane.to_string();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-window", ["-d", "-t", &target]),
+            )
+            .expect("split a source pane");
+        let source = shared
+            .inner
+            .lock()
+            .terminals
+            .keys()
+            .copied()
+            .find(|candidate| *candidate != pane)
+            .expect("source pane");
+        let source_target = source.to_string();
+
+        shared.detach(client);
+        let mut errored = ExecutionContext::default();
+        let denied = shared.execute(
+            ClientId(u64::MAX),
+            ClientKind::Command,
+            &mut errored,
+            &CommandInvocation::new("copy-mode", ["-s", &source_target, "-t", &target]),
+        );
+        assert!(
+            denied.is_err(),
+            "copy-mode -s with no attached client should error"
+        );
+        assert!(
+            shared.inner.lock().pending_copy_source.is_none(),
+            "an errored copy-mode -s left the source armed"
         );
     }
 

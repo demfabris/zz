@@ -1273,8 +1273,9 @@ test carries those numbers instead of the differential.
 
 Three things this does not do. The scroll-up only reaches history on the primary screen, which
 matches the pin, whose `grid_view_clear_history` falls back to a plain clear without `GRID_HISTORY`.
-zz pushes into history unconditionally because `scroll-on-clear` itself is parked in
-`options.pane-engine-knobs`; turning that push off belongs to that group, not to `-R`. And the pin
+zz pushes into history unconditionally on `-R` because `reset_pane_screen` does not read
+`scroll-on-clear`, which closed on 2026-09-02 for the byte stream through the pane worker's
+filter; wiring the reset through the same knob is that group's follow-up, not `-R`'s. And the pin
 keeps `MODE_KEYS_EXTENDED` when `extended-keys` is `always`; zz drops it unconditionally because
 that option lives in `options.client-terminal-negotiation`.
 

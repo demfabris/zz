@@ -14715,6 +14715,21 @@ fn copy_mode_action(
                 true,
             )?))
         }
+        "copy-pipe-line" | "copy-pipe-line-and-cancel" => Some(copy_line_action(copy_pipe_action(
+            command,
+            &arguments,
+            &options,
+            set_clipboard,
+            copy_command,
+            true,
+        )?)),
+        "copy-line" | "copy-line-and-cancel" => Some(copy_line_action(copy_selection_action(
+            &arguments,
+            &options,
+            set_clipboard,
+            true,
+            command.ends_with("-and-cancel"),
+        ))),
         "copy-end-of-line" | "copy-end-of-line-and-cancel" => {
             Some(copy_end_of_line_action(copy_selection_action(
                 &arguments,
@@ -14792,6 +14807,13 @@ fn copy_end_of_line_action(action: CopyModeAction) -> CopyModeAction {
         unreachable!("copy helper always returns a selection action");
     };
     CopyModeAction::CopyEndOfLine(copy)
+}
+
+fn copy_line_action(action: CopyModeAction) -> CopyModeAction {
+    let CopyModeAction::CopySelection(copy) = action else {
+        unreachable!("copy helper always returns a selection action");
+    };
+    CopyModeAction::CopyLine(copy)
 }
 
 /// `None` is the pin's silent no-op for a name it does not recognise, which

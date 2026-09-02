@@ -27304,12 +27304,14 @@ fn terminal_view_action_exits_copy_mode(action: &zz_terminal::TerminalViewAction
         } => true,
         zz_terminal::TerminalViewAction::CopyMode(
             zz_terminal::CopyModeAction::CopySelection(copy)
-            | zz_terminal::CopyModeAction::CopyEndOfLine(copy),
+            | zz_terminal::CopyModeAction::CopyEndOfLine(copy)
+            | zz_terminal::CopyModeAction::CopyLine(copy),
         )
         | zz_terminal::TerminalViewAction::CopyModeCounted {
             action:
                 zz_terminal::CopyModeAction::CopySelection(copy)
-                | zz_terminal::CopyModeAction::CopyEndOfLine(copy),
+                | zz_terminal::CopyModeAction::CopyEndOfLine(copy)
+                | zz_terminal::CopyModeAction::CopyLine(copy),
             ..
         } => copy.cancel,
         _ => false,

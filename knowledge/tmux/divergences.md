@@ -1457,6 +1457,23 @@ length moves run to run. The 40,960,000-byte repeat ceiling remains the one allo
 sibling `#{l:x}` replacements all expand, 99 nested `#{s/x/x/:}` wrappers still reach their body, and
 the hundredth answers empty: a recursion depth of 100 on both sides, not a running total.
 
+## Copy cursor geometry and the copy-mode key table (2026-09-02)
+
+The copy cursor's column now follows `window_copy_update_cursor`, which clamps every placement to the
+row it lands on: `grid_line_length` under `mode-keys emacs`, one less under `vi`, and no clamp while a
+rectangle is dragged. `mode-keys` reaches the pane worker as an engine knob resolved at window scope
+and refreshed whenever the option is written, so cursor-left, cursor-right, cursor-up, cursor-down,
+end-of-line and next-word-end all read it live the way window-copy.c does. Two reads changed with it:
+`#{copy_cursor_x}` is published unclamped, because emacs parks one past the last cell and a filled
+row's answer is the pane's own column count; and the cursor-centre commands, which place through the
+same clamp, cut a column past their target row to that row's limit.
+
+One divergence measured beside that work is not the copy engine's: while a pane holds copy mode the
+pin answers `#{client_key_table}` `root`, because `window_copy_key_table` is consulted per keypress
+off the mode entry and never written to the client, where zz stores the mode's table on the client
+and answers `copy-mode-vi` or `copy-mode`. The table each key resolves through is the same on both;
+only the readback differs. It is recorded on `copy-mode.action-fidelity` in the registry.
+
 # Related
 
 - [live tmux compatibility gaps](/tmux/gaps.md) — generated TODO, decision, and status report.

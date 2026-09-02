@@ -20,7 +20,7 @@ use zz_protocol::{
     resolve_command, unimplemented_tmux_command_spec,
 };
 use zz_terminal::{
-    CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy,
+    CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy, CopyModeSearch,
     CopySelectionMode, DEFAULT_HISTORY_LIMIT, DEFAULT_WORD_SEPARATORS, MAX_HISTORY_LIMIT,
     PasteBufferAction, SearchDirection, TerminalViewAction,
 };
@@ -198,6 +198,11 @@ const COPY_MODE_CONTEXT_FORMATS: &[&str] = &[
     "copy_cursor_x",
     "copy_cursor_y",
     "scroll_position",
+    "search_count",
+    "search_count_partial",
+    "search_match",
+    "search_present",
+    "search_timed_out",
     "selection_end_x",
     "selection_end_y",
     "selection_present",
@@ -344,11 +349,6 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
             "copy_position",
             "copy_position_limit",
             "rectangle_toggle",
-            "search_count",
-            "search_count_partial",
-            "search_match",
-            "search_present",
-            "search_timed_out",
             "selection_active",
             "selection_mode",
             "top_line_time",
@@ -7405,12 +7405,31 @@ impl MuxEngine {
                     require_mode: true,
                 }));
             };
-            let Some(action) = copy_mode_action(
-                command,
-                &positional[1..],
-                self.set_clipboard,
-                &self.copy_command,
-            )?
+            let mut arguments = positional[1..].to_vec();
+            if options.has("-F")
+                && let Some(argument) = arguments.first_mut()
+                && SEND_KEYS_FORMAT_EXPANDED_ACTIONS.contains(&command.as_str())
+            {
+                let target = ExecutionContext::for_pane(&self.state, pane)
+                    .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                *argument = self.expand_pane_format(
+                    argument,
+                    &target,
+                    context.session,
+                    context.target_format_client(),
+                    hooks,
+                );
+                if argument.is_empty() {
+                    return Ok(Execution::effect(MuxEffect::CopyModeRepeat {
+                        pane,
+                        count: 1,
+                        target_client,
+                        require_mode: true,
+                    }));
+                }
+            }
+            let Some(action) =
+                copy_mode_action(command, &arguments, self.set_clipboard, &self.copy_command)?
             else {
                 return Ok(Execution::effect(MuxEffect::CopyModeRepeat {
                     pane,
@@ -14945,6 +14964,7 @@ pub(crate) fn copy_mode_probe_action(command: &str) -> Option<CopyModeAction> {
         "jump-forward" | "jump-backward" | "jump-to-forward" | "jump-to-backward" => {
             vec!["x".to_owned()]
         }
+        "search-forward-incremental" | "search-backward-incremental" => vec!["=x".to_owned()],
         _ => Vec::new(),
     };
     copy_mode_action(command, &arguments, SetClipboard::Off, "")
@@ -15019,6 +15039,12 @@ fn copy_mode_action(
         "previous-prompt" => Some(CopyModeAction::PreviousPrompt { output }),
         "search-again" => Some(CopyModeAction::SearchAgain { reverse: false }),
         "search-reverse" => Some(CopyModeAction::SearchAgain { reverse: true }),
+        "search-forward" | "search-backward" | "search-forward-text" | "search-backward-text" => {
+            Some(copy_search_action(command, arguments.first()))
+        }
+        "search-forward-incremental" | "search-backward-incremental" => {
+            copy_incremental_search_action(command, arguments.first())
+        }
         "begin-selection" => Some(CopyModeAction::StartSelection),
         "select-word" => Some(CopyModeAction::SelectWord),
         "select-line" => Some(CopyModeAction::SelectLine),
@@ -15126,6 +15152,69 @@ fn copy_mode_action(
     Ok(action)
 }
 
+/// `send-keys -F` reaches exactly one place in the pin:
+/// `window_copy_expand_search_string` runs the search string through
+/// `format_single` in the target pane's context. Every other key argument is
+/// untouched by the flag, and the two `-incremental` spellings never call that
+/// helper.
+const SEND_KEYS_FORMAT_EXPANDED_ACTIONS: &[&str] = &[
+    "search-backward",
+    "search-backward-text",
+    "search-forward",
+    "search-forward-text",
+];
+
+/// `window_copy_cmd_search_forward` and its three plain siblings: the string is
+/// the one optional argument, the `-text` spellings clear `data->searchregex`,
+/// and a missing or empty string is `window_copy_expand_search_string`
+/// answering zero, which leaves the mode alone.
+fn copy_search_action(command: &str, argument: Option<&String>) -> CopyModeAction {
+    CopyModeAction::Search(Box::new(CopyModeSearch {
+        text: argument.cloned().unwrap_or_default(),
+        direction: if command.starts_with("search-forward") {
+            SearchDirection::Forward
+        } else {
+            SearchDirection::Backward
+        },
+        regex: !command.ends_with("-text"),
+        incremental: false,
+    }))
+}
+
+/// `window_copy_cmd_search_forward_incremental` reads the first character of
+/// its mandatory argument as the prefix `command-prompt -i` prepended: `=`
+/// searches the spelling's own way, `+` down and `-` up in the forward
+/// spelling, and the two swap in the backward one. A prefix that is none of
+/// the three runs no search at all, and the rest of the argument is the
+/// string, which may be empty.
+fn copy_incremental_search_action(
+    command: &str,
+    argument: Option<&String>,
+) -> Option<CopyModeAction> {
+    let argument = argument?;
+    let mut characters = argument.chars();
+    let prefix = characters.next()?;
+    let forward_spelling = command.starts_with("search-forward");
+    let direction = match prefix {
+        '=' => {
+            if forward_spelling {
+                SearchDirection::Forward
+            } else {
+                SearchDirection::Backward
+            }
+        }
+        '+' => SearchDirection::Forward,
+        '-' => SearchDirection::Backward,
+        _ => return None,
+    };
+    Some(CopyModeAction::Search(Box::new(CopyModeSearch {
+        text: characters.as_str().to_owned(),
+        direction,
+        regex: false,
+        incremental: true,
+    })))
+}
+
 fn copy_mode_action_options(command: &str, arguments: &[String]) -> Option<(Options, Vec<String>)> {
     let (options, positional) = parse_options(arguments, &[], &[]).ok()?;
     let allowed = match command {
@@ -15154,9 +15243,13 @@ fn copy_mode_action_options(command: &str, arguments: &[String]) -> Option<(Opti
         return None;
     }
     let (minimum, maximum) = match command {
-        "goto-line" | "jump-forward" | "jump-backward" | "jump-to-forward" | "jump-to-backward" => {
-            (1, 1)
-        }
+        "goto-line"
+        | "jump-forward"
+        | "jump-backward"
+        | "jump-to-forward"
+        | "jump-to-backward"
+        | "search-forward-incremental"
+        | "search-backward-incremental" => (1, 1),
         "copy-selection"
         | "copy-selection-no-clear"
         | "copy-selection-and-cancel"
@@ -15167,6 +15260,10 @@ fn copy_mode_action_options(command: &str, arguments: &[String]) -> Option<(Opti
         | "pipe"
         | "pipe-no-clear"
         | "pipe-and-cancel"
+        | "search-forward"
+        | "search-backward"
+        | "search-forward-text"
+        | "search-backward-text"
         | "selection-mode" => (0, 1),
         "copy-pipe"
         | "copy-pipe-no-clear"

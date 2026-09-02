@@ -289,6 +289,24 @@ impl SearchQuery {
     }
 }
 
+/// The string one `search-forward`, `search-backward` or `-text` spelling
+/// carries, plus the two bits `window_copy_cmd_search_*` sets on the mode
+/// before it runs: `data->searchtype` and `data->searchregex`. The
+/// `-incremental` spellings arrive here with the prefix character already read
+/// off the argument, which is what picks their direction.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopyModeSearch {
+    pub text: String,
+    pub direction: SearchDirection,
+    /// `data->searchregex`: the plain spellings search a regular expression
+    /// and the `-text` ones a literal string.
+    pub regex: bool,
+    /// `window_copy_cmd_search_forward_incremental`: the prompt re-runs the
+    /// search on every keystroke from the point the mode was at when the
+    /// prompt opened.
+    pub incremental: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CopyModeAction {
     Left,
@@ -385,6 +403,9 @@ pub enum CopyModeAction {
     /// selects the whole logical line the cursor sits on without needing a
     /// selection, copies it, then puts the cursor and view back.
     CopyLine(Box<CopyModeCopy>),
+    /// The six `search-` entry points that carry a string: `search-forward`,
+    /// `search-backward`, their `-text` and `-incremental` spellings.
+    Search(Box<CopyModeSearch>),
 }
 
 /// The pin's `selflag`: the unit a live selection extends by.
@@ -447,6 +468,13 @@ impl CopyModeAction {
             | Self::Jump(_)
             | Self::RepeatJump { .. }
             | Self::SearchAgain { .. } => CopyModeCountPolicy::Repeat,
+            Self::Search(search) => {
+                if search.incremental {
+                    CopyModeCountPolicy::Once
+                } else {
+                    CopyModeCountPolicy::Repeat
+                }
+            }
             Self::OtherEnd => CopyModeCountPolicy::OtherEnd,
             Self::SelectLine => CopyModeCountPolicy::SelectLine,
             Self::CopyEndOfLine(_) => CopyModeCountPolicy::CopyEndOfLine,

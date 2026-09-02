@@ -40,12 +40,17 @@ pub(crate) const LIST_CLIENTS_CONTEXT_FORMATS: [&str; 1] = ["line"];
 /// The `window_copy_formats` names zz answers. tmux adds them to the format
 /// tree from the pane's mode entry; zz reads them off the client view that
 /// holds the copy session, because copy mode is per client here.
-pub(crate) const COPY_MODE_CONTEXT_FORMATS: [&str; 10] = [
+pub(crate) const COPY_MODE_CONTEXT_FORMATS: [&str; 15] = [
     "copy_cursor_line",
     "copy_cursor_word",
     "copy_cursor_x",
     "copy_cursor_y",
     "scroll_position",
+    "search_count",
+    "search_count_partial",
+    "search_match",
+    "search_present",
+    "search_timed_out",
     "selection_end_x",
     "selection_end_y",
     "selection_present",
@@ -1024,6 +1029,11 @@ impl DaemonFormatHooks<'_> {
             cursor_x,
             cursor_y,
             scroll_position,
+            search_count,
+            search_count_partial,
+            search_match,
+            search_present,
+            search_timed_out,
             selection_end_x,
             selection_end_y,
             selection_present,
@@ -1043,6 +1053,11 @@ impl DaemonFormatHooks<'_> {
             );
         }
         match name {
+            _ if name == search_present => Some(u8::from(view.search_present).to_string()),
+            _ if name == search_timed_out => Some(u8::from(view.search_timed_out).to_string()),
+            _ if name == search_match => Some(view.search_match.clone()),
+            _ if name == search_count => Some(view.search_count?.0.to_string()),
+            _ if name == search_count_partial => Some(u8::from(view.search_count?.1).to_string()),
             _ if name == cursor_line => Some(view.cursor_line.clone()),
             _ if name == cursor_word => Some(view.cursor_word.clone()),
             _ if name == cursor_x => Some(view.cursor_x.to_string()),

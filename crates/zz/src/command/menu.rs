@@ -40,7 +40,10 @@ impl MenuView {
     }
 
     pub(crate) fn synchronize(&mut self, state: MenuState, cx: &mut Context<Self>) {
-        self.selected = state.selected.and_then(|index| usize::try_from(index).ok());
+        self.selected = self
+            .selected
+            .filter(|_| !state.items.is_empty())
+            .map(|selected| selected.min(state.items.len() - 1));
         self.state = state;
         cx.notify();
     }

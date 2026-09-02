@@ -16122,6 +16122,7 @@ impl Shared {
             }
             ChooseTreeResult::Activate(target) => {
                 self.publish_to_client(client, EventPayload::ChooseTree { state: None });
+                self.reap_chooser_kill_panes(client, kind, context);
                 let activated = if let Some((template, replacement)) = command {
                     match replacement {
                         Ok(replacement) => self.execute_chooser_command(
@@ -16140,7 +16141,6 @@ impl Shared {
                 } else {
                     self.activate_choose_tree_target(client, kind, context, target)
                 };
-                self.reap_chooser_kill_panes(client, kind, context);
                 activated?;
             }
         }
@@ -16296,6 +16296,15 @@ impl Shared {
                 template,
             } => {
                 self.publish_to_client(client, EventPayload::ChooseBuffer { state: None });
+                self.reap_chooser_kill_panes(client, kind, context);
+                let pane = {
+                    let inner = self.inner.lock();
+                    if inner.engine.state.window_for_pane(pane).is_some() {
+                        pane
+                    } else {
+                        context.pane.unwrap_or(pane)
+                    }
+                };
                 if let Some(template) = template {
                     self.execute_chooser_command(
                         client,
@@ -41834,6 +41843,11 @@ mod tests {
             ],
         );
         assert_eq!(palette.palette.as_array()[1], Color::rgb(0x12, 0x34, 0x56));
+        assert_eq!(
+            palette.palette.as_array()[2],
+            base.palette.as_array()[2],
+            "pane-colours[N] default keeps the theme slot; the pin resolves that cell to the terminal default"
+        );
         assert_eq!(palette.palette.as_array()[200], base.palette.as_array()[17]);
         assert_eq!(palette.palette.as_array()[2], base.palette.as_array()[2]);
         assert_eq!(palette.palette.as_array()[0], base.palette.as_array()[0]);

@@ -55,6 +55,7 @@ cleanup() {
     fi
     main_client set-environment -gu CHOOSER_KILL_RAN >/dev/null 2>&1
     main_client unbind-key -n C-o >/dev/null 2>&1
+    rm -f "$work/panes-at-template"
     exit "$cleanup_status"
 }
 trap cleanup EXIT
@@ -151,6 +152,23 @@ main_client set-environment -g CHOOSER_KILL_RAN no
 probe kill-on-enter 0d "$other_pane "
 check_equal kill-on-enter-template "CHOOSER_KILL_RAN=yes" \
     "$(main_client show-environment -g CHOOSER_KILL_RAN 2>/dev/null || true)"
+# The template runs after the kill: mode_tree_run_command only appends it, and
+# window_pane_reset_mode's server_kill_pane is synchronous, so the template
+# sees the window already down to one pane.
+reset_window
+rm -f "$work/panes-at-template"
+main_client bind-key -n C-o choose-tree -k -f "$mine" \
+    "run-shell 'echo #{window_panes} >$work/panes-at-template'"
+probe kill-before-template 0d "$other_pane "
+attempt=0
+while [ "$attempt" -lt 200 ]; do
+    if [ -s "$work/panes-at-template" ]; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.05
+done
+check_equal template-sees-the-kill 1 "$(cat "$work/panes-at-template" 2>/dev/null | tr -d ' \n')"
 reset_window
 main_client bind-key -n C-o choose-tree -k -f "$mine"
 probe kill-on-shortcut 30 "$other_pane "
@@ -183,11 +201,11 @@ main_client detach-client -s "=$session" >/dev/null 2>&1 || true
 sleep 1.0
 check_equal detach-keeps-pane "$source_pane $other_pane " "$(panes_here)"
 
-if [ "$check_count" -ne 9 ]; then
+if [ "$check_count" -ne 11 ]; then
     record_failure total-checks
 fi
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g CHOOSER_KILL_ON_EXIT clean:9
+    main_client set-environment -g CHOOSER_KILL_ON_EXIT clean:11
 else
     sed "s/^/chooser-kill-on-exit-$side: /" "$work/failures"
 fi

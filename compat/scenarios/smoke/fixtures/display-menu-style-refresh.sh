@@ -61,6 +61,7 @@ cleanup() {
         kill "$attach_pid" >/dev/null 2>&1
         wait "$attach_pid" >/dev/null 2>&1
     fi
+    main_client set-environment -gu DISPLAY_MENU_STYLE_ROW >/dev/null 2>&1
     exit "$cleanup_status"
 }
 trap cleanup EXIT
@@ -152,11 +153,19 @@ if [ -z "$client" ]; then
 fi
 sleep 0.8
 
+main_client set-environment -g DISPLAY_MENU_STYLE_ROW pending
 main_client display-menu -c "$client" -x 5 -y 5 -T '' \
-    alpha a 'display-message -p alpha' bravo b 'display-message -p bravo' &
+    alpha a 'set-environment -g DISPLAY_MENU_STYLE_ROW alpha' \
+    bravo b 'set-environment -g DISPLAY_MENU_STYLE_ROW bravo' &
 menu_pid=$!
 sleep 1.0
 drive "snap opened"
+
+# The restyles below repaint the menu while the cursor sits on the second row;
+# menu_reapply_styles never touches md->choice, so Enter at the end must still
+# run bravo.
+drive "keys 1b5b42"
+sleep 0.5
 
 # menu_reapply_styles runs from menu_draw_cb, so a set-option that lands while
 # the menu is up repaints it with the new colours and no key pressed. The box
@@ -187,16 +196,25 @@ restyle menu-style 'bg=colour17' lines-style-a
 check_equal border-lines-are-not-reread same "$(compare_glyphs style-a lines-style-a)"
 check_equal border-lines-leave-the-colours-alone same "$(compare_sgr style-a lines-style-a)"
 
-drive "keys 1b"
-sleep 0.8
+drive "keys 0d"
+attempt=0
+while [ "$attempt" -lt 200 ]; do
+    chosen="$(main_client show-environment -g DISPLAY_MENU_STYLE_ROW 2>/dev/null || true)"
+    if [ "$chosen" != "DISPLAY_MENU_STYLE_ROW=pending" ]; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.05
+done
 wait "$menu_pid" >/dev/null 2>&1 || true
 menu_pid=""
+check_equal cursor-survives-the-restyles "DISPLAY_MENU_STYLE_ROW=bravo" "$chosen"
 
-if [ "$check_count" -ne 9 ]; then
+if [ "$check_count" -ne 10 ]; then
     record_failure total-checks
 fi
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g DISPLAY_MENU_STYLE_REFRESH clean:9
+    main_client set-environment -g DISPLAY_MENU_STYLE_REFRESH clean:10
 else
     sed "s/^/display-menu-style-refresh-$side: /" "$work/failures"
 fi

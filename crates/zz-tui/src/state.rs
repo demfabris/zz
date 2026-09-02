@@ -329,11 +329,18 @@ impl Model {
     }
 
     pub fn set_menu(&mut self, menu: Option<MenuState>) {
-        let action_pending = self.menu.is_some() && menu.is_some() && self.menu_action_pending;
-        self.menu_selection = menu
-            .as_ref()
-            .and_then(|menu| menu.selected)
-            .and_then(|selected| usize::try_from(selected).ok());
+        let already_open = self.menu.is_some() && menu.is_some();
+        let action_pending = already_open && self.menu_action_pending;
+        self.menu_selection = match (&menu, already_open) {
+            (Some(next), true) => self
+                .menu_selection
+                .filter(|_| !next.items.is_empty())
+                .map(|selected| selected.min(next.items.len() - 1)),
+            (Some(next), false) => next
+                .selected
+                .and_then(|selected| usize::try_from(selected).ok()),
+            (None, _) => None,
+        };
         self.menu = menu;
         self.menu_action_pending = action_pending;
     }
@@ -978,12 +985,23 @@ mod tests {
         let updated = menu_state(None);
         model.set_menu(Some(updated.clone()));
         assert_eq!(model.menu, Some(updated));
-        assert_eq!(model.menu_selection, None);
+        assert_eq!(
+            model.menu_selection,
+            Some(0),
+            "a republished live menu keeps the client's cursor"
+        );
         assert!(!model.menu_action_pending);
 
         model.menu_action_pending = true;
         model.set_menu(Some(menu_state(Some(0))));
         assert!(model.menu_action_pending);
+
+        model.set_menu(None);
+        model.set_menu(Some(menu_state(None)));
+        assert_eq!(model.menu_selection, None);
+        model.set_menu(None);
+        model.set_menu(Some(menu_state(Some(0))));
+        assert_eq!(model.menu_selection, Some(0));
 
         model.menu_swallowed_key = Some(KeyCode::Enter);
         model.set_menu(None);

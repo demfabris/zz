@@ -189,7 +189,7 @@ gated by decision 3 or by missing context/model support, the rest are plain work
 | `choose-buffer` | `-F -k -y` |
 | `choose-tree` | `-F -h -k -y`; `-G` † |
 | `clear-history` | `-H` |
-| `command-prompt` | `-F -l -t`; `-P` † |
+| `command-prompt` | `-l`; `-P` † |
 | `copy-mode` | `-k -s`; `-S` † |
 | `detach-client` | `-t -P`; `-E` † |
 | `display-message` | `-a -c -N -v`; `-I` † |
@@ -527,11 +527,52 @@ available attached Interactive client. The strict three-step fixture runs 22 int
 arity-precedence, alias, readback, target, duration, source-file, and direct Command-client runtime checks on both servers and
 reports zero TOPO, GEO, FMT, OUT, or WARN differences.
 
-This parser closure does not implement tmux's custom selection action. On selection, tmux
-substitutes the selected `%pane` for `%%%` and executes the result with the retained original queue
-state; an omitted template uses `select-pane -t "%%%"`. Mux execution still rejects a positional
-template, and its native overlay has a fixed select-pane action. The loud runtime gap is parked under
-`display-panes.command-template`; overlay queue blocking and presentation retain separate owners.
+The selection action closed on 2026-09-02. `cmd_display_panes_key` substitutes the selected `%pane`
+for `%%%` and runs the result, and an omitted template is `select-pane -t "%%%"`, whose trailing `%`
+is `cmd_template_replace`'s quoting form rather than a third substitution. zz builds the template in
+the mux and runs it through the path `command-prompt` already used. `cmd_display_panes_exec` also
+returns `CMD_RETURN_WAIT` unless `-b`, so a command or control invoker now parks until the overlay
+closes, whichever way it closes; `-N` keeps that wait and only drops the key handler. Differential
+coverage is `smoke/display-panes-template`. One divergence remains and belongs to the command-queue
+foundation: the pin's failing template rides the issuing client's own queue, so a template that fails
+at run time exits 1 there and 0 in zz, whose overlay execution runs entirely in the interactive
+client's context.
+
+## `display-message` client aliases
+
+`cmd-find.c:1010-1022` reads `-t @`, `-t {active}` and `-t {current}` off
+`cmdq_get_client(item)->session->curw->window->active`, so all three answer the invoking client's own
+current pane and are a loud miss when that client has no session, which is every command client, even
+while another client is attached elsewhere. `display-message` carries `CMD_FIND_CANFAIL`, so the miss
+is `cmdq_error` plus `c->retval = 1` and the command still runs and still prints. zz pre-resolves
+exactly those three whole-target spellings in the daemon and reports through `route_source_error`,
+which is the same message-plus-status-without-failure channel, so the rest of the sequence follows.
+The same spelling inside a componentwise target is a pane slot, not a client alias:
+`cmd_find_get_pane_with_window` misses on `@`, `cmd_find_get_window` resolves it as a window instead,
+and `fs->wp` falls back to that window's active pane, so `-t <session>:<window>.@` answers the real
+session, window and active pane at status 0 on both binaries. Differential coverage is
+`smoke/display-message-client-aliases`. The rewrite is scoped to `display-message`; every other
+`CMD_FIND_PANE` command still resolves the three aliases to nothing at status 0, because zz's mux
+resolver takes no client handle.
+
+## `command-prompt` target client
+
+`cmd_command_prompt_entry` carries `CMD_CLIENT_TFLAG`, so the prompt is raised on the client
+`cmd_find_client` resolves from `-t` and otherwise on `cmd_find_current_client`'s answer, and
+`CMD_RETURN_WAIT` parks the issuing command queue until `cmd_command_prompt_callback` or
+`cmd_command_prompt_free` calls `cmdq_continue`. zz routes the command the way it already routed
+`display-panes` and parks a Command or Control invoker on a waiter stored in the prompt, released
+after the answer's own commands have run. `-b` and `-i` clear the wait, and a client that already has
+a prompt takes no second one. A read-only client takes the prompt but never processes its keys —
+`server-client.c:1623` gates the whole overlay and prompt block on `~CLIENT_READONLY` — so the queue
+stays parked until that client detaches. `-F` expands the string template once through
+`format_single_from_target`, which is `format_expand` and not `format_expand_time`, so `%%` survives
+to the answer pass; a `{ ... }` block is `ARGS_COMMANDS` and returns before the expansion. Because the
+expansion lands before `cmd_template_replace`, a `#{pane_id}` that expands to `%1` is itself consumed
+by the first answer. Differential coverage is `smoke/command-prompt-target`. One zz-only residue: on
+the pin `C-c`, `C-g` and Escape all close a prompt, while in zz only Escape does, so `C-c` and `C-g`
+are swallowed before `input_command_prompt_key` sees them even though `command_prompt_edit_key` maps
+them to Close.
 
 ## `choose-buffer` and `choose-tree` argument blocks
 
@@ -660,7 +701,13 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   run — holds.
 - `command-prompt -k` answers with `input_key_name`, which spells a space as `" "` where the
   pin's `key_string_lookup_key` spells it `Space`. Same narrow-vocabulary rule as the chooser
-  `-K` gutter above.
+  `-K` gutter above. Re-measured 2026-09-02 by driving a `-k` prompt on a real pty client on
+  both binaries now that `-t` can raise one from the CLI: `C-a`, `M-x`, `F1`, `Up`, `BSpace`
+  (0x7f), `a`, `Enter`, `Escape`, `Tab`, `DC` and the literal `~` and `;` all agree. Two more
+  spellings do not, and both are the client's decoding rather than the name table: 0x08 answers
+  `BSpace` where the pin answers `C-h`, and `ESC [ Z` answers `Tab` where the pin answers
+  `BTab`, because `crates/zz-tui/src/input.rs` folds `Backspace` and `BackTab` into one code
+  each.
 - `command-prompt` edits with emacs keys only. The pin routes every prompt key through
   `prompt_translate_key` first when `status-keys` is `vi`, and `tmux.c:543-554` rewrites
   `status-keys` AND `mode-keys` to `vi` at startup whenever the basename of `$VISUAL`/`$EDITOR`
@@ -685,6 +732,15 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   resumes the client immediately. This is the prompt path's analogue of the
   `display-message -N` stickiness recorded for Wave D run 3, and zz diverges deliberately:
   reproducing it would mean latching a flag zz has no other reason to keep.
+- A message drawn while a prompt is up does not defer, it covers. `screen-redraw.c:1601` draws
+  `c->message_string` ahead of `c->prompt`, and `server-client.c:1623` clears the message on the
+  next key and hands that key to the prompt underneath unless `message_ignore_keys` is set.
+  Measured on the pin with a `-b` prompt seeded `ab`: `display-message -d 5000` leaves the buffer
+  alone and `cd` plus Enter answers `abcd`; `display-message -N -d 1500` eats every key for the
+  delay, so an `XY` typed inside the window is lost and the later `cd` still answers `abcd`; and
+  `display-message -d 0`, the wait-for-a-key form, loses the prompt outright on the pin and needs
+  its own probe before anything is claimed about it. `semantic:prompt-message-freeze` stays open
+  on that last case.
 - `list-keys <key>` rejects the positional key filter.
 - `send-keys -H` rejects bytes `80` through `ff`.
 - Bind-time validation checks shared names and catalog flags, including daemon-native long options,
@@ -718,7 +774,7 @@ the work belongs to the server:
 
 | Command family | Server/core | Client/presentation | Parked on missing context/model |
 | --- | --- | --- | --- |
-| `command-prompt` | `-F -l -t` | ~~`-1 -C -e -i -k -N -T`~~ shipped | `-P` pane-rendered prompt |
+| `command-prompt` | `-l` | ~~`-1 -C -e -i -k -N -T`~~ shipped | `-P` pane-rendered prompt |
 | `copy-mode` | `-k -s` | . | `-S` bound mouse-slider context |
 | `send-keys` | `-c -K -R` | . | `-M` originating mouse event |
 | `display-message` | `-a -c -N -v` | . | `-I` CLI stdin/protocol stream |
@@ -754,7 +810,7 @@ daemon-owned command semantics into the client.
 | Long key-modifier aliases | Closed 2026-08-29 for tmux commands. Bind, unbind, list filtering, `prefix`, `prefix2`, and `backspace` now accept the pin's short case-insensitive modifiers and reject `Ctrl-` and `Alt-` before state changes. The shared native key parser remains permissive for zz clients. | none on tmux command paths; native client aliases remain a zz extension |
 | `#{config_files}` default discovery | Explicit startup `-f` paths are retained in order and comma-joined like the pin, and later `source-file` calls do not append. `reload-config` selects zz's current default candidate and replaces the retained fact with that path or empty. Without `-f`, pinned tmux lists every expanded default candidate whether or not it exists and does not canonicalize it; zz lists only the first existing zz-owned mux config, or empty when none exists. | **silent**, deliberate config-ownership boundary |
 | `refresh-client` | `-A`/`-B`/`-C`/`-f`/`-F`/`-t` behave (phase 6: flow control, subscriptions, control-client sizing). `-C` is Control's explicit geometry path; Control does not emit the TUI-only `ClientTerminalSize` message. Bare redraw, `-S`, and the attached-client redraw/scroll family (`-c -D -L -R -U -l -r` plus the optional positional adjustment) answer `unsupported command: refresh-client interactive behavior`; detached command clients with no target get the pin's exact `no current client`. | loud |
-| Supported client-selector targets | Every implemented tmux command flag that selects an attached client uses one matcher: `detach-client -t`, `switch-client -c`, `display-message -c`, `display-panes -t`, `display-popup -c`, `display-menu -c`, `confirm-before -t`, `refresh-client -t`, `lock-client -t`, and `load-buffer -t`. It accepts an exact registered name, the exact published `#{client_name}`, a full tty, or a tty after removing exactly one leading `/dev/` prefix, with exactly one optional trailing colon. The published-name path covers the tty, registered-name, `client-PID`, and `device-N` fallback ladder, so nameless Control clients can be targeted by the value returned from `list-clients`. It does not accept a final pathname basename, so `/dev/pts/3` admits `pts/3` but not `3` unless that is the exact client name. Collisions choose the globally oldest attached client by creation id, independent of session switches. The shared `device-N` alias remains a zz extension; popup, menu, confirm, refresh, and lock also retain numeric `N` and `client-N` aliases. A local terminal surface or Command client publishes `client-tty-v1:` whenever the tty is discoverable, independently from the additive `client-nested-v1` marker that a nonempty `$TMUX` enables. A local Control client publishes the same identity from terminal stdin only; piped stdin and remote endpoints omit the caller-host tty. Protocol v83 client facts expose the retained tty through `#{client_tty}` when the selected client has one. `set-buffer -t` joined the same matcher when `buffers.clipboard-write` closed. Unsupported `command-prompt -t`, `show-messages -t`, `send-keys -c`, and `suspend-client -t` are outside this closure. | none on the common tmux-compatible selector shapes; native aliases remain zz extensions, and the unsupported or inert command flags keep their existing owners |
+| Supported client-selector targets | Every implemented tmux command flag that selects an attached client uses one matcher: `detach-client -t`, `switch-client -c`, `display-message -c`, `display-panes -t`, `display-popup -c`, `display-menu -c`, `confirm-before -t`, `refresh-client -t`, `lock-client -t`, and `load-buffer -t`. It accepts an exact registered name, the exact published `#{client_name}`, a full tty, or a tty after removing exactly one leading `/dev/` prefix, with exactly one optional trailing colon. The published-name path covers the tty, registered-name, `client-PID`, and `device-N` fallback ladder, so nameless Control clients can be targeted by the value returned from `list-clients`. It does not accept a final pathname basename, so `/dev/pts/3` admits `pts/3` but not `3` unless that is the exact client name. Collisions choose the globally oldest attached client by creation id, independent of session switches. The shared `device-N` alias remains a zz extension; popup, menu, confirm, refresh, and lock also retain numeric `N` and `client-N` aliases. A local terminal surface or Command client publishes `client-tty-v1:` whenever the tty is discoverable, independently from the additive `client-nested-v1` marker that a nonempty `$TMUX` enables. A local Control client publishes the same identity from terminal stdin only; piped stdin and remote endpoints omit the caller-host tty. Protocol v83 client facts expose the retained tty through `#{client_tty}` when the selected client has one. `set-buffer -t` joined the same matcher when `buffers.clipboard-write` closed. `command-prompt -t` joined the same matcher when the prompt gained `CMD_CLIENT_TFLAG` routing. Unsupported `show-messages -t`, `send-keys -c`, and `suspend-client -t` are outside this closure. | none on the common tmux-compatible selector shapes; native aliases remain zz extensions, and the unsupported or inert command flags keep their existing owners |
 | Local Control terminal identity | Closed 2026-08-25 without a wire bump. A local Control hello carries its bounded cwd, `client-tty-v1:` only when stdin has a discoverable tty, and `client-nested-v1` only for a nonempty `$TMUX`. It never samples size, sends `client-size-v1:` or `ClientTerminalSize`, or infers geometry; `refresh-client -C` remains the explicit Control geometry path. Protocol v82's environment snapshot carries `TERM` when present, and protocol v83 client facts expose a terminal-backed Control tty while piped Control keeps it empty. The established `attach-session`, `new-session -A`, and `new-session -Ad` refusal paths require the marker plus an exact pane-tty match when they would attach an existing session. Fresh `new-session` and `-A` misses still create and attach, while duplicate and validation errors keep their existing precedence. Piped stdin is not nested-refused merely because `$TMUX` is set. Registration cleanup removes the retained facts. | none for local Control tty identity, nested intent, refusal gating, fresh-session behavior, or defined client-format empties |
 | Read-only clients (`attach-session -r`, `switch-client -r`) | The daemon accounts a raw terminal `Key` and resolves it through the client's ordinary key tables, allowing the pin's `CMD_READONLY` command roster (`attach-session`, `copy-mode`, `detach-client`, `list-clients`, `send-keys`, `switch-client`) while still dropping PTY forwarding; other commands answer the pin's `client is read-only`. `send-keys` keeps the pin's second authorization layer: absence of `-X` is decided before full option and repeat parsing, so even unsupported `-M` reports read-only first. With `-X`, typed read-only-safe movement, history, line, word, paragraph, prompt, bracket, goto-line, set-mark, jump-to-mark, and cancel actions work. Selection, copying, search, rectangle, jump capture, and the pin-recognized but zz-unimplemented unsafe copy-line, selection-mode, scroll-exit, and search names reject; genuinely unknown and empty actions retain the pin's later no-op or no-mode path. A direct request authorizes its one invocation. A stored binding list uses the commands constructed for storage and preflights that frozen list as one all-or-nothing chain before any effect, without another user-alias lookup, matching the pin. A read-only local view effect cannot fan into another session's clients. Raw keys bypass retained choosers, command prompts, and `display-panes`, as tmux's writable-only prequeue does. Direct local scrolling and copy-mode entry/navigation work, update activity plus latest geometry once, and preserve bells. Paste, clear-history, raw mouse, mixed wheel, and application pane Focus remain blocked; rejected non-focus native actions, including mouse, still account once, retain the modal, and preserve the bell. Standalone terminal `Text` accounts once without writing the PTY or clearing the bell, while matching text after a key adds no second update. Browser key/text, divider resize, popup/menu/confirm actions, uploads, and agent prompts remain dropped. `client_flags` reports `read-only` without the pin's coupled `ignore-size`: explicit requested `ignore-size` now affects explicit and automatic client sizing, but `-r` deliberately does not add it. The pin's same-uid check on re-marking a read-only client is skipped by the single-user daemon. | **silent** for native dropped-input feedback; unsafe commands and bindings are loud; uncoupled `-r` ignore-size and same-uid policy are deliberate |
 | Requested client flags (`attach-session -f`, `new-session -f`) | Closed 2026-08-27 without a wire bump. The daemon retains tmux's comma mutation grammar and reports common `read-only`, `ignore-size`, `active-pane`, and `no-detach-on-destroy` state; Control clients also consume `no-output`, `wait-exit`, and `pause-after`, including the pin's numeric-prefix and wrapping behavior. Unknown names are ignored, `!` clears except that read-only cannot clear itself, and the final repeated `-f` wins. Mutations follow target resolution, survive switch and detach, clear on unregister or replacement, and replay through the TUI only after a command actually succeeds and attaches. The full attached fixture covers missing targets, fresh and detached creation, switching, reattach, teardown, and the accepted `-r` difference; Rust tests cover terminal-open ordering and `new-session -A`. The later `clients.attach-sizing` slice consumes `ignore-size` for explicit and automatic client-derived sizing. Session destruction now computes the configured primary once, then applies the `on` or `no-detached` newest-session fallback only to clients retaining `no-detach-on-destroy`; focused tests cover the full policy matrix, and two real attached clients prove mixed fallback and exit behavior against the pin. `active-pane` remains retained while zz selects one shared pane per window. | retention, `ignore-size`, and `no-detach-on-destroy` consumption closed; **silent** consumer gap remains under `clients.active-pane` |

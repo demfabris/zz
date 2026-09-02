@@ -32641,10 +32641,10 @@ mod tests {
             expand_option(
                 &engine,
                 FormatContext::default(),
-                "remain-on-exit-format",
+                "lock-command",
                 &mut hooks
             ),
-            "hook:remain-on-exit-format"
+            "hook:lock-command"
         );
         assert_eq!(
             expand_option(

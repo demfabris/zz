@@ -16444,7 +16444,11 @@ impl Shared {
                 let commands = commands.to_vec();
                 let blocked = commands
                     .iter()
-                    .any(|command| !command_is_read_only_safe(command))
+                    .any(|command| {
+                        read_only_guard_client(&inner, client, command)
+                            .is_some_and(|guarded| inner.client_flags.contains(guarded))
+                            && !command_is_read_only_safe(command)
+                    })
                     .then(|| {
                         let duration_ms = client_attached_session(&inner, client)
                             .map_or(750, |session| {
@@ -76988,6 +76992,58 @@ bind - split-window -v -c "#{pane_current_path}"
                     }) if text == "client is read-only"
                 ))
         );
+
+        for (target_client, literal) in [
+            ("read-only-peer", "K"),
+            ("/dev/pts/nonexistent-client", "N"),
+        ] {
+            shared
+                .execute_key_commands(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    pane,
+                    &[CommandInvocation::new(
+                        "send-keys",
+                        ["-c", target_client, "-t", &browser_target, "-l", literal],
+                    )],
+                    false,
+                )
+                .expect("run client-selected binding");
+            assert_eq!(
+                take_browser_literals(&mailbox, browser),
+                vec![literal.to_owned()],
+                "binding selecting {target_client} must follow that client's flag"
+            );
+        }
+        shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[CommandInvocation::new(
+                    "send-keys",
+                    ["-c", "read-only-sender", "-t", &browser_target, "-l", "U"],
+                )],
+                false,
+            )
+            .expect("preflight self-selected binding");
+        let self_messages = take_reliable_messages(&mailbox);
+        assert!(!self_messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::BrowserCommand { pane, .. },
+                ..
+            }) if *pane == browser
+        )));
+        assert!(self_messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::TimedClientMessage { text, .. },
+                ..
+            }) if text == "client is read-only"
+        )));
     }
 
     #[test]

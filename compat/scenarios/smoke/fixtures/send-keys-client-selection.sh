@@ -20,11 +20,13 @@ main_client() {
 
 session=skselect
 work="$HOME/send-keys-client-selection-$side"
+steps="$work/steps"
 rm -rf "$work"
-mkdir -p "$work"
+mkdir -p "$steps"
 : >"$work/failures"
 failed=0
 check_count=0
+step=0
 writer_pid=""
 reader_pid=""
 
@@ -44,6 +46,11 @@ cleanup() {
     cleanup_status=$?
     trap - EXIT
     set +e
+    step=$((step + 1))
+    echo quit >"$steps/step-$step" 2>/dev/null
+    for key in x y z; do
+        main_client unbind-key -n "$key" >/dev/null 2>&1
+    done
     main_client kill-session -t "=$session" >/dev/null 2>&1
     for pid in $writer_pid $reader_pid; do
         kill "$pid" >/dev/null 2>&1
@@ -60,6 +67,30 @@ attach_client() {
         TERM=xterm-256color \
         python3 "$HOME/send-keys-attach.py" record "$work/$label.raw" 80 24 \
         "$binary" $prefix_args "$@" >"$work/$label.out" 2>&1 &
+}
+
+attach_driven_client() {
+    label="$1"
+    shift
+    env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+        TERM=xterm-256color \
+        python3 "$HOME/pty-drive.py" "$steps" 80 24 \
+        "$binary" $prefix_args "$@" >"$work/$label.out" 2>&1 &
+}
+
+drive() {
+    step=$((step + 1))
+    printf '%s\n' "$1" >"$steps/step-$step"
+    attempt=0
+    while [ "$attempt" -lt 400 ]; do
+        if [ -f "$steps/ack-$step" ]; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.05
+    done
+    record_failure "drive-$step"
+    return 0
 }
 
 await_clients() {
@@ -120,7 +151,7 @@ pane="$(main_client list-panes -t "=$session" -F '#{pane_id}' | head -n 1)"
 attach_client writer attach-session -t "=$session"
 writer_pid=$!
 await_clients 1 || { echo "send-keys-client-selection-$side: writer-attach"; exit 0; }
-attach_client reader attach-session -r -t "=$session"
+attach_driven_client reader attach-session -r -t "=$session"
 reader_pid=$!
 await_clients 2 || { echo "send-keys-client-selection-$side: reader-attach"; exit 0; }
 
@@ -169,11 +200,25 @@ expect_case readonly-again 1 'client is read-only'
 
 main_client send-keys -t "$pane" -X cancel
 
-if [ "$check_count" -ne 21 ]; then
+# The bound-key path tests the same client. key_bindings_dispatch admits a
+# send-keys binding on a read-only client because cmd_send_keys_entry carries
+# CMD_READONLY, and cmd_send_keys_exec then tests the -c client, so the
+# reader's own bindings deliver through a read-write or missing target client
+# and only the binding with no -c is refused.
+main_client bind-key -n x send-keys -t "$pane" -l U
+main_client bind-key -n z send-keys -c "$writer" -t "$pane" -l K
+main_client bind-key -n y send-keys -c /dev/pts/nonexistent-client -t "$pane" -l N
+drive 'keys 78'
+drive 'keys 7a'
+drive 'keys 79'
+await_pane ACDKN bound-delivered || true
+check_equal bound-pane ACDKN "$(main_client capture-pane -p -t "$pane" | tr -d ' \n')"
+
+if [ "$check_count" -ne 22 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g SEND_KEYS_CLIENT_SELECTION clean:21
+    main_client set-environment -g SEND_KEYS_CLIENT_SELECTION clean:22
 else
     sed "s/^/send-keys-client-selection-$side: /" "$work/failures"
 fi

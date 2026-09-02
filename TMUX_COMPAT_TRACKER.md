@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 6 INTEGRATED (SEND-KEYS -c/-H BYTES + COPY-MODE MODE ERRORS, UNFORGEABLE ALIAS GROUP + COMMAND-PROMPT CHAINS + EDITOR-DERIVED STATUS-KEYS, CHOOSER -F/-h/-k/-y + PANE-COLOURS + LIVE MENU/POPUP RESTYLE, PROTOCOL V93); CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **CYCLE 7 INTEGRATED (COMMAND-PROMPT -t/-F ROUTING + DISPLAY-PANES TEMPLATES/QUEUE WAITS + DISPLAY-MESSAGE CLIENT ALIASES, COPY-MODE FORMATS FROM DAEMON SESSIONS + -k KILL + REFRESH RE-SYNC + COPY-LINE FAMILY, DEFAULT-CLIENT-COMMAND + FOCUS-FOLLOWS-MOUSE + MENU POINTER/PASTE RULES, PROTOCOL V94); CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **35 UNRESOLVED GROUPS (26 OPEN + 9 BLOCKED = 35)**
+> Live work: **29 UNRESOLVED GROUPS (22 OPEN + 7 BLOCKED = 29)**
 >
-> Ledger settlement: **83.9% (182 of 217 known groups: 100 x (143 CLOSED + 39 ACCEPTED) / (143 CLOSED + 74 LIVE)); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **86.6% (188 of 217 known groups: 100 x (149 CLOSED + 39 ACCEPTED) / (149 CLOSED + 68 LIVE)); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **167 SCENARIOS, 2,402 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
+> Exit evidence: **178 SCENARIOS, 2,435 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 6 INTEGRATED 2026-09-02 ON THE MACBOOK; THE NEXT CYCLE STARTS FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **CYCLE 7 INTEGRATED 2026-09-02 ON THE MACBOOK; THE NEXT CYCLE STARTS FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,23 +76,23 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | `origin/main` at `0d727e36` (cycle-6 client merge) plus this ledger recompute |
+| Published branch | `origin/main` at `03f61a41` (cycle-7 client merge) plus this ledger recompute |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Cycle 6 of the orchestrated Opus/Fable loop: `send-keys -c` target-client selection with the read-only guard following it, `-H` raw bytes above 0x7f, and the pin's `not in a mode` errors (`b1c80f66`); an unforgeable alias group, command-prompt chains, labels and pass order, `command-prompt -l`, and editor-derived `status-keys` (`0201a5e9`); chooser `-F`/`-h`/`-k`/`-y`, `pane-colours`, menu action context and queue ordering, and live menu and popup restyle with protocol v93 (`0d727e36`) |
-| Orchestration | Cycle 6 launched 2026-09-01 on the Ubuntu box, paused for a machine move, and finished 2026-09-02 on the macbook through `opus-compat-run-6-continue.js`: three Opus lanes, one Fable reviewer per lane, one Fable gate. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; the cycle-6 lock fronts are INTEGRATED and released on the board |
+| Delivery | Cycle 7 of the orchestrated Opus/Fable loop: `command-prompt -t`/`-F` client routing that parks the issuing queue, `display-panes` selection templates with the queue wait, and `display-message` `@`/`{active}`/`{current}` client aliases (`327d036f`); the copy-mode format family produced from the daemon's copy sessions, `copy-mode -k`, a daemon-owned refresh re-sync for the `r` keys and the `copy-line` family, with protocol v94 (`dee45667`); `default-client-command` through the launcher, `focus-follows-mouse`, and the menu pointer and paste rules (`03f61a41`) |
+| Orchestration | Cycle 7 launched and finished 2026-09-02 on the macbook through `opus-compat-run-7.js`: three Opus lanes, one Fable reviewer per lane, one serialized Fable gate. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; the cycle-7 lock fronts are INTEGRATED and released on the board |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
-| Agreed-scope meter | 71.7% (218 of 304 items frozen on 2026-08-31), 31 of 65 groups done; `python3 compat/progress.py` |
-| Completed fixed cohort | Cycle 6: 3 of 3 lanes integrated, agreed-scope meter 65.8% to 71.7%, unresolved groups 36 to 35 |
-| Previous completed cohort | Cycle 5: 3 of 3 lanes integrated, agreed-scope meter 54.9% to 65.8% |
-| Campaign point | `send-keys -c` selects the pin's target client and the read-only guard follows it on the CLI and in bound-key chains; `-H` lands raw bytes; `send-keys -X` answers the pin's `not in a mode`; the alias group cannot be forged by a parser; command-prompt walks chains, labels and pass order like the pin and derives `status-keys` from the editor; choosers carry `-F`/`-h`/`-k`/`-y`, `pane-colours` reaches the cells, and a live menu or popup repaints when its style option moves; the biggest remaining baskets are the parked terminal engine knobs and pane border chrome, pane focus hooks, `send-keys -K`, prompt `-t` routing, and the chooser key vocabulary |
-| Live registry | 74 active groups, 508 active items, 143 closed records |
-| Active status | 26 open, 9 blocked, 39 accepted |
+| Agreed-scope meter | 77.6% (236 of 304 items frozen on 2026-08-31), 36 of 65 groups done; `python3 compat/progress.py` |
+| Completed fixed cohort | Cycle 7: 3 of 3 lanes integrated, agreed-scope meter 71.7% to 77.6%, unresolved groups 35 to 29 |
+| Previous completed cohort | Cycle 6: 3 of 3 lanes integrated, agreed-scope meter 65.8% to 71.7% |
+| Campaign point | `command-prompt -t` raises the prompt on the resolved client and parks the issuing Command or Control queue like `CMD_RETURN_WAIT`, `display-panes` runs its selection template and parks on the overlay, and `display-message @`/`{active}`/`{current}` answer the invoking client's own pane; copy-mode formats come from the daemon's own copy sessions so the `-N` counts are observable, `copy-mode -k` kills the pane when its mode ends, and the `r` refresh keys re-sync the frozen view; `default-client-command` runs through the launcher, `focus-follows-mouse` rides the option map, and the menu obeys the pin's pointer and paste rules; the biggest remaining baskets are the parked terminal engine knobs and pane border chrome (lines, indicators, tiled z-order), pane focus hooks, `send-keys -K`, the chooser key vocabulary, and the nested popup overlays |
+| Live registry | 68 active groups, 488 active items, 149 closed records |
+| Active status | 22 open, 7 blocked, 39 accepted |
 | Known differentials | 3 registered cases: two geometry, one geometry plus output |
 
-Cycles 2 through 6 reached `origin/main` through the board's MAIN lock; cycle 6 ends at the
-ledger recompute that follows `0d727e36`. Resolve the commit containing the latest tracker update with
+Cycles 2 through 7 reached `origin/main` through the board's MAIN lock; cycle 7 ends at the
+ledger recompute that follows `03f61a41`. Resolve the commit containing the latest tracker update with
 `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -106,15 +106,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 6: 3 of 3 lanes integrated |
-| Previous completed cohort | Cycle 5: 3 of 3 lanes integrated |
+| Completed fixed cohort | Cycle 7: 3 of 3 lanes integrated |
+| Previous completed cohort | Cycle 6: 3 of 3 lanes integrated |
 | New residual groups | Since the 2026-08-31 freeze: 2 items across 2 groups, tracked outside the agreed-scope meter |
-| Unresolved movement | Cycle 6: 36 at launch, 35 at close |
-| Live unresolved | 26 open + 9 blocked = 35 |
+| Unresolved movement | Cycle 7: 35 at launch, 29 at close |
+| Live unresolved | 22 open + 7 blocked = 29 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 167 scenarios, 2,402 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
-| Differential SHA-256 | `878c2299436a3f6dbffd1cb1947cd5d72750d5fea51662087e60dea8dd58d7b6` |
-| Ledger settlement | 182 of 217 known groups = 83.9% |
+| Latest differential | 178 scenarios, 2,435 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
+| Differential SHA-256 | `b235bd8ee5eaf8d0070fed7f5147e1dc543dc3074b990de9846f35e55a68cfda` |
+| Ledger settlement | 188 of 217 known groups = 86.6% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -128,7 +128,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(143 + 39) / (143 + 74) = 182 / 217 = 83.9%
+(149 + 39) / (149 + 68) = 188 / 217 = 86.6%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -174,6 +174,17 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-02 cycle-7 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `327d036f` (command-prompt `-t`/`-F` client routing that parks the issuing queue, display-panes selection templates with the queue wait and the busy-client and hook-body exceptions, display-message `@`/`{active}`/`{current}` client aliases; no wire change), `dee45667` (copy-mode format family from the daemon's copy sessions so the `-N` counts are observable, `copy-mode -k`, a daemon-owned refresh re-sync for the `r` keys, the `copy-line` family, protocol v94 `CopyModeAction` refresh tail plus `CopyLine`), `03f61a41` (`default-client-command` through the launcher, `focus-follows-mouse` on the option map, menu pointer and paste rules, popup Kitty images reopened, protocol v94 `MuxOptionKey::FocusFollowsMouse` and `MenuState.mouse_keys`) |
+| Review stage | One Fable reviewer per lane; every close verified against the pin; nine confirmed defects acted on by the gate with the reviewer's probe re-run: a hook body that raised command-prompt or display-panes parked the connection reader and left a phantom attached client (both waits now skip a clientless context; pin reaps in 100ms and zz now matches); a second display-panes on a busy client replaced the overlay instead of returning at once (fixed, two-invoker fixture check); the template output/status residue recorded under the queue foundation; a failed `copy-mode -k` left the kill armed for a later entry (the TerminalView arm now takes it up front, restores it only on the entry path, with a regression test and the reviewer's stale-kill probe re-run); the v94 changelog gained the `CopyLine` variant and the action-fidelity reason its 88/7 counts; `semantic:display-popup-kitty-images` was closed on a headless renderer test and was reopened with the attached-client proof recorded as owed; the `focus-follows-mouse` close now records that zz fires `after-select-pane` where the pin fires only `window-pane-changed` (probe re-run on both binaries); the read-only premise corrected to `server_acl_join`; the raw-TUI sidebar overlay-offset and the menu paste-tail re-bracket written down |
+| Workspace gates | Full workspace tests and clippy with warnings denied, green on all three lanes; every red row was a known timing flake that passed exact-solo (`history_request_is_guarded_clamped`, `attached_client_extents_clamp`, and `client_focus_closes_display_panes`, whose residual solo failure is the documented async snapshot race at `daemon.rs:38979`, unrelated to any lane) |
+| Differential | Daemon delta: 103 scenarios; copy delta: 117 scenarios; client delta: 133 scenarios (each eight shards plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` (`behavior-options` took one TOPO divergence under shard load and was verified clean solo) |
+| Records gate | Tracker check, board fold tests, and the stored summary check pass: 178 scenarios, 2,435 steps, attached-client `PASS` |
+| Summary SHA-256 | `b235bd8ee5eaf8d0070fed7f5147e1dc543dc3074b990de9846f35e55a68cfda` |
 
 ### 2026-09-02 cycle-6 integration checkpoint
 

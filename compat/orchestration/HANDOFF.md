@@ -1,5 +1,9 @@
 # Paused handoff for the tmux-compat campaign (after cycle 9)
 
+> 2026-09-02 ~18:30Z: RESUMED on the ubuntu box. Cycle 10 is running from
+> `opus-compat-run-10.js` under holder `ubuntu/orchestrator`; the census below is the one it was
+> written from. `CAMPAIGN-LOG.md` has the launch note; this file is rewritten at the next pause.
+
 Written 2026-09-02 ~16:00Z on the macbook. Cycle 9 is DONE, all three lanes merged, and fabrico
 asked for a pause: nothing is minted, claimed, or launched. The board is idle (MAIN and TRIAGE
 free, no leases held by `macbook/orchestrator`), the lease renewer and `caffeinate` are stopped,

@@ -229,3 +229,21 @@ placements). Lore: `event_hooks_fire_after_mutation_with_captured_formats` is a 
 `compat/run.sh` hard-codes `RESULTS_DIR`, so shards only stay apart by disjoint scenario names.
 Fabrico asked for a pause after this cycle: nothing minted, claimed, or launched; the census and the
 shape of a possible cycle 10 are in `HANDOFF.md`.
+
+## 2026-09-02: cycle 10 launched on the ubuntu box, the goal switched on
+
+Fabrico resumed on the ubuntu box (8 cores, 30 GB, bash 5.3, btrfs, SSH origin) with one
+instruction: go all the way. Cycle 10 was written from the pause census as `opus-compat-run-10.js`:
+a queue lane (the per-connection worker for Control clients that three cycles bounced, then the
+EOF drain and hard-loss cancel, `split-window -W`, the display-panes template routing residue and
+the environment bytes behind it), a copy lane (the copy-mode search family into the engine and the
+mode-keys tail, `send-keys -F` with the vi cursor-word bindings, the `-P` stance, the `set-hook -B`
+monitors, the `-v` trace), and a client lane (the popup Kitty per-view viewport, the chooser key
+vocabulary with `-y`, the popup pointer trio, the GUI pane width). Product decision taken this
+cycle by the orchestrator under that instruction, recorded in the registry as reversible:
+`command-prompt -P` moves from loudly unsupported to an accepted flag whose prompt stays on the
+client surface, so the fourteen stock copy-mode bindings can carry the pin's exact strings. The
+script now carries the box traps through `args` defaults (`boxNote`, `gitNote`) instead of
+hard-coded macbook text, and the gate uses one shared `zz-gate-target` build directory. `gh` had no
+usable token on this box at launch, so board claims and ledger entries are replayed from
+`board-replay-10.sh` once it does; the workers never touch the board.

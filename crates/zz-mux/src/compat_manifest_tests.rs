@@ -1122,7 +1122,7 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
     assert_eq!(TMUX_OPTION_CONSUMERS.len(), 114);
     assert_eq!(
         consumers.len(),
-        113,
+        114,
         "option consumer roster contains duplicates"
     );
     assert!(

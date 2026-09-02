@@ -131,6 +131,7 @@
 | smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
 | smoke/control-tilde-environment | 2 | yes | 0 | yes | yes | yes |
 | smoke/daemon-invalid-flags | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-action-queue | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-menu-cell-layout | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-menu-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-menu-shortcut-grammar | 3 | yes | 0 | yes | yes | yes |

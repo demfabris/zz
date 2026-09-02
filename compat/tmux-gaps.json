@@ -613,34 +613,6 @@
       "reason": "zz deliberately replaces these tmux format-driven mode and overlay producers with typed client state and native rendering. The explicit accepted partition prevents their 54 source tuples from being mistaken for either implemented tmux contexts or unclassified omissions. Ten tuples left on 2026-09-02, all `window-copy.c:window_copy_formats`: copy_cursor_line, copy_cursor_word, copy_cursor_x, copy_cursor_y, scroll_position, selection_end_x, selection_end_y, selection_present, selection_start_x and selection_start_y are now produced by the daemon from the per-client copy session rather than replaced by native UI state, which is exactly the second clause's exit, so they moved to the mux-owned partition and the invariant fell from 54 to 44. The rest of that producer's vocabulary stays here: copy_cursor_hyperlink, copy_position, copy_position_limit, rectangle_toggle, search_count, search_count_partial, search_match, search_present, search_timed_out, selection_active, selection_mode and top_line_time are still unproduced, and search_present and search_match in particular need the pin's searchmark array, which zz's search state does not model."
     },
     {
-      "id": "formats.pane-process",
-      "title": "Expose remaining pane process formats",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "daemon",
-      "items": [
-        "format:pane_pb_progress"
-      ],
-      "evidence": [
-        "resource:crates/zz-mux/src/formats.rs",
-        "resource:crates/zz-daemon/src/status.rs",
-        "scenario:compat/scenarios/smoke/format-pane-process.txt",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "pane_pipe answers 0 or 1 off the attached pipe and pane_pipe_pid declines unless a pipe is attached, otherwise naming the job process that runs the pipe command, with a differential covering attach and a bare pipe-pane detach.",
-        "pane_unseen_changes answers 1 only for output that arrives while the pane holds a mode, 0 without a mode, and 0 again after the mode is cancelled and after it is re-entered.",
-        "pane_pb_progress answers the pane's OSC 9;4 progress-bar value, which is 0 on a fresh pane and follows the sequence's progress argument."
-      ],
-      "depends_on": [],
-      "reason": "Three of the four are done and the fourth is re-scoped onto what the name actually means. pane_pipe, pane_pipe_pid and pane_unseen_changes moved from constant backings to the delegated partition and are answered by the daemon, proved differentially by compat/scenarios/smoke/format-pane-process.txt on both binaries: a fresh pane answers `pipe=0 pid=[] unseen=0`, pipe-pane raises pane_pipe to 1 and pane_pipe_pid to a live pid whose argument vector still names the pipe destination, and a bare pipe-pane drops both back. pane_unseen_changes is NOT the batch's premise of \"output an attached client has not seen\", and that premise is what needed correcting: input.c:1039 raises PANE_UNSEENCHANGES only inside `if (!TAILQ_EMPTY(&wp->modes))`, window.c:1448 drops it when the last mode entry goes, and window-copy.c:3013 drops it again from the copy-mode refresh timer. Measured on the pin: output to a detached window with no mode leaves it 0, output while the pane is in copy mode raises it to 1, and cancelling the mode drops it. zz carries the bit on the per-client copy session record instead of on the pane, which clears on the same two edges for free because entering a mode writes a fresh record; the daemon raises it from the pane-output activity producer for every non-exiting copy session on the pane. The per-client model is visible in one place the pin's is not: with two clients in copy mode on one pane, zz raises the bit on both records and answers 1 until every session is gone, where the pin has one pane flag; the answer is the same in every single-client state. pane_pb_progress stays open with its blocker measured rather than guessed. It is not paste-buffer progress: format.c:2380 reads `ft->wp->base.progress_bar.progress`, which screen.c:342 `screen_set_progress_bar` writes and input.c:3005 `input_osc_9` parses out of the ConEmu OSC 9;4 sequence, so it is a persistent per-pane progress-bar value and not a transient one. A fresh pane answers 0 and pane_pb_state answers `hidden` on the pin, where zz answers 0 and empty, so the pair agrees only in the default state. Closing it means parsing OSC 9;4 in the VT and retaining the state and progress on the pane, which is zz-terminal work; pane_pb_state is the same family and is tracked beside it."
-    },
-    {
       "id": "formats.pane-runtime",
       "title": "Expose pane mode formats",
       "decision": "native",
@@ -711,7 +683,6 @@
         "format:cursor_colour",
         "format:pane_bg",
         "format:pane_fg",
-        "format:pane_pb_state",
         "format:pane_tabs"
       ],
       "evidence": [
@@ -721,10 +692,10 @@
         "resource:knowledge/tmux/status-line.md"
       ],
       "acceptance": [
-        "The terminal worker stays the only owner of live VT state, and the six cell formats stay unavailable rather than being sampled from the format engine."
+        "The terminal worker stays the only owner of live VT state, and the five cell formats stay unavailable rather than being sampled from the format engine."
       ],
       "depends_on": [],
-      "reason": "`cursor_character`, `cursor_colour`, `pane_bg`, `pane_fg`, `pane_tabs`, and `pane_pb_state` read live cells and terminal state out of tmux's own screen, because in tmux the multiplexer is the terminal. In zz the terminal worker owns the VT and publishes frames to the clients that draw them, while the mux format engine models sessions, windows, and panes; it holds no grid and cannot sample one without reaching across the PTY drain. The six names stay in the always-unavailable set the status-line reference records. Reopen when a named scripted workload justifies a bounded terminal-fact channel that publishes cursor cell, tab stops, and progress state without blocking drain."
+      "reason": "`cursor_character`, `cursor_colour`, `pane_bg`, `pane_fg` and `pane_tabs` read live cells and terminal state out of tmux's own screen, because in tmux the multiplexer is the terminal. In zz the terminal worker owns the VT and publishes frames to the clients that draw them, while the mux format engine models sessions, windows, and panes; it holds no grid and cannot sample one without reaching across the PTY drain. The five names stay in the always-unavailable set the status-line reference records. Reopen when a named scripted workload justifies a bounded terminal-fact channel that publishes cursor cell and tab stops without blocking drain. 2026-09-02, re-scoped: the group carried six names and its acceptance said \"the six cell formats stay unavailable rather than being sampled from the format engine\". `pane_pb_state` was the sixth and it does not belong to that class. It reads `wp->base.progress_bar.state`, a two-field struct screen.c keeps beside the grid rather than in it, written only by `screen_set_progress_bar` out of `input_osc_9`; nothing about it needs a cell. Probed on pinned tmux on a 80x24 pane by writing `ESC ] 9;4;<state>[;<progress>] BEL` onto the pane's own pty and reading `#{pane_pb_state}/#{pane_pb_progress}`: a fresh pane answered `hidden/0`, then `9;4;0` `hidden/0`, `9;4;1;50` `normal/50`, `9;4;2;30` `error/30`, `9;4;3` `indeterminate/30` and `9;4;4;10` `paused/10`. zz answers all six now, because the pane worker's byte filter reads the sequence as it passes it through and keeps the pair on the worker, where the daemon reads it without touching the grid. It closed with `pane_pb_progress` under formats.pane-process, which owns the measurement and the scenario; the other five names keep this group's stance unchanged."
     },
     {
       "id": "formats.terminal-runtime",
@@ -3095,6 +3066,20 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "`new-session -s` now expands exactly once through the existing command-item format hooks before `-A` lookup, duplicate lookup, and creation. Attached Interactive and Control clients contribute their actual attached session, focused window, and active pane, including after a detached creation retargets the mutable command context; fresh Interactive and Command clients contribute no session defaults even when their execution context carries a most-recent target. Canonical, alias, and unique-prefix spellings expose `new-session` through `#{command}`, while an explicit outer item value retains precedence. Omitted `-s` keeps numeric allocation. Existing-session `-A` still ignores `-d` and creation-only flags; creation size, environment, cwd, and print handling still run only after the expanded name misses. The adjacent validation and vis-cleaning parity for both `new-session` names, `new-window -n`, both rename commands, and literal `break-pane -n` closed under `formats.name-validation-cleaning`, including the detached formatted `-A` nesting-guard correction. The strict `command-item-format` differential covers this path without duplicating its moving step count here. The later `mux.error-shapes` closure matched nested non-detached duplicate, invalid-name, and `-t` plus `-n` conflict precedence."
+    },
+    {
+      "id": "formats.pane-process",
+      "title": "Expose remaining pane process formats",
+      "closed_on": "2026-09-02",
+      "evidence": [
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:crates/zz-daemon/src/status.rs",
+        "scenario:compat/scenarios/smoke/format-pane-process.txt",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:crates/zz-terminal/src/session.rs",
+        "scenario:compat/scenarios/smoke/format-pane-progress.txt"
+      ],
+      "resolution": "Three of the four are done and the fourth is re-scoped onto what the name actually means. pane_pipe, pane_pipe_pid and pane_unseen_changes moved from constant backings to the delegated partition and are answered by the daemon, proved differentially by compat/scenarios/smoke/format-pane-process.txt on both binaries: a fresh pane answers `pipe=0 pid=[] unseen=0`, pipe-pane raises pane_pipe to 1 and pane_pipe_pid to a live pid whose argument vector still names the pipe destination, and a bare pipe-pane drops both back. pane_unseen_changes is NOT the batch's premise of \"output an attached client has not seen\", and that premise is what needed correcting: input.c:1039 raises PANE_UNSEENCHANGES only inside `if (!TAILQ_EMPTY(&wp->modes))`, window.c:1448 drops it when the last mode entry goes, and window-copy.c:3013 drops it again from the copy-mode refresh timer. Measured on the pin: output to a detached window with no mode leaves it 0, output while the pane is in copy mode raises it to 1, and cancelling the mode drops it. zz carries the bit on the per-client copy session record instead of on the pane, which clears on the same two edges for free because entering a mode writes a fresh record; the daemon raises it from the pane-output activity producer for every non-exiting copy session on the pane. The per-client model is visible in one place the pin's is not: with two clients in copy mode on one pane, zz raises the bit on both records and answers 1 until every session is gone, where the pin has one pane flag; the answer is the same in every single-client state. pane_pb_progress stays open with its blocker measured rather than guessed. It is not paste-buffer progress: format.c:2380 reads `ft->wp->base.progress_bar.progress`, which screen.c:342 `screen_set_progress_bar` writes and input.c:3005 `input_osc_9` parses out of the ConEmu OSC 9;4 sequence, so it is a persistent per-pane progress-bar value and not a transient one. A fresh pane answers 0 and pane_pb_state answers `hidden` on the pin, where zz answers 0 and empty, so the pair agrees only in the default state. Closing it means parsing OSC 9;4 in the VT and retaining the state and progress on the pane, which is zz-terminal work; pane_pb_state is the same family and is tracked beside it. 2026-09-02, closed. libghostty parses OSC 9;4 far enough to name it `GHOSTTY_OSC_COMMAND_CONEMU_PROGRESS_REPORT`, but neither the C ABI's `ghostty_osc_command_data` nor its terminal getters expose the state or the percentage, so there is nothing to read back; the sequence is read in zz-terminal instead. The pane worker's byte filter already resumes a CSI or an `ESC k` rename across chunk boundaries, and it now tracks OSC the same way: an OSC run goes to the engine in one write, unchanged, while a bounded copy of the payload is kept for the equivalent of `input_exit_osc`, which reads the leading digits as the OSC number and routes 9 to the OSC 9;4 grammar. The pair lives on the worker as a packed atomic, and the daemon reads it off the pane's terminal session, so the format engine still never touches a grid. Both names move from the constant partition to the delegated one, which is what let `pane_pb_state` leave formats.terminal-cells with its own re-scoping recorded there. Measured on pinned tmux by writing the sequence onto a pane's own pty and reading `#{pane_pb_state}/#{pane_pb_progress}` on an 80x24 pane. The walk: fresh `hidden/0`, `9;4;0` `hidden/0`, `9;4;1;50` `normal/50`, `9;4;2;30` `error/30`, `9;4;3` `indeterminate/30`, `9;4;4;10` `paused/10`. The edges, which are the whole contract: `screen_set_progress_bar` stores the state unconditionally and the percentage only when the sequence carried one and the state is not indeterminate, so `9;4;3;70` from `paused/10` answers `indeterminate/10` and `9;4;2;` answers `error/10`; and `input_osc_9` changes nothing at all for `9;4;5` (state outside 0..4), `9;4;1;101` (percentage over 100), `9;4` and `9;4;` (the payload stops before the state), `9;4;1;5x` (a trailing non-digit fails the `*pb != '\\0'` check) and `9;5;1` (OSC 9 whose first byte is not `4`). compat/scenarios/smoke/format-pane-progress.txt asserts those sixteen answers on both binaries, and it emits each sequence followed by a marker line so that an ignored payload is assertable at all: without waiting for the marker to reach the screen, a check that nothing moved would pass before the bytes were parsed."
     },
     {
       "id": "formats.repeat-modifier",

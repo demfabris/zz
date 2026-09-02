@@ -22,7 +22,7 @@ use zz_protocol::{
     ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, SessionId, StatusLine,
     WindowId,
 };
-use zz_terminal::{CellWidth, CopyModeFacts, TerminalSession, TerminalViewport};
+use zz_terminal::{CellWidth, CopyModeFacts, ProgressBar, TerminalSession, TerminalViewport};
 
 use crate::{configure_shell_job_environment, paths::home_directory, shell_process};
 
@@ -1174,6 +1174,21 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 .pane_pipes
                 .get(&context.pane_id.parse().ok()?)
                 .map(u32::to_string),
+            // `format_cb_pane_pb_progress` and `format_cb_pane_pb_state` read
+            // `wp->base.progress_bar`, which zz keeps on the pane's terminal
+            // worker; a pane with no worker has seen no OSC 9;4 and answers
+            // the fresh values.
+            "pane_pb_progress" => Some(
+                pane_progress_bar(self.facts, &context.pane_id)?
+                    .progress
+                    .to_string(),
+            ),
+            "pane_pb_state" => Some(
+                pane_progress_bar(self.facts, &context.pane_id)?
+                    .state
+                    .as_str()
+                    .to_owned(),
+            ),
             "window_active_clients" => Some(
                 self.facts
                     .window_clients
@@ -1239,6 +1254,20 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         };
         search_viewport(&viewport, pattern, regex, ignore_case)
     }
+}
+
+/// `wp->base.progress_bar`, which lives on the pane's own screen: a pane with
+/// no terminal worker has seen no OSC 9;4 and answers the defaults a fresh
+/// screen carries.
+fn pane_progress_bar(facts: &FormatHookFacts, pane: &str) -> Option<ProgressBar> {
+    let pane = pane.parse().ok()?;
+    Some(
+        facts
+            .terminals
+            .get(&pane)
+            .map(|terminal| terminal.progress_bar())
+            .unwrap_or_default(),
+    )
 }
 
 fn buffer_full(data: &[u8]) -> String {
@@ -1537,7 +1566,7 @@ mod tests {
     #[test]
     fn daemon_delegated_format_consumers_match_mux_inventory() {
         let delegated = zz_mux::delegated_format_variable_names().collect::<Vec<_>>();
-        assert_eq!(delegated.len(), 42);
+        assert_eq!(delegated.len(), 44);
 
         let session = SessionId(1);
         let pane = PaneId(1);

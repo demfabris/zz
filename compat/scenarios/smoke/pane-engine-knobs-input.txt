@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/pane-engine-knobs-input.sh ~/pane-engine-knobs-input.sh
+stage: fixtures/pane-erase-probe.sh ~/pane-erase-probe.sh
+out: set-environment -gu PANE_ENGINE_KNOBS_INPUT
+run-shell 'sh ~/pane-engine-knobs-input.sh'
+out: show-environment -g PANE_ENGINE_KNOBS_INPUT

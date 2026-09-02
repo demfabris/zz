@@ -86,7 +86,11 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "remain-on-exit",
     "focus-events",
     "allow-passthrough",
+    "allow-rename",
     "allow-set-title",
+    "alternate-screen",
+    "scroll-on-clear",
+    "backspace",
     "cursor-style",
     "cursor-colour",
     "synchronize-panes",
@@ -1841,6 +1845,11 @@ pub struct PaneRuntimeFacts {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TerminalWorkerOptions {
     pub allow_passthrough: bool,
+    pub allow_rename: bool,
+    pub alternate_screen: bool,
+    pub scroll_on_clear: bool,
+    pub erase_byte: Option<u8>,
+    pub verase_byte: u8,
     pub wrap_search: bool,
     pub cursor_style: &'static str,
     pub cursor_colour: String,
@@ -2876,6 +2885,72 @@ impl MuxEngine {
         self.pane_knobs(pane).allow_set_title
     }
 
+    /// `input_key` turns an unmodified `BSpace` into one byte named by the
+    /// server-scope `backspace` option, and `spawn.c` forces the child's
+    /// `VERASE` to the same key.
+    #[must_use]
+    pub fn backspace_byte(&self) -> Option<u8> {
+        let value = self.server_options.backspace.as_str();
+        if let Some(code) = tmux_hex_ascii_code(value) {
+            return Some(code);
+        }
+        if let Some(index) = TMUX_CONTROL_KEY_NAMES
+            .iter()
+            .position(|name| *name == value)
+        {
+            return u8::try_from(index).ok();
+        }
+        if value == "Space" {
+            return Some(b' ');
+        }
+        let base = value.strip_prefix("C-");
+        let mut characters = base.unwrap_or(value).chars();
+        let (Some(character), None) = (characters.next(), characters.next()) else {
+            return None;
+        };
+        if base.is_none() {
+            return u8::try_from(u32::from(character)).ok();
+        }
+        match character {
+            '?' => Some(0x7f),
+            '@'..='_' => u8::try_from(u32::from(character))
+                .ok()
+                .map(|byte| byte - 0x40),
+            'a'..='z' => u8::try_from(u32::from(character))
+                .ok()
+                .map(|byte| byte - 0x60),
+            _ => None,
+        }
+    }
+
+    /// `spawn.c` writes the `backspace` key straight into the child's
+    /// `VERASE` unless the key code carries a flag or a modifier, which every
+    /// code at or above `0x7f` does; those fall back to `0x7f`.
+    #[must_use]
+    pub fn verase_byte(&self) -> u8 {
+        let value = self.server_options.backspace.as_str();
+        if let Some(index) = TMUX_CONTROL_KEY_NAMES
+            .iter()
+            .position(|name| *name == value)
+        {
+            return u8::try_from(index).unwrap_or(0x7f);
+        }
+        if value == "Space" {
+            return b' ';
+        }
+        if tmux_hex_ascii_code(value).is_some() {
+            return 0x7f;
+        }
+        let mut characters = value.chars();
+        match (characters.next(), characters.next()) {
+            (Some(character), None) => u8::try_from(u32::from(character))
+                .ok()
+                .filter(|byte| *byte < 0x7f)
+                .unwrap_or(0x7f),
+            _ => 0x7f,
+        }
+    }
+
     pub fn terminal_worker_options_for_pane(
         &self,
         pane: PaneId,
@@ -2888,6 +2963,11 @@ impl MuxEngine {
         let styles = self.window_style_values(pane);
         Ok(TerminalWorkerOptions {
             allow_passthrough: pane_options.allow_passthrough != AllowPassthrough::Off,
+            allow_rename: pane_options.allow_rename,
+            alternate_screen: pane_options.alternate_screen,
+            scroll_on_clear: pane_options.scroll_on_clear,
+            erase_byte: self.backspace_byte(),
+            verase_byte: self.verase_byte(),
             wrap_search: self.window_knobs(window).wrap_search,
             cursor_style: pane_options.cursor_style.as_str(),
             cursor_colour: pane_options.cursor_colour,
@@ -11318,6 +11398,12 @@ impl MuxEngine {
         }
         if unset {
             self.server_options.reset(option);
+            if option == ServerOption::Backspace {
+                return Ok(Execution::effect(MuxEffect::TerminalKnobsChanged {
+                    window: None,
+                    pane: None,
+                }));
+            }
             return Ok(Execution::default());
         }
         let normalized = match option {
@@ -11345,6 +11431,12 @@ impl MuxEngine {
         self.server_options
             .set_command(option, appended.as_deref().or(value))
             .map_err(ServerError::InvalidCommand)?;
+        if option == ServerOption::Backspace {
+            return Ok(Execution::effect(MuxEffect::TerminalKnobsChanged {
+                window: None,
+                pane: None,
+            }));
+        }
         Ok(Execution::default())
     }
 
@@ -30073,6 +30165,11 @@ mod tests {
             engine.terminal_worker_options_for_pane(pane).unwrap(),
             TerminalWorkerOptions {
                 allow_passthrough: true,
+                allow_rename: true,
+                alternate_screen: false,
+                scroll_on_clear: false,
+                erase_byte: Some(0x7f),
+                verase_byte: 0x7f,
                 wrap_search: false,
                 cursor_style: "blinking-underline",
                 cursor_colour: "sky blue".to_owned(),
@@ -30809,15 +30906,74 @@ mod tests {
             }]
         );
 
-        for name in ["alternate-screen", "scroll-on-clear"] {
-            let store_only = engine
+        for name in ["allow-rename", "alternate-screen", "scroll-on-clear"] {
+            let engine_knob = engine
                 .execute(
                     &mut context,
                     &command("set-window-option", &["-g", name, "off"]),
                 )
                 .unwrap();
-            assert!(store_only.effects.is_empty());
+            let expected = if name == "allow-rename" {
+                Vec::new()
+            } else {
+                vec![MuxEffect::TerminalKnobsChanged {
+                    window: None,
+                    pane: None,
+                }]
+            };
+            assert_eq!(engine_knob.effects, expected, "{name}");
         }
+
+        let backspace = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "backspace", "C-h"]),
+            )
+            .unwrap();
+        assert_eq!(
+            backspace.effects,
+            vec![MuxEffect::TerminalKnobsChanged {
+                window: None,
+                pane: None,
+            }]
+        );
+        assert_eq!(engine.backspace_byte(), Some(0x08));
+        assert_eq!(engine.verase_byte(), 0x7f);
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "backspace", "0x08"]),
+            )
+            .unwrap();
+        assert_eq!(engine.backspace_byte(), Some(0x08));
+        assert_eq!(engine.verase_byte(), 0x08);
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "backspace", "0x41"]),
+            )
+            .unwrap();
+        assert_eq!(engine.backspace_byte(), Some(0x41));
+        assert_eq!(engine.verase_byte(), 0x7f);
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "backspace", "Space"]),
+            )
+            .unwrap();
+        assert_eq!(engine.backspace_byte(), Some(b' '));
+        assert_eq!(engine.verase_byte(), b' ');
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "backspace", "C-w"]),
+            )
+            .unwrap();
+        assert_eq!(engine.backspace_byte(), Some(0x17));
+        engine
+            .execute(&mut context, &command("set-option", &["-su", "backspace"]))
+            .unwrap();
+        assert_eq!(engine.backspace_byte(), Some(0x7f));
     }
 
     #[test]
@@ -32257,7 +32413,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 109);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 113);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

@@ -56,7 +56,7 @@ use zz_protocol::{
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
     CaptureBoundary, CaptureOptions, ClipboardTarget, Color, CursorBlinkPolicy, CursorStyle,
-    LastCommandCapture, PasteBufferAction, RawOutputTapError, TerminalAppearance,
+    EngineKnobs, LastCommandCapture, PasteBufferAction, RawOutputTapError, TerminalAppearance,
     TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalEvents,
     TerminalMode, TerminalPalette, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId,
     TerminalViewport, WordSeparators, apply_appearance_overrides, parse_x11_color,
@@ -695,6 +695,7 @@ const CURSOR_STYLE_OVERRIDES: [(&str, Option<(CursorStyle, CursorBlinkPolicy)>);
 struct ResolvedTerminalWorkerOptions {
     appearance: Arc<TerminalAppearance>,
     allow_passthrough: bool,
+    knobs: EngineKnobs,
     wrap_search: bool,
 }
 
@@ -715,6 +716,13 @@ fn terminal_worker_options(
             &options.pane_colours,
         ),
         allow_passthrough: options.allow_passthrough,
+        knobs: EngineKnobs {
+            scroll_on_clear: options.scroll_on_clear,
+            alternate_screen: options.alternate_screen,
+            allow_rename: options.allow_rename,
+            erase_byte: options.erase_byte,
+            verase_byte: options.verase_byte,
+        },
         wrap_search: options.wrap_search,
     })
 }
@@ -6992,6 +7000,7 @@ impl Shared {
                             env.push(("PWD".to_owned(), Some(path.to_string_lossy().into_owned())));
                         }
                         let spawn = TerminalSpawn {
+                            knobs: terminal_options.knobs,
                             working_directory: working_directory.clone(),
                             command,
                             shell,
@@ -7145,6 +7154,7 @@ impl Shared {
                             env.push(("PWD".to_owned(), Some(path.to_string_lossy().into_owned())));
                         }
                         let spawn = TerminalSpawn {
+                            knobs: terminal_options.knobs,
                             working_directory: working_directory.clone(),
                             command,
                             shell,
@@ -8057,6 +8067,12 @@ impl Shared {
                                 DeferredTerminalCommand::SetWrapSearch {
                                     terminal: Arc::clone(terminal),
                                     enabled: terminal_options.wrap_search,
+                                },
+                            );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetEngineKnobs {
+                                    terminal: Arc::clone(terminal),
+                                    knobs: terminal_options.knobs,
                                 },
                             );
                             deferred_terminal_commands.push(
@@ -13002,6 +13018,7 @@ impl Shared {
                 return Ok(Execution::default());
             };
             let spawn = TerminalSpawn {
+                knobs: EngineKnobs::default(),
                 working_directory: Some(working_directory),
                 command,
                 shell: Some(shell),
@@ -19196,6 +19213,7 @@ impl Shared {
                         | TerminalEvent::ViewClosed(_)
                         | TerminalEvent::ClipboardSet { .. }
                         | TerminalEvent::Bell
+                        | TerminalEvent::RenameWindow(_)
                         | TerminalEvent::PlaceholderBound { .. }
                         | TerminalEvent::PendingPasteExpired { .. }
                         | TerminalEvent::RawOutputTapClosed { .. } => {}
@@ -19314,6 +19332,7 @@ impl Shared {
                         | TerminalEvent::CopyReady { .. }
                         | TerminalEvent::OpenUri(_)
                         | TerminalEvent::Bell
+                        | TerminalEvent::RenameWindow(_)
                         | TerminalEvent::PlaceholderBound { .. }
                         | TerminalEvent::PendingPasteExpired { .. }
                         | TerminalEvent::RawOutputTapClosed { .. } => {}
@@ -19807,6 +19826,9 @@ impl Shared {
                             shared.deliver_clipboard_write(pane, target, text);
                         }
                         TerminalEvent::Bell => shared.raise_pane_bell(pane),
+                        TerminalEvent::RenameWindow(name) => {
+                            shared.rename_window_from_pane(pane, &terminal, &name);
+                        }
                         TerminalEvent::ViewClosed(_) => {}
                     }
                 }
@@ -19996,6 +20018,50 @@ impl Shared {
             self.publish_snapshot();
             self.run_event_hooks(vec![event]);
         }
+    }
+
+    /// `input_exit_rename` clears `automatic-rename` and sets the window name;
+    /// an empty name removes the local `automatic-rename` override instead.
+    fn rename_window_from_pane(
+        self: &Arc<Self>,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        name: &str,
+    ) {
+        if !self.is_current_terminal(pane, terminal) {
+            return;
+        }
+        let target = pane.to_string();
+        let mut context = ExecutionContext::default();
+        let commands = if name.is_empty() {
+            vec![CommandInvocation::new(
+                "set-option",
+                ["-w", "-u", "-t", target.as_str(), "automatic-rename"],
+            )]
+        } else {
+            vec![
+                CommandInvocation::new(
+                    "set-option",
+                    ["-w", "-t", target.as_str(), "automatic-rename", "off"],
+                ),
+                CommandInvocation::new("rename-window", ["-t", target.as_str(), name]),
+            ]
+        };
+        for command in &commands {
+            if let Err(error) = self.execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                command,
+            ) {
+                log::warn!(
+                    target: "zz_daemon::diagnostics::terminal",
+                    "allow-rename request failed pane={pane} name={name:?} error={error}"
+                );
+                return;
+            }
+        }
+        self.publish_snapshot();
     }
 
     fn synchronize_pane_runtime(
@@ -31061,6 +31127,10 @@ enum DeferredTerminalCommand {
         terminal: Arc<TerminalSession>,
         separators: WordSeparators,
     },
+    SetEngineKnobs {
+        terminal: Arc<TerminalSession>,
+        knobs: EngineKnobs,
+    },
     SetAllowPassthrough {
         terminal: Arc<TerminalSession>,
         enabled: bool,
@@ -31115,6 +31185,7 @@ impl DeferredTerminalCommand {
                 terminal.set_allow_passthrough(enabled);
             }
             Self::SetWrapSearch { terminal, enabled } => terminal.set_wrap_search(enabled),
+            Self::SetEngineKnobs { terminal, knobs } => terminal.set_engine_knobs(knobs),
             Self::SetAppearance {
                 terminal,
                 appearance,

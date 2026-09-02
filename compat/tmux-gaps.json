@@ -1,6 +1,6 @@
 {
   "schema": 3,
-  "updated_on": "2026-09-01",
+  "updated_on": "2026-09-02",
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
   "gaps": [
     {
@@ -1663,34 +1663,6 @@
       ],
       "depends_on": [],
       "reason": "`copy-mode -S`, `resize-pane -M`, `move-pane -M`, and `send-keys -M` all consume the mouse event that invoked the command, so the pin resolves the target from the event and drives a scrollbar slider drag, a border drag, or a mouse-keyed send. zz installs no tmux mouse key tables, so no command is ever invoked from a mouse event; the same gestures are handled directly by each rendering client, already accepted under `keys.root-native-mouse` and `keys.copy-mode-native-mouse`. The four flags stay loudly unsupported instead of quietly falling back to a keyboard path. Reopen only if zz installs tmux mouse key tables and a normalized event record travels with bound commands."
-    },
-    {
-      "id": "options.client-attach-and-focus",
-      "title": "Consume the client attach command and mouse focus options",
-      "decision": "park",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "daily",
-        "gui"
-      ],
-      "owner": "client",
-      "items": [
-        "option:default-client-command",
-        "option:focus-follows-mouse"
-      ],
-      "evidence": [
-        "resource:crates/zz/src/lib.rs",
-        "resource:crates/zz-mux/src/honest_knobs.rs",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "A client that attaches with no command runs the stored `default-client-command` list, keeping the pin's read-only refusal for a list that is not all read-only commands.",
-        "Moving the pointer onto an inactive pane makes it active while `focus-follows-mouse` is on, in the GPUI client and in the raw TUI, and leaves the active pane alone while it is off."
-      ],
-      "depends_on": [],
-      "reason": "Both are stored with the pin's parsing and defaults and are read by nothing. server_client_default_command in server-client.c fetches `default-client-command`, default `new-session`, as a command list whenever a client arrives with no command of its own, and substitutes the read-only refusal when the client is read-only and the list is not made entirely of CMD_READONLY commands; zz's CLI hard-codes that default instead, routing a bare `zz` straight at new-session, so setting the option changes nothing. server-client.c turns a KEYC_TYPE_MOUSEMOVE over a pane that is not the active one into window_set_active_pane when `focus-follows-mouse` is on, and tty.c forces MODE_MOUSE_ALL on that client so motion events arrive at all; zz has no consumer, and its clients already receive pointer motion without asking the terminal for all-motion tracking. The recipe: publish both session-scoped and server-scoped values the clients need on the existing option snapshot, have the launcher ask the daemon for `default-client-command` before it synthesizes new-session and run the parsed list through the same command path an explicit argument takes, and gate the GPUI pane hover handler and the TUI pointer route on the session's `focus-follows-mouse` value. Neither is blocked on an engine primitive; both are blocked on option values reaching the client, which is why they are parked together rather than closed with the engine knobs."
     },
     {
       "id": "options.client-terminal-negotiation",
@@ -3943,6 +3915,26 @@
         "scenario:compat/scenarios/resize-directions.txt"
       ],
       "resolution": "This was a catalog-only reconciliation. Runtime already accepted bare -D, -L, -R, and -U with the default amount 1, plus attached and separated integer amounts. Static CommandOptionSpec metadata now marks the four direction values optional while retaining attached-value support, and manifest reconciliation compares that shape with the pinned oracle. No handler, effect, wire field, tag, or protocol version changed. Nine focused resize tests pass, along with 175 protocol unit tests and 14 protocol framing tests. The strict 16-step resize-directions differential and the checked-in canonical summary have zero differences and no skips. resize-pane -M and -T remain open under their existing owners. The later mux.command-flag-errors closure consumes these optional shapes for exact lookahead. The later mux.error-shapes closure matched nested new-session precedence."
+    },
+    {
+      "id": "options.client-attach-and-focus",
+      "title": "Consume the client attach command and mouse focus options",
+      "closed_on": "2026-09-02",
+      "evidence": [
+        "resource:crates/zz/src/lib.rs",
+        "resource:crates/zz/src/bin/zz_cli.rs",
+        "resource:crates/zz/src/mux/client.rs",
+        "resource:crates/zz/src/workspace/view.rs",
+        "resource:crates/zz-tui/src/input.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:knowledge/protocol/wire-protocol.md",
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/smoke/default-client-command.txt",
+        "scenario:compat/scenarios/smoke/focus-follows-mouse.txt"
+      ],
+      "resolution": "Closed on 2026-09-02 against pinned tmux d77c9dc6 with both binaries driven on real ptys (scenarios default-client-command and focus-follows-mouse). `default-client-command`: server_client_dispatch_command sees argc == 0 for a client that reaches the server with no command of its own and queues server_client_default_command, which reads the option as a command list and inserts it after the callback, so the bare client runs the list and exits with its status. zz's launcher on PATH hard-coded `new-session -A` for an empty command line; it now marks every command line it forwards with the private `--bootstrap-launcher-client` argument, and the bundled executable, on an empty command line carrying that mark, asks the daemon for `show-options -sqv default-client-command`, parses the answer with the same config parser a bound command string goes through, and runs the result through the ordinary command-chain path, so the list picks up TUI attach routing, the daemon spawn, and the error channels an explicit argument gets. Measured on both binaries: `display-message -p custom` writes `custom` and exits 0; the two-command list `display-message -p one ; display-message -p two` writes both lines in order; `new-session -d -s NAME` creates that session and lets the client exit 0; and an unknown command is refused when the option is set, with the pin's `unknown command: no-such-command` on stderr, status 1, and the stored list left alone, which zz already matched. The acceptance clause's read-only half was re-scoped after measurement. It read \"keeping the pin's read-only refusal for a list that is not all read-only commands\"; that branch of server_client_default_command cannot be reached by any client the pin's own command line can produce. CLIENT_READONLY is only ever set by server_client_set_flags, whose four callers are attach-session -f, new-session -f, refresh-client -f and -F, so the flag is off for every argc == 0 dispatch; the pin's usage string is `tmux [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name] [-S socket-path] [-T features] [command [flags]]` and `tmux -r` is answered with `unknown option -- r` and status 1, measured on the pin. The refusal text `client is read-only` and its status 1 stay reachable only through the argc != 0 branch of a Control client that has already turned the flag on with refresh-client -f read-only, which belongs to the Control owner rather than here, so nothing in this group claims it. One recorded divergence is deliberately kept: the option's own default, `new-session` with no arguments, still becomes zz's `new-session -A`, which is the create-or-attach launcher behavior knowledge/tmux/divergences.md already records as silent and product-friendly. Any other stored value runs verbatim, so setting the option is what a script sees, and setting it to `new-session` restores the pin's create-another-session launcher only by spelling it differently. `focus-follows-mouse`: server_client_check_mouse turns a KEYC_TYPE_MOUSEMOVE resolved inside a pane that is not the window's active one into window_redraw_active_switch plus window_set_active_pane while the option is on, and tty.c forces MODE_MOUSE_ALL on the client so a real terminal reports motion at all. The value now rides the option map every client already receives: protocol v94 appends MuxOptionKey::FocusFollowsMouse, the daemon stamps the session-effective value into effective_mux_options beside `mouse`, a set at any session scope raises MuxOptionChanged from stored_scalar_execution, and both clients gate their pointer route on it - the raw TUI in handle_mouse before it decides who owns the event, the GPUI workspace with an on_mouse_move listener on every inactive pane surface. Two measurements shaped that placement. The pin reads the option before the mouse key becomes a binding, so the switch runs with `mouse` off as well: on an attached 79x24 pin client with `mouse off` and `focus-follows-mouse on`, a bare SGR motion report over the right pane still selected it, which is why zz's check sits ahead of its own mouse-option route rather than inside the workspace branch. And a report with a button held is a KEYC_TYPE_MOUSEDRAG, which never reaches that arm, so a drag leaves the active pane alone on both binaries. The scenario drives a 79-column client on both engines, where the one-column divider lands on column 39 and the right pane on columns 40..78, and reads the result through #{pane_active} from outside the client."
     },
     {
       "id": "options.option-name-format-coverage",

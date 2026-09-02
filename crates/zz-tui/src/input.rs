@@ -1122,6 +1122,7 @@ fn handle_mouse(
     }
     let (global_column, global_row, global_x, global_y) =
         global_mouse_position(model, event, pixel_mouse);
+    pointer_focus_follows_mouse(model, client, event, global_column, global_row)?;
     match mouse_route_owner(
         model.command_output.is_some(),
         model.mouse_option,
@@ -1259,6 +1260,32 @@ fn handle_mouse(
     } else {
         InputOutcome::None
     })
+}
+
+/// `server_client_check_mouse`: a `MOUSEMOVE` resolved inside a pane that is
+/// not the active one selects it while `focus-follows-mouse` is on. The pin
+/// reads the option before it decides what the mouse key becomes, so the switch
+/// happens whether or not `mouse` is on and whatever the pane under the pointer
+/// asked for; a drag reports as `MOUSEDRAG` and never switches.
+fn pointer_focus_follows_mouse(
+    model: &Model,
+    client: &InteractiveClient,
+    event: MouseEvent,
+    global_column: u16,
+    global_row: u16,
+) -> Result<(), String> {
+    if !model.focus_follows_mouse || !matches!(event.kind, MouseEventKind::Moved) {
+        return Ok(());
+    }
+    let Some(entry) = model.pane_at(global_column, global_row) else {
+        return Ok(());
+    };
+    if !entry.rect.content().contains(global_column, global_row)
+        || model.active_pane() == Some(entry.pane)
+    {
+        return Ok(());
+    }
+    focus_pane(client, entry.pane)
 }
 
 fn popup_mouse_action(

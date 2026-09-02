@@ -139,6 +139,7 @@
 | smoke/copy-mode-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-refresh | 3 | yes | 0 | yes | yes | yes |
 | smoke/daemon-invalid-flags | 3 | yes | 0 | yes | yes | yes |
+| smoke/default-client-command | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-menu-action-queue | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-menu-cell-layout | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-menu-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
@@ -149,6 +150,7 @@
 | smoke/display-popup-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-style-refresh | 3 | yes | 0 | yes | yes | yes |
 | smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |
+| smoke/focus-follows-mouse | 3 | yes | 0 | yes | yes | yes |
 | smoke/format-client-loop-context | 3 | yes | 0 | yes | yes | yes |
 | smoke/format-environment-loop-context | 3 | yes | 0 | yes | yes | yes |
 | smoke/format-modifier-client-loop | 3 | yes | 0 | yes | yes | yes |

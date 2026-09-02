@@ -10,6 +10,11 @@ use std::{
 
 const APP_STARTUP_DIRECTORY_ENV: &str = "ZZ_APP_STARTUP_DIRECTORY";
 
+/// Private handshake with the bundled executable: a `zz` typed on the command
+/// line is a client, so a command line that carries no command word runs the
+/// stored `default-client-command` instead of opening the application.
+const LAUNCHER_CLIENT_ARGUMENT: &str = "--bootstrap-launcher-client";
+
 fn main() -> ExitCode {
     let launcher = match env::current_exe().and_then(|launcher| launcher.canonicalize()) {
         Ok(launcher) => launcher,
@@ -33,11 +38,11 @@ fn main() -> ExitCode {
     launch(&executable, &arguments)
 }
 
-fn cli_arguments(mut arguments: Vec<OsString>) -> Vec<OsString> {
-    if arguments.is_empty() {
-        arguments.extend([OsString::from("new-session"), OsString::from("-A")]);
-    }
-    arguments
+fn cli_arguments(arguments: Vec<OsString>) -> Vec<OsString> {
+    let mut marked = Vec::with_capacity(arguments.len() + 1);
+    marked.push(OsString::from(LAUNCHER_CLIENT_ARGUMENT));
+    marked.extend(arguments);
+    marked
 }
 
 fn startup_directory() -> Option<PathBuf> {
@@ -202,10 +207,10 @@ mod tests {
     }
 
     #[test]
-    fn bare_cli_launch_becomes_create_or_attach() {
+    fn every_cli_launch_carries_the_client_marker_ahead_of_its_own_words() {
         assert_eq!(
             cli_arguments(Vec::new()),
-            [OsString::from("new-session"), OsString::from("-A")]
+            [OsString::from(super::LAUNCHER_CLIENT_ARGUMENT)]
         );
         for arguments in [
             vec![
@@ -218,9 +223,12 @@ mod tests {
                 OsString::from("-t"),
                 OsString::from("work"),
             ],
+            vec![OsString::from("-L"), OsString::from("probe")],
             vec![OsString::from("list-sessions")],
         ] {
-            assert_eq!(cli_arguments(arguments.clone()), arguments);
+            let mut expected = vec![OsString::from(super::LAUNCHER_CLIENT_ARGUMENT)];
+            expected.extend(arguments.clone());
+            assert_eq!(cli_arguments(arguments), expected);
         }
     }
 

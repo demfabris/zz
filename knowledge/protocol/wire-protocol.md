@@ -626,6 +626,13 @@ now validate on both encode and decode.
   `CopyModeAction` rides `TerminalViewAction`, which is carried by `InputMessage` and by
   `EventPayload::TerminalUiCommand`'s neighbours on `ProtocolMessage`, so the appended variants are
   wire-reachable and a v93 peer cannot decode them.
+- v94 appends `MuxOptionKey::FocusFollowsMouse` after `Prefix2`, taking `MuxOptionKey::ALL` from
+  seventeen keys to eighteen. `MuxOptions` must carry every key exactly once, so the appended key
+  changes the map on `EventPayload::MuxOptionsChanged` and a v93 peer decodes neither the variant
+  nor a map that contains it. The daemon stamps the value the way it already stamps `mouse`: it
+  resolves `focus-follows-mouse` against the session the recipient is attached to, the way the pin
+  reads `s->options` in `server_client_check_mouse`, and against the global session table for a
+  client attached to none. Both clients gate their pointer route on it.
 - v93 appends `KeyToken::Raw(u8)` after `Named`. `send-keys -H` is strtol base 16 clamped to one
   byte and tmux writes that byte to the pane raw as `KEYC_LITERAL`, so codes 0x80..0xff cannot ride
   `KeyToken::Literal`, whose UTF-8 text would re-encode them as two bytes. `KeyToken` travels on

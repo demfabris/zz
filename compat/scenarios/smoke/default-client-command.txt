@@ -1,0 +1,11 @@
+corpus: none
+# server_client_default_command fetches `default-client-command` as a command
+# list whenever a client arrives with no command of its own and inserts it after
+# the callback, so a bare client on a real pty runs the stored list and exits
+# with its status. The list is parsed when the option is set, so an unknown
+# command is refused there and the stored list survives.
+stage: fixtures/default-client-command.sh ~/default-client-command.sh
+stage: fixtures/bare-client.py ~/bare-client.py
+out: set-environment -gu DEFAULT_CLIENT_COMMAND
+run-shell 'sh ~/default-client-command.sh'
+out: show-environment -g DEFAULT_CLIENT_COMMAND

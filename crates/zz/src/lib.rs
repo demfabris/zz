@@ -109,6 +109,21 @@ const FOREIGN_TMUX_ERROR: &str = "zz: TMUX is set but ZZ_SOCKET is not; refusing
 #[cfg(not(target_os = "ios"))]
 const APP_STARTUP_DIRECTORY_ENV: &str = "ZZ_APP_STARTUP_DIRECTORY";
 #[cfg(not(target_os = "ios"))]
+/// Private handshake from the `zz` launcher on `PATH`: this process is a
+/// command-line client, so an empty command line runs `default-client-command`
+/// the way the pin's `server_client_default_command` does instead of opening
+/// the desktop application.
+const LAUNCHER_CLIENT_ARGUMENT: &str = "--bootstrap-launcher-client";
+
+/// Who produced this command line. Only the launcher's empty command line is a
+/// client with no command of its own; the application's own is the desktop app.
+#[cfg(not(target_os = "ios"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandLineOrigin {
+    Launcher,
+    Application,
+}
+
 const DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT: &str = "--bootstrap-server-id";
 #[cfg(not(target_os = "ios"))]
 const DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT: &str = "--bootstrap-client-cwd";
@@ -235,6 +250,7 @@ fn run_startup(socket_path: PathBuf) -> Startup {
         control_mode,
         shell_command,
         login_shell,
+        origin,
         early_output,
     } = arguments;
     let implicit_tmux_conflict = implicit_tmux_endpoint_conflict(
@@ -273,6 +289,7 @@ fn run_startup(socket_path: PathBuf) -> Startup {
         no_start_server,
         shell_command.as_deref(),
         login_shell,
+        origin,
         implicit_tmux_conflict,
     ) {
         Startup::Exit(exit)
@@ -467,6 +484,7 @@ struct ApplicationArguments {
     control_mode: u8,
     shell_command: Option<String>,
     login_shell: bool,
+    origin: CommandLineOrigin,
     early_output: Option<&'static str>,
 }
 
@@ -513,10 +531,13 @@ fn application_arguments(
     let mut login_shell = false;
     let mut control_mode = 0_u8;
     let mut foreground_server = false;
+    let mut origin = CommandLineOrigin::Application;
     let mut parsing_tmux_options = true;
     let mut arguments = arguments.into_iter().collect::<Vec<_>>().into_iter();
     while let Some(argument) = arguments.next() {
-        if argument == diagnostics::SOCKET_ARGUMENT {
+        if parsing_tmux_options && argument == LAUNCHER_CLIENT_ARGUMENT {
+            origin = CommandLineOrigin::Launcher;
+        } else if argument == diagnostics::SOCKET_ARGUMENT {
             let path = arguments.next().ok_or_else(|| {
                 ApplicationArgumentError::Message("--socket requires a path".to_owned())
             })?;
@@ -599,6 +620,7 @@ fn application_arguments(
                             control_mode: 0,
                             shell_command: None,
                             login_shell: false,
+                            origin: CommandLineOrigin::Application,
                             early_output: Some(TMUX_USAGE),
                         });
                     }
@@ -628,6 +650,7 @@ fn application_arguments(
                             control_mode: 0,
                             shell_command: None,
                             login_shell: false,
+                            origin: CommandLineOrigin::Application,
                             early_output: Some(TMUX_VERSION_OUTPUT),
                         });
                     }
@@ -682,6 +705,7 @@ fn application_arguments(
         control_mode,
         shell_command,
         login_shell,
+        origin,
         early_output: None,
     })
 }
@@ -767,6 +791,7 @@ fn run_command_mode(
     no_start_server: bool,
     shell_command: Option<&str>,
     login_shell: bool,
+    origin: CommandLineOrigin,
     implicit_tmux_conflict: bool,
 ) -> Option<ExitCode> {
     if let Some(shell_command) = shell_command {
@@ -785,6 +810,10 @@ fn run_command_mode(
         ));
     }
     let mut command_chain = split_command_chain(arguments);
+    if command_chain.is_empty() && origin == CommandLineOrigin::Launcher && host.is_none() {
+        command_chain =
+            default_client_command_chain(socket_path, mux_config_files, no_start_server);
+    }
     let Some(invocation) = command_chain.first().cloned() else {
         if host.is_some() {
             eprintln!("zz: --host requires a command");
@@ -2114,6 +2143,52 @@ fn connect_command_client(
     )
 }
 
+/// The command list the pin's `server_client_default_command` runs for a client
+/// that arrives with no command of its own: `default-client-command`, parsed as
+/// a command list. `new-session` alone is the option's own default, and zz's
+/// launcher keeps answering that one with the create-or-attach `new-session -A`
+/// it has always used.
+#[cfg(not(target_os = "ios"))]
+fn default_client_command_chain(
+    socket_path: &Path,
+    mux_config_files: &[PathBuf],
+    no_start_server: bool,
+) -> Vec<CommandInvocation> {
+    stored_default_client_command(socket_path, mux_config_files, no_start_server)
+        .map(|stored| zz_mux::parse_config("default-client-command", &stored))
+        .filter(|parsed| parsed.diagnostics.is_empty() && !parsed.commands.is_empty())
+        .map(|parsed| parsed.commands)
+        .filter(|commands| !is_launcher_default_client_command(commands))
+        .unwrap_or_else(|| vec![CommandInvocation::new("new-session", ["-A"])])
+}
+
+#[cfg(not(target_os = "ios"))]
+fn is_launcher_default_client_command(commands: &[CommandInvocation]) -> bool {
+    matches!(commands, [command] if command.name == "new-session" && command.args.is_empty())
+}
+
+#[cfg(not(target_os = "ios"))]
+fn stored_default_client_command(
+    socket_path: &Path,
+    mux_config_files: &[PathBuf],
+    no_start_server: bool,
+) -> Option<String> {
+    let mut client = if no_start_server {
+        CommandClient::connect(socket_path).ok()?
+    } else {
+        connect_command_client_with_spawn_provenance(socket_path, mux_config_files)
+            .ok()?
+            .0
+    };
+    let output = client
+        .execute(CommandInvocation::new(
+            "show-options",
+            ["-sqv", "default-client-command"],
+        ))
+        .ok()?;
+    Some(output.trim_end_matches('\n').to_owned())
+}
+
 #[cfg(not(target_os = "ios"))]
 fn connect_command_client_with_spawn_provenance(
     path: &Path,
@@ -2778,10 +2853,26 @@ mod tests {
                 false,
                 None,
                 false,
+                super::CommandLineOrigin::Launcher,
                 true,
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn the_option_default_keeps_the_launcher_create_or_attach_and_a_set_list_wins() {
+        assert!(super::is_launcher_default_client_command(&[
+            CommandInvocation::new("new-session", [] as [&str; 0])
+        ]));
+        assert!(!super::is_launcher_default_client_command(&[
+            CommandInvocation::new("new-session", ["-A"])
+        ]));
+        assert!(!super::is_launcher_default_client_command(&[
+            CommandInvocation::new("new-session", [] as [&str; 0]),
+            CommandInvocation::new("new-session", [] as [&str; 0]),
+        ]));
+        assert!(!super::is_launcher_default_client_command(&[]));
     }
 
     #[test]

@@ -11,8 +11,8 @@ use std::{
 use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
     Corners, CursorStyle, DragMoveEvent, Entity, EntityId, FocusHandle, IntoElement, KeyUpEvent,
-    Keystroke, MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Size,
-    StyleRefinement, Window, div, ease_out_quint, prelude::*, px,
+    Keystroke, MouseButton, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render,
+    Size, StyleRefinement, Window, div, ease_out_quint, prelude::*, px,
 };
 use zz_mux::{display_width, joined_layout, swapped_layout};
 use zz_protocol::{
@@ -1956,6 +1956,14 @@ impl AppView {
         }
     }
 
+    /// `server_client_check_mouse`: a pointer move over a pane that is not the
+    /// active one selects it while `focus-follows-mouse` is on. Unlike a click
+    /// it leaves an armed prefix alone, which is all the pin's
+    /// `window_set_active_pane` does.
+    fn on_pane_pointer_focus(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+        self.mux.read(cx).execute(pane_select_command(pane));
+    }
+
     fn on_pane_click(&mut self, pane: PaneId, cx: &mut Context<Self>) {
         self.mux.read(cx).execute(pane_select_command(pane));
         self.dismiss_armed_prefix(pane, cx);
@@ -2215,6 +2223,8 @@ impl AppView {
                 } else {
                     cx.theme().border
                 };
+                let follows_pointer = inactive && self.mux.read(cx).focus_follows_mouse();
+                let hovered_pane = *pane;
                 pane_surface(
                     ("mux-pane", pane.0),
                     content,
@@ -2230,6 +2240,15 @@ impl AppView {
                     cx,
                 )
                 .key_context(pane_key_context(*pane))
+                .when(follows_pointer, |surface| {
+                    surface.on_mouse_move(cx.listener(
+                        move |view, event: &MouseMoveEvent, _, cx| {
+                            if event.pressed_button.is_none() {
+                                view.on_pane_pointer_focus(hovered_pane, cx);
+                            }
+                        },
+                    ))
+                })
                 .into_any_element()
             }
             LayoutNode::Split {

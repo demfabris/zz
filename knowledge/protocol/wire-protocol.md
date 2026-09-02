@@ -633,6 +633,13 @@ now validate on both encode and decode.
   `InputMessage` and `EventPayload::TerminalUiCommand`'s neighbours on `ProtocolMessage` carry, so
   the appended variant is wire-reachable and a v95 peer cannot decode it. Nothing else moves: no
   existing variant, field or type changes.
+- v96 appends `PopupAction::Pointer { pointer: PopupPointer, view: Option<TerminalViewAction> }`
+  after `Close`, and adds the two types it carries: `PopupPointer` (`column`, `row`, `button`,
+  `drag`, `release`, `meta`) and `PopupPointerButton` (`None`, `Left`, `Middle`, `Right`). tmux
+  keeps the popup's border, drag, and menu policy in `popup_key_cb`, so a client reports the
+  pointer event in its own cell grid and hands over the `TerminalViewAction` it would have given
+  the popup's job; the daemon runs the policy and executes exactly one of the two. Appended, so a
+  v95 peer decodes none of it. Nothing else on the wire changed.
 - v95 appends the pane border chrome to `MuxSnapshot`. `WindowSnapshot` gains four fields after
   `activity`: `pane_border_status` (`PaneBorderStatus`, the window's `pane-border-status` with the
   pin's `window_get_pane_status` folding of `top-floating`/`bottom-floating` back to off already

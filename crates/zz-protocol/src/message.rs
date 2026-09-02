@@ -2240,9 +2240,42 @@ pub struct PopupState {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PopupAction {
     Text(String),
-    Key { input: KeyInput, text_follows: bool },
+    Key {
+        input: KeyInput,
+        text_follows: bool,
+    },
     TerminalView(TerminalViewAction),
     Close,
+    /// One pointer event in the owning client's own cell grid, plus the
+    /// terminal action the client would have handed the popup's job for it.
+    /// tmux keeps the border, drag, and menu policy in `popup_key_cb`, so the
+    /// client reports the press and the daemon decides which of the two runs.
+    Pointer {
+        pointer: PopupPointer,
+        view: Option<TerminalViewAction>,
+    },
+}
+
+/// A pointer event as `popup_key_cb` reads one: a cell in the client's grid,
+/// the button, whether the report carried the drag or release flag, and
+/// whether meta was held.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PopupPointer {
+    pub column: u16,
+    pub row: u16,
+    pub button: PopupPointerButton,
+    pub drag: bool,
+    pub release: bool,
+    pub meta: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PopupPointerButton {
+    #[default]
+    None,
+    Left,
+    Middle,
+    Right,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -12750,10 +12750,11 @@ impl Shared {
                     popup.styles.border_style.clone_from(&parsed.border_style);
                 }
                 if let Some(options) = options {
-                    popup.state.style =
-                        overlay_style(&options.style, popup.styles.style.as_deref());
-                    popup.state.border_style =
-                        overlay_style(&options.border_style, popup.styles.border_style.as_deref());
+                    popup.state.style = overlay_style(&options.style, popup.styles.style.as_deref());
+                    popup.state.border_style = overlay_style(
+                        &options.border_style,
+                        popup.styles.border_style.as_deref(),
+                    );
                 } else {
                     if let Some(style) = &parsed.style {
                         popup.state.style.clone_from(style);
@@ -12914,8 +12915,7 @@ impl Shared {
                 Some(working_directory.to_string_lossy().into_owned()),
             ));
             let style = overlay_style(&defaults.style, parsed.style.as_deref());
-            let border_style =
-                overlay_style(&defaults.border_style, parsed.border_style.as_deref());
+            let border_style = overlay_style(&defaults.border_style, parsed.border_style.as_deref());
             let (close_on_exit, close_on_exit_zero, close_on_any_key) =
                 popup_close_flags(&parsed, false).expect("new popup has close flags");
             let state = PopupState {
@@ -13315,9 +13315,9 @@ impl Shared {
             let window = target
                 .window
                 .ok_or_else(|| ServerError::MissingTarget("current window".to_owned()))?;
-            let defaults = inner.engine.menu_options_for_window(
-                client_overlay_style_window(&inner, target_client).unwrap_or(window),
-            )?;
+            let defaults = inner
+                .engine
+                .menu_options_for_window(client_overlay_style_window(&inner, target_client).unwrap_or(window))?;
             let title = parsed.title.as_deref().map_or_else(String::new, |title| {
                 expand_popup_value(
                     &inner,
@@ -13423,10 +13423,11 @@ impl Shared {
                 defaults.border_lines
             };
             let style = overlay_style(&defaults.style, parsed.style.as_deref());
-            let selected_style =
-                overlay_style(&defaults.selected_style, parsed.selected_style.as_deref());
-            let border_style =
-                overlay_style(&defaults.border_style, parsed.border_style.as_deref());
+            let selected_style = overlay_style(
+                &defaults.selected_style,
+                parsed.selected_style.as_deref(),
+            );
+            let border_style = overlay_style(&defaults.border_style, parsed.border_style.as_deref());
             let variables = popup_position_variables(
                 &inner.engine,
                 &target,
@@ -76403,14 +76404,8 @@ bind - split-window -v -c "#{pane_current_path}"
             overlay_style("bold,bg=colour17", Some("bg=colour52,dim")),
             "bold,bg=colour17,fg=default,bg=colour52"
         );
-        assert_eq!(
-            overlay_style("bold,bg=colour17", Some("default")),
-            "bold,bg=colour17"
-        );
-        assert_eq!(
-            overlay_style("bold,bg=colour17", Some("bogus")),
-            "bold,bg=colour17"
-        );
+        assert_eq!(overlay_style("bold,bg=colour17", Some("default")), "bold,bg=colour17");
+        assert_eq!(overlay_style("bold,bg=colour17", Some("bogus")), "bold,bg=colour17");
         assert_eq!(overlay_style("", Some("fg=red")), "fg=red,bg=default");
     }
 
@@ -76441,15 +76436,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut context,
                 &CommandInvocation::new(
                     "display-menu",
-                    [
-                        "-x",
-                        "0",
-                        "-y",
-                        "0",
-                        "alpha",
-                        "a",
-                        "display-message -p alpha",
-                    ],
+                    ["-x", "0", "-y", "0", "alpha", "a", "display-message -p alpha"],
                 ),
             )
             .expect("open menu");

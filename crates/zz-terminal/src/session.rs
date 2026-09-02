@@ -147,7 +147,10 @@ impl AllowPassthrough {
     }
 }
 
-const DEAD_NOTICE_WAIT: Duration = Duration::from_millis(250);
+/// The daemon answers every exit, with a notice for a retained pane and with
+/// nothing for one it is about to close, so this cap only has to cover the
+/// worst case where the pane is already gone from the daemon's map.
+const DEAD_NOTICE_WAIT: Duration = Duration::from_secs(5);
 const MAX_ENGINE_SEQUENCE_BYTES: usize = 256;
 const MAX_ENGINE_RENAME_BYTES: usize = 1024;
 
@@ -5590,23 +5593,38 @@ fn run_terminal(
             // the pin retains, so the VT has to outlive the child long enough
             // for the daemon to expand the template against the pane it has
             // just marked dead.
-            if let Ok(Command::WriteDeadNotice(Some(text))) =
-                control_rx.recv_timeout(DEAD_NOTICE_WAIT)
-            {
-                write_dead_notice(&mut terminal, &text)?;
-                publish_active_views(
-                    &mut terminal,
-                    publisher,
-                    &mut render_state,
-                    &mut row_iterator,
-                    &mut cell_iterator,
-                    &mut generations,
-                    SnapshotChange::Content,
-                    &mut dictionary,
-                    &mut active_views,
-                    &word_separators,
-                    SessionStatus::exited(status.exit_code(), status.signal().map(str::to_owned)),
-                )?;
+            let notice_deadline = Instant::now() + DEAD_NOTICE_WAIT;
+            while let Some(remaining) = notice_deadline.checked_duration_since(Instant::now()) {
+                // Every other command is dropped rather than answered: its
+                // reply channel disconnects, which is the same actor-stopped
+                // answer the caller would get once this worker returns, and
+                // the daemon's retained-pane paths already fall back on it.
+                match control_rx.recv_timeout(remaining) {
+                    Ok(Command::WriteDeadNotice(text)) => {
+                        if let Some(text) = text {
+                            write_dead_notice(&mut terminal, &text)?;
+                            publish_active_views(
+                                &mut terminal,
+                                publisher,
+                                &mut render_state,
+                                &mut row_iterator,
+                                &mut cell_iterator,
+                                &mut generations,
+                                SnapshotChange::Content,
+                                &mut dictionary,
+                                &mut active_views,
+                                &word_separators,
+                                SessionStatus::exited(
+                                    status.exit_code(),
+                                    status.signal().map(str::to_owned),
+                                ),
+                            )?;
+                        }
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
             }
             return Ok(());
         }

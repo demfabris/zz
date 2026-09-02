@@ -19829,6 +19829,9 @@ impl Shared {
             target: "zz_daemon::diagnostics::terminal",
             "terminal worker finished pane={pane}; closing pane"
         );
+        // A pane that is not retained draws no notice, so release its worker
+        // from the dead-notice wait instead of letting it time out.
+        terminal.write_dead_notice(None);
         let target = pane.to_string();
         let command = CommandInvocation::new("kill-pane", ["-t", target.as_str()]);
         context.no_hooks = true;

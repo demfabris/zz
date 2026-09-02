@@ -3385,7 +3385,7 @@ impl MuxState {
             window.pane_order.retain(|pane| *pane != source);
             insert_pane_order(&mut window.pane_order, source, target, false, false);
             window.z_order.retain(|pane| *pane != source);
-            insert_pane_order(&mut window.z_order, source, target, false, false);
+            insert_pane_order(&mut window.z_order, source, target, before, false);
             window.zoomed_pane = None;
             let pane_changed = !detached && activate_window_pane(window, source, false);
             normalize_window_history(window);
@@ -3439,7 +3439,7 @@ impl MuxState {
             .expect("target window exists");
         target_state.panes.insert(source, pane_state);
         insert_pane_order(&mut target_state.pane_order, source, target, false, false);
-        insert_pane_order(&mut target_state.z_order, source, target, false, false);
+        insert_pane_order(&mut target_state.z_order, source, target, before, false);
         target_state.zoomed_pane = None;
         let target_changed = !detached && activate_window_pane(target_state, source, false);
         normalize_window_history(target_state);

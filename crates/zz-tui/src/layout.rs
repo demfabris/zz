@@ -536,6 +536,38 @@ fn resolved_ratio(ratio: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `layout_fix_panes` leaves `yoff` alone under `pane-border-status bottom`
+    /// and only shrinks `sy`, so the content box starts on the pane's first row
+    /// there and one row down under `top`; the mouse route has to read the
+    /// same box the renderer paints.
+    #[test]
+    fn pane_content_starts_on_the_first_row_when_the_status_is_at_the_bottom() {
+        let rect = Rect {
+            x: 3,
+            y: 5,
+            width: 20,
+            height: 8,
+        };
+        let top = PaneRect {
+            pane: PaneId(0),
+            rect,
+            status_at_bottom: false,
+        };
+        let bottom = PaneRect {
+            pane: PaneId(0),
+            rect,
+            status_at_bottom: true,
+        };
+        assert_eq!(top.content(), rect.content());
+        assert_eq!(top.content().y, 6);
+        assert_eq!(bottom.content().y, 5);
+        assert_eq!(bottom.content().height, 7);
+        assert!(bottom.content().contains(3, 5));
+        assert!(!bottom.content().contains(3, 12));
+        assert!(!top.content().contains(3, 5));
+        assert_eq!(bottom.status_row().y, 12);
+    }
     use zz_protocol::SplitId;
 
     fn pane(id: u64) -> LayoutNode {

@@ -1217,7 +1217,7 @@ fn handle_mouse(
             InputOutcome::None
         });
     };
-    let content = entry.rect.content();
+    let content = entry.content();
     if !content.contains(global_column, global_row) {
         if matches!(event.kind, MouseEventKind::Down(_)) {
             focus_pane(client, entry.pane)?;
@@ -1306,7 +1306,7 @@ fn pointer_focus_follows_mouse(
     let Some(entry) = model.pane_at(global_column, global_row) else {
         return Ok(());
     };
-    if !entry.rect.content().contains(global_column, global_row)
+    if !entry.content().contains(global_column, global_row)
         || model.active_pane() == Some(entry.pane)
     {
         return Ok(());
@@ -1402,7 +1402,7 @@ pub(crate) fn app_mouse_forward_action(
     global_y: u32,
 ) -> Option<(zz_protocol::PaneId, TerminalViewAction)> {
     let entry = model.pane_at(global_column, global_row)?;
-    let content = entry.rect.content();
+    let content = entry.content();
     if !content.contains(global_column, global_row) {
         return None;
     }

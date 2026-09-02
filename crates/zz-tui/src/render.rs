@@ -1743,7 +1743,7 @@ fn pane_header(model: &Model, pane: PaneId, title: &str) -> String {
     let Some(viewport) = model.viewports.get(&pane) else {
         return format!(" {title} ");
     };
-    let content = entry.rect.content();
+    let content = entry.content();
     if viewport.columns == content.width && viewport.rows == content.height {
         format!(" {title} ")
     } else {

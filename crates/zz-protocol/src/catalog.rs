@@ -2065,22 +2065,22 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "command-prompt",
         aliases: &[],
         description: "Open a command prompt",
-        usage: "[-1CbeiklN] [-I inputs] [-p prompts] [-T prompt-type] [template]",
+        usage: "[-1CbeFiklN] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]",
         options: &[
             CommandOptionSpec::value("-I", FreeForm, "initial input"),
             CommandOptionSpec::value("-p", FreeForm, "prompt label"),
+            CommandOptionSpec::value("-t", FreeForm, "target client"),
             CommandOptionSpec::value("-T", FreeForm, "prompt type: command or search"),
             CommandOptionSpec::flag("-1", "submit the first key pressed"),
-            CommandOptionSpec::flag("-b", "background prompt, always on in zz"),
+            CommandOptionSpec::flag("-b", "do not wait for the prompt to close"),
             CommandOptionSpec::flag("-C", "keep publishing terminal frames while open"),
             CommandOptionSpec::flag("-e", "exit when backspace empties the prompt"),
+            CommandOptionSpec::flag("-F", "expand the template as a format first"),
             CommandOptionSpec::flag("-i", "run the template on every edit"),
             CommandOptionSpec::flag("-k", "submit the name of the first key pressed"),
             CommandOptionSpec::flag("-l", "one prompt and one input, commas kept literal"),
             CommandOptionSpec::flag("-N", "collect digits and pass the first non-digit on"),
-            CommandOptionSpec::unsupported_flag("-F"),
             CommandOptionSpec::unsupported_flag("-P"),
-            CommandOptionSpec::unsupported_value("-t"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -2817,7 +2817,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (460, 43));
+        assert_eq!((supported, unsupported), (462, 41));
         assert_eq!(usage_overrides.len(), 22);
         assert_eq!(
             usage_overrides,

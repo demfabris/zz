@@ -1,0 +1,12 @@
+corpus: none
+# command-prompt raises its prompt on the client cmd_find_client resolves from
+# -t, or on the invoking client's own best client, and CMD_RETURN_WAIT parks the
+# issuing command queue until the prompt is answered, cancelled, or freed. -b
+# clears the wait, a client that already has a prompt takes no second one, -F
+# expands the template through format_single_from_target before the answer pass,
+# and a read-only client keeps the queue parked until it detaches.
+stage: fixtures/command-prompt-target.sh ~/command-prompt-target.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu COMMAND_PROMPT_TARGET
+run-shell 'sh ~/command-prompt-target.sh'
+out: show-environment -g COMMAND_PROMPT_TARGET

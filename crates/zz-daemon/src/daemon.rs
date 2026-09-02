@@ -5957,6 +5957,11 @@ impl Shared {
         } else {
             None
         };
+        let prompt_route = if canonical == "command-prompt" {
+            self.command_prompt_route(client, kind, context, command)?
+        } else {
+            None
+        };
         let result = if let Some((target, target_kind, target_terminal, mut target_context)) =
             display_panes_target
         {
@@ -5969,6 +5974,20 @@ impl Shared {
                 target_terminal,
                 queue_execution,
             )
+        } else if let Some(mut route) = prompt_route {
+            let result = self.execute_with_mux_source_inner(
+                route.client,
+                route.kind,
+                &mut route.context,
+                &route.command,
+                mux_source,
+                route.terminal,
+                queue_execution,
+            );
+            if result.is_ok() && route.wait {
+                self.wait_for_command_prompt(route.client);
+            }
+            result
         } else {
             self.execute_with_mux_source_inner(
                 client,
@@ -5990,6 +6009,98 @@ impl Shared {
         }
         self.enforce_destroy_unattached_if_changed(unattached_watch);
         result
+    }
+
+    /// `CMD_CLIENT_TFLAG`: `cmd_command_prompt_exec` runs against the client
+    /// `cmd_find_client` resolves from `-t`, or the invoking client's own best
+    /// client, and blocks the issuing command queue on `CMD_RETURN_WAIT` unless
+    /// `-b` or `-i` cleared the wait. `-P` prompts inside a pane instead and
+    /// stays native, so it keeps the untargeted path.
+    fn command_prompt_route(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        command: &CommandInvocation,
+    ) -> Result<Option<CommandPromptRoute>, DaemonError> {
+        // Every flag diagnostic stays with the mux, so a spelling this scan
+        // cannot read routes nowhere and reaches the catalog's own message.
+        let Ok(parsed) = parse_buffer_command_args(
+            "command-prompt",
+            &command.args,
+            &['I', 'p', 'T', 't'],
+            &['1', 'C', 'b', 'e', 'F', 'i', 'k', 'l', 'N', 'P'],
+        ) else {
+            return Ok(None);
+        };
+        if parsed.has('P') {
+            return Ok(None);
+        }
+        let inner = self.inner.lock();
+        let target = resolve_client_target(&inner, client, kind, parsed.value('t'))?;
+        let target_kind = inner
+            .client_kinds
+            .get(&target)
+            .copied()
+            .unwrap_or(ClientKind::Command);
+        let terminal = client_terminal(&inner, target, target_kind);
+        let mut target_context = context.clone();
+        retarget_context_to_attachment(&inner, target, &mut target_context);
+        let positional_start = command.args.len().saturating_sub(parsed.positional.len());
+        // `args_make_commands_prepare` expands the template once, before any
+        // `%%` pass, and only for the string form: a `{ ... }` block already
+        // carries a parsed command list and returns before the expansion.
+        let routed = if parsed.has('F')
+            && !parsed.positional.is_empty()
+            && !command.argument_is_command_block(positional_start)
+        {
+            let expanded = expand_command_format(
+                &inner,
+                &target_context,
+                client_attached_session(&inner, target),
+                Some("command-prompt"),
+                &command.args[positional_start],
+                Some(target),
+                false,
+            );
+            let mut routed = command.clone();
+            routed.args[positional_start] = expanded;
+            routed
+        } else {
+            command.clone()
+        };
+        let wait = matches!(kind, ClientKind::Command | ClientKind::Control)
+            && !parsed.has('b')
+            && !parsed.has('i')
+            && !inner.command_prompts.contains_key(&target);
+        drop(inner);
+        Ok(Some(CommandPromptRoute {
+            client: target,
+            kind: target_kind,
+            terminal,
+            context: target_context,
+            command: routed,
+            wait,
+        }))
+    }
+
+    /// The `cmdq_wait` half: the issuing queue resumes when
+    /// `cmd_command_prompt_callback` or `cmd_command_prompt_free` calls
+    /// `cmdq_continue`, which is every way the prompt can end.
+    fn wait_for_command_prompt(self: &Arc<Self>, target: ClientId) {
+        let wait = {
+            let mut inner = self.inner.lock();
+            let Some(prompt) = inner.command_prompts.get_mut(&target) else {
+                return;
+            };
+            if prompt.waiter.is_some() {
+                return;
+            }
+            let (wake, wait) = crossbeam_channel::bounded(1);
+            prompt.waiter = Some(wake);
+            wait
+        };
+        let _ = wait.recv();
     }
 
     fn enforce_destroy_unattached_if_changed(
@@ -16951,6 +17062,10 @@ impl Shared {
         if let Some(submission) = outcome.submission {
             self.submit_command_prompt(client, kind, context, &submission);
         }
+        // `cmd_command_prompt_callback` calls `cmdq_continue` after
+        // `cmdq_insert_after`, so the answer's commands are already queued
+        // ahead of whatever the issuing client had left.
+        drop(outcome.waiter);
         !outcome.pass
     }
 
@@ -26103,6 +26218,18 @@ struct MenuWaiter {
     wake: crossbeam_channel::Sender<()>,
 }
 
+/// `command-prompt` after `cmd_find_client`: the prompt is raised on the
+/// resolved target client with that client's own current pane as the format
+/// target, whoever issued the command.
+struct CommandPromptRoute {
+    client: ClientId,
+    kind: ClientKind,
+    terminal: ClientTerminal,
+    context: ExecutionContext,
+    command: CommandInvocation,
+    wait: bool,
+}
+
 enum ConfirmExecution {
     Blocking {
         client: ClientId,
@@ -26266,6 +26393,11 @@ struct CommandPrompt {
     /// `prompt_create`'s `pr->last`: under `-i` the initial input seeds this
     /// instead of the buffer, and `C-r`/`C-s` restore it into an empty buffer.
     last: String,
+    /// `cdata->item`: the command queue parked on this prompt. Dropping the
+    /// prompt is `cmd_command_prompt_free`, so every way the prompt ends wakes
+    /// the queue, and an answered prompt hands it to `PromptKeyOutcome` first
+    /// so the answer's commands run before the issuing queue resumes.
+    waiter: Option<crossbeam_channel::Sender<()>>,
 }
 
 impl CommandPrompt {
@@ -26302,6 +26434,7 @@ impl CommandPrompt {
             mode,
             no_freeze,
             last,
+            waiter: None,
         }
     }
 
@@ -26691,6 +26824,9 @@ struct PromptKeyOutcome {
     /// The pin's `PROMPT_KEY_NOT_HANDLED`: the key goes on to the key tables.
     pass: bool,
     limit_exceeded: bool,
+    /// The parked command queue, released once the answer's own commands have
+    /// run, the way `cmdq_insert_after` puts them ahead of `cmdq_continue`.
+    waiter: Option<crossbeam_channel::Sender<()>>,
 }
 
 fn command_prompt_focus_action(mode: CommandPromptMode, focused: bool) -> PromptKeyAction {
@@ -26713,6 +26849,7 @@ fn command_prompt_outcome(
     action: PromptKeyAction,
     state: Option<CommandPromptState>,
 ) -> PromptKeyOutcome {
+    let mut prompt = prompt;
     let prompt_type = prompt.prompt_type;
     match action {
         PromptKeyAction::Handled => {
@@ -26753,17 +26890,20 @@ fn command_prompt_outcome(
         PromptKeyAction::Close => PromptKeyOutcome {
             event: PromptWireUpdate::Retire,
             retired: prompt.freezes(),
+            waiter: prompt.waiter.take(),
             ..PromptKeyOutcome::default()
         },
         PromptKeyAction::SubmitIncremental => PromptKeyOutcome {
             event: PromptWireUpdate::Retire,
             retired: prompt.freezes(),
+            waiter: prompt.waiter.take(),
             remember: (!prompt.input.is_empty()).then_some((prompt_type, prompt.input)),
             ..PromptKeyOutcome::default()
         },
         PromptKeyAction::SubmitAnswer(answer) => PromptKeyOutcome {
             event: PromptWireUpdate::Retire,
             retired: prompt.freezes(),
+            waiter: prompt.waiter.take(),
             submission: Some(CommandPromptSubmission {
                 inputs: prompt.answers_with(answer),
                 template: prompt.template,
@@ -26772,7 +26912,6 @@ fn command_prompt_outcome(
             ..PromptKeyOutcome::default()
         },
         PromptKeyAction::Submit => {
-            let mut prompt = prompt;
             let retired = prompt.freezes();
             let remember =
                 (!prompt.input.is_empty()).then_some((prompt_type, prompt.input.clone()));
@@ -26799,10 +26938,12 @@ fn command_prompt_outcome(
                 submission,
                 pass: false,
                 limit_exceeded: false,
+                waiter: prompt.waiter.take(),
             }
         }
         PromptKeyAction::SubmitAndPass => {
             let retired = prompt.freezes();
+            let waiter = prompt.waiter.take();
             let inputs = prompt.answers_with(prompt.input.clone());
             let submission = (inputs.iter().any(|input| !input.is_empty())
                 || prompt.template.is_some())
@@ -26820,6 +26961,7 @@ fn command_prompt_outcome(
                 submission,
                 pass: true,
                 limit_exceeded: false,
+                waiter,
             }
         }
     }
@@ -32703,6 +32845,30 @@ fn expand_popup_value(
     value: &str,
     target_client: Option<ClientId>,
 ) -> String {
+    expand_command_format(
+        inner,
+        target,
+        active_session,
+        command_name,
+        value,
+        target_client,
+        true,
+    )
+}
+
+/// `format_expand` versus `format_expand_time`: only the latter runs the string
+/// through `strftime` first, and `format_single_from_target`, which is what
+/// `args_make_commands_prepare` uses for `-F`, takes the plain one, so a `%%`
+/// in the template survives to the answer pass.
+fn expand_command_format(
+    inner: &ServerState,
+    target: &ExecutionContext,
+    active_session: Option<SessionId>,
+    command_name: Option<&str>,
+    value: &str,
+    target_client: Option<ClientId>,
+    time: bool,
+) -> String {
     let mut facts = format_hook_facts(inner);
     if let Some(client) = target_client {
         facts.client = client_attached_session(inner, client)
@@ -32714,13 +32880,20 @@ fn expand_popup_value(
     if let Some(command_name) = command_name {
         hooks = hooks.with_command_item(command_name);
     }
-    inner.engine.expand_pane_format_time(
-        value,
-        target,
-        active_session,
-        target.target_format_client(),
-        &mut hooks,
-    )
+    let format_client = target.target_format_client();
+    if time {
+        inner.engine.expand_pane_format_time(
+            value,
+            target,
+            active_session,
+            format_client,
+            &mut hooks,
+        )
+    } else {
+        inner
+            .engine
+            .expand_pane_format(value, target, active_session, format_client, &mut hooks)
+    }
 }
 
 fn popup_close_flags(parsed: &ParsedDisplayPopup, modifying: bool) -> Option<(bool, bool, bool)> {
@@ -69059,7 +69232,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn command_prompt_rejects_command_only_clients() {
+    fn command_prompt_from_a_command_client_needs_a_target_client() {
         let shared = Arc::new(Shared::new(1));
         let mut context = ExecutionContext::default();
         for kind in [ClientKind::Command, ClientKind::Control] {
@@ -69072,7 +69245,20 @@ bind - split-window -v -c "#{pane_current_path}"
                         &CommandInvocation::new("command-prompt", ["-k"]),
                     ),
                     Err(DaemonError::Server(ServerError::InvalidCommand(message)))
-                        if message.contains("interactive client")
+                        if message == "no current client"
+                ),
+                "{kind:?}"
+            );
+            assert!(
+                matches!(
+                    shared.execute(
+                        ClientId(7),
+                        kind,
+                        &mut context,
+                        &CommandInvocation::new("command-prompt", ["-t", "/dev/nope"]),
+                    ),
+                    Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                        if message == "can't find client: /dev/nope"
                 ),
                 "{kind:?}"
             );

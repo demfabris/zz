@@ -36696,10 +36696,10 @@ mod tests {
         assert!(matches!(
             engine.execute(
                 &mut context,
-                &command("command-prompt", &["-F", "unsupported"]),
+                &command("command-prompt", &["-P", "unsupported"]),
             ),
             Err(ServerError::UnsupportedCommand(message))
-                if message == "command-prompt -F"
+                if message == "command-prompt -P"
         ));
 
         for (index, value) in [
@@ -36836,17 +36836,19 @@ mod tests {
             engine.execute(&mut context, &command("command-prompt", &["-T", "bogus"])),
             Err(ServerError::InvalidCommand(message)) if message == "unknown type: bogus"
         ));
-        for parked in ["-F", "-P"] {
-            assert!(matches!(
-                engine.execute(&mut context, &command("command-prompt", &[parked])),
-                Err(ServerError::UnsupportedCommand(message))
-                    if message == format!("command-prompt {parked}")
-            ));
-        }
         assert!(matches!(
-            engine.execute(&mut context, &command("command-prompt", &["-t", "%1"])),
-            Err(ServerError::UnsupportedCommand(message)) if message == "command-prompt -t"
+            engine.execute(&mut context, &command("command-prompt", &["-P"])),
+            Err(ServerError::UnsupportedCommand(message))
+                if message == "command-prompt -P"
         ));
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("command-prompt", &["-t", "%1"]))
+                .expect("target client is the daemon's routing, not a mux rejection")
+                .effects
+                .len(),
+            1
+        );
     }
 
     #[test]

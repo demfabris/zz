@@ -5,8 +5,8 @@ description: "Dated rationale and source evidence for measured tmux divergences,
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-01
-last_updated_by: Codex
+last_updated: 2026-09-02
+last_updated_by: Claude
 ---
 
 # Overview
@@ -958,8 +958,6 @@ table below lists the remaining missing or deliberate format differences.
 | `session_group_attached_list` | Session groups are unsupported, so no grouped attachment list exists. | **silent** |
 | `session_group_list` | Session groups are unsupported, so no member list exists. | **silent** |
 | `tree_mode_format` | No tmux tree-mode row formatter; zz's tree chooser is native. | **silent** |
-| `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
-| `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
 # Options coverage: 2026-08-22 snapshot
 
@@ -1346,21 +1344,62 @@ window, and the differential transcript records `[16|]` on both sides for that s
 only for a format tree with no window at all, the case the `StatusContext::default()` unit test
 exercises.
 
-`window_bigger` and the two offsets are per-client and stay open on a measured blocker. In the pin
-they read the client's cached tty viewport through `tty_window_offset`, so `format_cb_window_bigger`
-answers null whenever the format tree carries no client. `cmd_list_windows_exec` builds its rows with
-a null client, so a `list-windows` row answers null even while a client is attached, and the value
-follows the client's own current window rather than the row's. The boolean itself already agrees: a
-live comparison of the pin against a headless zz daemon answered null with no client, `0` for a
-viewport-sized window with the status line on and off, `1` after `resize-window` widened the window
-past the viewport, and null again after detach, on both sides. What does not agree is the no-client
-row: zz resolves a format client for every command expansion through `current_format_client`, where
-the pin decides per command in `format_defaults`, so zz would answer `1` where the pin answers null.
-That row context has to land before `window_bigger` can close.
+`window_bigger` and the two offsets closed on 2026-09-02 (scenario
+`smoke/format-window-bigger`). They are the per-client window family: the daemon answers them from
+the format client's retained viewport, the client's reported columns and its rows less the session's
+status lines, which is the `tty->sx` and `tty->sy - status_line_size(c)` that `tty_window_offset1`
+compares. The comparison is against the CLIENT's own current window and the pane that window is
+showing, never the format's window, because tty.c reads `c->session->curw->window` and
+`server_client_get_pane(c)`. The offsets reproduce the else branch of `tty_window_offset1`: x is 0
+while the cursor is left of `sx`, `w->sx - sx` once it is past `w->sx - sx`, and `cx - sx/2` between
+them; y is 0, `w->sy - sy`, or `cy - sy + 1` on the same three branches, and both are 0 when the
+pane's cursor is hidden. Measured identical on both binaries across nine states: null with no client,
+`0` for a window that fits with the status line on and off, `1` after `resize-window` widened it to
+200x60 past an 80x24 client, ox 120 / oy 8 with the cursor parked at (151,31), ox 0 / oy 0 at (61,3),
+ox 60 / oy 3 at (101,26), null on a `list-windows` and a `list-panes` row while the client is still
+attached, and null again after detach.
 
-The offsets need more than that. `tty_window_offset1` centres the viewport on the cursor and honours
-a pan window, and zz has no viewport pan or server-side cursor-follow, so today both names answer
-null on both sides only because the pin also answers null whenever the window is not bigger.
+Two residues stay recorded. The pan branch of `tty_window_offset1`, which `refresh-client -U/-D/-L/-R`
+arms by setting `c->pan_window`, has no zz equivalent, so zz always reaches the cursor branch. And
+`#{window_width}` itself is not comparable between the binaries, because the zz raw client reserves
+about 29 columns and 2 rows of chrome; the middle band that opens, a window wider than the zz pane
+area but narrower than the pty, answers `0` in zz while the pane area really does scroll.
+
+## Per-command format clients and the listing (2026-09-02)
+
+The daemon used to resolve one format client for every expansion through `current_format_client`.
+The pin decides per command in `format_defaults`, and three consequences now match. A hook body
+carries the `cmd_find_best_client` activity winner rather than the client that raised the event:
+`notify_insert_one_hook` appends the body with client NULL and `cmdq_fire_command` resolves it
+through `cmd_find_client(item, NULL, 1)`, an activity_time comparison the MSG_RESIZE arm never
+updates, so with two attached clients, resizing the older one logs the other client's tty while
+`#{hook_client}` names the reporter (scenario `smoke/client-resized-context`). `list-windows`,
+`list-sessions` and `list-panes` rows carry no format client at all, because all three call
+`format_defaults(ft, NULL, ...)`, so every client-scoped name answers null on a row even while a
+client is attached. And `display-message -a` walks `format_each`: the 198-entry table in declaration
+order minus every entry whose callback returns NULL, then the command's own tree, which puts
+`command=display-message` after the whole table (scenario `smoke/format-listing`).
+
+Making the listing's name sets match cost four producer corrections, each of them the pin's
+behaviour. `client_last_session` and `client_theme` now decline instead of answering empty, and the
+daemon records a colour scheme only for a client that reported one, because `c->theme` stays
+THEME_UNKNOWN until the terminal answers the `\033[?996n` query; zz's raw client hard-codes dark in
+its hello, so the differential makes the pin's client report dark with `\033[?997;1n` and both then
+list the name. `window_active_clients` and `window_active_clients_list` are answered for command
+expansions from a per-window client fact, where they used to be filled only on the status path.
+`session_attached_list` joins the client's tty rather than the device name its hello carries, which
+is what `loop->name` is in `format_cb_session_attached_list`.
+
+`pane_pipe`, `pane_pipe_pid` and `pane_unseen_changes` left their constant backings in the same pass
+(scenario `smoke/format-pane-process`). `pane_unseen_changes` is not "output nobody has seen":
+input.c raises `PANE_UNSEENCHANGES` only inside `if (!TAILQ_EMPTY(&wp->modes))`, window.c drops it
+when the last mode entry goes, and the copy-mode refresh timer drops it again, so output to a pane
+with no mode leaves it `0`. zz carries the bit on the per-client copy session record, which clears on
+the same two edges because entering a mode writes a fresh record; with two clients in copy mode on
+one pane zz raises it on both and answers `1` until every session is gone, where the pin has one pane
+flag. `pane_pb_progress` stays open and is now measured as the OSC 9;4 progress bar rather than paste
+progress: format.c reads `wp->base.progress_bar.progress`, which `input_osc_9` writes, so closing it
+means parsing OSC 9;4 in the VT, and `pane_pb_state` is the same family.
 
 ## Format expansion budgets settled (2026-09-01)
 

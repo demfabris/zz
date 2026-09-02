@@ -131,7 +131,43 @@ sleep 0.5
 check_equal allow-rename-ignores-bel untouched \
     "$(named "$(main_client display-message -p -t "$rename_pane" '#{window_name}')" BELNAME)"
 main_client send-keys -t "$rename_pane" -H 1b 5c
-sleep 0.3
+sleep 0.5
+# The rename table drops every C0 byte but its terminators, so the BEL never
+# joins the name and the ST commits BELNAME.
+check_equal allow-rename-drops-bel-from-the-name BELNAME \
+    "$(main_client display-message -p -t "$rename_pane" '#{window_name}')"
+
+# Every exit from the rename state runs input_exit_rename: an ESC commits the
+# collected name and starts its own sequence, and CAN commits it too.
+main_client send-keys -t "$rename_pane" -H 1b 6b
+main_client send-keys -t "$rename_pane" -l ESCCSI
+main_client send-keys -t "$rename_pane" -H 1b 5b 30 6d
+sleep 0.5
+check_equal allow-rename-commits-on-esc ESCCSI \
+    "$(main_client display-message -p -t "$rename_pane" '#{window_name}')"
+main_client send-keys -t "$rename_pane" -H 1b 6b
+main_client send-keys -t "$rename_pane" -l CAN
+main_client send-keys -t "$rename_pane" -H 18
+sleep 0.5
+check_equal allow-rename-commits-on-can CAN \
+    "$(main_client display-message -p -t "$rename_pane" '#{window_name}')"
+
+# input_exit_rename writes the name with window_set_name, so the rename raises
+# window-renamed and never the after-rename-window command hook.
+main_client set-environment -g RENHOOK none
+main_client set-environment -g RENEVENT none
+main_client set-hook -g after-rename-window 'set-environment -g RENHOOK after'
+main_client set-hook -g window-renamed 'set-environment -g RENEVENT renamed'
+main_client send-keys -t "$rename_pane" -H 1b 6b
+main_client send-keys -t "$rename_pane" -l HOOKED
+main_client send-keys -t "$rename_pane" -H 1b 5c
+sleep 0.5
+check_equal allow-rename-raises-window-renamed renamed \
+    "$(main_client show-environment -g RENEVENT | sed 's/^RENEVENT=//')"
+check_equal allow-rename-skips-after-rename-window none \
+    "$(main_client show-environment -g RENHOOK | sed 's/^RENHOOK=//')"
+main_client set-hook -gu after-rename-window
+main_client set-hook -gu window-renamed
 
 check_equal backspace-defaults-to-c-question "C-?" "$(main_client show-options -s -v backspace)"
 main_client new-window -t "=$session" -n bspace "$visible"
@@ -181,7 +217,7 @@ await_line "$literal_pane" 'A'
 check_equal backspace-writes-a-literal-code A \
     "$(main_client capture-pane -p -t "$literal_pane" | tr -d ' \n')"
 
-if [ "$check_count" -ne 19 ]; then
+if [ "$check_count" -ne 24 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then

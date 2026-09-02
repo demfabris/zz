@@ -136,13 +136,25 @@ await_gone wok || { echo "remain-on-exit-format-$side: wok"; exit 0; }
 check_equal failed-closes-a-clean-exit 0 \
     "$(main_client list-windows -t "=$session" -F '#{window_name}' | grep -c '^wok$' || true)"
 
+# format_single runs with no job, so `#()` expands to nothing, and
+# format_draw paints the `#[...]` styles into the notice's cells.
+main_client set-option -g remain-on-exit-format '#[bold]X#(echo SHELL)Y'
+main_client new-window -t "=$session" -n wstyled 'sh -c "exit 3"'
+await_dead wstyled || { echo "remain-on-exit-format-$side: wstyled"; exit 0; }
+check_screen styled-notice-drops-the-shell-and-draws-text XY wstyled
+# capture-pane -e spells the run differently on the two engines (the pin
+# emits the bold alone, zz always names both colours), so only the bold
+# parameter ahead of the text is asserted.
+check_equal styled-notice-is-bold 1 \
+    "$(main_client capture-pane -pe -t "=$session:wstyled" | grep -cE '\[(1|0;1;[0-9;]*)mXY' || true)"
+
 main_client set-option -g remain-on-exit off
 main_client new-window -t "=$session" -n woff 'sh -c "exit 6"'
 await_gone woff || { echo "remain-on-exit-format-$side: woff"; exit 0; }
 check_equal off-closes-the-pane 0 \
     "$(main_client list-windows -t "=$session" -F '#{window_name}' | grep -c '^woff$' || true)"
 
-if [ "$check_count" -ne 8 ]; then
+if [ "$check_count" -ne 10 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then

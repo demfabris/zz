@@ -937,6 +937,8 @@ pub enum MuxEffect {
         pane: PaneId,
         duration_ms: u32,
         selectable: bool,
+        template: Option<CommandPromptTemplate>,
+        source: Option<SourceSpan>,
     },
     DisplayMessage {
         pane: Option<PaneId>,
@@ -4007,7 +4009,7 @@ impl MuxEngine {
             "choose-tree" => self.choose_tree(context, command)?,
             "choose-buffer" => self.choose_buffer(context, command)?,
             "display-message" => self.display_message(context, &command.args, hooks)?,
-            "display-panes" => self.display_panes(context, &command.args)?,
+            "display-panes" => self.display_panes(context, command)?,
             "clear-history" => self.clear_history(context, &command.args)?,
             "bind-key" => self.bind_key(command)?,
             "unbind-key" => self.unbind_key(&command.args)?,
@@ -7693,14 +7695,28 @@ impl MuxEngine {
     fn display_panes(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        invocation: &CommandInvocation,
     ) -> Result<Execution, ServerError> {
+        let args = &invocation.args;
+        let spec = command_spec("display-panes").expect("executable command has catalog metadata");
+        let parsed_options = parse_tmux_command_options(spec, invocation)?;
+        let positional_start = args.len().saturating_sub(parsed_options.positionals.len());
         let (options, positional) = parse_command_options("display-panes", args)?;
-        if !positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
-                "display-panes command templates are not supported yet".to_owned(),
-            ));
-        }
+        // `args_make_commands_prepare` with `select-pane -t "%%%"` as the
+        // default: the optional argument follows ARGS_PARSE_COMMANDS_OR_STRING,
+        // so a `{ ... }` block keeps its parsed command list.
+        let template = positional
+            .first()
+            .map(|template| {
+                if invocation.argument_is_command_block(positional_start) {
+                    let body = crate::parser::command_block_body(template).unwrap_or(template);
+                    self.prepare_frozen_callback_commands(body, true, "display-panes")
+                        .map(CommandPromptTemplate::Commands)
+                } else {
+                    Ok(CommandPromptTemplate::String(template.clone()))
+                }
+            })
+            .transpose()?;
         let pane = self.resolve_pane(None, context.window, context.pane)?;
         let duration_ms = options.value("-d").map_or_else(
             || {
@@ -7723,6 +7739,8 @@ impl MuxEngine {
             pane,
             duration_ms,
             selectable: !options.has("-N"),
+            template,
+            source: invocation.source.clone(),
         }))
     }
 
@@ -37167,6 +37185,8 @@ mod tests {
                     pane,
                     duration_ms,
                     selectable: true,
+                    template: None,
+                    source: None,
                 }]
             );
         }
@@ -37185,6 +37205,8 @@ mod tests {
                 pane,
                 duration_ms: 1_000,
                 selectable: true,
+                template: None,
+                source: None,
             }]
         );
         assert!(matches!(
@@ -37210,6 +37232,8 @@ mod tests {
                 pane,
                 duration_ms: 1200,
                 selectable: true,
+                template: None,
+                source: None,
             }]
         );
 
@@ -37225,14 +37249,32 @@ mod tests {
                 pane,
                 duration_ms: 1200,
                 selectable: false,
+                template: None,
+                source: None,
             }]
         );
-        for args in [vec!["select-pane -t %%%"], vec!["-d", "forever"]] {
-            assert!(matches!(
-                engine.execute(&mut context, &command("display-panes", &args)),
-                Err(ServerError::InvalidCommand(_))
-            ));
-        }
+        assert!(matches!(
+            engine.execute(&mut context, &command("display-panes", &["-d", "forever"])),
+            Err(ServerError::InvalidCommand(_))
+        ));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("display-panes", &["select-pane -t %%%"]),
+                )
+                .unwrap()
+                .effects,
+            vec![MuxEffect::DisplayPanes {
+                pane,
+                duration_ms: 1200,
+                selectable: true,
+                template: Some(CommandPromptTemplate::String(
+                    "select-pane -t %%%".to_owned()
+                )),
+                source: None,
+            }]
+        );
     }
 
     #[test]

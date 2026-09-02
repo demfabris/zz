@@ -395,7 +395,7 @@
         "Graceful EOF and a blank Return keep the originating queue alive until its pending hook and source work drains, preserving output and retained status before the client exits."
       ],
       "depends_on": [],
-      "reason": "zz now cancels a background if-shell or run-shell callback when its origin is gone before callback entry, but immediate hook and source replay has no connection-owned cancellation token once command execution has started. Pinned tmux frees the remaining client-owned queue on hard connection loss while letting the in-flight worker finish. The daemon reader cannot see that loss yet: crates/zz-daemon/src/daemon.rs gives only ClientKind::Command a per-connection command worker and moves the execution context into it, while a Control client runs every request inline on the same thread that reads the socket, so a blocked command holds the reader. Giving Control the same worker means sharing the context the reader still needs for attach and session-change handling, which is the architecture half of this group. Graceful EOF follows a different drain path, re-measured against the pin on 2026-09-01 by piping three commands at once into `-C attach-session` and closing stdin: three `display-message -p` lines run all three on the pin and only the first on zz; a blocking `run-shell` first runs nothing on either; blocking second runs the first on both; blocking third runs the first two on the pin and only the first on zz. So the pin executes every queued command up to and including the first queue-yielding one and discards the rest. zz's control client truncates the pending stdin queue to a single command (retain_first_initial_stdin_before_eof in crates/zz/src/control_mode.rs), which only matches the shape where the first queued command blocks. The client cannot tell a yielding command from a fast one on its own, and a static roster of blocking verbs would be a guess, so the drain fix wants the same per-connection worker to report that a request yielded the queue. Re-confirmed 2026-09-01 from the outside while building smoke/client-resize-context: piping `refresh-client -C 120,40`, a second identical report, a `display-message -p` and `detach-client` into `-C attach-session` runs all four on the pin and only the first on zz, so that scenario had to open one Control connection per size report. Any Control differential that needs two commands down one pipe is blocked on this group."
+      "reason": "zz now cancels a background if-shell or run-shell callback when its origin is gone before callback entry, but immediate hook and source replay has no connection-owned cancellation token once command execution has started. Pinned tmux frees the remaining client-owned queue on hard connection loss while letting the in-flight worker finish. The daemon reader cannot see that loss yet: crates/zz-daemon/src/daemon.rs gives only ClientKind::Command a per-connection command worker and moves the execution context into it, while a Control client runs every request inline on the same thread that reads the socket, so a blocked command holds the reader. Giving Control the same worker means sharing the context the reader still needs for attach and session-change handling, which is the architecture half of this group. Graceful EOF follows a different drain path, re-measured against the pin on 2026-09-01 by piping three commands at once into `-C attach-session` and closing stdin: three `display-message -p` lines run all three on the pin and only the first on zz; a blocking `run-shell` first runs nothing on either; blocking second runs the first on both; blocking third runs the first two on the pin and only the first on zz. So the pin executes every queued command up to and including the first queue-yielding one and discards the rest. zz's control client truncates the pending stdin queue to a single command (retain_first_initial_stdin_before_eof in crates/zz/src/control_mode.rs), which only matches the shape where the first queued command blocks. The client cannot tell a yielding command from a fast one on its own, and a static roster of blocking verbs would be a guess, so the drain fix wants the same per-connection worker to report that a request yielded the queue. Re-confirmed 2026-09-01 from the outside while building smoke/client-resize-context: piping `refresh-client -C 120,40`, a second identical report, a `display-message -p` and `detach-client` into `-C attach-session` runs all four on the pin and only the first on zz, so that scenario had to open one Control connection per size report. Any Control differential that needs two commands down one pipe is blocked on this group. 2026-09-02, from the command-prompt -t and display-panes waits: the parked-item half of that foundation now exists in two places and is cheap. A `crossbeam_channel::Sender<()>` lives on the overlay state (CommandPrompt.waiter, DisplayPanesSession.waiter), the issuing thread installs it under the same lock that proves the overlay is still up and then blocks on the receiver, and dropping the overlay wakes it, so every exit path (answer, cancel, dismissal, timer, detach, disconnect) is covered without touching each one. An answer hands the sender out to the outcome so it is released only after the answer's own commands have run, which is cmdq_insert_after before cmdq_continue. What that mechanism does NOT give either of these groups is the other half: it parks a whole daemon thread, so it is only installed for Command and Control invokers and never for an Interactive one, whose commands run on the very thread that would deliver the key that unparks them. A per-connection worker that can yield a request and resume it later is still what both of these need, and neither the prompt nor the display-panes wait moves toward it."
     },
     {
       "id": "copy-mode.action-fidelity",
@@ -625,60 +625,6 @@
       ],
       "depends_on": [],
       "reason": "The shared expander returns only the final string and has no structured trace sink for nested conditions, modifiers, lookups, and replacements."
-    },
-    {
-      "id": "display-panes.command-template",
-      "title": "Execute display-panes selection templates",
-      "decision": "park",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "daily",
-        "scripts"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:display-panes-command-template"
-      ],
-      "evidence": [
-        "resource:crates/zz-protocol/src/catalog.rs",
-        "resource:crates/zz-mux/src/command.rs",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "Selecting a pane substitutes its `%pane` ID for `%%%` in an optional string or typed template and executes the result with the retained original queue state; an omitted template uses `select-pane -t \"%%%\"`.",
-        "Attached-client tests prove template success and failure without absorbing queue blocking or presentation behavior."
-      ],
-      "depends_on": [],
-      "reason": "The grammar now accepts and constructs the optional template, but mux execution rejects a positional value. Pinned tmux substitutes the selected `%pane` for `%%%` and executes with the original queue state; zz's native overlay instead has a fixed select-pane action."
-    },
-    {
-      "id": "display-panes.queue-semantics",
-      "title": "Wait for display-panes overlays",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts",
-        "daily"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:display-panes-queue-blocking"
-      ],
-      "evidence": [
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "A command sequence resumes after the targeted overlay closes unless -b is present."
-      ],
-      "depends_on": [
-        "clients.interactive-refresh"
-      ],
-      "reason": "zz has no parked command-queue item tied to a client overlay lifetime."
     },
     {
       "id": "display-popup.behavior-fidelity",
@@ -2148,7 +2094,7 @@
         "Pane exit or signal resumes the parked queue before remain-on-exit retention or pane removal and propagates the exact exit status or 128 plus signal status to the originating unattached client."
       ],
       "depends_on": [],
-      "reason": "Pinned tmux closes the successful Control guard immediately, parks later queue items on the pane wait item, then propagates exit or signal status and wakes the queue before retention or removal. -W stays loudly unsupported until this foundation integrates across protocol-message, control-client, daemon-core, mux-command, and protocol-catalog."
+      "reason": "Pinned tmux closes the successful Control guard immediately, parks later queue items on the pane wait item, then propagates exit or signal status and wakes the queue before retention or removal. -W stays loudly unsupported until this foundation integrates across protocol-message, control-client, daemon-core, mux-command, and protocol-catalog. 2026-09-02, from the command-prompt -t and display-panes waits: the parked-item half of that foundation now exists in two places and is cheap. A `crossbeam_channel::Sender<()>` lives on the overlay state (CommandPrompt.waiter, DisplayPanesSession.waiter), the issuing thread installs it under the same lock that proves the overlay is still up and then blocks on the receiver, and dropping the overlay wakes it, so every exit path (answer, cancel, dismissal, timer, detach, disconnect) is covered without touching each one. An answer hands the sender out to the outcome so it is released only after the answer's own commands have run, which is cmdq_insert_after before cmdq_continue. What that mechanism does NOT give either of these groups is the other half: it parks a whole daemon thread, so it is only installed for Command and Control invokers and never for an Interactive one, whose commands run on the very thread that would deliver the key that unparks them. A per-connection worker that can yield a request and resume it later is still what both of these need, and neither the prompt nor the display-panes wait moves toward it."
     },
     {
       "id": "pane.floating-model",
@@ -3384,6 +3330,19 @@
       "resolution": "For a valid display-message target whose session has no attached clients, format expansion selects the globally most-active attached client when -c is absent, resolves to another session, or misses. Client activity orders candidates, and the oldest-created client wins an equal-activity tie. client_session comes from that selected client's actual attachment, while session, window, and pane facts remain scoped to the retained -t target. With zero attached clients, client facts stay empty; a missing target session leaves client, session, window, and pane facts empty through the existing CANFAIL path. At this checkpoint, an attached target session without -c still supplied no client facts under clients.context-formats; the protocol v83 closure now selects that session's best client. The fallback changes only the display-message command-format hook. Delivery, duration selection, printing routing and lifecycle, buffer-path context, and Command-client selection are unchanged. Sequential zz-daemon tests pass 599/599. Focused daemon coverage proves global activity selection and zero-client behavior; scoped attached-client probes pass on zz and pinned tmux for absent, cross-session, and unresolved -c cases. The debug build, strict daemon clippy, and fmt pass. One independent run completed the attached-client harness, but later current runs passed the scoped fallback probes and then failed at unrelated nested-attach terminal-query interleaving. The full harness is not stably green, and this close makes no canonical-suite claim."
     },
     {
+      "id": "display-panes.command-template",
+      "title": "Execute display-panes selection templates",
+      "closed_on": "2026-09-02",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/smoke/display-panes-template.txt"
+      ],
+      "resolution": "display-panes carries its optional template through the mux effect and runs it when a pane is chosen. cmd_display_panes_exec prepares the template with args_make_commands_prepare and `select-pane -t \"%%%\"` as the default command, and cmd_display_panes_key substitutes the chosen pane's `%id` as argument 1 before appending the result to the queue, so the trailing `%` in the default is cmd_template_replace's quoting form, not a third substitution. zz builds the same template in the mux (ARGS_PARSE_COMMANDS_OR_STRING, so a `{ ... }` block keeps its parsed command list) and the daemon runs it through the path command-prompt already used, now shared as submit_template with the origin name as its only difference. Proved on attached pty clients on both binaries in smoke/display-panes-template: a template that records the chosen pane answers `chose-<%id>` for the second pane, the omitted template selects that pane, and a template that fails at run time closes the overlay, leaves both panes alive, and lets the rest of the chain follow. One measured divergence stays open and belongs to the command-queue foundation rather than to this group: the pin's failing template rides the issuing client's own queue (cmdq_insert_after), so `display-panes -t C -d 0 'kill-pane -t nosuchpanename' ; set-environment ...` exits 1 on the pin and 0 on zz, whose overlay execution runs entirely in the interactive client's context. The differential asserts what both sides agree on and records the status difference here rather than asserting zz's answer."
+    },
+    {
       "id": "display-panes.gpui-escape-fallthrough",
       "title": "Fall through display-panes Escape and unmatched input",
       "closed_on": "2026-08-25",
@@ -3393,6 +3352,17 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "A writable valid display-panes selection is consumed without activity. An unmatched raw key or native GPUI Close tears down the overlay and then follows ordinary key dispatch and activity accounting; Close synthesizes Escape so its press falls through while its later release remains swallowed. Non-hover mouse press, drag, release, and wheel input likewise close the overlay before following ordinary terminal-view input, including latest-geometry and bell accounting. Bare buttonless Motion remains consumed without activity as a deliberate native hover-presentation choice. A deadline timeout closes the overlay without fabricating input or activity. Read-only raw keys and Close bypass overlay consumption into root-table resolution, native selection is rejected after activity and latest-geometry accounting, and safe local view actions reach the pane; each retains the overlay and preserves the pane bell."
+    },
+    {
+      "id": "display-panes.queue-semantics",
+      "title": "Wait for display-panes overlays",
+      "closed_on": "2026-09-02",
+      "evidence": [
+        "resource:knowledge/tmux/divergences.md",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/smoke/display-panes-template.txt"
+      ],
+      "resolution": "cmd_display_panes_exec returns CMD_RETURN_WAIT unless -b, and cmd_display_panes_free calls cmdq_continue, so the issuing queue resumes whichever way the overlay ends. zz now parks a command or control invoker on a waiter stored in DisplayPanesSession; the waiter is released when the session is dropped, which take_display_panes, the deadline expiry, overlay dismissal and client disconnect all do, and a selection holds it until the template's own commands have run. Measured on both binaries in smoke/display-panes-template with an attached pty client: with -d 0 a chained set-environment stays pending until a pane is chosen and then runs, -b returns at exit 0 with the template still unrun and its answer landing later, -d 700 releases the chain after the timer with the template unrun, and -N keeps the wait while dropping the key handler so only the timer ends it. The wait is only installed for Command and Control invokers, the same limit display-menu already carries: zz executes an interactive client's own commands on the thread that would have to deliver the answering key, so blocking there would deadlock. That is a real divergence from the pin, where a key binding's queue blocks too, and it is the same foundation control-mode.disconnect-cancels-command-queue and pane.command-completion need."
     },
     {
       "id": "formats.buffer-context",

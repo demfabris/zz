@@ -1,0 +1,12 @@
+corpus: none
+# display-panes runs its optional template with the chosen pane's %id
+# substituted for %%%, defaulting to select-pane -t "%%%", and CMD_RETURN_WAIT
+# parks the issuing chain on the overlay until a pane is chosen, the timer runs
+# out, or the client leaves. -b clears the wait, -N drops the key handler but
+# keeps it, and a template that fails at run time reaches the client without
+# failing display-panes or stopping the chain.
+stage: fixtures/display-panes-template.sh ~/display-panes-template.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu DISPLAY_PANES_TEMPLATE
+run-shell 'sh ~/display-panes-template.sh'
+out: show-environment -g DISPLAY_PANES_TEMPLATE

@@ -140,6 +140,7 @@
 | smoke/display-menu-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-menu-shortcut-grammar | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-menu-style-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-panes-template | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-style-refresh | 3 | yes | 0 | yes | yes | yes |
 | smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |

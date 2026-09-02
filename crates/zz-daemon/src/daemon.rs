@@ -133,6 +133,9 @@ const MAX_CONTEXT_PATH_BYTES: usize = 4 * 1024;
 const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_ITEMS: usize = 20;
 const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_BYTES: usize = 32 * 1024;
 const MAX_COMMAND_PROMPT_OUTPUT_BYTES: usize = 1024 * 1024;
+/// `cmd_display_panes_exec`'s `default_command`.
+const DISPLAY_PANES_DEFAULT_TEMPLATE: &str = "select-pane -t \"%%%\"";
+
 const COMMAND_PROMPT_OUTPUT_TRUNCATED: &str = "… output truncated";
 const MAX_STARTUP_CONFIG_PREVIEW_BYTES: usize = 64 * 1024;
 const STARTUP_CONFIG_PREVIEW_TRUNCATED: &str =
@@ -5945,15 +5948,20 @@ impl Shared {
             )?;
             let inner = self.inner.lock();
             let target = resolve_client_target(&inner, client, kind, parsed.value('t'))?;
-            let kind = inner
+            let target_kind = inner
                 .client_kinds
                 .get(&target)
                 .copied()
                 .unwrap_or(ClientKind::Command);
-            let terminal = client_terminal(&inner, target, kind);
+            let terminal = client_terminal(&inner, target, target_kind);
             let mut context = context.clone();
             retarget_context_to_attachment(&inner, target, &mut context);
-            Some((target, kind, terminal, context))
+            // `cmd_display_panes_exec` parks the issuing queue on
+            // `CMD_RETURN_WAIT` unless `-b`; `-N` still waits, it only drops
+            // the key handler.
+            let wait =
+                matches!(kind, ClientKind::Command | ClientKind::Control) && !parsed.has('b');
+            Some((target, target_kind, terminal, context, wait))
         } else {
             None
         };
@@ -5962,10 +5970,10 @@ impl Shared {
         } else {
             None
         };
-        let result = if let Some((target, target_kind, target_terminal, mut target_context)) =
+        let result = if let Some((target, target_kind, target_terminal, mut target_context, wait)) =
             display_panes_target
         {
-            self.execute_with_mux_source_inner(
+            let result = self.execute_with_mux_source_inner(
                 target,
                 target_kind,
                 &mut target_context,
@@ -5973,7 +5981,11 @@ impl Shared {
                 mux_source,
                 target_terminal,
                 queue_execution,
-            )
+            );
+            if result.is_ok() && wait {
+                self.wait_for_display_panes(target);
+            }
+            result
         } else if let Some(mut route) = prompt_route {
             let result = self.execute_with_mux_source_inner(
                 route.client,
@@ -6082,6 +6094,25 @@ impl Shared {
             command: routed,
             wait,
         }))
+    }
+
+    /// `cmd_display_panes_free` calls `cmdq_continue`, so the issuing queue
+    /// resumes whichever way the overlay closes: a chosen pane, a key that is
+    /// not an index, the timer, or the client leaving.
+    fn wait_for_display_panes(self: &Arc<Self>, target: ClientId) {
+        let wait = {
+            let mut inner = self.inner.lock();
+            let Some(overlay) = inner.display_panes.get_mut(&target) else {
+                return;
+            };
+            if overlay.waiter.is_some() {
+                return;
+            }
+            let (wake, wait) = crossbeam_channel::bounded(1);
+            overlay.waiter = Some(wake);
+            wait
+        };
+        let _ = wait.recv();
     }
 
     /// The `cmdq_wait` half: the issuing queue resumes when
@@ -7606,6 +7637,8 @@ impl Shared {
                         pane,
                         duration_ms,
                         selectable,
+                        template,
+                        source,
                     } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
@@ -7657,6 +7690,9 @@ impl Shared {
                                 state: state.clone(),
                                 deadline,
                                 cancel: deadline.map(|_| self.display_panes_deadline_tx.clone()),
+                                template: template.clone(),
+                                source: source.clone(),
+                                waiter: None,
                             },
                         );
                         if let Some(deadline) = deadline {
@@ -16537,7 +16573,14 @@ impl Shared {
                         .iter()
                         .any(|indicator| indicator.pane == pane)
                 {
-                    self.select_display_pane(client, kind, context, pane)?;
+                    self.select_display_pane(
+                        client,
+                        kind,
+                        context,
+                        pane,
+                        overlay.template.clone(),
+                        overlay.source.clone(),
+                    )?;
                 }
             }
             DisplayPanesAction::Key(input) => {
@@ -16568,7 +16611,14 @@ impl Shared {
                         .entry(client)
                         .or_default()
                         .insert(input_key_name(&input).into_string());
-                    self.select_display_pane(client, kind, context, pane)?;
+                    self.select_display_pane(
+                        client,
+                        kind,
+                        context,
+                        pane,
+                        overlay.template.clone(),
+                        overlay.source.clone(),
+                    )?;
                 } else if self
                     .inner
                     .lock()
@@ -16591,12 +16641,18 @@ impl Shared {
         Ok(())
     }
 
+    /// `cmd_display_panes_key`: unzoom, then run the template with the chosen
+    /// pane's `%id` as its only argument. The default template is
+    /// `select-pane -t "%%%"`, whose trailing `%` is `cmd_template_replace`'s
+    /// quoting form.
     fn select_display_pane(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
         context: &mut ExecutionContext,
         pane: PaneId,
+        template: Option<CommandPromptTemplate>,
+        source: Option<SourceSpan>,
     ) -> Result<(), DaemonError> {
         let zoomed = {
             let inner = self.inner.lock();
@@ -16616,13 +16672,20 @@ impl Shared {
                 &CommandInvocation::new("resize-pane", ["-Z", "-t", &pane.to_string()]),
             )?;
         }
-        self.execute_gesture(
+        self.submit_template(
             client,
             kind,
             context,
-            "display_panes_select",
-            &CommandInvocation::new("select-pane", ["-t", &pane.to_string()]),
-        )
+            &CommandPromptSubmission {
+                inputs: vec![pane.to_string()],
+                template: Some(template.unwrap_or_else(|| {
+                    CommandPromptTemplate::String(DISPLAY_PANES_DEFAULT_TEMPLATE.to_owned())
+                })),
+                source,
+            },
+            "display-panes",
+        );
+        Ok(())
     }
 
     fn execute_gesture(
@@ -17303,6 +17366,20 @@ impl Shared {
         context: &mut ExecutionContext,
         submission: &CommandPromptSubmission,
     ) {
+        self.submit_template(client, kind, context, submission, "command-prompt");
+    }
+
+    /// `args_make_commands` plus the queue append behind it: `command-prompt`
+    /// and `display-panes` share the whole path and differ only in the name
+    /// their diagnostics and callback preparation carry.
+    fn submit_template(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        submission: &CommandPromptSubmission,
+        origin: &str,
+    ) {
         let typed = matches!(
             &submission.template,
             Some(CommandPromptTemplate::Commands(_))
@@ -17319,10 +17396,11 @@ impl Shared {
                     MuxEngine::substitute_command_prompt_template(template, &submission.inputs);
                 let prepared = {
                     let inner = self.inner.lock();
+                    let origin_source = format!("<{origin}>");
                     let source = submission
                         .source
                         .as_ref()
-                        .map_or("<command-prompt>", |source| source.source.as_str());
+                        .map_or(origin_source.as_str(), |source| source.source.as_str());
                     let mut parsed = inner.engine.parse_config(source, &command);
                     if let Some(source) = &submission.source {
                         shift_command_prompt_source(&mut parsed, source);
@@ -17341,10 +17419,10 @@ impl Shared {
                         let mut commands = parsed.commands;
                         let mut error = None;
                         for command in &mut commands {
-                            if let Err(cause) = inner.engine.prepare_callback_invocations(
-                                std::slice::from_mut(command),
-                                "command-prompt",
-                            ) {
+                            if let Err(cause) = inner
+                                .engine
+                                .prepare_callback_invocations(std::slice::from_mut(command), origin)
+                            {
                                 error = Some(submission.source.as_ref().map_or_else(
                                     || cause.tmux_message(),
                                     |_| config_command_error(command, &cause.tmux_message()),
@@ -24871,6 +24949,14 @@ struct DisplayPanesSession {
     state: DisplayPanesState,
     deadline: Option<Instant>,
     cancel: Option<crossbeam_channel::Sender<DisplayPanesDeadlineCommand>>,
+    /// `cdata->state`: the optional template, kept whole so a selection can run
+    /// `args_make_commands` against the chosen pane the way
+    /// `cmd_display_panes_key` does.
+    template: Option<CommandPromptTemplate>,
+    source: Option<SourceSpan>,
+    /// `cdata->item`: the queue parked on the overlay, released when the
+    /// session is dropped, which `cmd_display_panes_free` mirrors exactly.
+    waiter: Option<crossbeam_channel::Sender<()>>,
 }
 
 impl DisplayPanesSession {
@@ -74380,13 +74466,16 @@ bind - split-window -v -c "#{pane_current_path}"
                 if message == "no current client"
         ));
 
+        // `-b` because `cmd_display_panes_exec` otherwise returns
+        // `CMD_RETURN_WAIT` and a `-d 0` overlay with nobody to close it parks
+        // the command client for good, on the pin as much as here.
         let (shared, target, _, mut context) = popup_test_workspace("target");
         shared
             .execute(
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("display-panes", ["-d", "0"]),
+                &CommandInvocation::new("display-panes", ["-b", "-d", "0"]),
             )
             .expect("targetless command with an attached client");
         assert!(shared.inner.lock().display_panes.contains_key(&target));

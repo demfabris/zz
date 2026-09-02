@@ -1,0 +1,17 @@
+corpus: none
+# A popup's Kitty images are zz's own presentation contract, not a fidelity
+# gap: the pinned tree at d77c9dc6 has no image protocol anywhere - the string
+# kitty appears in none of its sources, popup.c has no image or sixel branch,
+# and its config.h never defines ENABLE_SIXEL - so popup content goes through
+# input_parse_screen into the popup's own screen and the pinned client draws no
+# graphics escape at all. Both sides run the same probe against a client
+# attached on a real pty that answers the graphics query the way a Kitty
+# terminal does, and each asserts what its own binary owes: zz places the
+# popup's image at the content origin inside the border, retires the placement
+# it replaces and deletes what it placed when the popup closes, while the pin
+# draws the popup's text and never emits a graphics escape.
+stage: fixtures/display-popup-kitty.sh ~/display-popup-kitty.sh
+stage: fixtures/graphics-drive.py ~/graphics-drive.py
+out: set-environment -gu DISPLAY_POPUP_KITTY
+run-shell 'sh ~/display-popup-kitty.sh'
+out: show-environment -g DISPLAY_POPUP_KITTY

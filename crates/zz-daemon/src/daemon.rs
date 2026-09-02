@@ -2830,6 +2830,10 @@ fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
 struct Shared {
     inner: Mutex<ServerState>,
     client_writers: Mutex<BTreeMap<ClientId, Arc<OutboundMailbox>>>,
+    /// One flag per connection that owns a command queue. `server_client_lost`
+    /// frees the lost client's `cmdq`, so every queue loop this client owns
+    /// stops between items once its reader has left.
+    command_queue_cancels: Mutex<BTreeMap<ClientId, Arc<AtomicBool>>>,
     response_admissions: Mutex<ResponseAdmissionState>,
     response_admissions_changed: Condvar,
     default_attach_effects: Mutex<()>,
@@ -3901,6 +3905,7 @@ impl Shared {
         Self {
             inner: Mutex::new(state),
             client_writers: Mutex::new(BTreeMap::new()),
+            command_queue_cancels: Mutex::new(BTreeMap::new()),
             response_admissions: Mutex::new(ResponseAdmissionState::default()),
             response_admissions_changed: Condvar::new(),
             default_attach_effects: Mutex::new(()),
@@ -5391,6 +5396,29 @@ impl Shared {
         admitted
     }
 
+    /// The wire half of `CMD_RETURN_WAIT`: the queue this thread runs is about
+    /// to block on something that answers later, so tell the client once that
+    /// nothing else it queued runs until this request resumes.
+    fn report_command_queue_park(&self) {
+        let Some((client, request_id)) = take_unreported_command_queue_park() else {
+            return;
+        };
+        let Some(writer) = self.client_writers.lock().get(&client).cloned() else {
+            return;
+        };
+        let _ = writer.enqueue_reliable(&ProtocolMessage::CommandQueueParked { request_id });
+    }
+
+    /// Whether the connection that owns this client's command queue has gone.
+    /// `server_client_lost` frees the queue, so a loop that is between items
+    /// stops here and the items it has not started never run.
+    fn command_queue_cancelled(&self, client: ClientId) -> bool {
+        self.command_queue_cancels
+            .lock()
+            .get(&client)
+            .is_some_and(|cancel| cancel.load(Ordering::Acquire))
+    }
+
     fn prepare_command_request(
         &self,
         client: ClientId,
@@ -6303,6 +6331,7 @@ impl Shared {
             overlay.waiter = Some(wake);
             wait
         };
+        self.report_command_queue_park();
         let _ = wait.recv();
     }
 
@@ -6322,6 +6351,7 @@ impl Shared {
             prompt.waiter = Some(wake);
             wait
         };
+        self.report_command_queue_park();
         let _ = wait.recv();
     }
 
@@ -9482,6 +9512,7 @@ impl Shared {
                 });
                 (token, receiver)
             };
+            self.report_command_queue_park();
             let _ = receiver.1.recv();
             remove_wait_item(&mut self.inner.lock(), name, receiver.0);
             return Ok(Execution::default());
@@ -9539,6 +9570,7 @@ impl Shared {
             });
             (token, receiver)
         };
+        self.report_command_queue_park();
         let _ = receiver.1.recv();
         remove_wait_item(&mut self.inner.lock(), name, receiver.0);
         Ok(Execution::default())
@@ -10322,6 +10354,7 @@ impl Shared {
                     self.spawn_delay(delay, move || {
                         let _ = sender.send(());
                     })?;
+                    self.report_command_queue_park();
                     receiver.recv().map_err(|error| {
                         DaemonError::Thread(format!("run-shell delay worker stopped: {error}"))
                     })?;
@@ -10417,6 +10450,7 @@ impl Shared {
                     self.spawn_delay(delay, move || {
                         let _ = sender.send(());
                     })?;
+                    self.report_command_queue_park();
                     receiver.recv().map_err(|error| {
                         DaemonError::Thread(format!("run-shell delay worker stopped: {error}"))
                     })?;
@@ -10559,6 +10593,7 @@ impl Shared {
                             let _ = sender.send(result);
                         },
                     )?;
+                    self.report_command_queue_park();
                     let result = receiver.recv().map_err(|error| {
                         DaemonError::Thread(format!("run-shell worker stopped: {error}"))
                     })?;
@@ -10793,6 +10828,7 @@ impl Shared {
                 let _ = sender.send(result);
             },
         )?;
+        self.report_command_queue_park();
         let result = receiver
             .recv()
             .map_err(|error| DaemonError::Thread(format!("if-shell worker stopped: {error}")))?;
@@ -11038,6 +11074,7 @@ impl Shared {
         let mut failed_group = None;
         for command in parsed.commands {
             if mode.queue_execution().has_yielded()
+                || self.command_queue_cancelled(client)
                 || self.stopping.load(Ordering::Acquire)
                     && !mode.queue_execution().is_draining()
                     && !mode.queue_execution().detached
@@ -13220,6 +13257,7 @@ impl Shared {
         if !matches!(kind, ClientKind::Command | ClientKind::Control) {
             return Ok(Execution::default());
         }
+        self.report_command_queue_park();
         let exit_code = wait.recv().unwrap_or(129);
         if exit_code == 0 {
             Ok(Execution::default())
@@ -13701,6 +13739,7 @@ impl Shared {
         }
         self.publish_to_client(target_client, EventPayload::Menu { state: Some(state) });
         if matches!(kind, ClientKind::Command | ClientKind::Control) {
+            self.report_command_queue_park();
             let _ = wait.recv();
         }
         Ok(Execution::default())
@@ -13845,6 +13884,7 @@ impl Shared {
         if parsed.background || !matches!(kind, ClientKind::Command | ClientKind::Control) {
             return Ok(Execution::default());
         }
+        self.report_command_queue_park();
         let accepted = wait.recv().unwrap_or(false);
         if !accepted {
             return Err(DaemonError::CommandExit {
@@ -22994,6 +23034,9 @@ impl Shared {
         let mut failed_group = None;
         for prepared in commands {
             if queue_execution.has_yielded()
+                || options
+                    .replay_client
+                    .is_some_and(|client| self.command_queue_cancelled(client))
                 || self.stopping.load(Ordering::Acquire)
                     && !queue_execution.is_draining()
                     && !queue_execution.detached
@@ -35083,6 +35126,32 @@ fn ensure_browser_attached(inner: &ServerState, pane: PaneId) -> Result<(), Serv
     }
 }
 
+thread_local! {
+    /// The request the calling thread is running for a Control client, until
+    /// its first park is reported. `cmdq_next` stops the whole queue on a
+    /// waiting item, so one report per request is the whole fact.
+    static COMMAND_QUEUE_PARK: Cell<Option<(ClientId, u64)>> = const { Cell::new(None) };
+}
+
+struct CommandQueueParkScope;
+
+impl CommandQueueParkScope {
+    fn new(client: ClientId, request_id: u64) -> Self {
+        COMMAND_QUEUE_PARK.with(|park| park.set(Some((client, request_id))));
+        Self
+    }
+}
+
+impl Drop for CommandQueueParkScope {
+    fn drop(&mut self) {
+        COMMAND_QUEUE_PARK.with(|park| park.set(None));
+    }
+}
+
+fn take_unreported_command_queue_park() -> Option<(ClientId, u64)> {
+    COMMAND_QUEUE_PARK.with(Cell::take)
+}
+
 fn handle_connection<S: TransportStream>(
     mut stream: S,
     shared: &Arc<Shared>,
@@ -35215,42 +35284,64 @@ fn handle_connection<S: TransportStream>(
             })
             .unwrap_or_default()
     };
-    let (command_sender, command_worker, mut context) = if hello.kind == ClientKind::Command {
-        let (sender, receiver) = crossbeam_channel::unbounded::<CommandRequest>();
-        let worker_shared = Arc::clone(shared);
-        let worker_outbound = Arc::clone(&outbound);
-        let worker = match thread::Builder::new()
-            .name(format!("zz-client-command-{}", client.0))
-            .spawn(move || {
-                let mut context = context;
-                while let Ok(CommandRequest {
-                    request_id,
-                    command,
-                    prepared,
-                }) = receiver.recv()
-                {
-                    let _ = worker_shared.execute_command_request_with_prepared_into(
-                        &worker_outbound,
-                        client,
-                        ClientKind::Command,
-                        &mut context,
+    let command_queue_cancel = Arc::new(AtomicBool::new(false));
+    let (command_sender, command_worker, mut context) =
+        if matches!(hello.kind, ClientKind::Command | ClientKind::Control) {
+            let (sender, receiver) = crossbeam_channel::unbounded::<CommandRequest>();
+            let worker_shared = Arc::clone(shared);
+            let worker_outbound = Arc::clone(&outbound);
+            let worker_cancel = Arc::clone(&command_queue_cancel);
+            let worker_kind = hello.kind;
+            let reader_context = (worker_kind == ClientKind::Control).then(|| context.clone());
+            shared
+                .command_queue_cancels
+                .lock()
+                .insert(client, Arc::clone(&command_queue_cancel));
+            let worker = match thread::Builder::new()
+                .name(format!("zz-client-command-{}", client.0))
+                .spawn(move || {
+                    let mut context = context;
+                    while let Ok(CommandRequest {
                         request_id,
-                        &command,
+                        command,
                         prepared,
-                    );
+                    }) = receiver.recv()
+                    {
+                        if worker_cancel.load(Ordering::Acquire) {
+                            continue;
+                        }
+                        if worker_kind == ClientKind::Control {
+                            sync_context_with_attachment(
+                                &worker_shared.inner.lock(),
+                                client,
+                                &mut context,
+                            );
+                        }
+                        let _park = (worker_kind == ClientKind::Control)
+                            .then(|| CommandQueueParkScope::new(client, request_id));
+                        let _ = worker_shared.execute_command_request_with_prepared_into(
+                            &worker_outbound,
+                            client,
+                            worker_kind,
+                            &mut context,
+                            request_id,
+                            &command,
+                            prepared,
+                        );
+                    }
+                }) {
+                Ok(worker) => worker,
+                Err(error) => {
+                    shared.command_queue_cancels.lock().remove(&client);
+                    outbound.close();
+                    let _ = writer_thread.join();
+                    return Err(DaemonError::Thread(error.to_string()));
                 }
-            }) {
-            Ok(worker) => worker,
-            Err(error) => {
-                outbound.close();
-                let _ = writer_thread.join();
-                return Err(DaemonError::Thread(error.to_string()));
-            }
+            };
+            (Some(sender), Some(worker), reader_context)
+        } else {
+            (None, None, Some(context))
         };
-        (Some(sender), Some(worker), None)
-    } else {
-        (None, None, Some(context))
-    };
 
     let result = loop {
         let message = match read_protocol_message_into(&mut stream, &mut inbound_frame) {
@@ -35282,7 +35373,9 @@ fn handle_connection<S: TransportStream>(
                 prepared,
             }) => {
                 shared.inner.lock().cold_bootstrap.command(client);
-                if let Some(context) = context.as_mut() {
+                if command_sender.is_none()
+                    && let Some(context) = context.as_mut()
+                {
                     sync_context_with_attachment(&shared.inner.lock(), client, context);
                 }
                 if let Some(sender) = &command_sender {
@@ -35505,6 +35598,7 @@ fn handle_connection<S: TransportStream>(
         );
     };
 
+    command_queue_cancel.store(true, Ordering::Release);
     shared.detach(client);
     registration.unregister();
     drop(command_sender);
@@ -35514,6 +35608,7 @@ fn handle_connection<S: TransportStream>(
             "command worker panicked for client={client}",
         );
     }
+    shared.command_queue_cancels.lock().remove(&client);
     outbound.close();
     if writer_thread.join().is_err() {
         log::error!(

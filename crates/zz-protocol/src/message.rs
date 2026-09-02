@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 95;
+pub const PROTOCOL_VERSION: u16 = 96;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -2894,6 +2894,14 @@ pub enum ProtocolMessage {
         #[serde(deserialize_with = "deserialize_home_directories")]
         homes: Vec<Option<String>>,
     },
+    /// The daemon parked this client's command queue on `request_id`: nothing
+    /// else the client queued runs until that request resumes, the way a
+    /// `CMD_RETURN_WAIT` item holds `cmdq_next`. A Control client whose input
+    /// already reached end of file stops waiting here, which is what frees the
+    /// pin's queue when the client exits.
+    CommandQueueParked {
+        request_id: u64,
+    },
 }
 
 fn deserialize_home_directory_users<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -4126,7 +4134,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 95);
+        assert_eq!(super::PROTOCOL_VERSION, 96);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

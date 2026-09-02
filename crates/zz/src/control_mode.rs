@@ -178,7 +178,6 @@ fn drive<W: Write>(
         return Ok(completed_exit_code(initial_result.exit_code, &state));
     }
 
-    retain_first_initial_stdin_before_eof(&mut state.pending_return, &mut pending_stdin);
     if let Some(pending_return) = take_ready_pending_return(&mut state.pending_return) {
         return finish_control_return(
             client.as_ref(),
@@ -693,9 +692,37 @@ fn execute_command<W: Write>(
         }
     };
     let mut exit = ExitSignal::None;
+    let mut parked = false;
     loop {
         match receiver.recv().unwrap_or(MainEvent::Disconnected) {
             MainEvent::Protocol(message) => match *message {
+                ProtocolMessage::CommandQueueParked {
+                    request_id: parked_request,
+                } if parked_request == request_id => {
+                    parked = true;
+                    if release_parked_queue_at_client_exit(state, pending_stdin) {
+                        render_command_response(
+                            output,
+                            frame.as_ref(),
+                            flags,
+                            command_guard_frames,
+                            CommandResponse::Success {
+                                request_id,
+                                output: String::new(),
+                                exit_code: 0,
+                                stderr: String::new(),
+                            },
+                        )?;
+                        if exit_held {
+                            output.release_exit()?;
+                        }
+                        return Ok(CommandResult {
+                            exit_code: 0,
+                            exit,
+                            abort_line: true,
+                        });
+                    }
+                }
                 ProtocolMessage::CommandResponse(response)
                     if response_request_id(&response) == request_id =>
                 {
@@ -777,6 +804,28 @@ fn execute_command<W: Write>(
                         output,
                     );
                 }
+                if parked && release_parked_queue_at_client_exit(state, pending_stdin) {
+                    render_command_response(
+                        output,
+                        frame.as_ref(),
+                        flags,
+                        command_guard_frames,
+                        CommandResponse::Success {
+                            request_id,
+                            output: String::new(),
+                            exit_code: 0,
+                            stderr: String::new(),
+                        },
+                    )?;
+                    if exit_held {
+                        output.release_exit()?;
+                    }
+                    return Ok(CommandResult {
+                        exit_code: 0,
+                        exit,
+                        abort_line: true,
+                    });
+                }
             }
             MainEvent::Disconnected => {
                 render_command_failure(
@@ -812,6 +861,7 @@ struct ControlState {
     wait_exit: bool,
     return_code: u8,
     pending_return: Option<PendingReturn>,
+    parked_queue_released: bool,
 }
 
 impl ControlState {
@@ -1299,17 +1349,29 @@ fn capture_pending_return<W: Write>(
     }
 }
 
-fn retain_first_initial_stdin_before_eof(
-    pending_return: &mut Option<PendingReturn>,
+/// A parked request holds the daemon's queue for this client, so the input that
+/// is already queued behind it never runs. tmux frees that queue when the client
+/// exits, and both end of file and a blank Return exit it immediately, so stop
+/// waiting for the parked request and let the pending return finish the client.
+fn release_parked_queue_at_client_exit(
+    state: &mut ControlState,
     pending_stdin: &mut VecDeque<StdinEvent>,
-) {
-    if let Some(PendingReturn::Eof {
-        preceding_input, ..
-    }) = pending_return.as_mut()
-    {
-        pending_stdin.truncate(1);
-        *preceding_input = pending_stdin.len();
-    }
+) -> bool {
+    let Some(
+        PendingReturn::Eof {
+            preceding_input, ..
+        }
+        | PendingReturn::Blank {
+            preceding_input, ..
+        },
+    ) = state.pending_return.as_mut()
+    else {
+        return false;
+    };
+    *preceding_input = 0;
+    pending_stdin.clear();
+    state.parked_queue_released = true;
+    true
 }
 
 fn take_ready_pending_return(pending_return: &mut Option<PendingReturn>) -> Option<PendingReturn> {
@@ -1376,7 +1438,9 @@ fn finish_control_return<W: Write>(
         eprintln!("zz: {error}");
     }
     let _ = client.detach();
-    if input_error.is_none() {
+    // The parked request answers to a queue tmux has already freed, so nothing
+    // it prints later belongs on this client's stream.
+    if input_error.is_none() && !state.parked_queue_released {
         drain_before_exit(receiver, state, output)?;
     }
     finish_exit(
@@ -1998,7 +2062,7 @@ impl PendingReturn {
             }),
             StdinEvent::Eof => Ok(Self::Eof {
                 code: return_code,
-                preceding_input: 0,
+                preceding_input,
                 observed_preceding_input: false,
             }),
             StdinEvent::Error(message) => Ok(Self::InputError {
@@ -2682,7 +2746,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_eof_keeps_only_the_first_queued_input() {
+    fn initial_eof_waits_behind_every_queued_input() {
         let mut pending_return = None;
         let mut pending_stdin = VecDeque::new();
         let mut writer = ControlWriter::new(Vec::new(), false);
@@ -2714,8 +2778,6 @@ mod tests {
             &mut pending_stdin,
             &mut writer,
         );
-        retain_first_initial_stdin_before_eof(&mut pending_return, &mut pending_stdin);
-
         assert_eq!(pending_return.as_ref().map(PendingReturn::code), Some(0));
         assert!(
             pending_return
@@ -2726,19 +2788,19 @@ mod tests {
             pending_stdin.pop_front(),
             Some(StdinEvent::Line(line)) if line == "run-shell 'sleep 1'"
         ));
-        assert!(pending_stdin.is_empty());
         let pending_return = pending_return.as_mut().expect("pending return");
         pending_return.consume_preceding_input();
+        assert!(pending_return.has_preceding_input());
+        assert!(matches!(
+            pending_stdin.pop_front(),
+            Some(StdinEvent::Line(line)) if line == "display-message -p SECOND"
+        ));
+        assert!(pending_stdin.is_empty());
+        pending_return.consume_preceding_input();
         assert!(!pending_return.has_preceding_input());
-    }
 
-    #[test]
-    fn preparation_error_releases_eof_after_the_retained_input() {
-        let invalid = "bind-key -T { set-environment -g BIND_CONTROL_REJECT_FORBIDDEN yes } F11 display-message -p forbidden";
-        let mut pending_stdin = VecDeque::from([
-            StdinEvent::Line(invalid.to_owned()),
-            StdinEvent::Line("detach-client".to_owned()),
-        ]);
+        // A parked request frees the rest of that queue the way the client's
+        // exit frees the pin's.
         let mut state = ControlState {
             pending_return: Some(PendingReturn::Eof {
                 code: 0,
@@ -2747,7 +2809,29 @@ mod tests {
             }),
             ..ControlState::default()
         };
-        retain_first_initial_stdin_before_eof(&mut state.pending_return, &mut pending_stdin);
+        let mut queued = VecDeque::from([StdinEvent::Line("display-message -p LOST".to_owned())]);
+        assert!(release_parked_queue_at_client_exit(&mut state, &mut queued));
+        assert!(queued.is_empty());
+        assert!(
+            state
+                .pending_return
+                .as_ref()
+                .is_some_and(|pending| !pending.has_preceding_input())
+        );
+    }
+
+    #[test]
+    fn preparation_error_releases_eof_after_the_last_queued_input() {
+        let invalid = "bind-key -T { set-environment -g BIND_CONTROL_REJECT_FORBIDDEN yes } F11 display-message -p forbidden";
+        let mut pending_stdin = VecDeque::from([StdinEvent::Line(invalid.to_owned())]);
+        let mut state = ControlState {
+            pending_return: Some(PendingReturn::Eof {
+                code: 0,
+                preceding_input: 1,
+                observed_preceding_input: false,
+            }),
+            ..ControlState::default()
+        };
 
         let Some(StdinEvent::Line(line)) = pending_stdin.pop_front() else {
             panic!("missing retained input");

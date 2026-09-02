@@ -5817,7 +5817,7 @@ mod daemon_autostart {
         }
 
         #[test]
-        fn control_attached_eof_keeps_the_current_admitted_failure_status() {
+        fn control_attached_eof_releases_the_queue_at_the_first_parked_command() {
             for kind in ["runtime", "source", "run-shell", "confirm-before"] {
                 let fixture = Fixture::new();
                 if !local_socket_bind_available(&fixture.socket) {
@@ -5899,13 +5899,18 @@ mod daemon_autostart {
 
                 let output =
                     collect_control_process(child, None, &format!("attached EOF {kind} failure"));
-                assert_eq!(output.status.code(), Some(1));
+                // Measured on tmux d77c9dc6 with the same line piped into
+                // `-C attach-session`: the blocking run-shell yields the queue,
+                // the client at end of file exits there, the failure queued
+                // behind it never runs and the client returns 0 with no error
+                // block.
+                assert_eq!(output.status.code(), Some(0));
                 assert!(output.stderr.is_empty());
                 let stdout = std::fs::read(&output_path).expect("read attached EOF output");
                 let stream = parse_stream_allow_gaps(&stdout, false);
                 assert!(
-                    stream.blocks.iter().any(|block| {
-                        block.error && block.payload.iter().any(|line| line.contains(expected))
+                    !stream.blocks.iter().any(|block| {
+                        block.payload.iter().any(|line| line.contains(expected))
                     }),
                     "{stream:?}"
                 );
@@ -6180,7 +6185,7 @@ mod daemon_autostart {
         }
 
         #[test]
-        fn control_return_snapshot_precedes_later_failure_and_detach_eof_is_zero() {
+        fn control_eof_drops_a_parked_wrappers_later_failure_and_detach_eof_is_zero() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {
                 return;
@@ -6234,11 +6239,15 @@ mod daemon_autostart {
                     &format!("pre-{wrapper}-failure EOF snapshot"),
                 );
                 let stream = parse_stream(&output.stdout, false);
+                // Measured on tmux d77c9dc6 for all three wrappers: the
+                // condition job parks the queue, the client at end of file
+                // exits, and the branch that would have failed never runs, so
+                // the stream carries no error block and the status is 0.
                 assert_eq!(output.status.code(), Some(0), "{stream:?}");
                 assert!(output.stderr.is_empty());
                 assert!(
-                    stream.blocks.iter().any(|block| {
-                        block.error && block.payload.iter().any(|line| line.contains(&missing))
+                    !stream.blocks.iter().any(|block| {
+                        block.payload.iter().any(|line| line.contains(&missing))
                     }),
                     "{stream:?}"
                 );

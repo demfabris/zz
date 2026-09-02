@@ -1,0 +1,4 @@
+corpus: none
+stage: fixtures/control-hard-loss.sh ~/control-hard-loss.sh
+stage: fixtures/control-hard-loss.py ~/control-hard-loss.py
+run-shell 'sh ~/control-hard-loss.sh'

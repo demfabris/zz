@@ -1,0 +1,3 @@
+corpus: none
+stage: fixtures/control-eof-drain.sh ~/control-eof-drain.sh
+run-shell 'sh ~/control-eof-drain.sh'

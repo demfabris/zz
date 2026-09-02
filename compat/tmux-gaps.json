@@ -5,11 +5,11 @@
   "gaps": [
     {
       "id": "aliases.remote-client-preflight",
-      "title": "Prepare remote CLI aliases without starting SSH",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
+      "title": "Route a remote host statically to its ssh lifecycle",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "remote",
         "scripts"
@@ -19,15 +19,15 @@
         "semantic:command-alias-remote-client-preflight"
       ],
       "evidence": [
-        "resource:crates/zz/src/lib.rs",
         "resource:crates/zz-daemon/src/endpoint.rs",
+        "resource:crates/zz/src/lib.rs",
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "An existing-only remote daemon discovery and forwarding path prepares a whole CLI vector without starting SSH or a daemon merely to classify it, then preserves that immutable vector across command and TUI handoff."
+        "A `--host` CLI vector is classified against the static remote route and its ssh lifecycle without an existing-only discovery pass, while the local CLI keeps preparing against an already-running compatible daemon."
       ],
       "depends_on": [],
-      "reason": "The local CLI now prepares against an already-running compatible daemon, but --host intentionally retains static routing because the only current SSH forward constructor starts a new lifecycle."
+      "reason": "Settled 2026-09-02 as a native decision rather than a gap, because the clause it carried describes a zz-only surface with no pinned counterpart. The pin has no remote client at all: pinned tmux d77c9dc6 talks to one local socket, `-L` and `-S` name a path on this machine, and there is no host argument, no forwarding and nothing to preflight, so there is no pin behaviour this slug could be measured against. On the zz side the routing is a design decision the ssh-only consolidation already made: `--host` resolves statically to an ssh lifecycle, because the only forward constructor starts one, and the local CLI already does the part that has a tmux analogue, preparing a whole command vector against an already-running compatible daemon before it commits. An existing-only remote discovery pass would mean a second, connectionless probe channel over ssh purely to classify a vector, which is infrastructure zz does not want to carry for a classification step; the cost of the static route is that a `--host` vector that would have been refused locally is refused after the ssh lifecycle starts instead of before. Reopen only if zz grows a cheap existing-only remote probe for another reason and this classification can ride it."
     },
     {
       "id": "capture.rich-transports",
@@ -123,35 +123,6 @@
       "reason": "zz uses native chooser surfaces and the sidebar instead of tmux mode screens."
     },
     {
-      "id": "clients.active-pane",
-      "title": "Retain per-client active panes",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "daily",
-        "remote",
-        "scripts"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:per-client-active-pane"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz-mux/src/model.rs",
-        "resource:crates/zz-protocol/src/snapshot.rs",
-        "resource:knowledge/tmux/divergences.md",
-        "file:compat/attached-client.sh"
-      ],
-      "acceptance": [
-        "A client carrying active-pane retains one pane selection per window, and selection, default command and input context, borders, cursor, viewport, and command output follow it without moving peer clients. Missing state falls back to the shared active pane, and pane teardown removes stale selections."
-      ],
-      "depends_on": [],
-      "reason": "The requested flag is retained and reported, but zz still has one window-global active pane while pinned tmux can select a pane per client and window."
-    },
-    {
       "id": "clients.interactive-refresh",
       "title": "Complete interactive client commands",
       "decision": "native",
@@ -223,19 +194,24 @@
       ],
       "owner": "daemon",
       "items": [
+        "semantic:per-client-active-pane",
         "semantic:per-client-current-window",
         "semantic:read-only-ignore-size",
         "semantic:read-only-same-uid"
       ],
       "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-mux/src/model.rs",
+        "resource:crates/zz-protocol/src/snapshot.rs",
         "resource:knowledge/tmux/divergences.md",
         "scenario:compat/scenarios/last-pane-input-off.txt"
       ],
       "acceptance": [
-        "The divergence matrix documents per-client focus and single-user read-only policy; imported tmux command syntax keeps its meaning."
+        "The divergence matrix documents per-client focus and single-user read-only policy; imported tmux command syntax keeps its meaning.",
+        "The active-pane client flag is retained and reported, while the pane a window is on stays one shared model fact that every client sees."
       ],
       "depends_on": [],
-      "reason": "Independent GUI clients and per-client sizing are core zz behavior."
+      "reason": "Independent GUI clients and per-client sizing are core zz behavior. Widened 2026-09-02 for semantic:per-client-active-pane, relocated from clients.active-pane, which is now empty. The pin really does keep a per-client active pane: `refresh-client -f active-pane` sets CLIENT_ACTIVEPANE, `server_client_set_pane` stores the pane on a per-client-and-window record and `server_client_get_pane` reads it back, feeding target resolution through `cmd_find_from_client`, the active border and highlight in screen-redraw.c and window-border.c, `run-shell` with no target, and the tty cursor. Measured on a throwaway pin server with two attached 80x24 pty clients and a two-pane window. The flag is retained and reported: `#{client_flags}` answers `attached,focused,active-pane,UTF-8` for the client that asked and `attached,focused,UTF-8` for the other, which zz already matches. What the measurement adds is how little of it is observable in the format layer: `format_cb_pane_active` compares `ft->wp` with `wp->window->active`, so `#{pane_active}` and every `list-panes` row stay window-global on the pin too, and a per-client selection never shows up there. It is also unreachable from the CLI: `cmd_select_pane_exec` takes the per-client branch only when `cmdq_get_client(item)` has a session, and a command client's session is NULL, so `select-pane -t %1` typed on the command line moved the WINDOW's active pane from %0 to %1 and moved the rows with it even while an attached client carried the flag. Only a command running on the attached client's own queue reaches `server_client_set_pane`. The product stance: in zz the pane a window is on is model state, one shared fact that every client sees and that the snapshot carries, while per-client view state - the focused window, the client size, copy and view mode, the chooser and the sidebar - already lives on the client, which is what semantic:per-client-current-window in this group settles. Adding a per-client active pane would move a model field into the view layer and split pane targeting per client, and zz's answer is that clients differ by which WINDOW they look at, not by which pane inside it is active. The flag stays retained and reported so scripts that set it are not refused. Reopen only if zz moves the active pane out of the mux model."
     },
     {
       "id": "commands.native-client-tools",
@@ -310,35 +286,6 @@
       ],
       "depends_on": [],
       "reason": "The GUI superset needs its own names so tmux spellings can keep frozen tmux meaning."
-    },
-    {
-      "id": "config.tilde-home-path-encoding",
-      "title": "Preserve non-UTF-8 passwd home paths",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "mux",
-      "items": [
-        "semantic:config-tilde-home-non-utf8"
-      ],
-      "evidence": [
-        "resource:crates/zz-mux/src/parser.rs",
-        "resource:third_party/tmux-reference/UPSTREAM.md",
-        "resource:knowledge/references/tmux-upstream.md",
-        "resource:knowledge/tmux/conf-parser.md",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "On Unix, bare-tilde fallback and named-user expansion preserve passwd home-directory bytes that are not valid UTF-8 through config parsing and source-path execution, without replacement text or a false syntax error. Representable paths retain their current behavior."
-      ],
-      "depends_on": [
-        "protocol.binary-streams"
-      ],
-      "reason": "The Unix passwd lookup returns an OsString path. The current UTF-8 parser converts that path with into_string and treats a valid non-UTF-8 home as a failed account lookup, so a found user with unrepresentable bytes takes the pin's missing-user `syntax error` path instead of expanding. The config-file byte contract is closed under config.non-utf8-file-bytes, but the expansion result is not a path yet: it lands in the surrounding word, so `source-file ~user/x.conf` becomes an ordinary command argument holding those bytes. Measured on 2026-09-01 against the pin: a byte-parsed config line `source-file /tmp/zz-\\200-missing.conf` runs in the pin and reports `No such file or directory` for the raw path, while zz refuses the whole file with `stream did not contain valid UTF-8` because CommandInvocation carries String arguments. That is semantic:non-utf8-command-arguments under the accepted protocol.binary-streams reading, so this needs a byte-capable command-argument representation before the parser's user_home and the SourceFile effect are worth converting."
     },
     {
       "id": "control-mode.disconnect-cancels-command-queue",
@@ -892,11 +839,11 @@
     },
     {
       "id": "hooks.shutdown-window-unlinked-order",
-      "title": "Preserve forced-shutdown window-unlinked order",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
+      "title": "Do not reproduce the forced-shutdown window-unlinked order",
+      "decision": "never",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "scripts"
       ],
@@ -911,10 +858,10 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "Forced-shutdown differentials reach the same multi-window session maps through distinct insertion, deletion, and renumber histories, then match the pin's complete session-closed and window-unlinked hook order."
+        "Forced shutdown emits session-closed before the window-unlinked runs it can observe, and the per-window order is zz's index order rather than an emulation of the pin's red-black tree root sequence."
       ],
       "depends_on": [],
-      "reason": "Pinned session_destroy (session.c) clears s->curw, removes the session from the global RB tree, notifies session-closed, drains s->lastw, then loops on `wl = RB_ROOT(&s->windows)`, notifies window-unlinked for that winlink, and removes it. So session-closed precedes every window-unlinked, and the per-window order is the sequence of RB roots produced by repeatedly deleting the root of a tree keyed by winlink_cmp on idx, which depends on insertion and rebalance history rather than on the final map. zz retains only an index-sorted list of session windows and cannot reconstruct that order. Two measurements on 2026-09-01 narrow what closing this needs. First, the hook channel cannot observe the order at all: with a global window-unlinked hook installed, a five-window session whose history included `kill-window -t w:5` and `kill-window -t w:2` emitted exactly those two hook runs and then only session-closed when the session was killed, because the session is already out of the global tree by the time the queued notification resolves its target. Second, the remaining channel is control mode (control-notify.c %window-close and %unlinked-window-close), and both probe shapes tried - a control client attached to the dying session, and an observer control client attached to a second session - captured nothing, because the teardown detaches the first and the harness closes the client's stdin before the notifications flush. Closing therefore needs three things that do not exist yet: a control-mode fixture that holds a client open across the teardown and flushes before exit; an emulation of the OpenBSD sys/tree.h RB_INSERT and RB_REMOVE rebalancing keyed by winlink index, maintained across every link, unlink, kill, and renumber rather than derived from the final map; and differential cases that reach one index map through distinct histories. The pin already distinguishes those histories in its own window ids: for windows 0 through 4 built ascending the map is 0=@1 1=@2 2=@3 3=@4 4=@5, built descending it is 0=@1 1=@5 2=@4 3=@3 4=@2, built interleaved 3,1,4,2 it is 0=@1 1=@3 2=@5 3=@2 4=@4, and a delete-then-reinsert history yields 0=@1 1=@2 2=@7 3=@4 4=@5. Those four shapes are the cases the differential should carry once a capture channel exists."
+      "reason": "Pinned session_destroy (session.c) clears s->curw, removes the session from the global RB tree, notifies session-closed, drains s->lastw, then loops on `wl = RB_ROOT(&s->windows)`, notifies window-unlinked for that winlink, and removes it. So session-closed precedes every window-unlinked, and the per-window order is the sequence of RB roots produced by repeatedly deleting the root of a tree keyed by winlink_cmp on idx, which depends on insertion and rebalance history rather than on the final map. zz retains only an index-sorted list of session windows and cannot reconstruct that order. Two measurements on 2026-09-01 narrow what closing this needs. First, the hook channel cannot observe the order at all: with a global window-unlinked hook installed, a five-window session whose history included `kill-window -t w:5` and `kill-window -t w:2` emitted exactly those two hook runs and then only session-closed when the session was killed, because the session is already out of the global tree by the time the queued notification resolves its target. Second, the remaining channel is control mode (control-notify.c %window-close and %unlinked-window-close), and both probe shapes tried - a control client attached to the dying session, and an observer control client attached to a second session - captured nothing, because the teardown detaches the first and the harness closes the client's stdin before the notifications flush. Closing therefore needs three things that do not exist yet: a control-mode fixture that holds a client open across the teardown and flushes before exit; an emulation of the OpenBSD sys/tree.h RB_INSERT and RB_REMOVE rebalancing keyed by winlink index, maintained across every link, unlink, kill, and renumber rather than derived from the final map; and differential cases that reach one index map through distinct histories. The pin already distinguishes those histories in its own window ids: for windows 0 through 4 built ascending the map is 0=@1 1=@2 2=@3 3=@4 4=@5, built descending it is 0=@1 1=@5 2=@4 3=@3 4=@2, built interleaved 3,1,4,2 it is 0=@1 1=@3 2=@5 3=@2 4=@4, and a delete-then-reinsert history yields 0=@1 1=@2 2=@7 3=@4 4=@5. Those four shapes are the cases the differential should carry once a capture channel exists. Settled 2026-09-02 as a never decision and kept here so the whole measurement trail stays with the slug. Three things would all have to be built to close it and each is a cost with no product return. First, the order is unobservable through the channel scripts actually use: a global window-unlinked hook on a five-window session emitted only the two runs its own kill-window history produced and then session-closed, because the session is out of the global tree by the time the queued notification resolves its target, so no hook body can ever see the teardown order. Second, matching it needs an emulation of the OpenBSD sys/tree.h RB_INSERT and RB_REMOVE rebalancing keyed by winlink index, maintained across every link, unlink, kill and renumber, because the sequence is the roots produced by repeatedly deleting the root and depends on insertion history rather than on the final map; the pin's own window ids show those histories apart for the same index map: ascending gives 0=@1 1=@2 2=@3 3=@4 4=@5, descending gives 0=@1 1=@5 2=@4 3=@3 4=@2, interleaved 3,1,4,2 gives 0=@1 1=@3 2=@5 3=@2 4=@4, and a delete-then-reinsert history gives 0=@1 1=@2 2=@7 3=@4 4=@5. Third, proving it needs a control mode capture channel that holds a client open across the teardown and flushes before exit, which neither probe shape tried could do. zz keeps an index-sorted list of session windows, emits session-closed before the window-unlinked runs a hook can observe, and orders those by window index, which is stable and explainable; the pin's order is an artefact of its data structure, not a contract any script can rely on, and reproducing a rebalancing history to match it would be carried complexity for a sequence nothing can read. Reopen only if a named workload turns out to depend on the control-mode close order."
     },
     {
       "id": "keys.copy-mode-binding-fidelity",
@@ -1950,22 +1897,26 @@
         "flag:split-window:-I",
         "protocol:command-stream",
         "semantic:buffer-standard-streams",
+        "semantic:config-tilde-home-non-utf8",
         "semantic:non-utf8-command-arguments",
         "semantic:show-buffer-binary-policy",
         "semantic:source-file-stdin"
       ],
       "evidence": [
+        "resource:crates/zz-mux/src/parser.rs",
         "resource:crates/zz-protocol/src/catalog.rs",
         "resource:crates/zz/src/lib.rs",
-        "resource:knowledge/tmux/divergences.md",
-        "resource:knowledge/designs/tmux-superset-roadmap.md"
+        "resource:knowledge/designs/tmux-superset-roadmap.md",
+        "resource:knowledge/tmux/conf-parser.md",
+        "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
         "The typed UTF-8 command protocol stays the contract, with the bounded stdin payload serving zz's own verbs while every tmux stream form stays loudly refused.",
-        "Any later stream support arrives as one reviewed channel covering stdin, stdout, binary bytes, backpressure, cancellation, and process lifetime, not as five separate transports."
+        "Any later stream support arrives as one reviewed channel covering stdin, stdout, binary bytes, backpressure, cancellation, and process lifetime, not as five separate transports.",
+        "A path that only exists as bytes, including a passwd home directory that is not valid UTF-8, reaches the same refusal as any other non-UTF-8 command argument rather than a private byte path of its own."
       ],
       "depends_on": [],
-      "reason": "Five pinned forms move raw bytes between the invoking client's standard streams and the server: `display-message -I`, `split-window -I`, `load-buffer -`, `save-buffer -`, and `source-file -`, plus non-UTF-8 argv and `show-buffer`'s binary output. zz's client protocol carries typed UTF-8 messages, and its CLI already reads caller stdin for its own verbs as one bounded payload, where `agent-send` and `send-text` go through `read_stdin_payload` under the `MAX_AGENT_SEND_BYTES` cap. Every tmux `-` form stays loudly refused instead of pretending the daemon's cwd or process is the caller's. The superset roadmap's milestone 5 is explicit that one bounded command-stream channel would replace all five at once and only after demand is measured, so this is recorded as the reversible reading with no permanent exclusion. Reopen when a named workload needs unbounded or non-UTF-8 caller streams."
+      "reason": "Five pinned forms move raw bytes between the invoking client's standard streams and the server: `display-message -I`, `split-window -I`, `load-buffer -`, `save-buffer -`, and `source-file -`, plus non-UTF-8 argv and `show-buffer`'s binary output. zz's client protocol carries typed UTF-8 messages, and its CLI already reads caller stdin for its own verbs as one bounded payload, where `agent-send` and `send-text` go through `read_stdin_payload` under the `MAX_AGENT_SEND_BYTES` cap. Every tmux `-` form stays loudly refused instead of pretending the daemon's cwd or process is the caller's. The superset roadmap's milestone 5 is explicit that one bounded command-stream channel would replace all five at once and only after demand is measured, so this is recorded as the reversible reading with no permanent exclusion. Reopen when a named workload needs unbounded or non-UTF-8 caller streams. Relocated 2026-09-02: semantic:config-tilde-home-non-utf8 came here from config.tilde-home-path-encoding, whose own reason already put its blocker under this group's reading. The Unix passwd lookup hands back an OsString, and the parser's `user_home` converts it with into_string, so a real account whose home is not valid UTF-8 takes the pin's missing-user `syntax error` path instead of expanding. Converting `user_home` alone would not help, because the expansion lands in the surrounding word rather than in a path: `source-file ~user/x.conf` becomes an ordinary command argument, and CommandInvocation carries String arguments by decision. The measurement that fixes the boundary is the one already recorded on 2026-09-01: a byte-parsed config line `source-file /tmp/zz-\\200-missing.conf` runs on the pin and reports `No such file or directory` for the raw path, while zz refuses the whole file with `stream did not contain valid UTF-8`, which is semantic:non-utf8-command-arguments, already in this group. The config-file byte contract itself is closed under config.non-utf8-file-bytes, so the tilde case adds no new channel: it needs the same byte-capable command argument, and it gets answered when this group's one bounded stream channel is designed, not before. The product stance is unchanged: typed UTF-8 arguments are the contract and a byte-only path is refused loudly rather than silently mangled."
     },
     {
       "id": "protocol.socket-acl",

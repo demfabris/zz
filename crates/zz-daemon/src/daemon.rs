@@ -73974,6 +73974,14 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut context,
+                &CommandInvocation::new("set-option", ["-g", "remain-on-exit", "on"]),
+            )
+            .unwrap();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
                 &CommandInvocation::new("set-option", ["-t", "extent-clamp", "status", "off"]),
             )
             .unwrap();

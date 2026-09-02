@@ -59,9 +59,11 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
+# Each walk gets its own server name: reusing one across the two walks raced the
+# kill-server that ended the first one.
 start_probe() {
     if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ]; then
-        probe_socket="/tmp/zzpf-$$.sock"
+        probe_socket="/tmp/zzpf-$$-$1.sock"
         "$binary" --socket "$probe_socket" -f /dev/null daemon \
             >"$work/daemon.out" 2>"$work/daemon.err" &
         probe_daemon_pid=$!
@@ -74,13 +76,13 @@ start_probe() {
             fi
             sleep 0.05
         done
-        probe new-session -d -s pf -x 80 -y 24 'sleep 300'
+        probe new-session -d -s pf -x 80 -y 24 'sleep 3000'
     else
-        probe_label="zzpf-$$"
+        probe_label="zzpf-$$-$1"
         "$binary" -L "$probe_label" -f /dev/null \
-            new-session -d -s pf -x 80 -y 24 'sleep 300'
+            new-session -d -s pf -x 80 -y 24 'sleep 3000'
     fi
-    probe split-window -d -t pf:0 'sleep 300'
+    probe split-window -d -t pf:0 'sleep 3000'
 }
 
 stop_probe() {
@@ -132,13 +134,18 @@ walk() {
     mkdir -p "$work/steps"
     step=0
     : >"$log"
-    start_probe
+    start_probe "$1"
+    if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ]; then
+        attach_args="--socket $probe_socket"
+    else
+        attach_args="-L $probe_label"
+    fi
     probe set-option -g focus-events "$1"
     install_hooks
     env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
         TERM=xterm-256color \
         python3 "$HOME/pty-drive.py" "$work/steps" 80 24 \
-        "$binary" $2 attach-session -t "=pf" >"$work/attach-$1.out" 2>&1 &
+        $binary $attach_args attach-session -t "=pf" >"$work/attach-$1.out" 2>&1 &
     attach_pid=$!
     attempt=0
     while [ "$attempt" -lt 400 ]; do
@@ -172,16 +179,8 @@ walk() {
     tr '\n' ' ' <"$log"
 }
 
-if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ]; then
-    attach_args="--socket /tmp/zzpf-$$.sock"
-else
-    attach_args="-L zzpf-$$"
-fi
-
-# shellcheck disable=SC2086
-off="$(walk off "$attach_args")"
-# shellcheck disable=SC2086
-on="$(walk on "$attach_args")"
+off="$(walk off)"
+on="$(walk on)"
 
 main_client set-environment -g HOOKS_PANE_FOCUS_OFF "$off"
 main_client set-environment -g HOOKS_PANE_FOCUS_ON "$on"

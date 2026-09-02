@@ -1308,16 +1308,28 @@ fn send_keys_reports_the_flags_it_cannot_honor() {
     assert_eq!(reset.effects.len(), plain.effects.len() + 1);
     assert_eq!(reset.effects[1..], plain.effects[..]);
 
-    for flag in ["-M", "-K"] {
-        let error = engine
-            .execute(&mut context, &command("send-keys", &[flag, "x"]))
-            .unwrap_err();
-        assert!(
-            matches!(&error, ServerError::UnsupportedCommand(message)
-                if message == &format!("send-keys {flag}")),
-            "{error:?}"
-        );
-    }
+    let error = engine
+        .execute(&mut context, &command("send-keys", &["-M", "x"]))
+        .unwrap_err();
+    assert!(
+        matches!(&error, ServerError::UnsupportedCommand(message)
+            if message == "send-keys -M"),
+        "{error:?}"
+    );
+
+    // `-K` leaves the pane alone and hands the keys to the target client, so
+    // it produces no `SendKeys` at all.
+    let injected = engine
+        .execute(&mut context, &command("send-keys", &["-K", "x"]))
+        .unwrap();
+    assert_eq!(
+        injected.effects,
+        [MuxEffect::SendClientKeys {
+            target_client: None,
+            keys: vec![KeyToken::Literal("x".to_owned())],
+            repeat: 1,
+        }]
+    );
 }
 
 #[test]

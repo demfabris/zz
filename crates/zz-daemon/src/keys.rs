@@ -133,6 +133,26 @@ pub(crate) fn send_tokens(sessions: &[Arc<TerminalSession>], tokens: &[KeyToken]
     sent
 }
 
+/// The key presses `cmd_send_keys_inject_key` hands to
+/// `server_client_handle_key` for one `send-keys -K` argument.
+/// `cmd_send_keys_inject_string` looks the argument up as a key name first and
+/// falls back to injecting one key per character, so a literal token spends a
+/// press per character rather than writing text.
+pub(crate) fn client_key_inputs(token: &KeyToken) -> Vec<KeyInput> {
+    match token {
+        KeyToken::Named(name) => named_key(name).into_iter().collect(),
+        KeyToken::Literal(text) => text
+            .chars()
+            .filter_map(|character| named_key(character.encode_utf8(&mut [0_u8; 4])))
+            .collect(),
+        KeyToken::Raw(byte) => char::from_u32(u32::from(*byte))
+            .filter(char::is_ascii)
+            .and_then(|character| named_key(character.encode_utf8(&mut [0_u8; 4])))
+            .into_iter()
+            .collect(),
+    }
+}
+
 fn named_key(name: &str) -> Option<KeyInput> {
     let mut modifiers = Modifiers::default();
     let mut key_name = name;

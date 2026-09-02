@@ -177,6 +177,7 @@
 | smoke/resurrect-init | 3 | yes | 0 | yes | yes | yes |
 | smoke/send-keys-client-selection | 3 | yes | 0 | yes | yes | yes |
 | smoke/send-keys-control | 3 | yes | 0 | yes | yes | yes |
+| smoke/send-keys-inject | 3 | yes | 0 | yes | yes | yes |
 | smoke/sensible | 6 | yes | 0 | yes | yes | yes |
 | smoke/source-file-control | 12 | yes | 0 | yes | yes | yes |
 | smoke/source-file-depth | 4 | yes | 0 | yes | yes | yes |

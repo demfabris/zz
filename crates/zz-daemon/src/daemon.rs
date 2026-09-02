@@ -79,7 +79,10 @@ use crate::agent::{
 };
 use crate::{
     DaemonError, configure_shell_job_environment, diagnostic_elapsed_us, diagnostic_timer,
-    keys::{choose_buffer_key_action, choose_tree_key_action, input_key_name, send_tokens},
+    keys::{
+        choose_buffer_key_action, choose_tree_key_action, client_key_inputs, input_key_name,
+        send_tokens,
+    },
     lifecycle::DaemonIdentityGuard,
     paths::{default_mux_config, home_directory},
     shell_process,
@@ -96,7 +99,14 @@ const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_millis(100);
 #[cfg(windows)]
 const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_millis(20);
 const DIAGNOSTIC_STATE_INTERVAL: Duration = Duration::from_secs(5);
+/// How deep a `send-keys -K` chain may nest before the daemon stops replaying.
+/// The pin queues injected keys instead of recursing, so a self-injecting
+/// binding loops on its command queue there and would overflow the stack here.
+const MAX_CLIENT_KEY_INJECTION_DEPTH: u32 = 16;
 const CONTROL_SUBSCRIPTION_INTERVAL: Duration = Duration::from_secs(1);
+thread_local! {
+    static CLIENT_KEY_INJECTION_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
 const CONTROL_CELL_WIDTH_PX: u32 = 8;
 const CONTROL_CELL_HEIGHT_PX: u32 = 18;
 const CONTROL_SIZE_MINIMUM: u16 = 1;
@@ -6643,6 +6653,7 @@ impl Shared {
         let mut retired_command_outputs = Vec::new();
         let mut retired_popups = Vec::new();
         let mut deferred_terminal_commands = Vec::new();
+        let mut injected_client_keys = Vec::new();
         let mut refresh_armed = false;
         let mut unfocused_copy_mode_exits = Vec::new();
         let mut pipes_to_close = Vec::new();
@@ -7416,6 +7427,24 @@ impl Shared {
                                 keys: keys.clone(),
                                 repeat: *repeat,
                             });
+                        }
+                    }
+                    MuxEffect::SendClientKeys {
+                        target_client,
+                        keys,
+                        repeat,
+                    } => {
+                        // `cmd_send_keys_inject_key` returns the queue item
+                        // untouched when `cmdq_get_target_client` answers NULL,
+                        // so an unresolvable `-c` injects nothing and still
+                        // exits 0. Without `-c` the target is
+                        // `cmd_find_current_client`.
+                        let selected = match target_client.as_deref() {
+                            Some(target) => find_attached_client_with_aliases(&inner, target, true),
+                            None => current_format_client(&inner, client),
+                        };
+                        if let Some(selected) = selected {
+                            injected_client_keys.push((selected, keys.clone(), *repeat));
                         }
                     }
                     MuxEffect::ResetPane { pane } => {
@@ -8406,6 +8435,9 @@ impl Shared {
             if let Some(enabled) = wrap_search {
                 self.delivered_wrap_search_commands.lock().push(enabled);
             }
+        }
+        for (target, keys, repeat) in injected_client_keys {
+            self.inject_client_keys(target, &keys, repeat);
         }
         if refresh_armed {
             self.arm_copy_mode_refresh();
@@ -16025,14 +16057,18 @@ impl Shared {
                     if let Some(start) = pass_start.take() {
                         self.dispatch_input_text(client, pane, &mut sinks, &text[start..offset])?;
                     }
-                    self.execute_key_commands(
+                    let previous = context.invoking_key().map(str::to_owned);
+                    context.set_invoking_key(Some(character.to_string()));
+                    let dispatched = self.execute_key_commands(
                         client,
                         kind,
                         context,
                         pane,
                         &commands,
                         repeat_binding,
-                    )?;
+                    );
+                    context.set_invoking_key(previous);
+                    dispatched?;
                     sinks = None;
                     if self.inner.lock().command_prompts.contains_key(&client) {
                         let remaining = &text[offset + character.len_utf8()..];
@@ -16244,7 +16280,18 @@ impl Shared {
             }
             KeyDecision::Prefix | KeyDecision::Ignore => Ok(()),
             KeyDecision::Commands(commands) => {
-                self.execute_key_commands(client, kind, context, pane, &commands, repeat_binding)
+                let previous = context.invoking_key().map(str::to_owned);
+                context.set_invoking_key(Some(key.as_str().to_owned()));
+                let dispatched = self.execute_key_commands(
+                    client,
+                    kind,
+                    context,
+                    pane,
+                    &commands,
+                    repeat_binding,
+                );
+                context.set_invoking_key(previous);
+                dispatched
             }
         };
         self.sync_prefix_armed(client);
@@ -17087,6 +17134,70 @@ impl Shared {
     ) {
         let command = MuxEngine::substitute_command_prompt_template(template, &[replacement]);
         self.execute_overlay_source_with_error_case(client, context, &command, title, true);
+    }
+
+    /// Replay `send-keys -K` on the target client. `server_client_handle_key`
+    /// runs the client's own key table, so the key either fires a binding or
+    /// reaches the pane that client is looking at, whatever `-t` named. The
+    /// pin queues each injected key behind the command that sent it; zz calls
+    /// the handler directly from the post-lock tail, so a binding that injects
+    /// its own key recurses here where the pin would loop on its queue, and
+    /// `CLIENT_KEY_INJECTION_DEPTH` stops it.
+    fn inject_client_keys(
+        self: &Arc<Self>,
+        target: ClientId,
+        keys: &[zz_protocol::KeyToken],
+        repeat: u32,
+    ) {
+        let inputs = keys.iter().flat_map(client_key_inputs).collect::<Vec<_>>();
+        if inputs.is_empty() {
+            return;
+        }
+        let entered = CLIENT_KEY_INJECTION_DEPTH.with(|depth| {
+            let entered = depth.get();
+            if entered < MAX_CLIENT_KEY_INJECTION_DEPTH {
+                depth.set(entered + 1);
+            }
+            entered
+        });
+        if entered >= MAX_CLIENT_KEY_INJECTION_DEPTH {
+            log::warn!(
+                target: "zz_daemon::diagnostics::input",
+                "send-keys -K stopped at injection depth {entered} for client={target}"
+            );
+            return;
+        }
+        for _ in 0..repeat {
+            for input in &inputs {
+                let Some((kind, pane, mut context)) = ({
+                    let inner = self.inner.lock();
+                    client_context_pane(&inner, target).map(|pane| {
+                        let mut context = ExecutionContext::default();
+                        retarget_context_to_attachment(&inner, target, &mut context);
+                        if let Some(environment) = inner.client_environments.get(&target).cloned() {
+                            context.set_client_environment(Some(environment));
+                        }
+                        let kind = inner
+                            .client_kinds
+                            .get(&target)
+                            .copied()
+                            .unwrap_or(ClientKind::Interactive);
+                        (kind, pane, context)
+                    })
+                }) else {
+                    break;
+                };
+                if let Err(error) =
+                    self.input_key(target, kind, &mut context, pane, input.clone(), false)
+                {
+                    log::warn!(
+                        target: "zz_daemon::diagnostics::input",
+                        "send-keys -K injection failed client={target} error={error}"
+                    );
+                }
+            }
+        }
+        CLIENT_KEY_INJECTION_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
     }
 
     fn execute_key_commands(

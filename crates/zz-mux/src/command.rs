@@ -560,6 +560,7 @@ pub struct ExecutionContext {
     client_attached_context: Option<(SessionId, WindowId, PaneId)>,
     target_format_client_override: Option<FormatClient>,
     repeat_binding: bool,
+    invoking_key: Option<String>,
     replay_client: Option<ClientId>,
     control_command_target: Option<(ClientId, u8)>,
     refuse_new_session_attach: bool,
@@ -591,6 +592,7 @@ impl fmt::Debug for ExecutionContext {
                 &self.target_format_client_override,
             )
             .field("repeat_binding", &self.repeat_binding)
+            .field("invoking_key", &self.invoking_key)
             .field("replay_client", &self.replay_client)
             .field("control_command_target", &self.control_command_target)
             .field("refuse_new_session_attach", &self.refuse_new_session_attach)
@@ -622,6 +624,7 @@ impl Default for ExecutionContext {
             client_attached_context: None,
             target_format_client_override: None,
             repeat_binding: false,
+            invoking_key: None,
             replay_client: None,
             control_command_target: None,
             refuse_new_session_attach: false,
@@ -773,6 +776,18 @@ impl ExecutionContext {
         self.repeat_binding = repeat;
     }
 
+    /// The key whose binding queued this command, the way `cmdq_get_event`
+    /// answers the key event of the item `send-keys -K` runs under. A
+    /// `send-keys -K` with no positional key replays it.
+    #[must_use]
+    pub fn invoking_key(&self) -> Option<&str> {
+        self.invoking_key.as_deref()
+    }
+
+    pub fn set_invoking_key(&mut self, key: Option<String>) {
+        self.invoking_key = key;
+    }
+
     #[must_use]
     pub fn replay_client(&self) -> Option<ClientId> {
         self.replay_client
@@ -886,6 +901,16 @@ pub enum MuxEffect {
     },
     SendKeys {
         pane: PaneId,
+        keys: Vec<KeyToken>,
+        repeat: u32,
+    },
+    /// `send-keys -K`. `cmd_send_keys_inject_key` ignores the target pane
+    /// entirely and hands each key to `server_client_handle_key` on the target
+    /// client, so the client's own key table decides whether the key fires a
+    /// binding or reaches the pane it is looking at. A `-K` whose target
+    /// client does not resolve is a no-op.
+    SendClientKeys {
+        target_client: Option<String>,
         keys: Vec<KeyToken>,
         repeat: u32,
     },
@@ -7219,6 +7244,35 @@ impl MuxEngine {
         let reset = options.has("-R");
         if reset && positional.is_empty() {
             return Ok(Execution::effect(MuxEffect::ResetPane { pane }));
+        }
+        if options.has("-K") {
+            let mut execution = Execution::default();
+            if reset {
+                execution.effects.push(MuxEffect::ResetPane { pane });
+            }
+            let keys = if positional.is_empty() {
+                context
+                    .invoking_key()
+                    .map(|key| vec![KeyToken::Named(key.to_owned())])
+                    .unwrap_or_default()
+            } else if options.has("-H") {
+                positional
+                    .iter()
+                    .filter_map(|value| hex_key_token(value))
+                    .collect()
+            } else if options.has("-l") {
+                vec![KeyToken::Literal(positional.concat())]
+            } else {
+                positional.iter().map(|value| key_token(value)).collect()
+            };
+            if !keys.is_empty() {
+                execution.effects.push(MuxEffect::SendClientKeys {
+                    target_client,
+                    keys,
+                    repeat,
+                });
+            }
+            return Ok(execution);
         }
         let keys = if options.has("-H") {
             positional
@@ -22750,6 +22804,94 @@ mod tests {
                 .any(|effect| matches!(effect, MuxEffect::ResetPane { .. })),
             "the pin returns inside the -X block before it reaches the -R block"
         );
+    }
+
+    #[test]
+    fn send_keys_inject_routes_to_the_client_and_replays_the_invoking_key() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &[]))
+            .expect("session");
+
+        // `cmd_send_keys_inject_key` under `-K` never touches the target pane;
+        // it hands the key to the target client's own handler.
+        let injected = engine
+            .execute(
+                &mut context,
+                &command("send-keys", &["-c", "/dev/ttys9", "-K", "Z"]),
+            )
+            .expect("client injection");
+        assert_eq!(
+            injected.effects,
+            [MuxEffect::SendClientKeys {
+                target_client: Some("/dev/ttys9".to_owned()),
+                keys: vec![KeyToken::Literal("Z".to_owned())],
+                repeat: 1,
+            }]
+        );
+
+        // The `-N` loop wraps the injection, so a count repeats the key.
+        let repeated = engine
+            .execute(
+                &mut context,
+                &command("send-keys", &["-c", "/dev/ttys9", "-N", "3", "-K", "Z"]),
+            )
+            .expect("repeated injection");
+        assert_eq!(
+            repeated.effects,
+            [MuxEffect::SendClientKeys {
+                target_client: Some("/dev/ttys9".to_owned()),
+                keys: vec![KeyToken::Literal("Z".to_owned())],
+                repeat: 3,
+            }]
+        );
+
+        // With no positional key the pin injects `event->key`, the key of the
+        // queue item that ran the command.
+        context.set_invoking_key(Some("F5".to_owned()));
+        let replayed = engine
+            .execute(
+                &mut context,
+                &command("send-keys", &["-c", "/dev/ttys9", "-K"]),
+            )
+            .expect("replayed injection");
+        assert_eq!(
+            replayed.effects,
+            [MuxEffect::SendClientKeys {
+                target_client: Some("/dev/ttys9".to_owned()),
+                keys: vec![KeyToken::Named("F5".to_owned())],
+                repeat: 1,
+            }]
+        );
+
+        // `cmd_send_keys_exec` returns at `if (args_has(args, 'N'))` inside the
+        // `count == 0` block, so a count with no key arms the mode count and
+        // injects nothing.
+        let counted = engine
+            .execute(
+                &mut context,
+                &command("send-keys", &["-c", "/dev/ttys9", "-N", "2", "-K"]),
+            )
+            .expect("counted no-key form");
+        assert!(
+            !counted
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, MuxEffect::SendClientKeys { .. })),
+            "a -N with no positional key injects nothing: {counted:?}"
+        );
+
+        // A command queued by something other than a key has no `event->key` to
+        // replay, so the no-key form injects nothing at all.
+        context.set_invoking_key(None);
+        let unqueued = engine
+            .execute(
+                &mut context,
+                &command("send-keys", &["-c", "/dev/ttys9", "-K"]),
+            )
+            .expect("no key to replay");
+        assert_eq!(unqueued.effects, []);
     }
 
     #[test]

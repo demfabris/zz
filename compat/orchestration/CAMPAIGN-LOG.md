@@ -100,3 +100,39 @@ the three cached reports were exported into `opus-compat-run-6-continue.js` (mac
 workflow `args`), and the lock fronts were released so another holder can claim them. Lesson: the
 Workflow journal cache is same-session only, so a machine move means exporting reports into a
 continuation script, not copying the session.
+
+## 2026-09-02: cycle 6 finished on the macbook, meter 65.8% to 71.7%
+
+The continuation script ran as written on the new machine: 16-core etiquette (workers `--jobs 8`,
+gate `--jobs 16`, eight shards), SSH origin, holder `macbook/orchestrator`, four agents (daemon
+review, client worker, client review, gate), 2h00m wall, 1.07M subagent tokens, every build cold
+because the warm worktrees stayed on the Ubuntu box. Merges: keys `b1c80f66` (`send-keys -c` with
+the target client on the three send-keys effects, `-H` high hex through `KeyToken::Raw` on protocol
+93, copy-mode command errors; gate fix: bound-key chains preflight the selected client's read-only
+bit, not the invoker's), daemon `0201a5e9` (unforgeable alias-group provenance, status-keys derived
+from the editor, `command-prompt -l`, chains, labels and pass order; the clients.event-resize-context
+close was reverted at the gate because the pin resolves hook items through `cmd_find_best_client` by
+activity time, not the notified client, so the group is re-scoped to a two-client differential; the
+status-keys probe now takes one socket per probe after four orphaned daemons per run), client
+`0d727e36` (chooser `-F`/`-h`/`-k` and inert choose-buffer `-y` with the row text on the wire,
+pane-colours palette, menu action context and queue ordering, menu and popup style refresh; gate
+fixes: the menu cursor survives a restyle, `-k` kills before the template runs, the pane-colours
+default slot is a recorded residue), ledger `1d99c77b`. Board: three lanes ledgered, seven mooted
+fronts withdrawn, four residuals posted (F-KEY-CONTROL-V3, F-DISPLAY-MESSAGE-PANE-TARGETS-V3,
+F-PANE-BORDER-LINES-TILED, and the front-less display-menu waiter-wake race). New lore: `/bin/bash`
+3.2 has no `mapfile`, so a shard runner under it ran the full corpus eight times at once; APFS
+refuses the non-UTF-8 cwd fixture's mkdir on both binaries, so that scenario is environmental on
+macOS; the display-menu resize test raced the chosen row's command (it polls now) and two more
+load-only flakes joined the list. The campaign branches stay at their old tips on origin.
+
+Cycle 7 was written from the fresh census (35 unresolved groups: 26 open, 9 blocked) as
+`opus-compat-run-7.js`: a daemon lane (command prompt `-t` as the routing itself plus vi editing in
+the daemon, the pane focus hooks with a PANE_FOCUSED set, the per-command format client that closes
+the resize context and `window_bigger` together, display-panes templates and waits, the
+display-message client aliases), a copy lane (the copy-mode format family produced from the daemon's
+copy sessions so the count items become observable, then `-k`/`-s`, the refresh re-sync for the `r`
+keys, the copy-line family, `send-keys -F` for the vi `#`/`*` bindings, the null-aware format
+enumeration, terminfo-backed `I/c`), and a client lane (the two client-consumed options, the pin's
+pane border chrome in order, menu mouse and paste rules, the mode-tree key vocabulary, popup kitty
+images and the nested pointer items). Lock fronts F-DAEMON-PROMPT-FOCUS, F-COPY-MODE-DAEMON-VIEW,
+and F-CLIENT-CHROME-OVERLAYS are minted and READY; the script is not launched.

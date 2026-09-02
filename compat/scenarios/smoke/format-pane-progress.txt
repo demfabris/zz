@@ -1,0 +1,10 @@
+corpus: none
+# The ConEmu progress bar the OSC 9;4 sequence carries. input_osc_9 parses
+# 4;<state>[;<progress>] and screen_set_progress_bar keeps it on the pane's own
+# screen, where pane_pb_state names the state and pane_pb_progress prints the
+# percentage. A missing or indeterminate percentage leaves the stored one alone
+# and every malformed payload leaves the whole struct alone.
+stage: fixtures/format-pane-progress.sh ~/format-pane-progress.sh
+out: set-environment -gu FORMAT_PANE_PROGRESS
+run-shell 'sh ~/format-pane-progress.sh'
+out: show-environment -g FORMAT_PANE_PROGRESS

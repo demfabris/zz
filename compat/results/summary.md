@@ -164,6 +164,7 @@
 | smoke/format-modifier-environment-loop | 3 | yes | 0 | yes | yes | yes |
 | smoke/format-modifier-interrogate | 3 | yes | 0 | yes | yes | yes |
 | smoke/format-pane-process | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-pane-progress | 3 | yes | 0 | yes | yes | yes |
 | smoke/format-window-bigger | 3 | yes | 0 | yes | yes | yes |
 | smoke/fpp-init | 2 | yes | 0 | yes | yes | yes |
 | smoke/hooks-pane-focus | 3 | yes | 0 | yes | yes | yes |

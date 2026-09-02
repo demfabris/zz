@@ -961,7 +961,6 @@ table below lists the remaining missing or deliberate format differences.
 | `pane_fg` | The terminal cell foreground at the cursor is not mirrored into mux facts. | **silent** |
 | `pane_key_mode` | Native copy/view mode is not projected as tmux's pane key mode. | **silent** |
 | `pane_mode` | Native pane mode is not projected as tmux's mode name. | **silent** |
-| `pane_pb_state` | Terminal progress-bar state is not mirrored into mux facts. | **silent** |
 | `pane_search_string` | Native per-view search text is not mirrored into mux facts. | **silent** |
 | `pane_tabs` | Terminal tab stops are not mirrored into mux facts. | **silent** |
 | `session_group` | Session groups are unsupported, so no group name exists. | **silent** |
@@ -1414,9 +1413,14 @@ when the last mode entry goes, and the copy-mode refresh timer drops it again, s
 with no mode leaves it `0`. zz carries the bit on the per-client copy session record, which clears on
 the same two edges because entering a mode writes a fresh record; with two clients in copy mode on
 one pane zz raises it on both and answers `1` until every session is gone, where the pin has one pane
-flag. `pane_pb_progress` stays open and is now measured as the OSC 9;4 progress bar rather than paste
-progress: format.c reads `wp->base.progress_bar.progress`, which `input_osc_9` writes, so closing it
-means parsing OSC 9;4 in the VT, and `pane_pb_state` is the same family.
+flag. `pane_pb_progress` and `pane_pb_state` closed on 2026-09-02 as the ConEmu OSC 9;4 progress bar
+rather than paste progress: format.c reads `wp->base.progress_bar`, which `input_osc_9` writes and
+`screen_set_progress_bar` stores, keeping the state always and the percentage only when the sequence
+carried one and the state is not indeterminate. libghostty names the sequence but exposes neither
+field, so the pane worker's byte filter reads it out of the stream it is already passing through and
+keeps the pair beside the worker, where the daemon reads it without touching a grid
+(scenario `smoke/format-pane-progress`). `pane_pb_state` left the always-unavailable roster with
+that work; it was never a live-cell read.
 
 ## Format expansion budgets settled (2026-09-01)
 

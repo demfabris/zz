@@ -1210,11 +1210,11 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     let direct_formats = direct_format_variable_names().collect::<BTreeSet<_>>();
     let delegated_formats = delegated_format_variable_names().collect::<BTreeSet<_>>();
     assert_eq!(formats.len(), 198, "pinned global format count changed");
-    assert_eq!(constant_formats.len(), 57, "tracked format count changed");
+    assert_eq!(constant_formats.len(), 55, "tracked format count changed");
     assert_eq!(direct_formats.len(), 99, "direct format count changed");
     assert_eq!(
         delegated_formats.len(),
-        42,
+        44,
         "delegated format count changed"
     );
     assert!(
@@ -1235,7 +1235,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         nonconstant_formats.len(),
-        141,
+        143,
         "nonconstant format registration count changed"
     );
     let tracked_formats = items

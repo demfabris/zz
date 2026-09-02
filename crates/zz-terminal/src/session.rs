@@ -153,6 +153,65 @@ impl AllowPassthrough {
 const DEAD_NOTICE_WAIT: Duration = Duration::from_secs(5);
 const MAX_ENGINE_SEQUENCE_BYTES: usize = 256;
 const MAX_ENGINE_RENAME_BYTES: usize = 1024;
+const MAX_ENGINE_OSC_BYTES: usize = 64;
+
+/// `enum progress_bar_state`: what the `ConEmu` OSC 9;4 sequence's first argument
+/// selects. A pane that has never seen one is `hidden`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProgressBarState {
+    #[default]
+    Hidden,
+    Normal,
+    Error,
+    Indeterminate,
+    Paused,
+}
+
+impl ProgressBarState {
+    /// The spellings `format_cb_pane_pb_state` prints.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Hidden => "hidden",
+            Self::Normal => "normal",
+            Self::Error => "error",
+            Self::Indeterminate => "indeterminate",
+            Self::Paused => "paused",
+        }
+    }
+
+    const fn from_digit(digit: u8) -> Option<Self> {
+        Some(match digit {
+            b'0' => Self::Hidden,
+            b'1' => Self::Normal,
+            b'2' => Self::Error,
+            b'3' => Self::Indeterminate,
+            b'4' => Self::Paused,
+            _ => return None,
+        })
+    }
+}
+
+/// `struct progress_bar`: the state and percentage a pane's screen keeps after
+/// an OSC 9;4 sequence, read by `pane_pb_state` and `pane_pb_progress`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProgressBar {
+    pub state: ProgressBarState,
+    pub progress: u8,
+}
+
+impl ProgressBar {
+    /// `screen_set_progress_bar`: the state always lands, and the percentage
+    /// only when the sequence carried one and the state is not indeterminate.
+    fn apply(&mut self, state: ProgressBarState, progress: Option<u8>) {
+        self.state = state;
+        if let Some(progress) = progress
+            && state != ProgressBarState::Indeterminate
+        {
+            self.progress = progress;
+        }
+    }
+}
 
 /// Pane knobs the pin honors inside its own VT layer: `scroll-on-clear`,
 /// `alternate-screen`, `allow-rename`, and the byte `backspace` names.
@@ -184,6 +243,7 @@ enum EngineState {
     Escape,
     Csi,
     CsiOverflow,
+    Osc,
     Rename,
 }
 
@@ -198,6 +258,10 @@ struct EngineFilter {
     state: EngineState,
     sequence: Vec<u8>,
     title: Vec<u8>,
+    /// The OSC payload being collected, passed through to the engine as it is
+    /// read; `None` once it outgrew the cap and can no longer be parsed.
+    osc: Option<Vec<u8>>,
+    bar: ProgressBar,
 }
 
 impl EngineFilter {
@@ -207,6 +271,7 @@ impl EngineFilter {
         knobs: EngineKnobs,
         terminal: &mut Terminal<'_, '_>,
         renames: &mut Vec<String>,
+        bar: &mut Option<ProgressBar>,
     ) {
         while !bytes.is_empty() {
             match self.state {
@@ -217,6 +282,12 @@ impl EngineFilter {
                     b'[' => {
                         self.sequence.clear();
                         self.state = EngineState::Csi;
+                        bytes = &bytes[1..];
+                    }
+                    b']' => {
+                        terminal.vt_write(b"\x1b]");
+                        self.osc = Some(Vec::new());
+                        self.state = EngineState::Osc;
                         bytes = &bytes[1..];
                     }
                     b'k' => {
@@ -272,6 +343,9 @@ impl EngineFilter {
                     if byte >= 0x40 {
                         self.state = EngineState::Ground;
                     }
+                }
+                EngineState::Osc => {
+                    bytes = self.write_osc(bytes, terminal, bar);
                 }
                 EngineState::Rename => {
                     let byte = bytes[0];
@@ -352,6 +426,12 @@ impl EngineFilter {
                     }
                     cursor = end + 1;
                 }
+                b']' => {
+                    terminal.vt_write(&bytes[start..escape + 2]);
+                    self.osc = Some(Vec::new());
+                    self.state = EngineState::Osc;
+                    return &bytes[escape + 2..];
+                }
                 b'k' => {
                     terminal.vt_write(&bytes[start..escape]);
                     self.title.clear();
@@ -362,6 +442,68 @@ impl EngineFilter {
                     cursor = escape + 1;
                 }
             }
+        }
+    }
+
+    /// Reads an OSC payload without changing it: the whole run up to the next
+    /// terminator goes to the engine in one write while a bounded copy is kept
+    /// for `input_exit_osc`. `ESC` is left for the escape state, which writes
+    /// it back as the first byte of ST.
+    fn write_osc<'b>(
+        &mut self,
+        bytes: &'b [u8],
+        terminal: &mut Terminal<'_, '_>,
+        bar: &mut Option<ProgressBar>,
+    ) -> &'b [u8] {
+        let end = bytes
+            .iter()
+            .position(|byte| matches!(byte, 0x07 | 0x18 | 0x1a | 0x1b))
+            .unwrap_or(bytes.len());
+        self.collect_osc(&bytes[..end]);
+        let Some(&terminator) = bytes.get(end) else {
+            terminal.vt_write(bytes);
+            return &[];
+        };
+        if terminator == 0x1b {
+            terminal.vt_write(&bytes[..end]);
+            self.finish_osc(bar);
+            self.state = EngineState::Escape;
+            return &bytes[end + 1..];
+        }
+        terminal.vt_write(&bytes[..=end]);
+        if terminator == 0x07 {
+            self.finish_osc(bar);
+        } else {
+            self.osc = None;
+        }
+        self.state = EngineState::Ground;
+        &bytes[end + 1..]
+    }
+
+    fn collect_osc(&mut self, bytes: &[u8]) {
+        let Some(osc) = self.osc.as_mut() else {
+            return;
+        };
+        if osc.len() + bytes.len() > MAX_ENGINE_OSC_BYTES {
+            self.osc = None;
+            return;
+        }
+        osc.extend_from_slice(bytes);
+    }
+
+    /// `input_exit_osc` routes 9 to `input_osc_9`, whose OSC 9;4 grammar is the
+    /// only OSC the filter reads.
+    fn finish_osc(&mut self, bar: &mut Option<ProgressBar>) {
+        let Some(osc) = self.osc.take() else {
+            return;
+        };
+        let Some((state, progress)) = parse_osc_progress(&osc) else {
+            return;
+        };
+        let before = self.bar;
+        self.bar.apply(state, progress);
+        if self.bar != before {
+            *bar = Some(self.bar);
         }
     }
 
@@ -377,6 +519,65 @@ impl EngineFilter {
     }
 }
 
+/// `input_exit_osc` reads the leading digits as the OSC number, which must be
+/// followed by `;` or the end of the payload, and hands the rest to the
+/// per-number handler. Only 9 is read here.
+fn parse_osc_progress(payload: &[u8]) -> Option<(ProgressBarState, Option<u8>)> {
+    let digits = payload
+        .iter()
+        .position(|byte| !byte.is_ascii_digit())
+        .unwrap_or(payload.len());
+    if digits == 0 {
+        return None;
+    }
+    let mut option = 0_u32;
+    for byte in &payload[..digits] {
+        option = option
+            .saturating_mul(10)
+            .saturating_add(u32::from(byte - b'0'));
+    }
+    let rest = match payload.get(digits) {
+        None => &payload[digits..],
+        Some(b';') => &payload[digits + 1..],
+        Some(_) => return None,
+    };
+    (option == 9).then(|| parse_osc_9_progress(rest)).flatten()
+}
+
+/// `input_osc_9`: `4;<state>` with an optional `;<progress>`, where the state
+/// is one digit 0 through 4 and the progress is 0 through 100. A payload that
+/// stops after `4` or `4;` is silently ignored, and so is anything malformed;
+/// a missing progress leaves the pane's percentage where it was.
+fn parse_osc_9_progress(payload: &[u8]) -> Option<(ProgressBarState, Option<u8>)> {
+    let rest = payload.strip_prefix(b"4")?;
+    if rest.is_empty() || rest == b";" {
+        return None;
+    }
+    let rest = rest.strip_prefix(b";")?;
+    let state = ProgressBarState::from_digit(*rest.first()?)?;
+    let rest = &rest[1..];
+    if rest.is_empty() || rest == b";" {
+        return Some((state, None));
+    }
+    let rest = rest.strip_prefix(b";")?;
+    let mut progress = 0_u32;
+    let mut digits = 0_usize;
+    for byte in rest {
+        if !byte.is_ascii_digit() {
+            break;
+        }
+        if progress > 100 {
+            return None;
+        }
+        progress = progress * 10 + u32::from(byte - b'0');
+        digits += 1;
+    }
+    if digits != rest.len() || progress > 100 {
+        return None;
+    }
+    Some((state, Some(u8::try_from(progress).ok()?)))
+}
+
 /// The two sequences the filter ever rewrites, decided from the bytes alone
 /// so that a chunk with neither passes through in one write: a non-private
 /// erase that may cover the whole screen while `scroll-on-clear` is on, and a
@@ -388,17 +589,13 @@ fn csi_needs_rewrite(parameters: &[u8], final_byte: u8, knobs: EngineKnobs) -> b
         .is_some_and(|byte| (0x3c..0x40).contains(byte));
     match final_byte {
         b'J' if knobs.scroll_on_clear && !private => {
-            let first = parameters
-                .split(|byte| *byte == b';')
-                .next()
-                .unwrap_or(&[]);
+            let first = parameters.split(|byte| *byte == b';').next().unwrap_or(&[]);
             matches!(engine_parameter(first).unwrap_or(0), 0 | 2)
         }
-        b'h' | b'l' if !knobs.alternate_screen && parameters.first() == Some(&b'?') => {
-            parameters[1..]
-                .split(|byte| *byte == b';')
-                .any(|parameter| matches!(engine_parameter(parameter), Some(47 | 1047 | 1049)))
-        }
+        b'h' | b'l' if !knobs.alternate_screen && parameters.first() == Some(&b'?') => parameters
+            [1..]
+            .split(|byte| *byte == b';')
+            .any(|parameter| matches!(engine_parameter(parameter), Some(47 | 1047 | 1049))),
         _ => false,
     }
 }
@@ -975,6 +1172,7 @@ struct PublishedViewports {
     by_view: HashMap<TerminalViewId, Arc<TerminalViewport>>,
     copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
     frozen: Option<Arc<FrozenHistory>>,
+    bar: ProgressBar,
 }
 
 impl PublishedViewports {
@@ -984,6 +1182,7 @@ impl PublishedViewports {
             by_view: HashMap::new(),
             copy_facts: HashMap::new(),
             frozen: None,
+            bar: ProgressBar::default(),
         }
     }
 }
@@ -1472,6 +1671,13 @@ impl TerminalSession {
     #[must_use]
     pub fn events(&self) -> TerminalEvents {
         self.events.clone()
+    }
+
+    /// `wp->base.progress_bar`, which `pane_pb_state` and `pane_pb_progress`
+    /// read. A pane that has seen no OSC 9;4 answers hidden and zero.
+    #[must_use]
+    pub fn progress_bar(&self) -> ProgressBar {
+        self.latest.read().bar
     }
 
     #[must_use]
@@ -3485,6 +3691,10 @@ impl Publisher {
             .store(completion.encode(), Ordering::Release);
     }
 
+    fn set_progress_bar(&self, bar: ProgressBar) {
+        self.latest.write().bar = bar;
+    }
+
     fn publish(&self, viewport: TerminalViewport) {
         let viewport = Arc::new(viewport);
         {
@@ -4696,6 +4906,7 @@ fn run_terminal(
     let mut pending_copy_source: Option<Box<CapturedCopySource>> = None;
     let mut engine_filter = EngineFilter::default();
     let mut engine_renames = Vec::new();
+    let mut engine_bar: Option<ProgressBar> = None;
     let mut active_views = ActiveTerminalViews::new();
     let mut inactive_views = InactiveTerminalViews::new();
     let mut generations = ViewportGenerations::new()?;
@@ -4817,6 +5028,9 @@ fn run_terminal(
         }
         for name in engine_renames.drain(..) {
             publisher.rename_window(name)?;
+        }
+        if let Some(bar) = engine_bar.take() {
+            publisher.set_progress_bar(bar);
         }
 
         let mut deadline = Instant::now() + IDLE_SLEEP;
@@ -5549,6 +5763,7 @@ fn run_terminal(
                                         filter: &mut engine_filter,
                                         knobs: engine_knobs,
                                         renames: &mut engine_renames,
+                                        bar: &mut engine_bar,
                                     },
                                     &read_buffer[..length],
                                 );
@@ -5609,6 +5824,7 @@ fn run_terminal(
                                         filter: &mut engine_filter,
                                         knobs: engine_knobs,
                                         renames: &mut engine_renames,
+                                        bar: &mut engine_bar,
                                     },
                                     &mut raw_output_tap,
                                     buffer,
@@ -5643,6 +5859,7 @@ fn run_terminal(
                         filter: &mut engine_filter,
                         knobs: engine_knobs,
                         renames: &mut engine_renames,
+                        bar: &mut engine_bar,
                     },
                     &mut raw_output_parse_backlog,
                     &mut raw_output_parse_backlog_bytes,
@@ -5674,6 +5891,7 @@ fn run_terminal(
                             filter: &mut engine_filter,
                             knobs: engine_knobs,
                             renames: &mut engine_renames,
+                            bar: &mut engine_bar,
                         },
                         &mut raw_output_tap,
                         buffer,
@@ -11196,6 +11414,8 @@ struct EngineOutput<'a> {
     filter: &'a mut EngineFilter,
     knobs: EngineKnobs,
     renames: &'a mut Vec<String>,
+    /// The pane's progress bar, set only by an OSC 9;4 that moved it.
+    bar: &'a mut Option<ProgressBar>,
 }
 
 fn feed_pty_output(
@@ -11208,9 +11428,10 @@ fn feed_pty_output(
         filter,
         knobs,
         renames,
+        bar,
     } = engine;
     passthrough.write(bytes, |unwrapped| {
-        filter.write(unwrapped, *knobs, terminal, renames);
+        filter.write(unwrapped, *knobs, terminal, renames, bar);
     })
 }
 
@@ -12181,6 +12402,14 @@ fn resolve_style_color(value: StyleColor, palette: &[RgbColor; 256]) -> Option<C
 #[cfg(test)]
 mod tests {
     fn engine_filter_screen(knobs: EngineKnobs, chunks: &[&[u8]]) -> (String, Vec<String>) {
+        let (text, renames, _) = engine_filter_run(knobs, chunks);
+        (text, renames)
+    }
+
+    fn engine_filter_run(
+        knobs: EngineKnobs,
+        chunks: &[&[u8]],
+    ) -> (String, Vec<String>, ProgressBar) {
         let mut terminal = Terminal::new(TerminalOptions {
             cols: 20,
             rows: 4,
@@ -12189,15 +12418,132 @@ mod tests {
         .expect("terminal");
         let mut filter = EngineFilter::default();
         let mut renames = Vec::new();
+        let mut bar = None;
         for chunk in chunks {
-            filter.write(chunk, knobs, &mut terminal, &mut renames);
+            filter.write(chunk, knobs, &mut terminal, &mut renames, &mut bar);
         }
         let revision = ModeRevision::capture(&mut terminal).expect("revision");
         let rows = revision.total_rows();
         (
             revision.capture_rows(0, rows.saturating_sub(1), false, false, false),
             renames,
+            filter.bar,
         )
+    }
+
+    fn progress_after(sequences: &[&str]) -> ProgressBar {
+        let chunks = sequences
+            .iter()
+            .map(|sequence| format!("\x1b]{sequence}\x07").into_bytes())
+            .collect::<Vec<_>>();
+        let borrowed = chunks
+            .iter()
+            .map(std::vec::Vec::as_slice)
+            .collect::<Vec<_>>();
+        let (_, _, bar) = engine_filter_run(EngineKnobs::default(), &borrowed);
+        bar
+    }
+
+    /// Measured on pinned tmux against `#{pane_pb_state}/#{pane_pb_progress}`
+    /// with one 40x6 pane: a fresh pane answers `hidden/0`, then `9;4;0` gives
+    /// `hidden/0`, `9;4;1;50` `normal/50`, `9;4;2;30` `error/30`, `9;4;3`
+    /// `indeterminate/30` and `9;4;4;10` `paused/10`.
+    #[test]
+    fn engine_filter_reads_the_pinned_progress_bar_walk() {
+        assert_eq!(progress_after(&[]), ProgressBar::default());
+        assert_eq!(
+            progress_after(&["9;4;0"]),
+            ProgressBar {
+                state: ProgressBarState::Hidden,
+                progress: 0,
+            }
+        );
+        assert_eq!(
+            progress_after(&["9;4;0", "9;4;1;50"]),
+            ProgressBar {
+                state: ProgressBarState::Normal,
+                progress: 50,
+            }
+        );
+        assert_eq!(
+            progress_after(&["9;4;1;50", "9;4;2;30"]),
+            ProgressBar {
+                state: ProgressBarState::Error,
+                progress: 30,
+            }
+        );
+        assert_eq!(
+            progress_after(&["9;4;2;30", "9;4;3"]),
+            ProgressBar {
+                state: ProgressBarState::Indeterminate,
+                progress: 30,
+            }
+        );
+        assert_eq!(
+            progress_after(&["9;4;2;30", "9;4;4;10"]),
+            ProgressBar {
+                state: ProgressBarState::Paused,
+                progress: 10,
+            }
+        );
+    }
+
+    /// The same probe's edges. From `9;4;1;50`, the pin answered
+    /// `indeterminate/50` for `9;4;3;70` because `screen_set_progress_bar`
+    /// refuses a percentage in that state, then left `indeterminate/50` alone
+    /// through `9;4;5`, `9;4;1;101`, `9;4` and `9;4;`, moved to `error/50` on
+    /// `9;4;2;` and ignored `9;5;1`.
+    #[test]
+    fn engine_filter_holds_the_pinned_progress_bar_edges() {
+        let normal = ProgressBar {
+            state: ProgressBarState::Normal,
+            progress: 50,
+        };
+        let indeterminate = ProgressBar {
+            state: ProgressBarState::Indeterminate,
+            progress: 50,
+        };
+        assert_eq!(progress_after(&["9;4;1;50"]), normal);
+        assert_eq!(progress_after(&["9;4;1;50", "9;4;3;70"]), indeterminate);
+        for ignored in ["9;4;5", "9;4;1;101", "9;4", "9;4;", "9;5;1", "9;4;1;5x"] {
+            assert_eq!(
+                progress_after(&["9;4;1;50", "9;4;3;70", ignored]),
+                indeterminate,
+                "{ignored} moved the progress bar"
+            );
+        }
+        assert_eq!(
+            progress_after(&["9;4;1;50", "9;4;3;70", "9;4;2;"]),
+            ProgressBar {
+                state: ProgressBarState::Error,
+                progress: 50,
+            }
+        );
+        assert_eq!(
+            progress_after(&["9;4;1;100"]),
+            ProgressBar {
+                state: ProgressBarState::Normal,
+                progress: 100,
+            }
+        );
+    }
+
+    /// The OSC has to reach the engine unchanged, whatever the filter reads out
+    /// of it, and it has to survive arriving in pieces or ending on ST.
+    #[test]
+    fn engine_filter_passes_an_osc_through_in_any_shape() {
+        let (text, _, bar) = engine_filter_run(
+            EngineKnobs::default(),
+            &[b"\x1b]0;ti".as_slice(), b"tle\x1b\\a\x1b]9;4", b";1;7\x07b"],
+        );
+        assert_eq!(text, "ab\n\n\n");
+        assert_eq!(
+            bar,
+            ProgressBar {
+                state: ProgressBarState::Normal,
+                progress: 7,
+            }
+        );
     }
 
     #[test]
@@ -12222,15 +12568,16 @@ mod tests {
         assert_eq!(renames, ["ESCCSI", "CAN", "AB", "SPLIT", "QUIET"]);
         assert_eq!(text.trim(), "");
         let (_, refused) = engine_filter_screen(EngineKnobs::default(), &[b"\x1bkNAME\x1b\\"]);
-        assert!(refused.is_empty(), "allow-rename off still renamed: {refused:?}");
+        assert!(
+            refused.is_empty(),
+            "allow-rename off still renamed: {refused:?}"
+        );
     }
 
     #[test]
     fn engine_filter_hands_an_aborted_csi_to_the_engine() {
-        let (text, _) = engine_filter_screen(
-            EngineKnobs::default(),
-            &[b"hello \x1b[2\x1b[2Jworld"],
-        );
+        let (text, _) =
+            engine_filter_screen(EngineKnobs::default(), &[b"hello \x1b[2\x1b[2Jworld"]);
         assert!(!text.contains("2J"), "the aborted CSI leaked: {text:?}");
         assert!(text.contains("world"), "{text:?}");
     }
@@ -12253,7 +12600,13 @@ mod tests {
             b"[2",
             b"Cd",
         ] {
-            filter.write(chunk, EngineKnobs::default(), &mut terminal, &mut renames);
+            filter.write(
+                chunk,
+                EngineKnobs::default(),
+                &mut terminal,
+                &mut renames,
+                &mut None,
+            );
         }
         assert_eq!(terminal.cursor_x().expect("cursor"), 6);
         let revision = ModeRevision::capture(&mut terminal).expect("revision");
@@ -12297,7 +12650,11 @@ mod tests {
         while clears.len() < 512 << 10 {
             clears.extend_from_slice(b"\x1b[H\x1b[2J");
         }
-        for (name, input) in [("coloured", &coloured), ("plain", &plain), ("clears", &clears)] {
+        for (name, input) in [
+            ("coloured", &coloured),
+            ("plain", &plain),
+            ("clears", &clears),
+        ] {
             for round in 0..3 {
                 let mut terminal = Terminal::new(TerminalOptions {
                     cols: 200,
@@ -12320,10 +12677,12 @@ mod tests {
                 let mut passthrough = PassthroughFilter::default();
                 let mut filter = EngineFilter::default();
                 let mut renames = Vec::new();
+                let mut bar = None;
                 let mut engine = EngineOutput {
                     filter: &mut filter,
                     knobs: EngineKnobs::default(),
                     renames: &mut renames,
+                    bar: &mut bar,
                 };
                 let started = Instant::now();
                 for chunk in input.chunks(65536) {
@@ -12334,7 +12693,6 @@ mod tests {
             }
         }
     }
-
 
     use super::*;
     use crate::DEFAULT_HISTORY_LIMIT;

@@ -1141,7 +1141,7 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         };
         scope_counts[index] += 1;
     }
-    assert_eq!(scope_counts, [15, 44, 40, 14]);
+    assert_eq!(scope_counts, [15, 44, 40, 15]);
 
     let tracked = items
         .keys()

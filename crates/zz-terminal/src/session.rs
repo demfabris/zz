@@ -147,6 +147,7 @@ impl AllowPassthrough {
     }
 }
 
+const DEAD_NOTICE_WAIT: Duration = Duration::from_millis(250);
 const MAX_ENGINE_SEQUENCE_BYTES: usize = 256;
 const MAX_ENGINE_RENAME_BYTES: usize = 1024;
 
@@ -1307,6 +1308,13 @@ impl TerminalSession {
             })?
     }
 
+    /// Hands a retained pane its expanded `remain-on-exit-format` while the
+    /// worker is still holding the VT open after the child exited. `None`
+    /// releases the worker without drawing anything.
+    pub fn write_dead_notice(&self, text: Option<Arc<str>>) {
+        self.send_command(Command::WriteDeadNotice(text));
+    }
+
     /// Arms the revision the next copy-mode entry on this worker takes instead
     /// of cloning the pane's own screen.
     pub fn set_pending_copy_source(&self, source: Option<Box<CapturedCopySource>>) {
@@ -1880,6 +1888,7 @@ enum Command {
         reply: Sender<Result<CapturedCopySource, TerminalCaptureError>>,
     },
     SetPendingCopySource(Option<Box<CapturedCopySource>>),
+    WriteDeadNotice(Option<Arc<str>>),
     ResetScreen,
     AttachView(TerminalViewId),
     DetachView(TerminalViewId),
@@ -1932,6 +1941,7 @@ impl Command {
             Self::SetEngineKnobs(_) => "set-engine-knobs",
             Self::CaptureCopySource { .. } => "capture-copy-source",
             Self::SetPendingCopySource(_) => "set-pending-copy-source",
+            Self::WriteDeadNotice(_) => "write-dead-notice",
             Self::AttachView(_) => "attach-view",
             Self::DetachView(_) => "detach-view",
             Self::ReleaseView(_) => "release-view",
@@ -4058,6 +4068,7 @@ fn run_output_view(
                         | Command::SetAllowPassthrough(_)
                         | Command::SetEngineKnobs(_)
                         | Command::SetPendingCopySource(_)
+                        | Command::WriteDeadNotice(_)
                         | Command::PendingPasteOpened { .. }
                     | Command::ResetScreen
                     | Command::UnbindPastedImage { .. },
@@ -4961,6 +4972,11 @@ fn run_terminal(
                 Command::SetPendingCopySource(source) => {
                     pending_copy_source = source;
                 }
+                // The exit path is where a dead notice is taken; one arriving
+                // while the child is still alive has nothing to draw on.
+                Command::WriteDeadNotice(_) => {
+                    log::debug!("discarding a dead notice for a live pane");
+                }
                 Command::ResetScreen => {
                     reset_pane_screen(&mut terminal)?;
                     for view in active_views.values_mut().chain(inactive_views.values_mut()) {
@@ -5570,9 +5586,54 @@ fn run_terminal(
                 &word_separators,
                 SessionStatus::exited(status.exit_code(), status.signal().map(str::to_owned)),
             )?;
+            // `screen_write_vnputs` draws remain-on-exit-format into the pane
+            // the pin retains, so the VT has to outlive the child long enough
+            // for the daemon to expand the template against the pane it has
+            // just marked dead.
+            if let Ok(Command::WriteDeadNotice(Some(text))) =
+                control_rx.recv_timeout(DEAD_NOTICE_WAIT)
+            {
+                write_dead_notice(&mut terminal, &text)?;
+                publish_active_views(
+                    &mut terminal,
+                    publisher,
+                    &mut render_state,
+                    &mut row_iterator,
+                    &mut cell_iterator,
+                    &mut generations,
+                    SnapshotChange::Content,
+                    &mut dictionary,
+                    &mut active_views,
+                    &word_separators,
+                    SessionStatus::exited(status.exit_code(), status.signal().map(str::to_owned)),
+                )?;
+            }
             return Ok(());
         }
     }
+}
+
+/// `server_destroy_pane` resets the scroll region, parks the cursor on the
+/// last row, linefeeds once so the screen scrolls, draws the expanded
+/// `remain-on-exit-format` clipped to the pane width rather than wrapped, and
+/// then hides the cursor.
+fn write_dead_notice(terminal: &mut Terminal<'_, '_>, text: &str) -> Result<(), WorkerError> {
+    let columns = usize::from(terminal.cols()?);
+    let rows = terminal.rows()?;
+    let mut drawn = String::with_capacity(text.len());
+    let mut width = 0_usize;
+    for character in text.chars() {
+        let advance = usize::from(libghostty_vt::unicode::codepoint_width(character));
+        if width + advance > columns {
+            break;
+        }
+        width += advance;
+        drawn.push(character);
+    }
+    terminal.vt_write(format!("\x1b[r\x1b[{rows};1H\n").as_bytes());
+    terminal.vt_write(drawn.as_bytes());
+    terminal.vt_write(b"\x1b[?25l");
+    Ok(())
 }
 
 #[cfg(unix)]

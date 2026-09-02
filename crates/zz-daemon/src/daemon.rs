@@ -58,8 +58,9 @@ use zz_terminal::{
     CaptureBoundary, CaptureOptions, ClipboardTarget, Color, CursorBlinkPolicy, CursorStyle,
     LastCommandCapture, PasteBufferAction, RawOutputTapError, TerminalAppearance,
     TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalEvents,
-    TerminalMode, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport,
-    WordSeparators, apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
+    TerminalMode, TerminalPalette, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId,
+    TerminalViewport, WordSeparators, apply_appearance_overrides, parse_x11_color,
+    prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -697,6 +698,7 @@ fn terminal_worker_options(
             options.cursor_style,
             &options.cursor_colour,
             window_colours,
+            &options.pane_colours,
         ),
         allow_passthrough: options.allow_passthrough,
         wrap_search: options.wrap_search,
@@ -744,6 +746,7 @@ fn pane_terminal_appearance(
     cursor_style: &str,
     cursor_colour: &str,
     window_colours: (Option<TmuxColour>, Option<TmuxColour>),
+    pane_colours: &[(u8, String)],
 ) -> Arc<TerminalAppearance> {
     let cursor_style = CURSOR_STYLE_OVERRIDES
         .iter()
@@ -756,14 +759,19 @@ fn pane_terminal_appearance(
     let background = window_colours
         .1
         .and_then(|colour| appearance_tmux_colour(base, colour));
+    let palette = pane_palette(base, pane_colours);
     if cursor_style.is_none()
         && resolved_color.is_none()
         && foreground.is_none()
         && background.is_none()
+        && palette.is_none()
     {
         return Arc::clone(base);
     }
     let mut appearance = (**base).clone();
+    if let Some(palette) = palette {
+        appearance.palette = palette;
+    }
     if let Some((style, blink)) = cursor_style {
         appearance.cursor_style = style;
         appearance.cursor_blink_policy = blink;
@@ -778,6 +786,28 @@ fn pane_terminal_appearance(
         appearance.background = color;
     }
     Arc::new(appearance)
+}
+
+/// `colour_palette_from_option` copies the resolved `pane-colours` entries into
+/// the pane's default palette and leaves every other index alone, so the theme
+/// keeps the slots the option never named.
+fn pane_palette(
+    base: &TerminalAppearance,
+    pane_colours: &[(u8, String)],
+) -> Option<TerminalPalette> {
+    let mut colors = base.palette.into_array();
+    let mut overlaid = false;
+    for (index, value) in pane_colours {
+        let Some(color) = parse_tmux_colour(value).and_then(|colour| match colour {
+            TmuxColour::Default | TmuxColour::Terminal => None,
+            colour => appearance_tmux_colour(base, colour),
+        }) else {
+            continue;
+        };
+        colors[usize::from(*index)] = color;
+        overlaid = true;
+    }
+    overlaid.then(|| TerminalPalette::new(colors))
 }
 
 fn pane_cursor_color(appearance: &TerminalAppearance, value: &str) -> Option<Color> {
@@ -41120,7 +41150,7 @@ mod tests {
     fn pane_cursor_options_clone_only_for_concrete_overrides() {
         let base = Arc::new(TerminalAppearance::default());
         assert!(Arc::ptr_eq(
-            &pane_terminal_appearance(&base, "default", "", (None, None)),
+            &pane_terminal_appearance(&base, "default", "", (None, None), &[]),
             &base
         ));
 
@@ -41136,14 +41166,14 @@ mod tests {
             ("blinking-bar", CursorStyle::Bar, CursorBlinkPolicy::On),
             ("bar", CursorStyle::Bar, CursorBlinkPolicy::Off),
         ] {
-            let appearance = pane_terminal_appearance(&base, cursor_style, "", (None, None));
+            let appearance = pane_terminal_appearance(&base, cursor_style, "", (None, None), &[]);
             assert_eq!(appearance.cursor_style, expected_style);
             assert_eq!(appearance.cursor_blink_policy, expected_blink);
         }
 
-        let indexed = pane_terminal_appearance(&base, "default", "colour42", (None, None));
+        let indexed = pane_terminal_appearance(&base, "default", "colour42", (None, None), &[]);
         assert_eq!(indexed.cursor_color, base.palette.as_array()[42]);
-        let x11 = pane_terminal_appearance(&base, "default", "sky blue", (None, None));
+        let x11 = pane_terminal_appearance(&base, "default", "sky blue", (None, None), &[]);
         assert_eq!(x11.cursor_color, Color::rgb(135, 206, 235));
 
         let tinted = pane_terminal_appearance(
@@ -41154,6 +41184,7 @@ mod tests {
                 Some(TmuxColour::Rgb(0x0000_ff00)),
                 Some(TmuxColour::Indexed(17)),
             ),
+            &[],
         );
         assert_eq!(tinted.foreground, Color::rgb(0, 255, 0));
         assert_eq!(tinted.background, base.palette.as_array()[17]);
@@ -41163,8 +41194,34 @@ mod tests {
             "default",
             "",
             (Some(TmuxColour::Default), Some(TmuxColour::Terminal)),
+            &[],
         );
         assert!(Arc::ptr_eq(&defaulted, &base));
+
+        let palette = pane_terminal_appearance(
+            &base,
+            "default",
+            "",
+            (None, None),
+            &[
+                (1, "#123456".to_owned()),
+                (200, "colour17".to_owned()),
+                (2, "default".to_owned()),
+            ],
+        );
+        assert_eq!(palette.palette.as_array()[1], Color::rgb(0x12, 0x34, 0x56));
+        assert_eq!(palette.palette.as_array()[200], base.palette.as_array()[17]);
+        assert_eq!(palette.palette.as_array()[2], base.palette.as_array()[2]);
+        assert_eq!(palette.palette.as_array()[0], base.palette.as_array()[0]);
+        assert_eq!(palette.foreground, base.foreground);
+        let untouched = pane_terminal_appearance(
+            &base,
+            "default",
+            "",
+            (None, None),
+            &[(3, "notacolour".to_owned())],
+        );
+        assert!(Arc::ptr_eq(&untouched, &base));
     }
 
     #[test]

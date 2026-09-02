@@ -1,0 +1,10 @@
+corpus: none
+# menu-style, menu-selected-style and menu-border-style are read again every
+# time the menu is drawn, so setting one while the menu is up repaints the live
+# box without a key; menu-border-lines is copied in when the menu opens and is
+# never read again.
+stage: fixtures/display-menu-style-refresh.sh ~/display-menu-style-refresh.sh
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+out: set-environment -gu DISPLAY_MENU_STYLE_REFRESH
+run-shell 'sh ~/display-menu-style-refresh.sh'
+out: show-environment -g DISPLAY_MENU_STYLE_REFRESH

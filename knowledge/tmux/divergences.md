@@ -1138,6 +1138,9 @@ daemon-side label path only. `remain-on-exit` retains a frozen dead pane with li
 `pane_dead` and normal-exit `pane_dead_status` facts, and the respawn commands revive that
 stable pane slot; that pane keeps the whole grid its worker froze on the way out, so
 `capture-pane` reaches its scrollback the way the pin's surviving `struct screen` does.
+The frozen grid answers `capture-pane` only: `TerminalSession::history` on a retained pane still
+fails with `ActorStopped`, so a GUI client scrolling a dead pane's scrollback gets nothing; that
+request path is the terminal engine's (`crates/zz-terminal/src/session.rs`) and stays open.
 Measured 2026-09-02 beside that work: `new-session -d -x 40 -y 6` sizes the pin's pty to the
 window, so its child reads `tput lines` as 6, while zz spawns a detached pane's pty at 24 rows and
 only its mux geometry answers 6. Both engines report `pane_height` 6, so geometry rows stay clean

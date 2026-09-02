@@ -1362,10 +1362,6 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 .pane_pipes
                 .get(&context.pane_id.parse().ok()?)
                 .map(u32::to_string),
-            // `format_cb_pane_pb_progress` and `format_cb_pane_pb_state` read
-            // `wp->base.progress_bar`, which zz keeps on the pane's terminal
-            // worker; a pane with no worker has seen no OSC 9;4 and answers
-            // the fresh values.
             "pane_pb_progress" => Some(
                 pane_progress_bar(self.facts, &context.pane_id)?
                     .progress

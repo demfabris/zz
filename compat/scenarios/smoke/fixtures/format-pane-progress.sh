@@ -71,6 +71,26 @@ emit() {
     return 1
 }
 
+# The same write with the terminator and any byte the payload needs spelled
+# in printf's own escapes, for the OSC table's other exits.
+emit_raw() {
+    marker=$((marker + 1))
+    format="$1"
+    shift
+    # shellcheck disable=SC2059
+    printf "\033]$format\r\nMARK%02d\r\n" "$@" "$marker" >"$pane_tty"
+    attempt=0
+    while [ "$attempt" -lt 400 ]; do
+        if main_client capture-pane -p -S - -t "$pane" | grep -q "^MARK$(printf '%02d' "$marker")\$"; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.05
+    done
+    record_failure "emit-raw-$format"
+    return 1
+}
+
 main_client kill-session -t "=$session" >/dev/null 2>&1 || true
 main_client new-session -d -s "$session" -x 80 -y 24
 pane="$(main_client list-panes -t "=$session" -F '#{pane_id}' | sed -n '1p')"
@@ -122,7 +142,17 @@ check_equal full-progress normal/100 "$(bar)"
 emit '9;4;0;0' || { echo "format-pane-progress-$side: reset"; exit 0; }
 check_equal back-to-hidden hidden/0 "$(bar)"
 
-if [ "$check_count" -ne 16 ]; then
+# input_state_osc_string_table opens with INPUT_STATE_ANYWHERE, whose CAN and
+# SUB rows leave the state through input_exit_osc exactly as BEL and ST do, and
+# a control byte inside the payload is a null transition the table drops.
+emit_raw '9;4;1;50\030' || { echo "format-pane-progress-$side: can"; exit 0; }
+check_equal can-commits normal/50 "$(bar)"
+emit_raw '9;4;2;20\032' || { echo "format-pane-progress-$side: sub"; exit 0; }
+check_equal sub-commits error/20 "$(bar)"
+emit_raw '9;4;1;%b77\007' '\0' || { echo "format-pane-progress-$side: nul"; exit 0; }
+check_equal nul-inside-is-dropped normal/77 "$(bar)"
+
+if [ "$check_count" -ne 19 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then

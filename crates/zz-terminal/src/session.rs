@@ -452,8 +452,9 @@ impl EngineFilter {
 
     /// Reads an OSC payload without changing it: the whole run up to the next
     /// terminator goes to the engine in one write while a bounded copy is kept
-    /// for `input_exit_osc`. `ESC` is left for the escape state, which writes
-    /// it back as the first byte of ST.
+    /// for `input_exit_osc`, which runs on every way out of the state: BEL,
+    /// CAN and SUB commit the payload like ST does. `ESC` is left for the
+    /// escape state, which writes it back as the first byte of ST.
     fn write_osc<'b>(
         &mut self,
         bytes: &'b [u8],
@@ -476,15 +477,14 @@ impl EngineFilter {
             return &bytes[end + 1..];
         }
         terminal.vt_write(&bytes[..=end]);
-        if terminator == 0x07 {
-            self.finish_osc(bar);
-        } else {
-            self.osc = None;
-        }
+        self.finish_osc(bar);
         self.state = EngineState::Ground;
         &bytes[end + 1..]
     }
 
+    /// `input_state_osc_string_table` appends only 0x20..0xff to the payload;
+    /// every other control byte inside an OSC is a null transition the pin
+    /// drops.
     fn collect_osc(&mut self, bytes: &[u8]) {
         let Some(osc) = self.osc.as_mut() else {
             return;
@@ -493,7 +493,7 @@ impl EngineFilter {
             self.osc = None;
             return;
         }
-        osc.extend_from_slice(bytes);
+        osc.extend(bytes.iter().copied().filter(|byte| *byte >= 0x20));
     }
 
     /// `input_exit_osc` routes 9 to `input_osc_9`, whose OSC 9;4 grammar is the
@@ -4434,8 +4434,6 @@ fn run_output_view(
                 Ok(Command::KittyImageGeneration(request)) => {
                     let _ = request.reply.send(None);
                 }
-                // The overlay has no pty, so only the copy geometry's own knob
-                // is taken off this command.
                 Ok(Command::SetEngineKnobs(next)) => mode_keys_vi = next.mode_keys_vi,
                 Ok(
                     Command::Text { .. }
@@ -5352,8 +5350,6 @@ fn run_terminal(
                 Command::SetPendingCopySource(source) => {
                     pending_copy_source = source;
                 }
-                // The exit path is where a dead notice is taken; one arriving
-                // while the child is still alive has nothing to draw on.
                 Command::WriteDeadNotice(_) => {
                     log::debug!("discarding a dead notice for a live pane");
                 }
@@ -5971,17 +5967,9 @@ fn run_terminal(
                 &word_separators,
                 SessionStatus::exited(status.exit_code(), status.signal().map(str::to_owned)),
             )?;
-            // `screen_write_vnputs` draws remain-on-exit-format into the pane
-            // the pin retains, so the VT has to outlive the child long enough
-            // for the daemon to expand the template against the pane it has
-            // just marked dead.
             let notice_deadline = Instant::now() + DEAD_NOTICE_WAIT;
             let mut retained = false;
             while let Some(remaining) = notice_deadline.checked_duration_since(Instant::now()) {
-                // Every other command is dropped rather than answered: its
-                // reply channel disconnects, which is the same actor-stopped
-                // answer the caller would get once this worker returns, and
-                // the daemon's retained-pane paths already fall back on it.
                 match control_rx.recv_timeout(remaining) {
                     Ok(Command::WriteDeadNotice(text)) => {
                         if let Some(text) = text {
@@ -6010,11 +5998,6 @@ fn run_terminal(
                     Err(_) => break,
                 }
             }
-            // A retained pane keeps its whole `struct screen` on the pin, notice
-            // and scrollback alike, so freeze the grid before the VT goes out of
-            // scope with the worker. Only the retained branch sends notice text;
-            // the closing branch sends `None` to release the wait, and its pane
-            // is never captured after the worker returns, so it pays nothing.
             if retained {
                 match ModeRevision::capture(&mut terminal) {
                     Ok(revision) => publisher.publish_frozen_history(revision),
@@ -11985,9 +11968,6 @@ fn publish_active_views<'alloc: 'callbacks, 'callbacks>(
 /// stores in `selx`, `sely`, `endselx` and `endsely` are absolute grid rows,
 /// which is what the retained revision already indexes by.
 fn copy_mode_facts(mode: &CopyModeState, word_separators: &WordSeparators) -> CopyModeFacts {
-    // `data->cx` is reported as it stands: emacs parks it one past the last
-    // cell, which on a filled row is the column count itself, so the row clamp
-    // here would answer one short.
     let cursor = PointCoordinate {
         x: mode.cursor.x,
         y: mode
@@ -12819,6 +12799,49 @@ mod tests {
                 progress: 100,
             }
         );
+    }
+
+    /// The OSC terminators the pin's `input_state_osc_string_table` shares
+    /// with `INPUT_STATE_ANYWHERE`: CAN and SUB leave the state through
+    /// `input_exit_osc` exactly as BEL and ST do, and a control byte inside the
+    /// payload is a null transition the table never appends. Measured on the
+    /// pin on 2026-09-02 with the bytes written to the pane's own tty: `9;4;1;50`
+    /// ended by CAN answers normal/50, `9;4;2;20` ended by SUB answers
+    /// error/20, and `9;4;1;<NUL>77` ended by BEL answers normal/77.
+    #[test]
+    fn engine_filter_commits_an_osc_on_can_sub_and_drops_control_bytes() {
+        let (_, _, bar) =
+            engine_filter_run(EngineKnobs::default(), &[b"\x1b]9;4;1;50\x18".as_slice()]);
+        assert_eq!(
+            bar,
+            ProgressBar {
+                state: ProgressBarState::Normal,
+                progress: 50,
+            }
+        );
+        let (_, _, bar) = engine_filter_run(
+            EngineKnobs::default(),
+            &[b"\x1b]9;4;1;50\x18".as_slice(), b"\x1b]9;4;2;20\x1a"],
+        );
+        assert_eq!(
+            bar,
+            ProgressBar {
+                state: ProgressBarState::Error,
+                progress: 20,
+            }
+        );
+        let (text, _, bar) = engine_filter_run(
+            EngineKnobs::default(),
+            &[b"\x1b]9;4;1;\x0077\x07z".as_slice()],
+        );
+        assert_eq!(
+            bar,
+            ProgressBar {
+                state: ProgressBarState::Normal,
+                progress: 77,
+            }
+        );
+        assert!(text.starts_with('z'), "{text:?}");
     }
 
     /// The OSC has to reach the engine unchanged, whatever the filter reads out
@@ -16378,10 +16401,6 @@ mod tests {
         );
         assert_eq!(mode.cursor.x, 9, "empty separators stop only at whitespace");
 
-        // `next-space-end` is window_copy_cursor_next_word_end with empty
-        // separators, so it carries that function's mode-keys branch: emacs
-        // takes the reader's landing one past the word, vi is pulled back onto
-        // its last cell.
         mode.cursor = PointCoordinate { x: 0, y: row };
         move_copy_cursor(
             mode,
@@ -20282,9 +20301,6 @@ mod tests {
                 y: viewport + 2,
             }
         );
-        // Both commands place through window_copy_update_cursor, so a column
-        // past the row it lands on is clamped to that row's own limit; the
-        // fourth row holds `four`.
         mode.cursor = PointCoordinate { x: 7, y: viewport };
         move_copy_cursor(
             mode,

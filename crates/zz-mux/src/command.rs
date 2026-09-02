@@ -7507,9 +7507,6 @@ impl MuxEngine {
             return Ok(Execution::default());
         }
         let mut effects = Vec::new();
-        // `cmd_copy_mode_exec` resolves -s as its own pane target and hands it
-        // to window_pane_set_mode as the source; naming the target pane itself
-        // is the plain entry.
         if let Some(source) = options.value("-s") {
             let source = self.resolve_pane(Some(source), context.window, context.pane)?;
             if source != pane {

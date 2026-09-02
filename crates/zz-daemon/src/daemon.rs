@@ -7601,13 +7601,6 @@ impl Shared {
                         target_client,
                         require_mode,
                     } => {
-                        // A `copy-mode -k` arms `pending_copy_kill` and a
-                        // `copy-mode -s` arms `pending_copy_source` in the
-                        // effects before this one; only a real mode entry on the
-                        // pane may consume them, so an entry that errors or is
-                        // redirected to a command output must not leave either
-                        // armed for the next unrelated entry. Take both up front
-                        // and use them only on the path that reaches the entry.
                         let armed_copy_kill = inner.pending_copy_kill.take();
                         let armed_copy_source = inner.pending_copy_source.take();
                         if *require_mode && !pane_carries_a_mode_command(&inner, client, *pane) {
@@ -8215,9 +8208,6 @@ impl Shared {
                     }
                     MuxEffect::ModeKeysChanged { window } => {
                         retarget_copy_mode_tables(&mut inner, *window);
-                        // window-copy.c reads mode-keys live in its cursor
-                        // geometry, so the panes it governs need the new value
-                        // before their next copy action.
                         let windows = window.map_or_else(
                             || inner.engine.state.windows.keys().copied().collect(),
                             |window| BTreeSet::from([window]),
@@ -20092,8 +20082,6 @@ impl Shared {
             target: "zz_daemon::diagnostics::terminal",
             "terminal worker finished pane={pane}; closing pane"
         );
-        // A pane that is not retained draws no notice, so release its worker
-        // from the dead-notice wait instead of letting it time out.
         terminal.write_dead_notice(None);
         let target = pane.to_string();
         let command = CommandInvocation::new("kill-pane", ["-t", target.as_str()]);

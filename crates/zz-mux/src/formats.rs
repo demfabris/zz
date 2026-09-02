@@ -2662,6 +2662,29 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         }
     }
 
+    /// format.c `format_find`'s environment tail: after every option, table
+    /// and tree lookup misses, the session store answers first and the global
+    /// one second, and a name the session store keeps with no value masks the
+    /// global entry instead of falling through to it.
+    fn environment_value(&mut self, key: &str) -> Option<String> {
+        let values = self.context.values();
+        let universe = Arc::clone(&values.format_universe);
+        let session = universe.environments.sessions.get(&values.session_id);
+        let row = session
+            .and_then(|rows| rows.iter().find(|row| row.name == key))
+            .or_else(|| {
+                universe
+                    .environments
+                    .global
+                    .iter()
+                    .find(|row| row.name == key)
+            })?;
+        if row.removed {
+            return None;
+        }
+        Some(row.value.clone())
+    }
+
     fn lookup(&mut self, key: &str, flags: &ModifierFlags<'_>) -> Option<String> {
         let hooked = match self.client_row {
             Some(row) if client_loop_scoped(key) => {
@@ -2669,10 +2692,15 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             }
             _ => self.hooks.variable(key, self.context.values()),
         };
-        if hooked.is_none() && self.context.variable_kind(key).is_none() {
+        let mut value = if let Some(hooked) = hooked {
+            hooked
+        } else if self.context.variable_kind(key).is_some() {
+            self.context.variable(key).map(Cow::into_owned)?
+        } else if flags.time.enabled {
             return None;
-        }
-        let mut value = hooked.or_else(|| self.context.variable(key).map(Cow::into_owned))?;
+        } else {
+            self.environment_value(key)?
+        };
         if flags.time.enabled {
             return Some(format_time_value(
                 &value,

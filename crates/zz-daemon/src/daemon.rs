@@ -19497,6 +19497,7 @@ impl Shared {
         let Some(subscriber) = subscriber else {
             return;
         };
+        self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, viewport);
         let sequence = Self::next_sequence();
         let result = match payload {
             TerminalFanout::Full => subscriber.enqueue_terminal_viewport(pane, sequence, viewport),

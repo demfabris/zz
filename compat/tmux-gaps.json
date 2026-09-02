@@ -1013,35 +1013,6 @@
       "reason": "The terminal API lacks a distinct hyperlink-registry reset."
     },
     {
-      "id": "hooks.pane-events",
-      "title": "Produce pane focus and clipboard hooks",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts",
-        "gui"
-      ],
-      "owner": "daemon",
-      "items": [
-        "hook:pane-focus-in",
-        "hook:pane-focus-out"
-      ],
-      "evidence": [
-        "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-mux/src/tmux_options.rs",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "scenario:compat/scenarios/hooks-pane-clipboard.txt"
-      ],
-      "acceptance": [
-        "Each pane transition emits once with a defined client when multiple clients view the pane.",
-        "Pane and window switches emit only while focus-events is on, the hooks queue ahead of the window, session, and client change notifications the pin emits after them, and the differential covers focus-events off."
-      ],
-      "depends_on": [],
-      "reason": "Focus is per client and needs attached, focused clients to transition. pane-set-clipboard now fires from both pinned producers: an OSC 52 write from a pane under set-clipboard on (differential coverage in hooks-pane-clipboard), and a copy-mode copy that asks for the clipboard under any non-off set-clipboard. A 2026-09-01 close was reverted at the gate on two pin measurements taken with a real pty client and focus-events at its default off: across attach, select-pane, new-window, select-window, kill-pane, and detach the pin emits exactly one pane-focus-in (attach) and one pane-focus-out (detach), because window_set_active_pane and session_set_current call window_pane_update_focus only under focus-events on while attach, detach, tty focus keys, overlay changes, and pane removal evaluate unconditionally, and no pane-focus-in follows kill-pane because the surviving pane's PANE_FOCUSED flag was already set; the attempt recomputed the focused set after every command and emitted ten. With focus-events on and a synchronous set-buffer -a hook, the pin queues pane-focus-out and pane-focus-in before window-pane-changed, session-window-changed, client-session-changed, client-attached, and client-detached, and after window-pane-changed on kill-pane; the attempt queued them after client-session-changed and client-attached, after window-pane-changed on select-pane, and after client-detached on detach. A re-close must carry a per-pane PANE_FOCUSED flag evaluated only at those trigger points and queue the hooks in the pin's order, and its differential must run with focus-events off as well as on. The same probe found three zz-only residues that matter here: zz raises client-focus-in on every pty attach where the pin does not, keeps the client unfocused across switch-client where server_client_set_session re-sets CLIENT_FOCUSED, and does not skip PANE_EXITED panes the way window_pane_update_focus does. Not attempted on 2026-09-01; the trigger map below is read off the pin so the next attempt does not have to find it again. window.c window_pane_update_focus is the only producer: it skips a PANE_EXITED pane, calls a pane unfocused unless it is its window's active pane and some client with a session, session->attached, CLIENT_FOCUSED, that window current, and overlay_draw == NULL exists, and it notifies only on a flag edge. Its callers are window.c window_update_focus (window.c:534) from session.c:490-491 session_set_current (both the old and new window, gated on focus-events), server-client.c:123 and :150 overlay set and clear, server-client.c:420 and :424 server_client_set_session (the old session's window then the new one, ungated, which is attach and detach), tty-keys.c:1010 and :1015 the tty focus keys (ungated), and window.c:905 window_lost_pane after its own notify_window(\"window-pane-changed\"); plus window.c:597-598 window_set_active_pane on the last and new active pane, gated on focus-events and ahead of its window-pane-changed notify. The obstacle in zz is ordering, not the predicate. zz's hook events for window-pane-changed, session-window-changed and the rest come out of a pure before/after MuxHookSnapshot diff (window_hook_events in crates/zz-daemon/src/daemon.rs) that takes only the two snapshots and the command name, with no access to ServerState, so it cannot see attached clients, client focus, overlays, or the focus-events option, and cannot decide whether a focus transition belongs before or after the window-pane-changed it sits next to. A re-close needs that generator to take the server state (or needs the focus transitions computed beside it and spliced at the right index), a PANE_FOCUSED set on ServerState updated only at the trigger points above, and a differential run with focus-events off as well as on."
-    },
-    {
       "id": "hooks.shutdown-window-unlinked-order",
       "title": "Preserve forced-shutdown window-unlinked order",
       "decision": "adopt",
@@ -3529,6 +3500,20 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Windows now retain tmux's Unix-second `activity_time` apart from zz's logical MRU counter. Creation, parsed nonempty pane output, and the existing pinned current-window transition producers update both values from the injected engine clock. The independent audit found and repaired the direct daemon `switch-client` selection path so it refreshes that clock before changing the current window. Same-window selection, pane selection, pane creation, splits, and layout-only changes without output leave the timestamp unchanged. The direct Time format backing expands empty without a window and preserves the same seconds through plain, boolean, comparison, list-row, and time-modified forms. Focused model, command, format, daemon, and differential coverage preserves the pin's move-window and swap-window transition details while proving target isolation and output-driven updates. No wire protocol or snapshot field changed."
+    },
+    {
+      "id": "hooks.pane-events",
+      "title": "Produce pane focus and clipboard hooks",
+      "closed_on": "2026-09-02",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-tui/src/state.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/hooks-pane-clipboard.txt",
+        "scenario:compat/scenarios/smoke/hooks-pane-focus.txt",
+        "scenario:compat/scenarios/smoke/hooks-pane-focus-clients.txt"
+      ],
+      "resolution": "window_pane_update_focus is the pin's only pane-focus producer, and the daemon now carries the same per-pane flag on ServerState and evaluates it only where the pin calls it: attach and detach through server_client_set_session, the tty focus keys, an overlay opening or closing, and the window_lost_pane that follows a pane removal run unconditionally, while window_set_active_pane and session_set_current run only while focus-events is on. The pane counts as focused while it is its window's active pane and some attached, focused, overlay-free client has that window current, an exited pane is skipped, and a hook is raised only on a flag edge. The 2026-09-01 revert's two measurements both hold now. With the option off, the walk attach / select-pane / new-window / select-window / kill-pane / detach raises exactly one pane-focus-in at attach and one pane-focus-out at detach on both binaries; with it on the transitions queue ahead of window-pane-changed, session-window-changed, client-session-changed, client-attached and client-detached, and after window-pane-changed on the pane removal, because that is the one call site the pin evaluates after its own notify. Both runs are asserted as raw timelines in smoke/hooks-pane-focus, which drives one real pty client on a throwaway server per side and compares the pin's queue order to zz's. smoke/hooks-pane-focus-clients drives two pty clients on one pane and proves the rest of the predicate: only the last client to lose focus and the first to regain it move the flag, the tty focus keys update the pane before the client-focus-out notify and after the client-focus-in one (tty-keys.c orders those two differently), a display-panes overlay opening drops the flag and its key closing restores it, and switch-client evaluates the old session's window then the new one ahead of client-session-changed. Two of the three zz-only residues the revert found are fixed with it: attach now re-sets the client focused flag the way server_client_set_session does, so a switch-client no longer leaves the client unfocused, and the TUI no longer replays a focus report after every attach, so a pty attach raises no client-focus-in where the pin raises none (the daemon already assumes a fresh attachment is focused, which is what made the replay redundant). The third is fixed in the transition itself, though only by construction and not by a differential row: pane_focus_transition returns early for a pane the engine marks dead, the way window_pane_update_focus returns early for PANE_EXITED, so a pane whose process exited under remain-on-exit keeps whatever flag it had and raises nothing. A side probe with remain-on-exit on, focus-events on and one pty client produced the same hook timeline on both binaries across a pane death and the select-pane after it, but it does not isolate the skip on its own. Two divergences stay and are recorded in knowledge/tmux/divergences.md rather than here alone: zz's clients report focus regardless of the focus-events option, where the pin only enables terminal focus reporting while the option is on and therefore never receives a focus key with it off, so a zz client that loses focus with the option off still moves the pane flag; and new-window queues window-linked after session-window-changed on the pin and before it in zz, which is why neither differential logs window-linked. pane-set-clipboard closed earlier under the same group."
     },
     {
       "id": "hooks.queue",

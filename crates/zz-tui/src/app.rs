@@ -2159,7 +2159,7 @@ mod tests {
     #[test]
     fn unrelated_request_zero_error_preserves_pending_attach_recovery() {
         let (mut model, _) = paned_model();
-        assert!(model.finish_client_focus_attach().is_some());
+        assert_eq!(model.finish_client_focus_attach(), None);
         model.begin_client_focus_attach();
         assert_eq!(model.client_focus_changed(false), None);
         let mut attempt = AttachAttempt::Explicit;

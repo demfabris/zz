@@ -1,0 +1,15 @@
+corpus: none
+# window_pane_update_focus is the only pane-focus producer and it runs at fixed
+# call sites: attach and detach through server_client_set_session, the tty focus
+# keys, overlay set and clear, and window_lost_pane run unconditionally, while
+# window_set_active_pane and session_set_current run only while focus-events is
+# on. With the option off the whole walk raises exactly one pane-focus-in at
+# attach and one pane-focus-out at detach; with it on the transitions queue
+# ahead of window-pane-changed, session-window-changed, client-session-changed,
+# client-attached and client-detached, and after window-pane-changed on a pane
+# removal.
+stage: fixtures/hooks-pane-focus.sh ~/hooks-pane-focus.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+run-shell 'sh ~/hooks-pane-focus.sh'
+out: show-environment -g HOOKS_PANE_FOCUS_OFF
+out: show-environment -g HOOKS_PANE_FOCUS_ON

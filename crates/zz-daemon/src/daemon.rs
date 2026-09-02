@@ -2846,6 +2846,8 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
     "command-error",
     "pane-died",
     "pane-exited",
+    "pane-focus-in",
+    "pane-focus-out",
     "pane-mode-changed",
     "pane-set-clipboard",
     "pane-title-changed",
@@ -6667,6 +6669,7 @@ impl Shared {
             format_variables.insert("config_files".to_owned(), inner.config_files.clone());
             let hook_snapshot_before =
                 event_hooks_enabled.then(|| MuxHookSnapshot::capture(&inner.engine));
+            let pane_focus_before = event_hooks_enabled.then(|| capture_pane_focus_probe(&inner));
             let copy_modes_before = event_hooks_enabled.then(|| active_copy_mode_panes(&inner));
             let active_windows_before = inner
                 .engine
@@ -8269,7 +8272,12 @@ impl Shared {
             }
             if let Some(before) = hook_snapshot_before.as_ref() {
                 let after = MuxHookSnapshot::capture(&inner.engine);
+                let anchor = pending_hook_events.len();
                 pending_hook_events.extend(mux_hook_events(before, &after, command_name));
+                if let Some(pane_focus_before) = pane_focus_before.as_ref() {
+                    let focus = pane_focus_hook_events(&mut inner, pane_focus_before, &after);
+                    splice_pane_focus_events(&mut pending_hook_events, anchor, focus);
+                }
                 for session in before
                     .sessions
                     .keys()
@@ -14166,6 +14174,7 @@ impl Shared {
                 active_copy_mode_panes(&inner),
             )
         });
+        let pane_focus_before = event_hooks_enabled.then(|| capture_pane_focus_probe(&inner));
         let previous_session = client_attached_session(&inner, client);
         let client_name = client_format_name(&inner, client);
         let previous_sessions = inner
@@ -14282,6 +14291,7 @@ impl Shared {
         let mut snapshot = inner.engine.state.snapshot();
         let presence = snapshot_presence(&inner);
         stamp_snapshot_for_client(&inner, client, &mut snapshot, &presence);
+        inner.client_focused.insert(client, true);
         let mut hook_events = Vec::new();
         if let Some((hook_snapshot_before, copy_modes_before)) = hook_state_before.as_ref() {
             let hook_snapshot_after = MuxHookSnapshot::capture(&inner.engine);
@@ -14290,6 +14300,11 @@ impl Shared {
                 &hook_snapshot_after,
                 "",
             ));
+            if let Some(pane_focus_before) = pane_focus_before.as_ref() {
+                let focus =
+                    pane_focus_hook_events(&mut inner, pane_focus_before, &hook_snapshot_after);
+                splice_pane_focus_events(&mut hook_events, 0, focus);
+            }
             let copy_modes_after = active_copy_mode_panes(&inner);
             hook_events.extend(pane_mode_hook_events(
                 hook_snapshot_before,
@@ -14583,6 +14598,7 @@ impl Shared {
                 active_copy_mode_panes(&inner),
             )
         });
+        let pane_focus_before = event_hooks_enabled.then(|| capture_pane_focus_probe(&inner));
         let client_name = client_format_name(&inner, client);
         let terminals = sessions
             .iter()
@@ -14657,6 +14673,11 @@ impl Shared {
                 &hook_snapshot_after,
                 "",
             ));
+            if let Some(pane_focus_before) = pane_focus_before.as_ref() {
+                let focus =
+                    pane_focus_hook_events(&mut inner, pane_focus_before, hook_snapshot_before);
+                splice_pane_focus_events(&mut events, 0, focus);
+            }
             let copy_modes_after = active_copy_mode_panes(&inner);
             events.extend(pane_mode_hook_events(
                 hook_snapshot_before,
@@ -14885,6 +14906,8 @@ impl Shared {
                 let copy_modes = copy_mode_change.then(|| active_copy_mode_panes(&inner));
                 (MuxHookSnapshot::capture(&inner.engine), copy_modes)
             });
+        let pane_focus_before =
+            (!context.no_hooks).then(|| capture_pane_focus_probe(&self.inner.lock()));
         let result = (|| -> Result<(), DaemonError> {
             match input {
                 InputMessage::Text { pane, text } => {
@@ -15214,6 +15237,10 @@ impl Shared {
                     &copy_modes_after,
                 ));
             }
+            self.run_event_hooks(events);
+        }
+        if let Some(pane_focus_before) = pane_focus_before.as_ref() {
+            let events = pane_focus_settle(&mut self.inner.lock(), pane_focus_before);
             self.run_event_hooks(events);
         }
         log::trace!(
@@ -15675,29 +15702,31 @@ impl Shared {
     ) -> Option<(bool, bool, Vec<PendingHookEvent>)> {
         let mut inner = self.inner.lock();
         client_attached_session(&inner, client)?;
+        let pane_focus_before = (!context.no_hooks).then(|| capture_pane_focus_probe(&inner));
         inner.client_focused.insert(client, focused);
         let mut hook_events = Vec::new();
-        if kind == ClientKind::Interactive {
-            if !context.no_hooks
-                && let Some(event) = client_hook_event(
-                    &inner,
-                    if focused {
-                        "client-focus-in"
-                    } else {
-                        "client-focus-out"
-                    },
-                    client,
-                )
-            {
-                hook_events.push(event);
-            }
-            if focused
-                && update_latest
-                && let Some(event) =
-                    set_current_window_latest_client(&mut inner, client, !context.no_hooks)
-            {
-                hook_events.push(event);
-            }
+        let pane_focus = pane_focus_before.as_ref().map(|before| {
+            let snapshot = MuxHookSnapshot::capture(&inner.engine);
+            pane_focus_hook_events(&mut inner, before, &snapshot)
+        });
+        // `tty_keys_next` updates pane focus before it notifies
+        // `client-focus-out` and after it notifies `client-focus-in`.
+        let pane_focus = pane_focus.unwrap_or_default();
+        if focused {
+            hook_events.extend(client_focus_hook(&inner, kind, context, client, focused));
+            let anchor = hook_events.len();
+            splice_pane_focus_events(&mut hook_events, anchor, pane_focus);
+        } else {
+            splice_pane_focus_events(&mut hook_events, 0, pane_focus);
+            hook_events.extend(client_focus_hook(&inner, kind, context, client, focused));
+        }
+        if kind == ClientKind::Interactive
+            && focused
+            && update_latest
+            && let Some(event) =
+                set_current_window_latest_client(&mut inner, client, !context.no_hooks)
+        {
+            hook_events.push(event);
         }
         Some((
             inner.client_flags.contains(client),
@@ -19691,7 +19720,7 @@ impl Shared {
         if let Some(pipe) = pipe {
             stop_pane_pipe(pipe);
         }
-        let Some((mut context, retained, changed, mut events, before)) = ({
+        let Some((mut context, retained, changed, mut events, before, pane_focus_before)) = ({
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -19705,6 +19734,7 @@ impl Shared {
             };
             inner.engine.set_format_now(unix_timestamp());
             let before = MuxHookSnapshot::capture(&inner.engine);
+            let pane_focus_before = capture_pane_focus_probe(&inner);
             let retained = inner
                 .engine
                 .retain_exited_pane(pane, failed)
@@ -19739,7 +19769,14 @@ impl Shared {
             if !changed && retained {
                 events.clear();
             }
-            Some((context, retained, changed, events, before))
+            Some((
+                context,
+                retained,
+                changed,
+                events,
+                before,
+                pane_focus_before,
+            ))
         }) else {
             return;
         };
@@ -19778,8 +19815,12 @@ impl Shared {
             );
         }
         if result.is_ok() {
-            let after = MuxHookSnapshot::capture(&self.inner.lock().engine);
+            let mut inner = self.inner.lock();
+            let after = MuxHookSnapshot::capture(&inner.engine);
+            let anchor = events.len();
             events.extend(mux_hook_events(&before, &after, ""));
+            let focus = pane_focus_hook_events(&mut inner, &pane_focus_before, &after);
+            splice_pane_focus_events(&mut events, anchor, focus);
         }
         if result.is_ok() || !self.is_current_terminal(pane, terminal) {
             self.run_event_hooks(events);
@@ -24904,6 +24945,7 @@ struct ServerState {
     client_activity_times: BTreeMap<ClientId, u64>,
     client_created_times: BTreeMap<ClientId, u64>,
     client_focused: BTreeMap<ClientId, bool>,
+    pane_focus: BTreeSet<PaneId>,
     window_latest_clients: BTreeMap<WindowId, ClientId>,
     session_last_attached: BTreeMap<SessionId, u64>,
     activity_sequence: u64,
@@ -28585,6 +28627,290 @@ fn client_focused_window(
         .copied()
         .filter(|focused| session.windows.contains(focused))
         .unwrap_or(session.active_window)
+}
+
+fn client_focus_hook(
+    inner: &ServerState,
+    kind: ClientKind,
+    context: &ExecutionContext,
+    client: ClientId,
+    focused: bool,
+) -> Option<PendingHookEvent> {
+    if kind != ClientKind::Interactive || context.no_hooks {
+        return None;
+    }
+    let name = if focused {
+        "client-focus-in"
+    } else {
+        "client-focus-out"
+    };
+    client_hook_event(inner, name, client)
+}
+
+/// The client and layout facts `window_pane_update_focus` reads, captured
+/// before a change so the transitions the pin would evaluate can be replayed
+/// against the state that follows it.
+#[derive(Default)]
+struct PaneFocusProbe {
+    window_active_panes: BTreeMap<WindowId, PaneId>,
+    session_windows: BTreeMap<SessionId, WindowId>,
+    client_sessions: BTreeMap<ClientId, SessionId>,
+    client_focused: BTreeMap<ClientId, bool>,
+    client_overlays: BTreeSet<ClientId>,
+}
+
+/// The focus transitions a change produced, split at the anchor the pin queues
+/// them around: everything but a pane removal is notified before the window,
+/// session and client change hooks beside it, while `window_lost_pane`
+/// notifies `window-pane-changed` first and updates focus after.
+#[derive(Default)]
+struct PaneFocusEvents {
+    leading: Vec<PendingHookEvent>,
+    after_window_pane_changed: Vec<(WindowId, PendingHookEvent)>,
+}
+
+impl PaneFocusEvents {
+    fn is_empty(&self) -> bool {
+        self.leading.is_empty() && self.after_window_pane_changed.is_empty()
+    }
+}
+
+fn capture_pane_focus_probe(inner: &ServerState) -> PaneFocusProbe {
+    PaneFocusProbe {
+        window_active_panes: inner
+            .engine
+            .state
+            .windows
+            .iter()
+            .map(|(window, state)| (*window, state.active_pane))
+            .collect(),
+        session_windows: inner
+            .engine
+            .state
+            .sessions
+            .iter()
+            .map(|(session, state)| (*session, state.active_window))
+            .collect(),
+        client_sessions: inner
+            .attached
+            .iter()
+            .flat_map(|(session, clients)| clients.iter().map(|client| (*client, *session)))
+            .collect(),
+        client_focused: inner.client_focused.clone(),
+        client_overlays: inner
+            .client_kinds
+            .keys()
+            .copied()
+            .filter(|client| any_overlay_present(inner, *client))
+            .collect(),
+    }
+}
+
+/// `window_pane_update_focus`: a pane counts as focused only while it is its
+/// window's active pane and some attached, focused client with no overlay has
+/// that window current.
+fn pane_is_focused(inner: &ServerState, pane: PaneId) -> bool {
+    let Some(window) = inner.engine.state.window_for_pane(pane) else {
+        return false;
+    };
+    if inner
+        .engine
+        .state
+        .windows
+        .get(&window)
+        .map(|state| state.active_pane)
+        != Some(pane)
+    {
+        return false;
+    }
+    inner
+        .client_focused
+        .iter()
+        .filter(|(_, focused)| **focused)
+        .map(|(client, _)| *client)
+        .filter(|client| !any_overlay_present(inner, *client))
+        .any(|client| client_focused_window_for_attachment(inner, client) == Some(window))
+}
+
+/// One `window_pane_update_focus` call: a pane that has exited is skipped
+/// entirely, and a hook is raised only when the pane-level flag moves.
+fn pane_focus_transition(
+    inner: &mut ServerState,
+    pane: PaneId,
+    snapshot: &MuxHookSnapshot,
+) -> Option<PendingHookEvent> {
+    if inner.engine.state.pane(pane).is_none_or(|state| state.dead) {
+        return None;
+    }
+    let focused = pane_is_focused(inner, pane);
+    if focused == inner.pane_focus.contains(&pane) {
+        return None;
+    }
+    let name = if focused {
+        inner.pane_focus.insert(pane);
+        "pane-focus-in"
+    } else {
+        inner.pane_focus.remove(&pane);
+        "pane-focus-out"
+    };
+    let state = snapshot.panes.get(&pane)?;
+    Some(PendingHookEvent::pane(name, pane, state, snapshot))
+}
+
+fn session_active_pane(inner: &ServerState, session: SessionId) -> Option<PaneId> {
+    let window = inner.engine.state.sessions.get(&session)?.active_window;
+    Some(inner.engine.state.windows.get(&window)?.active_pane)
+}
+
+fn client_active_pane(inner: &ServerState, client: ClientId) -> Option<PaneId> {
+    let window = client_focused_window_for_attachment(inner, client)?;
+    Some(inner.engine.state.windows.get(&window)?.active_pane)
+}
+
+/// Replay the pin's `window_pane_update_focus` call sites against the change
+/// `before` bounds. Attach and detach, the tty focus keys, an overlay opening
+/// or closing and a pane removal evaluate unconditionally; the pane and window
+/// switches in `window_set_active_pane` and `session_set_current` evaluate only
+/// while `focus-events` is on.
+fn pane_focus_candidates(
+    inner: &ServerState,
+    before: &PaneFocusProbe,
+) -> (Vec<PaneId>, Vec<(WindowId, PaneId)>) {
+    let gated = inner.engine.focus_events();
+    let mut leading = Vec::new();
+    let mut removals = Vec::new();
+    for client in before
+        .client_overlays
+        .iter()
+        .copied()
+        .chain(
+            inner
+                .client_kinds
+                .keys()
+                .copied()
+                .filter(|client| any_overlay_present(inner, *client)),
+        )
+        .collect::<BTreeSet<_>>()
+    {
+        if before.client_overlays.contains(&client) != any_overlay_present(inner, client) {
+            leading.extend(client_active_pane(inner, client));
+        }
+    }
+    for (client, session) in inner
+        .attached
+        .iter()
+        .flat_map(|(session, clients)| clients.iter().map(|client| (*client, Some(*session))))
+        .chain(before.client_sessions.keys().map(|client| (*client, None)))
+        .collect::<BTreeMap<_, _>>()
+    {
+        let previous = before.client_sessions.get(&client).copied();
+        let session = session.or_else(|| client_attached_session(inner, client));
+        if previous == session {
+            continue;
+        }
+        leading.extend(previous.and_then(|previous| session_active_pane(inner, previous)));
+        leading.extend(session.and_then(|session| session_active_pane(inner, session)));
+    }
+    for (client, focused) in &inner.client_focused {
+        if before.client_focused.get(client) != Some(focused) {
+            leading.extend(client_active_pane(inner, *client));
+        }
+    }
+    if gated {
+        for (session, window) in &before.session_windows {
+            let Some(current) = inner.engine.state.sessions.get(session) else {
+                continue;
+            };
+            if current.active_window == *window {
+                continue;
+            }
+            leading.extend(
+                inner
+                    .engine
+                    .state
+                    .windows
+                    .get(window)
+                    .map(|state| state.active_pane),
+            );
+            leading.extend(session_active_pane(inner, *session));
+        }
+    }
+    for (window, pane) in &before.window_active_panes {
+        let Some(current) = inner.engine.state.windows.get(window) else {
+            continue;
+        };
+        if current.active_pane == *pane {
+            continue;
+        }
+        if inner.engine.state.pane(*pane).is_some() {
+            if gated {
+                leading.push(*pane);
+                leading.push(current.active_pane);
+            }
+        } else {
+            removals.push((*window, current.active_pane));
+        }
+    }
+    (leading, removals)
+}
+
+fn pane_focus_hook_events(
+    inner: &mut ServerState,
+    before: &PaneFocusProbe,
+    snapshot: &MuxHookSnapshot,
+) -> PaneFocusEvents {
+    inner
+        .pane_focus
+        .retain(|pane| inner.engine.state.pane(*pane).is_some());
+    let (leading, removals) = pane_focus_candidates(inner, before);
+    let mut events = PaneFocusEvents::default();
+    for pane in leading {
+        events
+            .leading
+            .extend(pane_focus_transition(inner, pane, snapshot));
+    }
+    for (window, pane) in removals {
+        events
+            .after_window_pane_changed
+            .extend(pane_focus_transition(inner, pane, snapshot).map(|event| (window, event)));
+    }
+    events
+}
+
+/// The input dispatch settle: an overlay that a key opened or closed moves pane
+/// focus the way `server_client_set_overlay` and `server_client_clear_overlay`
+/// do. Nothing is snapshotted while no call site would have evaluated a pane.
+fn pane_focus_settle(inner: &mut ServerState, before: &PaneFocusProbe) -> Vec<PendingHookEvent> {
+    let (leading, removals) = pane_focus_candidates(inner, before);
+    if leading.is_empty() && removals.is_empty() {
+        return Vec::new();
+    }
+    let snapshot = MuxHookSnapshot::capture(&inner.engine);
+    let events = pane_focus_hook_events(inner, before, &snapshot);
+    let mut flattened = Vec::new();
+    splice_pane_focus_events(&mut flattened, 0, events);
+    flattened
+}
+
+/// Splice the focus transitions into the change hooks the same batch produced,
+/// keeping the pin's queue order around `window-pane-changed`.
+fn splice_pane_focus_events(events: &mut Vec<PendingHookEvent>, at: usize, focus: PaneFocusEvents) {
+    if focus.is_empty() {
+        return;
+    }
+    let leading = focus.leading.len();
+    events.splice(at..at, focus.leading);
+    for (window, event) in focus.after_window_pane_changed {
+        let anchor = events
+            .iter()
+            .rposition(|candidate| {
+                candidate.name == "window-pane-changed"
+                    && candidate.variables.get(HOOK_WINDOW_CONTEXT_FORMAT)
+                        == Some(&window.to_string())
+            })
+            .map_or(at + leading, |index| index + 1);
+        events.insert(anchor, event);
+    }
 }
 
 fn client_focused_window_for_attachment(inner: &ServerState, client: ClientId) -> Option<WindowId> {
@@ -34872,7 +35198,7 @@ mod tests {
         );
         assert_eq!(
             produced_non_after_hooks.len(),
-            28,
+            30,
             "explicit hook producer count changed"
         );
         assert!(
@@ -34897,13 +35223,9 @@ mod tests {
                 }
             }
         }
-        let expected_tracked_hooks = ["pane-focus-in", "pane-focus-out"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<BTreeSet<_>>();
-        assert_eq!(
-            tracked_hooks, expected_tracked_hooks,
-            "runtime hook gap roster changed"
+        assert!(
+            tracked_hooks.is_empty(),
+            "runtime hook gap roster changed: {tracked_hooks:?}"
         );
 
         let produced_hooks = produced_after_hooks
@@ -34914,13 +35236,13 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect::<BTreeSet<_>>();
-        assert_eq!(produced_hooks.len(), 65, "produced hook count changed");
+        assert_eq!(produced_hooks.len(), 67, "produced hook count changed");
         assert_eq!(
             explicit_only_hooks.len(),
             1,
             "explicit-only hook count changed"
         );
-        assert_eq!(tracked_hooks.len(), 2, "tracked hook count changed");
+        assert!(tracked_hooks.is_empty(), "tracked hook count changed");
         assert!(
             produced_hooks.is_disjoint(&tracked_hooks),
             "produced and tracked hooks overlap"
@@ -43826,6 +44148,7 @@ mod tests {
                 *name,
                 "window-linked"
                     | "session-created"
+                    | "pane-focus-in"
                     | "client-session-changed"
                     | "client-attached"
                     | "window-renamed"
@@ -44276,6 +44599,107 @@ mod tests {
 
         assert_eq!(client_format_name(&inner, client), "client-4242");
         assert_eq!(find_attached_client(&inner, "client-4242"), Some(client));
+    }
+
+    #[test]
+    fn pane_focus_follows_the_pinned_predicate_and_queues_ahead_of_the_client_hooks() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "pane-focus", "focus");
+        let mut hook_context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane focus hook context");
+        install_client_event_log_hooks(
+            &shared,
+            &mut hook_context,
+            &[
+                "pane-focus-in",
+                "pane-focus-out",
+                "client-session-changed",
+                "client-attached",
+                "client-detached",
+            ],
+        );
+        let (first, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("first-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (second, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("second-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.inner.lock().message_log.clear();
+
+        // `server_client_set_session` updates focus before it notifies
+        // `client-session-changed`, and `cmd_attach_session` notifies
+        // `client-attached` after that.
+        shared.attach(first, session).expect("attach first client");
+        assert_eq!(
+            client_event_log(&shared)
+                .iter()
+                .map(|entry| entry.split('|').next().unwrap_or_default().to_owned())
+                .collect::<Vec<_>>(),
+            ["pane-focus-in", "client-session-changed", "client-attached"]
+        );
+        assert_eq!(shared.inner.lock().pane_focus, BTreeSet::from([pane]));
+
+        shared
+            .attach(second, session)
+            .expect("attach second client");
+        shared.inner.lock().message_log.clear();
+
+        let report = |client, focused| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    InputMessage::ClientFocus { focused },
+                )
+                .expect("report client focus");
+        };
+
+        // The pane is focused while any attached, focused client holds its
+        // window, so only the last client to lose it and the first to regain it
+        // move the flag.
+        report(first, false);
+        assert!(
+            !client_event_log(&shared)
+                .iter()
+                .any(|entry| entry.starts_with("pane-focus")),
+            "the pane stays focused while the second client still is"
+        );
+        report(second, false);
+        report(first, true);
+        report(second, true);
+        report(first, false);
+        report(second, false);
+        assert_eq!(
+            client_event_log(&shared)
+                .iter()
+                .filter(|entry| entry.starts_with("pane-focus"))
+                .map(|entry| entry.split('|').next().unwrap_or_default().to_owned())
+                .collect::<Vec<_>>(),
+            ["pane-focus-out", "pane-focus-in", "pane-focus-out"]
+        );
+        assert!(shared.inner.lock().pane_focus.is_empty());
+
+        // Re-attaching re-sets CLIENT_FOCUSED the way `server_client_set_session`
+        // does, and the detach that follows raises the transition ahead of
+        // `client-detached`.
+        shared.attach(first, session).expect("re-attach");
+        shared.inner.lock().message_log.clear();
+        shared.detach(first);
+        shared.detach(second);
+        assert_eq!(
+            client_event_log(&shared)
+                .iter()
+                .map(|entry| entry.split('|').next().unwrap_or_default().to_owned())
+                .collect::<Vec<_>>(),
+            ["pane-focus-out", "client-detached", "client-detached"]
+        );
     }
 
     #[test]
@@ -68407,7 +68831,9 @@ bind - split-window -v -c "#{pane_current_path}"
             "an errored copy-mode -k left the kill armed"
         );
 
-        shared.attach(client, session).expect("attach after the error");
+        shared
+            .attach(client, session)
+            .expect("attach after the error");
         shared
             .execute(
                 client,

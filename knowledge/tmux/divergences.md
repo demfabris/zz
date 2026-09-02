@@ -92,8 +92,17 @@ promotion after a detach. Changed TUI resizes send retained outer size before
 per-pane geometry, so `client-resized` can expand old pane and window dimensions;
 `clients.event-resize-context` owns moving that hook after geometry without losing
 unchanged-report duplicates. Pinned `after-queue` is explicit-only: ordinary queues do not produce
-it, while `set-hook -R` runs it. Three names still have no automatic producer:
-`pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`.
+it, while `set-hook -R` runs it. Every other pinned hook name now has an automatic
+producer. `pane-focus-in` and `pane-focus-out` are the daemon's replay of
+`window_pane_update_focus`: a per-pane flag evaluated only at the pin's call sites,
+unconditionally on attach, detach, the tty focus keys, an overlay opening or
+closing and a pane removal, and only under `focus-events` for the pane and window
+switches, queued ahead of the window, session and client change hooks except on a
+pane removal, where the pin notifies `window-pane-changed` first. Two related
+divergences stay: zz's clients report client focus regardless of `focus-events`,
+where the pin only enables terminal focus reporting while the option is on and so
+never receives a focus key with it off; and `new-window` queues `window-linked`
+before `session-window-changed` here and after it on the pin.
 `window-layout-changed` single-fires where the pin double-fires on
 resize/select-layout.
 

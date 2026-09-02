@@ -277,7 +277,7 @@ impl Model {
         self.client_focus.attach_ready = true;
         self.client_focus.attach_pending = false;
         self.client_focus.attach_recoverable = false;
-        self.client_focus.sent = None;
+        self.client_focus.sent = Some(true);
         self.pending_client_focus()
     }
 
@@ -1215,14 +1215,15 @@ mod tests {
     }
 
     #[test]
-    fn client_focus_assumes_foreground_and_replays_on_initial_attach() {
+    fn client_focus_adopts_the_focused_attach_default_and_reports_only_a_loss() {
         let mut model = make_model(80, 24);
 
-        assert_eq!(
-            model.finish_client_focus_attach(),
-            Some(InputMessage::ClientFocus { focused: true })
-        );
+        assert_eq!(model.finish_client_focus_attach(), None);
         assert_eq!(model.client_focus_changed(true), None);
+        assert_eq!(
+            model.client_focus_changed(false),
+            Some(InputMessage::ClientFocus { focused: false })
+        );
     }
 
     #[test]
@@ -1239,10 +1240,7 @@ mod tests {
     #[test]
     fn client_focus_replays_once_per_reattach_without_pane_focus() {
         let mut model = make_model(80, 24);
-        assert!(matches!(
-            model.finish_client_focus_attach(),
-            Some(InputMessage::ClientFocus { focused: true })
-        ));
+        assert_eq!(model.finish_client_focus_attach(), None);
         assert_eq!(
             model.client_focus_changed(false),
             Some(InputMessage::ClientFocus { focused: false })
@@ -1258,7 +1256,7 @@ mod tests {
     #[test]
     fn failed_attach_recovers_latest_focus_without_same_value_churn() {
         let mut model = make_model(80, 24);
-        assert!(model.finish_client_focus_attach().is_some());
+        assert_eq!(model.finish_client_focus_attach(), None);
 
         model.begin_client_focus_attach();
         assert_eq!(model.client_focus_changed(false), None);
@@ -1278,7 +1276,7 @@ mod tests {
     #[test]
     fn unrelated_failure_while_ready_does_not_change_focus_delivery() {
         let mut model = make_model(80, 24);
-        assert!(model.finish_client_focus_attach().is_some());
+        assert_eq!(model.finish_client_focus_attach(), None);
         assert!(!model.client_focus_attach_pending());
         assert_eq!(model.fail_client_focus_attach(), None);
         assert_eq!(
@@ -1290,17 +1288,17 @@ mod tests {
     #[test]
     fn reconnect_discards_the_old_epoch_and_replays_without_pane_focus() {
         let mut model = make_model(80, 24);
-        assert!(model.finish_client_focus_attach().is_some());
+        assert_eq!(model.finish_client_focus_attach(), None);
         assert_eq!(
             model.client_focus_changed(false),
             Some(InputMessage::ClientFocus { focused: false })
         );
 
         model.reset_client_focus_attach();
-        assert_eq!(model.client_focus_changed(true), None);
+        assert_eq!(model.client_focus_changed(false), None);
         assert_eq!(model.fail_client_focus_attach(), None);
         let replay = model.finish_client_focus_attach();
-        assert_eq!(replay, Some(InputMessage::ClientFocus { focused: true }));
+        assert_eq!(replay, Some(InputMessage::ClientFocus { focused: false }));
         assert!(!matches!(replay, Some(InputMessage::TerminalView { .. })));
     }
 

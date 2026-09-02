@@ -1,0 +1,12 @@
+corpus: none
+# Two real pty clients share one pane. window_pane_update_focus calls the pane
+# focused while any attached, focused, overlay-free client has its window
+# current, so only the last client to lose focus and the first to regain it move
+# the flag. The tty focus keys update the pane before the client-focus-out
+# notify and after the client-focus-in one, an overlay opening and closing moves
+# it unconditionally, and switch-client evaluates the old session's window then
+# the new one ahead of client-session-changed.
+stage: fixtures/hooks-pane-focus-clients.sh ~/hooks-pane-focus-clients.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+run-shell 'sh ~/hooks-pane-focus-clients.sh'
+out: show-environment -g HOOKS_PANE_FOCUS_CLIENTS

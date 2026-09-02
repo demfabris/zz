@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 7 INTEGRATED (COMMAND-PROMPT -t/-F ROUTING + DISPLAY-PANES TEMPLATES/QUEUE WAITS + DISPLAY-MESSAGE CLIENT ALIASES, COPY-MODE FORMATS FROM DAEMON SESSIONS + -k KILL + REFRESH RE-SYNC + COPY-LINE FAMILY, DEFAULT-CLIENT-COMMAND + FOCUS-FOLLOWS-MOUSE + MENU POINTER/PASTE RULES, PROTOCOL V94); CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **CYCLE 8 INTEGRATED (DAEMON + FORMATS LANES; PANE FOCUS HOOKS + PROMPT KEY TABLE, PER-COMMAND FORMAT CLIENT + DISPLAY-MESSAGE -a LISTING + WINDOW_BIGGER/OFFSETS + PANE PIPE/UNSEEN FORMATS; TERMINAL LANE SKIPPED FOR A RETAINED-PANE CAPTURE REGRESSION; PROTOCOL V94); CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **29 UNRESOLVED GROUPS (22 OPEN + 7 BLOCKED = 29)**
+> Live work: **19 UNRESOLVED GROUPS (14 OPEN + 5 BLOCKED = 19)**
 >
-> Ledger settlement: **86.6% (188 of 217 known groups: 100 x (149 CLOSED + 39 ACCEPTED) / (149 CLOSED + 68 LIVE)); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **91.1% (195 of 214 known groups: 100 x (154 CLOSED + 41 ACCEPTED) / (154 CLOSED + 60 LIVE)); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **178 SCENARIOS, 2,435 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
+> Exit evidence: **185 SCENARIOS, 2,454 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 7 INTEGRATED 2026-09-02 ON THE MACBOOK; THE NEXT CYCLE STARTS FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **CYCLE 8 INTEGRATED 2026-09-02 ON THE MACBOOK (2 OF 3 LANES; TERMINAL SKIPPED); THE NEXT CYCLE STARTS FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,23 +76,23 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | `origin/main` at `03f61a41` (cycle-7 client merge) plus this ledger recompute |
+| Published branch | `origin/main` at `37c91bf2` (cycle-8 formats merge) plus this ledger recompute |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Cycle 7 of the orchestrated Opus/Fable loop: `command-prompt -t`/`-F` client routing that parks the issuing queue, `display-panes` selection templates with the queue wait, and `display-message` `@`/`{active}`/`{current}` client aliases (`327d036f`); the copy-mode format family produced from the daemon's copy sessions, `copy-mode -k`, a daemon-owned refresh re-sync for the `r` keys and the `copy-line` family, with protocol v94 (`dee45667`); `default-client-command` through the launcher, `focus-follows-mouse`, and the menu pointer and paste rules (`03f61a41`) |
-| Orchestration | Cycle 7 launched and finished 2026-09-02 on the macbook through `opus-compat-run-7.js`: three Opus lanes, one Fable reviewer per lane, one serialized Fable gate. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; the cycle-7 lock fronts are INTEGRATED and released on the board |
+| Delivery | Cycle 8 of the orchestrated Opus/Fable loop, 2 of 3 lanes integrated: the pane focus hooks at the pin's own `window_pane_update_focus` call sites and the command prompt's vi/emacs key table with `key_string_lookup_key` spellings (`7f212120`); the per-command format client, `display-message -a` listing, `window_bigger`/`window_offset_*`, the `pane_pipe`/`pane_unseen_changes` family and four registry settlements (`37c91bf2`). The terminal lane (pane engine knobs, `copy-mode -s`, `clear-history -H`, `remain-on-exit-format`) was skipped at the gate: drawing the default `remain-on-exit-format` notice scrolls a retained pane's last output into scrollback that zz's frozen capture cannot read, so `capture-pane -S -1 -E -1` regressed on two corpus scenarios; the fix is architectural and left for the next cycle. Protocol stays v94 |
+| Orchestration | Cycle 8 launched and finished 2026-09-02 on the macbook through `opus-compat-run-8.js`: three Opus lanes, one Fable reviewer per lane, one serialized Fable gate. Daemon and formats integrated; the terminal lane was skipped for a retained-pane `capture-pane` regression its review missed (recorded on `F-TERMINAL-KNOBS-COPY`). [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; the daemon and formats lock fronts are INTEGRATED and all three are released on the board |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
-| Agreed-scope meter | 77.6% (236 of 304 items frozen on 2026-08-31), 36 of 65 groups done; `python3 compat/progress.py` |
-| Completed fixed cohort | Cycle 7: 3 of 3 lanes integrated, agreed-scope meter 71.7% to 77.6%, unresolved groups 35 to 29 |
-| Previous completed cohort | Cycle 6: 3 of 3 lanes integrated, agreed-scope meter 65.8% to 71.7% |
-| Campaign point | `command-prompt -t` raises the prompt on the resolved client and parks the issuing Command or Control queue like `CMD_RETURN_WAIT`, `display-panes` runs its selection template and parks on the overlay, and `display-message @`/`{active}`/`{current}` answer the invoking client's own pane; copy-mode formats come from the daemon's own copy sessions so the `-N` counts are observable, `copy-mode -k` kills the pane when its mode ends, and the `r` refresh keys re-sync the frozen view; `default-client-command` runs through the launcher, `focus-follows-mouse` rides the option map, and the menu obeys the pin's pointer and paste rules; the biggest remaining baskets are the parked terminal engine knobs and pane border chrome (lines, indicators, tiled z-order), pane focus hooks, `send-keys -K`, the chooser key vocabulary, and the nested popup overlays |
-| Live registry | 68 active groups, 488 active items, 149 closed records |
-| Active status | 22 open, 7 blocked, 39 accepted |
+| Agreed-scope meter | 84.2% (256 of 304 items frozen on 2026-08-31), 46 of 65 groups done; `python3 compat/progress.py` |
+| Completed fixed cohort | Cycle 8: 2 of 3 lanes integrated (terminal skipped), agreed-scope meter 77.6% to 84.2%, unresolved groups 29 to 19 |
+| Previous completed cohort | Cycle 7: 3 of 3 lanes integrated, agreed-scope meter 71.7% to 77.6% |
+| Campaign point | pane-focus-in/out fire where the pin calls `window_pane_update_focus` and the command prompt runs the pin's own key table (vi command mode, word separators, `-k` spellings, C-c/C-g close); every command resolves its format client the way `cmd_find_best_client` does, `display-message -a` lists the answering variables, `window_bigger` and the offsets come from the client viewport, and `pane_pipe`/`pane_pipe_pid`/`pane_unseen_changes` are produced. The terminal engine knobs, `copy-mode -s` and `remain-on-exit-format` are ready on the skipped lane but not landed; the biggest remaining baskets are the retained-pane capture fix, pane border chrome (lines, indicators, tiled z-order), `send-keys -K`, the format `I` modifier and `display-message -v` trace, the chooser key vocabulary, and the nested popup overlays |
+| Live registry | 60 active groups, 473 active items, 154 closed records |
+| Active status | 14 open, 5 blocked, 41 accepted |
 | Known differentials | 3 registered cases: two geometry, one geometry plus output |
 
-Cycles 2 through 7 reached `origin/main` through the board's MAIN lock; cycle 7 ends at the
-ledger recompute that follows `03f61a41`. Resolve the commit containing the latest tracker update with
+Cycles 2 through 8 reached `origin/main` through the board's MAIN lock; cycle 8 ends at the
+ledger recompute that follows `37c91bf2`. Resolve the commit containing the latest tracker update with
 `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -106,15 +106,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 7: 3 of 3 lanes integrated |
-| Previous completed cohort | Cycle 6: 3 of 3 lanes integrated |
+| Completed fixed cohort | Cycle 8: 2 of 3 lanes integrated (terminal skipped) |
+| Previous completed cohort | Cycle 7: 3 of 3 lanes integrated |
 | New residual groups | Since the 2026-08-31 freeze: 2 items across 2 groups, tracked outside the agreed-scope meter |
-| Unresolved movement | Cycle 7: 35 at launch, 29 at close |
-| Live unresolved | 22 open + 7 blocked = 29 |
+| Unresolved movement | Cycle 8: 29 at launch, 19 at close |
+| Live unresolved | 14 open + 5 blocked = 19 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 178 scenarios, 2,435 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
-| Differential SHA-256 | `b235bd8ee5eaf8d0070fed7f5147e1dc543dc3074b990de9846f35e55a68cfda` |
-| Ledger settlement | 188 of 217 known groups = 86.6% |
+| Latest differential | 185 scenarios, 2,454 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
+| Differential SHA-256 | `c314baeed40f98f6759311b70835886733723ba493db654a094e5faebb2d10c7` |
+| Ledger settlement | 195 of 214 known groups = 91.1% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -128,7 +128,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(149 + 39) / (149 + 68) = 188 / 217 = 86.6%
+(154 + 41) / (154 + 60) = 195 / 214 = 91.1%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -174,6 +174,18 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-02 cycle-8 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `7f212120` (pane-focus-in/out raised at the pin's `window_pane_update_focus` call sites with the focus-events gating and queue order, the command prompt's vi/emacs key table, word separators, `-k` spellings via `key_string_lookup_key`, C-c/C-g close, the TUI relaying every prompt key; no wire change), `37c91bf2` (per-command format client from `cmd_find_best_client`, `display-message -a` listing, `window_bigger`/`window_offset_x`/`window_offset_y` from the client viewport, `pane_pipe`/`pane_pipe_pid`/`pane_unseen_changes`, three slug relocations and two in-place settlements; catalog 464/39, no wire change) |
+| Terminal lane | SKIPPED, not merged. Its five reviewer must-fixes were applied and hold, but the delta gate found `options.remain-on-exit-format` regresses `capture-pane` on a retained pane: drawing the default `Pane is dead (...)` notice linefeed-scrolls the child's last output into scrollback, and zz's retained/frozen capture reads only the visible viewport (`capture_viewport` clamps negative boundaries to row 0), so `capture-pane -S -1 -E -1` answers empty where the pin and pre-lane zz answer the last line. Deterministic on `new-session-environment` and `pane-spawn-options`, clean on the daemon+formats tree, probed on both binaries. The fix is architectural (retained capture must read scrolled-off history); recorded on `F-TERMINAL-KNOBS-COPY` for the next cycle to fix or to re-land the other four groups (pane engine knobs, `copy-mode -s`, `clear-history -H`, `resize-pane -T`) without `remain-on-exit-format` |
+| Review stage | One Fable reviewer per lane; every merged close verified against the pin; the daemon lane's two must-fix text defects fixed at the gate (the prompt record claimed a standalone `display-message -d 0` loses a parked prompt and cited a nonexistent `#{client_prompt}`, rewritten to the measured pair and re-probed on both binaries; a doc comment reattached to `command_prompt_raw_key`); the formats lane approved with no defects (one stale `session_attached_list` sentence corrected at the gate) |
+| Workspace gates | Full workspace tests and clippy with warnings denied, green on both merged lanes; every red row was a known timing flake that passed exact-solo (`attached_client_extents_clamp`, whose `mode revision exceeds 128 MiB` race reproduces 2/6 solo on pristine `origin/main` and is not a lane regression; `client_focus_closes_display_panes`; `history_request_is_guarded_clamped`) |
+| Differential | Daemon delta: 150 scenarios; formats delta: 131 scenarios (each eight shards plus source-replay-diagnostics solo); every channel clean under `--strict-geometry`, `known/known-pane-scrollbar-columns` at its registered tuple |
+| Records gate | Tracker check, board fold tests, and the stored summary check pass: 185 scenarios, 2,454 steps, attached-client `PASS` |
+| Summary SHA-256 | `c314baeed40f98f6759311b70835886733723ba493db654a094e5faebb2d10c7` |
 
 ### 2026-09-02 cycle-7 integration checkpoint
 

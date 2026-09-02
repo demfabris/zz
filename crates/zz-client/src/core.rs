@@ -1593,6 +1593,7 @@ mod tests {
             })],
             selected: Some(0),
             stay_open: false,
+            mouse_keys: false,
         };
         let confirm = ConfirmState {
             prompt: "Confirm? ".to_owned(),

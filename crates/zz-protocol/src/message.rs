@@ -2230,6 +2230,11 @@ pub struct MenuState {
     pub items: Vec<Option<MenuItem>>,
     pub selected: Option<u32>,
     pub stay_open: bool,
+    /// `display-menu` without `-M` and without an invoking mouse event is
+    /// `MENU_NOMOUSE` on the pin: it answers only button 1, and any other
+    /// button leaves it.
+    #[serde(default)]
+    pub mouse_keys: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

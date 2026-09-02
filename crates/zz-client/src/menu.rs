@@ -1,11 +1,176 @@
 use zz_protocol::{MenuAction, MenuItem, MenuState, input_key_name};
-use zz_terminal::{KeyAction, KeyCode, KeyInput};
+use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuKeyResult {
     Action(MenuAction),
     Select(Option<usize>),
     Consumed,
+}
+
+/// One pointer report as `menu_key_cb` classifies it. A motion with no button
+/// held is its own kind because the pin's `move` is `MOUSE_DRAG && MOUSE_RELEASE`
+/// and such a report must never select or close.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuPointerKind {
+    Press,
+    Release,
+    Motion,
+    Drag,
+    Wheel,
+}
+
+/// The drawn box a pointer report is measured against: `md->px`, `md->py` and
+/// the `menu->width + 4` by `menu->count + 2` screen `screen_write_box` fills.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MenuBox {
+    pub left: u16,
+    pub top: u16,
+    pub width: u16,
+    pub items: usize,
+}
+
+/// What a pasted run does to a live menu: the selection it leaves behind, the
+/// first action it fires, and the text that arrives after the menu is gone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuPasteResult {
+    pub selection: Option<usize>,
+    pub action: Option<MenuAction>,
+    pub remainder: String,
+}
+
+impl MenuBox {
+    /// `menu_key_cb`'s hit box: `px .. px + 4 + width` by
+    /// `py + 1 .. py + 1 + count - 1`, so the title row in the top border and
+    /// the bottom border sit outside it while the column one past the right
+    /// border sits inside.
+    #[must_use]
+    pub fn contains(self, column: u16, row: u16) -> bool {
+        let last_row = self
+            .top
+            .saturating_add(1)
+            .saturating_add(u16::try_from(self.items).unwrap_or(u16::MAX))
+            .saturating_sub(1);
+        column >= self.left
+            && column <= self.left.saturating_add(self.width)
+            && row >= self.top.saturating_add(1)
+            && row <= last_row
+    }
+
+    #[must_use]
+    fn row_at(self, row: u16) -> Option<usize> {
+        usize::from(row.checked_sub(self.top.saturating_add(1))?).into()
+    }
+}
+
+/// The pin's `MOUSE_BUTTON_1`, which `MOUSE_BUTTONS(b)` answers for a button-1
+/// press and for a drag with button 1 held.
+pub const MOUSE_BUTTON_1: u8 = 0;
+
+/// `menu_key_cb`'s mouse arm. A menu the pin marked `MENU_NOMOUSE` - every
+/// `display-menu` without `-M` and without an invoking mouse event - answers
+/// only button 1, which it ignores, and leaves on any other button, so a
+/// release, a motion, a wheel and a button-2 or button-3 press all close it
+/// with nothing chosen. Otherwise a press or a motion moves the highlight, a
+/// release chooses the row the highlight already sits on, and a release outside
+/// the box closes a menu that is not stay-open. A stay-open menu instead closes
+/// on any report that is neither a release, a wheel nor a drag.
+#[must_use]
+pub fn resolve_menu_mouse(
+    state: &MenuState,
+    selected: Option<usize>,
+    frame: MenuBox,
+    kind: MenuPointerKind,
+    buttons: u8,
+    column: u16,
+    row: u16,
+) -> MenuKeyResult {
+    if !state.mouse_keys {
+        if buttons == MOUSE_BUTTON_1 {
+            return MenuKeyResult::Consumed;
+        }
+        return MenuKeyResult::Action(MenuAction::Cancel);
+    }
+    let motion = kind == MenuPointerKind::Motion;
+    let release = matches!(kind, MenuPointerKind::Release | MenuPointerKind::Motion);
+    let wheel = kind == MenuPointerKind::Wheel;
+    let drag = matches!(kind, MenuPointerKind::Motion | MenuPointerKind::Drag);
+    if !frame.contains(column, row) {
+        let closes = if state.stay_open {
+            !release && !wheel && !drag
+        } else {
+            !motion && release
+        };
+        if closes {
+            return MenuKeyResult::Action(MenuAction::Cancel);
+        }
+        return MenuKeyResult::Select(None);
+    }
+    let chooses = if state.stay_open {
+        !wheel && !drag
+    } else {
+        !motion && release
+    };
+    if chooses {
+        return menu_choose_selected(state, selected);
+    }
+    match frame.row_at(row) {
+        Some(index) if index < state.items.len() => MenuKeyResult::Select(Some(index)),
+        _ => MenuKeyResult::Select(None),
+    }
+}
+
+/// The pin has no paste path while a menu owns the client's keys:
+/// `server_client_handle_key0` hands `c->overlay_key` every key of a bracketed
+/// paste, so the two bracket markers fall through `menu_key_cb` and are
+/// swallowed while each pasted character is answered exactly as if it had been
+/// typed. Once a character closes the menu, the rest of the run reaches the
+/// pane as ordinary keys.
+#[must_use]
+pub fn resolve_menu_paste(
+    state: &MenuState,
+    selected: Option<usize>,
+    text: &str,
+) -> MenuPasteResult {
+    let mut selection = selected;
+    for (offset, character) in text.char_indices() {
+        let input = KeyInput {
+            action: KeyAction::Press,
+            key: KeyCode::Character(character),
+            modifiers: Modifiers::default(),
+            text: (!character.is_control()).then(|| character.to_string().into_boxed_str()),
+            unshifted_codepoint: Some(character),
+        };
+        match resolve_menu_key(state, selection, &input) {
+            MenuKeyResult::Action(action) => {
+                return MenuPasteResult {
+                    selection,
+                    action: Some(action),
+                    remainder: text[offset.saturating_add(character.len_utf8())..].to_owned(),
+                };
+            }
+            MenuKeyResult::Select(next) => selection = next,
+            MenuKeyResult::Consumed => {}
+        }
+    }
+    MenuPasteResult {
+        selection,
+        action: None,
+        remainder: String::new(),
+    }
+}
+
+fn menu_choose_selected(state: &MenuState, selected: Option<usize>) -> MenuKeyResult {
+    match selected {
+        None => MenuKeyResult::Action(MenuAction::Cancel),
+        Some(index) => match state.items.get(index) {
+            Some(Some(item)) if item.enabled => {
+                MenuKeyResult::Action(MenuAction::Choose(u32::try_from(index).unwrap_or(u32::MAX)))
+            }
+            _ if state.stay_open => MenuKeyResult::Consumed,
+            _ => MenuKeyResult::Action(MenuAction::Cancel),
+        },
+    }
 }
 
 #[must_use]
@@ -31,16 +196,7 @@ pub fn resolve_menu_key(
     }
     match key {
         "Escape" | "C-[" | "C-c" | "C-g" | "q" => MenuKeyResult::Action(MenuAction::Cancel),
-        "Enter" => match selected {
-            None => MenuKeyResult::Action(MenuAction::Cancel),
-            Some(index) => match state.items.get(index) {
-                Some(Some(item)) if item.enabled => MenuKeyResult::Action(MenuAction::Choose(
-                    u32::try_from(index).unwrap_or(u32::MAX),
-                )),
-                _ if state.stay_open => MenuKeyResult::Consumed,
-                _ => MenuKeyResult::Action(MenuAction::Cancel),
-            },
-        },
+        "Enter" => menu_choose_selected(state, selected),
         "Up" | "k" | "BTab" => MenuKeyResult::Select(menu_step(&state.items, selected, -1)),
         "Down" | "j" => MenuKeyResult::Select(menu_step(&state.items, selected, 1)),
         "Home" | "g" => MenuKeyResult::Select(menu_edge(&state.items, false)),
@@ -200,6 +356,7 @@ mod tests {
             ],
             selected: Some(0),
             stay_open: false,
+            mouse_keys: true,
         }
     }
 
@@ -308,6 +465,7 @@ mod tests {
                 .collect(),
             selected: None,
             stay_open: true,
+            mouse_keys: true,
             ..state()
         };
         for key in [KeyCode::ArrowUp, KeyCode::ArrowDown, KeyCode::End] {
@@ -398,6 +556,7 @@ mod tests {
                 }),
             ],
             stay_open: true,
+            mouse_keys: true,
             ..state()
         };
         assert_eq!(
@@ -426,6 +585,7 @@ mod tests {
         );
         let stay_open = MenuState {
             stay_open: true,
+            mouse_keys: true,
             ..state()
         };
         assert_eq!(

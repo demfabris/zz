@@ -23,7 +23,10 @@ pub use core::{
     agent_attention_status,
 };
 pub use layout::{NormalizedPaneRect, pane_rects};
-pub use menu::{MenuKeyResult, resolve_menu_key};
+pub use menu::{
+    MenuBox, MenuKeyResult, MenuPasteResult, MenuPointerKind, resolve_menu_key, resolve_menu_mouse,
+    resolve_menu_paste,
+};
 pub use status::{ComposedStatusRow, StatusHitRange, compose_status_row};
 pub use status_bar::{
     StatusBarAlignment, StatusBarClock, StatusBarModel, StatusBarSettings, StatusBarWindow,

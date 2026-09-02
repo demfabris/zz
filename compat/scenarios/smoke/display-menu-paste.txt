@@ -1,0 +1,12 @@
+corpus: none
+# server_client_handle_key0 hands c->overlay_key every key of a bracketed paste
+# before the command queue sees it, so the two bracket markers fall through
+# menu_key_cb and are swallowed while each pasted character is answered exactly
+# as if it had been typed: an inert run leaves the menu up, the cancel key
+# closes it without running a row, a row key runs that row, and the characters
+# after the close reach the pane as ordinary keys.
+stage: fixtures/display-menu-paste.sh ~/display-menu-paste.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu DISPLAY_MENU_PASTE
+run-shell 'sh ~/display-menu-paste.sh'
+out: show-environment -g DISPLAY_MENU_PASTE

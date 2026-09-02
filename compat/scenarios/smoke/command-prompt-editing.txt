@@ -1,0 +1,15 @@
+corpus: none
+# The prompt's own key handling, driven on a real pty client. `-k` answers with
+# `key_string_lookup_key`'s spelling, so 0x20 is Space, 0x08 is C-h and CSI Z is
+# BTab. `prompt_set_options` reads status-keys and word-separators from the
+# session once at prompt creation, `prompt_translate_key` is the vi table on top
+# of the emacs one, its word motions take the separators where the big-letter
+# ones take none, and C-c and C-g close the prompt the way Escape does. A
+# message from another client draws over the prompt line without touching its
+# buffer and `-N` eats every key for the delay. `status_message_set` assigns
+# `message_ignore_keys` only when the delay is non-zero, so a following `-d 0`
+# message inherits it and keeps eating keys, and the parked prompt never closes.
+stage: fixtures/command-prompt-editing.sh ~/command-prompt-editing.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+run-shell 'sh ~/command-prompt-editing.sh'
+out: show-environment -g COMMAND_PROMPT_EDITING

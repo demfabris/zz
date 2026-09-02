@@ -473,7 +473,9 @@ fn parse_sgr_mouse(parameters: &str, final_byte: u8) -> Option<MouseEvent> {
 fn control_key(byte: u8) -> KeyEvent {
     match byte {
         0 => KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL),
-        8 | 127 => KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        // `key_string_lookup_key` spells 0x08 `C-h` and only 0x7f `BSpace`,
+        // so the legacy control byte must stay a control chord.
+        127 => KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
         9 => KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
         10 | 13 => KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         1..=26 => KeyEvent::new(

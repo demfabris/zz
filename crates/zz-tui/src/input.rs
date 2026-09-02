@@ -1045,15 +1045,6 @@ fn handle_picker_key(
     Ok(InputOutcome::Repaint)
 }
 
-/// `-1`, `-N` and `-k` are decided key by key inside the daemon, so the TUI
-/// stops editing and relays the press on the pane-targeted key path instead.
-const fn prompt_relays_keys(mode: CommandPromptMode) -> bool {
-    matches!(
-        mode,
-        CommandPromptMode::Single | CommandPromptMode::Numeric | CommandPromptMode::Key
-    )
-}
-
 fn handle_command_prompt(
     model: &mut Model,
     client: &InteractiveClient,
@@ -1062,109 +1053,19 @@ fn handle_command_prompt(
     if event.kind == KeyEventKind::Release {
         return Ok(InputOutcome::None);
     }
-    let mode = model
-        .command_prompt
-        .as_ref()
-        .expect("command prompt checked above")
-        .mode;
-    if prompt_relays_keys(mode) {
-        if let Some(pane) = model.active_pane() {
-            client
-                .send_input(InputMessage::Key {
-                    pane,
-                    input: key_input(event),
-                    text_follows: false,
-                })
-                .map_err(|error| error.to_string())?;
-        }
-        return Ok(InputOutcome::None);
-    }
-    let state = model
-        .command_prompt
-        .as_mut()
-        .expect("command prompt checked above");
-    let mut changed = false;
-    let action = match event.code {
-        TerminalKeyCode::Esc => Some(CommandPromptAction::Close),
-        TerminalKeyCode::Enter => Some(CommandPromptAction::Submit {
-            input: state.input.clone(),
-        }),
-        TerminalKeyCode::Left => {
-            state.cursor = state.cursor.saturating_sub(1);
-            changed = true;
-            None
-        }
-        TerminalKeyCode::Right => {
-            state.cursor = state
-                .cursor
-                .saturating_add(1)
-                .min(u32::try_from(state.input.chars().count()).unwrap_or(u32::MAX));
-            changed = true;
-            None
-        }
-        TerminalKeyCode::Home => {
-            state.cursor = 0;
-            changed = true;
-            None
-        }
-        TerminalKeyCode::End => {
-            state.cursor = u32::try_from(state.input.chars().count()).unwrap_or(u32::MAX);
-            changed = true;
-            None
-        }
-        TerminalKeyCode::Backspace => {
-            if state.cursor > 0 {
-                let end = scalar_byte_index(&state.input, state.cursor);
-                let start = scalar_byte_index(&state.input, state.cursor - 1);
-                state.input.replace_range(start..end, "");
-                state.cursor -= 1;
-                changed = true;
-                None
-            } else if mode == CommandPromptMode::BackspaceExit && state.input.is_empty() {
-                Some(CommandPromptAction::Close)
-            } else {
-                None
-            }
-        }
-        TerminalKeyCode::Delete => {
-            let start = scalar_byte_index(&state.input, state.cursor);
-            let end = scalar_byte_index(&state.input, state.cursor.saturating_add(1));
-            if start < end {
-                state.input.replace_range(start..end, "");
-                changed = true;
-            }
-            None
-        }
-        TerminalKeyCode::Char(character)
-            if !event
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) =>
-        {
-            let index = scalar_byte_index(&state.input, state.cursor);
-            if state.input.len().saturating_add(character.len_utf8()) <= MAX_COMMAND_PROMPT_BYTES {
-                state.input.insert(index, character);
-                state.cursor = state.cursor.saturating_add(1);
-                changed = true;
-            }
-            None
-        }
-        _ => None,
-    };
-    if let Some(action) = action {
+    // Every prompt key is decided in the daemon, which owns the buffer, the
+    // cursor, the history and the status-keys table the way `status_prompt_key`
+    // does, so the client only relays the press and renders what comes back.
+    if let Some(pane) = model.active_pane() {
         client
-            .send_input(InputMessage::CommandPrompt { action })
-            .map_err(|error| error.to_string())?;
-    } else if changed {
-        client
-            .send_input(InputMessage::CommandPrompt {
-                action: CommandPromptAction::Update {
-                    input: state.input.clone(),
-                    cursor: state.cursor,
-                },
+            .send_input(InputMessage::Key {
+                pane,
+                input: key_input(event),
+                text_follows: false,
             })
             .map_err(|error| error.to_string())?;
     }
-    Ok(InputOutcome::Repaint)
+    Ok(InputOutcome::None)
 }
 
 fn scalar_byte_index(text: &str, scalar: u32) -> usize {
@@ -1195,7 +1096,12 @@ fn handle_paste(
         return Ok(InputOutcome::None);
     }
     if let Some(state) = model.command_prompt.as_mut() {
-        if prompt_relays_keys(state.mode) {
+        // `-1`, `-N` and `-k` read key codes, not text, so a paste has nothing
+        // to give them.
+        if matches!(
+            state.mode,
+            CommandPromptMode::Single | CommandPromptMode::Numeric | CommandPromptMode::Key
+        ) {
             return Ok(InputOutcome::None);
         }
         let available = MAX_COMMAND_PROMPT_BYTES.saturating_sub(state.input.len());
@@ -2808,27 +2714,6 @@ mod tests {
         assert_eq!(input.key, KeyCode::Character('a'));
         assert_eq!(input.text.as_deref(), Some("A"));
         assert!(input.modifiers.shift());
-    }
-
-    /// `-1`, `-N` and `-k` are decided key by key inside the daemon, so the
-    /// TUI must stop editing and relay their presses; text modes keep the
-    /// local editor.
-    #[test]
-    fn key_reading_prompt_modes_relay_instead_of_editing() {
-        for mode in [
-            CommandPromptMode::Single,
-            CommandPromptMode::Numeric,
-            CommandPromptMode::Key,
-        ] {
-            assert!(prompt_relays_keys(mode), "{mode:?}");
-        }
-        for mode in [
-            CommandPromptMode::Text,
-            CommandPromptMode::Incremental,
-            CommandPromptMode::BackspaceExit,
-        ] {
-            assert!(!prompt_relays_keys(mode), "{mode:?}");
-        }
     }
 
     #[test]

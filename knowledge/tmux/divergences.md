@@ -586,10 +586,9 @@ stays parked until that client detaches. `-F` expands the string template once t
 `format_single_from_target`, which is `format_expand` and not `format_expand_time`, so `%%` survives
 to the answer pass; a `{ ... }` block is `ARGS_COMMANDS` and returns before the expansion. Because the
 expansion lands before `cmd_template_replace`, a `#{pane_id}` that expands to `%1` is itself consumed
-by the first answer. Differential coverage is `smoke/command-prompt-target`. One zz-only residue: on
-the pin `C-c`, `C-g` and Escape all close a prompt, while in zz only Escape does, so `C-c` and `C-g`
-are swallowed before `input_command_prompt_key` sees them even though `command_prompt_edit_key` maps
-them to Close.
+by the first answer. Differential coverage is `smoke/command-prompt-target`. The `C-c` and `C-g`
+residue closed on 2026-09-02 with the prompt key relay below: the daemon already mapped both to
+Close and the TUI was swallowing them before `input_command_prompt_key` saw them.
 
 ## `choose-buffer` and `choose-tree` argument blocks
 
@@ -716,28 +715,27 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   submits first because `input_command_prompt_key` completes before it answers "pass". zz has
   no command queue to reproduce the interleave, and the observable contract — both commands
   run — holds.
-- `command-prompt -k` answers with `input_key_name`, which spells a space as `" "` where the
-  pin's `key_string_lookup_key` spells it `Space`. Same narrow-vocabulary rule as the chooser
-  `-K` gutter above. Re-measured 2026-09-02 by driving a `-k` prompt on a real pty client on
-  both binaries now that `-t` can raise one from the CLI: `C-a`, `M-x`, `F1`, `Up`, `BSpace`
-  (0x7f), `a`, `Enter`, `Escape`, `Tab`, `DC` and the literal `~` and `;` all agree. Two more
-  spellings do not, and both are the client's decoding rather than the name table: 0x08 answers
-  `BSpace` where the pin answers `C-h`, and `ESC [ Z` answers `Tab` where the pin answers
-  `BTab`, because `crates/zz-tui/src/input.rs` folds `Backspace` and `BackTab` into one code
-  each.
-- `command-prompt` edits with emacs keys only. The pin routes every prompt key through
-  `prompt_translate_key` first when `status-keys` is `vi`, and `tmux.c:543-554` rewrites
-  `status-keys` AND `mode-keys` to `vi` at startup whenever the basename of `$VISUAL`/`$EDITOR`
-  contains `vi` — so a developer box with `EDITOR=nvim` silently runs a vi prompt even though
-  the options table default is emacs. zz's prompt has no vi mode. Pre-existing; recorded here
-  because it is why every pin measurement in this row had to `set -g status-keys emacs` first,
-  and because it makes `status-keys`/`mode-keys` defaults environment-dependent in a way zz
-  does not reproduce at all. The sharpest symptom: in vi mode Escape enters
-  `PROMPT_COMMANDMODE` instead of closing the prompt, so `command-prompt` on such a box has no
-  one-key cancel at all. Note also that `prompt_draw` branches only on `PROMPT_COMMANDMODE`
-  and `PROMPT_QUOTENEXT` — none of D1's mode flags change how a prompt is DRAWN, which is why
-  the TUI's status-line prompt needed no rendering change to stay faithful and only the GPUI
-  palette, a zz-native modal, adjusted its affordances.
+- `command-prompt -k` and vi prompt editing closed on 2026-09-02, and the piece that unlocked
+  them was that the TUI was editing text prompts itself and only relaying `-1`, `-N` and `-k`.
+  The pin has no such split — `status_prompt_key` owns the buffer, the cursor, the history and
+  the key table — so the TUI now relays every prompt key and the daemon's `prompt_key` is the
+  single implementation. `-k` answers with `key_string_lookup_key`'s spelling, so a space is
+  `Space` and a shifted Tab is `BTab`; 0x08 stopped being folded into `Backspace` in the TUI's
+  legacy control-byte decoder and decodes as `C-h`, leaving only 0x7f as `BSpace`.
+  `prompt_set_options` reads `status-keys` and `word-separators` off the raising session once,
+  `prompt_translate_key` is implemented whole, and the three word motions classify each
+  character as space, separator or word the way `prompt_forward_word`, `prompt_end_word` and
+  `prompt_backward_word` do, with the big-letter vi variants passing no separators. Note that
+  `prompt_draw` branches only on `PROMPT_COMMANDMODE` and `PROMPT_QUOTENEXT` — none of D1's
+  mode flags change how a prompt is DRAWN — but `CommandPromptState` carries no command-mode
+  flag, so the pin's separate command cursor style is still not rendered, and zz has no
+  `prompt_paste` (`C-y`), transpose (`C-t`) or quote-next (`C-v`), so those chords and the vi
+  `p` that maps onto `C-y` are no-ops. Differential coverage is
+  `smoke/command-prompt-editing`. Found while measuring: pinned tmux d77c9dc6 has a heap
+  overread in `prompt_key`, whose `KEYC_DC`/`C-d` branch copies `(size + 1 - index)` entries
+  from `buffer + index + 1`, one entry past the buffer; a vi command-mode `x` at index 3 of a
+  four-character buffer killed the pinned server, so the differential never presses Delete
+  inside a prompt.
 - The freeze a message raises is DERIVED in zz and LATCHED in the pin, and they part company in
   one place. `status_message_clear` only drops `TTY_FREEZE` `if (c->prompt == NULL)`, so
   clearing a message while ANY prompt is open leaves the client frozen — including a

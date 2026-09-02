@@ -7615,6 +7615,9 @@ impl Shared {
                             &mut resume_client_terminals,
                         );
                         if !inner.command_prompts.contains_key(&client) {
+                            let (vi_keys, word_separators) = inner
+                                .engine
+                                .prompt_key_options(client_attached_session(&inner, client));
                             let prompt = CommandPrompt::new(
                                 steps.clone(),
                                 template.clone(),
@@ -7622,7 +7625,8 @@ impl Shared {
                                 *prompt_type,
                                 *mode,
                                 *no_freeze,
-                            );
+                            )
+                            .with_key_options(vi_keys, word_separators);
                             // `status_prompt_set` clears any message first, and
                             // its own freeze then decides the gate.
                             prompt_cleared_message = take_client_message(&mut inner, client);
@@ -26789,6 +26793,13 @@ struct CommandPrompt {
     /// the queue, and an answered prompt hands it to `PromptKeyOutcome` first
     /// so the answer's commands run before the issuing queue resumes.
     waiter: Option<crossbeam_channel::Sender<()>>,
+    /// `pr->keys` and `pr->word_separators`, filled by `prompt_set_options`
+    /// from the raising session's `status-keys` and `word-separators` and kept
+    /// for the prompt's whole life, plus the `PROMPT_COMMANDMODE` flag the vi
+    /// table toggles.
+    vi_keys: bool,
+    command_mode: bool,
+    word_separators: String,
 }
 
 impl CommandPrompt {
@@ -26826,7 +26837,18 @@ impl CommandPrompt {
             no_freeze,
             last,
             waiter: None,
+            vi_keys: false,
+            command_mode: false,
+            word_separators: String::new(),
         }
+    }
+
+    /// `prompt_set_options`: the prompt keeps the session's `status-keys` and
+    /// `word-separators` as they were when it opened.
+    fn with_key_options(mut self, vi_keys: bool, word_separators: String) -> Self {
+        self.vi_keys = vi_keys;
+        self.word_separators = word_separators;
+        self
     }
 
     /// `cmd_command_prompt_callback`: an Enter that is not the chain's last
@@ -26952,58 +26974,109 @@ impl CommandPrompt {
         changed
     }
 
-    fn move_word_left(&mut self) -> bool {
-        let original = self.cursor;
-        while self.cursor > 0 {
-            let previous = previous_char_boundary(&self.input, self.cursor);
-            if !self.input[previous..self.cursor]
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace)
-            {
-                break;
-            }
-            self.cursor = previous;
-        }
-        while self.cursor > 0 {
-            let previous = previous_char_boundary(&self.input, self.cursor);
-            if self.input[previous..self.cursor]
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace)
-            {
-                break;
-            }
-            self.cursor = previous;
-        }
-        self.cursor != original
+    fn cursor_index(&self) -> usize {
+        self.input[..self.cursor].chars().count()
     }
 
-    fn move_word_right(&mut self) -> bool {
-        let original = self.cursor;
-        while self.cursor < self.input.len() {
-            let next = next_char_boundary(&self.input, self.cursor);
-            if !self.input[self.cursor..next]
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace)
+    fn set_cursor_index(&mut self, index: usize) -> bool {
+        let cursor = char_index_to_byte(&self.input, index).unwrap_or(self.input.len());
+        let changed = cursor != self.cursor;
+        self.cursor = cursor;
+        changed
+    }
+
+    /// `prompt_backward_word`: step back over spaces, then back to the start of
+    /// the run that shares the character class the landing character has.
+    fn backward_word_index(&self, separators: &str) -> usize {
+        let buffer = self.input.chars().collect::<Vec<_>>();
+        let mut index = self.cursor_index();
+        while index != 0 {
+            index -= 1;
+            if !prompt_space(buffer.get(index)) {
+                break;
+            }
+        }
+        let word_is_separators = prompt_in_list(separators, buffer.get(index));
+        while index != 0 {
+            index -= 1;
+            if prompt_space(buffer.get(index))
+                || word_is_separators != prompt_in_list(separators, buffer.get(index))
+            {
+                index += 1;
+                break;
+            }
+        }
+        index
+    }
+
+    fn move_word_left(&mut self, separators: &str) -> bool {
+        let index = self.backward_word_index(separators);
+        self.set_cursor_index(index)
+    }
+
+    /// `prompt_forward_word`: emacs first skips spaces, both stop at the first
+    /// space or opposite character class, and vi then lands on the start of the
+    /// next word rather than the space.
+    fn move_word_right(&mut self, vi: bool, separators: &str) -> bool {
+        let buffer = self.input.chars().collect::<Vec<_>>();
+        let size = buffer.len();
+        let mut index = self.cursor_index();
+        if !vi {
+            while index != size && prompt_space(buffer.get(index)) {
+                index += 1;
+            }
+        }
+        if index == size {
+            return self.set_cursor_index(index);
+        }
+        let word_is_separators =
+            prompt_in_list(separators, buffer.get(index)) && !prompt_space(buffer.get(index));
+        loop {
+            index += 1;
+            if prompt_space(buffer.get(index)) {
+                if vi {
+                    while index != size && prompt_space(buffer.get(index)) {
+                        index += 1;
+                    }
+                }
+                break;
+            }
+            if index == size || word_is_separators != prompt_in_list(separators, buffer.get(index))
             {
                 break;
             }
-            self.cursor = next;
         }
-        while self.cursor < self.input.len() {
-            let next = next_char_boundary(&self.input, self.cursor);
-            if self.input[self.cursor..next]
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace)
+        self.set_cursor_index(index)
+    }
+
+    /// `prompt_end_word`: forward to the last character of the next word.
+    fn move_end_word(&mut self, separators: &str) -> bool {
+        let buffer = self.input.chars().collect::<Vec<_>>();
+        let size = buffer.len();
+        let mut index = self.cursor_index();
+        if index == size {
+            return false;
+        }
+        loop {
+            index += 1;
+            if index == size {
+                return self.set_cursor_index(index);
+            }
+            if !prompt_space(buffer.get(index)) {
+                break;
+            }
+        }
+        let word_is_separators = prompt_in_list(separators, buffer.get(index));
+        loop {
+            index += 1;
+            if index == size
+                || prompt_space(buffer.get(index))
+                || word_is_separators != prompt_in_list(separators, buffer.get(index))
             {
                 break;
             }
-            self.cursor = next;
         }
-        self.cursor != original
+        self.set_cursor_index(index - 1)
     }
 
     fn delete_backward(&mut self) -> bool {
@@ -27027,10 +27100,11 @@ impl CommandPrompt {
         true
     }
 
-    fn delete_previous_word(&mut self) -> bool {
+    /// `prompt_key`'s `C-w`: the same span `prompt_backward_word` would move
+    /// over, deleted.
+    fn delete_previous_word(&mut self, separators: &str) -> bool {
         let end = self.cursor;
-        self.move_word_left();
-        if self.cursor == end {
+        if !self.move_word_left(separators) {
             return false;
         }
         self.input.replace_range(self.cursor..end, "");
@@ -29573,6 +29647,25 @@ fn truncate_pane_indicator_label(mut label: String) -> String {
 /// back to the key tables, and `-1` folds one key into a character and submits
 /// it — with the pin's quirk that a buffer seeded by `-I` can never be one
 /// character long, so the prompt closes with nothing submitted.
+/// `key_string_lookup_key`'s two spellings `input_key_name` does not emit: the
+/// key table names 0x20 `Space`, and a shifted Tab is `BTab` rather than a Tab
+/// carrying a shift the pin never records on it.
+fn prompt_key_spelling(input: &zz_terminal::KeyInput) -> String {
+    if input.key == zz_terminal::KeyCode::Tab
+        && input.modifiers.shift()
+        && !input.modifiers.control()
+        && !input.modifiers.alt()
+    {
+        return MENU_BACK_TAB_KEY.to_owned();
+    }
+    let mut name = input_key_name(input).into_string();
+    if name.ends_with(' ') {
+        name.pop();
+        name.push_str("Space");
+    }
+    name
+}
+
 fn command_prompt_raw_key(
     prompt: &mut CommandPrompt,
     input: &zz_terminal::KeyInput,
@@ -29583,9 +29676,7 @@ fn command_prompt_raw_key(
         return PromptKeyAction::Handled;
     }
     match prompt.mode {
-        CommandPromptMode::Key => {
-            PromptKeyAction::SubmitAnswer(input_key_name(input).into_string())
-        }
+        CommandPromptMode::Key => PromptKeyAction::SubmitAnswer(prompt_key_spelling(input)),
         CommandPromptMode::Numeric => match input.key {
             zz_terminal::KeyCode::Character(character)
                 if character.is_ascii_digit()
@@ -29641,6 +29732,200 @@ fn single_key_character(input: &zz_terminal::KeyInput) -> Option<char> {
     }
 }
 
+/// `prompt_space`: only a single-width ASCII space counts, so a wide or
+/// multi-byte character is never whitespace and never a separator.
+fn prompt_space(character: Option<&char>) -> bool {
+    character == Some(&' ')
+}
+
+fn prompt_in_list(separators: &str, character: Option<&char>) -> bool {
+    character.is_some_and(|character| character.is_ascii() && separators.contains(*character))
+}
+
+/// `prompt_translate_key`'s answer: the vi table rewrites a key into an emacs
+/// one, into one of the `KEYC_VI` word motions no emacs key produces, into a
+/// plain insertion, or into nothing at all.
+enum PromptViKey {
+    Edit(zz_terminal::KeyInput),
+    Motion(PromptWordMotion),
+    Append,
+    Handled,
+}
+
+#[derive(Clone, Copy)]
+enum PromptWordMotion {
+    Forward { vi: bool, separators: bool },
+    End { separators: bool },
+    Backward { separators: bool },
+}
+
+impl PromptWordMotion {
+    fn apply(self, prompt: &mut CommandPrompt) -> bool {
+        let separators = std::mem::take(&mut prompt.word_separators);
+        let changed = match self {
+            Self::Forward {
+                vi,
+                separators: use_separators,
+            } => prompt.move_word_right(vi, if use_separators { &separators } else { "" }),
+            Self::End {
+                separators: use_separators,
+            } => prompt.move_end_word(if use_separators { &separators } else { "" }),
+            Self::Backward {
+                separators: use_separators,
+            } => prompt.move_word_left(if use_separators { &separators } else { "" }),
+        };
+        prompt.word_separators = separators;
+        changed
+    }
+}
+
+fn prompt_key_input(
+    input: &zz_terminal::KeyInput,
+    key: zz_terminal::KeyCode,
+    control: bool,
+    alt: bool,
+) -> zz_terminal::KeyInput {
+    zz_terminal::KeyInput {
+        action: input.action,
+        key,
+        modifiers: zz_terminal::Modifiers::new(false, control, alt, false),
+        text: None,
+        unshifted_codepoint: None,
+    }
+}
+
+/// `prompt_translate_key`: the whole vi table. Insert mode passes a fixed list
+/// of control keys through to the emacs handler, takes Escape or `C-[` into
+/// command mode with the cursor stepped back, and appends everything else.
+/// Command mode maps the vi keys onto emacs keys and the `KEYC_VI` word
+/// motions, and drops what it does not name.
+fn prompt_translate_key(prompt: &mut CommandPrompt, input: &zz_terminal::KeyInput) -> PromptViKey {
+    use zz_terminal::KeyCode;
+    let control = input.modifiers.control();
+    let alt = input.modifiers.alt();
+    let character = match input.key {
+        KeyCode::Character(character) => Some(
+            if input.modifiers.shift() && character.is_ascii_lowercase() {
+                character.to_ascii_uppercase()
+            } else {
+                character
+            },
+        ),
+        _ => None,
+    };
+    let plain = |key| prompt_key_input(input, key, false, false);
+    let control_letter = |letter| prompt_key_input(input, KeyCode::Character(letter), true, false);
+    if !prompt.command_mode {
+        if control
+            && let Some(letter) = character
+            && matches!(
+                letter.to_ascii_lowercase(),
+                'a' | 'c' | 'e' | 'g' | 'h' | 'k' | 'n' | 'p' | 't' | 'u' | 'v' | 'w' | 'y'
+            )
+        {
+            return PromptViKey::Edit(input.clone());
+        }
+        if control && character == Some('[') {
+            prompt.command_mode = true;
+            prompt.move_left();
+            return PromptViKey::Handled;
+        }
+        if !control && !alt {
+            match input.key {
+                KeyCode::Escape => {
+                    prompt.command_mode = true;
+                    prompt.move_left();
+                    return PromptViKey::Handled;
+                }
+                KeyCode::Tab
+                | KeyCode::Enter
+                | KeyCode::Backspace
+                | KeyCode::Delete
+                | KeyCode::ArrowDown
+                | KeyCode::End
+                | KeyCode::Home
+                | KeyCode::ArrowLeft
+                | KeyCode::ArrowRight
+                | KeyCode::ArrowUp => return PromptViKey::Edit(input.clone()),
+                _ => {}
+            }
+        }
+        if (control || alt) && matches!(input.key, KeyCode::ArrowLeft | KeyCode::ArrowRight) {
+            return PromptViKey::Edit(input.clone());
+        }
+        return PromptViKey::Append;
+    }
+
+    if input.key == KeyCode::Backspace {
+        return PromptViKey::Edit(plain(KeyCode::ArrowLeft));
+    }
+    if control && character == Some('[') {
+        return PromptViKey::Handled;
+    }
+    if input.key == KeyCode::Escape && !control && !alt {
+        return PromptViKey::Handled;
+    }
+    if !control && !alt {
+        match character {
+            Some('A' | 'I' | 'C' | 's' | 'a') => prompt.command_mode = false,
+            Some('S') => {
+                prompt.command_mode = false;
+                return PromptViKey::Edit(control_letter('u'));
+            }
+            Some('i') => {
+                prompt.command_mode = false;
+                return PromptViKey::Handled;
+            }
+            _ => {}
+        }
+    }
+    if control && let Some(letter) = character {
+        return match letter.to_ascii_lowercase() {
+            'h' | 'c' => PromptViKey::Edit(input.clone()),
+            _ => PromptViKey::Handled,
+        };
+    }
+    if alt {
+        return PromptViKey::Handled;
+    }
+    match input.key {
+        KeyCode::Enter => return PromptViKey::Edit(plain(KeyCode::Enter)),
+        KeyCode::Delete => return PromptViKey::Edit(plain(KeyCode::Delete)),
+        KeyCode::ArrowDown => return PromptViKey::Edit(plain(KeyCode::ArrowDown)),
+        KeyCode::ArrowLeft => return PromptViKey::Edit(plain(KeyCode::ArrowLeft)),
+        KeyCode::ArrowRight => return PromptViKey::Edit(plain(KeyCode::ArrowRight)),
+        KeyCode::ArrowUp => return PromptViKey::Edit(plain(KeyCode::ArrowUp)),
+        _ => {}
+    }
+    match character {
+        Some('A' | '$') => PromptViKey::Edit(plain(KeyCode::End)),
+        Some('I' | '0' | '^') => PromptViKey::Edit(plain(KeyCode::Home)),
+        Some('C' | 'D') => PromptViKey::Edit(control_letter('k')),
+        Some('X') => PromptViKey::Edit(plain(KeyCode::Backspace)),
+        Some('b') => PromptViKey::Motion(PromptWordMotion::Backward { separators: true }),
+        Some('B') => PromptViKey::Motion(PromptWordMotion::Backward { separators: false }),
+        Some('d') => PromptViKey::Edit(control_letter('u')),
+        Some('e') => PromptViKey::Motion(PromptWordMotion::End { separators: true }),
+        Some('E') => PromptViKey::Motion(PromptWordMotion::End { separators: false }),
+        Some('w') => PromptViKey::Motion(PromptWordMotion::Forward {
+            vi: true,
+            separators: true,
+        }),
+        Some('W') => PromptViKey::Motion(PromptWordMotion::Forward {
+            vi: true,
+            separators: false,
+        }),
+        Some('q') => PromptViKey::Edit(control_letter('c')),
+        Some('s' | 'x') => PromptViKey::Edit(plain(KeyCode::Delete)),
+        Some('j') => PromptViKey::Edit(plain(KeyCode::ArrowDown)),
+        Some('h') => PromptViKey::Edit(plain(KeyCode::ArrowLeft)),
+        Some('a' | 'l') => PromptViKey::Edit(plain(KeyCode::ArrowRight)),
+        Some('k') => PromptViKey::Edit(plain(KeyCode::ArrowUp)),
+        // `p` maps onto `C-y`, and zz has no `prompt_paste` to map it to.
+        _ => PromptViKey::Handled,
+    }
+}
+
 fn command_prompt_key(
     prompt: &mut CommandPrompt,
     input: &zz_terminal::KeyInput,
@@ -29665,7 +29950,45 @@ fn command_prompt_key(
     {
         return PromptKeyAction::Close;
     }
-    let action = command_prompt_edit_key(prompt, input, text_follows, history);
+    let translated = prompt.vi_keys.then(|| prompt_translate_key(prompt, input));
+    let action = match translated {
+        None => command_prompt_edit_key(prompt, input, text_follows, history),
+        Some(PromptViKey::Handled) => PromptKeyAction::Handled,
+        Some(PromptViKey::Motion(motion)) => {
+            if motion.apply(prompt) {
+                PromptKeyAction::Updated
+            } else {
+                PromptKeyAction::Handled
+            }
+        }
+        Some(PromptViKey::Edit(key)) => {
+            command_prompt_edit_key(prompt, &key, text_follows, history)
+        }
+        // `append_key` inserts the key itself, so a chord the vi table does not
+        // name reaches the buffer only when it is one plain character.
+        Some(PromptViKey::Append) => match input.key {
+            zz_terminal::KeyCode::Character(character)
+                if !input.modifiers.control()
+                    && !input.modifiers.alt()
+                    && !input.modifiers.platform() =>
+            {
+                if text_follows {
+                    PromptKeyAction::Handled
+                } else {
+                    let text = input
+                        .text
+                        .as_deref()
+                        .map_or_else(|| character.to_string(), str::to_owned);
+                    if prompt.insert(&text) {
+                        PromptKeyAction::Updated
+                    } else {
+                        PromptKeyAction::LimitExceeded
+                    }
+                }
+            }
+            _ => PromptKeyAction::Handled,
+        },
+    };
     match action {
         PromptKeyAction::Updated if incremental => PromptKeyAction::Incremental('='),
         PromptKeyAction::Submit if incremental => PromptKeyAction::SubmitIncremental,
@@ -29713,8 +30036,16 @@ fn command_prompt_edit_key(
             prompt.cursor = prompt.input.len();
             changed
         }),
-        zz_terminal::KeyCode::ArrowLeft if control || alt => changed(prompt.move_word_left()),
-        zz_terminal::KeyCode::ArrowRight if control || alt => changed(prompt.move_word_right()),
+        zz_terminal::KeyCode::ArrowLeft if control || alt => {
+            changed(PromptWordMotion::Backward { separators: true }.apply(prompt))
+        }
+        zz_terminal::KeyCode::ArrowRight if control || alt => changed(
+            PromptWordMotion::Forward {
+                vi: false,
+                separators: true,
+            }
+            .apply(prompt),
+        ),
         zz_terminal::KeyCode::ArrowLeft if platform => changed({
             let changed = prompt.cursor != 0;
             prompt.cursor = 0;
@@ -29749,7 +30080,12 @@ fn command_prompt_edit_key(
                 'd' => changed(prompt.delete_forward()),
                 'u' => changed(prompt.clear()),
                 'k' => changed(prompt.delete_to_end()),
-                'w' => changed(prompt.delete_previous_word()),
+                'w' => changed({
+                    let separators = std::mem::take(&mut prompt.word_separators);
+                    let deleted = prompt.delete_previous_word(&separators);
+                    prompt.word_separators = separators;
+                    deleted
+                }),
                 'c' | 'g' | '[' => PromptKeyAction::Close,
                 letter @ ('r' | 's') if prompt.mode == CommandPromptMode::Incremental => {
                     PromptKeyAction::Incremental(prompt.incremental_prefix(letter == 'r'))
@@ -29758,8 +30094,14 @@ fn command_prompt_edit_key(
             }
         }
         zz_terminal::KeyCode::Character(character) if alt => match character.to_ascii_lowercase() {
-            'b' => changed(prompt.move_word_left()),
-            'f' => changed(prompt.move_word_right()),
+            'b' => changed(PromptWordMotion::Backward { separators: true }.apply(prompt)),
+            'f' => changed(
+                PromptWordMotion::Forward {
+                    vi: false,
+                    separators: true,
+                }
+                .apply(prompt),
+            ),
             _ => PromptKeyAction::Handled,
         },
         zz_terminal::KeyCode::Character(_) if platform => PromptKeyAction::Handled,
@@ -70000,7 +70342,7 @@ bind - split-window -v -c "#{pane_current_path}"
             false,
         );
         assert_eq!(prompt.state(&[]).cursor, 6);
-        assert!(prompt.delete_previous_word());
+        assert!(prompt.delete_previous_word(zz_terminal::DEFAULT_WORD_SEPARATORS));
         assert_eq!(prompt.input, "α ");
         assert!(prompt.insert("界"));
         assert_eq!(prompt.state(&[]).cursor, 3);

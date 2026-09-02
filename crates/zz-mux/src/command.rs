@@ -70,6 +70,7 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "detach-on-destroy",
     "prefix",
     "mode-keys",
+    "status-keys",
     "key-table",
     "prefix-timeout",
     "repeat-time",
@@ -2584,6 +2585,19 @@ impl MuxEngine {
         self.scalar_option_effective(TmuxOptionTarget::Session(session), "visual-silence")
             .and_then(VisualBell::parse)
             .unwrap_or(VisualBell::Off)
+    }
+
+    /// `prompt_set_options`: the prompt reads `status-keys` and
+    /// `word-separators` off the session that raised it, or the global session
+    /// options when there is no session, and keeps them for its whole life.
+    #[must_use]
+    pub fn prompt_key_options(&self, session: Option<SessionId>) -> (bool, String) {
+        let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
+        let vi = self.scalar_option_effective(target, "status-keys") == Some("vi");
+        let separators = session.map_or(self.global_word_separators.as_str(), |session| {
+            self.word_separators_for_session(session)
+        });
+        (vi, separators.to_owned())
     }
 
     fn window_option_override(&self, window: WindowId, option: WindowOption) -> Option<&str> {
@@ -32037,7 +32051,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 108);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 109);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

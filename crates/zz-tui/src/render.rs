@@ -322,6 +322,7 @@ impl Renderer {
             self.kitty.suspend(&mut self.output);
             self.paint_popup(model, true);
             if model.menu.is_none() && model.confirm.is_none() {
+                self.reconcile_popup_kitty_images(model);
                 self.place_popup_cursor(model);
             }
         }
@@ -358,6 +359,7 @@ impl Renderer {
             self.output.append(&mut self.queued_control);
             self.kitty.suspend(&mut self.output);
             self.paint_popup(model, false);
+            self.reconcile_popup_kitty_images(model);
             self.place_popup_cursor(model);
             self.output.extend_from_slice(b"\x1b[?2026l");
             return self.flush_output();
@@ -551,6 +553,36 @@ impl Renderer {
                 }
             }
         }
+    }
+
+    /// The pinned tree has no image protocol at all, so a popup's own images
+    /// are a zz contract: the popup's job writes into its own pane, and that
+    /// pane is not in the workspace layout the ordinary reconcile walks. The
+    /// suspend above has already retired every workspace placement, so the
+    /// popup reconciles alone and its placements are clipped to the content box
+    /// inside the border. When the popup closes, the next reconcile no longer
+    /// names its pane and the bridge deletes what it placed.
+    fn reconcile_popup_kitty_images(&mut self, model: &Model) {
+        let Some(popup) = model.popup.as_ref() else {
+            return;
+        };
+        let Some(layout) = model.popup_layout() else {
+            return;
+        };
+        let Some(viewport) = model.viewports.get(&popup.pane) else {
+            return;
+        };
+        if layout.content.width == 0 || layout.content.height == 0 {
+            return;
+        }
+        self.kitty.reconcile(
+            std::iter::once((
+                popup.pane,
+                layout.content,
+                viewport.kitty_placements.as_ref(),
+            )),
+            &mut self.output,
+        );
     }
 
     fn reconcile_kitty_images(&mut self, model: &Model) {
@@ -2747,6 +2779,82 @@ mod tests {
         let menu = output.rfind("Actions").expect("menu title");
         assert!(popup < menu);
         assert!(output.rfind("\x1b[?25l").is_some_and(|hide| hide > menu));
+    }
+
+    fn popup_kitty_placement(image_id: u32, generation: u64) -> zz_terminal::KittyPlacement {
+        zz_terminal::KittyPlacement {
+            image_id,
+            image_generation: generation,
+            layer: zz_terminal::KittyLayer::AboveText,
+            viewport_col: 0,
+            viewport_row: 0,
+            absolute_row: 0,
+            cell_offset_x: 0,
+            cell_offset_y: 0,
+            grid_cols: 2,
+            grid_rows: 1,
+            pixel_width: 2,
+            pixel_height: 1,
+            source_rect: None,
+        }
+    }
+
+    /// The pinned tree carries no image protocol anywhere - popup content goes
+    /// through `input_parse_screen` into the popup's own screen with no image
+    /// path - so a popup's images are a zz contract rather than a fidelity gap.
+    /// This is that contract: a placement inside the popup is drawn against the
+    /// content box inside the border, a replacement retires the placement it
+    /// replaces, and closing the popup deletes what the popup placed.
+    #[test]
+    fn popup_images_are_placed_replaced_and_cleaned_up_on_close() {
+        let mut model = popup_model(PopupBorderLines::Single, true);
+        let pane = model.popup.as_ref().expect("popup").pane;
+        let content = model.popup_layout().expect("popup layout").content;
+        let mut renderer = Renderer::new();
+        renderer.enable_kitty_graphics();
+        for image_id in [9, 10] {
+            renderer.install_kitty_image(KittyImageData {
+                pane,
+                image_id,
+                generation: 1,
+                width: 2,
+                height: 1,
+                bytes: vec![0, 0, 0, 255, 0, 0, 0, 255],
+            });
+        }
+        renderer.queued_control.clear();
+
+        let viewport = model.viewports.get_mut(&pane).expect("popup viewport");
+        viewport.kitty_placements = Arc::from([popup_kitty_placement(9, 1)]);
+        renderer.reconcile_popup_kitty_images(&model);
+        let placed = String::from_utf8(std::mem::take(&mut renderer.output)).unwrap();
+        assert!(placed.contains("\x1b_Ga=p,"), "{placed:?}");
+        assert!(
+            placed.contains(&format!("\x1b[{};{}H", content.y + 1, content.x + 1)),
+            "the placement is anchored inside the border: {placed:?}"
+        );
+
+        let viewport = model.viewports.get_mut(&pane).expect("popup viewport");
+        viewport.kitty_placements = Arc::from([popup_kitty_placement(10, 1)]);
+        renderer.reconcile_popup_kitty_images(&model);
+        let replaced = String::from_utf8(std::mem::take(&mut renderer.output)).unwrap();
+        assert!(
+            replaced.contains("\x1b_Ga=d,d=i,"),
+            "the replaced placement is retired: {replaced:?}"
+        );
+        assert!(replaced.contains("\x1b_Ga=p,"), "{replaced:?}");
+
+        model.popup = None;
+        renderer.reconcile_kitty_images(&model);
+        let closed = String::from_utf8(std::mem::take(&mut renderer.output)).unwrap();
+        assert!(
+            closed.contains("\x1b_Ga=d,d=i,"),
+            "closing the popup deletes what it placed: {closed:?}"
+        );
+        assert!(
+            !closed.contains("\x1b_Ga=p,"),
+            "and places nothing new: {closed:?}"
+        );
     }
 
     #[test]

@@ -1,0 +1,12 @@
+corpus: none
+# The fourteen stock copy-mode bindings the pin renders through
+# `command-prompt -P`, plus the two cursor-word searches, driven from a real
+# attached client's keyboard on both engines. The prompt's surface is the one
+# thing that differs: the pin paints it over the target pane's last row and zz
+# raises the prompt its own client owns, so every check reads the copy-mode
+# format family rather than the cells.
+stage: fixtures/copy-mode-prompt-bindings.sh ~/copy-mode-prompt-bindings.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu COPY_MODE_PROMPT_BINDINGS
+run-shell 'sh ~/copy-mode-prompt-bindings.sh'
+out: show-environment -g COPY_MODE_PROMPT_BINDINGS

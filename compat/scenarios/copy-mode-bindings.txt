@@ -1,0 +1,24 @@
+# The pin's stock copy-mode and copy-mode-vi bindings that go through a prompt,
+# plus the two cursor-word searches. command-prompt -P is a presentation hint
+# zz's clients own rather than a pane-cell prompt, so the stored command is the
+# pin's on both engines and only the surface the prompt lands on differs.
+out: list-keys -T copy-mode-vi #
+out: list-keys -T copy-mode-vi *
+out: list-keys -T copy-mode-vi /
+out: list-keys -T copy-mode-vi ?
+out: list-keys -T copy-mode-vi :
+out: list-keys -T copy-mode-vi f
+out: list-keys -T copy-mode-vi F
+out: list-keys -T copy-mode-vi t
+out: list-keys -T copy-mode-vi T
+out: list-keys -T copy-mode C-s
+out: list-keys -T copy-mode C-r
+out: list-keys -T copy-mode g
+out: list-keys -T copy-mode f
+out: list-keys -T copy-mode F
+out: list-keys -T copy-mode t
+out: list-keys -T copy-mode T
+out: list-keys -T copy-mode-vi n
+out: list-keys -T copy-mode-vi N
+out: list-keys -T copy-mode n
+out: list-keys -T copy-mode N

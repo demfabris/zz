@@ -7407,8 +7407,9 @@ impl MuxEngine {
             };
             let mut arguments = positional[1..].to_vec();
             if options.has("-F")
-                && let Some(argument) = arguments.first_mut()
                 && SEND_KEYS_FORMAT_EXPANDED_ACTIONS.contains(&command.as_str())
+                && let Some(index) = send_keys_search_string_index(&arguments)
+                && let Some(argument) = arguments.get_mut(index)
             {
                 let target = ExecutionContext::for_pane(&self.state, pane)
                     .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
@@ -15150,6 +15151,24 @@ fn copy_mode_action(
         _ => None,
     };
     Ok(action)
+}
+
+/// Where the search string sits among an action's own arguments. The pin
+/// reads it as `args_string(cs->wargs, 0)`, after the action's flags and the
+/// `--` its stock bindings carry, so the expansion has to skip both.
+fn send_keys_search_string_index(arguments: &[String]) -> Option<usize> {
+    let mut index = 0;
+    while let Some(argument) = arguments.get(index) {
+        if argument == "--" {
+            return Some(index + 1);
+        }
+        if argument.starts_with('-') && argument != "-" {
+            index += 1;
+            continue;
+        }
+        return Some(index);
+    }
+    None
 }
 
 /// `send-keys -F` reaches exactly one place in the pin:
@@ -37389,14 +37408,23 @@ mod tests {
                 no_freeze: false,
             }]
         );
-        assert!(matches!(
-            engine.execute(
+        // `-P` is a presentation hint the client owns, so the daemon raises
+        // the same prompt with it as without it.
+        let with_pane_flag = engine
+            .execute(
                 &mut context,
-                &command("command-prompt", &["-P", "unsupported"]),
-            ),
-            Err(ServerError::UnsupportedCommand(message))
-                if message == "command-prompt -P"
-        ));
+                &command(
+                    "command-prompt",
+                    &[
+                        "-P",
+                        "-I",
+                        "work tree / editor pane",
+                        "rename-window -- '%%'",
+                    ],
+                ),
+            )
+            .expect("-P raises the client prompt");
+        assert_eq!(with_pane_flag.effects, execution.effects);
 
         for (index, value) in [
             (90, "a10e=display-message"),
@@ -37532,11 +37560,10 @@ mod tests {
             engine.execute(&mut context, &command("command-prompt", &["-T", "bogus"])),
             Err(ServerError::InvalidCommand(message)) if message == "unknown type: bogus"
         ));
-        assert!(matches!(
-            engine.execute(&mut context, &command("command-prompt", &["-P"])),
-            Err(ServerError::UnsupportedCommand(message))
-                if message == "command-prompt -P"
-        ));
+        assert_eq!(
+            mode(&mut engine, &mut context, &["-P", "-1"]),
+            (CommandPromptMode::Single, CommandPromptType::Command, false),
+        );
         assert_eq!(
             engine
                 .execute(&mut context, &command("command-prompt", &["-t", "%1"]))

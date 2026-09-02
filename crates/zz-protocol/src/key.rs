@@ -224,10 +224,6 @@ impl Default for KeyTables {
             ("copy-mode-vi", "C-[", "clear-selection"),
             ("copy-mode-vi", "X", "set-mark"),
             ("copy-mode-vi", "M-x", "jump-to-mark"),
-            ("copy-mode-vi", "f", "jump-forward"),
-            ("copy-mode-vi", "F", "jump-backward"),
-            ("copy-mode-vi", "t", "jump-to-forward"),
-            ("copy-mode-vi", "T", "jump-to-backward"),
             ("copy-mode-vi", ";", "jump-again"),
             ("copy-mode-vi", ",", "jump-reverse"),
             ("copy-mode-vi", "A", "append-selection-and-cancel"),
@@ -281,10 +277,6 @@ impl Default for KeyTables {
             ("copy-mode", "M-}", "next-paragraph"),
             ("copy-mode", "X", "set-mark"),
             ("copy-mode", "M-x", "jump-to-mark"),
-            ("copy-mode", "f", "jump-forward"),
-            ("copy-mode", "F", "jump-backward"),
-            ("copy-mode", "t", "jump-to-forward"),
-            ("copy-mode", "T", "jump-to-backward"),
             ("copy-mode", ";", "jump-again"),
             ("copy-mode", ",", "jump-reverse"),
             ("copy-mode", "n", "search-again"),
@@ -365,15 +357,15 @@ impl Default for KeyTables {
                 },
             );
         }
-        for (key, action) in [
-            ("#", "search-backward-cursor-word"),
-            ("*", "search-forward-cursor-word"),
-        ] {
+        for (key, action) in [("#", "search-backward"), ("*", "search-forward")] {
             tables.bind(
                 "copy-mode-vi",
                 key,
                 Binding {
-                    commands: vec![CommandInvocation::new("send-keys", ["-X", action])],
+                    commands: vec![CommandInvocation::new(
+                        "send-keys",
+                        ["-FX", action, "--", "#{copy_cursor_word}"],
+                    )],
                     repeat: false,
                     note: None,
                 },
@@ -406,9 +398,14 @@ impl Default for KeyTables {
                     commands: vec![
                         CommandInvocation::new(
                             "command-prompt",
-                            ["-p", "(goto line)", "{ send-keys -X goto-line -- \"%%\" }"],
+                            [
+                                "-P",
+                                "-p",
+                                "(goto line)",
+                                "{ send-keys -X goto-line -- \"%%\" }",
+                            ],
                         )
-                        .with_command_blocks([2]),
+                        .with_command_blocks([3]),
                     ],
                     repeat: false,
                     note: None,
@@ -435,23 +432,95 @@ impl KeyTables {
         }
     }
 
+    /// The pin's stock prompted copy-mode bindings. All of them are
+    /// `command-prompt -P`, which zz treats as a presentation hint the client
+    /// owns rather than as a pane-cell prompt, so the stored command is the
+    /// pin's and the surface the prompt lands on is zz's own.
     fn bind_copy_mode_search_defaults(&mut self) {
-        for (table, key, backward) in [
-            ("copy-mode-vi", "/", false),
-            ("copy-mode-vi", "?", true),
-            ("copy-mode", "C-s", false),
-            ("copy-mode", "C-r", true),
+        for (table, key, label, action) in [
+            ("copy-mode-vi", "/", "(search down)", "search-forward"),
+            ("copy-mode-vi", "?", "(search up)", "search-backward"),
         ] {
-            let arguments = backward.then_some("-b");
             self.bind(
                 table,
                 key,
                 Binding {
-                    commands: vec![CommandInvocation::new("copy-mode-search-prompt", arguments)],
+                    commands: vec![
+                        CommandInvocation::new(
+                            "command-prompt",
+                            [
+                                "-P",
+                                "-T",
+                                "search",
+                                "-p",
+                                label,
+                                &format!("{{ send-keys -X {action} -- \"%%\" }}"),
+                            ],
+                        )
+                        .with_command_blocks([5]),
+                    ],
                     repeat: false,
                     note: None,
                 },
             );
+        }
+        for (key, label, action) in [
+            ("C-s", "(search down)", "search-forward-incremental"),
+            ("C-r", "(search up)", "search-backward-incremental"),
+        ] {
+            self.bind(
+                "copy-mode",
+                key,
+                Binding {
+                    commands: vec![
+                        CommandInvocation::new(
+                            "command-prompt",
+                            [
+                                "-Pi",
+                                "-I",
+                                "#{pane_search_string}",
+                                "-T",
+                                "search",
+                                "-p",
+                                label,
+                                &format!("{{ send-keys -X {action} -- \"%%\" }}"),
+                            ],
+                        )
+                        .with_command_blocks([7]),
+                    ],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+        for table in ["copy-mode-vi", "copy-mode"] {
+            for (key, label, action) in [
+                ("f", "(jump forward)", "jump-forward"),
+                ("F", "(jump backward)", "jump-backward"),
+                ("t", "(jump to forward)", "jump-to-forward"),
+                ("T", "(jump to backward)", "jump-to-backward"),
+            ] {
+                self.bind(
+                    table,
+                    key,
+                    Binding {
+                        commands: vec![
+                            CommandInvocation::new(
+                                "command-prompt",
+                                [
+                                    "-1P",
+                                    "-p",
+                                    label,
+                                    &format!("{{ send-keys -X {action} -- \"%%\" }}"),
+                                ],
+                            )
+                            .with_command_blocks([3]),
+                        ],
+                        repeat: false,
+                        note: None,
+                    },
+                );
+            }
         }
     }
 
@@ -2358,10 +2427,19 @@ mod tests {
                 note: None,
             },
         );
+        tables.bind(
+            "copy-mode-vi",
+            "C-M-f",
+            Binding {
+                commands: vec![CommandInvocation::new("send-keys", ["-X", "jump-forward"])],
+                repeat: false,
+                note: None,
+            },
+        );
         let mut engine = KeyEngine::default();
         engine.switch_table(Some("copy-mode-vi".to_owned()));
 
-        assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
+        assert_eq!(engine.handle(&tables, "C-M-f"), KeyDecision::Ignore);
         assert_eq!(
             engine.handle_transient_mode_synthetic_any(&tables, "copy-mode-vi", "root"),
             (KeyDecision::Ignore, false)
@@ -2749,14 +2827,70 @@ mod tests {
         let tables = KeyTables::default();
         assert_eq!(
             tables.get("copy-mode-vi", "/").unwrap().commands,
-            vec![CommandInvocation::new(
-                "copy-mode-search-prompt",
-                [] as [&str; 0],
-            )]
+            vec![
+                CommandInvocation::new(
+                    "command-prompt",
+                    [
+                        "-P",
+                        "-T",
+                        "search",
+                        "-p",
+                        "(search down)",
+                        "{ send-keys -X search-forward -- \"%%\" }",
+                    ],
+                )
+                .with_command_blocks([5])
+            ]
         );
         assert_eq!(
             tables.get("copy-mode-vi", "?").unwrap().commands,
-            vec![CommandInvocation::new("copy-mode-search-prompt", ["-b"])]
+            vec![
+                CommandInvocation::new(
+                    "command-prompt",
+                    [
+                        "-P",
+                        "-T",
+                        "search",
+                        "-p",
+                        "(search up)",
+                        "{ send-keys -X search-backward -- \"%%\" }",
+                    ],
+                )
+                .with_command_blocks([5])
+            ]
+        );
+        assert_eq!(
+            tables.get("copy-mode", "C-s").unwrap().commands,
+            vec![
+                CommandInvocation::new(
+                    "command-prompt",
+                    [
+                        "-Pi",
+                        "-I",
+                        "#{pane_search_string}",
+                        "-T",
+                        "search",
+                        "-p",
+                        "(search down)",
+                        "{ send-keys -X search-forward-incremental -- \"%%\" }",
+                    ],
+                )
+                .with_command_blocks([7])
+            ]
+        );
+        assert_eq!(
+            tables.get("copy-mode-vi", "*").unwrap().commands,
+            vec![CommandInvocation::new(
+                "send-keys",
+                ["-FX", "search-forward", "--", "#{copy_cursor_word}"],
+            )]
+        );
+        assert_eq!(
+            tables.get("copy-mode-vi", "#").unwrap().commands,
+            vec![CommandInvocation::new(
+                "send-keys",
+                ["-FX", "search-backward", "--", "#{copy_cursor_word}"],
+            )]
         );
         assert_eq!(
             tables.get("copy-mode-vi", "n").unwrap().commands,
@@ -2807,13 +2941,20 @@ mod tests {
             )])
         );
         assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
-        assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
         assert_eq!(
-            engine.handle(&tables, "x"),
-            KeyDecision::Commands(vec![CommandInvocation::new(
-                "send-keys",
-                ["-N", "3", "-X", "jump-forward", "x"],
-            )])
+            engine.handle(&tables, "f"),
+            KeyDecision::Commands(vec![
+                CommandInvocation::new(
+                    "command-prompt",
+                    [
+                        "-1P",
+                        "-p",
+                        "(jump forward)",
+                        "{ send-keys -X jump-forward -- \"%%\" }",
+                    ],
+                )
+                .with_command_blocks([3])
+            ])
         );
     }
 
@@ -2997,8 +3138,6 @@ mod tests {
             ("z", "scroll-middle"),
             ("%", "next-matching-bracket"),
             ("D", "copy-pipe-end-of-line-and-cancel"),
-            ("#", "search-backward-cursor-word"),
-            ("*", "search-forward-cursor-word"),
         ] {
             assert_eq!(
                 tables
@@ -3018,9 +3157,14 @@ mod tests {
                 vec![
                     CommandInvocation::new(
                         "command-prompt",
-                        ["-p", "(goto line)", "{ send-keys -X goto-line -- \"%%\" }"],
+                        [
+                            "-P",
+                            "-p",
+                            "(goto line)",
+                            "{ send-keys -X goto-line -- \"%%\" }"
+                        ],
                     )
-                    .with_command_blocks([2])
+                    .with_command_blocks([3])
                 ],
                 "{table} {key}",
             );
@@ -3124,13 +3268,20 @@ mod tests {
         );
 
         assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
-        assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
         assert_eq!(
-            engine.handle(&tables, "x"),
-            KeyDecision::Commands(vec![CommandInvocation::new(
-                "send-keys",
-                ["-N", "3", "-X", "jump-forward", "x"],
-            )])
+            engine.handle(&tables, "f"),
+            KeyDecision::Commands(vec![
+                CommandInvocation::new(
+                    "command-prompt",
+                    [
+                        "-1P",
+                        "-p",
+                        "(jump forward)",
+                        "{ send-keys -X jump-forward -- \"%%\" }",
+                    ],
+                )
+                .with_command_blocks([3])
+            ])
         );
 
         for (key, action) in [
@@ -3203,13 +3354,20 @@ mod tests {
         );
 
         assert_eq!(engine.handle(&tables, "M-4"), KeyDecision::Ignore);
-        assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
         assert_eq!(
-            engine.handle(&tables, "x"),
-            KeyDecision::Commands(vec![CommandInvocation::new(
-                "send-keys",
-                ["-N", "4", "-X", "jump-forward", "x"],
-            )])
+            engine.handle(&tables, "f"),
+            KeyDecision::Commands(vec![
+                CommandInvocation::new(
+                    "command-prompt",
+                    [
+                        "-1P",
+                        "-p",
+                        "(jump forward)",
+                        "{ send-keys -X jump-forward -- \"%%\" }",
+                    ],
+                )
+                .with_command_blocks([3])
+            ])
         );
 
         assert_eq!(engine.handle(&tables, "M-2"), KeyDecision::Ignore);
@@ -3218,9 +3376,14 @@ mod tests {
             KeyDecision::Commands(vec![
                 CommandInvocation::new(
                     "command-prompt",
-                    ["-p", "(goto line)", "{ send-keys -X goto-line -- \"%%\" }"],
+                    [
+                        "-P",
+                        "-p",
+                        "(goto line)",
+                        "{ send-keys -X goto-line -- \"%%\" }"
+                    ],
                 )
-                .with_command_blocks([2])
+                .with_command_blocks([3])
             ])
         );
         assert_eq!(
@@ -3490,15 +3653,31 @@ mod tests {
         for (key, command) in [
             (
                 "/",
-                CommandInvocation::new("copy-mode-search-prompt", [] as [&str; 0]),
+                CommandInvocation::new(
+                    "command-prompt",
+                    [
+                        "-P",
+                        "-T",
+                        "search",
+                        "-p",
+                        "(search down)",
+                        "{ send-keys -X search-forward -- \"%%\" }",
+                    ],
+                )
+                .with_command_blocks([5]),
             ),
             (
                 ":",
                 CommandInvocation::new(
                     "command-prompt",
-                    ["-p", "(goto line)", "{ send-keys -X goto-line -- \"%%\" }"],
+                    [
+                        "-P",
+                        "-p",
+                        "(goto line)",
+                        "{ send-keys -X goto-line -- \"%%\" }",
+                    ],
                 )
-                .with_command_blocks([2]),
+                .with_command_blocks([3]),
             ),
         ] {
             let mut engine = KeyEngine::default();
@@ -3587,12 +3766,33 @@ mod tests {
         ));
     }
 
+    /// The stock jump keys are the pin's `command-prompt -1P` bindings now, so
+    /// the single key that answers them is the prompt's, not the engine's. The
+    /// engine keeps the capture for an argument-less `send-keys -X
+    /// jump-forward` a configuration binds itself, which the pin treats as a
+    /// no-op.
     #[test]
     fn copy_jump_bindings_capture_exactly_one_following_key() {
-        let tables = KeyTables::default();
+        let mut tables = KeyTables::default();
         let mut engine = KeyEngine::default();
         engine.switch_table(Some("copy-mode-vi".to_owned()));
-        assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
+        assert!(matches!(
+            engine.handle(&tables, "f"),
+            KeyDecision::Commands(_)
+        ));
+
+        for (key, action) in [("C-M-f", "jump-forward"), ("C-M-t", "jump-to-forward")] {
+            tables.bind(
+                "copy-mode-vi",
+                key,
+                Binding {
+                    commands: vec![CommandInvocation::new("send-keys", ["-X", action])],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+        assert_eq!(engine.handle(&tables, "C-M-f"), KeyDecision::Ignore);
         assert_eq!(
             engine.handle(&tables, "é"),
             KeyDecision::Commands(vec![CommandInvocation::new(
@@ -3605,7 +3805,7 @@ mod tests {
             KeyDecision::Commands(_)
         ));
 
-        assert_eq!(engine.handle(&tables, "t"), KeyDecision::Ignore);
+        assert_eq!(engine.handle(&tables, "C-M-t"), KeyDecision::Ignore);
         assert_eq!(engine.handle(&tables, "Escape"), KeyDecision::Ignore);
         assert!(matches!(
             engine.handle(&tables, "l"),

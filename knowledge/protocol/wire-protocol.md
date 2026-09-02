@@ -616,11 +616,14 @@ now validate on both encode and decode.
 - **`PROTOCOL_VERSION: u16 = 94`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
-- v94 appends `CopyModeAction::RefreshOn`, `RefreshOff`, `RefreshToggle` and `RefreshRevision`
-  after `PreviousMatchingBracket`. The first three are the pinned `refresh-on`, `refresh-off` and
-  `refresh-toggle` names; the fourth is one tick of the refresh timer, which tmux runs inside
-  `window-copy.c` as a libevent timer and zz runs in the daemon because the terminal worker owns
-  none. `CopyModeAction` rides `TerminalViewAction`, which is carried by `InputMessage` and by
+- v94 appends `CopyModeAction::RefreshOn`, `RefreshOff`, `RefreshToggle`, `RefreshRevision` and
+  `CopyLine(Box<CopyModeCopy>)` after `PreviousMatchingBracket`. The first three are the pinned
+  `refresh-on`, `refresh-off` and `refresh-toggle` names; `RefreshRevision` is one tick of the
+  refresh timer, which tmux runs inside `window-copy.c` as a libevent timer and zz runs in the
+  daemon because the terminal worker owns none; `CopyLine` carries the existing `CopyModeCopy`
+  payload and is the `copy-line` family (`window_copy_do_copy_line` selects the whole logical line
+  the cursor sits on without a selection, copies it, then restores the cursor and view).
+  `CopyModeAction` rides `TerminalViewAction`, which is carried by `InputMessage` and by
   `EventPayload::TerminalUiCommand`'s neighbours on `ProtocolMessage`, so the appended variants are
   wire-reachable and a v93 peer cannot decode them.
 - v93 appends `KeyToken::Raw(u8)` after `Named`. `send-keys -H` is strtol base 16 clamped to one

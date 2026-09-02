@@ -7469,6 +7469,13 @@ impl Shared {
                         target_client,
                         require_mode,
                     } => {
+                        // A `copy-mode -k` arms `pending_copy_kill` in the
+                        // effect before this one; only a real mode entry on the
+                        // pane may consume it, so an entry that errors or is
+                        // redirected to a command output must not leave it armed
+                        // for the next unrelated entry. Take it up front and
+                        // restore it only on the path that reaches the entry.
+                        let armed_copy_kill = inner.pending_copy_kill.take();
                         if *require_mode && !pane_carries_a_mode_command(&inner, client, *pane) {
                             return Err(
                                 ServerError::InvalidCommand("not in a mode".to_owned()).into()
@@ -7513,6 +7520,7 @@ impl Shared {
                         if targets.is_empty() {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
+                        inner.pending_copy_kill = armed_copy_kill;
                         for target in targets {
                             let action = &counted_copy_mode_action(&mut inner, target, action);
                             deferred_terminal_commands.push(DeferredTerminalCommand::ViewAction {
@@ -68308,6 +68316,59 @@ bind - split-window -v -c "#{pane_current_path}"
                 assert!(inner.message_log.is_empty());
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_mode_kill_does_not_survive_an_errored_entry() {
+        let (shared, client, mut context, pane, terminal, _mailbox) = copy_mode_fixture(
+            "kill-error",
+            "i=0; while [ $i -lt 12 ]; do printf 'line-%02d\\n' \"$i\"; i=$((i+1)); done",
+        );
+        let target = pane.to_string();
+        let session = context.session.expect("session");
+
+        // Detaching leaves the pane's terminal alive with no attached client,
+        // so `copy-mode -k` arms the kill in one effect and errors on the next
+        // (`pane is not attached`). The armed kill must not survive for the
+        // next unrelated entry on that pane.
+        shared.detach(client);
+        let mut errored = ExecutionContext::default();
+        let denied = shared.execute(
+            ClientId(u64::MAX),
+            ClientKind::Command,
+            &mut errored,
+            &CommandInvocation::new("copy-mode", ["-k", "-t", &target]),
+        );
+        assert!(
+            denied.is_err(),
+            "copy-mode -k with no attached client should error"
+        );
+        assert!(
+            shared.inner.lock().pending_copy_kill.is_none(),
+            "an errored copy-mode -k left the kill armed"
+        );
+
+        shared.attach(client, session).expect("attach after the error");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("copy-mode", ["-t", &target]),
+            )
+            .expect("plain copy-mode after the errored kill");
+        wait_for_view_mode(
+            &terminal,
+            TerminalViewId(client.0),
+            "copy mode did not freeze",
+            |mode| matches!(mode, TerminalMode::Copy { .. }),
+        );
+        wait_for_observed_copy_session(&shared, client);
+        assert!(
+            !shared.inner.lock().copy_sessions[&client].kill,
+            "a plain copy-mode inherited a kill from an earlier errored entry"
+        );
     }
 
     #[cfg(unix)]

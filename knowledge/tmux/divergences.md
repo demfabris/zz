@@ -753,9 +753,12 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   Measured on the pin with a `-b` prompt seeded `ab`: `display-message -d 5000` leaves the buffer
   alone and `cd` plus Enter answers `abcd`; `display-message -N -d 1500` eats every key for the
   delay, so an `XY` typed inside the window is lost and the later `cd` still answers `abcd`; and
-  `display-message -d 0`, the wait-for-a-key form, loses the prompt outright on the pin and needs
-  its own probe before anything is claimed about it. `semantic:prompt-message-freeze` stays open
-  on that last case.
+  `display-message -d 0` is measured too: `status_message_set` assigns `message_ignore_keys`
+  only when the delay is non-zero, so a standalone `-d 0` message clears on the next key and that
+  key reaches the prompt (`cd` plus Enter answers `abcd` on both binaries), while a `-d 0`
+  message issued after a `-N` one inherits `message_ignore_keys`, never clears, and the parked
+  prompt never closes on either binary. `semantic:prompt-message-freeze` closed on 2026-09-02
+  with all three message cases in `smoke/command-prompt-editing`.
 - `list-keys <key>` rejects the positional key filter.
 - `send-keys -H` rejects bytes `80` through `ff`.
 - Bind-time validation checks shared names and catalog flags, including daemon-native long options,

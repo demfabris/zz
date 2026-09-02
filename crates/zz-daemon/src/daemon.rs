@@ -29642,11 +29642,6 @@ fn truncate_pane_indicator_label(mut label: String) -> String {
     label
 }
 
-/// `prompt_key`'s three head branches, taken before any editing: `-k` answers
-/// with the key's own name, `-N` collects digits and hands the first non-digit
-/// back to the key tables, and `-1` folds one key into a character and submits
-/// it — with the pin's quirk that a buffer seeded by `-I` can never be one
-/// character long, so the prompt closes with nothing submitted.
 /// `key_string_lookup_key`'s two spellings `input_key_name` does not emit: the
 /// key table names 0x20 `Space`, and a shifted Tab is `BTab` rather than a Tab
 /// carrying a shift the pin never records on it.
@@ -29666,6 +29661,11 @@ fn prompt_key_spelling(input: &zz_terminal::KeyInput) -> String {
     name
 }
 
+/// `prompt_key`'s three head branches, taken before any editing: `-k` answers
+/// with the key's own name, `-N` collects digits and hands the first non-digit
+/// back to the key tables, and `-1` folds one key into a character and submits
+/// it — with the pin's quirk that a buffer seeded by `-I` can never be one
+/// character long, so the prompt closes with nothing submitted.
 fn command_prompt_raw_key(
     prompt: &mut CommandPrompt,
     input: &zz_terminal::KeyInput,

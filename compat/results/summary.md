@@ -119,6 +119,7 @@
 | smoke/chooser-buffer-confirm-flag | 3 | yes | 0 | yes | yes | yes |
 | smoke/chooser-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
 | smoke/chooser-row-flags | 3 | yes | 0 | yes | yes | yes |
+| smoke/clear-history-hyperlinks | 3 | yes | 0 | yes | yes | yes |
 | smoke/cli-chain-parse-abort | 3 | yes | 0 | yes | yes | yes |
 | smoke/client-exit-actions | 3 | yes | 0 | yes | yes | yes |
 | smoke/client-non-utf8-cwd | 4 | yes | 0 | yes | yes | yes |

@@ -23400,11 +23400,18 @@ mod tests {
             }]
         ));
         assert!(matches!(
-            engine.execute(
-                &mut context,
-                &command("clear-history", &["-H", "-t", &terminal.to_string()]),
-            ),
-            Err(ServerError::UnsupportedCommand(_))
+            engine
+                .execute(
+                    &mut context,
+                    &command("clear-history", &["-H", "-t", &terminal.to_string()]),
+                )
+                .expect("clear-history -H")
+                .effects
+                .as_slice(),
+            [MuxEffect::TerminalView {
+                action: TerminalViewAction::ClearHistory,
+                ..
+            }]
         ));
 
         let execution = engine

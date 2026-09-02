@@ -265,6 +265,18 @@ fn read_terminfo_entries(term: &str) -> Option<Vec<String>> {
     Some(entries)
 }
 
+/// Read and cache the terminfo entry for `term` without building anything from
+/// it. Reading the database is a subprocess, so registration warms the cache
+/// while the state lock is down and the format path only ever reads it back.
+pub(crate) fn warm_terminfo_entries(environment: &[String]) {
+    for entry in environment {
+        if let Some(term) = entry.strip_prefix("TERM=") {
+            let _ = terminfo_entries(term);
+            return;
+        }
+    }
+}
+
 /// The `struct tty_term` the pin would build for a client on `term`.
 pub(crate) fn client_terminal_facts(
     term: &str,

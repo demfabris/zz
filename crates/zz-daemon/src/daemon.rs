@@ -90,6 +90,7 @@ use crate::{
         BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
         FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest,
         client_environment_rows, client_terminal_facts, host_names, status_context,
+        warm_terminfo_entries,
     },
     transport::{LocalTransport, Transport, TransportListener, TransportStream},
 };
@@ -34789,6 +34790,7 @@ fn handle_connection<S: TransportStream>(
             .client_environments
             .insert(client, client_environment_fact(&hello.environment));
     }
+    warm_terminfo_entries(&hello.environment);
     let mut registration = ClientRegistrationGuard::new(shared, client);
     log::debug!(
         target: "zz_daemon::diagnostics::connection",

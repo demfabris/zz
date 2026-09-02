@@ -1,0 +1,14 @@
+corpus: none
+# The client-resized report and the format client a hook body gets. One changed
+# outer resize raises the hook once, with the client size current and the window
+# geometry one resize behind, an unchanged report raises nothing, and a Control
+# refresh-client -C raises neither hook while still resizing the window. With two
+# clients attached the body reads the cmd_find_best_client activity winner, which
+# the resize arm never updates, so resizing the older client logs the other
+# client's tty while hook_client names the reporter.
+stage: fixtures/client-resized-context.sh ~/client-resized-context.sh
+stage: fixtures/format-hook-log.sh ~/format-hook-log.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu CLIENT_RESIZED_CONTEXT
+run-shell 'sh ~/client-resized-context.sh'
+out: show-environment -g CLIENT_RESIZED_CONTEXT

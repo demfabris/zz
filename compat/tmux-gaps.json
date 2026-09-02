@@ -955,30 +955,6 @@
       "reason": "The discovery container is now split into its three producer families, and the cell metrics are done. window_cell_width and window_cell_height publish w->xpixel and w->ypixel, which window.c defaults to DEFAULT_XPIXEL 16 and DEFAULT_YPIXEL 32 when no client reports a cell size and resize.c otherwise fills from the sizing client's c->tty.xpixel. zz delegates both to the daemon, which answers the format client's reported cell pixels and falls back to the pin's defaults, and gates them on a window in context the way format_cb_window_cell_width gates on ft->w. Measured against the pin on the strict format-window-cell-metrics differential, both sides answer 16 and 32 from display-message with and without an attached client, from every list-windows row, and from a list-sessions row as well, because format_defaults fills wl = s->curw when no winlink is given, so a session row reads the metrics through its current window. Null appears only for a format tree with no window at all, the case the StatusContext::default() unit test exercises. window_bigger and the offsets are the per-client family and stay open on one blocker that is now measured rather than guessed. In the pin they read the client's cached tty viewport, so format_cb_window_bigger answers null whenever the format tree has no client: cmd_list_windows_exec builds its rows with a null client, so a list-windows row answers null even while a client is attached, and the value follows the client's own current window rather than the row's. A live comparison on a throwaway server and a headless zz daemon showed the boolean itself already agrees across five states, both answering null with no client, 0 for a viewport-sized window with the status line on and off, 1 after resize-window widened the window past the viewport, and null again after detach. It also showed zz would answer 1 for the list-windows row the pin leaves null, because the daemon resolves a format client for every command expansion through current_format_client rather than per command like format_defaults. Closing window_bigger needs that no-client row context first. The two offsets need more than that: tty_window_offset1 centres the viewport on the cursor and honours a pan window, and zz has no viewport pan or server-side cursor-follow, so both names answer null on both sides today only because the pin also answers null whenever the window is not bigger."
     },
     {
-      "id": "history.hyperlink-reset",
-      "title": "Reset hyperlink history",
-      "decision": "adopt",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "daily"
-      ],
-      "owner": "terminal",
-      "items": [
-        "flag:clear-history:-H"
-      ],
-      "evidence": [
-        "resource:crates/zz-protocol/src/catalog.rs",
-        "resource:knowledge/designs/tmux-superset-roadmap.md"
-      ],
-      "acceptance": [
-        "A terminal-owned action clears normal history and resets the VT hyperlink registry atomically."
-      ],
-      "depends_on": [],
-      "reason": "The terminal API lacks a distinct hyperlink-registry reset."
-    },
-    {
       "id": "hooks.pane-events",
       "title": "Produce pane focus and clipboard hooks",
       "decision": "adopt",
@@ -2265,11 +2241,11 @@
     },
     {
       "id": "terminal.resize-pane-trim",
-      "title": "Add terminal history trim action",
-      "decision": "adopt",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "medium",
+      "title": "Keep the scrollback out of the active grid",
+      "decision": "never",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "daily",
         "scripts"
@@ -2280,13 +2256,14 @@
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/catalog.rs",
-        "resource:knowledge/designs/tmux-superset-roadmap.md"
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:third_party/rust/libghostty-vt-sys/src/bindings.rs"
       ],
       "acceptance": [
-        "One atomic terminal action trims cursor-derived history, advances the cursor, and no-ops in pane mode."
+        "resize-pane -T stays refused rather than silently doing nothing, because libghostty cannot pull scrollback rows back into the active grid and a no-op would be a screen-visible divergence."
       ],
       "depends_on": [],
-      "reason": "The mux cannot inspect cursor, history, or terminal mode state."
+      "reason": "The acceptance had asked for one atomic terminal action that trims cursor-derived history, advances the cursor, and no-ops in pane mode. Read against the pin on 2026-09-02: cmd_resize_pane_exec's -T branch returns immediately when the pane holds any mode, then takes `adjust = screen_size_y(&wp->base) - 1 - wp->base.cy` clamped to the history size, calls grid_remove_history(gd, adjust) and adds adjust to wp->base.cy. grid_remove_history frees the last adjust lines of the whole grid, the blank rows below the cursor, and then shrinks hsize by the same count, so the visible window slides up into the scrollback: the screen gains adjust rows of history at the top, loses the blank rows at the bottom, the cursor ends on the last screen row, and history_size drops by adjust. That is grid surgery, not a VT operation. libghostty's terminal API is vt_write, resize, reset, scroll_viewport and readers; scroll_viewport moves what is displayed and never moves a row between the scrollback and the active grid, and nothing else can remove history rows or pull them back in. Resizing the terminal down and up again would come close on ghostty's reflow rules, but the geometry is the mux's to own and the round trip would send the child two spurious SIGWINCHes, so it is not the same operation. zz therefore keeps refusing the flag with `unsupported command: resize-pane -T` rather than accepting it as a no-op, because the pin's -T is visible in capture-pane and a silent no-op would be the worse divergence. Reopen if libghostty grows a scrollback API that can move rows across the active-grid boundary."
     }
   ],
   "closed": [
@@ -3503,6 +3480,19 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Windows now retain tmux's Unix-second `activity_time` apart from zz's logical MRU counter. Creation, parsed nonempty pane output, and the existing pinned current-window transition producers update both values from the injected engine clock. The independent audit found and repaired the direct daemon `switch-client` selection path so it refreshes that clock before changing the current window. Same-window selection, pane selection, pane creation, splits, and layout-only changes without output leave the timestamp unchanged. The direct Time format backing expands empty without a window and preserves the same seconds through plain, boolean, comparison, list-row, and time-modified forms. Focused model, command, format, daemon, and differential coverage preserves the pin's move-window and swap-window transition details while proving target isolation and output-driven updates. No wire protocol or snapshot field changed."
+    },
+    {
+      "id": "history.hyperlink-reset",
+      "title": "Reset hyperlink history",
+      "closed_on": "2026-09-02",
+      "resolution": "The acceptance had asked for a terminal-owned action that clears normal history and resets the VT hyperlink registry atomically. It was re-scoped on 2026-09-02 against two measurements. cmd_capture_pane_exec runs the same window_pane_reset_mode_all and grid_clear_history for both spellings and adds exactly one call under -H, screen_reset_hyperlinks(wp->screen), which drops the pane's hyperlinks structure so cells keep their ids and the ids resolve to nothing. Probed on a throwaway server with a pane holding `ESC]8;;http://e.com ESC\\\\ LINK ESC]8;; ESC\\\\`: `capture-pane -pe` answered `^[]8;;http://e.com^[\\\\LINK^[]8;;^[\\\\` before, the same after a plain `clear-history`, and plain `LINK` after `clear-history -H`. The second measurement is that zz has no such observable: its `capture-pane -pe` answered plain `LINK` for the same pane before any clear, because hyperlink URIs are not in zz's capture transports at all, which is capture.rich-transports. libghostty stores hyperlinks per cell behind ghostty_grid_ref_hyperlink_uri and exposes no registry, no reset, and no writer; the only primitive that would drop them is ghostty_terminal_reset, which takes the whole terminal with it. So the reset has no primitive and no observer, and the honest product stance is that the flag stops failing: catalog.rs promotes -H from an unsupported flag to a real one, clear-history runs its ordinary history clear under either spelling, and `bind-key ... clear-history -H` binds where it used to be refused. compat/scenarios/smoke/clear-history-hyperlinks.txt asserts those ten facts on both binaries through an attached pty client, because a detached `clear-history` still answers `pane is not attached` on zz under clients.interactive-refresh. Reopen when capture gains hyperlink transports under capture.rich-transports, because a captured URI would then make the missing reset visible.",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:third_party/rust/libghostty-vt-sys/src/bindings.rs",
+        "scenario:compat/scenarios/smoke/clear-history-hyperlinks.txt",
+        "file:compat/scenarios/smoke/fixtures/clear-history-hyperlinks.sh"
+      ]
     },
     {
       "id": "hooks.queue",

@@ -498,7 +498,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "choose-tree",
         "[-GhkNrswZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
     ),
-    ("clear-history", "[-H] [-t target-pane]"),
     (
         "command-prompt",
         "[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]",
@@ -2190,10 +2189,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "clear-history",
         aliases: &["clearhist"],
         description: "Clear terminal history",
-        usage: "[-t target-pane]",
+        usage: "[-H] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
-            CommandOptionSpec::unsupported_flag("-H"),
+            CommandOptionSpec::flag("-H", "also reset the pane's hyperlink registry"),
         ],
         positionals: &[],
         variadic: None,
@@ -2817,8 +2816,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (464, 39));
-        assert_eq!(usage_overrides.len(), 22);
+        assert_eq!((supported, unsupported), (465, 38));
+        assert_eq!(usage_overrides.len(), 21);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

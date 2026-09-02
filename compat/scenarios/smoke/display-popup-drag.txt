@@ -1,0 +1,14 @@
+corpus: none
+# popup_key_cb's drag arm on both binaries, driven with SGR mouse reports on a
+# client attached to a real pty. A press on the popup's top border followed by
+# a drag report still on that border arms MOVE - the border is read from the
+# drag report's own position and the button from the previous one - and the next
+# drag moves the box by the offset the grab kept, so a press four columns into
+# the border and a drag ten columns and five rows away moves the box exactly
+# that far. A drag that starts inside the content box, away from every border,
+# belongs to the popup's job and never moves the box.
+stage: fixtures/display-popup-drag.sh ~/display-popup-drag.sh
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+out: set-environment -gu DISPLAY_POPUP_DRAG
+run-shell 'sh ~/display-popup-drag.sh'
+out: show-environment -g DISPLAY_POPUP_DRAG

@@ -163,8 +163,11 @@
 | smoke/display-panes-template | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-kitty | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-kitty-noresize | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-drag | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-menu | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-style-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-to-pane | 3 | yes | 0 | yes | yes | yes |
 | smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |
 | smoke/focus-follows-mouse | 3 | yes | 0 | yes | yes | yes |
 | smoke/format-client-loop-context | 3 | yes | 0 | yes | yes | yes |

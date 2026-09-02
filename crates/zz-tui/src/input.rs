@@ -7,7 +7,8 @@ use zz_daemon::{
 use zz_protocol::{
     ChooseBufferAction, ChooseTreeAction, CommandInvocation, CommandPromptAction,
     CommandPromptMode, ConfirmAction, ConfirmState, DisplayPanesAction, InputMessage,
-    MAX_COMMAND_PROMPT_BYTES, MenuAction, MenuState, PaneKindSnapshot, PopupAction,
+    MAX_COMMAND_PROMPT_BYTES, MenuAction, MenuState, PaneKindSnapshot, PopupAction, PopupPointer,
+    PopupPointerButton,
 };
 use zz_terminal::{
     KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent, SearchQuery, TerminalMouseButton,
@@ -175,11 +176,9 @@ pub(crate) fn handle(
             None => handle_paste(model, client, text),
         },
         TerminalEvent::Mouse(event) if model.popup.is_some() => {
-            if let Some(action) = popup_mouse_action(model, event, pixel_mouse) {
+            if let Some(action) = popup_pointer_action(model, event, pixel_mouse) {
                 client
-                    .send_input(InputMessage::Popup {
-                        action: PopupAction::TerminalView(action),
-                    })
+                    .send_input(InputMessage::Popup { action })
                     .map_err(|error| error.to_string())?;
             }
             Ok(InputOutcome::None)
@@ -1314,32 +1313,60 @@ fn pointer_focus_follows_mouse(
     focus_pane(client, entry.pane)
 }
 
-fn popup_mouse_action(
+/// Every pointer event a popup is up for. tmux runs the border, drag, and menu
+/// policy in `popup_key_cb`, above the job, so the client reports the event in
+/// its own cell grid and carries the job's action along for the daemon to run
+/// if the policy leaves it alone.
+fn popup_pointer_action(
     model: &Model,
     event: MouseEvent,
     pixel_mouse: bool,
-) -> Option<TerminalViewAction> {
+) -> Option<PopupAction> {
     let popup = model.popup.as_ref()?;
     let content = model.popup_layout()?.content;
     let (global_column, global_row, global_x, global_y) =
         global_mouse_position(model, event, pixel_mouse);
-    if !content.contains(global_column, global_row) {
-        return None;
+    let view = if content.contains(global_column, global_row)
+        && model
+            .viewports
+            .get(&popup.pane)
+            .is_some_and(|viewport| viewport.mouse_tracking)
+    {
+        pane_mouse_action(
+            &model.size,
+            event,
+            content,
+            global_column,
+            global_row,
+            global_x,
+            global_y,
+            event.modifiers.contains(KeyModifiers::SHIFT),
+        )
+    } else {
+        None
+    };
+    Some(PopupAction::Pointer {
+        pointer: PopupPointer {
+            column: global_column,
+            row: global_row,
+            button: popup_pointer_button(event.kind),
+            drag: matches!(event.kind, MouseEventKind::Drag(_)),
+            release: matches!(event.kind, MouseEventKind::Up(_)),
+            meta: event.modifiers.contains(KeyModifiers::ALT),
+        },
+        view,
+    })
+}
+
+const fn popup_pointer_button(kind: MouseEventKind) -> PopupPointerButton {
+    match kind {
+        MouseEventKind::Down(button) | MouseEventKind::Drag(button) => match button {
+            MouseButton::Left => PopupPointerButton::Left,
+            MouseButton::Middle => PopupPointerButton::Middle,
+            MouseButton::Right => PopupPointerButton::Right,
+        },
+        _ => PopupPointerButton::None,
     }
-    let viewport = model.viewports.get(&popup.pane)?;
-    if !viewport.mouse_tracking {
-        return None;
-    }
-    pane_mouse_action(
-        &model.size,
-        event,
-        content,
-        global_column,
-        global_row,
-        global_x,
-        global_y,
-        event.modifiers.contains(KeyModifiers::SHIFT),
-    )
 }
 
 fn global_mouse_position(
@@ -1914,15 +1941,30 @@ mod tests {
     fn popup_pointer_and_scroll_are_content_relative_and_tracking_gated() {
         let model = popup_model(PopupBorderLines::Single, true);
         let layout = model.popup_layout().expect("popup layout");
+        let view_of = |model: &Model, event| match popup_pointer_action(model, event, false) {
+            Some(PopupAction::Pointer { view, .. }) => view,
+            other => panic!("popup pointer was not reported: {other:?}"),
+        };
+        let pointer_of = |model: &Model, event| match popup_pointer_action(model, event, false) {
+            Some(PopupAction::Pointer { pointer, .. }) => pointer,
+            other => panic!("popup pointer was not reported: {other:?}"),
+        };
         let pointer = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: layout.content.x.saturating_add(2),
             row: layout.content.y.saturating_add(1),
             modifiers: KeyModifiers::SHIFT,
         };
-        let Some(TerminalViewAction::Mouse(input)) = popup_mouse_action(&model, pointer, false)
-        else {
-            panic!("tracked popup pointer was not routed");
+        let reported = pointer_of(&model, pointer);
+        assert_eq!(reported.column, pointer.column);
+        assert_eq!(reported.row, pointer.row);
+        assert_eq!(reported.button, PopupPointerButton::Left);
+        assert!(!reported.drag);
+        assert!(!reported.release);
+        assert!(!reported.meta);
+
+        let Some(TerminalViewAction::Mouse(input)) = view_of(&model, pointer) else {
+            panic!("tracked popup pointer carried no action for the job");
         };
         assert_eq!(input.cell.column, 2);
         assert_eq!(input.cell.row, 1);
@@ -1942,26 +1984,31 @@ mod tests {
             ..pointer
         };
         assert!(matches!(
-            popup_mouse_action(&model, scroll, false),
+            view_of(&model, scroll),
             Some(TerminalViewAction::ScrollWheel { lines: -1, input })
                 if input.cell.column == 2 && input.cell.row == 1
         ));
+        assert_eq!(pointer_of(&model, scroll).button, PopupPointerButton::None);
 
+        // The border and the cells outside the box are the daemon's, not the
+        // job's: the client reports where the pointer landed and carries no
+        // action for the popup's application.
         let border = MouseEvent {
             column: layout.frame.x,
             row: layout.frame.y,
             ..pointer
         };
-        assert_eq!(popup_mouse_action(&model, border, false), None);
+        assert_eq!(view_of(&model, border), None);
+        assert_eq!(pointer_of(&model, border).column, layout.frame.x);
         let outside = MouseEvent {
             column: layout.frame.x.saturating_sub(1),
             row: layout.frame.y,
             ..pointer
         };
-        assert_eq!(popup_mouse_action(&model, outside, false), None);
+        assert_eq!(view_of(&model, outside), None);
 
         let untracked = popup_model(PopupBorderLines::Single, false);
-        assert_eq!(popup_mouse_action(&untracked, pointer, false), None);
+        assert_eq!(view_of(&untracked, pointer), None);
 
         let borderless = popup_model(PopupBorderLines::None, true);
         let frame = borderless.popup_layout().expect("borderless layout").frame;
@@ -1971,7 +2018,17 @@ mod tests {
             modifiers: KeyModifiers::NONE,
             ..pointer
         };
-        assert!(popup_mouse_action(&borderless, edge, false).is_some());
+        assert!(view_of(&borderless, edge).is_some());
+
+        let meta_drag = MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Right),
+            modifiers: KeyModifiers::ALT,
+            ..pointer
+        };
+        let reported = pointer_of(&model, meta_drag);
+        assert_eq!(reported.button, PopupPointerButton::Right);
+        assert!(reported.drag);
+        assert!(reported.meta);
     }
 
     fn menu_state(selected: Option<u32>, stay_open: bool) -> MenuState {

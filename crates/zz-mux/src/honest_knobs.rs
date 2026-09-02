@@ -1041,7 +1041,12 @@ impl PaneOption {
     pub(crate) const fn updates_terminal_worker(self) -> bool {
         matches!(
             self,
-            Self::AllowPassthrough | Self::CursorColour | Self::CursorStyle
+            Self::AllowPassthrough
+                | Self::AllowRename
+                | Self::AlternateScreen
+                | Self::CursorColour
+                | Self::CursorStyle
+                | Self::ScrollOnClear
         )
     }
 }

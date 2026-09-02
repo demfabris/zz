@@ -86,3 +86,17 @@ behind `focus-events` and queues them ahead of the change notifications. Gate lo
 broke two daemon tests nobody had run (the downstream rule is now in the prompts); `--delta --list`
 came back stale once; three new load-only flakes joined the list. Rebased campaign branches stay at
 their old tips on origin because forcing is forbidden.
+
+## 2026-09-02: cycle 6 launched, paused after 80 minutes for a machine move
+
+Lanes from a fresh census: mux keys/copy/formats (`send-keys -c`/`-K`/`-H`, copy-mode `-k`/`-s`,
+`display-message -a`, per-client window formats), daemon prompt/hooks (the p2 alias-forgery defect
+first, then command-prompt fidelity, pane-focus hooks, the re-scoped resize context), client
+choosers/overlays (chooser flags, pane-colours, menu and popup behavior). Warm worktrees made the
+lanes roughly twice as fast as cycle 5: the keys lane pushed and was reviewed in 75 minutes, the
+daemon lane pushed five commits in 80. The run was stopped cleanly at that boundary: the client
+lane's uncommitted work became a snapshot commit on `campaign/batch-choosers-overlays-opus-wip`,
+the three cached reports were exported into `opus-compat-run-6-continue.js` (machine strings via
+workflow `args`), and the lock fronts were released so another holder can claim them. Lesson: the
+Workflow journal cache is same-session only, so a machine move means exporting reports into a
+continuation script, not copying the session.

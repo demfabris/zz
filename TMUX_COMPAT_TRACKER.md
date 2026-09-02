@@ -10,7 +10,7 @@
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **RESUMED 2026-09-01 ON THE UBUNTU BOX; CYCLE 5 INTEGRATED; THE NEXT CYCLE STARTS FROM THE DISPATCH BOARD, RECIPE IN [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **CYCLE 6 IN FLIGHT, PAUSED 2026-09-02 FOR A MACHINE MOVE; CONTINUE FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) WITH `opus-compat-run-6-continue.js`**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -79,7 +79,7 @@ percentage is a ledger health metric, not a compatibility claim.
 | Published branch | `origin/main` at `9cab1fa4` (cycle-5 daemon merge) plus this ledger recompute |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
 | Delivery | Cycle 5 of the orchestrated Opus/Fable loop: terminal behavior and pane chrome option baskets settled plus `send-keys -R` (`8c1da05e`), pane selection state, the exact-match target prefix scoped by slot, and `split-window -k`/`-m` (`887a372e`), Control tilde parsing against the daemon environment and a byte-preserving client cwd with protocol v92 (`9cab1fa4`) |
-| Orchestration | Resumed 2026-09-01 on the Ubuntu box after the machine move; cycle 5 ran three lanes with a Fable review each and integrated through the board's MAIN lock; the lock fronts `F-TERMINAL-CLIENT-OPTIONS`, `F-PANE-MODEL-BASKET`, and `F-DAEMON-INTERACTION-SMALLS` are INTEGRATED and released. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the recipe |
+| Orchestration | Cycle 6 launched 2026-09-01 on the Ubuntu box and paused after 80 minutes for a machine move: the keys and daemon lane branches are pushed and reported, the client lane is snapshotted on its wip branch. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table and the machine-independent continuation script `opus-compat-run-6-continue.js`; the cycle-6 lock fronts are READY on the board |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |

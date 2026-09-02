@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-09-02
+* **Update**: Paused campaign cycle 6 for a machine move: exported the cached lane reports into `compat/orchestration/opus-compat-run-6-continue.js` (machine facts via workflow `args`), snapshotted the client lane on its wip branch, and rewrote the handoff around the in-flight state.
+
 ## 2026-09-01
 * **Update**: Integrated campaign cycle 5 on the Ubuntu box (agreed-scope meter 54.9% to 65.8%, protocol v91 to v92: Control tilde environment round trip and byte-preserving client cwd), refreshed `compat/orchestration/` with the cycle-5 log, the machine-adapted cycle-5 script, and the ready cycle-6 script and handoff.
 * **Update**: Recorded the orchestrated Opus/Fable campaign cycles (2026-08-31 to 2026-09-01, agreed-scope meter 1.6% to 54.9%, protocol v88 to v91) in the cohorts playbook, refreshed the tracker checkpoint and resume contract for the dispatch-board era, and landed `compat/orchestration/` with the cycle-5 workflow script, the machine-move handoff, and the per-cycle log so the campaign can resume from any clone.

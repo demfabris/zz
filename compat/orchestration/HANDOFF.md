@@ -1,47 +1,75 @@
 # Cycle-6 handoff for the tmux-compat campaign
 
-Written 2026-09-01 ~23:40Z on the Ubuntu box after cycle 5 integrated. Everything a new machine
-needs is in this repository and in issue #7; nothing lives only on one machine.
+Written 2026-09-02 ~01:00Z on the Ubuntu box. Cycle 6 is IN FLIGHT and paused for a machine move.
+Everything a new machine needs is in this repository and in issue #7; nothing lives only on one
+machine, including the half-finished cycle.
 
 ## State now
 
 | Fact | Value |
 | --- | --- |
-| `origin/main` | `bbc09f5` (cycle-5 ledger; terminal lane `8c1da05`, panes `887a372`, daemon `9cab1fa`) |
+| `origin/main` | records commit after `bbc09f5` (cycle-5 ledger; terminal lane `8c1da05`, panes `887a372`, daemon `9cab1fa`) |
 | Agreed-scope meter | 65.8% (200/304 items), 30/65 groups done; `python3 compat/progress.py` |
 | Live registry | 36 unresolved groups (27 open, 9 blocked); ledger 83.4% (181/217) |
 | Corpus | 154 scenarios / 2,361 steps, attached-client PASS, summary digest `a13fe7ad…` |
-| `PROTOCOL_VERSION` | 92 (next bump 92 -> 93: hex hello frame 0x5C -> 0x5D, test `..._ninety_two` -> `..._ninety_three`) |
-| Board (issue #7) | MAIN and TRIAGE free. Cycle-6 lock fronts minted and READY: `F-MUX-KEYS-COPY-FORMATS`, `F-DAEMON-PROMPT-HOOKS` (p2, carries the alias-forgery defect), `F-CLIENT-CHOOSERS-OVERLAYS` (contracts in their FRONT comments 5501598102, 5501598283, 5501598474) |
+| `PROTOCOL_VERSION` | 92 on main; the pushed daemon lane bumps it to 93 (hex hello frame 0x5C -> 0x5D, test `..._ninety_three`) |
+| Board (issue #7) | MAIN and TRIAGE free. Cycle-6 lock fronts READY again after the pause release: `F-MUX-KEYS-COPY-FORMATS`, `F-DAEMON-PROMPT-HOOKS` (p2), `F-CLIENT-CHOOSERS-OVERLAYS` (contracts in FRONT comments 5501598102, 5501598283, 5501598474) |
 
-Biggest remaining baskets: `keys.copy-mode-binding-fidelity` (16, 14 blocked by the accepted
-`command-prompt -P` decision), `prompt.command-fidelity` (11), `choosers.command-flags` (8),
-`options.pane-engine-knobs` (8, park), `options.pane-border-chrome` (7, park), `terminal.key-control`
-(5), `display-menu.behavior-fidelity` (5), `display-popup.behavior-fidelity` (5). The one p2 item on
-the board is a defect, not a gap: a user-authored `__zz-command-alias-group` block still executes
-instead of being rejected as an unknown command (`F-ALIAS-GROUP-FORGERY`).
+## Cycle 6, paused mid-flight
 
-## The cycle
+Cycle 6 launched from `opus-compat-run-6.js` on 2026-09-01 ~23:05Z and was stopped about 80 minutes
+later for a machine move. What already exists on `origin`:
 
-`opus-compat-run-6.js` beside this file is the ready-to-run Claude Code Workflow script: three Opus
-implementor lanes in parallel worktrees, one Fable adversarial reviewer pipelined behind each lane,
-one serialized Fable integration gate that merges to main, ledgers the board, recomputes
-`TMUX_COMPAT_TRACKER.md`, and runs TRIAGE. Cycle 5 ran this exact shape on this box: 3h55m wall,
-2.04M subagent tokens, seven agents, three of three lanes merged. Launch with the Workflow tool:
-`Workflow({scriptPath: "<path>/opus-compat-run-6.js"})`. If the process dies mid-run,
-`Workflow({scriptPath, resumeFromRunId})` replays finished agents from the journal cache and re-runs
-only what was in flight; the journal lives under the session's
-`subagents/workflows/<runId>/journal.jsonl` (result key is `result`). If the gate died after pushing
-some lanes, finishing the rest by hand is often cheaper than a resume: the gate's fix commits sit in
-its `zz-gate-*` worktrees.
+| Lane | Branch | State |
+| --- | --- | --- |
+| keys (mux) | `campaign/batch-keys-copy-formats-opus` at `68b4324` (2 commits on `fdf56a1`) | Worker done: `send-keys -c` closed with the target-client field on the three send-keys effects, one `terminal.key-control` item and one `copy-mode.command-fidelity` item closed, the rest recorded as skips. Reviewed: approve-with-fixes, one must-fix on the read-only guard wording plus three nits |
+| daemon | `campaign/batch-daemon-prompt-hooks-opus` at `64b429b` (5 commits) | Worker done, NOT yet reviewed: the p2 alias-group forgery defect fixed with an unforgeable `expanded_alias_group` provenance (protocol 92 -> 93), five `prompt.command-fidelity` items (status-keys derivation, `-l`, chains, labels, pass order), `clients.event-resize-context` re-scoped to the measured pin and closed on the hook format client; pane-focus hooks, path encoding, tilde home, Control disconnect, and `-W` skipped with reasons |
+| client | `campaign/batch-choosers-overlays-opus-wip` at `0f1dffd` (4 commits) | Worker interrupted: chooser `-F`/`-h`/`-k`, pane-colours palette, and menu action client context committed; a snapshot commit holds uncommitted `command.rs`, `compat_manifest_tests.rs`, and `render.rs` work. Not reviewed |
+
+`opus-compat-run-6-continue.js` beside this file finishes the cycle on ANY machine without the old
+session's cache: it embeds the keys worker report, the keys review verdict, and the daemon worker
+report as constants, runs the daemon review live, restarts the client worker from the wip branch
+(its prompt carries the resume recipe), reviews it, then runs the same serialized Fable gate as
+every cycle (keys first, daemon, client). Machine strings come from workflow `args` with this box's
+defaults:
+
+```js
+Workflow({
+  scriptPath: "<checkout>/compat/orchestration/opus-compat-run-6-continue.js",
+  args: {
+    root: "/Users/you/dev/zz", dev: "/Users/you/dev", holder: "mbp/orchestrator",
+    machine: "16-core mac", cores: 16,
+    workerJobs: 8, workerThreads: 4, gateJobs: 16, gateThreads: 8, shards: 8
+  }
+})
+```
+
+Omit `args` on this Ubuntu box. Before launching: claim the three lock fronts under your holder
+identity (`ZZ_BOARD_HOLDER=<holder> python3 compat/board.py claim <FRONT> --lease 6h`) and check
+that `origin/main` is still the records commit this handoff describes (the branches rebase onto
+whatever main is; a moved main only means a longer rebase for the gate). After the gate finishes,
+verify `origin/main`, the board records, and `compat/progress.py`, then write cycle 7 from a fresh
+registry census as described under the loop below. `CAMPAIGN-LOG.md` has the per-cycle history.
+
+## The cycle, in general
+
+`opus-compat-run-6.js` is the full cycle-6 script as launched (three Opus implementor lanes in
+parallel worktrees, one Fable adversarial reviewer pipelined behind each lane, one serialized Fable
+integration gate that merges to main, ledgers the board, recomputes `TMUX_COMPAT_TRACKER.md`, and
+runs TRIAGE); the next cycle's script starts from it. Cycle 5 ran that shape on this box in 3h55m
+and 2.04M subagent tokens; cycle 6 was on pace for well under that thanks to warm worktrees. If a
+run dies mid-way in the SAME session, `Workflow({scriptPath, resumeFromRunId})` replays finished
+agents from the journal cache (`subagents/workflows/<runId>/journal.jsonl`, result key `result`);
+across machines or sessions, export the cached reports into a continuation script the way
+`opus-compat-run-6-continue.js` does. If the gate died after pushing some lanes, finishing the rest
+by hand is often cheaper: the gate's fix commits sit in its `zz-gate-*` worktrees.
 
 Orchestrator loop per cycle: claim the three lock fronts under your holder identity (6h leases,
 renew them and MAIN with `renew <FRONT> --lease 6h` while the gate runs; renew sets expiry to now
 plus the lease), launch, verify `origin/main`, the board records, and `compat/progress.py` when the
 gate finishes, then write the next script from a fresh registry census (protocol version, lock
 names, group lists, the mooted fronts for TRIAGE), mint the next lock fronts under TRIAGE, commit
-the orchestration records under MAIN, and repeat. `CAMPAIGN-LOG.md` beside this file is the
-per-cycle log with the gotchas each one produced.
+the orchestration records under MAIN, and repeat.
 
 ## This machine (`ubuntu`)
 
@@ -50,17 +78,19 @@ per-cycle log with the gotchas each one produced.
 works non-interactively; HTTPS `https://github.com/demfabris/zz.git` is the hang fallback (a
 credential store exists). `gh` is logged in. Holder identity `ubuntu/orchestrator`. Caches are
 populated (`compat/.cache/tmux-src/tmux` at `d77c9dc6`, `compat/.cache/plugins`). No rerere cache.
-The cycle-5 worker worktrees `zz-opus-panes`, `zz-opus-dint`, and `zz-opus-termopts` are clean with
-warm `target/` directories (15 to 29 GB each); the cycle-6 lanes reuse them with
-`checkout --detach origin/main` instead of cold builds. Remove them only when disk gets tight; their
-branches are on `origin` as `campaign/batch-*`.
+The worker worktrees `zz-opus-panes`, `zz-opus-dint`, and `zz-opus-termopts` are clean with warm
+`target/` directories (15 to 29 GB each) and sit at the cycle-6 lane tips; `zz-review-dint` was
+created by the interrupted daemon reviewer. Scripts reuse a clean worktree with `checkout --detach`
+instead of a cold build. Remove them only when disk gets tight; every branch is on `origin`.
 
 ## Before launching on a new machine
 
 Edit the machine-specific strings in the script:
 
-- The `/home/demfabris/dev/zz` paths (shared checkout and worktree parent), the core-count etiquette
-  numbers, and the WORKDIR warm-reuse lines (on a fresh machine every lane creates its worktree).
+- For `opus-compat-run-6-continue.js`, pass the machine facts as `args` (see above). For a full-cycle
+  script, edit the `/home/demfabris/dev/zz` paths (shared checkout and worktree parent), the
+  core-count etiquette numbers, and the WORKDIR reuse lines, or lift the `args` block from the
+  continuation script.
 - The git transport lines: keep `origin` if SSH works non-interactively, otherwise switch the fetch
   and push commands to the HTTPS URL.
 - The protected-server line: no tmux server was running here at launch, so the prompts only forbid

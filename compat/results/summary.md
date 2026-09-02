@@ -28,6 +28,7 @@
 | display-panes-format | 10 | yes | 0 | yes | yes | yes |
 | errors | 2 | yes | 0 | yes | yes | yes |
 | exec-family | 30 | yes | 0 | yes | yes | yes |
+| format-environment-fallback | 27 | yes | 0 | yes | yes | yes |
 | format-expansion-output-clamp | 7 | yes | 0 | yes | yes | yes |
 | format-flags | 8 | yes | 0 | yes | yes | yes |
 | format-modifier-option-loop | 17 | yes | 0 | yes | yes | yes |

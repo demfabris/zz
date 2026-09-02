@@ -1,0 +1,31 @@
+# format_find's environment tail: after every option, table and tree lookup
+# misses, the session store answers first and the global one second, a name the
+# session store keeps with no value masks the global entry, and the time
+# modifier skips the tail entirely.
+new-session -d -s envs
+set-environment -g PLAIN hello
+out: display-message -p -t envs [#{PLAIN}]
+set-environment -t envs SESSPLAIN sv
+out: display-message -p -t envs [#{SESSPLAIN}]
+out: display-message -p -t envs [#{t:PLAIN}]
+set-environment -g OVER gval
+set-environment -t envs OVER sval
+out: display-message -p -t envs [#{OVER}]
+set-environment -g MASKED gmask
+set-environment -t envs -r MASKED
+out: display-message -p -t envs [#{MASKED}]
+set-environment -g -r GONE
+out: display-message -p -t envs [#{GONE}]
+set-environment -g -h HID hv
+out: display-message -p -t envs [#{HID}]
+set-environment -g session_name ENVLOSES
+out: display-message -p -t envs [#{session_name}]
+set-environment -g status-left ENVLOSES
+out: display-message -p -t envs [#{status-left}]
+out: display-message -p -t envs [#{?OVER,yes,no}|#{?NOSUCHVAR,yes,no}]
+out: display-message -p -t envs [#{=2:OVER}|#{b:PLAIN}]
+out: display-message -p -t envs [#{NOSUCHVAR}]
+new-session -d -s other
+out: display-message -p -t other [#{OVER}|#{PLAIN}|#{SESSPLAIN}]
+set-environment -t envs -u OVER
+out: display-message -p -t envs [#{OVER}]

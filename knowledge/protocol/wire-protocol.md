@@ -616,7 +616,7 @@ now validate on both encode and decode.
 - **`PROTOCOL_VERSION: u16 = 96`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
-- v96 appends `ProtocolMessage::CommandQueueParked { request_id }` after `HomeDirectoryResponse`.
+- v96 appends `ProtocolMessage::CommandQueueParked { request_id: u64 }` after `HomeDirectoryResponse`.
   The daemon sends it from a Control client's command worker at the moment that client's command
   queue parks on a request that has not answered yet: a blocking `run-shell` or `if-shell` waiting
   on its job, a `wait-for` lock, and the overlays that hold their invoker (`command-prompt`,

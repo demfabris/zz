@@ -52,6 +52,15 @@ run_case success split-window -d -W -t "=$session:" true
 run_case signal split-window -d -W -t "=$session:" 'kill -TERM $$'
 run_case printed split-window -d -P -F '#{pane_index}' -W -t "=$session:" 'exit 5'
 
+# A non-zero status keeps the item's after hook: the hook was inserted at exec
+# and window_pane_wait_finish only sets c->retval, so the hook runs, the rest of
+# the queue runs, and only the client's status carries the child's.
+main_client set-hook -g after-split-window 'display-message -p HOOK'
+main_client set-hook -g command-error 'display-message -p CMDERR'
+run_case hooked split-window -d -P -W -t "=$session:" 'exit 2' \; display-message -p AFTER
+main_client set-hook -gu after-split-window
+main_client set-hook -gu command-error
+
 # The rest of the queue runs after the pane's command is gone, so the marker the
 # pane writes is already there when the next command in the same queue prints.
 marker="$work/ordered"

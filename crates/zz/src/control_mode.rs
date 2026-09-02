@@ -1451,8 +1451,6 @@ fn finish_control_return<W: Write>(
         eprintln!("zz: {error}");
     }
     let _ = client.detach();
-    // The parked request answers to a queue tmux has already freed, so nothing
-    // it prints later belongs on this client's stream.
     if input_error.is_none() && !state.parked_queue_released {
         drain_before_exit(receiver, state, output)?;
     }
@@ -2812,8 +2810,6 @@ mod tests {
         pending_return.consume_preceding_input();
         assert!(!pending_return.has_preceding_input());
 
-        // A parked request frees the rest of that queue the way the client's
-        // exit frees the pin's.
         let mut state = ControlState {
             pending_return: Some(PendingReturn::Eof {
                 code: 0,

@@ -5414,28 +5414,29 @@ impl Shared {
     /// the child's exit status, or 128 plus its signal, once the child is
     /// gone. Only a Command or Control invoker can park, the way the overlay
     /// waits do, because an Interactive client's commands run on the thread
-    /// that would deliver the wake.
+    /// that would deliver the wake. The execution comes back unchanged beside
+    /// the status so the item's after hook is picked the way the pin picks it
+    /// at exec; `finish_pane_command` turns the status into the client's
+    /// afterwards.
     fn wait_for_pane_command(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
         result: Result<Execution, DaemonError>,
-    ) -> Result<Execution, DaemonError> {
+    ) -> (Result<Execution, DaemonError>, u8) {
         let Ok(execution) = result else {
-            return result;
+            return (result, 0);
         };
         let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
             MuxEffect::PaneWaitForExit { pane } => Some(*pane),
             _ => None,
         }) else {
-            return Ok(execution);
+            return (Ok(execution), 0);
         };
         if !matches!(kind, ClientKind::Command | ClientKind::Control) {
             self.inner.lock().pane_exit_waits.remove(&pane);
-            return Ok(execution);
+            return (Ok(execution), 0);
         }
-        // The wait was registered under the lock that created the pane, so a
-        // child that has already exited left its status in the channel.
         let Some(wait) = self
             .inner
             .lock()
@@ -5443,7 +5444,7 @@ impl Shared {
             .get(&pane)
             .map(|entry| entry.wait.clone())
         else {
-            return Ok(execution);
+            return (Ok(execution), 0);
         };
         self.report_command_queue_park();
         let exit_code = loop {
@@ -5458,7 +5459,7 @@ impl Shared {
             }
         };
         self.inner.lock().pane_exit_waits.remove(&pane);
-        self.finish_pane_command(client, execution, exit_code)
+        (Ok(execution), exit_code)
     }
 
     /// `window_pane_wait_finish` only sets `c->retval` when the client has no
@@ -5865,7 +5866,7 @@ impl Shared {
             client_terminal,
             queue_execution,
         );
-        let result = self.wait_for_pane_command(client, kind, result);
+        let (result, pane_exit_code) = self.wait_for_pane_command(client, kind, result);
         set_context_client_terminal(context, previous_client_terminal);
         context.copy_client_attachment(&original_context);
         let suppress_after_hook = matches!(
@@ -5899,7 +5900,7 @@ impl Shared {
         match result {
             Ok(mut execution) => {
                 append_inserted_output(&mut execution.output, &hook_output);
-                Ok(execution)
+                self.finish_pane_command(client, execution, pane_exit_code)
             }
             Err(DaemonError::CommandExit {
                 mut output,
@@ -7437,7 +7438,9 @@ impl Shared {
                     | MuxEffect::SuppressAfterHook => {}
                     MuxEffect::PaneWaitForExit { pane } => {
                         let (wake, wait) = crossbeam_channel::bounded(1);
-                        inner.pane_exit_waits.insert(*pane, PaneExitWait { wake, wait });
+                        inner
+                            .pane_exit_waits
+                            .insert(*pane, PaneExitWait { wake, wait });
                     }
                     MuxEffect::PaneCreated {
                         pane,
@@ -7531,7 +7534,6 @@ impl Shared {
                                 pipes_to_close.push(pipe);
                             }
                             Self::wake_pane_exit_wait(&inner, *pane, 0);
-                            inner.pane_exit_waits.remove(pane);
                             inner.terminals.remove(pane);
                             inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
@@ -34597,9 +34599,7 @@ fn pane_wait_exit_code(terminal: &TerminalSession, status: &zz_terminal::Session
         );
     }
     match status {
-        zz_terminal::SessionStatus::Exited(status) => {
-            u8::try_from(status.code).unwrap_or(u8::MAX)
-        }
+        zz_terminal::SessionStatus::Exited(status) => u8::try_from(status.code).unwrap_or(u8::MAX),
         _ => 0,
     }
 }

@@ -5899,19 +5899,15 @@ mod daemon_autostart {
 
                 let output =
                     collect_control_process(child, None, &format!("attached EOF {kind} failure"));
-                // Measured on tmux d77c9dc6 with the same line piped into
-                // `-C attach-session`: the blocking run-shell yields the queue,
-                // the client at end of file exits there, the failure queued
-                // behind it never runs and the client returns 0 with no error
-                // block.
                 assert_eq!(output.status.code(), Some(0));
                 assert!(output.stderr.is_empty());
                 let stdout = std::fs::read(&output_path).expect("read attached EOF output");
                 let stream = parse_stream_allow_gaps(&stdout, false);
                 assert!(
-                    !stream.blocks.iter().any(|block| {
-                        block.payload.iter().any(|line| line.contains(expected))
-                    }),
+                    !stream
+                        .blocks
+                        .iter()
+                        .any(|block| block.payload.iter().any(|line| line.contains(expected))),
                     "{stream:?}"
                 );
                 assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
@@ -6239,16 +6235,13 @@ mod daemon_autostart {
                     &format!("pre-{wrapper}-failure EOF snapshot"),
                 );
                 let stream = parse_stream(&output.stdout, false);
-                // Measured on tmux d77c9dc6 for all three wrappers: the
-                // condition job parks the queue, the client at end of file
-                // exits, and the branch that would have failed never runs, so
-                // the stream carries no error block and the status is 0.
                 assert_eq!(output.status.code(), Some(0), "{stream:?}");
                 assert!(output.stderr.is_empty());
                 assert!(
-                    !stream.blocks.iter().any(|block| {
-                        block.payload.iter().any(|line| line.contains(&missing))
-                    }),
+                    !stream
+                        .blocks
+                        .iter()
+                        .any(|block| block.payload.iter().any(|line| line.contains(&missing))),
                     "{stream:?}"
                 );
                 assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));

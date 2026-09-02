@@ -162,6 +162,7 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "mode-style",
     "pane-border-style",
     "pane-active-border-style",
+    "pane-colours",
     "copy-mode-match-style",
     "copy-mode-current-match-style",
     "copy-mode-mark-style",
@@ -1443,7 +1444,7 @@ fn parse_format_option(input: &str) -> Option<(TmuxOption, FormatOptionIndex)> {
     }
     if matches!(
         option.name,
-        "command-alias" | "status-format" | "update-environment"
+        "command-alias" | "pane-colours" | "status-format" | "update-environment"
     ) {
         return Some((option, index));
     }
@@ -2212,7 +2213,7 @@ impl MuxEngine {
     fn format_option_array(&self, target: TmuxOptionTarget, name: &str) -> Option<&StringArray> {
         matches!(
             name,
-            "command-alias" | "status-format" | "update-environment"
+            "command-alias" | "pane-colours" | "status-format" | "update-environment"
         )
         .then(|| {
             self.array_option_readback(target, name, true)
@@ -31799,7 +31800,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 105);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 106);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)
@@ -31862,9 +31863,33 @@ mod tests {
             expand_option(&engine, FormatContext::default(), "base-ind", &mut hooks),
             "hook:base-ind"
         );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-w", "pane-colours[0]", "red"]),
+            )
+            .unwrap();
         assert_eq!(
             expand_option(&engine, FormatContext::default(), "pane-colors", &mut hooks),
-            "hook:pane-colors"
+            "red"
+        );
+        assert_eq!(
+            expand_option(
+                &engine,
+                FormatContext::default(),
+                "pane-colors[0]",
+                &mut hooks
+            ),
+            "red"
+        );
+        assert_eq!(
+            expand_option(
+                &engine,
+                FormatContext::default(),
+                "pane-border-format",
+                &mut hooks
+            ),
+            "hook:pane-border-format"
         );
     }
 

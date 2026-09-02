@@ -189,7 +189,7 @@ gated by decision 3 or by missing context/model support, the rest are plain work
 | `choose-buffer` | `-F -k -y` |
 | `choose-tree` | `-F -h -k -y`; `-G` † |
 | `clear-history` | `-H` |
-| `command-prompt` | `-l`; `-P` † |
+| `command-prompt` | `-P` † |
 | `copy-mode` | `-k -s`; `-S` † |
 | `detach-client` | `-t -P`; `-E` † |
 | `display-message` | `-a -c -N -v`; `-I` † |
@@ -532,11 +532,17 @@ for `%%%` and runs the result, and an omitted template is `select-pane -t "%%%"`
 is `cmd_template_replace`'s quoting form rather than a third substitution. zz builds the template in
 the mux and runs it through the path `command-prompt` already used. `cmd_display_panes_exec` also
 returns `CMD_RETURN_WAIT` unless `-b`, so a command or control invoker now parks until the overlay
-closes, whichever way it closes; `-N` keeps that wait and only drops the key handler. Differential
-coverage is `smoke/display-panes-template`. One divergence remains and belongs to the command-queue
-foundation: the pin's failing template rides the issuing client's own queue, so a template that fails
-at run time exits 1 there and 0 in zz, whose overlay execution runs entirely in the interactive
-client's context.
+closes, whichever way it closes; `-N` keeps that wait and only drops the key handler. A client that
+already draws the overlay answers a second `display-panes` at once without replacing the first
+(`cmd_display_panes_exec`'s `overlay_draw` early return; zz checks only its own display-panes state,
+so a menu or popup on the target does not make it a no-op there), and a hook body never parks,
+because the thread it would park is the reader of the connection whose event raised the hook.
+Differential coverage is `smoke/display-panes-template`. One divergence remains and belongs to the
+command-queue foundation: the pin runs the chosen template with the issuing item's queue state
+(`cmdq_insert_after` with `cmdq_get_state(item)`), so its printed output and error status reach the
+command client that raised the overlay, while zz runs it in the interactive client's context and the
+CLI sees nothing at exit 0: `display-message -p "chose %%%"` as the template prints `chose %1` on the
+pin's CLI stdout and nothing on zz's, and a template that fails at run time exits 1 there and 0 in zz.
 
 ## `display-message` client aliases
 
@@ -562,8 +568,10 @@ resolver takes no client handle.
 `CMD_RETURN_WAIT` parks the issuing command queue until `cmd_command_prompt_callback` or
 `cmd_command_prompt_free` calls `cmdq_continue`. zz routes the command the way it already routed
 `display-panes` and parks a Command or Control invoker on a waiter stored in the prompt, released
-after the answer's own commands have run. `-b` and `-i` clear the wait, and a client that already has
-a prompt takes no second one. A read-only client takes the prompt but never processes its keys —
+after the answer's own commands have run. `-b` and `-i` clear the wait, a client that already has a
+prompt takes no second one, and a hook body never waits: its commands run with no client on the
+thread that reads the connection whose event raised the hook, and parking it there left a client that
+died without detaching listed as attached forever. A read-only client takes the prompt but never processes its keys —
 `server-client.c:1623` gates the whole overlay and prompt block on `~CLIENT_READONLY` — so the queue
 stays parked until that client detaches. `-F` expands the string template once through
 `format_single_from_target`, which is `format_expand` and not `format_expand_time`, so `%%` survives
@@ -860,9 +868,9 @@ daemon-owned command semantics into the client.
 | Option-name format lookup | Closed 2026-08-29 in slice 10ae. Generic option lookup now precedes format-table, command-item, and environment values for the source-registered 105-name roster: 13 server, 42 session, 40 window, and 10 pane consumers. Exact names and legacy aliases follow selected-target scope, inheritance, attached-client fallback, active children, and `S`, `W`, and `P` loop retargeting; command prefixes do not match. Flags render as `0` or `1`, and other types retain their tmux spelling. `command-alias`, `status-format`, and `update-environment` support whole-array and indexed access with numeric-before-named order, leading-zero normalization, empty malformed or missing results, and whole-array local shadowing. Mux formats read live state. Direct daemon producers use the same live resolver, while detached status shares one all-scope snapshot across a refresh batch. Missing-target `run-shell -C` and `if-shell -F` read global options while their inserted work keeps the caller context. The 60-step `option-name-formats` differential has no differing channel, and the attached status probe passes. | none for the complete registered roster; no protocol, wire snapshot, or native GUI styling change |
 | Renderer-style residue (C9) | Only the COLOUR halves behave: `window-style`/`window-active-style` patch each pane's default fg/bg (attributes, `dim`, and the styles' `#()` shell branches stay inert; the appearance seam expands conditionals with context-only hooks), and `pane-border-style`/`pane-active-border-style` publish one fg colour per pane for the raw TUI (`None` selects its normal fallback; non-colour border attributes and `bg` fills stay ledgered per the v71 contract). The GPUI client ignores those border fields and derives pane chrome from its local theme. `mode-style` colours the copy-mode selection (the pin's `copy-mode-selection-style` default chain) and the copy-mode match styles colour the GUI's search overlays through the published appearance. That appearance channel carries one global value, so `setw -t` per-window copy-mode/mode styles store but do not recolour. zz's copy-mode position indicator keeps its theme chrome (`copy-mode-position-style`/`-format` are store-only), the TUI flattens all overlays to reverse video, and `copy-mode-mark-style` resolves but paints nothing because zz renders no mark element. | **silent**, bounded |
 | Border style owner z-order | Closed 2026-08-31 for per-span partitioning. The raw TUI now resolves every shared divider span from its adjacent panes. With `A | (B / C)` and C active, the A/B span is inactive while the junction and A/C span are active; fallback is `top`→`bottom`→`left`→`right`, and aligned same-side ties created only by splits use lower `PaneId` creation order. The 10-step `LC_ALL=C` raw-client scenario matches pinned tmux in every channel, while the exact base fails its renderer marker. The pin's final same-side overwrite order after `join-pane`, `swap-pane`, or serialized `select-layout` follows mutable tiled pane z-order. `MuxSnapshot` does not transport that order, so those cases remain open. Floating panes, GPUI chrome, and unrelated indicators are excluded. | **silent**, bounded, opt-in; mutable z-order open |
-| `display-panes` custom selection template | The parser accepts and constructs the optional string-or-typed template with the pinned callback rule, but mux execution still rejects a positional value. Tmux substitutes the selected `%pane` for `%%%` and executes with the retained original queue state; an omitted template uses `select-pane -t "%%%"`. The gap is parked under `display-panes.command-template`, separate from queue blocking and presentation. | **loud**, bounded |
+| `display-panes` custom selection template | Closed 2026-09-02 under `display-panes.command-template`: the mux builds the optional string-or-typed template, the chosen `%pane` replaces `%%%` and the result runs through the shared submit path, and an omitted template is `select-pane -t "%%%"`. What stays: the pin runs the template with the issuing item's queue state, so its printed output and error status reach the command client that raised the overlay, while zz runs it in the interactive client's context and the CLI sees nothing at exit 0; carried by the command-queue foundation groups. | **silent**, bounded |
 | `display-panes` label presentation | The pin paints big numerals plus the expanded `display-panes-format` across the pane's top row in the `display-panes-colour` cell. zz expands the same format per pane into `PaneIndicator.label` (1 KiB cap) and paints it through the shared styled-segment path: the TUI composes it across the pane header row right of the selection-key badge (alignment and exact-width clipping via `compose_status_row`), the GUI as an alignment-bucketed top strip inside the indicator overlay clipped at the pane edge. The label's base colours stay theme-derived — `display-panes-colour`/`display-panes-active-colour` remain store-only — and zz keeps its native badge/card instead of the pin's numerals. | **silent**, bounded |
-| `display-panes` queue blocking | With no `-b`, tmux returns `CMD_RETURN_WAIT` and resumes that client's command queue when the overlay closes. zz accepts `-b` but always returns immediately, so a command sequence continues while the overlay is still open. `-N`, client targeting, duration, and key fallthrough do not change this retained difference. | **silent**, bounded |
+| `display-panes` queue blocking | Closed 2026-09-02 under `display-panes.queue-semantics`: with no `-b` a Command or Control invoker parks on a waiter in the overlay state until the overlay closes, `-N` keeps that wait, and a busy client answers a second `display-panes` at once without replacing the first. Two invokers never park: an Interactive client's own key-binding chain (its commands run on the thread that would deliver the closing key) and a hook body (its thread is the reader of the connection that raised the event). zz also checks only its own display-panes state where the pin's `overlay_draw` early return covers menus and popups too. | **silent**, bounded |
 | Status-block suppression threshold | tmux hides the status line when `tty.sy <= statuslines` (resize.c `CLIENT_STATUSOFF`), so a 3-row terminal with `status 2` still shows both status rows plus one window row. zz panes carry a header row, so the TUI suppresses the block when `rows < statuslines + 2` (one header plus one content row must survive) — in that same 3-row terminal zz shows no status block and gives all rows to the pane. The GUI mirrors the rule against its measured canvas in line-height units. | **silent**, bounded |
 | `history-limit` default | zz keeps 10,000 lines for its product default; the pin keeps 2,000. `show-options -g history-limit` prints the effective 10,000 value. | **silent**, deliberate |
 | Plain option listings | No-argument listings contain tmux table names and `@` user names. The six zz-native settings stay available through explicit-name queries and never appear as unknown words in tmux-parsing scripts. | **silent**, zz extension hidden from tmux listings |

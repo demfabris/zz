@@ -5954,14 +5954,20 @@ impl Shared {
                 .copied()
                 .unwrap_or(ClientKind::Command);
             let terminal = client_terminal(&inner, target, target_kind);
+            let hook_body = context.has_no_client();
             let mut context = context.clone();
             retarget_context_to_attachment(&inner, target, &mut context);
-            // `cmd_display_panes_exec` parks the issuing queue on
+            // `cmd_display_panes_exec` returns at once when the client already
+            // draws an overlay, and otherwise parks the issuing queue on
             // `CMD_RETURN_WAIT` unless `-b`; `-N` still waits, it only drops
-            // the key handler.
-            let wait =
-                matches!(kind, ClientKind::Command | ClientKind::Control) && !parsed.has('b');
-            Some((target, target_kind, terminal, context, wait))
+            // the key handler. A hook body runs with no client and never
+            // parks, because the thread it would park is the reader of the
+            // connection that raised the event.
+            let already_up = inner.display_panes.contains_key(&target);
+            let wait = matches!(kind, ClientKind::Command | ClientKind::Control)
+                && !hook_body
+                && !parsed.has('b');
+            Some((target, target_kind, terminal, context, wait, already_up))
         } else {
             None
         };
@@ -5973,22 +5979,32 @@ impl Shared {
         let client_alias_route = (canonical == "display-message")
             .then(|| self.display_message_client_alias(client, command))
             .flatten();
-        let result = if let Some((target, target_kind, target_terminal, mut target_context, wait)) =
-            display_panes_target
+        let result = if let Some((
+            target,
+            target_kind,
+            target_terminal,
+            mut target_context,
+            wait,
+            already_up,
+        )) = display_panes_target
         {
-            let result = self.execute_with_mux_source_inner(
-                target,
-                target_kind,
-                &mut target_context,
-                command,
-                mux_source,
-                target_terminal,
-                queue_execution,
-            );
-            if result.is_ok() && wait {
-                self.wait_for_display_panes(target);
+            if already_up {
+                Ok(Execution::default())
+            } else {
+                let result = self.execute_with_mux_source_inner(
+                    target,
+                    target_kind,
+                    &mut target_context,
+                    command,
+                    mux_source,
+                    target_terminal,
+                    queue_execution,
+                );
+                if result.is_ok() && wait {
+                    self.wait_for_display_panes(target);
+                }
+                result
             }
-            result
         } else if let Some(mut route) = prompt_route {
             let result = self.execute_with_mux_source_inner(
                 route.client,
@@ -6048,7 +6064,9 @@ impl Shared {
     /// `cmd_find_client` resolves from `-t`, or the invoking client's own best
     /// client, and blocks the issuing command queue on `CMD_RETURN_WAIT` unless
     /// `-b` or `-i` cleared the wait. `-P` prompts inside a pane instead and
-    /// stays native, so it keeps the untargeted path.
+    /// stays native, so it keeps the untargeted path. A hook body runs with
+    /// no client and never waits: the thread it would park is the reader of
+    /// the connection whose event raised the hook.
     fn command_prompt_route(
         self: &Arc<Self>,
         client: ClientId,
@@ -6103,6 +6121,7 @@ impl Shared {
             command.clone()
         };
         let wait = matches!(kind, ClientKind::Command | ClientKind::Control)
+            && !context.has_no_client()
             && !parsed.has('b')
             && !parsed.has('i')
             && !inner.command_prompts.contains_key(&target);
@@ -38730,6 +38749,17 @@ mod tests {
                 &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
             )
             .expect("enable focus events");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::DisplayPanes {
+                    action: DisplayPanesAction::Key(display_panes_escape_key()),
+                },
+            )
+            .expect("close the untimed display overlay");
+        take_reliable_messages(&mailbox);
         open_display(&mut context, &["-d", "60000"]);
         let scheduled = {
             let mut inner = shared.inner.lock();

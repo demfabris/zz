@@ -53,7 +53,7 @@ cleanup() {
         kill "$attach_pid" >/dev/null 2>&1
         wait "$attach_pid" >/dev/null 2>&1
     fi
-    for name in DP_CHOSEN DP_AFTER DP_DEFAULT DP_BACKGROUND DP_TIMEOUT; do
+    for name in DP_CHOSEN DP_AFTER DP_DEFAULT DP_BACKGROUND DP_TIMEOUT DP_SECOND; do
         main_client set-environment -gu "$name" >/dev/null 2>&1
     done
     exit "$cleanup_status"
@@ -147,6 +147,36 @@ check_equal template-exit 0 "$(cat "$work/chosen.exit" 2>/dev/null)"
 check_equal template-substituted "chose-$pane1" "$(value DP_CHOSEN)"
 check_equal template-chain-continued after "$(value DP_AFTER)"
 
+# cmd_display_panes_exec returns CMD_RETURN_NORMAL at once when the client
+# already draws an overlay, so a second display-panes on a busy client neither
+# replaces the first nor parks, and the key still runs the first template.
+main_client select-pane -t "$pane0"
+main_client set-environment -g DP_CHOSEN pending
+main_client set-environment -g DP_AFTER pending
+main_client set-environment -g DP_SECOND pending
+rm -f "$work/first.exit"
+(
+    main_client display-panes -t "$client" -d 0 \
+        "set-environment -g DP_CHOSEN 'first-%%%'" \; \
+        set-environment -g DP_AFTER after
+    echo "$?" >"$work/first.exit"
+) &
+first_pid=$!
+sleep 0.8
+second_rc=0
+main_client display-panes -t "$client" -d 0 \
+    "set-environment -g DP_SECOND 'second-%%%'" || second_rc=$?
+check_equal second-exit 0 "$second_rc"
+check_equal second-left-the-first-parked "" "$(cat "$work/first.exit" 2>/dev/null)"
+check_equal second-left-the-chain-parked pending "$(value DP_AFTER)"
+drive "keys 31"
+sleep 1.0
+await_pid "$first_pid" first-parked
+check_equal first-exit 0 "$(cat "$work/first.exit" 2>/dev/null)"
+check_equal first-template-ran "first-$pane1" "$(value DP_CHOSEN)"
+check_equal second-template-unrun pending "$(value DP_SECOND)"
+check_equal first-chain-continued after "$(value DP_AFTER)"
+
 # The omitted template is `select-pane -t "%%%"`.
 main_client select-pane -t "$pane0"
 main_client display-panes -b -t "$client" -d 0
@@ -222,11 +252,11 @@ await_pid "$silent_pid" silent-parked
 check_equal silent-exit 0 "$(cat "$work/silent.exit" 2>/dev/null)"
 check_equal silent-ran-nothing pending "$(value DP_TIMEOUT)"
 
-if [ "$check_count" -ne 17 ]; then
+if [ "$check_count" -ne 24 ]; then
     record_failure total-checks
 fi
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g DISPLAY_PANES_TEMPLATE clean:17
+    main_client set-environment -g DISPLAY_PANES_TEMPLATE clean:24
 else
     sed "s/^/display-panes-template-$side: /" "$work/failures"
 fi

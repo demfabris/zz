@@ -44,12 +44,12 @@ use thiserror::Error;
 use crate::{
     ATTR_BLINK, ATTR_BOLD, ATTR_EXPLICIT_RGB, ATTR_FAINT, ATTR_HYPERLINK, ATTR_INVISIBLE,
     ATTR_ITALIC, ATTR_OVERLINE, ATTR_STRIKETHROUGH, CellWidth, ClipboardTarget, Color, CopyJump,
-    CopyJumpDirection, CopyModeAction, CopyModeCountPolicy, CopySelectionMode, Cursor,
-    CursorBlinkPolicy, CursorStyle, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME, KeyAction,
-    KeyCode, KeyInput, KittyLayer, KittyPlacement, MAX_HISTORY_LIMIT, MAX_KITTY_IMAGE_BYTES,
-    Modifiers, OVERLAY_RECTANGLE, OverlayKind, OverlaySpan, PackedCell, PackedStyle,
-    PasteBufferAction, PointerCellEvent, ScrollbarState, SearchCase, SearchDirection, SearchMode,
-    SearchQuery, SearchStatus, SessionStatus, TerminalAppearance, TerminalColorScheme,
+    CopyJumpDirection, CopyModeAction, CopyModeCountPolicy, CopyModeSearch, CopySelectionMode,
+    Cursor, CursorBlinkPolicy, CursorStyle, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME,
+    KeyAction, KeyCode, KeyInput, KittyLayer, KittyPlacement, MAX_HISTORY_LIMIT,
+    MAX_KITTY_IMAGE_BYTES, Modifiers, OVERLAY_RECTANGLE, OverlayKind, OverlaySpan, PackedCell,
+    PackedStyle, PasteBufferAction, PointerCellEvent, ScrollbarState, SearchCase, SearchDirection,
+    SearchMode, SearchQuery, SearchStatus, SessionStatus, TerminalAppearance, TerminalColorScheme,
     TerminalDictionary, TerminalMode, TerminalMouseButton, TerminalMouseInput, TerminalMousePhase,
     TerminalPresentation, TerminalViewAction, TerminalViewId, TerminalViewport, UnderlineStyle,
     WordSeparators,
@@ -1224,6 +1224,15 @@ pub struct CopyModeFacts {
     pub scroll_position: u32,
     /// `data->screen.sel`, whose absence removes the four coordinates too.
     pub selection: Option<CopyModeSelectionFacts>,
+    /// `data->searchmark != NULL`.
+    pub search_present: bool,
+    /// `data->searchcount` and `data->searchmore`, both absent while the pin
+    /// holds -1 in the count.
+    pub search_count: Option<(u32, bool)>,
+    /// `data->timeout`, which zz's synchronous copy-mode search never sets.
+    pub search_timed_out: bool,
+    /// `window_copy_match_at_cursor`: the marked text the cursor stands in.
+    pub search_match: String,
 }
 
 /// `data->selx`, `sely`, `endselx` and `endsely`: grid rows counted from the
@@ -2654,6 +2663,29 @@ struct CopyModeState {
     /// and the length of the row it was taken from.
     last_cx: u16,
     last_sx: u16,
+    /// `data->searchmark != NULL`: whether a copy-mode search laid marks down.
+    /// The marks themselves are the view's search state, so this only says
+    /// whether the mode owns them.
+    search_marks: bool,
+    /// `data->searchcount` and `data->searchmore`. The mode is entered with a
+    /// zeroed count, which is why the pin publishes 0 before any search, and
+    /// `window_copy_clear_marks` puts -1 back, which publishes neither name.
+    search_count: Option<(u32, bool)>,
+    /// `data->searchx`, `data->searchy` and `data->searcho`: where the mode
+    /// stood when the incremental prompt opened, which every changed string
+    /// goes back to.
+    incremental_origin: Option<CopyModeIncrementalOrigin>,
+    /// `data->searchstr`, `data->searchtype` and `data->searchregex`: the
+    /// search the mode last ran, which `search-again` and `search-reverse`
+    /// re-run and which the incremental spellings compare against.
+    search: Option<CopyModeSearch>,
+}
+
+/// `data->searchx`, `data->searchy` and `data->searcho`.
+#[derive(Clone, Copy, Debug)]
+struct CopyModeIncrementalOrigin {
+    row: u32,
+    viewport_offset: u32,
 }
 
 /// `window_copy_clone_screen` with `trim`: one pane's screen, its trailing
@@ -6757,16 +6789,43 @@ fn apply_view_action(
         }
         TerminalViewAction::CopyModeCounted { action, count } => {
             let was_frozen = copy_mode.is_some();
-            let result = if let CopyModeAction::SearchAgain { reverse } = action {
-                let forward = search
-                    .as_ref()
-                    .is_none_or(|search| search.query.direction == SearchDirection::Forward);
-                let direction = if forward ^ reverse { 1 } else { -1 };
-                for _ in 0..count {
-                    step_search(search, direction, wrap_search);
+            let result = if let CopyModeAction::Search(spec) = &action {
+                run_copy_mode_search(
+                    view_id,
+                    copy_mode,
+                    search,
+                    search_snapshot,
+                    search_worker,
+                    spec,
+                    count,
+                    mode_keys_vi,
+                    wrap_search,
+                );
+                ViewActionResult::Snapshot
+            } else if let CopyModeAction::SearchAgain { reverse } = action {
+                if let Some(spec) = copy_mode_search_again(copy_mode.as_deref(), reverse) {
+                    run_copy_mode_search(
+                        view_id,
+                        copy_mode,
+                        search,
+                        search_snapshot,
+                        search_worker,
+                        &spec,
+                        count,
+                        mode_keys_vi,
+                        wrap_search,
+                    );
+                } else {
+                    let forward = search
+                        .as_ref()
+                        .is_none_or(|search| search.query.direction == SearchDirection::Forward);
+                    let direction = if forward ^ reverse { 1 } else { -1 };
+                    for _ in 0..count {
+                        step_search(search, direction, wrap_search);
+                    }
+                    sync_copy_cursor_to_search(copy_mode, search.as_deref());
+                    reveal_search_for_view(terminal, copy_mode.as_deref(), search.as_deref())?;
                 }
-                sync_copy_cursor_to_search(copy_mode, search.as_deref());
-                reveal_search_for_view(terminal, copy_mode.as_deref(), search.as_deref())?;
                 ViewActionResult::Snapshot
             } else {
                 apply_counted_copy_mode_action(
@@ -6791,14 +6850,42 @@ fn apply_view_action(
             }
             Ok(result)
         }
+        TerminalViewAction::CopyMode(CopyModeAction::Search(spec)) => {
+            run_copy_mode_search(
+                view_id,
+                copy_mode,
+                search,
+                search_snapshot,
+                search_worker,
+                &spec,
+                1,
+                mode_keys_vi,
+                wrap_search,
+            );
+            Ok(ViewActionResult::Snapshot)
+        }
         TerminalViewAction::CopyMode(CopyModeAction::SearchAgain { reverse }) => {
-            let forward = search
-                .as_ref()
-                .is_none_or(|search| search.query.direction == SearchDirection::Forward);
-            let direction = if forward ^ reverse { 1 } else { -1 };
-            step_search(search, direction, wrap_search);
-            sync_copy_cursor_to_search(copy_mode, search.as_deref());
-            reveal_search_for_view(terminal, copy_mode.as_deref(), search.as_deref())?;
+            if let Some(spec) = copy_mode_search_again(copy_mode.as_deref(), reverse) {
+                run_copy_mode_search(
+                    view_id,
+                    copy_mode,
+                    search,
+                    search_snapshot,
+                    search_worker,
+                    &spec,
+                    1,
+                    mode_keys_vi,
+                    wrap_search,
+                );
+            } else {
+                let forward = search
+                    .as_ref()
+                    .is_none_or(|search| search.query.direction == SearchDirection::Forward);
+                let direction = if forward ^ reverse { 1 } else { -1 };
+                step_search(search, direction, wrap_search);
+                sync_copy_cursor_to_search(copy_mode, search.as_deref());
+                reveal_search_for_view(terminal, copy_mode.as_deref(), search.as_deref())?;
+            }
             Ok(ViewActionResult::Snapshot)
         }
         TerminalViewAction::CopyMode(CopyModeAction::SearchCursorWord { direction }) => {
@@ -6806,28 +6893,23 @@ fn apply_view_action(
                 .as_deref()
                 .and_then(|mode| mode_cursor_word(&mode.revision, mode.cursor, word_separators));
             if let Some(text) = text {
-                let selection =
-                    search_selection_policy(copy_mode.as_deref(), search_origin, direction, true);
-                if search_snapshot.is_none()
-                    && let Some(mode) = copy_mode.as_ref()
-                {
-                    *search_snapshot = Some(Arc::clone(&mode.revision.search));
-                }
-                let mut query = SearchQuery::literal(text);
-                query.direction = direction;
-                queue_search(
-                    terminal,
-                    SearchTarget {
-                        view_id,
-                        screen: view_screen,
-                        search,
-                        snapshot: search_snapshot,
-                    },
+                run_copy_mode_search(
+                    view_id,
+                    copy_mode,
+                    search,
+                    search_snapshot,
                     search_worker,
-                    query,
-                    selection,
-                )?;
-                Ok(ViewActionResult::OverlaySnapshot)
+                    &CopyModeSearch {
+                        text,
+                        direction,
+                        regex: false,
+                        incremental: false,
+                    },
+                    1,
+                    mode_keys_vi,
+                    wrap_search,
+                );
+                Ok(ViewActionResult::Snapshot)
             } else {
                 Ok(ViewActionResult::None)
             }
@@ -7241,6 +7323,10 @@ fn enter_copy_mode(
         kind: FrozenModeKind::Copy,
         last_cx: 0,
         last_sx: 0,
+        search_marks: false,
+        search_count: Some((0, false)),
+        incremental_origin: None,
+        search: None,
     }));
     Ok(())
 }
@@ -8886,7 +8972,9 @@ fn apply_copy_mode_action(
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
-        CopyModeAction::SearchAgain { .. } | CopyModeAction::SearchCursorWord { .. } => {
+        CopyModeAction::SearchAgain { .. }
+        | CopyModeAction::SearchCursorWord { .. }
+        | CopyModeAction::Search(_) => {
             *copy_mode = Some(mode);
             Ok(ViewActionResult::None)
         }
@@ -11013,6 +11101,189 @@ fn append_history_row(
     Ok(())
 }
 
+/// `window_copy_cmd_search_again` and `window_copy_cmd_search_reverse` re-run
+/// the search the mode already holds, with the stored regex bit and either the
+/// stored direction or its opposite, so both go through the same placement
+/// rule the first search used.
+fn copy_mode_search_again(mode: Option<&CopyModeState>, reverse: bool) -> Option<CopyModeSearch> {
+    let stored = mode?.search.as_ref()?;
+    let direction = match (stored.direction, reverse) {
+        (SearchDirection::Forward, false) | (SearchDirection::Backward, true) => {
+            SearchDirection::Forward
+        }
+        (SearchDirection::Backward, false) | (SearchDirection::Forward, true) => {
+            SearchDirection::Backward
+        }
+    };
+    Some(CopyModeSearch {
+        direction,
+        incremental: false,
+        ..stored.clone()
+    })
+}
+
+/// `window_copy_search` picks the match the cursor moves to. Forward, vi steps
+/// past the mark the cursor stands on first, so it lands on the next match's
+/// start, while emacs searches from the cursor itself and may find the mark it
+/// is already on. Backward, both move one cell left first, so both land on the
+/// start of the previous match.
+fn pick_copy_search_match(
+    matches: &[SearchMatch],
+    cursor: PointCoordinate,
+    direction: SearchDirection,
+    inclusive: bool,
+    wrap: bool,
+) -> Option<usize> {
+    if matches.is_empty() {
+        return None;
+    }
+    let found = match direction {
+        SearchDirection::Forward => matches.iter().position(|found| {
+            if inclusive {
+                (found.row, found.start) >= (cursor.y, cursor.x)
+            } else {
+                (found.row, found.start) > (cursor.y, cursor.x)
+            }
+        }),
+        SearchDirection::Backward => matches
+            .iter()
+            .rposition(|found| (found.row, found.start) < (cursor.y, cursor.x)),
+    };
+    if found.is_some() {
+        return found;
+    }
+    if !wrap {
+        return None;
+    }
+    match direction {
+        SearchDirection::Forward => Some(0),
+        SearchDirection::Backward => Some(matches.len() - 1),
+    }
+}
+
+/// The six `search-` entry points that carry a string. The pin runs the whole
+/// search inside the command, marks included, so zz runs it against the frozen
+/// revision here instead of queuing it on the search worker: everything the
+/// next command reads is already in place when this returns.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one call site threads the view's search state"
+)]
+fn run_copy_mode_search(
+    view_id: TerminalViewId,
+    copy_mode: &mut CopyModeSlot,
+    search: &mut SearchSlot,
+    search_snapshot: &mut Option<Arc<HistorySearchSnapshot>>,
+    worker: &mut SearchWorker,
+    spec: &CopyModeSearch,
+    count: u32,
+    mode_keys_vi: bool,
+    wrap: bool,
+) -> bool {
+    let Some(mode) = copy_mode.as_deref_mut() else {
+        return false;
+    };
+    if spec.incremental {
+        match mode.incremental_origin {
+            None => {
+                mode.incremental_origin = Some(CopyModeIncrementalOrigin {
+                    row: mode.cursor.y,
+                    viewport_offset: mode.viewport_offset,
+                });
+            }
+            Some(origin) => {
+                if mode
+                    .search
+                    .as_ref()
+                    .is_some_and(|previous| previous.text != spec.text)
+                {
+                    mode.viewport_offset = origin.viewport_offset;
+                    mode.cursor = PointCoordinate {
+                        x: copy_cursor_limit(&mode.revision, origin.row, mode_keys_vi, false),
+                        y: origin.row,
+                    };
+                }
+            }
+        }
+        if spec.text.is_empty() {
+            mode.search_marks = false;
+            mode.search_count = None;
+            *search = None;
+            return true;
+        }
+    } else if spec.text.is_empty() {
+        return false;
+    }
+
+    let regex = spec.regex && spec.text.contains(|c| "^$*+()?[].\\".contains(c));
+    let visible_only = mode.search_marks
+        && mode
+            .search
+            .as_ref()
+            .is_some_and(|previous| previous.text == spec.text && previous.regex == spec.regex);
+    if !visible_only && mode.search_marks {
+        mode.search_marks = false;
+        mode.search_count = None;
+    }
+    mode.search = Some(spec.clone());
+    let query = SearchQuery {
+        text: spec.text.clone(),
+        mode: if regex {
+            SearchMode::Regex
+        } else {
+            SearchMode::Literal
+        },
+        case: SearchCase::Smart,
+        direction: spec.direction,
+    };
+    if search_snapshot.is_none() {
+        *search_snapshot = Some(Arc::clone(&mode.revision.search));
+    }
+    let snapshot = Arc::clone(search_snapshot.as_ref().expect("captured above"));
+    let (request_id, _) = worker.next_request(view_id);
+    let mut scratch = Vec::new();
+    let Some(mut state) = snapshot.search_reusing(&query, request_id, &mut scratch, || false)
+    else {
+        return false;
+    };
+    let inclusive = !mode_keys_vi && spec.direction == SearchDirection::Forward;
+    let mut placed = None;
+    let mut cursor = mode.cursor;
+    for _ in 0..count.max(1) {
+        let Some(index) =
+            pick_copy_search_match(&state.matches, cursor, spec.direction, inclusive, wrap)
+        else {
+            break;
+        };
+        let Some(found) = state.matches.get(index).copied() else {
+            break;
+        };
+        cursor = PointCoordinate {
+            x: if inclusive { found.end } else { found.start },
+            y: found.row,
+        };
+        placed = Some(index);
+    }
+    let Some(index) = placed else {
+        state.current = None;
+        store_search_state(search, state);
+        return true;
+    };
+    state.current = Some(index);
+    let total = u32::try_from(state.matches.len()).unwrap_or(u32::MAX);
+    store_search_state(search, state);
+    mode.search_marks = true;
+    if !visible_only {
+        mode.search_count = Some((total, false));
+    }
+    place_copy_cursor(mode, cursor, mode_keys_vi);
+    reveal_copy_cursor(mode);
+    if mode.selecting {
+        update_copy_selection(mode, None);
+    }
+    true
+}
+
 fn step_search(search: &mut SearchSlot, direction: isize, wrap: bool) {
     let Some(search) = search.as_mut() else {
         return;
@@ -12025,7 +12296,7 @@ fn publish_active_views<'alloc: 'callbacks, 'callbacks>(
         if let Some(facts) = view
             .copy_mode
             .as_deref()
-            .map(|mode| copy_mode_facts(mode, word_separators))
+            .map(|mode| copy_mode_facts(mode, view.search.as_deref(), word_separators))
         {
             copy_facts.insert(view_id, Arc::new(facts));
         }
@@ -12040,7 +12311,11 @@ fn publish_active_views<'alloc: 'callbacks, 'callbacks>(
 /// are screen-relative and bottom-relative; the selection coordinates the pin
 /// stores in `selx`, `sely`, `endselx` and `endsely` are absolute grid rows,
 /// which is what the retained revision already indexes by.
-fn copy_mode_facts(mode: &CopyModeState, word_separators: &WordSeparators) -> CopyModeFacts {
+fn copy_mode_facts(
+    mode: &CopyModeState,
+    search: Option<&SearchState>,
+    word_separators: &WordSeparators,
+) -> CopyModeFacts {
     let cursor = PointCoordinate {
         x: mode.cursor.x,
         y: mode
@@ -12064,7 +12339,65 @@ fn copy_mode_facts(mode: &CopyModeState, word_separators: &WordSeparators) -> Co
             end_x: u32::from(selection.focus.x),
             end_y: selection.focus.y,
         }),
+        search_present: mode.search_marks,
+        search_count: mode.search_count,
+        search_timed_out: false,
+        search_match: if mode.search_marks {
+            copy_mode_search_match(mode, search, cursor)
+        } else {
+            String::new()
+        },
     }
+}
+
+/// `window_copy_match_at_cursor`: the marked run the cursor stands in, read
+/// back off the revision. An unmarked cell steps one position back before
+/// giving up, which is how the emacs placement one past a match still answers
+/// that match.
+fn copy_mode_search_match(
+    mode: &CopyModeState,
+    search: Option<&SearchState>,
+    cursor: PointCoordinate,
+) -> String {
+    let contains = |search: &SearchState, point: PointCoordinate| {
+        search
+            .matches
+            .iter()
+            .find(|found| found.row == point.y && (found.start..found.end).contains(&point.x))
+            .copied()
+    };
+    let Some(found) = search.and_then(|search| {
+        contains(search, cursor).or_else(|| {
+            let back = if cursor.x > 0 {
+                PointCoordinate {
+                    x: cursor.x - 1,
+                    y: cursor.y,
+                }
+            } else {
+                PointCoordinate {
+                    x: mode.revision.columns.saturating_sub(1),
+                    y: cursor.y.checked_sub(1)?,
+                }
+            };
+            contains(search, back)
+        })
+    }) else {
+        return String::new();
+    };
+    let mut text = String::new();
+    for column in found.start..found.end {
+        let point = PointCoordinate {
+            x: column,
+            y: found.row,
+        };
+        if revision_cell_is_padding(&mode.revision, point) {
+            continue;
+        }
+        if let Some(character) = mode.revision.first_char(point) {
+            text.push(character);
+        }
+    }
+    text
 }
 
 /// `grid_line_length`: the row's width with trailing blank cells trimmed. An

@@ -209,7 +209,7 @@ mod tests {
             .iter()
             .filter(|entry| copy_mode_action_is_mapped(entry.name))
             .count();
-        assert_eq!(mapped, 88);
+        assert_eq!(mapped, 94);
         for entry in PINNED_COPY_MODE_ACTIONS {
             let Some(action) = copy_mode_probe_action(entry.name) else {
                 continue;
@@ -229,18 +229,8 @@ mod tests {
         for entry in missing_copy_mode_actions() {
             missing.entry(entry.category).or_default().push(entry.name);
         }
-        let expected: BTreeMap<CopyActionCategory, Vec<&str>> = BTreeMap::from([(
-            CopyActionCategory::Vocabulary,
-            vec![
-                "scroll-to-mouse",
-                "search-backward",
-                "search-backward-incremental",
-                "search-backward-text",
-                "search-forward",
-                "search-forward-incremental",
-                "search-forward-text",
-            ],
-        )]);
+        let expected: BTreeMap<CopyActionCategory, Vec<&str>> =
+            BTreeMap::from([(CopyActionCategory::Vocabulary, vec!["scroll-to-mouse"])]);
         assert_eq!(missing, expected);
     }
 }

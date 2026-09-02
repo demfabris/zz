@@ -1,0 +1,14 @@
+corpus: none
+# The six copy-mode search entry points that carry a string, run as daemon
+# actions on both engines. window_copy_search picks the match by mode-keys: vi
+# steps past the mark the cursor is on before searching forward and lands on the
+# next match's start, emacs searches from the cursor itself and parks one cell
+# past the match it finds. The -text spellings are literal, the -incremental
+# ones read the prefix command-prompt -i prepends and go back to the latched
+# entry row whenever the string changes, and send-keys -F expands the search
+# string as a format in the target pane's context.
+stage: fixtures/copy-mode-search.sh ~/copy-mode-search.sh
+stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+out: set-environment -gu COPY_MODE_SEARCH
+run-shell 'sh ~/copy-mode-search.sh'
+out: show-environment -g COPY_MODE_SEARCH

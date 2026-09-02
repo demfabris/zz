@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/pane-engine-knobs.sh ~/pane-engine-knobs.sh
+out: set-environment -gu PANE_ENGINE_KNOBS
+run-shell 'sh ~/pane-engine-knobs.sh'
+out: show-environment -g PANE_ENGINE_KNOBS

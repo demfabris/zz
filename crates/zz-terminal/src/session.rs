@@ -47,10 +47,10 @@ use crate::{
     CopyJumpDirection, CopyModeAction, CopyModeCountPolicy, CopySelectionMode, Cursor,
     CursorBlinkPolicy, CursorStyle, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME, KeyAction,
     KeyCode, KeyInput, KittyLayer, KittyPlacement, MAX_HISTORY_LIMIT, MAX_KITTY_IMAGE_BYTES,
-    OVERLAY_RECTANGLE, OverlayKind, OverlaySpan, PackedCell, PackedStyle, PasteBufferAction,
-    PointerCellEvent, ScrollbarState, SearchCase, SearchDirection, SearchMode, SearchQuery,
-    SearchStatus, SessionStatus, TerminalAppearance, TerminalColorScheme, TerminalDictionary,
-    TerminalMode, TerminalMouseButton, TerminalMouseInput, TerminalMousePhase,
+    Modifiers, OVERLAY_RECTANGLE, OverlayKind, OverlaySpan, PackedCell, PackedStyle,
+    PasteBufferAction, PointerCellEvent, ScrollbarState, SearchCase, SearchDirection, SearchMode,
+    SearchQuery, SearchStatus, SessionStatus, TerminalAppearance, TerminalColorScheme,
+    TerminalDictionary, TerminalMode, TerminalMouseButton, TerminalMouseInput, TerminalMousePhase,
     TerminalPresentation, TerminalViewAction, TerminalViewId, TerminalViewport, UnderlineStyle,
     WordSeparators,
 };
@@ -145,6 +145,243 @@ impl AllowPassthrough {
     const fn unwraps(self) -> bool {
         matches!(self, Self::All)
     }
+}
+
+const MAX_ENGINE_SEQUENCE_BYTES: usize = 256;
+const MAX_ENGINE_RENAME_BYTES: usize = 1024;
+
+/// Pane knobs the pin honors inside its own VT layer: `scroll-on-clear`,
+/// `alternate-screen`, `allow-rename`, and the byte `backspace` names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EngineKnobs {
+    pub scroll_on_clear: bool,
+    pub alternate_screen: bool,
+    pub allow_rename: bool,
+    pub erase_byte: Option<u8>,
+    pub verase_byte: u8,
+}
+
+impl Default for EngineKnobs {
+    fn default() -> Self {
+        Self {
+            scroll_on_clear: true,
+            alternate_screen: true,
+            allow_rename: false,
+            erase_byte: Some(0x7f),
+            verase_byte: 0x7f,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum EngineState {
+    #[default]
+    Ground,
+    Escape,
+    Csi,
+    CsiOverflow,
+    Rename,
+    RenameEscape,
+}
+
+/// Rewrites the byte stream ahead of `vt_write` for the knobs libghostty has
+/// no switch for: it scrolls a full-screen erase into history, drops the
+/// alternate-screen mode switches, and takes `ESC k` off the wire.
+#[derive(Default)]
+struct EngineFilter {
+    state: EngineState,
+    sequence: Vec<u8>,
+    title: Vec<u8>,
+}
+
+impl EngineFilter {
+    fn write(
+        &mut self,
+        mut bytes: &[u8],
+        knobs: EngineKnobs,
+        terminal: &mut Terminal<'_, '_>,
+        renames: &mut Vec<String>,
+    ) {
+        while !bytes.is_empty() {
+            match self.state {
+                EngineState::Ground => {
+                    let Some(escape) = find_escape(bytes) else {
+                        terminal.vt_write(bytes);
+                        return;
+                    };
+                    if escape > 0 {
+                        terminal.vt_write(&bytes[..escape]);
+                    }
+                    bytes = &bytes[escape + 1..];
+                    self.state = EngineState::Escape;
+                }
+                EngineState::Escape => match bytes[0] {
+                    b'[' => {
+                        self.sequence.clear();
+                        self.state = EngineState::Csi;
+                        bytes = &bytes[1..];
+                    }
+                    b'k' => {
+                        self.title.clear();
+                        self.state = EngineState::Rename;
+                        bytes = &bytes[1..];
+                    }
+                    _ => {
+                        terminal.vt_write(b"\x1b");
+                        self.state = EngineState::Ground;
+                    }
+                },
+                EngineState::Csi => {
+                    let byte = bytes[0];
+                    bytes = &bytes[1..];
+                    if byte < 0x20 {
+                        terminal.vt_write(&[byte]);
+                    } else if (0x20..0x40).contains(&byte) {
+                        if self.sequence.len() >= MAX_ENGINE_SEQUENCE_BYTES {
+                            terminal.vt_write(b"\x1b[");
+                            terminal.vt_write(&self.sequence);
+                            terminal.vt_write(&[byte]);
+                            self.sequence.clear();
+                            self.state = EngineState::CsiOverflow;
+                        } else {
+                            self.sequence.push(byte);
+                        }
+                    } else {
+                        write_engine_csi(&self.sequence, byte, knobs, terminal);
+                        self.sequence.clear();
+                        self.state = EngineState::Ground;
+                    }
+                }
+                EngineState::CsiOverflow => {
+                    let byte = bytes[0];
+                    bytes = &bytes[1..];
+                    terminal.vt_write(&[byte]);
+                    if byte >= 0x40 {
+                        self.state = EngineState::Ground;
+                    }
+                }
+                EngineState::Rename => {
+                    let byte = bytes[0];
+                    bytes = &bytes[1..];
+                    if byte == 0x1b {
+                        self.state = EngineState::RenameEscape;
+                    } else if self.title.len() < MAX_ENGINE_RENAME_BYTES {
+                        self.title.push(byte);
+                    }
+                }
+                EngineState::RenameEscape => match bytes[0] {
+                    b'\\' => {
+                        bytes = &bytes[1..];
+                        if knobs.allow_rename
+                            && let Ok(name) = std::str::from_utf8(&self.title)
+                        {
+                            renames.push(name.to_owned());
+                        }
+                        self.title.clear();
+                        self.state = EngineState::Ground;
+                    }
+                    b'k' => {
+                        bytes = &bytes[1..];
+                        self.title.clear();
+                        self.state = EngineState::Rename;
+                    }
+                    _ => {
+                        self.title.clear();
+                        self.state = EngineState::Escape;
+                    }
+                },
+            }
+        }
+    }
+}
+
+/// `screen_write_clearscreen` and, with the cursor at the origin,
+/// `screen_write_clearendofscreen` hand a full-screen erase to
+/// `grid_view_clear_history`, which scrolls every used row into history first.
+/// libghostty always takes the other branch, so the used-row count goes back
+/// on the wire as an SU ahead of the erase.
+fn write_engine_csi(
+    sequence: &[u8],
+    final_byte: u8,
+    knobs: EngineKnobs,
+    terminal: &mut Terminal<'_, '_>,
+) {
+    let private = sequence
+        .first()
+        .is_some_and(|byte| (0x3c..0x40).contains(byte));
+    if knobs.scroll_on_clear
+        && final_byte == b'J'
+        && !private
+        && erases_whole_screen(sequence, terminal)
+        && let Some(rows) = used_screen_rows(terminal)
+    {
+        terminal.vt_write(format!("\x1b[{rows}S").as_bytes());
+    }
+    if !knobs.alternate_screen
+        && matches!(final_byte, b'h' | b'l')
+        && sequence.first() == Some(&b'?')
+    {
+        let kept = sequence[1..]
+            .split(|byte| *byte == b';')
+            .filter(|parameter| !matches!(engine_parameter(parameter), Some(47 | 1047 | 1049)))
+            .collect::<Vec<_>>();
+        if kept.is_empty() {
+            return;
+        }
+        let mut rewritten = b"\x1b[?".to_vec();
+        for (index, parameter) in kept.iter().enumerate() {
+            if index > 0 {
+                rewritten.push(b';');
+            }
+            rewritten.extend_from_slice(parameter);
+        }
+        rewritten.push(final_byte);
+        terminal.vt_write(&rewritten);
+        return;
+    }
+    terminal.vt_write(b"\x1b[");
+    terminal.vt_write(sequence);
+    terminal.vt_write(&[final_byte]);
+}
+
+fn engine_parameter(parameter: &[u8]) -> Option<u32> {
+    if parameter.is_empty() || !parameter.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    std::str::from_utf8(parameter).ok()?.parse().ok()
+}
+
+fn erases_whole_screen(sequence: &[u8], terminal: &Terminal<'_, '_>) -> bool {
+    let first = sequence.split(|byte| *byte == b';').next().unwrap_or(&[]);
+    match engine_parameter(first).unwrap_or(0) {
+        2 => true,
+        0 => terminal.cursor_x().unwrap_or(1) == 0 && terminal.cursor_y().unwrap_or(1) == 0,
+        _ => false,
+    }
+}
+
+/// `grid_view_clear_history` scrolls one line per row up to the last row that
+/// holds a written cell, which is the pin's `cellused != 0` test.
+fn used_screen_rows(terminal: &Terminal<'_, '_>) -> Option<u16> {
+    if terminal.active_screen().ok()? != Screen::Primary {
+        return None;
+    }
+    let rows = terminal.rows().ok()?;
+    let columns = terminal.cols().ok()?;
+    (0..rows).rev().find_map(|row| {
+        let used = (0..columns).any(|column| {
+            terminal
+                .grid_ref(Point::Active(PointCoordinate {
+                    x: column,
+                    y: u32::from(row),
+                }))
+                .ok()
+                .and_then(|reference| reference.cell().ok())
+                .and_then(|cell| cell.has_text().ok())
+                .unwrap_or(false)
+        });
+        used.then_some(row + 1)
+    })
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -306,6 +543,22 @@ impl PassthroughFilter {
 }
 
 #[inline]
+/// `spawn.c` copies the session termios into the child and then forces
+/// `VERASE` to the key the `backspace` option names.
+#[cfg(unix)]
+fn force_pty_erase(descriptor: std::os::fd::RawFd, erase: u8) {
+    use rustix::termios::{OptionalActions, SpecialCodeIndex, tcgetattr, tcsetattr};
+
+    let Ok(handle) = filedescriptor::FileDescriptor::dup(&descriptor) else {
+        return;
+    };
+    let Ok(mut termios) = tcgetattr(&handle) else {
+        return;
+    };
+    termios.special_codes[SpecialCodeIndex::VERASE] = erase;
+    let _ = tcsetattr(&handle, OptionalActions::Now, &termios);
+}
+
 fn find_escape(bytes: &[u8]) -> Option<usize> {
     bytes.iter().position(|byte| *byte == 0x1b)
 }
@@ -464,6 +717,8 @@ pub enum TerminalEvent {
         target: ClipboardTarget,
         text: String,
     },
+    /// The program wrote `ESC k <name> ST` while `allow-rename` was on.
+    RenameWindow(String),
     /// The program rang BEL. Raised once per occurrence.
     Bell,
     PlaceholderBound {
@@ -674,6 +929,7 @@ impl TerminalProcessExit {
 
 #[derive(Clone, Debug, Default)]
 pub struct TerminalSpawn {
+    pub knobs: EngineKnobs,
     pub working_directory: Option<PathBuf>,
     pub command: Option<Vec<String>>,
     pub shell: Option<String>,
@@ -1022,6 +1278,10 @@ impl TerminalSession {
 
     pub fn set_wrap_search(&self, enabled: bool) {
         self.send_command(Command::SetWrapSearch(enabled));
+    }
+
+    pub fn set_engine_knobs(&self, knobs: EngineKnobs) {
+        self.send_command(Command::SetEngineKnobs(knobs));
     }
 
     /// Apply pinned tmux's `send-keys -R` pane reset, preserving scrollback.
@@ -1586,6 +1846,7 @@ enum Command {
     SetAppearance(Arc<TerminalAppearance>),
     SetAllowPassthrough(AllowPassthrough),
     SetWrapSearch(bool),
+    SetEngineKnobs(EngineKnobs),
     ResetScreen,
     AttachView(TerminalViewId),
     DetachView(TerminalViewId),
@@ -1635,6 +1896,7 @@ impl Command {
             Self::SetAppearance(_) => "set-appearance",
             Self::SetAllowPassthrough(_) => "set-allow-passthrough",
             Self::SetWrapSearch(_) => "set-wrap-search",
+            Self::SetEngineKnobs(_) => "set-engine-knobs",
             Self::AttachView(_) => "attach-view",
             Self::DetachView(_) => "detach-view",
             Self::ReleaseView(_) => "release-view",
@@ -3194,6 +3456,10 @@ impl Publisher {
         )
     }
 
+    fn rename_window(&self, name: String) -> Result<(), WorkerError> {
+        self.send_user_action(TerminalEvent::RenameWindow(name), "window rename")
+    }
+
     fn bell(&self) {
         if let Err(error) = self.send_reliable(TerminalEvent::Bell)
             && matches!(error, WorkerError::EventBackpressure)
@@ -3237,6 +3503,7 @@ fn reliable_event_bytes(event: &TerminalEvent) -> usize {
             })),
         TerminalEvent::OpenUri(open) => open.uri.len(),
         TerminalEvent::ClipboardSet { text, .. } => text.len(),
+        TerminalEvent::RenameWindow(name) => name.len(),
         TerminalEvent::ViewportReady { .. }
         | TerminalEvent::ViewClosed(_)
         | TerminalEvent::Bell
@@ -3740,6 +4007,7 @@ fn run_output_view(
                         | Command::PastePreparedBytes { .. }
                         | Command::RawInput(_)
                         | Command::SetAllowPassthrough(_)
+                        | Command::SetEngineKnobs(_)
                         | Command::PendingPasteOpened { .. }
                     | Command::ResetScreen
                     | Command::UnbindPastedImage { .. },
@@ -4046,6 +4314,11 @@ fn run_terminal(
     #[cfg(not(unix))]
     let tty = None;
 
+    #[cfg(unix)]
+    if let Some(descriptor) = pair.master.as_raw_fd() {
+        force_pty_erase(descriptor, spawn.knobs.verase_byte);
+    }
+
     let mut command = terminal_command(spawn);
     command.env(
         "TERM",
@@ -4198,6 +4471,9 @@ fn run_terminal(
     let mut word_separators = WordSeparators::default();
     let mut wrap_search = true;
     let mut passthrough = PassthroughFilter::default();
+    let mut engine_knobs = spawn.knobs;
+    let mut engine_filter = EngineFilter::default();
+    let mut engine_renames = Vec::new();
     let mut active_views = ActiveTerminalViews::new();
     let mut inactive_views = InactiveTerminalViews::new();
     let mut generations = ViewportGenerations::new()?;
@@ -4316,6 +4592,9 @@ fn run_terminal(
         }
         for token in pasted_image_bindings.expire(Instant::now()) {
             publisher.pending_paste_expired(token)?;
+        }
+        for name in engine_renames.drain(..) {
+            publisher.rename_window(name)?;
         }
 
         let mut deadline = Instant::now() + IDLE_SLEEP;
@@ -4439,6 +4718,7 @@ fn run_terminal(
                             &mut key_encoder,
                             &mut key_event,
                             *input,
+                            engine_knobs.erase_byte,
                             &mut writer,
                             &mut input_bytes,
                         )?;
@@ -4610,6 +4890,9 @@ fn run_terminal(
                 }
                 Command::SetWrapSearch(next) => {
                     wrap_search = next;
+                }
+                Command::SetEngineKnobs(next) => {
+                    engine_knobs = next;
                 }
                 Command::ResetScreen => {
                     reset_pane_screen(&mut terminal)?;
@@ -5025,6 +5308,11 @@ fn run_terminal(
                                 let parsed = feed_pty_output(
                                     &mut terminal,
                                     &mut passthrough,
+                                    &mut EngineOutput {
+                                        filter: &mut engine_filter,
+                                        knobs: engine_knobs,
+                                        renames: &mut engine_renames,
+                                    },
                                     &read_buffer[..length],
                                 );
                                 vt_diagnostics.record(parsed, started);
@@ -5080,6 +5368,11 @@ fn run_terminal(
                                 let (closed, parsed) = consume_pty_output(
                                     &mut terminal,
                                     &mut passthrough,
+                                    &mut EngineOutput {
+                                        filter: &mut engine_filter,
+                                        knobs: engine_knobs,
+                                        renames: &mut engine_renames,
+                                    },
                                     &mut raw_output_tap,
                                     buffer,
                                     length,
@@ -5109,6 +5402,11 @@ fn run_terminal(
                 let parsed = drain_raw_output_parse_backlog(
                     &mut terminal,
                     &mut passthrough,
+                    &mut EngineOutput {
+                        filter: &mut engine_filter,
+                        knobs: engine_knobs,
+                        renames: &mut engine_renames,
+                    },
                     &mut raw_output_parse_backlog,
                     &mut raw_output_parse_backlog_bytes,
                     &mut raw_output_parse_buffer,
@@ -5135,6 +5433,11 @@ fn run_terminal(
                     let (closed, parsed) = consume_pty_output(
                         &mut terminal,
                         &mut passthrough,
+                        &mut EngineOutput {
+                            filter: &mut engine_filter,
+                            knobs: engine_knobs,
+                            renames: &mut engine_renames,
+                        },
                         &mut raw_output_tap,
                         buffer,
                         length,
@@ -10439,6 +10742,7 @@ fn read_pty(
 fn consume_pty_output(
     terminal: &mut Terminal<'_, '_>,
     passthrough: &mut PassthroughFilter,
+    engine: &mut EngineOutput<'_>,
     raw_output_tap: &mut Option<(u64, Sender<Arc<[u8]>>)>,
     buffer: Vec<u8>,
     length: usize,
@@ -10451,7 +10755,7 @@ fn consume_pty_output(
         String::from_utf8_lossy(&buffer[..length]),
     );
     let closed_tap = tap_raw_output(raw_output_tap, &buffer[..length]);
-    let parsed = feed_pty_output(terminal, passthrough, &buffer[..length]);
+    let parsed = feed_pty_output(terminal, passthrough, engine, &buffer[..length]);
     let _ = recycled.try_send(buffer);
     (closed_tap, parsed)
 }
@@ -10478,6 +10782,7 @@ fn tap_raw_output_arc(
 fn drain_raw_output_parse_backlog(
     terminal: &mut Terminal<'_, '_>,
     passthrough: &mut PassthroughFilter,
+    engine: &mut EngineOutput<'_>,
     backlog: &mut VecDeque<(Arc<[u8]>, usize)>,
     backlog_bytes: &mut usize,
     buffer: &mut Vec<u8>,
@@ -10501,16 +10806,30 @@ fn drain_raw_output_parse_backlog(
     if buffer.is_empty() {
         0
     } else {
-        feed_pty_output(terminal, passthrough, buffer)
+        feed_pty_output(terminal, passthrough, engine, buffer)
     }
+}
+
+struct EngineOutput<'a> {
+    filter: &'a mut EngineFilter,
+    knobs: EngineKnobs,
+    renames: &'a mut Vec<String>,
 }
 
 fn feed_pty_output(
     terminal: &mut Terminal<'_, '_>,
     passthrough: &mut PassthroughFilter,
+    engine: &mut EngineOutput<'_>,
     bytes: &[u8],
 ) -> usize {
-    passthrough.write(bytes, |unwrapped| terminal.vt_write(unwrapped))
+    let EngineOutput {
+        filter,
+        knobs,
+        renames,
+    } = engine;
+    passthrough.write(bytes, |unwrapped| {
+        filter.write(unwrapped, *knobs, terminal, renames);
+    })
 }
 
 #[cfg(any(target_os = "linux", not(unix), test))]
@@ -10568,6 +10887,7 @@ fn encode_key(
     encoder: &mut key::Encoder<'_>,
     event: &mut key::Event<'_>,
     input: KeyInput,
+    erase_byte: Option<u8>,
     writer: &mut dyn Write,
     input_bytes: &mut Vec<u8>,
 ) -> Result<(), WorkerError> {
@@ -10595,6 +10915,13 @@ fn encode_key(
 
     input_bytes.clear();
     encoder.encode_to_vec(event, input_bytes)?;
+    if input.key == KeyCode::Backspace
+        && input.modifiers == Modifiers::default()
+        && input_bytes.as_slice() == [0x7f]
+    {
+        input_bytes.clear();
+        input_bytes.extend(erase_byte);
+    }
     if !input_bytes.is_empty() {
         writer.write_all(input_bytes)?;
         writer.flush()?;
@@ -11471,6 +11798,7 @@ fn resolve_style_color(value: StyleColor, palette: &[RgbColor; 256]) -> Option<C
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::DEFAULT_HISTORY_LIMIT;
 
@@ -12425,6 +12753,7 @@ mod tests {
                 | TerminalEvent::CopyReady { .. }
                 | TerminalEvent::ClipboardSet { .. }
                 | TerminalEvent::Bell
+                | TerminalEvent::RenameWindow(_)
                 | TerminalEvent::PlaceholderBound { .. }
                 | TerminalEvent::PendingPasteExpired { .. }
                 | TerminalEvent::RawOutputTapClosed { .. } => {
@@ -17066,6 +17395,7 @@ mod tests {
                     text: None,
                     unshifted_codepoint: None,
                 },
+                Some(0x7f),
                 writer.as_mut(),
                 &mut input_bytes,
             )
@@ -17160,6 +17490,7 @@ mod tests {
                 text: None,
                 unshifted_codepoint: None,
             },
+            Some(0x7f),
             &mut writer,
             &mut input_bytes,
         )
@@ -17226,6 +17557,7 @@ mod tests {
                 text: None,
                 unshifted_codepoint: None,
             },
+            Some(0x7f),
             &mut writer,
             &mut input_bytes,
         )
@@ -17260,6 +17592,7 @@ mod tests {
                     text: Some(Box::from("x")),
                     unshifted_codepoint: Some('x'),
                 },
+                Some(0x7f),
                 &mut writer,
                 &mut input_bytes,
             )

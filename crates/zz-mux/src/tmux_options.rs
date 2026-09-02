@@ -1148,7 +1148,9 @@ pub(crate) fn tmux_option_format_is_flag(name: &str) -> bool {
     matches!(
         name,
         "aggressive-resize"
+            | "allow-rename"
             | "allow-set-title"
+            | "alternate-screen"
             | "automatic-rename"
             | "exit-empty"
             | "exit-unattached"
@@ -1157,6 +1159,7 @@ pub(crate) fn tmux_option_format_is_flag(name: &str) -> bool {
             | "monitor-bell"
             | "mouse"
             | "renumber-windows"
+            | "scroll-on-clear"
             | "set-titles"
             | "synchronize-panes"
             | "wrap-search"

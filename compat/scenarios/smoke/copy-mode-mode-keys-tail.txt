@@ -1,0 +1,12 @@
+corpus: none
+# The four window-copy.c branches that were left reading mode-keys: the two
+# matching-bracket commands, which read the value latched at mode entry rather
+# than the live option; the right step window_copy_cursor_jump_to_back takes
+# after a jump, which is allowed the emacs one-past column; and the scroll_only
+# row shift in window_copy_cursor_up and _down, which needs a scrolled revision
+# to show at all.
+stage: fixtures/copy-mode-mode-keys-tail.sh ~/copy-mode-mode-keys-tail.sh
+stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+out: set-environment -gu COPY_MODE_MODE_KEYS_TAIL
+run-shell 'sh ~/copy-mode-mode-keys-tail.sh'
+out: show-environment -g COPY_MODE_MODE_KEYS_TAIL

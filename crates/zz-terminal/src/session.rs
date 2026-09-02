@@ -2663,6 +2663,9 @@ struct CopyModeState {
     /// and the length of the row it was taken from.
     last_cx: u16,
     last_sx: u16,
+    /// `data->modekeys`: the option's value when the mode was entered. Three
+    /// branches in window-copy.c read this latch rather than the live option.
+    mode_keys_vi_at_entry: bool,
     /// `data->searchmark != NULL`: whether a copy-mode search laid marks down.
     /// The marks themselves are the view's search state, so this only says
     /// whether the mode owns them.
@@ -4593,6 +4596,7 @@ fn output_view_state(terminal: &mut Terminal<'_, '_>) -> Result<TerminalViewStat
         false,
         false,
         None,
+        false,
     )?;
     let mode = active
         .copy_mode
@@ -6784,6 +6788,7 @@ fn apply_view_action(
                     }
                 ),
                 pending_copy_source.take(),
+                mode_keys_vi,
             )?;
             Ok(ViewActionResult::Snapshot)
         }
@@ -7278,6 +7283,7 @@ fn enter_copy_mode(
     scroll_exit: bool,
     hide_position: bool,
     source: Option<Box<CapturedCopySource>>,
+    mode_keys_vi: bool,
 ) -> Result<(), WorkerError> {
     if copy_mode.is_some() {
         return Ok(());
@@ -7323,6 +7329,7 @@ fn enter_copy_mode(
         kind: FrozenModeKind::Copy,
         last_cx: 0,
         last_sx: 0,
+        mode_keys_vi_at_entry: mode_keys_vi,
         search_marks: false,
         search_count: Some((0, false)),
         incremental_origin: None,
@@ -8634,7 +8641,7 @@ fn apply_copy_mode_action(
             Ok(ViewActionResult::Snapshot)
         }
         CopyModeAction::ScrollDownAndCancel => {
-            scroll_copy_cursor(&mut mode, false);
+            scroll_copy_cursor(&mut mode, false, mode_keys_vi);
             if mode.selecting {
                 update_copy_selection(&mut mode, Some(word_separators));
             }
@@ -8672,7 +8679,7 @@ fn apply_copy_mode_action(
             if scrolls_toward_bottom && mode.scroll_exit && copy_mode_scroll_exit_ready(&mode) {
                 return cancel_copy_mode(terminal, selection, unseen_output);
             }
-            scroll_copy_cursor(&mut mode, !scrolls_toward_bottom);
+            scroll_copy_cursor(&mut mode, !scrolls_toward_bottom, mode_keys_vi);
             if mode.selecting {
                 update_copy_selection(&mut mode, Some(word_separators));
             }
@@ -8884,7 +8891,8 @@ fn apply_copy_mode_action(
             Ok(ViewActionResult::Snapshot)
         }
         CopyModeAction::Jump(jump) => {
-            apply_copy_jump(&mut mode, &jump, false);
+            let latched_vi = mode.mode_keys_vi_at_entry;
+            apply_copy_jump(&mut mode, &jump, latched_vi);
             mode.last_jump = Some(jump);
             if mode.selecting {
                 update_copy_selection(&mut mode, Some(word_separators));
@@ -8900,7 +8908,8 @@ fn apply_copy_mode_action(
                         CopyJumpDirection::Backward => CopyJumpDirection::Forward,
                     };
                 }
-                apply_copy_jump(&mut mode, &jump, true);
+                let latched_vi = mode.mode_keys_vi_at_entry;
+                apply_copy_jump(&mut mode, &jump, latched_vi);
                 if mode.selecting {
                     update_copy_selection(&mut mode, Some(word_separators));
                 }
@@ -9245,48 +9254,110 @@ fn cancel_copy_mode(
     Ok(ViewActionResult::Snapshot)
 }
 
-fn apply_copy_jump(mode: &mut CopyModeState, jump: &CopyJump, repeated: bool) {
-    let row = mode.cursor.y;
-    let skip = u16::from(repeated && jump.to).saturating_add(1);
-    let found = match jump.direction {
-        CopyJumpDirection::Forward => mode.cursor.x.saturating_add(skip)..mode.revision.columns,
-        CopyJumpDirection::Backward => 0..mode.cursor.x.saturating_sub(skip.saturating_sub(1)),
-    };
-    let target = match jump.direction {
-        CopyJumpDirection::Forward => found
-            .into_iter()
-            .find(|column| {
-                mode.revision
-                    .cell_matches_text(PointCoordinate { x: *column, y: row }, &jump.target)
-            })
-            .map(|column| {
-                if jump.to {
-                    column.saturating_sub(1)
-                } else {
-                    column
-                }
-            }),
-        CopyJumpDirection::Backward => found
-            .into_iter()
-            .rev()
-            .find(|column| {
-                mode.revision
-                    .cell_matches_text(PointCoordinate { x: *column, y: row }, &jump.target)
-            })
-            .map(|column| {
-                if jump.to {
-                    column.saturating_add(1)
-                } else {
-                    column
-                }
-            }),
-    };
-    if let Some(column) = target {
-        mode.cursor.x = column.min(mode.revision.columns.saturating_sub(1));
-        reveal_copy_cursor(mode);
+/// `grid_reader_cursor_jump`: the scan runs forward from the start point,
+/// bounded by each row's used length, and continues onto the row a wrap
+/// carried the line onto.
+fn reader_jump_forward(
+    revision: &ModeRevision,
+    mut point: PointCoordinate,
+    target: &str,
+) -> Option<PointCoordinate> {
+    let last = revision.total_rows().saturating_sub(1);
+    loop {
+        let length = revision_line_length(revision, point.y);
+        while point.x < length {
+            if revision.cell_matches_text(point, target) {
+                return Some(point);
+            }
+            point.x += 1;
+        }
+        if point.y >= last || !revision.row(point.y).wrapped() {
+            return None;
+        }
+        point.y += 1;
+        point.x = 0;
     }
 }
 
+/// `grid_reader_cursor_jump_back`: the scan runs backward from the cell before
+/// the start point and continues onto the row a wrap carried the line from,
+/// picking that row's used length back up as its right edge.
+fn reader_jump_backward(
+    revision: &ModeRevision,
+    mut point: PointCoordinate,
+    target: &str,
+) -> Option<PointCoordinate> {
+    let mut edge = point.x.saturating_add(1);
+    loop {
+        let mut column = edge;
+        while column > 0 {
+            column -= 1;
+            let candidate = PointCoordinate {
+                x: column,
+                y: point.y,
+            };
+            if revision.cell_matches_text(candidate, target) {
+                return Some(candidate);
+            }
+        }
+        if point.y == 0 || !revision.row(point.y - 1).wrapped() {
+            return None;
+        }
+        point.y -= 1;
+        edge = revision_line_length(revision, point.y);
+    }
+}
+
+/// `window_copy_cursor_jump` and its three siblings. The start point is the
+/// pin's: one cell on for `jump-forward`, two for `jump-to-forward`, one back
+/// for `jump-backward` and two for `jump-to-backward`, and the `to` spellings
+/// then take one reader step back toward where they came from.
+/// `window_copy_cursor_jump_to_back` is the one that reads mode-keys: its right
+/// step is allowed the emacs one-past column, so a target on the last cell of a
+/// wrapped row lands past that cell under emacs and on the next row under vi.
+fn apply_copy_jump(mode: &mut CopyModeState, jump: &CopyJump, vi: bool) {
+    let start = mode.cursor;
+    let found = match (jump.direction, jump.to) {
+        (CopyJumpDirection::Forward, false) => reader_jump_forward(
+            &mode.revision,
+            PointCoordinate {
+                x: start.x.saturating_add(1),
+                y: start.y,
+            },
+            &jump.target,
+        ),
+        (CopyJumpDirection::Forward, true) => reader_jump_forward(
+            &mode.revision,
+            PointCoordinate {
+                x: start.x.saturating_add(2),
+                y: start.y,
+            },
+            &jump.target,
+        )
+        .map(|mut point| {
+            reader_cursor_left(&mode.revision, &mut point, true);
+            point
+        }),
+        (CopyJumpDirection::Backward, false) => {
+            let mut point = start;
+            reader_cursor_left(&mode.revision, &mut point, false);
+            reader_jump_backward(&mode.revision, point, &jump.target)
+        }
+        (CopyJumpDirection::Backward, true) => {
+            let mut point = start;
+            reader_cursor_left(&mode.revision, &mut point, false);
+            reader_cursor_left(&mode.revision, &mut point, false);
+            reader_jump_backward(&mode.revision, point, &jump.target).map(|mut point| {
+                reader_cursor_right(&mode.revision, &mut point, true, false, !vi);
+                point
+            })
+        }
+    };
+    if let Some(point) = found {
+        mode.cursor = point;
+        reveal_copy_cursor(mode);
+    }
+}
 fn move_copy_cursor(
     mode: &mut CopyModeState,
     action: &CopyModeAction,
@@ -9372,13 +9443,32 @@ fn move_copy_cursor(
             point = move_revision_word(&mode.revision, point, action, word_separators);
         }
         CopyModeAction::PreviousMatchingBracket => {
-            if let Some(target) = revision_matching_bracket(&mode.revision, point, true) {
+            let latched_vi = mode.mode_keys_vi_at_entry;
+            if let Some(target) = revision_matching_bracket(&mode.revision, point, true, latched_vi)
+            {
                 point = target;
+            } else if !latched_vi {
+                point = move_revision_word(
+                    &mode.revision,
+                    point,
+                    &CopyModeAction::PreviousWord,
+                    &WordSeparators::new(CLOSING_BRACKETS),
+                );
             }
         }
         CopyModeAction::NextMatchingBracket => {
-            if let Some(target) = revision_matching_bracket(&mode.revision, point, false) {
+            let latched_vi = mode.mode_keys_vi_at_entry;
+            if let Some(target) =
+                revision_matching_bracket(&mode.revision, point, false, latched_vi)
+            {
                 point = target;
+            } else if !latched_vi {
+                point = move_revision_word_end(
+                    &mode.revision,
+                    point,
+                    Some(&WordSeparators::new(OPENING_BRACKETS)),
+                    latched_vi,
+                );
             }
         }
         CopyModeAction::NextParagraph => {
@@ -9412,13 +9502,19 @@ fn move_copy_cursor(
     reveal_copy_cursor(mode);
 }
 
-fn scroll_copy_cursor(mode: &mut CopyModeState, up: bool) {
+/// `window_copy_cursor_up` and `window_copy_cursor_down` with `scroll_only`.
+/// The view moves one row either way; what moves with it is the mode-keys
+/// branch. Under vi the cursor first steps one screen row against the scroll,
+/// so it keeps the text line it was on, unless it already sits on the screen
+/// row the step would leave. Under emacs it keeps its screen row instead, so
+/// the line under it changes.
+fn scroll_copy_cursor(mode: &mut CopyModeState, up: bool, vi: bool) {
     let previous = mode.viewport_offset;
     let page = u32::from(mode.revision.viewport_rows.max(1));
     if up {
         mode.viewport_offset = previous.saturating_sub(1);
         if mode.viewport_offset < previous
-            && mode.cursor.y >= previous.saturating_add(page.saturating_sub(1))
+            && (!vi || mode.cursor.y >= previous.saturating_add(page.saturating_sub(1)))
         {
             mode.cursor.y = mode.cursor.y.saturating_sub(1);
         }
@@ -9426,7 +9522,7 @@ fn scroll_copy_cursor(mode: &mut CopyModeState, up: bool) {
         mode.viewport_offset = previous
             .saturating_add(1)
             .min(mode.revision.maximum_offset());
-        if mode.viewport_offset > previous && mode.cursor.y <= previous {
+        if mode.viewport_offset > previous && (!vi || mode.cursor.y <= previous) {
             mode.cursor.y = mode
                 .cursor
                 .y
@@ -9708,10 +9804,23 @@ fn move_copy_cursor_row(
     }
 }
 
+/// window-copy.c's `close` and `open` bracket strings, which the emacs
+/// branches of the two matching-bracket commands also hand to their word
+/// fallbacks as the separator set.
+const CLOSING_BRACKETS: &str = "}])";
+const OPENING_BRACKETS: &str = "{[(";
+
+/// `window_copy_cmd_previous_matching_bracket` and its next twin, both reading
+/// `data->modekeys` as it stood when the mode was entered. vi scans the logical
+/// line for a bracket and, going forward, walks a closing one back to its
+/// opener. emacs looks at the cursor cell and then at exactly one neighbour,
+/// accepts only the direction's own bracket class, and leaves the word fallback
+/// to the caller.
 fn revision_matching_bracket(
     revision: &ModeRevision,
     point: PointCoordinate,
     backward: bool,
+    vi: bool,
 ) -> Option<PointCoordinate> {
     let columns = u64::from(revision.columns);
     let total = columns.saturating_mul(u64::from(revision.total_rows()));
@@ -9729,10 +9838,25 @@ fn revision_matching_bracket(
     let is_target = |character: Option<char>| {
         if backward {
             matches!(character, Some(')' | ']' | '}'))
-        } else {
+        } else if vi {
             matches!(character, Some('(' | ')' | '[' | ']' | '{' | '}'))
+        } else {
+            matches!(character, Some('(' | '[' | '{'))
         }
     };
+    if !vi {
+        if is_target(char_at(origin)) {
+            bracket = origin;
+        } else {
+            let neighbour = if backward {
+                (point.x > 0).then(|| origin.saturating_sub(1))
+            } else {
+                (point.x.saturating_add(1) < revision.columns).then(|| origin.saturating_add(1))
+            };
+            let neighbour = neighbour.filter(|index| is_target(char_at(*index)))?;
+            bracket = neighbour;
+        }
+    }
     while !is_target(char_at(bracket)) {
         let at = to_point(bracket);
         let reaches_further = if backward {
@@ -13636,6 +13760,7 @@ mod tests {
             scroll_exit,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
@@ -16863,6 +16988,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
@@ -16951,6 +17077,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
@@ -16993,6 +17120,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let first = (0..copy_mode.as_ref().expect("mode").revision.total_rows())
@@ -17123,6 +17251,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mut unseen_output = 0;
@@ -17185,6 +17314,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode again");
         apply_counted_copy_mode_action(
@@ -17367,6 +17497,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
@@ -17393,6 +17524,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
@@ -17513,6 +17645,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("plain entry");
         enter_copy_mode(
@@ -17522,6 +17655,7 @@ mod tests {
             true,
             false,
             None,
+            true,
         )
         .expect("repeated scroll-exit entry");
         assert!(!copy_mode.as_ref().expect("mode").scroll_exit);
@@ -17534,6 +17668,7 @@ mod tests {
             true,
             false,
             None,
+            true,
         )
         .expect("scroll-exit entry");
         enter_copy_mode(
@@ -17543,6 +17678,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("repeated plain entry");
         assert!(copy_mode.as_ref().expect("mode").scroll_exit);
@@ -17568,6 +17704,7 @@ mod tests {
                 scroll_exit,
                 hide_position,
                 None,
+                true,
             )
             .expect("copy mode");
             let mode = copy_mode.as_ref().expect("mode");
@@ -17640,6 +17777,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let copy_maximum = copy_mode
@@ -17769,6 +17907,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let row = (0..copy_mode.as_ref().expect("mode").revision.total_rows())
@@ -17860,6 +17999,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let first = (0..copy_mode.as_ref().expect("mode").revision.total_rows())
@@ -17922,6 +18062,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let row = copy_mode.as_ref().expect("mode").cursor.y;
@@ -18043,6 +18184,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let row_with = |mode: &CopyModeState, needle: char| {
@@ -18257,6 +18399,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mut origin = None;
@@ -18307,8 +18450,16 @@ mod tests {
         terminal.vt_write(b"old-one\r\nold-two\r\n\x1b[1;31mfrozen-marker\x1b[0m");
         let mut selection = None;
         let mut mode = None;
-        enter_copy_mode(&mut terminal, &mut selection, &mut mode, false, false, None)
-            .expect("copy mode");
+        enter_copy_mode(
+            &mut terminal,
+            &mut selection,
+            &mut mode,
+            false,
+            false,
+            None,
+            true,
+        )
+        .expect("copy mode");
         let mut view = TerminalViewState::for_screen(Screen::Primary);
         view.copy_mode = mode;
         let mut render_state = RenderState::new().expect("render state");
@@ -20275,6 +20426,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         (selection, copy_mode)
@@ -20303,6 +20455,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let row = copy_mode.as_ref().expect("mode").viewport_offset;
@@ -20601,6 +20754,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         {
@@ -20678,6 +20832,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mut unseen_output = 0;
@@ -20763,6 +20918,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
@@ -20829,6 +20985,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mut unseen_output = 0;
@@ -20888,6 +21045,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mut unseen_output = 0;
@@ -20976,6 +21134,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mut unseen_output = 0;
@@ -21042,6 +21201,7 @@ mod tests {
             false,
             false,
             None,
+            true,
         )
         .expect("copy mode");
         let mut unseen_output = 0;

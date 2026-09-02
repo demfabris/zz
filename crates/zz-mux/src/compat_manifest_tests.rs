@@ -1454,20 +1454,31 @@ fn stock_copy_mode_action_keys_render_the_pinned_binding() {
 #[test]
 fn missing_copy_actions_keep_their_behavior_item_open() {
     let manifest: Manifest = read_json(&root().join("compat/tmux-gaps.json"));
-    let group = manifest
+    let open = manifest
         .gaps
         .iter()
         .find(|gap| gap.id == "copy-mode.action-fidelity")
-        .expect("copy-mode.action-fidelity is registered");
-    let open = group
-        .items
-        .iter()
-        .map(String::as_str)
-        .collect::<BTreeSet<_>>();
+        .map(|group| {
+            group
+                .items
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
     let mut missing = BTreeSet::new();
     for entry in crate::copy_actions::missing_copy_mode_actions() {
         missing.insert(entry.category);
     }
+    // Vocabulary is where a name sits when a product decision closed it rather
+    // than an implementation, so it carries no behavior item. Every other
+    // category has one, and an unmapped action there has to keep it open.
+    assert!(
+        missing
+            .iter()
+            .all(|category| *category == CopyActionCategory::Vocabulary),
+        "a behavior category regained an unmapped pinned action: {missing:?}"
+    );
     for (category, item) in [
         (
             CopyActionCategory::CursorGeometry,

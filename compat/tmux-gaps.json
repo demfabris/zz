@@ -573,33 +573,6 @@
       "reason": "The mux has no command-queue mouse record, so bare = currently reaches the ordinary pane parser and falls into the empty CANFAIL result even for a mouse-triggered command."
     },
     {
-      "id": "display-message.pane-target-grammar",
-      "title": "Complete display-message pane target grammar",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "mux",
-      "items": [
-        "semantic:display-message-relative-special-targets"
-      ],
-      "evidence": [
-        "resource:crates/zz-mux/src/model.rs",
-        "resource:crates/zz-mux/src/command.rs",
-        "file:compat/scenarios/pane-target-grammar.txt",
-        "resource:knowledge/tmux/tmux-compat.md",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "display-message -t matches CMD_FIND_PANE for relative window offsets and the pin's special window, pane, active, current, and marked target aliases, while preserving the same componentwise CANFAIL state after a miss."
-      ],
-      "depends_on": [],
-      "reason": "Everything the shared resolver can answer without a client now matches, proved by the pane-target-grammar differential: relative pane offsets and their wrap, the window-slot offsets and start, end, and last aliases behind a colon, the `{up-of}`, `{down-of}`, `{left-of}`, and `{right-of}` searches from the window's own active pane, the eight case-insensitive `window_find_string` compass words in both bare and braced spellings, the `~` and `{marked}` whole-target aliases in the session, window, and pane slots, and the componentwise CANFAIL residue (`nope`, `%999`, `9.9`, and `{marked}.0` retain nothing while `:nope` and the wrapping `+99` fall forward to the session's current window and active pane). What stays open is the client slot. Measured on the pin from an unattached CLI client, `display-message -p -t @`, `-t {active}`, and `-t {current}` each answer `no current client` on stderr and exit 1 rather than failing quietly under CANFAIL, because cmd-find.c resolves them from `cmdq_get_client(item)->session->curw->window->active`. Re-measured on 2026-09-01 with the streams separated, and the shape is narrower than the clause reads: the pin prints the diagnostic, clears the find state, and still runs the command, so `display-message -p -t @ 'S=#{session_name}'` writes `S=` to stdout at status 1 and a chained second command still runs. zz answers the identical stdout with status 0 and no stderr for all three, and for `{last}`, `{marked}` and `~` both sides answer the same empty expansion at status 0, so the whole remaining divergence is the diagnostic and the status, not the resolution. The client the pin reads is the invoking one, `cmdq_get_client(item)`, whose session is NULL for a command client, so the error fires even while another client is attached elsewhere; a componentwise spelling like `-t a:1.@` is a pane-slot `@` and exits 0 on both. Closing this needs a diagnostic channel that emits a message and a non-zero status while still producing the command's output, which is the daemon's CommandResponse::Error output field, plus either a client-aware resolver signature across roughly fifty call sites in zz-mux and zz-daemon or daemon-side pre-resolution of the three client aliases. zz's mux resolver takes no client handle: `MuxState::resolve_pane` and `resolve_window` receive only a current window and pane, the invoking client's attached context reaches commands through `ExecutionContext::attached_client_context`, and the client roster plus every existing `no current client` diagnostic live in zz-daemon. Closing this needs either a client-aware resolver signature across roughly fifty call sites in zz-mux and zz-daemon or daemon-side pre-resolution of the three client aliases, so the clause is scoped to that decision rather than to grammar work."
-    },
-    {
       "id": "display-message.verbose-trace",
       "title": "Trace display-message format expansion",
       "decision": "adopt",
@@ -3301,6 +3274,21 @@
         "scenario:compat/scenarios/display-message.txt"
       ],
       "resolution": "The catalog accepts display-message -N, and the mux carries its ignore-keys value to the daemon without changing the wire protocol. A positive-effective-duration ordinary Interactive display-message writes the destination client's sticky bit: -N sets it and a plain message clears it. Omitted -d resolves from the destination client's attached session, independent of the pane selected by -t; explicit -d still wins. A positive-duration Interactive PrintOrMessage producer also clears the bit. Explicit or inherited zero duration, clear, expiry, -p, Control clients, a missing destination client, -a, and -I leave it unchanged; detach keeps it with the registered client, while unregister removes it. An active message with the bit set drops writable terminal Key, standalone or paired Text, Paste, non-hover Mouse and wheel input, and ClientFocus before message dismissal, display-panes teardown, prompt handling, key dispatch, and activity accounting, so the message and terminal-publication freeze remain active. An ignored release retires its swallowed press decision without forwarding. Without -N, non-hover mouse and wheel input dismiss an active message; retaining bare hover is an intentional zz presentation adaptation. Ignored presses create their typed pending entry and suppression debt under the same daemon lock, using the committed character from KeyInput.text. Text matching selects the first entry with the same pane and lane, retires the skipped queue prefix and its linked debt, then retires the matched debt while preserving the later suffix. Browser-before-terminal ordering preserves the later terminal debt; terminal-before-browser ordering retires the skipped terminal debt as stale. Read-only input and native BrowserSurface input keep their prior paths. Focused daemon tests cover sticky replacement, destination-session zero and nonzero inheritance, PrintOrMessage reset, expiry, clear, missing-target CANFAIL, inert branches, unregister, every ignored input form, modal ordering, activity, committed text in both lane orders, release cleanup, read-only bypass, and browser-native input. The strict display-message scenario proves -N and -p -N acceptance beside target-client CANFAIL behavior."
+    },
+    {
+      "id": "display-message.pane-target-grammar",
+      "title": "Complete display-message pane target grammar",
+      "closed_on": "2026-09-02",
+      "evidence": [
+        "resource:crates/zz-mux/src/model.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "file:compat/scenarios/pane-target-grammar.txt",
+        "resource:knowledge/tmux/tmux-compat.md",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/smoke/display-message-client-aliases.txt"
+      ],
+      "resolution": "The client slot is resolved daemon-side rather than by threading a client handle through the mux resolver. cmd-find.c reads `@`, `{active}` and `{current}` off `cmdq_get_client(item)->session->curw->window->active`, so the daemon now pre-resolves exactly those three whole-target spellings from the invoking client and rewrites `-t` to the resolved pane; when that client has no session, which is every command client, it reports through the same channel `cmdq_error` uses. `route_source_error` is that channel: a Command client gets the line on stderr and `c->retval = 1` without the command failing, so the rest of the sequence still runs, which is what `CMD_FIND_CANFAIL` gives the pin. Measured on both binaries in smoke/display-message-client-aliases, 25 checks: `-t @`, `-t {active}` and `-t {current}` each print `no current client` on stderr, exit 1, and still write the command's empty expansion `S=|W=|P=` to stdout; `{last}`, `{marked}` and `~` stay quiet misses at exit 0 with the same empty expansion; a chained `set-environment` after the failing alias still runs and the whole sequence exits 1. One clause was re-measured rather than assumed: the earlier reason called the componentwise `a:1.@` case `a pane-slot @ that exits 0`, which is right about the status but not about the state. `cmd_find_get_pane_with_window` misses on `@`, `cmd_find_get_window` then resolves it as a window, and `fs->wp` falls back to that window's active pane, so `-t <session>:<window>.@` answers the real session, window and active pane on both binaries, not an empty state. The differential asserts that measured shape. The rewrite is scoped to display-message because that is where the group scoped it; every other CMD_FIND_PANE command still resolves the three aliases to nothing at status 0, and a client-aware resolver signature across zz-mux remains the general fix."
     },
     {
       "id": "display-message.target-client",

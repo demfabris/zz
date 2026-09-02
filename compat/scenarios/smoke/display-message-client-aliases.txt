@@ -1,0 +1,10 @@
+corpus: none
+# display-message -t @, {active} and {current} read the invoking client's own
+# session, which a command client does not have, so all three report `no current
+# client` and exit 1 while CMD_FIND_CANFAIL still runs the command and prints its
+# empty expansion. The same spelling inside a componentwise target is a pane slot
+# and misses quietly, and the diagnostic does not stop the rest of the sequence.
+stage: fixtures/display-message-client-aliases.sh ~/display-message-client-aliases.sh
+out: set-environment -gu DISPLAY_MESSAGE_CLIENT_ALIASES
+run-shell 'sh ~/display-message-client-aliases.sh'
+out: show-environment -g DISPLAY_MESSAGE_CLIENT_ALIASES

@@ -5970,6 +5970,9 @@ impl Shared {
         } else {
             None
         };
+        let client_alias_route = (canonical == "display-message")
+            .then(|| self.display_message_client_alias(client, command))
+            .flatten();
         let result = if let Some((target, target_kind, target_terminal, mut target_context, wait)) =
             display_panes_target
         {
@@ -5998,6 +6001,24 @@ impl Shared {
             );
             if result.is_ok() && route.wait {
                 self.wait_for_command_prompt(route.client);
+            }
+            result
+        } else if let Some(route) = client_alias_route {
+            let result = self.execute_with_mux_source_inner(
+                client,
+                kind,
+                context,
+                route.command.as_ref().unwrap_or(command),
+                mux_source,
+                invoking_client_terminal,
+                queue_execution,
+            );
+            // `cmd_find_target` reports through `cmdq_error`, which is a
+            // message plus `c->retval = 1` and not a command failure, and
+            // `display-message` carries `CMD_FIND_CANFAIL`, so the command
+            // still runs, still prints, and the rest of the sequence follows.
+            if result.is_ok() && route.command.is_none() {
+                self.route_source_error(client, kind, context.pane, "no current client");
             }
             result
         } else {
@@ -6094,6 +6115,47 @@ impl Shared {
             command: routed,
             wait,
         }))
+    }
+
+    /// `cmd_find_target`'s three client aliases: `@`, `{active}` and
+    /// `{current}` read `cmdq_get_client(item)->session->curw->window->active`,
+    /// so they answer the invoking client's own current pane and are a loud
+    /// miss when that client has no session, which is every command client.
+    fn display_message_client_alias(
+        self: &Arc<Self>,
+        client: ClientId,
+        command: &CommandInvocation,
+    ) -> Option<ClientAliasRoute> {
+        let parsed = parse_buffer_command_args(
+            "display-message",
+            &command.args,
+            &['c', 'd', 'F', 't'],
+            &['a', 'C', 'I', 'l', 'N', 'p', 'v'],
+        )
+        .ok()?;
+        let target = parsed.value('t')?;
+        if !matches!(target, "@" | "{active}" | "{current}") {
+            return None;
+        }
+        let inner = self.inner.lock();
+        let pane = client_attached_session(&inner, client)
+            .and_then(|session| inner.engine.state.sessions.get(&session))
+            .map(|session| client_focused_window(&inner, client, session))
+            .and_then(|window| inner.engine.state.windows.get(&window))
+            .map(|window| window.active_pane);
+        drop(inner);
+        let command = pane.and_then(|pane| {
+            let args = replace_short_option_value(
+                &command.args,
+                &['c', 'd', 'F', 't'],
+                't',
+                &pane.to_string(),
+            )?;
+            let mut routed = command.clone();
+            routed.args = args;
+            Some(routed)
+        });
+        Some(ClientAliasRoute { command })
     }
 
     /// `cmd_display_panes_free` calls `cmdq_continue`, so the issuing queue
@@ -26302,6 +26364,51 @@ struct MenuSession {
 struct MenuWaiter {
     client: ClientId,
     wake: crossbeam_channel::Sender<()>,
+}
+
+/// A `-t` the daemon resolved for the mux. `command` is the rewritten
+/// invocation when the alias found a pane, and `None` when it did not, which is
+/// the pin's `no current client` case.
+struct ClientAliasRoute {
+    command: Option<CommandInvocation>,
+}
+
+/// Rewrite one short option's value in place, whether it was spelled attached
+/// (`-t@`) or as the next argument, and answer `None` when the option is not
+/// there to rewrite.
+fn replace_short_option_value(
+    args: &[String],
+    value_options: &[char],
+    option: char,
+    replacement: &str,
+) -> Option<Vec<String>> {
+    let mut rewritten = args.to_vec();
+    let mut index = 0;
+    while let Some(argument) = args.get(index) {
+        if argument == "--" || !argument.starts_with('-') || argument == "-" {
+            return None;
+        }
+        let mut consumed_next = false;
+        for (offset, candidate) in argument[1..].char_indices() {
+            if !value_options.contains(&candidate) {
+                continue;
+            }
+            let value_start = 1 + offset + candidate.len_utf8();
+            let attached = value_start < argument.len();
+            if candidate == option {
+                if attached {
+                    rewritten[index] = format!("{}{replacement}", &argument[..value_start]);
+                } else {
+                    replacement.clone_into(rewritten.get_mut(index + 1)?);
+                }
+                return Some(rewritten);
+            }
+            consumed_next = !attached;
+            break;
+        }
+        index += usize::from(consumed_next) + 1;
+    }
+    None
 }
 
 /// `command-prompt` after `cmd_find_client`: the prompt is raised on the

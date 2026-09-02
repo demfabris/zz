@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v93)
+title: zz wire protocol (v94)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 93`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 94`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (93) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (94) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -613,9 +613,16 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 93`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 94`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v94 appends `CopyModeAction::RefreshOn`, `RefreshOff`, `RefreshToggle` and `RefreshRevision`
+  after `PreviousMatchingBracket`. The first three are the pinned `refresh-on`, `refresh-off` and
+  `refresh-toggle` names; the fourth is one tick of the refresh timer, which tmux runs inside
+  `window-copy.c` as a libevent timer and zz runs in the daemon because the terminal worker owns
+  none. `CopyModeAction` rides `TerminalViewAction`, which is carried by `InputMessage` and by
+  `EventPayload::TerminalUiCommand`'s neighbours on `ProtocolMessage`, so the appended variants are
+  wire-reachable and a v93 peer cannot decode them.
 - v93 appends `KeyToken::Raw(u8)` after `Named`. `send-keys -H` is strtol base 16 clamped to one
   byte and tmux writes that byte to the pane raw as `KEYC_LITERAL`, so codes 0x80..0xff cannot ride
   `KeyToken::Literal`, whose UTF-8 text would re-encode them as two bytes. `KeyToken` travels on

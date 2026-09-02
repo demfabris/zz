@@ -373,6 +373,14 @@ pub enum CopyModeAction {
     TogglePosition,
     RecentreTopBottom,
     PreviousMatchingBracket,
+    /// `refresh-on`: start re-cloning the frozen backing from the live pane.
+    RefreshOn,
+    /// `refresh-off`: stop re-cloning it.
+    RefreshOff,
+    RefreshToggle,
+    /// One tick of the refresh timer, which is the daemon's here. It is not a
+    /// pinned action name; `window_copy_refresh_timer` is a libevent timer.
+    RefreshRevision,
 }
 
 /// The pin's `selflag`: the unit a live selection extends by.
@@ -472,6 +480,10 @@ impl CopyModeAction {
             | Self::ScrollBottom
             | Self::TogglePosition
             | Self::RecentreTopBottom
+            | Self::RefreshOn
+            | Self::RefreshOff
+            | Self::RefreshToggle
+            | Self::RefreshRevision
             | Self::GotoLine(_) => CopyModeCountPolicy::Once,
         }
     }

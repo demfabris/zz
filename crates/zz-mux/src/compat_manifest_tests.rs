@@ -111,7 +111,7 @@ struct OracleKey {
 }
 
 const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] =
-    &[("copy-mode", 53), ("copy-mode-vi", 62), ("prefix", 32)];
+    &[("copy-mode", 54), ("copy-mode-vi", 63), ("prefix", 32)];
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -1388,15 +1388,15 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         303,
         "pinned binding count changed"
     );
-    assert_eq!(zz_keys.len(), 266, "zz default binding count changed");
+    assert_eq!(zz_keys.len(), 268, "zz default binding count changed");
     assert_eq!(
         shared_keys.len(),
-        208,
+        210,
         "shared default binding count changed"
     );
     assert_eq!(
         missing_keys.len(),
-        95,
+        93,
         "missing default binding count changed"
     );
     assert_eq!(
@@ -1411,7 +1411,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         structurally_matching_bindings.len(),
-        147,
+        149,
         "structurally matching shared binding count changed"
     );
     assert_eq!(

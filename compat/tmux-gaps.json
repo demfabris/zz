@@ -1237,38 +1237,6 @@
       "reason": "zz keeps numeric capture inside its per-client key engine instead of rendering tmux's command-prompt -P, while preserving the pin's action-level repeat semantics and exposing the native copy-mode-repeat command shape to list-keys. The emacs table now reaches the same capture: the pin binds M-1 through M-9 to `command-prompt -NP -I <digit> -p (repeat) { send-keys -N \"%%\" }`, a PROMPT_NUMERIC prompt seeded with the digit that collects further digits and hands the first non-digit key on, and whose block writes wme->prefix for the next action. zz arms the same count with `copy-mode-repeat <digit>` and lets a following bare digit extend it, which the engine previously allowed only in copy-mode-vi. The visible shape difference is the pane-cell prompt, accepted under `prompt.pane-rendered`."
     },
     {
-      "id": "keys.copy-mode-unsupported-default-actions",
-      "title": "Implement missing stock copy-mode actions",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "daily",
-        "remote"
-      ],
-      "owner": "terminal",
-      "items": [
-        "key:copy-mode-vi:r",
-        "key:copy-mode:r"
-      ],
-      "evidence": [
-        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
-        "resource:crates/zz-protocol/src/key.rs",
-        "resource:crates/zz-mux/src/command.rs",
-        "resource:crates/zz-terminal/src/interaction.rs",
-        "resource:knowledge/tmux/key-tables.md",
-        "file:compat/scenarios/copy-mode-stock-action-keys.txt"
-      ],
-      "acceptance": [
-        "previous-matching-bracket, recentre-top-bottom, cursor-centre-horizontal, toggle-position, and refresh-toggle have typed terminal behavior before their seven stock keys are installed."
-      ],
-      "depends_on": [
-        "copy-mode.action-fidelity"
-      ],
-      "reason": "Five of the seven keys are installed. `copy-mode-vi P` and `copy-mode P` send toggle-position, `copy-mode C-M-b` sends previous-matching-bracket, `copy-mode C-l` sends recentre-top-bottom, and `copy-mode M-l` sends cursor-centre-horizontal, each rendering the pin's stored `send-keys -X <action>` shape with the pin's nonrepeat metadata, so all five are structurally matching shared bindings now. The two `r` keys stay open because refresh-toggle stays unmapped, and the earlier reading of why was wrong: the pinned action does not need a live pane to switch off, it unfreezes the copy backing. Measured on the pin with a detached throwaway server against a pane printing a line every 200ms, `#{scroll_position}` holds at 0 for a second after entry with refresh off, climbs 3 to 8 across a second after `send-keys -X refresh-on` as window_copy_do_refresh re-clones the backing screen on its 50ms timer, and freezes again at 8 after `send-keys -X refresh-toggle`. window-copy.c also refuses to start the timer for a view of another pane (`copy-mode -s`) or for view-mode, and skips a tick while a selection or a cursor drag is live, following the bottom only when oy is 0 and the cursor is on the last row. That is a re-sync of the frozen revision, which in zz is owned by the daemon's single-writer copy_sessions map and its published revisions, not by the mux key tables or the terminal engine. Installing `r` before that re-sync exists would bind a key to nothing, so both `r` keys wait on a daemon-owned refresh revision."
-    },
-    {
       "id": "keys.default-prefix",
       "title": "Keep the native default prefix table",
       "decision": "native",
@@ -3758,6 +3726,24 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "All ten keys are installed, so the emacs copy table no longer swallows M-1 through M-9 and g. M-1 through M-9 arm zz's per-client numeric capture with the same `copy-mode-repeat <digit>` command the vi digits use, and the capture rule that only vi digits could extend now covers both copy tables, so M-1 2 accumulates to 12 exactly as the pin's PROMPT_NUMERIC prompt accumulates digits after its -I seed. The next copy action consumes the count through the same engine path as vi: the count lands as one `-N <count>` pair before the argument containing -X, which is what the pin's `{ send-keys -N \"%%\" }` block does when it writes wme->prefix for the following action. g opens the same goto-line prompt vi ':' opens, and both now carry a structured `{ send-keys -X goto-line -- \"%%\" }` command block instead of the old string template, so submission edits the leaf argument in place and a typed line number cannot inject a second command. The exact stored command shape in this group's acceptance was not reached and did not vanish: the pin renders both families through `command-prompt -P`, whose pane-cell prompt is loudly unsupported by the accepted `prompt.pane-rendered` decision. The nine M-digit shape divergences moved to `keys.copy-mode-native-numeric-prefix`, which already owns that stance for the vi digits, and `binding:copy-mode:g` moved to `keys.copy-mode-binding-fidelity` beside `binding:copy-mode-vi::`. Nothing wire-reachable changed."
+    },
+    {
+      "id": "keys.copy-mode-unsupported-default-actions",
+      "title": "Implement missing stock copy-mode actions",
+      "closed_on": "2026-09-02",
+      "evidence": [
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-protocol/src/key.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-terminal/src/interaction.rs",
+        "resource:knowledge/tmux/key-tables.md",
+        "file:compat/scenarios/copy-mode-stock-action-keys.txt",
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/smoke/copy-mode-refresh.txt",
+        "file:compat/scenarios/smoke/fixtures/copy-mode-refresh.sh"
+      ],
+      "resolution": "All seven stock keys are installed with the pin's stored `send-keys -X <action>` shape and its nonrepeat metadata. The last two, `copy-mode-vi r` and `copy-mode r`, waited on refresh-toggle, which is a re-sync of the frozen backing rather than a cursor move. window_copy_refresh_start refuses a view of another pane and view-mode and does nothing when the refresh is already running; window_copy_refresh_timer skips a tick unless the pane has unseen output with no selection and no cursor drag; and window_copy_do_refresh re-clones the backing, keeps the view on the row it was already showing, and only follows new output when oy is 0 and the cursor is on the last row. zz keeps the frozen revision on the client's terminal view and the terminal worker owns no timers, so the daemon runs one 50ms thread while any copy session asks for a refresh and the engine decides which ticks do anything; the three toggle actions carry the bit on both the frozen view and the daemon's copy session, and CopyModeAction gained RefreshOn, RefreshOff, RefreshToggle and the daemon-driven RefreshRevision tick, which is the v94 protocol bump. Measured on the pin against a pane printing a line every 50ms with an attached pty client: `#{scroll_position}` and `#{copy_cursor_line}` both hold after entry with the refresh off, the position climbs after `refresh-on` while the cursor line does not move, `refresh-toggle` freezes it and a second toggle restarts it, a live selection holds it even with the refresh running and clearing the selection resumes it, `refresh-off` freezes it, and with the view at the bottom and the cursor on the last row the position stays 0 instead of climbing. compat/scenarios/smoke/copy-mode-refresh.txt asserts those thirteen facts as comparisons rather than absolute rows, because the two clients render panes of different heights, and both binaries answer identically, including `list-keys` rendering `send-keys -X refresh-toggle` for `r` in both tables."
     },
     {
       "id": "keys.literal-delete-identity",

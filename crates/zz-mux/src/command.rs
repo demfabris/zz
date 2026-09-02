@@ -42,6 +42,7 @@ use crate::{
     },
     layout::PANE_MAXIMUM,
     model::{DEFAULT_WINDOW_EXTENT, NO_MARKED_TARGET, fnmatch, is_marked_target},
+    terminfo::TtyTerm,
     tmux_options::{
         HOOK_NAMES, TmuxArrayValue, TmuxOption, TmuxOptionScope, TmuxStoredScalarKind,
         exact_tmux_option, match_tmux_option, parse_tmux_option, tmux_option_format_is_flag,
@@ -544,6 +545,14 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
         self.inner.client_environment_rows()
+    }
+
+    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+        self.inner.client_tty_term()
+    }
+
+    fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_terminal_environment()
     }
 }
 
@@ -1232,6 +1241,14 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
+    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+        self.inner.client_tty_term()
+    }
+
+    fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_terminal_environment()
+    }
+
     /// `cmdq_merge_formats` puts `command` in `ft->tree` for every queue item,
     /// which is why `format_each` prints it after the whole table.
     fn tree_entries(&mut self) -> Vec<(String, String)> {
@@ -1290,6 +1307,14 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
         self.inner.client_environment_rows()
     }
+
+    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+        self.inner.client_tty_term()
+    }
+
+    fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_terminal_environment()
+    }
 }
 
 impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
@@ -1338,6 +1363,14 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
         self.inner.client_environment_rows()
+    }
+
+    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+        self.inner.client_tty_term()
+    }
+
+    fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_terminal_environment()
     }
 }
 
@@ -10462,6 +10495,18 @@ impl MuxEngine {
             self.global_lock_command = next;
         }
         Ok(Execution::default())
+    }
+
+    /// The `terminal-features` array, which `tty_term_create` walks with
+    /// `fnmatch` against the client's TERM to decide which features to turn on
+    /// before it interrogates the terminal. It is a server option, so the
+    /// global session store is the only place it lives.
+    #[must_use]
+    pub fn terminal_features_option(&self) -> Vec<String> {
+        self.array_option_readback(TmuxOptionTarget::Server, "terminal-features", true)
+            .into_iter()
+            .flat_map(|(array, _)| array.values().cloned())
+            .collect()
     }
 
     fn update_environment_names(&self) -> impl Iterator<Item = &str> {

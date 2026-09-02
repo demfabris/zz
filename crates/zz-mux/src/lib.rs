@@ -15,6 +15,7 @@ mod model;
 mod parser;
 mod sort;
 mod status;
+mod terminfo;
 mod tmux_options;
 
 pub use command::TMUX_OPTION_CONSUMERS as BEHAVES;
@@ -60,6 +61,7 @@ pub use status::{
     StatusJustify, StatusOption, StatusPosition, WindowStatusFormats, WindowStatusOption,
     expand_format_values, expand_status,
 };
+pub use terminfo::TtyTerm;
 pub use zz_protocol::{Binding, KeyDecision, KeyEngine, KeyTables, canonical_key};
 pub use zz_protocol::{
     COMMAND_SPECS, CommandOptionSpec, CommandSpec, CommandValueKind, canonical_command,

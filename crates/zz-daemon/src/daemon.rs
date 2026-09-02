@@ -89,7 +89,7 @@ use crate::{
     status::{
         BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
         FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest,
-        client_environment_rows, host_names, status_context,
+        client_environment_rows, client_terminal_facts, host_names, status_context,
     },
     transport::{LocalTransport, Transport, TransportListener, TransportStream},
 };
@@ -28808,6 +28808,15 @@ fn client_format_facts(
         written: written.to_string(),
         line: 0,
         environment: client_environment_rows(inner.client_environments.get(&client)),
+        terminal: has_terminal
+            .then(|| {
+                client_terminal_facts(
+                    client_environment_value(inner, client, "TERM").unwrap_or_default(),
+                    client_environment_value(inner, client, "COLORTERM"),
+                    &inner.engine.terminal_features_option(),
+                )
+            })
+            .flatten(),
         viewport: has_terminal
             .then(|| client_viewport_facts(inner, client, session, window))
             .flatten(),

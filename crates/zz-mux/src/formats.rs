@@ -7,7 +7,10 @@ use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{CommandSpec, MAX_STATUS_TEXT_BYTES, PaneId, SessionId, WindowId};
 pub use zz_protocol::{TmuxColour, parse_tmux_colour};
 
-use crate::{MuxEngine, PaneKind, WindowSize, command::TmuxOptionTarget, layout::CellLayout};
+use crate::{
+    MuxEngine, PaneKind, WindowSize, command::TmuxOptionTarget, layout::CellLayout,
+    terminfo::TtyTerm,
+};
 
 const FORMAT_LOOP_LIMIT: usize = 100;
 const FORMAT_MAX_REPEAT: usize = 10_000;
@@ -1505,6 +1508,20 @@ pub trait StatusHooks {
         Vec::new()
     }
 
+    /// The `struct tty_term` the format tree's own client would carry, which
+    /// `#{I/c:}` and `#{I/f:}` interrogate. `None` is `format_replace`'s early
+    /// exit on a null client, a null tty term, or `CLIENT_UNATTACHEDFLAGS`.
+    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+        None
+    }
+
+    /// The format tree's own client's environment. `#{I/e:}` reads
+    /// `ft->c->environ`, which for a `-c` command is the target client, where
+    /// `#{Vc:}` reads the invoking client's store instead.
+    fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {
+        Vec::new()
+    }
+
     /// The entries the command itself put in `ft->tree`, which `format_each`
     /// walks after the table in RB, that is key, order.
     fn tree_entries(&mut self) -> Vec<(String, String)> {
@@ -1815,6 +1832,14 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
+    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+        self.inner.client_tty_term()
+    }
+
+    fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_terminal_environment()
+    }
+
     fn tree_entries(&mut self) -> Vec<(String, String)> {
         self.inner.tree_entries()
     }
@@ -1974,7 +1999,9 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             |(modifiers, offset)| (modifiers, &body[offset..]),
         );
         let flags = ModifierFlags::from_modifiers(&modifiers);
-        let mut value = if flags.literal {
+        let mut value = if let Some(word) = flags.interrogate {
+            self.expand_interrogate(copy, word)
+        } else if flags.literal {
             unescape(copy)
         } else if flags.character {
             self.expand_character(copy, depth)
@@ -2159,6 +2186,33 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             .filter(|value| (32..=126).contains(value))
             .map(char::from)
             .map_or_else(String::new, |value| value.to_string())
+    }
+
+    /// `format_replace`'s client capability, feature and environment lookup.
+    /// The body is a literal name, never expanded, and the three checks run in
+    /// the fixed source order c, f, e with each overwriting the last, so a flag
+    /// word naming several of them answers the last one that ran.
+    fn expand_interrogate(&mut self, copy: &str, word: &str) -> String {
+        let Some(terminal) = self.hooks.client_tty_term() else {
+            return String::new();
+        };
+        let mut value = String::new();
+        if word.contains('c') {
+            bool_string(terminal.has_capability(copy)).clone_into(&mut value);
+        }
+        if word.contains('f') {
+            bool_string(terminal.has_feature(copy)).clone_into(&mut value);
+        }
+        if word.contains('e') {
+            value = self
+                .hooks
+                .client_terminal_environment()
+                .into_iter()
+                .find(|row| row.name == copy)
+                .map(|row| row.value)
+                .unwrap_or_default();
+        }
+        value
     }
 
     fn expand_colour(&mut self, copy: &str, depth: usize, flags: &str) -> String {
@@ -2682,6 +2736,7 @@ enum ModifierKind {
     Environments,
     ContentSearch,
     Repeat,
+    Interrogate,
 }
 
 #[derive(Clone, Copy)]
@@ -2701,7 +2756,7 @@ impl FormatModifierSpec {
     }
 }
 
-const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 35] = [
+const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 36] = [
     FormatModifierSpec::new("||", ModifierKind::Or, false),
     FormatModifierSpec::new("&&", ModifierKind::And, false),
     FormatModifierSpec::new("!!", ModifierKind::NotNot, false),
@@ -2737,6 +2792,7 @@ const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 35] = [
     FormatModifierSpec::new("V", ModifierKind::Environments, true),
     FormatModifierSpec::new("C", ModifierKind::ContentSearch, true),
     FormatModifierSpec::new("R", ModifierKind::Repeat, true),
+    FormatModifierSpec::new("I", ModifierKind::Interrogate, true),
 ];
 
 #[cfg(test)]
@@ -2859,6 +2915,7 @@ struct ModifierFlags<'a> {
     loop_reversed: bool,
     content_search: Option<&'a str>,
     repeat: bool,
+    interrogate: Option<&'a str>,
     time: TimeFlags<'a>,
     quote_shell: bool,
     quote_single: bool,
@@ -2953,6 +3010,16 @@ impl<'a> ModifierFlags<'a> {
                 ModifierKind::Substitute | ModifierKind::Expression => {}
                 ModifierKind::Colour => {
                     flags.colour = Some(modifier.args.first().map_or("", String::as_str));
+                }
+                // `case 'I'` breaks at `argc < 1`, and a flag word carrying
+                // none of c, f or e sets no bit, so both fall through to the
+                // ordinary lookup of the body.
+                ModifierKind::Interrogate => {
+                    if let Some(word) = modifier.args.first()
+                        && word.contains(['c', 'f', 'e'])
+                    {
+                        flags.interrogate = Some(word.as_str());
+                    }
                 }
                 ModifierKind::NameExists => {
                     if modifier

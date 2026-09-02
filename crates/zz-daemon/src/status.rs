@@ -5,8 +5,8 @@ use std::{
     fmt::Write as _,
     io::Read as _,
     path::{Path, PathBuf},
-    process::{Child, Stdio},
-    sync::{Arc, OnceLock},
+    process::{Child, Command, Stdio},
+    sync::{Arc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -16,7 +16,7 @@ use glob::{MatchOptions, Pattern};
 use regex::RegexBuilder;
 use zz_mux::{
     FormatClientRow, FormatEnvironRow, MuxEngine, StatusContext, StatusFormats, StatusHooks,
-    StatusRowVariables, display_width, expand_status,
+    StatusRowVariables, TtyTerm, display_width, expand_status,
 };
 use zz_protocol::{
     ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, SessionId, StatusLine,
@@ -140,6 +140,10 @@ pub(crate) struct ClientFormatFacts {
     pub(crate) written: String,
     pub(crate) line: usize,
     pub(crate) environment: Vec<FormatEnvironRow>,
+    /// The `struct tty_term` tmux would build for this client, which is what
+    /// `#{I/c:}` and `#{I/f:}` interrogate. Absent for a client with no tty,
+    /// which is `format_replace`'s null-term early exit.
+    pub(crate) terminal: Option<TtyTerm>,
     pub(crate) viewport: Option<ClientViewportFacts>,
 }
 
@@ -199,6 +203,83 @@ const DEFAULT_YPIXEL: u32 = 32;
 
 /// A client's own process environment as `#{Vc:}` rows. A client store has no
 /// hidden or removed entries: the client sends what it has.
+/// `tty_term_read_list` on the pin sets up the terminfo entry for the client's
+/// TERM and writes each capability it finds as a `name=value` string. zz has no
+/// curses linkage, so it reads the same entry through `infocmp -x`, which is
+/// the only portable reader that also prints the extended section the tmux
+/// capability names live in. The result depends on nothing but the TERM name,
+/// so it is read once per name for the life of the process.
+fn terminfo_entries(term: &str) -> Option<Arc<Vec<String>>> {
+    static ENTRIES: OnceLock<Mutex<BTreeMap<String, Option<Arc<Vec<String>>>>>> = OnceLock::new();
+    let cache = ENTRIES.get_or_init(|| Mutex::new(BTreeMap::new()));
+    if let Some(cached) = cache.lock().ok()?.get(term) {
+        return cached.clone();
+    }
+    let read = read_terminfo_entries(term).map(Arc::new);
+    if read.is_none() {
+        log::warn!(
+            target: "zz_daemon::diagnostics::status",
+            "no terminfo entry for TERM={term}; the client interrogate answers empty"
+        );
+    }
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(term.to_owned(), read.clone());
+    }
+    read
+}
+
+fn read_terminfo_entries(term: &str) -> Option<Vec<String>> {
+    if term.is_empty() || term.contains('/') || term.starts_with('-') {
+        return None;
+    }
+    let output = Command::new("infocmp")
+        .args(["-x", "-1", term])
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let mut entries = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let Some(line) = line.strip_suffix(',') else {
+            continue;
+        };
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        // `infocmp` prints a string capability as `name=value`, a number as
+        // `name#value`, a boolean as a bare `name` and a cancelled capability
+        // as `name@`; `tty_term_read_list` carries all three live forms as
+        // `name=value` and never sees a cancelled one.
+        if let Some((name, value)) = line.split_once('=') {
+            entries.push(format!("{name}={value}"));
+        } else if let Some((name, value)) = line.split_once('#') {
+            entries.push(format!("{name}={value}"));
+        } else if !line.ends_with('@') {
+            entries.push(format!("{line}=1"));
+        }
+    }
+    Some(entries)
+}
+
+/// The `struct tty_term` the pin would build for a client on `term`.
+pub(crate) fn client_terminal_facts(
+    term: &str,
+    colour_term: Option<&str>,
+    terminal_features: &[String],
+) -> Option<TtyTerm> {
+    let entries = terminfo_entries(term)?;
+    Some(TtyTerm::create(
+        term,
+        &entries,
+        colour_term,
+        terminal_features,
+    ))
+}
+
 pub(crate) fn client_environment_rows(
     environment: Option<&Arc<BTreeMap<String, String>>>,
 ) -> Vec<FormatEnvironRow> {
@@ -974,6 +1055,18 @@ impl StatusHooks for DaemonFormatHooks<'_> {
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
         self.facts.client_environment.as_ref().clone()
+    }
+
+    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+        self.facts.client.as_ref()?.terminal.clone()
+    }
+
+    fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {
+        self.facts
+            .client
+            .as_ref()
+            .map(|client| client.environment.clone())
+            .unwrap_or_default()
     }
 
     /// `cmdq_merge_formats` copies the queue item's own entries into `ft->tree`
@@ -2653,5 +2746,27 @@ mod tests {
             started.elapsed() < SHELL_TIMEOUT * 3,
             "the timeout, not the command, bounds the render"
         );
+    }
+}
+
+#[cfg(test)]
+mod terminfo_tests {
+    use super::*;
+
+    #[test]
+    fn the_infocmp_reader_finds_the_extended_section() {
+        let Some(entries) = terminfo_entries("xterm-256color") else {
+            return;
+        };
+        assert!(entries.iter().any(|entry| entry.starts_with("AX=")));
+        assert!(entries.iter().any(|entry| entry.starts_with("colors=256")));
+        let term = client_terminal_facts(
+            "xterm-256color",
+            Some("truecolor"),
+            &["xterm*:clipboard:ccolour:cstyle:focus:title".to_owned()],
+        )
+        .expect("term");
+        assert!(term.has_capability("smcup"));
+        assert!(term.has_feature("RGB"));
     }
 }

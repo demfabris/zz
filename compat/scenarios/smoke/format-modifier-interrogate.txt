@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/format-modifier-interrogate.sh ~/format-modifier-interrogate.sh
+stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+out: set-environment -gu FORMAT_MODIFIER_INTERROGATE
+run-shell 'sh ~/format-modifier-interrogate.sh'
+out: show-environment -g FORMAT_MODIFIER_INTERROGATE

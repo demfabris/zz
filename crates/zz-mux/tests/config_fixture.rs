@@ -53,9 +53,9 @@ fn existing_tmux_config_applies_supported_subset_and_skips_the_rest() {
             &zz_protocol::CommandInvocation::new("new-session", [] as [&str; 0]),
         )
         .expect("session with configured options");
-    for (key, input, template) in [
-        ("R", "0", "rename-session -- '%%'"),
-        ("W", "0", "rename-window -- '%%'"),
+    for (key, input, template, label) in [
+        ("R", "0", "rename-session -- '%%'", "(rename-session) "),
+        ("W", "0", "rename-window -- '%%'", "(rename-window) "),
     ] {
         let command = engine.keys.get("prefix", key).unwrap().commands[0].clone();
         let execution = engine
@@ -64,8 +64,10 @@ fn existing_tmux_config_applies_supported_subset_and_skips_the_rest() {
         assert_eq!(
             execution.effects,
             [MuxEffect::CommandPrompt {
-                prompt: ":".to_owned(),
-                input: input.to_owned(),
+                steps: vec![zz_mux::CommandPromptStep {
+                    label: label.to_owned(),
+                    input: input.to_owned(),
+                }],
                 template: Some(CommandPromptTemplate::String(template.to_owned())),
                 source: None,
                 prompt_type: zz_protocol::CommandPromptType::Command,

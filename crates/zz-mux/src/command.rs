@@ -811,6 +811,28 @@ pub enum CommandPromptTemplate {
     Commands(Vec<CommandInvocation>),
 }
 
+/// One `-p` label with the `-I` input that seeds it. `command-prompt` splits
+/// both on commas and walks the pairs in order, so a chain is a list of these.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommandPromptStep {
+    pub label: String,
+    pub input: String,
+}
+
+/// `args_make_commands_get_command`: the name a bare prompt puts in its
+/// parentheses. A typed template answers with its first command's catalog
+/// name, a string template with everything before its first space or comma.
+fn command_prompt_template_name(template: &CommandPromptTemplate) -> &str {
+    match template {
+        CommandPromptTemplate::Commands(commands) => commands
+            .first()
+            .map_or("", |command| canonical_command(&command.name)),
+        CommandPromptTemplate::String(template) => {
+            template.split([' ', ',']).next().unwrap_or(template)
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MuxEffect {
     PaneCreated {
@@ -879,8 +901,7 @@ pub enum MuxEffect {
         command: TerminalUiCommand,
     },
     CommandPrompt {
-        prompt: String,
-        input: String,
+        steps: Vec<CommandPromptStep>,
         template: Option<CommandPromptTemplate>,
         source: Option<SourceSpan>,
         prompt_type: CommandPromptType,
@@ -2904,17 +2925,29 @@ impl MuxEngine {
         prepare_expanded_callback_invocation(self, command, owner, !alias_matched)
     }
 
-    pub fn substitute_command_prompt_commands(
+    pub fn substitute_command_prompt_commands<S: AsRef<str>>(
         &self,
         commands: &mut [CommandInvocation],
-        input: &str,
+        inputs: &[S],
     ) -> Result<(), ServerError> {
-        substitute_command_prompt_invocations(commands, input)
+        substitute_command_prompt_invocations(commands, inputs)
     }
 
+    /// `args_make_commands`: one `cmd_template_replace` pass per answer, in
+    /// answer order, so an earlier answer's text is itself rewritten by a
+    /// later pass.
     #[must_use]
-    pub fn substitute_command_prompt_template(template: &str, input: &str) -> String {
-        command_template_replace(template, input, 1)
+    pub fn substitute_command_prompt_template<S: AsRef<str>>(
+        template: &str,
+        inputs: &[S],
+    ) -> String {
+        inputs
+            .iter()
+            .enumerate()
+            .fold(template.to_owned(), |template, (index, input)| {
+                let index = u8::try_from(index.saturating_add(1)).unwrap_or(u8::MAX);
+                command_template_replace(&template, input.as_ref(), index)
+            })
     }
 
     pub fn parse_config_without_variable_expansion(
@@ -7271,8 +7304,6 @@ impl MuxEngine {
             }
         };
         let mode = command_prompt_mode(&options);
-        let prompt = options.value("-p").unwrap_or(":").to_owned();
-        let input = self.expand_prompt_input(context, options.value("-I").unwrap_or_default())?;
         let template = positional
             .first()
             .map(|template| {
@@ -7285,12 +7316,53 @@ impl MuxEngine {
                 }
             })
             .transpose()?;
-        if prompt.len() > MAX_COMMAND_PROMPT_LABEL_BYTES {
+        let (labels, pad) = match options.value("-p") {
+            Some(labels) => (labels.to_owned(), true),
+            None => match &template {
+                Some(template) => (
+                    format!("({})", command_prompt_template_name(template)),
+                    true,
+                ),
+                None => (":".to_owned(), false),
+            },
+        };
+        let inputs = options.value("-I");
+        let steps = if options.has("-l") {
+            vec![CommandPromptStep {
+                label: labels,
+                input: self.expand_prompt_input(context, inputs.unwrap_or_default())?,
+            }]
+        } else {
+            let mut inputs = inputs.map(|inputs| inputs.split(','));
+            labels
+                .split(',')
+                .map(|label| {
+                    Ok(CommandPromptStep {
+                        label: if pad {
+                            format!("{label} ")
+                        } else {
+                            label.to_owned()
+                        },
+                        input: self.expand_prompt_input(
+                            context,
+                            inputs.as_mut().and_then(Iterator::next).unwrap_or_default(),
+                        )?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ServerError>>()?
+        };
+        if steps
+            .iter()
+            .any(|step| step.label.len() > MAX_COMMAND_PROMPT_LABEL_BYTES)
+        {
             return Err(ServerError::InvalidCommand(format!(
                 "command prompt label exceeds {MAX_COMMAND_PROMPT_LABEL_BYTES} bytes"
             )));
         }
-        if input.len() > zz_protocol::MAX_COMMAND_PROMPT_BYTES {
+        if steps
+            .iter()
+            .any(|step| step.input.len() > zz_protocol::MAX_COMMAND_PROMPT_BYTES)
+        {
             return Err(ServerError::InvalidCommand(format!(
                 "command prompt input exceeds {} bytes",
                 zz_protocol::MAX_COMMAND_PROMPT_BYTES
@@ -7309,8 +7381,7 @@ impl MuxEngine {
             )));
         }
         Ok(Execution::effect(MuxEffect::CommandPrompt {
-            prompt,
-            input,
+            steps,
             template,
             source: invocation.source.clone(),
             prompt_type,
@@ -14920,14 +14991,15 @@ fn prepare_expanded_callback_invocation(
     validate_bound_command(command, owner)
 }
 
-fn substitute_command_prompt_invocations(
+fn substitute_command_prompt_invocations<S: AsRef<str>>(
     commands: &mut [CommandInvocation],
-    input: &str,
+    inputs: &[S],
 ) -> Result<(), ServerError> {
     for command in commands {
         for index in 0..command.args.len() {
             if !command.argument_is_command_block(index) {
-                command.args[index] = command_template_replace(&command.args[index], input, 1);
+                command.args[index] =
+                    MuxEngine::substitute_command_prompt_template(&command.args[index], inputs);
                 continue;
             }
             let body = crate::parser::command_block_body(&command.args[index])
@@ -14938,7 +15010,7 @@ fn substitute_command_prompt_invocations(
                 return Err(ServerError::CommandParse(diagnostic.message));
             }
             let mut nested = parsed.commands;
-            substitute_command_prompt_invocations(&mut nested, input)?;
+            substitute_command_prompt_invocations(&mut nested, inputs)?;
             command.args[index] = format!("{{ {} }}", format_callback_commands_round_trip(&nested));
         }
     }
@@ -36489,8 +36561,10 @@ mod tests {
         assert_eq!(
             execution.effects,
             vec![MuxEffect::CommandPrompt {
-                prompt: "window name".to_owned(),
-                input: "scratch".to_owned(),
+                steps: vec![CommandPromptStep {
+                    label: "window name ".to_owned(),
+                    input: "scratch".to_owned(),
+                }],
                 template: Some(CommandPromptTemplate::String("new-window -n %%".to_owned(),)),
                 source: None,
                 prompt_type: CommandPromptType::Command,
@@ -36517,8 +36591,10 @@ mod tests {
         assert_eq!(
             execution.effects,
             vec![MuxEffect::CommandPrompt {
-                prompt: ":".to_owned(),
-                input: "work tree / editor pane".to_owned(),
+                steps: vec![CommandPromptStep {
+                    label: "(rename-window) ".to_owned(),
+                    input: "work tree / editor pane".to_owned(),
+                }],
                 template: Some(CommandPromptTemplate::String(
                     "rename-window -- '%%'".to_owned(),
                 )),
@@ -36582,7 +36658,7 @@ mod tests {
             .expect("prepare typed prompt commands");
         let input = "x\" ; set-environment -g PROMPT_INJECTED yes ; display-message -p \"";
         engine
-            .substitute_command_prompt_commands(&mut commands, input)
+            .substitute_command_prompt_commands(&mut commands, &[input])
             .expect("substitute typed prompt input");
 
         let body = crate::parser::command_block_body(&commands[0].args[2])
@@ -36600,11 +36676,11 @@ mod tests {
     #[test]
     fn command_prompt_substitution_matches_tmux_placeholders_and_quoting() {
         assert_eq!(
-            MuxEngine::substitute_command_prompt_template("%%:%%:%1:%1:%2", "abc"),
+            MuxEngine::substitute_command_prompt_template("%%:%%:%1:%1:%2", &["abc"]),
             "abc:%%:abc:abc:%2"
         );
         assert_eq!(
-            MuxEngine::substitute_command_prompt_template("%%%|%1%", "\"\\$;~"),
+            MuxEngine::substitute_command_prompt_template("%%%|%1%", &["\"\\$;~"]),
             r#"\"\\\$\;\~|\"\\\$\;\~"#
         );
 
@@ -36614,7 +36690,7 @@ mod tests {
         assert!(parsed.diagnostics.is_empty());
         let mut commands = parsed.commands;
         engine
-            .substitute_command_prompt_commands(&mut commands, "abc")
+            .substitute_command_prompt_commands(&mut commands, &["abc"])
             .expect("substitute typed prompt placeholders");
         assert_eq!(commands[0].args[1], "abc:%%:abc:abc:%2:%%%:abc");
     }
@@ -36671,7 +36747,7 @@ mod tests {
             engine.execute(&mut context, &command("command-prompt", &["-T", "bogus"])),
             Err(ServerError::InvalidCommand(message)) if message == "unknown type: bogus"
         ));
-        for parked in ["-F", "-l", "-P"] {
+        for parked in ["-F", "-P"] {
             assert!(matches!(
                 engine.execute(&mut context, &command("command-prompt", &[parked])),
                 Err(ServerError::UnsupportedCommand(message))

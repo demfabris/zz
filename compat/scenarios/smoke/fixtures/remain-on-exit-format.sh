@@ -82,6 +82,22 @@ screen() {
     main_client capture-pane -p -t "=$session:$1" | tr -d ' \n'
 }
 
+# The pin draws the notice inside server_destroy_pane, so `#{pane_dead}` and
+# the drawn row land together; zz marks the pane dead first and hands the
+# expanded text to the pane's worker straight after, so the row settles a beat
+# later. Both engines end on the same screen.
+check_screen() {
+    attempt=0
+    while [ "$attempt" -lt 400 ]; do
+        if [ "$(screen "$3")" = "$2" ]; then
+            break
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.05
+    done
+    check_equal "$1" "$2" "$(screen "$3")"
+}
+
 main_client new-session -d -s "$session" -n keep -x 40 -y 6
 main_client set-option -g remain-on-exit on
 main_client set-option -g remain-on-exit-format 'DEADFMT[#{pane_dead_status}][#{pane_dead_signal}]'
@@ -90,23 +106,23 @@ main_client set-option -g remain-on-exit-format 'DEADFMT[#{pane_dead_status}][#{
 # dead, so the status and signal names are the ones the child left behind.
 main_client new-window -t "=$session" -n wstatus 'sh -c "exit 7"'
 await_dead wstatus || { echo "remain-on-exit-format-$side: wstatus"; exit 0; }
-check_equal status-notice-is-drawn 'DEADFMT[7][]' "$(screen wstatus)"
+check_screen status-notice-is-drawn 'DEADFMT[7][]' wstatus
 check_equal status-pane-is-dead 1 "$(main_client display-message -p -t "=$session:wstatus" '#{pane_dead}')"
 
 main_client new-window -t "=$session" -n wsignal 'sh -c "kill -TERM $$"'
 await_dead wsignal || { echo "remain-on-exit-format-$side: wsignal"; exit 0; }
-check_equal signal-notice-is-drawn 'DEADFMT[][term]' "$(screen wsignal)"
+check_screen signal-notice-is-drawn 'DEADFMT[][term]' wsignal
 
 main_client new-window -t "=$session" -n wzero 'sh -c "exit 0"'
 await_dead wzero || { echo "remain-on-exit-format-$side: wzero"; exit 0; }
-check_equal zero-status-notice-is-drawn 'DEADFMT[0][]' "$(screen wzero)"
+check_screen zero-status-notice-is-drawn 'DEADFMT[0][]' wzero
 
 # `if (*s != '\0')` guards the whole draw, so an empty template leaves the
 # pane's own last output exactly where it was.
 main_client set-option -g remain-on-exit-format ''
 main_client new-window -t "=$session" -n wempty 'sh -c "printf MARKER; exit 4"'
 await_dead wempty || { echo "remain-on-exit-format-$side: wempty"; exit 0; }
-check_equal empty-template-draws-nothing MARKER "$(screen wempty)"
+check_screen empty-template-draws-nothing MARKER wempty
 
 # remain-on-exit failed retains only a child that failed, and the retained one
 # still gets the notice.
@@ -114,7 +130,7 @@ main_client set-option -g remain-on-exit-format 'DEADFMT[#{pane_dead_status}][#{
 main_client set-option -g remain-on-exit failed
 main_client new-window -t "=$session" -n wfailed 'sh -c "exit 5"'
 await_dead wfailed || { echo "remain-on-exit-format-$side: wfailed"; exit 0; }
-check_equal failed-retains-a-failure 'DEADFMT[5][]' "$(screen wfailed)"
+check_screen failed-retains-a-failure 'DEADFMT[5][]' wfailed
 main_client new-window -t "=$session" -n wok 'sh -c "exit 0"'
 await_gone wok || { echo "remain-on-exit-format-$side: wok"; exit 0; }
 check_equal failed-closes-a-clean-exit 0 \

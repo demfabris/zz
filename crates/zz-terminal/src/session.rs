@@ -4902,6 +4902,12 @@ fn run_terminal(
         rows: geometry.rows,
         max_scrollback,
     })?;
+    terminal.resize(
+        geometry.columns,
+        geometry.rows,
+        geometry.cell_width_px,
+        geometry.cell_height_px,
+    )?;
     terminal.on_pty_write(move |_, bytes| {
         effect_sink.borrow_mut().push(bytes);
     })?;
@@ -19857,6 +19863,51 @@ mod tests {
             assert!(
                 std::time::Instant::now() < deadline,
                 "live session never published a Kitty placement"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// A popup is spawned at the size it wants and nobody ever resizes it, so
+    /// the placements a popup publishes have to be there before the first
+    /// `Command::Resize`. `Terminal::new` takes no cell pixel geometry, and the
+    /// Kitty placement's render info is measured in cell pixels, so a session
+    /// that never resized reported no placement at all.
+    #[cfg(unix)]
+    #[test]
+    fn a_session_that_is_never_resized_still_publishes_kitty_placements() {
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                initial_size: Some(TerminalSize {
+                    columns: 38,
+                    rows: 12,
+                    cell_width_px: 8,
+                    cell_height_px: 18,
+                }),
+                ..TerminalSpawn::default()
+            },
+        );
+        let view = TerminalViewId(21);
+        session.attach_view(view);
+        session.send_text("printf '\\033_Ga=T,f=24,s=1,v=1,i=77;/wAA\\033\\\\'\n");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            while session.events().try_recv().is_ok() {}
+            let placed = session.latest_viewport_for(view).is_some_and(|viewport| {
+                viewport
+                    .kitty_placements
+                    .iter()
+                    .any(|placement| placement.image_id == 77)
+            });
+            if placed {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "unresized session never published a Kitty placement"
             );
             thread::sleep(Duration::from_millis(20));
         }

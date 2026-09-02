@@ -1,0 +1,15 @@
+corpus: none
+# The same popup image contract as display-popup-kitty with no client resize
+# anywhere: a user prints an image inside a popup and never touches the window,
+# which is the ordinary flow. The popup's images have to reach the client on the
+# publishes the popup's own output drives, so this scenario also compares the
+# image the placement names across the replacement - every popup paint suspends
+# the bridge and re-places, so a delete plus a place on a repaint says nothing
+# about whether the popup replaced anything. The pinned tree at d77c9dc6 has no
+# image protocol at all, so the pin draws the popup's text and emits no graphics
+# escape, and its side asserts exactly that.
+stage: fixtures/display-popup-kitty-noresize.sh ~/display-popup-kitty-noresize.sh
+stage: fixtures/graphics-drive.py ~/graphics-drive.py
+out: set-environment -gu DISPLAY_POPUP_KITTY_NORESIZE
+run-shell 'sh ~/display-popup-kitty-noresize.sh'
+out: show-environment -g DISPLAY_POPUP_KITTY_NORESIZE

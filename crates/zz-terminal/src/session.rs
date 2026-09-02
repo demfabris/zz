@@ -7881,6 +7881,18 @@ fn apply_copy_mode_action(
                 word_separators,
             )
         }
+        CopyModeAction::CopyLine(copy) => {
+            select_copy_mode_whole_line(&mut mode, 1);
+            *copy_mode = Some(mode);
+            apply_copy_mode_action(
+                terminal,
+                selection,
+                copy_mode,
+                unseen_output,
+                CopyModeAction::CopySelection(copy),
+                word_separators,
+            )
+        }
         CopyModeAction::SelectionMode(unit) => {
             mode.selection_mode = unit;
             *copy_mode = Some(mode);
@@ -7997,7 +8009,50 @@ fn apply_counted_copy_mode_action(
                 word_separators,
             )
         }
+        CopyModeCountPolicy::CopyLine => {
+            let CopyModeAction::CopyLine(copy) = action else {
+                unreachable!("copy-line policy is only assigned to copy-line")
+            };
+            let Some(mut mode) = copy_mode.take() else {
+                return Ok(ViewActionResult::None);
+            };
+            select_copy_mode_whole_line(&mut mode, count);
+            *copy_mode = Some(mode);
+            apply_copy_mode_action(
+                terminal,
+                selection,
+                copy_mode,
+                unseen_output,
+                CopyModeAction::CopySelection(copy),
+                word_separators,
+            )
+        }
     }
+}
+
+/// `window_copy_do_copy_line`'s selection: `selflag` back to `SEL_CHAR`, the
+/// cursor to the start of its logical line, `np - 1` rows down, then the end of
+/// that logical line. The cursor itself is left alone, because the pin puts
+/// `cx`, `cy` and `oy` back after the copy.
+fn select_copy_mode_whole_line(mode: &mut CopyModeState, count: u32) {
+    if count == 0 {
+        return;
+    }
+    let (anchor, _) = mode_logical_line_bounds(&mode.revision, mode.cursor.y);
+    let row = mode
+        .cursor
+        .y
+        .saturating_add(count.saturating_sub(1))
+        .min(mode.revision.total_rows().saturating_sub(1));
+    let (_, focus) = mode_logical_line_bounds(&mode.revision, row);
+    mode.selection_mode = CopySelectionMode::Char;
+    mode.selection = Some(ModeSelection {
+        anchor,
+        focus,
+        mode: SelectionMode::Cell,
+        rectangle: false,
+    });
+    mode.selecting = true;
 }
 
 fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32) {

@@ -134,6 +134,7 @@
 | smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
 | smoke/control-tilde-environment | 2 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-command-errors | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-copy-line | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-formats | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-refresh | 3 | yes | 0 | yes | yes | yes |

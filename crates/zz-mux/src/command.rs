@@ -901,6 +901,12 @@ pub enum MuxEffect {
     /// copy session actually ends. `window_pane_set_mode` returns before that
     /// assignment when the pane already holds the mode, so this effect is
     /// emitted before the entry and refuses to arm a pane already in the mode.
+    /// `window_copy_init` reads `wme->swp`: the next copy-mode entry on
+    /// `pane` clones `source`'s screen instead of the target's own.
+    ArmCopyModeSource {
+        pane: PaneId,
+        source: PaneId,
+    },
     ArmCopyModeKill {
         pane: PaneId,
     },
@@ -7364,6 +7370,15 @@ impl MuxEngine {
             return Ok(Execution::default());
         }
         let mut effects = Vec::new();
+        // `cmd_copy_mode_exec` resolves -s as its own pane target and hands it
+        // to window_pane_set_mode as the source; naming the target pane itself
+        // is the plain entry.
+        if let Some(source) = options.value("-s") {
+            let source = self.resolve_pane(Some(source), context.window, context.pane)?;
+            if source != pane {
+                effects.push(MuxEffect::ArmCopyModeSource { pane, source });
+            }
+        }
         if options.has("-k") {
             effects.push(MuxEffect::ArmCopyModeKill { pane });
         }

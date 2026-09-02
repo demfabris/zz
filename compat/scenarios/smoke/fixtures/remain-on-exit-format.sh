@@ -117,6 +117,50 @@ main_client new-window -t "=$session" -n wzero 'sh -c "exit 0"'
 await_dead wzero || { echo "remain-on-exit-format-$side: wzero"; exit 0; }
 check_screen zero-status-notice-is-drawn 'DEADFMT[0][]' wzero
 
+# The notice's linefeed scrolls the child's last output row out of the visible
+# screen, and a retained pane keeps that row: on the pin a 40x6 pane running ten
+# lines answers `capture-pane -p` with L07..L10 plus the notice and
+# `capture-pane -p -S -` with L01..L10 plus the notice. Thirty lines put rows out
+# of reach of both engines' screens, since zz spawns a detached pane's pty at 24
+# rows where the pin uses the window's six.
+cat >"$work/scroll.sh" <<'SCROLLED'
+i=1
+while [ $i -le 30 ]; do
+    printf 'L%02d\n' "$i"
+    i=$((i + 1))
+done
+exit 2
+SCROLLED
+
+rows_of() {
+    main_client capture-pane -p "$@" | grep -v '^$' | tr '\n' '|'
+}
+
+want_history=''
+i=1
+while [ $i -le 30 ]; do
+    want_history="$want_history$(printf 'L%02d' "$i")|"
+    i=$((i + 1))
+done
+want_history="${want_history}DEADFMT[2][]|"
+
+main_client new-window -t "=$session" -n wscroll "sh $work/scroll.sh"
+await_dead wscroll || { echo "remain-on-exit-format-$side: wscroll"; exit 0; }
+attempt=0
+while [ "$attempt" -lt 400 ]; do
+    if [ "$(rows_of -S - -t "=$session:wscroll")" = "$want_history" ]; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.05
+done
+check_equal dead-history-holds-every-row "$want_history" \
+    "$(rows_of -S - -t "=$session:wscroll")"
+check_equal dead-screen-drops-the-scrolled-rows 0 \
+    "$(main_client capture-pane -p -t "=$session:wscroll" | grep -cE '^L0[18]$' || true)"
+check_equal dead-history-reaches-the-scrolled-rows 2 \
+    "$(main_client capture-pane -p -S - -t "=$session:wscroll" | grep -cE '^L0[18]$' || true)"
+
 # `if (*s != '\0')` guards the whole draw, so an empty template leaves the
 # pane's own last output exactly where it was.
 main_client set-option -g remain-on-exit-format ''
@@ -154,7 +198,7 @@ await_gone woff || { echo "remain-on-exit-format-$side: woff"; exit 0; }
 check_equal off-closes-the-pane 0 \
     "$(main_client list-windows -t "=$session" -F '#{window_name}' | grep -c '^woff$' || true)"
 
-if [ "$check_count" -ne 10 ]; then
+if [ "$check_count" -ne 13 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then

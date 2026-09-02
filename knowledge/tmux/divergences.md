@@ -1137,7 +1137,13 @@ session map and `-E` skips the array seed. `automatic-rename` gates the desktop'
 window names install the pin's window-local `off`; its format string is evaluated by the
 daemon-side label path only. `remain-on-exit` retains a frozen dead pane with live
 `pane_dead` and normal-exit `pane_dead_status` facts, and the respawn commands revive that
-stable pane slot. `default-terminal`, `display-time`, and `repeat-time` feed new PTYs,
+stable pane slot; that pane keeps the whole grid its worker froze on the way out, so
+`capture-pane` reaches its scrollback the way the pin's surviving `struct screen` does.
+Measured 2026-09-02 beside that work: `new-session -d -x 40 -y 6` sizes the pin's pty to the
+window, so its child reads `tput lines` as 6, while zz spawns a detached pane's pty at 24 rows and
+only its mux geometry answers 6. Both engines report `pane_height` 6, so geometry rows stay clean
+and only row counts inside a pane diverge; every scenario that reads a detached pane's screen
+compares content with the blank rows dropped rather than counting rows. `default-terminal`, `display-time`, and `repeat-time` feed new PTYs,
 client message/overlay timers, and each attached session's repeat-key window.
 `list-keys` now matches the pin's selectors, key filtering, aggregate facts, stock copy-table repeat
 metadata, global flags, table, and key-column padding. Only the deterministic comparator boundary

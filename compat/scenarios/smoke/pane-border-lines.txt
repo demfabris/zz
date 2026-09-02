@@ -1,0 +1,12 @@
+corpus: none
+# pane-border-lines picks the glyph family window_get_border_cell draws every
+# border cell from, and the cell type comes from redraw_get_cell_type: a T where
+# one divider meets another and a cross where two meet head on, so a family is
+# proved by its straight run, its tee and its cross together. For a tiled pane
+# window_pane_get_pane_lines reads the window option and never the pane one.
+# The families are only visible on an attached client, so the probe attaches one
+# on a real pty inside a recorder server and reads the screen back.
+stage: fixtures/pane-border-lines.sh ~/pane-border-lines.sh
+out: set-environment -gu PANE_BORDER_LINES
+run-shell 'sh ~/pane-border-lines.sh'
+out: show-environment -g PANE_BORDER_LINES

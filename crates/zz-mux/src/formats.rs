@@ -4,7 +4,9 @@ use chrono::{Datelike as _, Local, TimeZone as _};
 use glob::{MatchOptions, Pattern};
 use regex::{Captures, RegexBuilder};
 use unicode_width::UnicodeWidthChar as _;
-use zz_protocol::{CommandSpec, MAX_STATUS_TEXT_BYTES, PaneId, SessionId, WindowId};
+use zz_protocol::{
+    CommandSpec, MAX_STATUS_TEXT_BYTES, PaneBorderStatus, PaneId, SessionId, WindowId,
+};
 pub use zz_protocol::{TmuxColour, parse_tmux_colour};
 
 use crate::{MuxEngine, PaneKind, WindowSize, command::TmuxOptionTarget, layout::CellLayout};
@@ -1278,17 +1280,10 @@ impl MuxEngine {
                 .pane_start_path
                 .clone_from(&context.pane_current_path);
         }
-        let geometry = if context.pane_zoomed {
-            let (sx, sy) = window.layout.extent();
-            Some((sx, sy, 0, 0))
-        } else if let Some((sx, sy)) = pane.screen_extent.filter(|_| window.zoomed_pane.is_some()) {
-            Some((sx, sy, 0, 0))
-        } else {
-            window
-                .layout
-                .pane_geometry(pane.id)
-                .map(|geometry| (geometry.sx, geometry.sy, geometry.xoff, geometry.yoff))
-        };
+        let border_status = self.pane_border_status(window.id);
+        let geometry = window
+            .displayed_pane_cell(pane.id, border_status)
+            .map(|geometry| (geometry.sx, geometry.sy, geometry.xoff, geometry.yoff));
         if let Some((sx, sy, xoff, yoff)) = geometry {
             context.pane_width = Some(sx);
             context.pane_height = Some(sy);
@@ -1301,9 +1296,17 @@ impl MuxEngine {
                 .checked_add(sy)
                 .and_then(|bottom| bottom.checked_sub(1));
             context.pane_at_left = Some(xoff == 0);
-            context.pane_at_top = Some(yoff == 0);
+            context.pane_at_top = Some(match border_status {
+                PaneBorderStatus::Top => yoff == 1,
+                PaneBorderStatus::Off | PaneBorderStatus::Bottom => yoff == 0,
+            });
             context.pane_at_right = Some(xoff.saturating_add(sx) == width);
-            context.pane_at_bottom = Some(yoff.saturating_add(sy) == height);
+            context.pane_at_bottom = Some(match border_status {
+                PaneBorderStatus::Bottom => {
+                    yoff.saturating_add(sy) == height.saturating_sub(1) && height > 0
+                }
+                PaneBorderStatus::Off | PaneBorderStatus::Top => yoff.saturating_add(sy) == height,
+            });
         }
         context.pane_z = Some(1);
         if context.pane_active == Some(true) {

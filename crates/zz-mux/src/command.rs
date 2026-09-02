@@ -13,11 +13,11 @@ use zz_protocol::{
     CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution, CommandSpec,
     DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
     DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
-    MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES, PaneId, PaneKindSnapshot,
-    PopupBorderLines, ServerError, SessionId, SourceSpan, TerminalUiCommand, WindowId,
-    catalog_command_spec, command_specs, normalize_browser_profile_name,
-    parse_tmux_command_options, parse_tmux_options, resolve_command,
-    unimplemented_tmux_command_spec,
+    MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES, PaneBorderIndicators, PaneBorderLines,
+    PaneBorderStatus, PaneId, PaneKindSnapshot, PopupBorderLines, ServerError, SessionId,
+    SourceSpan, TerminalUiCommand, WindowId, catalog_command_spec, command_specs,
+    normalize_browser_profile_name, parse_tmux_command_options, parse_tmux_options,
+    resolve_command, unimplemented_tmux_command_spec,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy,
@@ -165,6 +165,10 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "mode-style",
     "pane-border-style",
     "pane-active-border-style",
+    "pane-border-format",
+    "pane-border-indicators",
+    "pane-border-lines",
+    "pane-border-status",
     "pane-colours",
     "copy-mode-match-style",
     "copy-mode-current-match-style",
@@ -2789,6 +2793,43 @@ impl MuxEngine {
     #[must_use]
     pub fn window_size(&self, window: WindowId) -> WindowSize {
         self.window_knobs(window).window_size
+    }
+
+    /// `window_get_pane_status`: the window's `pane-border-status`, with
+    /// `top-floating` and `bottom-floating` folded back to off because no
+    /// tiled pane ever sees them.
+    #[must_use]
+    pub fn pane_border_status(&self, window: WindowId) -> PaneBorderStatus {
+        self.scalar_option_effective(TmuxOptionTarget::Window(window), "pane-border-status")
+            .map_or(PaneBorderStatus::Off, PaneBorderStatus::parse)
+    }
+
+    /// `window_pane_get_pane_lines` reads `wp->window->options` for every pane
+    /// that is not floating, so a tiled pane takes the window value and the
+    /// pane-scoped one it inherits from is never consulted.
+    #[must_use]
+    pub fn pane_border_lines(&self, window: WindowId) -> PaneBorderLines {
+        let mut values = self.global_pane_options.clone();
+        if let Some(overrides) = self.window_pane_options.get(&window) {
+            for (option, value) in overrides {
+                values
+                    .set_command(*option, Some(value))
+                    .expect("stored window-pane option was validated");
+            }
+        }
+        PaneBorderLines::parse(&values.pane_border_lines)
+    }
+
+    #[must_use]
+    pub fn pane_border_indicators(&self, window: WindowId) -> PaneBorderIndicators {
+        PaneBorderIndicators::parse(&self.window_knobs(window).pane_border_indicators)
+    }
+
+    #[must_use]
+    pub fn pane_border_format(&self, pane: PaneId) -> String {
+        self.scalar_option_effective(TmuxOptionTarget::Pane(pane), "pane-border-format")
+            .unwrap_or_default()
+            .to_owned()
     }
 
     #[must_use]
@@ -6451,6 +6492,7 @@ impl MuxEngine {
                 .windows
                 .get(&window_id)
                 .ok_or_else(|| ServerError::MissingTarget(window_id.to_string()))?;
+            let border_status = self.pane_border_status(window_id);
             let mut panes = window.pane_order().to_vec();
             sort.apply(&mut panes, |left, right| {
                 let left_pane = &window.panes[left];
@@ -6473,9 +6515,12 @@ impl MuxEngine {
                     Some(TmuxSortOrder::Index) => left_index.cmp(&right_index),
                     Some(TmuxSortOrder::Name) => left_pane.title.cmp(&right_pane.title),
                     Some(TmuxSortOrder::Size) => {
-                        let left_extent = window.displayed_pane_geometry(*left).unwrap_or_default();
-                        let right_extent =
-                            window.displayed_pane_geometry(*right).unwrap_or_default();
+                        let left_extent = window
+                            .displayed_pane_geometry_with_border(*left, border_status)
+                            .unwrap_or_default();
+                        let right_extent = window
+                            .displayed_pane_geometry_with_border(*right, border_status)
+                            .unwrap_or_default();
                         (u32::from(left_extent.0) * u32::from(left_extent.1))
                             .cmp(&(u32::from(right_extent.0) * u32::from(right_extent.1)))
                     }
@@ -6728,6 +6773,7 @@ impl MuxEngine {
         if self.window_size(window_id) == WindowSize::Manual {
             return false;
         }
+        let status = self.pane_border_status(window_id);
         let changed = 'probe: {
             let window = self
                 .state
@@ -6750,7 +6796,7 @@ impl MuxEngine {
             if window.active_pane != pane {
                 break 'probe false;
             }
-            let Some(pane_geometry) = window.layout.pane_geometry(pane) else {
+            let Some(pane_geometry) = window.layout.pane_geometry_with_border(pane, status) else {
                 debug_assert!(false, "window pane is missing from its layout");
                 break 'probe false;
             };
@@ -6781,10 +6827,11 @@ impl MuxEngine {
     #[must_use]
     pub fn pane_geometry(&self, pane: PaneId) -> Option<(u16, u16)> {
         let window = self.state.window_for_pane(pane)?;
+        let status = self.pane_border_status(window);
         self.state
             .windows
             .get(&window)?
-            .displayed_pane_geometry(pane)
+            .displayed_pane_geometry_with_border(pane, status)
     }
 
     #[must_use]
@@ -6801,7 +6848,8 @@ impl MuxEngine {
         }
         let mut layout = window.layout.clone();
         layout.resize(columns, rows);
-        let geometry = layout.pane_geometry(pane)?;
+        let geometry =
+            layout.pane_geometry_with_border(pane, self.pane_border_status(window.id))?;
         Some((geometry.sx, geometry.sy))
     }
 
@@ -6817,7 +6865,9 @@ impl MuxEngine {
         if let Some(zoomed) = window.zoomed_pane {
             return (zoomed == pane).then_some((columns, rows));
         }
-        let pane_geometry = window.layout.pane_geometry(pane)?;
+        let pane_geometry = window
+            .layout
+            .pane_geometry_with_border(pane, self.pane_border_status(window.id))?;
         let current = window.layout.extent();
         Some((
             implied_window_extent(columns, current.0, pane_geometry.sx),
@@ -11386,6 +11436,7 @@ impl MuxEngine {
                 window,
                 pane: None,
             })),
+            WindowOption::PaneBorderIndicators => Ok(Execution::effect(MuxEffect::SnapshotChanged)),
             WindowOption::MonitorSilence => unreachable!(),
             _ => Ok(Execution::default()),
         }
@@ -11474,7 +11525,13 @@ impl MuxEngine {
             TmuxOptionTarget::Pane(pane) => self.pane_knobs(pane),
             _ => unreachable!("pane options have window-pane scope"),
         };
-        if next == previous && !pane_overrides_removed || !option.updates_terminal_worker() {
+        if next == previous && !pane_overrides_removed {
+            return Ok(Execution::default());
+        }
+        if option == PaneOption::PaneBorderLines {
+            return Ok(Execution::effect(MuxEffect::SnapshotChanged));
+        }
+        if !option.updates_terminal_worker() {
             return Ok(Execution::default());
         }
         let (window, pane) = match target {
@@ -12412,9 +12469,28 @@ fn stored_scalar_execution(name: &str, target: TmuxOptionTarget) -> Execution {
     }
     if matches!(
         name,
-        "pane-border-style" | "pane-active-border-style" | "display-panes-format"
+        "pane-border-style"
+            | "pane-active-border-style"
+            | "display-panes-format"
+            | "pane-border-format"
+            | "pane-border-lines"
+            | "pane-border-indicators"
     ) {
         return Execution::effect(MuxEffect::SnapshotChanged);
+    }
+    if name == "pane-border-status" {
+        return Execution {
+            output: String::new(),
+            effects: vec![
+                MuxEffect::WindowSizeChanged {
+                    window: match target {
+                        TmuxOptionTarget::Window(window) => Some(window),
+                        _ => None,
+                    },
+                },
+                MuxEffect::SnapshotChanged,
+            ],
+        };
     }
     if matches!(name, "window-style" | "window-active-style") {
         let (window, pane) = match target {
@@ -32073,7 +32149,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 109);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 113);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)
@@ -32174,10 +32250,19 @@ mod tests {
             expand_option(
                 &engine,
                 FormatContext::default(),
-                "pane-border-format",
+                "remain-on-exit-format",
                 &mut hooks
             ),
-            "hook:pane-border-format"
+            "hook:remain-on-exit-format"
+        );
+        assert_eq!(
+            expand_option(
+                &engine,
+                FormatContext::default(),
+                "pane-border-status",
+                &mut hooks
+            ),
+            "off"
         );
     }
 

@@ -51,7 +51,21 @@ impl ComposedStatusRow {
 #[must_use]
 pub fn compose_status_row(expanded: &str, width: u16, base_style: &str) -> ComposedStatusRow {
     let base = parse_style(base_style).unwrap_or_default();
-    compose(expanded, usize::from(width), &base)
+    compose(expanded, usize::from(width), &base, &[])
+}
+
+/// Composes one row over a per-column underlay whose length is the row width.
+/// A column the format never writes keeps its underlay text instead of a
+/// blank, the way `window_make_pane_status` fills the pane status screen with
+/// border cells before `format_draw` writes `pane-border-format` over it.
+#[must_use]
+pub fn compose_status_row_over(
+    expanded: &str,
+    underlay: &[String],
+    base_style: &str,
+) -> ComposedStatusRow {
+    let base = parse_style(base_style).unwrap_or_default();
+    compose(expanded, underlay.len(), &base, underlay)
 }
 
 #[derive(Clone, Debug)]
@@ -457,7 +471,12 @@ impl Draw {
     }
 }
 
-fn compose(expanded: &str, available: usize, base: &TmuxStyle) -> ComposedStatusRow {
+fn compose(
+    expanded: &str,
+    available: usize,
+    base: &TmuxStyle,
+    underlay: &[String],
+) -> ComposedStatusRow {
     if available == 0 {
         return ComposedStatusRow::default();
     }
@@ -481,7 +500,7 @@ fn compose(expanded: &str, available: usize, base: &TmuxStyle) -> ComposedStatus
             _ => arrange_none(&mut draw, available),
         }
     }
-    finish(draw, base, fill)
+    finish(draw, base, fill, underlay)
 }
 
 fn arrange_none(draw: &mut Draw, available: usize) {
@@ -731,7 +750,12 @@ fn merged_style(base: &TmuxStyle, cell: &TmuxStyle) -> TmuxStyle {
     merged
 }
 
-fn finish(draw: Draw, base: &TmuxStyle, fill: Option<TmuxColour>) -> ComposedStatusRow {
+fn finish(
+    draw: Draw,
+    base: &TmuxStyle,
+    fill: Option<TmuxColour>,
+    underlay: &[String],
+) -> ComposedStatusRow {
     let uncovered = fill.map_or_else(
         || merged_style(base, &TmuxStyle::default()),
         |fill| TmuxStyle {
@@ -750,9 +774,12 @@ fn finish(draw: Draw, base: &TmuxStyle, fill: Option<TmuxColour>) -> ComposedSta
             });
         }
     };
-    for slot in &draw.out {
+    for (column, slot) in draw.out.iter().enumerate() {
         match slot {
-            None => push(" ", uncovered.clone()),
+            None => push(
+                underlay.get(column).map_or(" ", String::as_str),
+                uncovered.clone(),
+            ),
             Some(Slot::Cell { text, style, .. }) => push(text, merged_style(base, style)),
             Some(Slot::Tail(_)) => {}
         }

@@ -1,0 +1,52 @@
+corpus: none
+# pane-border-status carves a real row out of pane geometry rather than
+# decorating one. layout_fix_panes calls layout_add_horizontal_border for every
+# pane: under `top` only a cell whose top edge is the layout root's top edge
+# takes the row (yoff++ and sy--), under `bottom` only a cell whose bottom edge
+# is the root's bottom edge takes it (sy--), and the layout cell itself is never
+# touched, so #{window_layout} is the same string at every setting. The two
+# floating settings fold back to off for a tiled pane through
+# window_get_pane_status. #{pane_at_top} and #{pane_at_bottom} read the shifted
+# offsets against the row rather than against the window edge.
+set -g status off
+out: display-message -p #{window_width}x#{window_height}
+split-window -v
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}:t#{pane_at_top}b#{pane_at_bottom}
+set -w pane-border-status top
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}:t#{pane_at_top}b#{pane_at_bottom}
+out: display-message -p #{window_layout}
+set -w pane-border-status bottom
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}:t#{pane_at_top}b#{pane_at_bottom}
+out: display-message -p #{window_layout}
+set -w pane-border-status top-floating
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}:t#{pane_at_top}b#{pane_at_bottom}
+set -w pane-border-status bottom-floating
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}:t#{pane_at_top}b#{pane_at_bottom}
+set -w pane-border-status bottom
+split-window -h -t w:0.1
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+set -w pane-border-status top
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+kill-pane -t w:0.2
+resize-pane -Z -t w:0.0
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+resize-pane -Z -t w:0.0
+kill-pane -t w:0.1
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+split-window -h
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+set -w pane-border-status bottom
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+set -w pane-border-status off
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+# The row itself is drawn by an attached client, so the second half attaches one
+# on a real pty inside a recorder server and reads the screen back with
+# capture-pane. window_make_pane_status expands pane-border-format per pane and
+# format_draw writes it over the prefilled border row, so a distinctive format
+# has to appear once per pane while the option is on, move from the top of a
+# pane to its bottom when the option does, follow a live format change, and
+# leave no trace once the option goes back off.
+stage: fixtures/pane-border-status.sh ~/pane-border-status.sh
+out: set-environment -gu PANE_BORDER_STATUS
+run-shell 'sh ~/pane-border-status.sh'
+out: show-environment -g PANE_BORDER_STATUS

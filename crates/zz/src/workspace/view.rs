@@ -3264,6 +3264,11 @@ mod tests {
             visible_layout_dump: String::new(),
             status_label: String::new(),
             activity: false,
+            pane_border_status: zz_protocol::PaneBorderStatus::Off,
+            pane_border_lines: zz_protocol::PaneBorderLines::Single,
+            pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
+            pane_order: Vec::new(),
+            pane_z_order: Vec::new(),
         };
         let attached = SessionId(1);
         let session = zz_protocol::SessionSnapshot {
@@ -3691,6 +3696,7 @@ mod tests {
                     dead_status: None,
                     border_colour: None,
                     active_border_colour: None,
+                    border_status_text: String::new(),
                 },
             )]
             .into_iter()
@@ -3699,6 +3705,11 @@ mod tests {
             visible_layout_dump: String::new(),
             status_label: String::new(),
             activity: false,
+            pane_border_status: zz_protocol::PaneBorderStatus::Off,
+            pane_border_lines: zz_protocol::PaneBorderLines::Single,
+            pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
+            pane_order: Vec::new(),
+            pane_z_order: Vec::new(),
         };
         MuxSnapshot {
             generation,
@@ -4019,6 +4030,7 @@ mod tests {
             dead_status: None,
             border_colour: None,
             active_border_colour: None,
+            border_status_text: String::new(),
         };
         let window = WindowSnapshot {
             id: WindowId(0),
@@ -4047,6 +4059,11 @@ mod tests {
             visible_layout_dump: String::new(),
             status_label: String::new(),
             activity: false,
+            pane_border_status: zz_protocol::PaneBorderStatus::Off,
+            pane_border_lines: zz_protocol::PaneBorderLines::Single,
+            pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
+            pane_order: Vec::new(),
+            pane_z_order: Vec::new(),
         };
         MuxSnapshot {
             generation: 10 + active.0 + generation_bias,
@@ -4896,6 +4913,11 @@ mod tests {
             visible_layout_dump: String::new(),
             status_label: String::new(),
             activity: false,
+            pane_border_status: zz_protocol::PaneBorderStatus::Off,
+            pane_border_lines: zz_protocol::PaneBorderLines::Single,
+            pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
+            pane_order: Vec::new(),
+            pane_z_order: Vec::new(),
         };
 
         assert!(pending.still_predicts(Some(&window), 12));

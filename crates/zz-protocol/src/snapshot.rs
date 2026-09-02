@@ -356,6 +356,94 @@ pub enum PaneKindSnapshot {
     Editor(EditorDescriptor),
 }
 
+/// `pane-border-status` as the redraw path sees it. `window_get_pane_status`
+/// folds `top-floating` and `bottom-floating` back to off for every tiled
+/// pane, so only these three reach a client.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaneBorderStatus {
+    #[default]
+    Off,
+    Top,
+    Bottom,
+}
+
+impl PaneBorderStatus {
+    #[must_use]
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "top" => Self::Top,
+            "bottom" => Self::Bottom,
+            _ => Self::Off,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_on(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
+/// `pane-border-lines`: the glyph family `window_get_border_cell` draws pane
+/// borders from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaneBorderLines {
+    #[default]
+    Single,
+    Double,
+    Heavy,
+    Simple,
+    Number,
+    Spaces,
+    None,
+}
+
+impl PaneBorderLines {
+    #[must_use]
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "double" => Self::Double,
+            "heavy" => Self::Heavy,
+            "simple" => Self::Simple,
+            "number" => Self::Number,
+            "spaces" => Self::Spaces,
+            "none" => Self::None,
+            _ => Self::Single,
+        }
+    }
+}
+
+/// `pane-border-indicators`: how the active pane is marked on its borders.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaneBorderIndicators {
+    Off,
+    #[default]
+    Colour,
+    Arrows,
+    Both,
+}
+
+impl PaneBorderIndicators {
+    #[must_use]
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "off" => Self::Off,
+            "arrows" => Self::Arrows,
+            "both" => Self::Both,
+            _ => Self::Colour,
+        }
+    }
+
+    #[must_use]
+    pub const fn colours(self) -> bool {
+        matches!(self, Self::Colour | Self::Both)
+    }
+
+    #[must_use]
+    pub const fn arrows(self) -> bool {
+        matches!(self, Self::Arrows | Self::Both)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneSnapshot {
     pub id: PaneId,
@@ -370,6 +458,10 @@ pub struct PaneSnapshot {
     pub border_colour: Option<TmuxColour>,
     /// `pane-active-border-style` colour override; `None` means theme fallback.
     pub active_border_colour: Option<TmuxColour>,
+    /// The expanded `pane-border-format` for this pane, empty while
+    /// `pane-border-status` is off.
+    #[serde(default)]
+    pub border_status_text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -387,6 +479,23 @@ pub struct WindowSnapshot {
     #[serde(deserialize_with = "deserialize_window_status_label")]
     pub status_label: String,
     pub activity: bool,
+    #[serde(default)]
+    pub pane_border_status: PaneBorderStatus,
+    #[serde(default)]
+    pub pane_border_lines: PaneBorderLines,
+    #[serde(default)]
+    pub pane_border_indicators: PaneBorderIndicators,
+    /// `w->panes`: the order `window_pane_index` counts, so a pane's index is
+    /// its position here plus `pane-base-index`.
+    #[serde(default)]
+    pub pane_order: Vec<PaneId>,
+    /// `w->z_index`: the second order `window_add_pane` always appends to,
+    /// `join-pane` inserts beside its destination in, `swap-pane` exchanges
+    /// positions in, and `layout_parse` rebuilds from the layout tree. A
+    /// border cell two panes both touch goes to the pane earliest here,
+    /// because `redraw_build_scene` walks the list in reverse.
+    #[serde(default)]
+    pub pane_z_order: Vec<PaneId>,
 }
 
 fn deserialize_window_status_label<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -468,6 +577,11 @@ mod tests {
             visible_layout_dump: String::new(),
             status_label: String::new(),
             activity: false,
+            pane_border_status: PaneBorderStatus::Off,
+            pane_border_lines: PaneBorderLines::Single,
+            pane_border_indicators: PaneBorderIndicators::Colour,
+            pane_order: Vec::new(),
+            pane_z_order: Vec::new(),
         };
         let first = WindowId(1);
         let second = WindowId(2);
@@ -514,6 +628,11 @@ mod tests {
             visible_layout_dump: String::new(),
             status_label,
             activity: false,
+            pane_border_status: PaneBorderStatus::Off,
+            pane_border_lines: PaneBorderLines::Single,
+            pane_border_indicators: PaneBorderIndicators::Colour,
+            pane_order: Vec::new(),
+            pane_z_order: Vec::new(),
         };
         let boundary = window("x".repeat(MAX_WINDOW_STATUS_LABEL_BYTES));
         let encoded = postcard::to_stdvec(&boundary).expect("encode boundary label");

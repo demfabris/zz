@@ -1,0 +1,15 @@
+corpus: none
+# A border cell two panes both touch goes to the pane earliest in w->z_index,
+# because redraw_build_scene walks that list with TAILQ_FOREACH_REVERSE and each
+# pane overwrites the side it owns. z_index is not the pane id order: window_add_pane
+# always appends a tiled pane to its tail while inserting it wherever the split
+# asked in w->panes, join-pane inserts the moved pane next to its destination in
+# both lists, swap-pane exchanges the two positions in both, and layout_parse
+# rebuilds it from the layout tree. So a pane joined into a window sits last in
+# z_index however old it is, and the divider it shares with the pane above
+# belongs to that pane. Read as a glyph through pane-border-lines number, which
+# draws each border cell as the index of the pane that owns it.
+stage: fixtures/pane-border-zorder.sh ~/pane-border-zorder.sh
+out: set-environment -gu PANE_BORDER_ZORDER
+run-shell 'sh ~/pane-border-zorder.sh'
+out: show-environment -g PANE_BORDER_ZORDER

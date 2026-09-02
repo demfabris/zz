@@ -5,13 +5,14 @@ use std::{
 
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, EditorDescriptor, LayoutNode,
-    MAX_GUI_TEXT_BYTES, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, ServerError,
-    SessionId, SessionSnapshot, SplitId, WindowId, WindowSnapshot, normalize_browser_profile_name,
+    MAX_GUI_TEXT_BYTES, MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus,
+    PaneId, PaneKindSnapshot, PaneSnapshot, ServerError, SessionId, SessionSnapshot, SplitId,
+    WindowId, WindowSnapshot, normalize_browser_profile_name,
 };
 
 use crate::{
     PresetOptions,
-    layout::{CellLayout, LayoutError, SplitSize},
+    layout::{CellGeometry, CellLayout, LayoutError, SplitSize, carve_border_row},
 };
 
 pub(crate) const DEFAULT_WINDOW_EXTENT: (u16, u16) = (80, 24);
@@ -244,6 +245,12 @@ pub struct Window {
     pub layout: CellLayout,
     pub panes: BTreeMap<PaneId, Pane>,
     pane_order: Vec<PaneId>,
+    /// The pin's `w->z_index`: a second pane order that `window_add_pane`
+    /// always appends to, `join-pane` inserts beside its destination in,
+    /// `swap-pane` exchanges positions in, and `layout_parse` rebuilds from
+    /// the layout tree. `redraw_build_scene` walks it in reverse, so the pane
+    /// earliest here owns a border cell two panes both touch.
+    z_order: Vec<PaneId>,
     last_panes: Vec<PaneId>,
     last_layout: Option<LayoutPreset>,
     previous_layout: Option<Box<CellLayout>>,
@@ -322,16 +329,50 @@ impl Window {
     /// layout during zoom), otherwise its tree allocation.
     #[must_use]
     pub fn displayed_pane_geometry(&self, pane: PaneId) -> Option<(u16, u16)> {
+        self.displayed_pane_cell(pane, PaneBorderStatus::Off)
+            .map(|geometry| (geometry.sx, geometry.sy))
+    }
+
+    /// The same cell with the `pane-border-status` row carved out of it. A
+    /// zoomed pane is the whole window, and `layout_fix_panes` still runs over
+    /// the one-leaf zoom root, so it takes the row too.
+    #[must_use]
+    pub(crate) fn displayed_pane_cell(
+        &self,
+        pane: PaneId,
+        status: PaneBorderStatus,
+    ) -> Option<CellGeometry> {
         if self.zoomed_pane == Some(pane) {
-            return Some(self.layout.extent());
+            let (sx, sy) = self.layout.extent();
+            let full = CellGeometry {
+                sx,
+                sy,
+                xoff: 0,
+                yoff: 0,
+            };
+            return Some(carve_border_row(full, full, status));
         }
         if self.zoomed_pane.is_some()
-            && let Some(extent) = self.panes.get(&pane).and_then(|pane| pane.screen_extent)
+            && let Some((sx, sy)) = self.panes.get(&pane).and_then(|pane| pane.screen_extent)
         {
-            return Some(extent);
+            return Some(CellGeometry {
+                sx,
+                sy,
+                xoff: 0,
+                yoff: 0,
+            });
         }
-        let geometry = self.layout.pane_geometry(pane)?;
-        Some((geometry.sx, geometry.sy))
+        self.layout.pane_geometry_with_border(pane, status)
+    }
+
+    #[must_use]
+    pub fn displayed_pane_geometry_with_border(
+        &self,
+        pane: PaneId,
+        status: PaneBorderStatus,
+    ) -> Option<(u16, u16)> {
+        self.displayed_pane_cell(pane, status)
+            .map(|geometry| (geometry.sx, geometry.sy))
     }
 
     fn clear_pane_screen_extents(&mut self) {
@@ -343,6 +384,11 @@ impl Window {
     #[must_use]
     pub fn pane_order(&self) -> &[PaneId] {
         &self.pane_order
+    }
+
+    #[must_use]
+    pub fn z_order(&self) -> &[PaneId] {
+        &self.z_order
     }
 
     pub(crate) fn last_pane(&self) -> Option<PaneId> {
@@ -476,6 +522,7 @@ impl MuxState {
             layout: CellLayout::new(pane_id, extent.0, extent.1),
             panes: BTreeMap::from([(pane_id, pane)]),
             pane_order: vec![pane_id],
+            z_order: vec![pane_id],
             last_panes: Vec::new(),
             last_layout: None,
             previous_layout: None,
@@ -601,6 +648,7 @@ impl MuxState {
             layout: CellLayout::new(pane_id, extent.0, extent.1),
             panes: BTreeMap::from([(pane_id, pane)]),
             pane_order: vec![pane_id],
+            z_order: vec![pane_id],
             last_panes: Vec::new(),
             last_layout: None,
             previous_layout: None,
@@ -1108,6 +1156,7 @@ impl MuxState {
             placement.before,
             placement.full_size,
         );
+        window.z_order.push(pane_id);
         if !placement.detached {
             activate_window_pane(window, pane_id, false);
         }
@@ -1517,6 +1566,7 @@ impl MuxState {
 
         let window = self.windows.get_mut(&window).expect("window was resolved");
         let previous = std::mem::replace(&mut window.layout, next);
+        window.z_order = window.layout.panes_in_order();
         window.previous_layout = Some(Box::new(previous));
         window.last_extent_probe = None;
         self.bump_generation();
@@ -3040,6 +3090,7 @@ impl MuxState {
                 let swapped = window.layout.swap(source, target);
                 debug_assert!(swapped);
                 swap_pane_order(&mut window.pane_order, source, target);
+                swap_pane_order(&mut window.z_order, source, target);
                 was_zoomed
             };
             if detached {
@@ -3111,6 +3162,8 @@ impl MuxState {
         target_state.panes.insert(source, source_pane);
         replace_pane_order(&mut source_state.pane_order, source, target);
         replace_pane_order(&mut target_state.pane_order, target, source);
+        replace_pane_order(&mut source_state.z_order, source, target);
+        replace_pane_order(&mut target_state.z_order, target, source);
 
         let next_source_active = if detached && source_active != source {
             source_active
@@ -3236,6 +3289,7 @@ impl MuxState {
                 layout: CellLayout::new(pane, inherited_extent.0, inherited_extent.1),
                 panes: BTreeMap::from([(pane, pane_state)]),
                 pane_order: vec![pane],
+                z_order: vec![pane],
                 last_panes: Vec::new(),
                 last_layout: None,
                 previous_layout: None,
@@ -3330,6 +3384,8 @@ impl MuxState {
             lose_window_pane(window, source);
             window.pane_order.retain(|pane| *pane != source);
             insert_pane_order(&mut window.pane_order, source, target, false, false);
+            window.z_order.retain(|pane| *pane != source);
+            insert_pane_order(&mut window.z_order, source, target, false, false);
             window.zoomed_pane = None;
             let pane_changed = !detached && activate_window_pane(window, source, false);
             normalize_window_history(window);
@@ -3383,6 +3439,7 @@ impl MuxState {
             .expect("target window exists");
         target_state.panes.insert(source, pane_state);
         insert_pane_order(&mut target_state.pane_order, source, target, false, false);
+        insert_pane_order(&mut target_state.z_order, source, target, false, false);
         target_state.zoomed_pane = None;
         let target_changed = !detached && activate_window_pane(target_state, source, false);
         normalize_window_history(target_state);
@@ -3580,6 +3637,7 @@ impl MuxState {
                             dead_status: pane.dead_status,
                             border_colour: None,
                             active_border_colour: None,
+                            border_status_text: String::new(),
                         },
                     )
                 })
@@ -3588,6 +3646,11 @@ impl MuxState {
             visible_layout_dump,
             status_label: String::new(),
             activity: window.activity_flag,
+            pane_border_status: PaneBorderStatus::Off,
+            pane_border_lines: PaneBorderLines::Single,
+            pane_border_indicators: PaneBorderIndicators::Colour,
+            pane_order: window.pane_order.clone(),
+            pane_z_order: window.z_order.clone(),
         }
     }
 
@@ -4191,6 +4254,7 @@ fn repair_window_after_pane_removal(window: &mut Window, pane: PaneId) {
     window.clear_pane_screen_extents();
     lose_window_pane(window, pane);
     window.pane_order.retain(|candidate| *candidate != pane);
+    window.z_order.retain(|candidate| *candidate != pane);
     normalize_window_history(window);
 }
 

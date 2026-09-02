@@ -5,7 +5,7 @@ use std::{
     fmt::Write as _,
 };
 
-use zz_protocol::{Axis, LayoutNode, PaneId, SplitId};
+use zz_protocol::{Axis, LayoutNode, PaneBorderStatus, PaneId, SplitId};
 
 use crate::{PresetOptions, model::LayoutPreset};
 
@@ -218,6 +218,20 @@ impl CellLayout {
 
     pub(crate) fn pane_geometry(&self, pane: PaneId) -> Option<CellGeometry> {
         pane_geometry(&self.root, pane)
+    }
+
+    /// The cell geometry with the `pane-border-status` row carved out of it,
+    /// the way `layout_fix_panes` calls `layout_add_horizontal_border`: only a
+    /// cell whose top edge is the root's top edge takes the `top` row (`yoff++`
+    /// and `sy--`), only a cell whose bottom edge is the root's bottom edge
+    /// takes the `bottom` row (`sy--`), and a one-row cell keeps its row.
+    pub(crate) fn pane_geometry_with_border(
+        &self,
+        pane: PaneId,
+        status: PaneBorderStatus,
+    ) -> Option<CellGeometry> {
+        let geometry = pane_geometry(&self.root, pane)?;
+        Some(carve_border_row(geometry, self.root.geometry(), status))
     }
 
     pub(crate) fn contains(&self, pane: PaneId) -> bool {
@@ -1049,6 +1063,30 @@ fn count_panes(node: &CellNode) -> usize {
             children.iter().map(|child| count_panes(&child.node)).sum()
         }
     }
+}
+
+pub(crate) fn carve_border_row(
+    mut geometry: CellGeometry,
+    root: CellGeometry,
+    status: PaneBorderStatus,
+) -> CellGeometry {
+    let carve = match status {
+        PaneBorderStatus::Off => false,
+        PaneBorderStatus::Top => geometry.yoff == root.yoff,
+        PaneBorderStatus::Bottom => {
+            geometry.yoff.saturating_add(geometry.sy) == root.yoff.saturating_add(root.sy)
+        }
+    };
+    if !carve {
+        return geometry;
+    }
+    if status == PaneBorderStatus::Top {
+        geometry.yoff = geometry.yoff.saturating_add(1);
+    }
+    if geometry.sy > 1 {
+        geometry.sy -= 1;
+    }
+    geometry
 }
 
 fn pane_geometry(node: &CellNode, target: PaneId) -> Option<CellGeometry> {

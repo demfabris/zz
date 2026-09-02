@@ -8174,6 +8174,7 @@ mod tests {
             dead_status: None,
             border_colour: None,
             active_border_colour: None,
+            border_status_text: String::new(),
         }
     }
 
@@ -8196,6 +8197,11 @@ mod tests {
             visible_layout_dump: String::new(),
             status_label: String::new(),
             activity: false,
+            pane_border_status: zz_protocol::PaneBorderStatus::Off,
+            pane_border_lines: zz_protocol::PaneBorderLines::Single,
+            pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
+            pane_order: Vec::new(),
+            pane_z_order: Vec::new(),
         }
     }
 

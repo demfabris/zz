@@ -2142,7 +2142,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-message",
         aliases: &["display"],
         description: "Display or print a formatted message",
-        usage: "[-ClNp] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
+        usage: "[-aClNp] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
         options: &[
             CommandOptionSpec::flag("-p", "print the message"),
             CommandOptionSpec::flag("-C", "keep terminal updates flowing while it shows"),
@@ -2152,7 +2152,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-l", "do not expand the message template"),
             CommandOptionSpec::flag("-N", "ignore key presses while the message shows"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
-            CommandOptionSpec::unsupported_flag("-a"),
+            CommandOptionSpec::flag("-a", "list every format variable this target answers"),
             CommandOptionSpec::unsupported_flag("-I"),
             CommandOptionSpec::unsupported_flag("-v"),
         ],
@@ -2817,7 +2817,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (463, 40));
+        assert_eq!((supported, unsupported), (464, 39));
         assert_eq!(usage_overrides.len(), 22);
         assert_eq!(
             usage_overrides,

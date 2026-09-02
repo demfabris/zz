@@ -1,0 +1,14 @@
+corpus: none
+# display-message -a runs format_each: the 198-entry format table in
+# declaration order, which is alphabetical, skipping every entry whose callback
+# returns NULL, and then the command's own tree, so `command` lands after the
+# whole table. The listing is compared by name, order and line shape because 46
+# of the names are themselves tracked format gaps, with a handful of values both
+# binaries own outright. A pane with no client answers 142 table names, an
+# attached client that reports its theme adds back exactly 28, and 28 more
+# decline in both contexts.
+stage: fixtures/format-listing.sh ~/format-listing.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu FORMAT_LISTING
+run-shell 'sh ~/format-listing.sh'
+out: show-environment -g FORMAT_LISTING

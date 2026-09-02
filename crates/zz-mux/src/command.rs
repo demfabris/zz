@@ -34,7 +34,7 @@ use crate::{
     formats::{
         CommandHooks, FormatClient, FormatClientRow, FormatContext, FormatEnvironRow,
         FormatOptionRow, FormatType, StatusHooks, expand_format_time_with_hooks,
-        expand_format_with_hooks, format_true, parse_tmux_colour,
+        expand_format_with_hooks, format_listing, format_true, parse_tmux_colour,
     },
     honest_knobs::{
         AllowPassthrough, PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption,
@@ -1205,6 +1205,18 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
         self.inner.client_environment_rows()
+    }
+
+    /// `cmdq_merge_formats` puts `command` in `ft->tree` for every queue item,
+    /// which is why `format_each` prints it after the whole table.
+    fn tree_entries(&mut self) -> Vec<(String, String)> {
+        let mut entries = self.inner.tree_entries();
+        if let Some(command) = self.command
+            && !entries.iter().any(|(name, _)| name == "command")
+        {
+            entries.push(("command".to_owned(), command.to_owned()));
+        }
+        entries
     }
 }
 
@@ -7635,6 +7647,16 @@ impl MuxEngine {
             .value("-d")
             .map(|value| parse_strtonum(value, 0, i64::from(u32::MAX), "delay"))
             .transpose()?;
+        // `cmd_display_message_exec` runs format_each and returns before it
+        // looks at the template, so -a ignores -l, -d and -p alike and prints
+        // through cmdq_print whether or not -p was given.
+        if options.has("-a") {
+            let mut listing = String::new();
+            for (name, value) in format_listing(self, format_context, hooks) {
+                let _ = writeln!(listing, "{name}={value}");
+            }
+            return Ok(Execution::output(listing.trim_end_matches('\n').to_owned()));
+        }
         let text = if options.has("-l") {
             format
         } else {

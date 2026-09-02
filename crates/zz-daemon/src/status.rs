@@ -84,6 +84,11 @@ pub(crate) struct FormatHookFacts {
     pub(crate) pane_pipes: Arc<BTreeMap<PaneId, u32>>,
     pub(crate) session_attachments: Arc<BTreeMap<SessionId, (usize, String)>>,
     pub(crate) session_last_attached: Arc<BTreeMap<SessionId, u64>>,
+    /// The panes carrying the pin's `PANE_UNSEENCHANGES`.
+    pub(crate) unseen_changes: Arc<BTreeSet<PaneId>>,
+    /// Every window some client's own current window is, with that client's
+    /// name, in client order.
+    pub(crate) window_clients: Arc<BTreeMap<WindowId, Vec<String>>>,
     pub(crate) buffer: Option<BufferFormatFacts>,
     pub(crate) client: Option<ClientFormatFacts>,
     pub(crate) clients: Arc<Vec<FormatClientRow>>,
@@ -971,6 +976,22 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         self.facts.client_environment.as_ref().clone()
     }
 
+    /// `cmdq_merge_formats` copies the queue item's own entries into `ft->tree`
+    /// before any command runs, which is `command` for every command and the
+    /// hook variables on top of it inside a hook body.
+    fn tree_entries(&mut self) -> Vec<(String, String)> {
+        let mut entries = self
+            .variables
+            .into_iter()
+            .flatten()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        if let Some(command) = self.command_item {
+            entries.push(("command".to_owned(), command.to_owned()));
+        }
+        entries
+    }
+
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         if let Some(value) = self
             .option_engine
@@ -1057,7 +1078,10 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "client_flags" => Some(self.facts.client.as_ref()?.flags.clone()),
             "client_height" => Some(self.facts.client.as_ref()?.height.clone()),
             "client_key_table" => Some(self.facts.client.as_ref()?.key_table.clone()),
-            "client_last_session" => Some(self.facts.client.as_ref()?.last_session.clone()),
+            // format_cb_client_last_session declines unless the client has a
+            // last session that is still alive.
+            "client_last_session" => Some(self.facts.client.as_ref()?.last_session.clone())
+                .filter(|session| !session.is_empty()),
             "client_name" => Some(self.facts.client.as_ref()?.name.clone()),
             "client_pid" => Some(self.facts.client.as_ref()?.pid.clone()),
             "client_prefix" => Some(self.facts.client.as_ref()?.prefix.clone()),
@@ -1066,7 +1090,11 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "client_termfeatures" => Some(self.facts.client.as_ref()?.termfeatures.clone()),
             "client_termname" => Some(self.facts.client.as_ref()?.termname.clone()),
             "client_termtype" => Some(self.facts.client.as_ref()?.termtype.clone()),
-            "client_theme" => Some(self.facts.client.as_ref()?.theme.clone()),
+            // THEME_UNKNOWN is a NULL in format_cb_client_theme: the pin waits
+            // for the terminal to report, and so does the daemon.
+            "client_theme" => {
+                Some(self.facts.client.as_ref()?.theme.clone()).filter(|theme| !theme.is_empty())
+            }
             "client_tty" => Some(self.facts.client.as_ref()?.tty.clone()),
             "client_uid" => Some(self.facts.client.as_ref()?.uid.clone()),
             "client_user" => Some(self.facts.client.as_ref()?.user.clone()),
@@ -1117,16 +1145,48 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     .as_secs()
                     .to_string(),
             ),
-            "pane_pipe" => self
-                .facts
-                .pane_pipes
-                .contains_key(&context.pane_id.parse().ok()?)
-                .then(|| "1".to_owned()),
+            "pane_pipe" => Some(
+                if self
+                    .facts
+                    .pane_pipes
+                    .contains_key(&context.pane_id.parse().ok()?)
+                {
+                    "1"
+                } else {
+                    "0"
+                }
+                .to_owned(),
+            ),
+            "pane_unseen_changes" => Some(
+                if self
+                    .facts
+                    .unseen_changes
+                    .contains(&context.pane_id.parse().ok()?)
+                {
+                    "1"
+                } else {
+                    "0"
+                }
+                .to_owned(),
+            ),
             "pane_pipe_pid" => self
                 .facts
                 .pane_pipes
                 .get(&context.pane_id.parse().ok()?)
                 .map(u32::to_string),
+            "window_active_clients" => Some(
+                self.facts
+                    .window_clients
+                    .get(&context.window_id.parse().ok()?)
+                    .map_or(0, Vec::len)
+                    .to_string(),
+            ),
+            "window_active_clients_list" => Some(
+                self.facts
+                    .window_clients
+                    .get(&context.window_id.parse().ok()?)
+                    .map_or_else(String::new, |names| names.join(",")),
+            ),
             "session_attached" => Some(
                 self.facts
                     .session_attachments
@@ -1477,18 +1537,26 @@ mod tests {
     #[test]
     fn daemon_delegated_format_consumers_match_mux_inventory() {
         let delegated = zz_mux::delegated_format_variable_names().collect::<Vec<_>>();
-        assert_eq!(delegated.len(), 39);
+        assert_eq!(delegated.len(), 42);
 
         let session = SessionId(1);
         let pane = PaneId(1);
         let facts = FormatHookFacts {
             session_last_attached: Arc::new(BTreeMap::from([(session, 1)])),
+            // pane_pipe_pid declines unless a pipe is attached, the way
+            // format_cb_pane_pipe_pid gates on wp->pipe_fd.
+            pane_pipes: Arc::new(BTreeMap::from([(pane, 4242)])),
             buffer: Some(BufferFormatFacts {
                 name: String::new(),
                 data: Arc::from([]),
                 created: UNIX_EPOCH,
             }),
             client: Some(ClientFormatFacts {
+                // client_last_session and client_theme decline when empty, the
+                // way format_cb_client_last_session and format_cb_client_theme
+                // do, so the inventory has to give them something.
+                last_session: "last".to_owned(),
+                theme: "dark".to_owned(),
                 // The offsets only answer while the window is bigger than the
                 // client viewport, which is the state this inventory needs.
                 viewport: Some(ClientViewportFacts {

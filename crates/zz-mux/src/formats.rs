@@ -592,8 +592,8 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_pb_progress", Pane, Zero),
     variable!("pane_pb_state", Pane, Empty),
     variable!("pane_pid", Pane, PanePid),
-    variable!("pane_pipe", Pane, Zero),
-    variable!("pane_pipe_pid", Pane, Empty),
+    variable!("pane_pipe", Pane, StatusHook),
+    variable!("pane_pipe_pid", Pane, StatusHook),
     variable!("pane_right", Pane, PaneRight),
     variable!("pane_search_string", Pane, Empty),
     variable!("pane_start_command", Pane, PaneStartCommand),
@@ -604,7 +604,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_title", Pane, PaneTitle),
     variable!("pane_top", Pane, PaneTop),
     variable!("pane_tty", Pane, PaneTty),
-    variable!("pane_unseen_changes", Pane, Zero),
+    variable!("pane_unseen_changes", Pane, StatusHook),
     variable!("pane_width", Pane, PaneWidth),
     variable!("pane_x", Pane, PaneX),
     variable!("pane_y", Pane, PaneY),
@@ -1504,6 +1504,12 @@ pub trait StatusHooks {
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
         Vec::new()
     }
+
+    /// The entries the command itself put in `ft->tree`, which `format_each`
+    /// walks after the table in RB, that is key, order.
+    fn tree_entries(&mut self) -> Vec<(String, String)> {
+        Vec::new()
+    }
 }
 
 pub fn expand_status(
@@ -1562,6 +1568,138 @@ impl StatusHooks for CommandHooks {
 pub(crate) fn expand_format(format: &str, engine: &MuxEngine, context: FormatContext) -> String {
     let mut hooks = CommandHooks::new(engine.format_now());
     expand_format_with_hooks(format, engine, context, &mut hooks)
+}
+
+/// The names whose pin callback answers NULL for a reason the value alone
+/// cannot show. `mouse_*` need `ft->m.valid`, which only a mouse binding sets;
+/// the session group names need `session_group_contains`, and zz has no session
+/// groups at all.
+const LISTING_NEVER_ANSWERED: [&str; 14] = [
+    "mouse_hyperlink",
+    "mouse_line",
+    "mouse_pane",
+    "mouse_status_line",
+    "mouse_status_range",
+    "mouse_word",
+    "mouse_x",
+    "mouse_y",
+    "session_group",
+    "session_group_attached",
+    "session_group_attached_list",
+    "session_group_list",
+    "session_group_many_attached",
+    "session_group_size",
+];
+
+/// `format_cb_session_attached_list` and `format_cb_window_active_clients_list`
+/// build an evbuffer and return NULL when nothing went into it.
+const LISTING_EMPTY_LIST_DECLINES: [&str; 2] =
+    ["session_attached_list", "window_active_clients_list"];
+
+/// `format_each` prints a `FORMAT_TABLE_TIME` entry as `tv->tv_sec`, so a zero
+/// time is `0` in the listing where `format_find` turns the same entry into
+/// NULL and the expansion is empty. These are the time entries whose callback
+/// answers whenever its scope object exists; `buffer_created` and
+/// `pane_dead_time` are the two that really do return NULL.
+const LISTING_ZERO_TIMES: [&str; 7] = [
+    "client_activity",
+    "client_created",
+    "session_activity",
+    "session_created",
+    "session_last_attached",
+    "start_time",
+    "window_activity",
+];
+
+/// `format_cb_client_name` answers exactly when `ft->c` is set, which is the
+/// witness the walk uses to decide the whole client family at once.
+const LISTING_CLIENT_WITNESS: &str = "client_name";
+
+/// The one Client-scope name whose callback reads a global option instead of
+/// `ft->c`, so it answers with no client at all, exactly like
+/// `buffer_mode_format`.
+const LISTING_CLIENTLESS_CLIENT_NAME: &str = "client_mode_format";
+
+/// format.c `format_each`: walk the 198-entry table in declaration order,
+/// skipping every entry whose callback would return NULL, then the command's
+/// own tree in key order.
+pub(crate) fn format_listing(
+    engine: &MuxEngine,
+    context: FormatContext,
+    hooks: &mut impl StatusHooks,
+) -> Vec<(String, String)> {
+    let resolved = context.resolve(engine);
+    let has_client = hooks
+        .variable(LISTING_CLIENT_WITNESS, &resolved.values)
+        .is_some();
+    let mut rows = Vec::with_capacity(FORMAT_VARIABLES.len());
+    for spec in &FORMAT_VARIABLES {
+        if let Some(value) = listing_value(spec, &resolved, has_client, hooks) {
+            rows.push((spec.name.to_owned(), value));
+        }
+    }
+    // `format_find` reads the table before `ft->tree`, so a tree entry that
+    // repeats a table name is unreachable and the pin never adds one; zz seeds
+    // a couple of table values through the same variable map, and those belong
+    // to the table pass they already answered.
+    let mut tree = hooks.tree_entries();
+    tree.retain(|(name, _)| format_variable(name).is_none());
+    tree.sort();
+    rows.extend(tree);
+    rows
+}
+
+fn listing_value(
+    spec: &FormatVariableSpec,
+    resolved: &ResolvedFormatContext,
+    has_client: bool,
+    hooks: &mut impl StatusHooks,
+) -> Option<String> {
+    let available = match spec.scope {
+        FormatScope::Server | FormatScope::Buffer => true,
+        FormatScope::Client => has_client || spec.name == LISTING_CLIENTLESS_CLIENT_NAME,
+        FormatScope::Session => resolved.has_session,
+        FormatScope::Window => resolved.has_window,
+        FormatScope::Pane | FormatScope::Terminal => resolved.has_pane,
+    };
+    if !available || LISTING_NEVER_ANSWERED.contains(&spec.name) {
+        return None;
+    }
+    let hooked = hooks.variable(spec.name, &resolved.values);
+    let value = match (hooked, spec.backing) {
+        (Some(value), _) => value,
+        (None, FormatBacking::StatusHook) => {
+            return LISTING_ZERO_TIMES
+                .contains(&spec.name)
+                .then(|| "0".to_owned());
+        }
+        (None, _) => resolved
+            .values
+            .resolve(spec, resolved.format_type)
+            .into_owned(),
+    };
+    if value.is_empty() {
+        if LISTING_ZERO_TIMES.contains(&spec.name) {
+            return Some("0".to_owned());
+        }
+        if LISTING_EMPTY_LIST_DECLINES.contains(&spec.name) {
+            return None;
+        }
+    }
+    // format_cb_pane_dead_signal, _status and _time all gate on the exit status
+    // the pin only records once the pane is dead.
+    if matches!(
+        spec.name,
+        "pane_dead_signal" | "pane_dead_status" | "pane_dead_time"
+    ) && resolved.values.pane_dead != Some(true)
+    {
+        return None;
+    }
+    // format_cb_session_active needs both ft->s and ft->c.
+    if spec.name == "session_active" && resolved.values.session_active.is_none() {
+        return None;
+    }
+    Some(value)
 }
 
 pub(crate) fn expand_format_with_hooks(
@@ -1675,6 +1813,10 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
         self.inner.client_environment_rows()
+    }
+
+    fn tree_entries(&mut self) -> Vec<(String, String)> {
+        self.inner.tree_entries()
     }
 }
 

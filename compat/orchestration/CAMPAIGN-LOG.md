@@ -193,3 +193,39 @@ SendClientKeys effect, the mode-keys branches are blocked behind cursor geometry
 never wraps), and `pane_pb_progress` is the ConEmu OSC 9;4 progress bar, not paste progress. New
 lore: `attached_client_extents_clamp` fails two to four runs in six even solo on this box on
 pristine main (the 128 MiB revision limit under the huge-client resize), so it is a known race.
+
+## 2026-09-02: cycle 9 on the macbook, meter 84.2% to 90.5%, then PAUSED
+
+Seven agents, 3h52m wall, 2.58M subagent tokens, all three lanes merged. Merges: daemon
+`5e6de65a` (`send-keys -K` handed to the target client's key handler; the I modifier answered from
+the client's own terminfo through a ported `infocmp -x` reader with `tty_term_codes`,
+`tty_features`, `terminal-overrides` via `tty_term_apply` and the ignorefkeys cancels; the
+environment-bytes loss and the `set-hook -B` monitor subsystem written down as records; gate fix:
+`attached_client_extents_clamp` was never a load flake but a fixture race, the output-view pane
+exited and the watcher killed its window on the first resize, so the test now retains that pane),
+terminal `4cb913dc` (the cycle-8 re-land with the retained-pane history readable on a dead pane,
+which cleared both regressed corpus scenarios; the eight engine knobs, `copy-mode -s`,
+`clear-history -H`, `resize-pane -T`, `remain-on-exit-format`; the ConEmu OSC 9;4 progress bar for
+`pane_pb_progress`; the copy cursor per-line limit and the mode-keys branches that read it, with
+the blocker for the rest recorded; gate fix from the reviewer's probe: an OSC now commits on CAN and
+SUB and drops the control bytes inside it), client `6f307120` (the pin's pane border chrome, closing
+`options.pane-border-chrome`; a popup's Kitty images handed to the drawing client; the raw TUI's
+mouse routed through the bottom-status content box and `join-pane -b` z-order, both reviewer
+must-fixes; the chooser vocabulary and popup pointer needs written down; protocol 94 to 95 with six
+appended fields; the popup kitty close was REOPENED at review because placements arrive only after a
+client resize, and the reason now carries the per-view viewport recipe; gate fix: a cross-lane test
+collision, the terminal lane promoted `remain-on-exit-format` into the option-consumer roster while
+the client lane's test used it as the unconsumed example), ledger `3726adf8` (199 scenarios / 2,527
+steps / PASS, settlement 95.3%). Newly closed groups: `terminal.key-control`,
+`formats.modifier-fidelity`, `options.pane-engine-knobs`, `options.remain-on-exit-format`,
+`formats.pane-process`, `history.hyperlink-reset`, `copy-mode.command-fidelity`,
+`options.pane-border-chrome`; `terminal.resize-pane-trim` settled never,
+`options.terminal-engine-limits` added accepted-native. Board: three lanes ledgered,
+`F-KEY-CONTROL-V3`, `F-PANE-BORDER-LINES-TILED` and `F-PANE-BORDER-ZORDER` withdrawn as mooted, two
+residuals on no front (the retained pane's `history()` after `ActorStopped`, the popup Kitty
+placements). Lore: `event_hooks_fire_after_mutation_with_captured_formats` is a new timing flake
+(automatic-rename race); the registry needed a three-way merge by group id at the client rebase
+(kept in the gate's scratchpad, worth landing under `compat/` if the campaign resumes);
+`compat/run.sh` hard-codes `RESULTS_DIR`, so shards only stay apart by disjoint scenario names.
+Fabrico asked for a pause after this cycle: nothing minted, claimed, or launched; the census and the
+shape of a possible cycle 10 are in `HANDOFF.md`.

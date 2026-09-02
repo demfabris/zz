@@ -1,45 +1,55 @@
-# Cycle-9 handoff for the tmux-compat campaign
+# Paused handoff for the tmux-compat campaign (after cycle 9)
 
-Written 2026-09-02 ~09:20Z on the macbook during the overnight autonomous run (fabrico authorized
-driving the campaign end to end without asking). Cycle 8 is DONE (two of three lanes merged);
-cycle 9 is written, minted on the board, and launched right after this commit.
+Written 2026-09-02 ~16:00Z on the macbook. Cycle 9 is DONE, all three lanes merged, and fabrico
+asked for a pause: nothing is minted, claimed, or launched. The board is idle (MAIN and TRIAGE
+free, no leases held by `macbook/orchestrator`), the lease renewer and `caffeinate` are stopped,
+and local `main` matches `origin/main`.
 
 ## State now
 
 | Fact | Value |
 | --- | --- |
-| `origin/main` | `6e0bdd48` (cycle-8 ledger; lanes `7f212120` daemon, `37c91bf2` formats) plus this records commit |
-| Agreed-scope meter | 84.2% (256/304 items), 46/65 groups done; `python3 compat/progress.py` |
-| Live registry | 19 unresolved groups (14 open, 5 blocked), 50 items |
-| Corpus | 185 scenarios / 2,454 steps, attached-client PASS |
-| `PROTOCOL_VERSION` | 94 (hex hello frame 0x5E, test `..._ninety_four`); cycle 9 bumps to 95 (0x5F) |
+| `origin/main` | `3726adf8` (cycle-9 ledger; lanes `5e6de65a` daemon, `4cb913dc` terminal, `6f307120` client) plus this records commit |
+| Agreed-scope meter | 90.5% (275/304 items), 55/65 groups done, 5 partially burned; `python3 compat/progress.py` |
+| Live registry | 10 open groups, 0 blocked, 30 items (29 inside the frozen scope, 1 added since); 162 closed records, 43 accepted groups; ledger settlement 95.3% (205/215) |
+| Corpus | 199 scenarios / 2,527 steps, attached-client PASS, digest `385ca4f5` |
+| `PROTOCOL_VERSION` | 95 (hex hello frame 0x5F, test `..._ninety_five`); the next wire-reachable change bumps to 96 (0x60) |
 | Remote | `origin` is HTTPS (`https://github.com/demfabris/zz.git`, gh credential helper) since the SSH security keys became unavailable mid-cycle-7; switch back with `git remote set-url origin git@github.com:demfabris/zz.git` once the YubiKey is back |
-| Unmerged work | `campaign/batch-terminal-knobs-opus-gated` (`c328ebd3`): the cycle-8 terminal lane rebased onto the formats merge with all five review fixes applied, skipped at the gate for the retained-pane capture regression (board note 5508956858); cycle 9 re-lands it |
-| Board (issue #7) | MAIN and TRIAGE free. Cycle-9 lock fronts READY: `F-TERMINAL-KNOBS-RELAND` (p2, contract 5509044766), `F-CLIENT-CHROME-POPUPS` (5509044963), `F-DAEMON-MUX-SMALLS` (5509045128). Also READY: `F-KEY-CONTROL-V3` (mooted if `-K` closes), `F-PANE-BORDER-ZORDER` + `-LINES-TILED` (mooted by the client lane), `F-PANE-COMMAND-COMPLETION` (design front), the `F-SPLIT-MUX-*-V5` chain |
+| Unmerged work | none. `campaign/batch-terminal-knobs-opus-gated` (`c328ebd3`) is superseded by the cycle-9 re-land and can be deleted with the other stale `campaign/*` branches |
+| Board (issue #7) | MAIN and TRIAGE free. READY: `F-PANE-COMMAND-COMPLETION` (design front for `split-window -W`) and the `F-SPLIT-MUX-*-V5` chain. Cycle-9 fronts INTEGRATED; `F-KEY-CONTROL-V3`, `F-PANE-BORDER-LINES-TILED`, `F-PANE-BORDER-ZORDER` withdrawn as mooted |
 
-## Cycle 9, launching
+## What is left, and what a cycle 10 could take
 
-`opus-compat-run-9.js` beside this file is the full cycle: three Opus implementor lanes in parallel
-worktrees, one Fable adversarial reviewer pipelined behind each, one serialized Fable gate (daemon,
-terminal, client) that merges to main, ledgers the board, recomputes `TMUX_COMPAT_TRACKER.md`, and
-runs TRIAGE. Machine facts come from workflow `args`; the defaults are this macbook.
+The census below is `compat/tmux-gaps.json` gaps with status open (there are no blocked groups
+left); every reason carries the measurement and the recipe for the next attempt.
 
-| Lane | Lock front | Batch |
+| Group | Items | Standing |
 | --- | --- | --- |
-| terminal | `F-TERMINAL-KNOBS-RELAND` | starts from the gated branch; the retained-pane capture fix first (scrolled-off history readable on a dead pane), proved by the two regressed corpus scenarios going clean; every cycle-8 proof re-run at tip (eight knobs, `-s`, `-H`, `-T`, `remain-on-exit-format`); then OSC 9;4 progress for `pane_pb_progress`; then the copy cursor geometry and mode-keys |
-| client | `F-CLIENT-CHROME-POPUPS` | the pane-border-status row through its exact recipe, `pane-border-format` per pane, tiled z-order and the lines value on the snapshot (94 to 95), junctions, indicators; the mode-tree key vocabulary with `x`/`X` prompts and `-y`; the popup kitty item through a graphics-answering pty fixture, then a menu over a popup for the three pointer items |
-| daemon | `F-DAEMON-MUX-SMALLS` | `send-keys -K` through a SendClientKeys effect; a byte-clean session environment plus the ClientHello byte entry; the I modifier through the ported `tty_term_codes` and `tty_features` tables and `infocmp -x`; the `set-hook -B` monitor subsystem; the `-v` trace last |
+| `keys.copy-mode-binding-fidelity` | 16 | 14 wait on the accepted `command-prompt -P` decision, `#`/`*` on the search action family. Closes only if that decision changes |
+| `display-popup.behavior-fidelity` | 4 | `kitty-images` has an exact recipe (a per-view viewport in `zz-terminal` so `publish_popup_terminal` carries placements without a resize, proved by a no-resize fixture comparing image ids; residual 5512260474). `border-drag`, `context-menu`, `to-pane` wait on a menu over a popup |
+| `choosers.command-flags` | 2 | `choose-tree -y` and the mode-tree key vocabulary; the client lane wrote down what the vocabulary needs (`78f9acd2`) |
+| `display-message.verbose-trace` | 2 | `-v` and the format trace; needs modifier arguments expanded at parse time |
+| `clients.path-encoding` | 1 | `client-environment-non-utf8`; the daemon lane wrote down where the bytes are lost (`dca1f47f`) |
+| `copy-mode.action-fidelity` | 1 | logical-line and mode-keys; blocked on cursor geometry (zz's cursor-right never wraps), recorded at `a25ad0a0` |
+| `formats.context-producer-fidelity` | 1 | `notify_monitor_cb` only; the monitor subsystem record is `7919994e` |
+| `control-mode.disconnect-cancels-command-queue` | 1 | design front; bounced three times, needs per-connection worker infrastructure |
+| `pane.command-completion` | 1 | `split-window -W`; design front `F-PANE-COMMAND-COMPLETION` is READY |
+| `rendering.geometry-residue` | 1 | `attached-gui-pane-width`, GUI-only; needs a way to drive the desktop client's measurement under test |
 
-What stays after cycle 9 no matter what: the two design fronts
-(`control-mode.disconnect-cancels-command-queue`, `split-window -W`), the 14 copy bindings on the
-accepted `-P` decision plus the two on the search action family, and `rendering.geometry-residue`
-(GUI-only, needs a way to drive the desktop client's measurement under test).
+A cycle 10 with three lanes (popup kitty + choosers, `-v` trace + environment bytes + context
+producer, the popup pointer trio behind a menu-over-popup) could close about nine items and land
+the meter near 93%. The other twenty items do not move without a product decision (the `-P`
+stance), a design front, or a GUI test harness, so the campaign is at the point where the next
+step is fabrico's call rather than another autonomous cycle. To run one: write
+`opus-compat-run-10.js` from `opus-compat-run-9.js` (same `M` block, three new lane batches, lock
+names, protocol 95 to 96), mint the lock fronts under TRIAGE, commit the records under MAIN, claim
+the fronts, launch with the `args` below, and run a lease renewer.
 
-Launch:
+Launch shape (unchanged since cycle 6):
 
 ```js
 Workflow({
-  scriptPath: "<checkout>/compat/orchestration/opus-compat-run-9.js",
+  scriptPath: "<checkout>/compat/orchestration/opus-compat-run-<N>.js",
   args: {
     root: "/Users/demfabris/dev/zz", dev: "/Users/demfabris/dev", holder: "macbook/orchestrator",
     machine: "16-core, 48 GB macOS box (macbook)", cores: 16,
@@ -50,13 +60,13 @@ Workflow({
 })
 ```
 
-Omit `args` on this macbook. Before launching: claim the three lock fronts under your holder
-identity (`ZZ_BOARD_HOLDER=<holder> python3 compat/board.py claim <FRONT> --lease 6h`), check
-`origin/main`, and start a lease renewer (a loop renewing the three fronts and MAIN with
-`--lease 6h` every ~100 minutes). Cycles 7 and 8 took about four hours and 2.6-2.8M subagent
-tokens each. After the gate finishes, verify `origin/main`, the board records, and
-`compat/progress.py`, then write the next cycle from a fresh registry census as described under
-the loop below. `CAMPAIGN-LOG.md` has the per-cycle history.
+Omit `args` on this macbook. Before launching: claim the lock fronts under your holder identity
+(`ZZ_BOARD_HOLDER=<holder> python3 compat/board.py claim <FRONT> --lease 6h`), check
+`origin/main`, and start a lease renewer (a loop renewing the fronts and MAIN with `--lease 6h`
+every ~100 minutes). Cycles 7 to 9 took about four hours and 2.6-2.8M subagent tokens each. After
+the gate finishes, verify `origin/main`, the board records, and `compat/progress.py`, then write
+the next cycle from a fresh registry census as described under the loop below. `CAMPAIGN-LOG.md`
+has the per-cycle history.
 
 ## The cycle, in general
 
@@ -82,12 +92,13 @@ went away mid-cycle-7 ("device not found" on the ED25519-SK identities); SSH wor
 before that and will again with the YubiKey. Unattended runs need two Claude Code settings that are
 in place: a global `Bash(rm:*)` allow rule, and the PreToolUse hook `~/.claude/scripts/guard-rm-home.py`
 that denies `rm -rf $HOME` (the built-in critical-path guard prompts on that shape and no allow rule
-bypasses it). `caffeinate -is -w <claude pid>` keeps the Mac awake for the session; the lid must stay
-open. `gh` is logged in with repo scope. Holder identity
+bypasses it). `caffeinate -is -w <claude pid>` keeps the Mac awake for a running cycle (stopped at the
+pause; start it again with the next launch); the lid must stay open. `gh` is logged in with repo scope. Holder identity
 `macbook/orchestrator`. Caches are populated (`compat/.cache/tmux-src/tmux` at `d77c9dc6`,
 `compat/.cache/plugins`, eight plugins); the `formats` scenario ran clean here. Worktrees: `~/dev/zz-opus-dint`,
-`~/dev/zz-opus-panes` and `~/dev/zz-opus-termopts` exist, clean and warm at the cycle-8 lane tips; the
-reviewers reuse `zz-review-*` when present. Machine traps the prompts already
+`~/dev/zz-opus-panes` and `~/dev/zz-opus-termopts` exist, clean and warm at the cycle-9 lane tips
+(`4858798a`, `f1dfad97`, `399629e9`); the gate removed its `zz-gate-*` worktrees and the shared
+`zz-gate-target` build dir; the reviewers reuse `zz-review-*` when present. Machine traps the prompts already
 carry: `/bin/bash` is 3.2 (no `mapfile`; shard runners use `/opt/homebrew/bin/bash` or python3),
 APFS refuses non-UTF-8 file names (`smoke/client-non-utf8-cwd` guards for it since cycle 7), and the user has a live tmux server (sessions `clairvo`, `home`, `zz`)
 and a live `/Applications/zz.app` daemon that no worker may kill. The Ubuntu box still holds the
@@ -138,7 +149,8 @@ scratchpad paths, so launch the next cycle's script fresh rather than resuming a
 ## Lore the prompts already encode
 
 Flaky-under-load list (all pass exact-solo): `client_focus_closes_display_panes_and_preserves_chooser_modes`,
-`attached_client_extents_clamp_retained_and_default_dimensions`,
+`event_hooks_fire_after_mutation_with_captured_formats` (automatic-rename race, `bash` where the
+test expects `named`),
 `history_request_is_guarded_clamped_and_returns_self_contained_rows`, copy-mode reconcile tests,
 `daemon_native_split_resize_commits_exactly_and_rejects_stale_contexts`,
 `nested_alias_queue_bubbles_shutdown_and_yield_to_its_parent`,
@@ -151,6 +163,9 @@ zz-terminal `pty_output_drains_while_the_input_writer_is_backpressured`,
 cli_binary runs), `concurrent_default_interactive_attaches_share_session_zero` (headless "not a
 terminal", may be misattributed), `smoke/source-replay-diagnostics` (pin-side crash under
 concurrent scenario load; run it solo after sharded gates), and `smoke/client-non-utf8-cwd` on APFS.
+`attached_client_extents_clamp_retained_and_default_dimensions` is OFF the list since `5e6de65a`: it
+was never a load flake but a deterministic fixture race (the output-view pane exited and the watcher
+killed its window on the first resize); the test now retains that pane.
 
 Registry grammar: closing = removing the slug from the group's items (an emptied group moves to
 `closed[]`); native decisions = relocate the slug into an accepted-native group with the measured

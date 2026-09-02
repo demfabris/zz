@@ -12450,7 +12450,14 @@ impl Shared {
             let (title, border_lines) = {
                 let inner = self.inner.lock();
                 let title = parsed.title.as_deref().map_or_else(String::new, |title| {
-                    expand_popup_value(&inner, &target, context.session, Some(command_name), title)
+                    expand_popup_value(
+                        &inner,
+                        &target,
+                        context.session,
+                        Some(command_name),
+                        title,
+                        Some(target_client),
+                    )
                 });
                 let border_lines = if parsed.borderless {
                     Some(PopupBorderLines::None)
@@ -12569,11 +12576,25 @@ impl Shared {
                 width,
                 height,
                 |value| {
-                    expand_popup_value(&inner, &target, context.session, Some(command_name), value)
+                    expand_popup_value(
+                        &inner,
+                        &target,
+                        context.session,
+                        Some(command_name),
+                        value,
+                        Some(target_client),
+                    )
                 },
             );
             let title = parsed.title.as_deref().map_or_else(String::new, |title| {
-                expand_popup_value(&inner, &target, context.session, Some(command_name), title)
+                expand_popup_value(
+                    &inner,
+                    &target,
+                    context.session,
+                    Some(command_name),
+                    title,
+                    Some(target_client),
+                )
             });
             let requested_cwd = parsed.start_directory.as_deref().map(|directory| {
                 expand_popup_value(
@@ -12582,6 +12603,7 @@ impl Shared {
                     context.session,
                     Some(command_name),
                     directory,
+                    Some(target_client),
                 )
             });
             let working_directory =
@@ -12937,7 +12959,14 @@ impl Shared {
                 .ok_or_else(|| ServerError::MissingTarget("current window".to_owned()))?;
             let defaults = inner.engine.menu_options_for_window(window)?;
             let title = parsed.title.as_deref().map_or_else(String::new, |title| {
-                expand_popup_value(&inner, &target, context.session, Some(command_name), title)
+                expand_popup_value(
+                    &inner,
+                    &target,
+                    context.session,
+                    Some(command_name),
+                    title,
+                    Some(target_client),
+                )
             });
             let row_room = usize::from(geometry.columns.saturating_sub(MENU_ROW_MARGIN));
             let mut items = Vec::new();
@@ -12960,8 +12989,14 @@ impl Shared {
                 let command_index = index.saturating_add(1);
                 let action = &parsed.items[command_index];
                 index = index.saturating_add(2);
-                let name =
-                    expand_popup_value(&inner, &target, context.session, Some(command_name), name);
+                let name = expand_popup_value(
+                    &inner,
+                    &target,
+                    context.session,
+                    Some(command_name),
+                    name,
+                    Some(target_client),
+                );
                 if name.is_empty() {
                     continue;
                 }
@@ -12991,6 +13026,7 @@ impl Shared {
                     context.session,
                     Some(command_name),
                     action,
+                    Some(target_client),
                 );
                 items.push(Some(MenuItem {
                     name,
@@ -13049,7 +13085,14 @@ impl Shared {
                 width,
                 height,
                 |value| {
-                    expand_popup_value(&inner, &target, context.session, Some(command_name), value)
+                    expand_popup_value(
+                        &inner,
+                        &target,
+                        context.session,
+                        Some(command_name),
+                        value,
+                        Some(target_client),
+                    )
                 },
             );
             (
@@ -13138,6 +13181,7 @@ impl Shared {
                     context.session,
                     Some(command_name),
                     command,
+                    Some(target_client),
                 )
             });
             (target_client, target, expanded_command)
@@ -13172,8 +13216,14 @@ impl Shared {
         } else {
             prompt.replace("{confirm-key}", confirm_key)
         };
-        let prompt =
-            expand_popup_value(&self.inner.lock(), &target, context.session, None, &prompt);
+        let prompt = expand_popup_value(
+            &self.inner.lock(),
+            &target,
+            context.session,
+            None,
+            &prompt,
+            None,
+        );
         let state = ConfirmState {
             prompt,
             confirm_key: bytes[0],
@@ -14899,7 +14949,13 @@ impl Shared {
         if !target_alive {
             target = context.clone();
         }
-        self.execute_overlay_source(client, &mut target, command, "display-menu");
+        self.execute_overlay_source_with_error_case(
+            client,
+            &mut target,
+            command,
+            "display-menu",
+            true,
+        );
     }
 
     fn input_confirm(
@@ -14947,16 +15003,6 @@ impl Shared {
             }
             ConfirmExecution::Deferred { .. } | ConfirmExecution::Background { .. } => {}
         }
-    }
-
-    fn execute_overlay_source(
-        self: &Arc<Self>,
-        client: ClientId,
-        context: &mut ExecutionContext,
-        command: &str,
-        title: &str,
-    ) {
-        self.execute_overlay_source_with_error_case(client, context, command, title, false);
     }
 
     fn execute_overlay_source_with_error_case(
@@ -32453,14 +32499,23 @@ fn menu_selectable_from(items: &[Option<MenuItem>], start: usize, reverse: bool)
     })
 }
 
+/// `menu_add_item` and `cmd_display_popup_exec` expand every value through
+/// `format_single(qitem, value, c, ...)` with the menu's or popup's own target
+/// client, so a `#{client_...}` variable in a title, a row, or a row's command
+/// reads that client and not the one that typed the command.
 fn expand_popup_value(
     inner: &ServerState,
     target: &ExecutionContext,
     active_session: Option<SessionId>,
     command_name: Option<&str>,
     value: &str,
+    target_client: Option<ClientId>,
 ) -> String {
-    let facts = format_hook_facts(inner);
+    let mut facts = format_hook_facts(inner);
+    if let Some(client) = target_client {
+        facts.client = client_attached_session(inner, client)
+            .map(|session| client_format_facts(inner, client, session));
+    }
     let mut variables = target.format_variables.clone();
     variables.insert("config_files".to_owned(), inner.config_files.clone());
     let mut hooks = DaemonFormatHooks::command_with_variables(&facts, &variables);

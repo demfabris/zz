@@ -1,0 +1,11 @@
+corpus: none
+# display-menu holds the command queue while the menu is up and lets the rest
+# of the chain follow whichever way the client leaves it, the chosen action runs
+# after the menu is already gone and against the menu's own client the way
+# menu_add_item expanded it, and a row command that fails at run time is quiet
+# while one that fails to parse reaches the client.
+stage: fixtures/display-menu-action-queue.sh ~/display-menu-action-queue.sh
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+out: set-environment -gu DISPLAY_MENU_ACTION_QUEUE
+run-shell 'sh ~/display-menu-action-queue.sh'
+out: show-environment -g DISPLAY_MENU_ACTION_QUEUE

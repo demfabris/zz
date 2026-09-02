@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **75**. Classified items: **520**.
+Tracked gap groups: **75**. Classified items: **518**.
 
 - Status: open: 27, blocked: 9, accepted: 39.
 - Decision: adopt: 32, native: 31, park: 4, never: 8.
 - Priority: later: 36, none: 39.
 - Closed history entries: 142.
-- Surface: command: 9, flag: 45, native-command: 21, option: 74, format: 65, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 80, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 45, native-command: 21, option: 74, format: 65, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 78, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -435,14 +435,14 @@ Copy mode lives per client in zz and needs explicit target-client semantics. Mea
 
 ### `display-menu.behavior-fidelity`: Match remaining display-menu behavior
 
-Row shortcuts now go through the pin's own key parser and keep only the spellings a client attached to the menu can press, and an owning-client resize re-fits the live descriptor the way menu_resize_cb does: the box keeps its width, rows, selection, stay-open policy and commands, takes the new client and cell geometry, slides back inside the viewport, parks at the origin when it no longer fits, and never closes. Rows are now built against the client's own cells the way menu_add_item does: the room is the client columns less four, an action key is annotated when its bracketed form fits a quarter of that room or the whole name still fits beside it, otherwise only the annotation is dropped while the row keeps answering the key, and an overlong name keeps its last cells through format_trim_right's reading and gains the `>` marker, so a name past the room trims instead of shedding the whole descriptor. The drawn key and the pressed key are separate wire facts on protocol v90 (MenuItem.annotation). Descriptor action queues, refresh behavior, mouse handling, and close-mid-paste ordering still need focused comparison with the pin. One measured residue: the pin reads row enablement from the post-trim name (menu_key_cb skips rows via the stored name's leading '-'), so a disabled row whose overlong name loses its '-' to format_trim_right answers its action key on the pin; zz derives enablement from the pre-trim name and keeps such a row inert. Drawn names match either way; probed live on a 40-column client with a '-' plus 200-cell name.
+Row shortcuts now go through the pin's own key parser and keep only the spellings a client attached to the menu can press, and an owning-client resize re-fits the live descriptor the way menu_resize_cb does: the box keeps its width, rows, selection, stay-open policy and commands, takes the new client and cell geometry, slides back inside the viewport, parks at the origin when it no longer fits, and never closes. Rows are now built against the client's own cells the way menu_add_item does: the room is the client columns less four, an action key is annotated when its bracketed form fits a quarter of that room or the whole name still fits beside it, otherwise only the annotation is dropped while the row keeps answering the key, and an overlong name keeps its last cells through format_trim_right's reading and gains the `>` marker, so a name past the room trims instead of shedding the whole descriptor. The drawn key and the pressed key are separate wire facts on protocol v90 (MenuItem.annotation). Descriptor action queues, refresh behavior, mouse handling, and close-mid-paste ordering still need focused comparison with the pin. One measured residue: the pin reads row enablement from the post-trim name (menu_key_cb skips rows via the stored name's leading '-'), so a disabled row whose overlong name loses its '-' to format_trim_right answers its action key on the pin; zz derives enablement from the pre-trim name and keeps such a row inert. Drawn names match either way; probed live on a 40-column client with a '-' plus 200-cell name. Queue ordering and action context closed on 2026-09-01 against clients attached on real ptys on both binaries (scenario display-menu-action-queue). display-menu holds the command queue while the menu is up, so a chained command has not run yet; leaving the menu lets the chain run either way, and choosing a row runs that row's action first while cancelling runs nothing. menu_add_item expands each row and each row command through format_single with the menu's own target client, so `#{client_name}` in an action names the menu's client and not the one that typed the command; zz was expanding those values with no client at all and produced an empty string, and now seeds the format facts from the target client the way the pin seeds `c`. The menu is already gone when its action runs, proved by an action that opens a second menu and answers its own key. A failing action neither fails display-menu nor stops the chain, and cmdq_error puts the message on that client's status line with the first letter raised for a run-time failure and a parse failure alike; zz was leaving the first letter alone on the menu path and now raises it. One measured residue the probe reads around: the pin draws the whole message across the status line, while zz's raw TUI clips it to the room its own sidebar and detach hint leave, so the probe compares the message prefix. A second measured divergence, found while probing overlay replacement for the chooser flags: display-menu -c on a client that already has a chooser open leaves the client's keys with the chooser in zz, so the menu's item never runs and the key that would have chosen it cancels the chooser instead, where the pin's menu takes the key and leaves the pane mode underneath alone. Mouse policy, close-mid-paste ordering, and style refresh still need their own comparison.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `hard`
 - Owner: `daemon`
 - User impact: daily, remote, scripts
-- Items: `semantic:display-menu-action-context-and-errors`, `semantic:display-menu-mouse-policy`, `semantic:display-menu-paste-close-ordering`, `semantic:display-menu-queue-ordering`, `semantic:display-menu-style-refresh`
+- Items: `semantic:display-menu-mouse-policy`, `semantic:display-menu-paste-close-ordering`, `semantic:display-menu-style-refresh`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-mux/src/command.rs`
@@ -460,8 +460,8 @@ Row shortcuts now go through the pin's own key parser and keep only the spelling
   - `scenario:compat/scenarios/smoke/display-menu-cell-layout.txt`
   - `resource:knowledge/protocol/wire-protocol.md`
   - `resource:knowledge/tmux/divergences.md`
+  - `scenario:compat/scenarios/smoke/display-menu-action-queue.txt`
 - Acceptance:
-  - `Pinned attached probes cover selected-action client context, error delivery, overlay-close order, and blocking or -b command-queue continuation.`
   - `Pinned keyboard and rendering probes cover shortcut grammar and display, cell width, style updates, and resize lifecycle across live menu descriptors.`
   - `Pinned input probes cover mouse policy and paste bytes when the menu closes during a paste sequence, without pane leakage or duplicate action execution.`
 

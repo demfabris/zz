@@ -1,46 +1,45 @@
-# Cycle-8 handoff for the tmux-compat campaign
+# Cycle-9 handoff for the tmux-compat campaign
 
-Written 2026-09-02 ~04:30Z on the macbook, mid-overnight autonomous run (fabrico authorized driving
-the campaign end to end without asking). Cycle 7 is DONE; cycle 8 is written, minted on the board,
-and launched right after this commit. Everything a machine needs is in this repository and in issue
-#7.
+Written 2026-09-02 ~09:20Z on the macbook during the overnight autonomous run (fabrico authorized
+driving the campaign end to end without asking). Cycle 8 is DONE (two of three lanes merged);
+cycle 9 is written, minted on the board, and launched right after this commit.
 
 ## State now
 
 | Fact | Value |
 | --- | --- |
-| `origin/main` | `e910a732` (cycle-7 ledger; lanes `327d036f` daemon, `dee45667` copy, `03f61a41` client) plus this records commit |
-| Agreed-scope meter | 77.6% (236/304 items), 36/65 groups done; `python3 compat/progress.py` |
-| Live registry | 29 unresolved groups (22 open, 7 blocked); ledger 86.6% (188/217) |
-| Corpus | 178 scenarios / 2,435 steps, attached-client PASS |
-| `PROTOCOL_VERSION` | 94 (hex hello frame 0x5E, test `..._ninety_four`); cycle 8 bumps to 95 (0x5F) |
+| `origin/main` | `6e0bdd48` (cycle-8 ledger; lanes `7f212120` daemon, `37c91bf2` formats) plus this records commit |
+| Agreed-scope meter | 84.2% (256/304 items), 46/65 groups done; `python3 compat/progress.py` |
+| Live registry | 19 unresolved groups (14 open, 5 blocked), 50 items |
+| Corpus | 185 scenarios / 2,454 steps, attached-client PASS |
+| `PROTOCOL_VERSION` | 94 (hex hello frame 0x5E, test `..._ninety_four`); cycle 9 bumps to 95 (0x5F) |
 | Remote | `origin` is HTTPS (`https://github.com/demfabris/zz.git`, gh credential helper) since the SSH security keys became unavailable mid-cycle-7; switch back with `git remote set-url origin git@github.com:demfabris/zz.git` once the YubiKey is back |
-| Board (issue #7) | MAIN and TRIAGE free. Cycle-8 lock fronts READY: `F-DAEMON-FOCUS-PROMPT-V2` (p2, contract 5506005142), `F-FORMATS-REGISTRY-SETTLE` (5506005284), `F-TERMINAL-KNOBS-COPY` (5506005480). Also READY and untouched: `F-KEY-CONTROL-V3` (mooted if cycle 8 closes `-K`), `F-PANE-BORDER-ZORDER` + `-LINES-TILED` and `F-PANE-COMMAND-COMPLETION` (next client cycle / design front), the `F-SPLIT-MUX-*-V5` chain |
+| Unmerged work | `campaign/batch-terminal-knobs-opus-gated` (`c328ebd3`): the cycle-8 terminal lane rebased onto the formats merge with all five review fixes applied, skipped at the gate for the retained-pane capture regression (board note 5508956858); cycle 9 re-lands it |
+| Board (issue #7) | MAIN and TRIAGE free. Cycle-9 lock fronts READY: `F-TERMINAL-KNOBS-RELAND` (p2, contract 5509044766), `F-CLIENT-CHROME-POPUPS` (5509044963), `F-DAEMON-MUX-SMALLS` (5509045128). Also READY: `F-KEY-CONTROL-V3` (mooted if `-K` closes), `F-PANE-BORDER-ZORDER` + `-LINES-TILED` (mooted by the client lane), `F-PANE-COMMAND-COMPLETION` (design front), the `F-SPLIT-MUX-*-V5` chain |
 
-## Cycle 8, launching
+## Cycle 9, launching
 
-`opus-compat-run-8.js` beside this file is the full cycle: three Opus implementor lanes in parallel
+`opus-compat-run-9.js` beside this file is the full cycle: three Opus implementor lanes in parallel
 worktrees, one Fable adversarial reviewer pipelined behind each, one serialized Fable gate (daemon,
-formats, terminal) that merges to main, ledgers the board, recomputes `TMUX_COMPAT_TRACKER.md`, and
+terminal, client) that merges to main, ledgers the board, recomputes `TMUX_COMPAT_TRACKER.md`, and
 runs TRIAGE. Machine facts come from workflow `args`; the defaults are this macbook.
 
 | Lane | Lock front | Batch |
 | --- | --- | --- |
-| daemon | `F-DAEMON-FOCUS-PROMPT-V2` | the pane focus hooks first with a three-hour budget (PANE_FOCUSED set at the pin's trigger points, transitions spliced by anchor); then status-keys plus vi prompt editing, the three key spellings, the message-covers-prompt shape; client environment bytes (94 to 95); `send-keys -K` last |
-| formats | `F-FORMATS-REGISTRY-SETTLE` | the per-command format client (activity-time best client, null list rows) closing the resize context and `window_bigger`; the null-aware `display-message -a` listing against the measured 142/28/28 name sets; the four pane process formats; the bare `=` mouse target; the I modifier through ported `tty_term_codes` and `tty_features`; four registry settlements (tilde home, per-client active pane, remote alias preflight, shutdown unlink order); `-v` last |
-| terminal | `F-TERMINAL-KNOBS-COPY` | the knob path widened and scroll-on-clear, alternate-screen, allow-rename, backspace implemented, the four libghostty-impossible knobs settled; `copy-mode -s` as a source-pane revision; the three terminal-owned blocked items measured and implemented or settled; mode-keys plumbing last |
+| terminal | `F-TERMINAL-KNOBS-RELAND` | starts from the gated branch; the retained-pane capture fix first (scrolled-off history readable on a dead pane), proved by the two regressed corpus scenarios going clean; every cycle-8 proof re-run at tip (eight knobs, `-s`, `-H`, `-T`, `remain-on-exit-format`); then OSC 9;4 progress for `pane_pb_progress`; then the copy cursor geometry and mode-keys |
+| client | `F-CLIENT-CHROME-POPUPS` | the pane-border-status row through its exact recipe, `pane-border-format` per pane, tiled z-order and the lines value on the snapshot (94 to 95), junctions, indicators; the mode-tree key vocabulary with `x`/`X` prompts and `-y`; the popup kitty item through a graphics-answering pty fixture, then a menu over a popup for the three pointer items |
+| daemon | `F-DAEMON-MUX-SMALLS` | `send-keys -K` through a SendClientKeys effect; a byte-clean session environment plus the ClientHello byte entry; the I modifier through the ported `tty_term_codes` and `tty_features` tables and `infocmp -x`; the `set-hook -B` monitor subsystem; the `-v` trace last |
 
-What cycle 8 leaves for cycle 9: the client basket (`options.pane-border-chrome` with its exact
-status-row recipe, `choosers.command-flags`, the three popup pointer items behind a menu-over-popup),
-`keys.copy-mode-binding-fidelity` (14 on the accepted `-P` decision, 2 on the search action family),
-`formats.context-producer-fidelity` (the `set-hook -B` monitor subsystem), and the two design fronts
-(`control-mode.disconnect-cancels-command-queue`, `split-window -W`).
+What stays after cycle 9 no matter what: the two design fronts
+(`control-mode.disconnect-cancels-command-queue`, `split-window -W`), the 14 copy bindings on the
+accepted `-P` decision plus the two on the search action family, and `rendering.geometry-residue`
+(GUI-only, needs a way to drive the desktop client's measurement under test).
 
 Launch:
 
 ```js
 Workflow({
-  scriptPath: "<checkout>/compat/orchestration/opus-compat-run-8.js",
+  scriptPath: "<checkout>/compat/orchestration/opus-compat-run-9.js",
   args: {
     root: "/Users/demfabris/dev/zz", dev: "/Users/demfabris/dev", holder: "macbook/orchestrator",
     machine: "16-core, 48 GB macOS box (macbook)", cores: 16,
@@ -54,10 +53,10 @@ Workflow({
 Omit `args` on this macbook. Before launching: claim the three lock fronts under your holder
 identity (`ZZ_BOARD_HOLDER=<holder> python3 compat/board.py claim <FRONT> --lease 6h`), check
 `origin/main`, and start a lease renewer (a loop renewing the three fronts and MAIN with
-`--lease 6h` every ~100 minutes). Cycle 7 took 3h53m and 2.64M subagent tokens for seven agents.
-After the gate finishes, verify `origin/main`, the board records, and `compat/progress.py`, then
-write cycle 9 from a fresh registry census as described under the loop below. `CAMPAIGN-LOG.md` has
-the per-cycle history.
+`--lease 6h` every ~100 minutes). Cycles 7 and 8 took about four hours and 2.6-2.8M subagent
+tokens each. After the gate finishes, verify `origin/main`, the board records, and
+`compat/progress.py`, then write the next cycle from a fresh registry census as described under
+the loop below. `CAMPAIGN-LOG.md` has the per-cycle history.
 
 ## The cycle, in general
 
@@ -87,7 +86,7 @@ bypasses it). `caffeinate -is -w <claude pid>` keeps the Mac awake for the sessi
 open. `gh` is logged in with repo scope. Holder identity
 `macbook/orchestrator`. Caches are populated (`compat/.cache/tmux-src/tmux` at `d77c9dc6`,
 `compat/.cache/plugins`, eight plugins); the `formats` scenario ran clean here. Worktrees: `~/dev/zz-opus-dint`,
-`~/dev/zz-opus-panes` and `~/dev/zz-opus-termopts` exist, clean and warm at the cycle-7 lane tips; the
+`~/dev/zz-opus-panes` and `~/dev/zz-opus-termopts` exist, clean and warm at the cycle-8 lane tips; the
 reviewers reuse `zz-review-*` when present. Machine traps the prompts already
 carry: `/bin/bash` is 3.2 (no `mapfile`; shard runners use `/opt/homebrew/bin/bash` or python3),
 APFS refuses non-UTF-8 file names (`smoke/client-non-utf8-cwd` guards for it since cycle 7), and the user has a live tmux server (sessions `clairvo`, `home`, `zz`)

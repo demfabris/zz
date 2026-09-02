@@ -165,3 +165,31 @@ sharing `status.rs` with another lane, the I modifier's blocker sharpened to the
 `tty_term_codes` and `tty_features` tables, the vi `#`/`*` bindings now wait on the search action
 family rather than the format, the border chrome has an exact recipe for the status row, and the
 three popup pointer items wait on a menu over a popup.
+
+## 2026-09-02: cycle 8 overnight on the macbook, meter 77.6% to 84.2%
+
+Seven agents, 4h14m wall, 2.78M subagent tokens, two of three lanes merged. Merges: daemon
+`7f212120` (the pane focus hooks at the pin's own call sites with a PANE_FOCUSED set and the
+transitions spliced by anchor, the item three lanes had skipped; status-keys with the prompt's vi
+table, the three key spellings, the message-covers-prompt shape; gate fix: a false `-d 0`
+measurement rewritten to the proved pair), formats `37c91bf2` (the per-command format client by
+activity time with null list rows, closing the resize context and all three `window_*` runtime
+formats; the null-aware `display-message -a` listing against the measured name sets; `pane_pipe`,
+`pane_pipe_pid` and `pane_unseen_changes` with the unseen-changes premise corrected to the pin's
+mode-gated flag; the bare `=` mouse target; four settlements: tilde home into the byte-streams
+stance, per-client active pane, remote alias preflight, shutdown unlink order as never; reviewed
+approve with zero defects), ledger `6e0bdd48`. The terminal lane (all eight engine knobs, `copy-mode
+-s`, `clear-history -H`, `resize-pane -T`, `remain-on-exit-format`; reviewed approve-with-fixes
+and all five fixes applied) was SKIPPED at the gate: drawing the pin's default dead-pane notice
+scrolls the child's last line into history, and zz's retained-pane capture has no scrollback, so two
+pre-existing corpus scenarios lost a line. The gate's rebased tip with the fixes was recovered from
+unreachable commits and pushed as `campaign/batch-terminal-knobs-opus-gated` (`c328ebd3`); the
+front was withdrawn and reminted as `F-TERMINAL-KNOBS-RELAND` with the capture fix first. Skips
+worth reading: the I modifier now decomposes into `tty_term_codes`, `tty_features`, the
+terminal-features fnmatch pass and `infocmp -x` (zz's `client_termfeatures` is the renderer roster,
+not the pin's detection), the `-v` trace needs modifier arguments expanded at parse time, the
+environment bytes need a byte-clean session environment end to end, `send-keys -K` is mapped onto a
+SendClientKeys effect, the mode-keys branches are blocked behind cursor geometry (zz's cursor-right
+never wraps), and `pane_pb_progress` is the ConEmu OSC 9;4 progress bar, not paste progress. New
+lore: `attached_client_extents_clamp` fails two to four runs in six even solo on this box on
+pristine main (the 128 MiB revision limit under the huge-client resize), so it is a known race.

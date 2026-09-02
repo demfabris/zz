@@ -10509,6 +10509,13 @@ impl MuxEngine {
             .collect()
     }
 
+    pub fn terminal_overrides_option(&self) -> Vec<String> {
+        self.array_option_readback(TmuxOptionTarget::Server, "terminal-overrides", true)
+            .into_iter()
+            .flat_map(|(array, _)| array.values().cloned())
+            .collect()
+    }
+
     fn update_environment_names(&self) -> impl Iterator<Item = &str> {
         self.stored_arrays
             .global_session
@@ -22859,8 +22866,6 @@ mod tests {
             .execute(&mut context, &command("new-session", &[]))
             .expect("session");
 
-        // `cmd_send_keys_inject_key` under `-K` never touches the target pane;
-        // it hands the key to the target client's own handler.
         let injected = engine
             .execute(
                 &mut context,
@@ -22876,7 +22881,6 @@ mod tests {
             }]
         );
 
-        // The `-N` loop wraps the injection, so a count repeats the key.
         let repeated = engine
             .execute(
                 &mut context,
@@ -22892,8 +22896,6 @@ mod tests {
             }]
         );
 
-        // With no positional key the pin injects `event->key`, the key of the
-        // queue item that ran the command.
         context.set_invoking_key(Some("F5".to_owned()));
         let replayed = engine
             .execute(
@@ -22910,9 +22912,6 @@ mod tests {
             }]
         );
 
-        // `cmd_send_keys_exec` returns at `if (args_has(args, 'N'))` inside the
-        // `count == 0` block, so a count with no key arms the mode count and
-        // injects nothing.
         let counted = engine
             .execute(
                 &mut context,
@@ -22927,8 +22926,6 @@ mod tests {
             "a -N with no positional key injects nothing: {counted:?}"
         );
 
-        // A command queued by something other than a key has no `event->key` to
-        // replay, so the no-key form injects nothing at all.
         context.set_invoking_key(None);
         let unqueued = engine
             .execute(

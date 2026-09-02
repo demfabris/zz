@@ -201,8 +201,6 @@ impl ClientViewportFacts {
 const DEFAULT_XPIXEL: u32 = 16;
 const DEFAULT_YPIXEL: u32 = 32;
 
-/// A client's own process environment as `#{Vc:}` rows. A client store has no
-/// hidden or removed entries: the client sends what it has.
 /// `tty_term_read_list` on the pin sets up the terminfo entry for the client's
 /// TERM and writes each capability it finds as a `name=value` string. zz has no
 /// curses linkage, so it reads the same entry through `infocmp -x`, which is
@@ -241,6 +239,16 @@ fn read_terminfo_entries(term: &str) -> Option<Vec<String>> {
         return None;
     }
     let text = String::from_utf8(output.stdout).ok()?;
+    Some(parse_infocmp_entries(&text))
+}
+
+/// `infocmp -1` prints a string capability as `name=value` in the terminfo
+/// source spelling, a number as `name#value` (hex under ncurses 6.1 and later
+/// once it passes 255), a boolean as a bare `name` and a cancelled capability
+/// as `name@`. `tty_term_read_list` carries the three live forms as
+/// `name=value` with the string decoded the way `tigetstr` hands it back and
+/// the number printed `%d`, and never sees a cancelled one.
+fn parse_infocmp_entries(text: &str) -> Vec<String> {
     let mut entries = Vec::new();
     for line in text.lines() {
         let line = line.trim();
@@ -250,19 +258,90 @@ fn read_terminfo_entries(term: &str) -> Option<Vec<String>> {
         if line.starts_with('#') || line.is_empty() {
             continue;
         }
-        // `infocmp` prints a string capability as `name=value`, a number as
-        // `name#value`, a boolean as a bare `name` and a cancelled capability
-        // as `name@`; `tty_term_read_list` carries all three live forms as
-        // `name=value` and never sees a cancelled one.
         if let Some((name, value)) = line.split_once('=') {
-            entries.push(format!("{name}={value}"));
+            entries.push(format!("{name}={}", decode_terminfo_string(value)));
         } else if let Some((name, value)) = line.split_once('#') {
-            entries.push(format!("{name}={value}"));
+            let number = match value
+                .strip_prefix("0x")
+                .or_else(|| value.strip_prefix("0X"))
+            {
+                Some(hex) => i64::from_str_radix(hex, 16).ok(),
+                None => value.parse::<i64>().ok(),
+            };
+            if let Some(number) = number {
+                entries.push(format!("{name}={number}"));
+            }
         } else if !line.ends_with('@') {
             entries.push(format!("{line}=1"));
         }
     }
-    Some(entries)
+    entries
+}
+
+/// terminfo(5) string escapes as `tigetstr` decodes them: `\E` and `\e` for
+/// ESC, `^X` for a control character, `\NNN` octal, the C escapes, and the
+/// backslashed punctuation the source syntax needs (`\,` `\:` `\^` `\\`).
+/// `\0` is `\200` because terminfo has no NUL.
+fn decode_terminfo_string(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        index += 1;
+        match byte {
+            b'^' => {
+                let Some(&control) = bytes.get(index) else {
+                    out.push(byte);
+                    break;
+                };
+                index += 1;
+                out.push(if control == b'?' {
+                    0x7f
+                } else {
+                    control & 0x1f
+                });
+            }
+            b'\\' => {
+                let Some(&next) = bytes.get(index) else {
+                    out.push(byte);
+                    break;
+                };
+                index += 1;
+                let decoded = match next {
+                    b'E' | b'e' => 0x1b,
+                    b'n' | b'l' => b'\n',
+                    b'r' => b'\r',
+                    b't' => b'\t',
+                    b'b' => 0x08,
+                    b'f' => 0x0c,
+                    b's' => b' ',
+                    b'a' => 0x07,
+                    b'0'..=b'7' => {
+                        let mut number = u32::from(next - b'0');
+                        for _ in 0..2 {
+                            match bytes.get(index) {
+                                Some(digit @ b'0'..=b'7') => {
+                                    number = number * 8 + u32::from(digit - b'0');
+                                    index += 1;
+                                }
+                                _ => break,
+                            }
+                        }
+                        if number == 0 {
+                            0x80
+                        } else {
+                            (number & 0xff) as u8
+                        }
+                    }
+                    other => other,
+                };
+                out.push(decoded);
+            }
+            _ => out.push(byte),
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Read and cache the terminfo entry for `term` without building anything from
@@ -282,6 +361,7 @@ pub(crate) fn client_terminal_facts(
     term: &str,
     colour_term: Option<&str>,
     terminal_features: &[String],
+    terminal_overrides: &[String],
 ) -> Option<TtyTerm> {
     let entries = terminfo_entries(term)?;
     Some(TtyTerm::create(
@@ -289,9 +369,12 @@ pub(crate) fn client_terminal_facts(
         &entries,
         colour_term,
         terminal_features,
+        terminal_overrides,
     ))
 }
 
+/// A client's own process environment as `#{Vc:}` rows. A client store has no
+/// hidden or removed entries: the client sends what it has.
 pub(crate) fn client_environment_rows(
     environment: Option<&Arc<BTreeMap<String, String>>>,
 ) -> Vec<FormatEnvironRow> {
@@ -2772,13 +2855,86 @@ mod terminfo_tests {
         };
         assert!(entries.iter().any(|entry| entry.starts_with("AX=")));
         assert!(entries.iter().any(|entry| entry.starts_with("colors=256")));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.starts_with("clear=\u{1b}["))
+        );
         let term = client_terminal_facts(
             "xterm-256color",
             Some("truecolor"),
             &["xterm*:clipboard:ccolour:cstyle:focus:title".to_owned()],
+            &[],
         )
         .expect("term");
         assert!(term.has_capability("smcup"));
         assert!(term.has_feature("RGB"));
+        assert!(term.has_feature("bpaste"));
+    }
+
+    /// Measured on the pin on 2026-09-02 with COLORTERM unset and one pty
+    /// client per TERM, against the stock `terminal-features` and
+    /// `terminal-overrides` arrays: the entries without XT still get the
+    /// VT100-like features off a decoded clear, the stock `linux*:AX@` row
+    /// removes AX, and the stock `rxvt*:ignorefkeys` row cancels kf1.
+    #[test]
+    fn the_stock_arrays_move_the_other_terms_the_way_the_pin_does() {
+        let engine = zz_mux::MuxEngine::default();
+        let features = engine.terminal_features_option();
+        let overrides = engine.terminal_overrides_option();
+        let facts = |term: &str| client_terminal_facts(term, None, &features, &overrides);
+        if let Some(screen) = facts("screen-256color") {
+            assert!(screen.has_feature("bpaste"));
+            assert!(screen.has_feature("focus"));
+            assert!(screen.has_capability("Enfcs"));
+            assert!(!screen.has_capability("XT"));
+        }
+        if let Some(tmux) = facts("tmux-256color") {
+            assert!(tmux.has_feature("bpaste"));
+            assert!(tmux.has_feature("focus"));
+            assert!(tmux.has_capability("Enfcs"));
+        }
+        if let Some(linux) = facts("linux") {
+            assert!(linux.has_feature("title"));
+            assert!(!linux.has_capability("AX"));
+        }
+        if let Some(rxvt) = facts("rxvt") {
+            assert!(!rxvt.has_capability("kf1"));
+            assert!(!rxvt.has_capability("kf63"));
+        }
+    }
+
+    /// ncurses 6.1 and later print a number past 255 in hex, and every string
+    /// in the terminfo source spelling; `tty_term_read_list` sees neither.
+    #[test]
+    fn the_infocmp_reader_speaks_both_ncurses_generations() {
+        let entries = parse_infocmp_entries(
+            "#\tReconstructed via infocmp\nxterm-256color|xterm with 256 colors,\n\tam,\n\tcolors#0x100,\n\tpairs#65536,\n\tclear=\\E[H\\E[2J,\n\tkf1=\\EOP,\n\tbel=^G,\n\tacsc=``aaffggiijjkk\\,\\:\\^\\\\,\n\tsmcup@,\n\tU8#1,\n\tSs=\\E[%p1%d q$<5>,\n",
+        );
+        assert_eq!(
+            entries,
+            [
+                "xterm-256color|xterm with 256 colors=1",
+                "am=1",
+                "colors=256",
+                "pairs=65536",
+                "clear=\u{1b}[H\u{1b}[2J",
+                "kf1=\u{1b}OP",
+                "bel=\u{7}",
+                "acsc=``aaffggiijjkk,:^\\",
+                "U8=1",
+                "Ss=\u{1b}[%p1%d q$<5>",
+            ]
+        );
+        let term = TtyTerm::create(
+            "xterm-256color",
+            &entries,
+            None,
+            &[],
+            &["linux*:AX@".to_owned()],
+        );
+        assert!(term.has_capability("colors"));
+        assert!(term.has_feature("bpaste"));
+        assert!(!term.has_capability("smcup"));
     }
 }

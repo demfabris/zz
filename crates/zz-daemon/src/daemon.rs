@@ -7435,11 +7435,6 @@ impl Shared {
                         keys,
                         repeat,
                     } => {
-                        // `cmd_send_keys_inject_key` returns the queue item
-                        // untouched when `cmdq_get_target_client` answers NULL,
-                        // so an unresolvable `-c` injects nothing and still
-                        // exits 0. Without `-c` the target is
-                        // `cmd_find_current_client`.
                         let selected = match target_client.as_deref() {
                             Some(target) => find_attached_client_with_aliases(&inner, target, true),
                             None => current_format_client(&inner, client),
@@ -28815,6 +28810,7 @@ fn client_format_facts(
                     client_environment_value(inner, client, "TERM").unwrap_or_default(),
                     client_environment_value(inner, client, "COLORTERM"),
                     &inner.engine.terminal_features_option(),
+                    &inner.engine.terminal_overrides_option(),
                 )
             })
             .flatten(),

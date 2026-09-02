@@ -1317,8 +1317,6 @@ fn send_keys_reports_the_flags_it_cannot_honor() {
         "{error:?}"
     );
 
-    // `-K` leaves the pane alone and hands the keys to the target client, so
-    // it produces no `SendKeys` at all.
     let injected = engine
         .execute(&mut context, &command("send-keys", &["-K", "x"]))
         .unwrap();

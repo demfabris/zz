@@ -3011,9 +3011,6 @@ impl<'a> ModifierFlags<'a> {
                 ModifierKind::Colour => {
                     flags.colour = Some(modifier.args.first().map_or("", String::as_str));
                 }
-                // `case 'I'` breaks at `argc < 1`, and a flag word carrying
-                // none of c, f or e sets no bit, so both fall through to the
-                // ordinary lookup of the body.
                 ModifierKind::Interrogate => {
                     if let Some(word) = modifier.args.first()
                         && word.contains(['c', 'f', 'e'])

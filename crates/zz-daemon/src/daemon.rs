@@ -42193,6 +42193,54 @@ mod tests {
         );
     }
 
+    /// The pin writes a border style's whole cell: measured on an attached
+    /// 79x24 pinned client on 2026-09-02 with `pane-border-style
+    /// 'bold,fg=colour190,bg=colour17'`, whose border cells arrived as
+    /// `ESC[1m`, `ESC[38;5;190m` and `ESC[48;5;17m`. zz's snapshot carries the
+    /// foreground alone, so the same style reaches a client as colour 190 with
+    /// no background and no attribute. This locks that residue: a wider
+    /// appearance bridge has to move this assertion, not slip past it.
+    #[test]
+    fn a_pane_border_style_reaches_a_client_as_its_foreground_alone() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "residue", "-n", "main"]),
+            )
+            .expect("create session");
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("split-window", ["-d"]),
+            )
+            .expect("split window");
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-g", "pane-border-style", "bold,fg=colour190,bg=colour17"],
+                ),
+            )
+            .expect("set border style");
+
+        let facts = FormatHookFacts::default();
+        let mut snapshot = engine.state.snapshot();
+        stamp_pane_border_colours(&engine, "", &facts, FormatClient::NoClient, &mut snapshot);
+        for pane in snapshot.sessions[0].windows[0].panes.values() {
+            assert_eq!(pane.border_colour, Some(TmuxColour::Indexed(190)));
+        }
+        assert_eq!(
+            zz_protocol::parse_style("bold,fg=colour190,bg=colour17")
+                .expect("the style parses")
+                .bg,
+            Some(TmuxColour::Indexed(17)),
+            "the background the pin draws is parsed and then dropped"
+        );
+    }
+
     #[test]
     fn display_panes_labels_expand_the_format_per_pane() {
         let mut engine = MuxEngine::default();

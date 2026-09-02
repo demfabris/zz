@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/remain-on-exit-format.sh ~/remain-on-exit-format.sh
+out: set-environment -gu REMAIN_ON_EXIT_FORMAT
+run-shell 'sh ~/remain-on-exit-format.sh'
+out: show-environment -g REMAIN_ON_EXIT_FORMAT

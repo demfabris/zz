@@ -17,11 +17,11 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **63**. Classified items: **473**.
+Tracked gap groups: **62**. Classified items: **473**.
 
-- Status: open: 18, blocked: 6, accepted: 39.
-- Decision: adopt: 22, native: 31, park: 2, never: 8.
-- Priority: later: 24, none: 39.
+- Status: open: 18, blocked: 5, accepted: 39.
+- Decision: adopt: 21, native: 31, park: 2, never: 8.
+- Priority: later: 23, none: 39.
 - Closed history entries: 154.
 - Surface: command: 9, flag: 39, native-command: 21, option: 71, format: 57, key: 93, binding: 61, native-key: 58, semantic: 55, presentation: 7, protocol: 2.
 
@@ -63,7 +63,6 @@ structure as proof.
 | `control-mode.disconnect-cancels-command-queue` | Cancel client-owned Control queues after connection loss | adopt | open | hard | daemon | scripts | none |
 | `copy-mode.action-fidelity` | Complete the copy-mode action vocabulary | adopt | open | hard | terminal | daily, remote, scripts | none |
 | `copy-mode.command-fidelity` | Complete copy-mode command fidelity | adopt | open | hard | client | daily, remote | clients.interactive-refresh |
-| `display-message.mouse-target-context` | Resolve display-message mouse targets | adopt | blocked | hard | mux | scripts, gui | mouse.bound-context |
 | `display-message.verbose-trace` | Trace display-message format expansion | adopt | open | hard | mux | scripts, admin | none |
 | `display-popup.behavior-fidelity` | Match remaining display-popup behavior | adopt | open | hard | daemon | daily, remote, scripts | none |
 | `formats.context-producer-fidelity` | Implement missing context-format producers | adopt | open | hard | mux | scripts, gui | none |
@@ -410,24 +409,6 @@ Copy mode lives per client in zz and needs explicit target-client semantics. sem
   - `file:compat/scenarios/smoke/fixtures/copy-mode-kill-on-exit.sh`
 - Acceptance:
   - `Attached-client tests cover source pane, initial scroll position, and command counts; the counts are proved through the copy-mode format family rather than through a client's rendered screen.`
-
-### `display-message.mouse-target-context`: Resolve display-message mouse targets
-
-The mux has no command-queue mouse record, so bare = currently reaches the ordinary pane parser and falls into the empty CANFAIL result even for a mouse-triggered command.
-
-- Decision: `adopt`
-- Status: `blocked`
-- Priority and ease: `later` / `hard`
-- Owner: `mux`
-- User impact: scripts, gui
-- Items: `semantic:display-message-bare-mouse-target`
-- Depends on: `mouse.bound-context`
-- Evidence:
-  - `resource:crates/zz-mux/src/command.rs`
-  - `resource:knowledge/tmux/tmux-compat.md`
-  - `resource:knowledge/tmux/divergences.md`
-- Acceptance:
-  - `A display-message command invoked from a mouse binding resolves bare -t = and -t {mouse} to that event's pane, window, and session. Without a mouse event, CMD_FIND_CANFAIL retains an empty target context and stays quiet.`
 
 ### `display-message.verbose-trace`: Trace display-message format expansion
 
@@ -959,21 +940,23 @@ The pin's comparator truncates 64-bit key differences into int, returns equality
 
 ### `mouse.bound-context`: Carry bound mouse event context
 
-`copy-mode -S`, `resize-pane -M`, `move-pane -M`, and `send-keys -M` all consume the mouse event that invoked the command, so the pin resolves the target from the event and drives a scrollbar slider drag, a border drag, or a mouse-keyed send. zz installs no tmux mouse key tables, so no command is ever invoked from a mouse event; the same gestures are handled directly by each rendering client, already accepted under `keys.root-native-mouse` and `keys.copy-mode-native-mouse`. The four flags stay loudly unsupported instead of quietly falling back to a keyboard path. Reopen only if zz installs tmux mouse key tables and a normalized event record travels with bound commands.
+`copy-mode -S`, `resize-pane -M`, `move-pane -M`, and `send-keys -M` all consume the mouse event that invoked the command, so the pin resolves the target from the event and drives a scrollbar slider drag, a border drag, or a mouse-keyed send. zz installs no tmux mouse key tables, so no command is ever invoked from a mouse event; the same gestures are handled directly by each rendering client, already accepted under `keys.root-native-mouse` and `keys.copy-mode-native-mouse`. The four flags stay loudly unsupported instead of quietly falling back to a keyboard path. Reopen only if zz installs tmux mouse key tables and a normalized event record travels with bound commands. Relocated 2026-09-02: semantic:display-message-bare-mouse-target came here from display-message.mouse-target-context, which was blocked on this group and is now empty. Its acceptance asked for `display-message` invoked from a mouse binding to resolve bare `-t =` and `-t {mouse}` to that event's pane, window and session. Measured on both binaries with real pty clients and SGR mouse bytes: with `mouse on` and `bind -n MouseDown1Pane run-shell 'echo down >> LOG'`, writing `\033[<0;10;5M` and `\033[<0;10;5m` to the client's pty makes the pin run the binding, and zz never runs it at all, because zz's key engine installs no root-table mouse bindings and its clients answer the pointer natively. zz parses and stores the mouse key names, so the bind is accepted and simply never fires. The premise the slug needs, a command invoked from a mouse event, therefore does not exist in zz, and the target spelling it asks about stays what the pin also produces with no mouse event in the tree: `-t =` falls through to the ordinary pane parser and misses quietly under CMD_FIND_CANFAIL, which is measured identical on both binaries. The product stance is this group's: pointer gestures belong to each rendering client, not to a tmux key table, so the invoking-mouse-event record the slug depends on is not something zz will carry. The same reasoning already limits display-menu, whose full mouse policy zz turns on with -M alone because there is no invoking mouse event to turn it on implicitly. Reopen with the rest of this group if zz ever installs tmux mouse key tables.
 
 - Decision: `native`
 - Status: `accepted`
 - Priority and ease: `none` / `none`
 - Owner: `protocol`
 - User impact: daily, scripts, gui
-- Items: `flag:copy-mode:-S`, `flag:move-pane:-M`, `flag:resize-pane:-M`, `flag:send-keys:-M`
+- Items: `flag:copy-mode:-S`, `flag:move-pane:-M`, `flag:resize-pane:-M`, `flag:send-keys:-M`, `semantic:display-message-bare-mouse-target`
 - Depends on: none
 - Evidence:
+  - `resource:crates/zz-mux/src/command.rs`
   - `resource:crates/zz-protocol/src/catalog.rs`
-  - `resource:knowledge/tmux/key-tables.md`
   - `resource:knowledge/designs/tmux-superset-roadmap.md`
+  - `resource:knowledge/tmux/divergences.md`
+  - `resource:knowledge/tmux/key-tables.md`
 - Acceptance:
-  - `Native pointer handling keeps scrollbar, border, and drag gestures without installing tmux mouse key tables, and the four mouse-context flags stay loudly unsupported.`
+  - `Native pointer handling keeps scrollbar, border, and drag gestures without installing tmux mouse key tables, the four mouse-context flags stay loudly unsupported, and a target spelling that only a bound mouse event can resolve stays a quiet CMD_FIND_CANFAIL miss.`
 
 ### `options.client-terminal-negotiation`: Keep client terminal negotiation native
 

@@ -120,6 +120,7 @@
 | smoke/client-exit-actions | 3 | yes | 0 | yes | yes | yes |
 | smoke/client-non-utf8-cwd | 4 | yes | 0 | yes | yes | yes |
 | smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |
+| smoke/command-prompt-chain | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-alias-parse-unit | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-chain-parse-abort | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-grammar | 17 | yes | 0 | yes | yes | yes |

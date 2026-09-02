@@ -1,0 +1,4 @@
+corpus: none
+stage: fixtures/command-prompt-chain.sh ~/command-prompt-chain.sh
+run-shell 'sh ~/command-prompt-chain.sh'
+out: show-environment -g PROMPT_CHAIN

@@ -21,7 +21,7 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
-    CellLayout, CommandAliasResolution, CommandPromptTemplate, ConfigDiagnostic,
+    CellLayout, CommandAliasResolution, CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic,
     CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
     FormatClient, KeyDecision, KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind,
     PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes, RetainedJobEnvironment, StatusHooks,
@@ -7260,8 +7260,7 @@ impl Shared {
                         direct_events.push(EventPayload::FocusSidebar);
                     }
                     MuxEffect::CommandPrompt {
-                        prompt,
-                        input,
+                        steps,
                         template,
                         source,
                         prompt_type,
@@ -7287,8 +7286,7 @@ impl Shared {
                         );
                         if !inner.command_prompts.contains_key(&client) {
                             let prompt = CommandPrompt::new(
-                                prompt.clone(),
-                                input.clone(),
+                                steps.clone(),
                                 template.clone(),
                                 source.clone(),
                                 *prompt_type,
@@ -7302,7 +7300,7 @@ impl Shared {
                             let fired =
                                 (prompt.mode == CommandPromptMode::Incremental).then(|| {
                                     CommandPromptSubmission {
-                                        input: format!("={}", prompt.input),
+                                        inputs: vec![format!("={}", prompt.input)],
                                         template: prompt.template.clone(),
                                         source: prompt.source.clone(),
                                     }
@@ -16382,7 +16380,7 @@ impl Shared {
         replacement: &str,
         title: &str,
     ) {
-        let command = MuxEngine::substitute_command_prompt_template(template, replacement);
+        let command = MuxEngine::substitute_command_prompt_template(template, &[replacement]);
         self.execute_overlay_source_with_error_case(client, context, &command, title, true);
     }
 
@@ -16685,7 +16683,7 @@ impl Shared {
             kind,
             context,
             &CommandPromptSubmission {
-                input,
+                inputs: vec![input],
                 template,
                 source,
             },
@@ -16747,7 +16745,7 @@ impl Shared {
                     ))
                     .into());
                 }
-                let (submission, remembered, prompt_type, retired) = {
+                let (submission, remembered, prompt_type, retired, chained) = {
                     let mut inner = self.inner.lock();
                     let Some(mut prompt) = inner.command_prompts.remove(&client) else {
                         return Ok(());
@@ -16756,20 +16754,34 @@ impl Shared {
                     prompt.replace_input(input, cursor)?;
                     let retired = prompt.freezes();
                     let prompt_type = prompt.prompt_type;
-                    // `-i` already ran the template on every edit; its Enter
-                    // only records history and closes.
-                    let submission = (prompt.mode != CommandPromptMode::Incremental
-                        && (!prompt.input.is_empty() || prompt.template.is_some()))
-                    .then_some(CommandPromptSubmission {
-                        input: prompt.input.clone(),
-                        template: prompt.template,
-                        source: prompt.source,
-                    });
-                    let remembered = (!prompt.input.is_empty()).then_some(prompt.input);
-                    (submission, remembered, prompt_type, retired)
+                    let remembered = (!prompt.input.is_empty()).then(|| prompt.input.clone());
+                    if prompt.mode != CommandPromptMode::Incremental && prompt.advance() {
+                        let state = prompt.state(prompt_history(&inner, prompt_type));
+                        inner.command_prompts.insert(client, prompt);
+                        (None, remembered, prompt_type, false, Some(state))
+                    } else {
+                        // `-i` already ran the template on every edit; its Enter
+                        // only records history and closes.
+                        let submission = (prompt.mode != CommandPromptMode::Incremental
+                            && (prompt.answers.iter().any(|answer| !answer.is_empty())
+                                || prompt.template.is_some()))
+                        .then_some(CommandPromptSubmission {
+                            inputs: prompt.answers,
+                            template: prompt.template,
+                            source: prompt.source,
+                        });
+                        (submission, remembered, prompt_type, retired, None)
+                    }
                 };
                 if let Some(remembered) = &remembered {
                     self.record_prompt_history(prompt_type, remembered);
+                }
+                if let Some(state) = chained {
+                    self.publish_to_client(
+                        client,
+                        EventPayload::CommandPrompt { state: Some(state) },
+                    );
+                    return Ok(());
                 }
                 self.publish_to_client(client, EventPayload::CommandPrompt { state: None });
                 if retired {
@@ -16896,7 +16908,7 @@ impl Shared {
                     None => "%1",
                 };
                 let command =
-                    MuxEngine::substitute_command_prompt_template(template, &submission.input);
+                    MuxEngine::substitute_command_prompt_template(template, &submission.inputs);
                 let prepared = {
                     let inner = self.inner.lock();
                     let source = submission
@@ -16956,7 +16968,7 @@ impl Shared {
                 .inner
                 .lock()
                 .engine
-                .substitute_command_prompt_commands(&mut commands, &submission.input);
+                .substitute_command_prompt_commands(&mut commands, &submission.inputs);
             if let Err(error) = substitution {
                 self.publish_to_client(
                     client,
@@ -25845,6 +25857,9 @@ struct CommandPrompt {
     prompt: String,
     input: String,
     cursor: usize,
+    steps: Vec<CommandPromptStep>,
+    current: usize,
+    answers: Vec<String>,
     template: Option<CommandPromptTemplate>,
     source: Option<SourceSpan>,
     history_index: Option<usize>,
@@ -25859,14 +25874,16 @@ struct CommandPrompt {
 
 impl CommandPrompt {
     fn new(
-        prompt: String,
-        input: String,
+        steps: Vec<CommandPromptStep>,
         template: Option<CommandPromptTemplate>,
         source: Option<SourceSpan>,
         prompt_type: CommandPromptType,
         mode: CommandPromptMode,
         no_freeze: bool,
     ) -> Self {
+        let first = steps.first();
+        let prompt = first.map(|step| step.label.clone()).unwrap_or_default();
+        let input = first.map(|step| step.input.clone()).unwrap_or_default();
         let incremental = mode == CommandPromptMode::Incremental;
         let (input, last) = if incremental {
             (String::new(), input)
@@ -25879,6 +25896,9 @@ impl CommandPrompt {
             history_draft: input.clone(),
             input,
             cursor,
+            steps,
+            current: 0,
+            answers: Vec::new(),
             template,
             source,
             history_index: None,
@@ -25887,6 +25907,30 @@ impl CommandPrompt {
             no_freeze,
             last,
         }
+    }
+
+    /// `cmd_command_prompt_callback`: an Enter that is not the chain's last
+    /// answer records the buffer and reopens on the next label and input.
+    fn advance(&mut self) -> bool {
+        self.answers.push(std::mem::take(&mut self.input));
+        let Some(step) = self.steps.get(self.current.saturating_add(1)) else {
+            self.cursor = 0;
+            return false;
+        };
+        self.current = self.current.saturating_add(1);
+        self.prompt.clone_from(&step.label);
+        self.input.clone_from(&step.input);
+        self.cursor = self.input.len();
+        self.history_index = None;
+        self.history_draft.clone_from(&self.input);
+        self.last = String::new();
+        true
+    }
+
+    fn answers_with(&self, answer: String) -> Vec<String> {
+        let mut answers = self.answers.clone();
+        answers.push(answer);
+        answers
     }
 
     fn kind(&self) -> CommandPromptKind {
@@ -26225,7 +26269,7 @@ enum PromptKeyAction {
 }
 
 struct CommandPromptSubmission {
-    input: String,
+    inputs: Vec<String>,
     template: Option<CommandPromptTemplate>,
     source: Option<SourceSpan>,
 }
@@ -26297,7 +26341,7 @@ fn command_prompt_outcome(
         }
         PromptKeyAction::Incremental(prefix) => {
             let fired = CommandPromptSubmission {
-                input: format!("{prefix}{}", prompt.input),
+                inputs: vec![format!("{prefix}{}", prompt.input)],
                 template: prompt.template.clone(),
                 source: prompt.source.clone(),
             };
@@ -26325,25 +26369,37 @@ fn command_prompt_outcome(
             event: PromptWireUpdate::Retire,
             retired: prompt.freezes(),
             submission: Some(CommandPromptSubmission {
-                input: answer,
+                inputs: prompt.answers_with(answer),
                 template: prompt.template,
                 source: prompt.source,
             }),
             ..PromptKeyOutcome::default()
         },
         PromptKeyAction::Submit => {
+            let mut prompt = prompt;
             let retired = prompt.freezes();
-            let submission = (!prompt.input.is_empty() || prompt.template.is_some()).then(|| {
-                CommandPromptSubmission {
-                    input: prompt.input.clone(),
-                    template: prompt.template.clone(),
-                    source: prompt.source.clone(),
-                }
+            let remember =
+                (!prompt.input.is_empty()).then_some((prompt_type, prompt.input.clone()));
+            if prompt.advance() {
+                let state = prompt.state(prompt_history(inner, prompt_type));
+                inner.command_prompts.insert(client, prompt);
+                return PromptKeyOutcome {
+                    event: PromptWireUpdate::Republish(Box::new(state)),
+                    remember,
+                    ..PromptKeyOutcome::default()
+                };
+            }
+            let submission = (prompt.answers.iter().any(|answer| !answer.is_empty())
+                || prompt.template.is_some())
+            .then(|| CommandPromptSubmission {
+                inputs: prompt.answers.clone(),
+                template: prompt.template.clone(),
+                source: prompt.source.clone(),
             });
             PromptKeyOutcome {
                 event: PromptWireUpdate::Retire,
                 retired,
-                remember: (!prompt.input.is_empty()).then_some((prompt_type, prompt.input)),
+                remember,
                 submission,
                 pass: false,
                 limit_exceeded: false,
@@ -26351,9 +26407,12 @@ fn command_prompt_outcome(
         }
         PromptKeyAction::SubmitAndPass => {
             let retired = prompt.freezes();
-            let submission = (!prompt.input.is_empty() || prompt.template.is_some()).then_some({
+            let inputs = prompt.answers_with(prompt.input.clone());
+            let submission = (inputs.iter().any(|input| !input.is_empty())
+                || prompt.template.is_some())
+            .then_some({
                 CommandPromptSubmission {
-                    input: prompt.input,
+                    inputs,
                     template: prompt.template,
                     source: prompt.source,
                 }
@@ -37165,8 +37224,10 @@ mod tests {
         shared.inner.lock().command_prompts.insert(
             first,
             CommandPrompt::new(
-                "prompt".to_owned(),
-                "7".to_owned(),
+                vec![CommandPromptStep {
+                    label: "prompt".to_owned(),
+                    input: "7".to_owned(),
+                }],
                 Some(CommandPromptTemplate::String(
                     "rename-session -- 'prompt-before-any'".to_owned(),
                 )),
@@ -37514,8 +37575,10 @@ mod tests {
             shared.inner.lock().command_prompts.insert(
                 client,
                 CommandPrompt::new(
-                    "prompt".to_owned(),
-                    input.to_owned(),
+                    vec![CommandPromptStep {
+                        label: "prompt".to_owned(),
+                        input: input.to_owned(),
+                    }],
                     template.map(|template| CommandPromptTemplate::String(template.to_owned())),
                     None,
                     CommandPromptType::Command,
@@ -38049,8 +38112,10 @@ mod tests {
             inner.command_prompts.insert(
                 client,
                 CommandPrompt::new(
-                    "prompt".to_owned(),
-                    "kept".to_owned(),
+                    vec![CommandPromptStep {
+                        label: "prompt".to_owned(),
+                        input: "kept".to_owned(),
+                    }],
                     None,
                     None,
                     CommandPromptType::Command,
@@ -55558,8 +55623,10 @@ set-option -g @alias-mixed-next yes
             inner.command_prompts.insert(
                 client,
                 CommandPrompt::new(
-                    "prompt".to_owned(),
-                    "kept".to_owned(),
+                    vec![CommandPromptStep {
+                        label: "prompt".to_owned(),
+                        input: "kept".to_owned(),
+                    }],
                     None,
                     None,
                     CommandPromptType::Command,
@@ -68142,8 +68209,10 @@ bind - split-window -v -c "#{pane_current_path}"
     #[test]
     fn command_prompt_editor_preserves_unicode_boundaries_and_history_drafts() {
         let mut prompt = CommandPrompt::new(
-            ":".to_owned(),
-            "α beta".to_owned(),
+            vec![CommandPromptStep {
+                label: ":".to_owned(),
+                input: "α beta".to_owned(),
+            }],
             None,
             None,
             CommandPromptType::Command,
@@ -73989,8 +74058,10 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.inner.lock().command_prompts.insert(
             client,
             CommandPrompt::new(
-                "prompt".to_owned(),
-                String::new(),
+                vec![CommandPromptStep {
+                    label: "prompt".to_owned(),
+                    input: String::new(),
+                }],
                 None,
                 None,
                 CommandPromptType::Command,
@@ -75143,8 +75214,10 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.inner.lock().command_prompts.insert(
             client,
             CommandPrompt::new(
-                "prompt".to_owned(),
-                String::new(),
+                vec![CommandPromptStep {
+                    label: "prompt".to_owned(),
+                    input: String::new(),
+                }],
                 None,
                 None,
                 CommandPromptType::Command,
@@ -84752,7 +84825,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ClientKind::Interactive,
             &mut context,
             &CommandPromptSubmission {
-                input: "x".to_owned(),
+                inputs: vec!["x".to_owned()],
                 template,
                 source: None,
             },
@@ -84791,7 +84864,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ClientKind::Interactive,
             &mut context,
             &CommandPromptSubmission {
-                input: "x".to_owned(),
+                inputs: vec!["x".to_owned()],
                 template,
                 source: None,
             },
@@ -84839,7 +84912,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ClientKind::Interactive,
             &mut context,
             &CommandPromptSubmission {
-                input: input.to_owned(),
+                inputs: vec![input.to_owned()],
                 template,
                 source: None,
             },
@@ -84864,7 +84937,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ClientKind::Interactive,
             &mut context,
             &CommandPromptSubmission {
-                input: "x".to_owned(),
+                inputs: vec!["x".to_owned()],
                 template: Some(CommandPromptTemplate::String(
                     "set-environment -g COMMAND_PROMPT_PRECHECK yes\nunknown-%1".to_owned(),
                 )),
@@ -84935,7 +85008,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ClientKind::Interactive,
             &mut context,
             &CommandPromptSubmission {
-                input: "go".to_owned(),
+                inputs: vec!["go".to_owned()],
                 template: typed.template,
                 source: typed.source,
             },
@@ -84977,7 +85050,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ClientKind::Interactive,
             &mut context,
             &CommandPromptSubmission {
-                input: "go".to_owned(),
+                inputs: vec!["go".to_owned()],
                 template: string.template,
                 source: string.source,
             },

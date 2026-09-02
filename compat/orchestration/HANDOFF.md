@@ -1,37 +1,46 @@
-# Cycle-7 handoff for the tmux-compat campaign
+# Cycle-8 handoff for the tmux-compat campaign
 
-Written 2026-09-02 ~03:20Z on the macbook. Cycle 6 is DONE and cycle 7 is written, minted on the
-board, and NOT launched. Everything a machine needs is in this repository and in issue #7.
+Written 2026-09-02 ~04:30Z on the macbook, mid-overnight autonomous run (fabrico authorized driving
+the campaign end to end without asking). Cycle 7 is DONE; cycle 8 is written, minted on the board,
+and launched right after this commit. Everything a machine needs is in this repository and in issue
+#7.
 
 ## State now
 
 | Fact | Value |
 | --- | --- |
-| `origin/main` | `1d99c77b` (cycle-6 ledger; lanes `b1c80f66` keys, `0201a5e9` daemon, `0d727e36` client) |
-| Agreed-scope meter | 71.7% (218/304 items), 31/65 groups done; `python3 compat/progress.py` |
-| Live registry | 35 unresolved groups (26 open, 9 blocked); ledger 83.9% (182/217) |
-| Corpus | 167 scenarios / 2,402 steps, attached-client PASS, summary digest `878c2299…` |
-| `PROTOCOL_VERSION` | 93 (hex hello frame 0x5D, test `..._ninety_three`); cycle 7 bumps to 94 (0x5E) |
-| Board (issue #7) | MAIN and TRIAGE free. Cycle-7 lock fronts READY: `F-DAEMON-PROMPT-FOCUS` (p2, contract 5503736750), `F-COPY-MODE-DAEMON-VIEW` (5503736866), `F-CLIENT-CHROME-OVERLAYS` (5503736968). Also READY and untouched: `F-PANE-COMMAND-COMPLETION` (needs a design front), the `F-SPLIT-MUX-*-V5` chain, and the three fronts cycle 7 moots (`F-DISPLAY-MESSAGE-PANE-TARGETS-V3`, `F-KEY-CONTROL-V3`, `F-PANE-BORDER-ZORDER` + `-LINES-TILED`) |
+| `origin/main` | `e910a732` (cycle-7 ledger; lanes `327d036f` daemon, `dee45667` copy, `03f61a41` client) plus this records commit |
+| Agreed-scope meter | 77.6% (236/304 items), 36/65 groups done; `python3 compat/progress.py` |
+| Live registry | 29 unresolved groups (22 open, 7 blocked); ledger 86.6% (188/217) |
+| Corpus | 178 scenarios / 2,435 steps, attached-client PASS |
+| `PROTOCOL_VERSION` | 94 (hex hello frame 0x5E, test `..._ninety_four`); cycle 8 bumps to 95 (0x5F) |
+| Remote | `origin` is HTTPS (`https://github.com/demfabris/zz.git`, gh credential helper) since the SSH security keys became unavailable mid-cycle-7; switch back with `git remote set-url origin git@github.com:demfabris/zz.git` once the YubiKey is back |
+| Board (issue #7) | MAIN and TRIAGE free. Cycle-8 lock fronts READY: `F-DAEMON-FOCUS-PROMPT-V2` (p2, contract 5506005142), `F-FORMATS-REGISTRY-SETTLE` (5506005284), `F-TERMINAL-KNOBS-COPY` (5506005480). Also READY and untouched: `F-KEY-CONTROL-V3` (mooted if cycle 8 closes `-K`), `F-PANE-BORDER-ZORDER` + `-LINES-TILED` and `F-PANE-COMMAND-COMPLETION` (next client cycle / design front), the `F-SPLIT-MUX-*-V5` chain |
 
-## Cycle 7, ready to launch
+## Cycle 8, launching
 
-`opus-compat-run-7.js` beside this file is the full cycle: three Opus implementor lanes in parallel
+`opus-compat-run-8.js` beside this file is the full cycle: three Opus implementor lanes in parallel
 worktrees, one Fable adversarial reviewer pipelined behind each, one serialized Fable gate (daemon,
-copy, client) that merges to main, ledgers the board, recomputes `TMUX_COMPAT_TRACKER.md`, and runs
-TRIAGE. Machine facts come from workflow `args`; the defaults are this macbook.
+formats, terminal) that merges to main, ledgers the board, recomputes `TMUX_COMPAT_TRACKER.md`, and
+runs TRIAGE. Machine facts come from workflow `args`; the defaults are this macbook.
 
 | Lane | Lock front | Batch |
 | --- | --- | --- |
-| daemon | `F-DAEMON-PROMPT-FOCUS` | fixture guard for APFS first; command-prompt `-t` as the routing (a command client is held until the prompt closes) plus vi editing in the daemon, `-F`, key spelling, message freeze; pane focus hooks with a PANE_FOCUSED set at the pin's trigger points; the per-command format client (activity-time best client, null for list rows) closing the resize context and `window_bigger`; display-panes templates and waits; the display-message client aliases; client environment bytes last |
-| copy | `F-COPY-MODE-DAEMON-VIEW` | the copy-mode format family produced from the daemon's copy sessions (makes the `-N` count items observable), `copy-mode -k`/`-s`, a daemon-owned refresh re-sync for the `r` keys, the copy-line family, `send-keys -F` plus `copy_cursor_word` for the vi `#`/`*` bindings, null-aware `display-message -a`, terminfo-backed `I/c`; mode-keys plumbing, `-K`, `-v` last |
-| client | `F-CLIENT-CHROME-OVERLAYS` | `default-client-command` through the launcher and `focus-follows-mouse`; the pin's pane border chrome in order (tiled z-order on the snapshot with the 94 bump, border lines with junctions, indicators, the border-status row as mux layout geometry with the format published per pane, the renderer residue named); menu mouse policy and paste swallowing; the mode-tree key vocabulary with `x`/`X` prompts and `-y`; popup kitty images then the nested menu-over-popup pointer items |
+| daemon | `F-DAEMON-FOCUS-PROMPT-V2` | the pane focus hooks first with a three-hour budget (PANE_FOCUSED set at the pin's trigger points, transitions spliced by anchor); then status-keys plus vi prompt editing, the three key spellings, the message-covers-prompt shape; client environment bytes (94 to 95); `send-keys -K` last |
+| formats | `F-FORMATS-REGISTRY-SETTLE` | the per-command format client (activity-time best client, null list rows) closing the resize context and `window_bigger`; the null-aware `display-message -a` listing against the measured 142/28/28 name sets; the four pane process formats; the bare `=` mouse target; the I modifier through ported `tty_term_codes` and `tty_features`; four registry settlements (tilde home, per-client active pane, remote alias preflight, shutdown unlink order); `-v` last |
+| terminal | `F-TERMINAL-KNOBS-COPY` | the knob path widened and scroll-on-clear, alternate-screen, allow-rename, backspace implemented, the four libghostty-impossible knobs settled; `copy-mode -s` as a source-pane revision; the three terminal-owned blocked items measured and implemented or settled; mode-keys plumbing last |
+
+What cycle 8 leaves for cycle 9: the client basket (`options.pane-border-chrome` with its exact
+status-row recipe, `choosers.command-flags`, the three popup pointer items behind a menu-over-popup),
+`keys.copy-mode-binding-fidelity` (14 on the accepted `-P` decision, 2 on the search action family),
+`formats.context-producer-fidelity` (the `set-hook -B` monitor subsystem), and the two design fronts
+(`control-mode.disconnect-cancels-command-queue`, `split-window -W`).
 
 Launch:
 
 ```js
 Workflow({
-  scriptPath: "<checkout>/compat/orchestration/opus-compat-run-7.js",
+  scriptPath: "<checkout>/compat/orchestration/opus-compat-run-8.js",
   args: {
     root: "/Users/demfabris/dev/zz", dev: "/Users/demfabris/dev", holder: "macbook/orchestrator",
     machine: "16-core, 48 GB macOS box (macbook)", cores: 16,
@@ -43,14 +52,12 @@ Workflow({
 ```
 
 Omit `args` on this macbook. Before launching: claim the three lock fronts under your holder
-identity (`ZZ_BOARD_HOLDER=<holder> python3 compat/board.py claim <FRONT> --lease 6h`), check that
-`origin/main` is still `1d99c77b` (a moved main only means a longer rebase for the gate), and start
-a lease renewer (a loop that renews the three fronts and MAIN with `--lease 6h` every ~100 minutes;
-`renew` sets expiry to now plus the lease). Cycle 6's continuation on this box took 2h00m and 1.07M
-subagent tokens for four agents with cold builds; a full seven-agent cycle is 3-4h. After the gate
-finishes, verify `origin/main`, the board records, and `compat/progress.py`, then write cycle 8 from
-a fresh registry census as described under the loop below. `CAMPAIGN-LOG.md` has the per-cycle
-history.
+identity (`ZZ_BOARD_HOLDER=<holder> python3 compat/board.py claim <FRONT> --lease 6h`), check
+`origin/main`, and start a lease renewer (a loop renewing the three fronts and MAIN with
+`--lease 6h` every ~100 minutes). Cycle 7 took 3h53m and 2.64M subagent tokens for seven agents.
+After the gate finishes, verify `origin/main`, the board records, and `compat/progress.py`, then
+write cycle 9 from a fresh registry census as described under the loop below. `CAMPAIGN-LOG.md` has
+the per-cycle history.
 
 ## The cycle, in general
 
@@ -71,16 +78,19 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
 
 ## This machine (`macbook`)
 
-16 cores, 48 GB, macOS 27. `origin` is SSH and works non-interactively (Secretive plus the brew
-ssh; a dry-run push succeeded without a prompt); HTTPS `https://github.com/demfabris/zz.git` is the
-hang fallback (gh's credential helper). `gh` is logged in with repo scope. Holder identity
+16 cores, 48 GB, macOS 27. `origin` is HTTPS (gh's credential helper) since the SSH security keys
+went away mid-cycle-7 ("device not found" on the ED25519-SK identities); SSH worked non-interactively
+before that and will again with the YubiKey. Unattended runs need two Claude Code settings that are
+in place: a global `Bash(rm:*)` allow rule, and the PreToolUse hook `~/.claude/scripts/guard-rm-home.py`
+that denies `rm -rf $HOME` (the built-in critical-path guard prompts on that shape and no allow rule
+bypasses it). `caffeinate -is -w <claude pid>` keeps the Mac awake for the session; the lid must stay
+open. `gh` is logged in with repo scope. Holder identity
 `macbook/orchestrator`. Caches are populated (`compat/.cache/tmux-src/tmux` at `d77c9dc6`,
-`compat/.cache/plugins`, eight plugins); the `formats` scenario ran clean here. Worktrees: only
-`~/dev/zz-opus-termopts` exists (clean, warm zz-tui/zz build at the cycle-6 client tip); the other
-lanes and the reviewers build cold, which is fine on 16 cores. Machine traps the prompts already
+`compat/.cache/plugins`, eight plugins); the `formats` scenario ran clean here. Worktrees: `~/dev/zz-opus-dint`,
+`~/dev/zz-opus-panes` and `~/dev/zz-opus-termopts` exist, clean and warm at the cycle-7 lane tips; the
+reviewers reuse `zz-review-*` when present. Machine traps the prompts already
 carry: `/bin/bash` is 3.2 (no `mapfile`; shard runners use `/opt/homebrew/bin/bash` or python3),
-APFS refuses non-UTF-8 file names (so `smoke/client-non-utf8-cwd` is environmental until the daemon
-lane's fixture guard lands), and the user has a live tmux server (sessions `clairvo`, `home`, `zz`)
+APFS refuses non-UTF-8 file names (`smoke/client-non-utf8-cwd` guards for it since cycle 7), and the user has a live tmux server (sessions `clairvo`, `home`, `zz`)
 and a live `/Applications/zz.app` daemon that no worker may kill. The Ubuntu box still holds the
 cycle-6 worktrees `zz-opus-panes`, `zz-opus-dint`, `zz-review-dint` with 15-29 GB `target/` dirs.
 

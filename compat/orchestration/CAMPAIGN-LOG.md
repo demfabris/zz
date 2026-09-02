@@ -136,3 +136,32 @@ enumeration, terminfo-backed `I/c`), and a client lane (the two client-consumed 
 pane border chrome in order, menu mouse and paste rules, the mode-tree key vocabulary, popup kitty
 images and the nested pointer items). Lock fronts F-DAEMON-PROMPT-FOCUS, F-COPY-MODE-DAEMON-VIEW,
 and F-CLIENT-CHROME-OVERLAYS are minted and READY; the script is not launched.
+
+## 2026-09-02: cycle 7 on the macbook, meter 71.7% to 77.6%
+
+Seven agents, 3h53m wall, 2.64M subagent tokens, all three lanes merged. Merges: daemon `327d036f`
+(command-prompt `-t` as the routing itself with the issuing command client parked on a waiter until
+the prompt closes, `-F`, display-panes templates and waits, the display-message client aliases with
+the pin's diagnostic and status, the APFS fixture guard; gate fix: a hook-raised prompt parked the
+connection reader and left a phantom client, so the waits are gated on a real client, and a second
+display-panes on a busy client answers at once), copy `dee45667` (the copy-mode format family
+answered from the daemon's copy sessions, which made the `-N` count items observable and closed
+them, `copy-mode -k`, the refresh re-sync and the `r` keys, the copy-line family, `pane_in_mode` and
+`pane_mode`; gate fix: a failed `-k` left its kill armed for the next entry), client `03f61a41`
+(`default-client-command` through the launcher, `focus-follows-mouse`, menu mouse policy and paste
+ordering re-measured and re-scoped, the renderer residue written out; gate: the popup kitty close was
+reopened because its proof was a headless renderer test, and the focus-follows-mouse close records
+that zz fires `after-select-pane` where the pin fires only `window-pane-changed`), ledger
+`e910a732`. Protocol 93 to 94 from two lanes, reconciled at the gate. Board: three lanes ledgered,
+`F-DISPLAY-MESSAGE-PANE-TARGETS-V3` withdrawn, keep-notes on the three fronts whose slugs stayed
+open. Lore: the SSH security keys became unavailable mid-gate ("device not found"), so `origin` was
+switched to HTTPS through gh's credential helper and the gate finished over it;
+`client_focus_closes_display_panes_and_preserves_chooser_modes` also fails about one run in three
+exact-solo (an async status/snapshot refresh race), so it is a known flake even solo; the `rm -rf
+$HOME` shape in a worker's probe trips Claude Code's critical-path guard and now meets a local hook
+that denies it with the rewrite. Skips worth reading: the pane focus hooks were skipped a third time
+for lack of budget (the recipe is complete), the per-command format client was skipped twice for
+sharing `status.rs` with another lane, the I modifier's blocker sharpened to the pin's own
+`tty_term_codes` and `tty_features` tables, the vi `#`/`*` bindings now wait on the search action
+family rather than the format, the border chrome has an exact recipe for the status row, and the
+three popup pointer items wait on a menu over a popup.

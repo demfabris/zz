@@ -10539,7 +10539,12 @@ impl Shared {
                     self.spawn_delay(delay, move || {
                         let _ = sender.send(());
                     })?;
-                    self.report_command_queue_park();
+                    // `run-shell -C` with no delay is `event_active`, which the
+                    // pin's own loop pass resumes before it can check whether
+                    // the client wants to exit, so the queue never rests here.
+                    if !delay.is_zero() {
+                        self.report_command_queue_park();
+                    }
                     receiver.recv().map_err(|error| {
                         DaemonError::Thread(format!("run-shell delay worker stopped: {error}"))
                     })?;

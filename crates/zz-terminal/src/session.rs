@@ -974,6 +974,7 @@ struct PublishedViewports {
     fallback: Arc<TerminalViewport>,
     by_view: HashMap<TerminalViewId, Arc<TerminalViewport>>,
     copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
+    frozen: Option<Arc<FrozenHistory>>,
 }
 
 impl PublishedViewports {
@@ -982,8 +983,18 @@ impl PublishedViewports {
             fallback: Arc::new(viewport),
             by_view: HashMap::new(),
             copy_facts: HashMap::new(),
+            frozen: None,
         }
     }
+}
+
+/// The whole grid a retained pane keeps after its child exits: scrollback plus
+/// the visible screen, so `capture-pane` answers negative `-S` boundaries on a
+/// dead pane the way `screen_write_collect_add` left them on the pin, where the
+/// pane's `struct screen` simply outlives the process.
+#[derive(Debug)]
+pub struct FrozenHistory {
+    revision: Arc<ModeRevision>,
 }
 
 /// What `window_copy_formats` reads off one pane's mode entry, computed for
@@ -1767,10 +1778,22 @@ impl TerminalSession {
             })?
     }
 
+    /// Answers `capture-pane` on a pane whose worker has already returned. The
+    /// grid the worker froze on its way out carries the scrollback, so the rows
+    /// the dead-pane notice scrolled off are still reachable; only the two
+    /// flags that need a live screen fall back on the published viewport.
     pub fn capture_frozen_frame(
         &self,
         options: CaptureOptions,
     ) -> Result<String, TerminalCaptureError> {
+        let frozen = self.latest.read().frozen.clone();
+        if let Some(frozen) = frozen
+            && !options.alternate
+            && !options.mode
+        {
+            let revision = &frozen.revision;
+            return capture_revision(revision, revision.maximum_offset(), options);
+        }
         capture_viewport(&self.latest_viewport(), options)
     }
 
@@ -3475,6 +3498,10 @@ impl Publisher {
 
     fn publish_copy_facts(&self, facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>) {
         self.latest.write().copy_facts = facts;
+    }
+
+    fn publish_frozen_history(&self, revision: Arc<ModeRevision>) {
+        self.latest.write().frozen = Some(Arc::new(FrozenHistory { revision }));
     }
 
     fn publish_viewports(&self, viewports: Vec<(TerminalViewId, TerminalViewport)>) {
@@ -5717,6 +5744,7 @@ fn run_terminal(
             // for the daemon to expand the template against the pane it has
             // just marked dead.
             let notice_deadline = Instant::now() + DEAD_NOTICE_WAIT;
+            let mut retained = false;
             while let Some(remaining) = notice_deadline.checked_duration_since(Instant::now()) {
                 // Every other command is dropped rather than answered: its
                 // reply channel disconnects, which is the same actor-stopped
@@ -5725,6 +5753,7 @@ fn run_terminal(
                 match control_rx.recv_timeout(remaining) {
                     Ok(Command::WriteDeadNotice(text)) => {
                         if let Some(text) = text {
+                            retained = true;
                             write_dead_notice(&mut terminal, &text)?;
                             publish_active_views(
                                 &mut terminal,
@@ -5747,6 +5776,19 @@ fn run_terminal(
                     }
                     Ok(_) => {}
                     Err(_) => break,
+                }
+            }
+            // A retained pane keeps its whole `struct screen` on the pin, notice
+            // and scrollback alike, so freeze the grid before the VT goes out of
+            // scope with the worker. Only the retained branch sends notice text;
+            // the closing branch sends `None` to release the wait, and its pane
+            // is never captured after the worker returns, so it pays nothing.
+            if retained {
+                match ModeRevision::capture(&mut terminal) {
+                    Ok(revision) => publisher.publish_frozen_history(revision),
+                    Err(error) => {
+                        log::warn!("retained pane kept no frozen history: {error}");
+                    }
                 }
             }
             return Ok(());
@@ -7903,17 +7945,27 @@ fn capture_mode_revision(
     mode: &CopyModeState,
     options: CaptureOptions,
 ) -> Result<String, TerminalCaptureError> {
-    let total = u64::from(mode.revision.total_rows());
-    let visible_start = u64::from(mode.viewport_offset).min(total.saturating_sub(1));
+    capture_revision(&mode.revision, mode.viewport_offset, options)
+}
+
+/// Resolves `capture-pane` boundaries against a captured grid, whose visible
+/// screen starts at `viewport_offset` rows down from the top of the history.
+fn capture_revision(
+    revision: &ModeRevision,
+    viewport_offset: u32,
+    options: CaptureOptions,
+) -> Result<String, TerminalCaptureError> {
+    let total = u64::from(revision.total_rows());
+    let visible_start = u64::from(viewport_offset).min(total.saturating_sub(1));
     let visible_end = visible_start
-        .saturating_add(u64::from(mode.revision.viewport_rows).saturating_sub(1))
+        .saturating_add(u64::from(revision.viewport_rows).saturating_sub(1))
         .min(total.saturating_sub(1));
     let start = resolve_capture_boundary(options.start, visible_start, visible_end, total);
     let end = resolve_capture_boundary(options.end, visible_start, visible_end, total);
     if start > end {
         return Ok(String::new());
     }
-    let output = mode.revision.capture_rows(
+    let output = revision.capture_rows(
         u32::try_from(start).unwrap_or(u32::MAX),
         u32::try_from(end).unwrap_or(u32::MAX),
         options.join_wrapped,

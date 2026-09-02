@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 93;
+pub const PROTOCOL_VERSION: u16 = 94;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -145,10 +145,11 @@ pub enum MuxOptionKey {
     Mouse,
     EscapeTime,
     Prefix2,
+    FocusFollowsMouse,
 }
 
 impl MuxOptionKey {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Prefix,
         Self::ModeKeys,
         Self::HistoryLimit,
@@ -166,6 +167,7 @@ impl MuxOptionKey {
         Self::Mouse,
         Self::EscapeTime,
         Self::Prefix2,
+        Self::FocusFollowsMouse,
     ];
 
     #[must_use]
@@ -188,6 +190,7 @@ impl MuxOptionKey {
             Self::Mouse => "mouse",
             Self::EscapeTime => "escape-time",
             Self::Prefix2 => "prefix2",
+            Self::FocusFollowsMouse => "focus-follows-mouse",
         }
     }
 
@@ -211,6 +214,7 @@ impl MuxOptionKey {
             "mouse" => Some(Self::Mouse),
             "escape-time" => Some(Self::EscapeTime),
             "prefix2" => Some(Self::Prefix2),
+            "focus-follows-mouse" => Some(Self::FocusFollowsMouse),
             _ => None,
         }
     }
@@ -224,9 +228,10 @@ impl MuxOptionKey {
             Self::CopyCommand => String::new(),
             Self::SetClipboard => "external".to_owned(),
             Self::BufferLimit => "50".to_owned(),
-            Self::SynchronizePanes | Self::ExperimentalAgentPane | Self::ExperimentalEditorPane => {
-                "off".to_owned()
-            }
+            Self::SynchronizePanes
+            | Self::ExperimentalAgentPane
+            | Self::ExperimentalEditorPane
+            | Self::FocusFollowsMouse => "off".to_owned(),
             Self::HistoryTrickle => "2000".to_owned(),
             Self::Mouse => "on".to_owned(),
             Self::EscapeTime => "10".to_owned(),
@@ -4116,7 +4121,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 93);
+        assert_eq!(super::PROTOCOL_VERSION, 94);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

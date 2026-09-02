@@ -139,6 +139,8 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "window-status-last-style",
     "window-status-bell-style",
     "mouse",
+    "focus-follows-mouse",
+    "default-client-command",
     "escape-time",
     "set-titles",
     "set-titles-string",
@@ -3375,6 +3377,9 @@ impl MuxEngine {
                 .scalar_option_effective(TmuxOptionTarget::GlobalSession, "prefix2")
                 .unwrap_or("None")
                 .to_owned(),
+            MuxOptionKey::FocusFollowsMouse => {
+                tmux_flag(self.effective_focus_follows_mouse(None)).to_owned()
+            }
         }
     }
 
@@ -3383,6 +3388,14 @@ impl MuxEngine {
     #[must_use]
     pub fn effective_mouse(&self, session: Option<SessionId>) -> bool {
         session.map_or(self.global_mouse, |session| self.mouse_for_session(session))
+    }
+
+    /// `focus-follows-mouse` as the pin resolves it: `s->options` for a client
+    /// attached to `session`, the global session table for one that is not.
+    #[must_use]
+    pub fn effective_focus_follows_mouse(&self, session: Option<SessionId>) -> bool {
+        let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
+        self.scalar_option_effective(target, "focus-follows-mouse") == Some("on")
     }
 
     /// What the daemon starts an agent pane's adapter with.
@@ -12302,6 +12315,15 @@ fn stored_scalar_execution(name: &str, target: TmuxOptionTarget) -> Execution {
         return Execution::effect(MuxEffect::MuxOptionChanged {
             option: MuxOptionKey::Prefix2,
             session: None,
+        });
+    }
+    if name == "focus-follows-mouse" {
+        return Execution::effect(MuxEffect::MuxOptionChanged {
+            option: MuxOptionKey::FocusFollowsMouse,
+            session: match target {
+                TmuxOptionTarget::Session(session) => Some(session),
+                _ => None,
+            },
         });
     }
     if matches!(name, "set-titles" | "set-titles-string") {
@@ -31945,7 +31967,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 106);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 108);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

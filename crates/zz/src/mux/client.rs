@@ -2064,6 +2064,16 @@ impl MuxClient {
             .map(|option| zz_protocol::canonical_key(&option.value))
     }
 
+    /// The daemon-published `focus-follows-mouse`, resolved for the session
+    /// this client is attached to the way the pin reads `s->options`.
+    #[must_use]
+    pub(crate) fn focus_follows_mouse(&self) -> bool {
+        self.core
+            .mux_options()
+            .get(MuxOptionKey::FocusFollowsMouse)
+            .is_some_and(|option| option.value == "on")
+    }
+
     /// Whether the daemon reported this client's prefix sequence as armed.
     #[must_use]
     pub(crate) const fn prefix_armed(&self) -> bool {
@@ -4967,6 +4977,39 @@ mod tests {
                     .to_owned(),
             }
         );
+    }
+
+    #[gpui::test]
+    fn focus_follows_mouse_follows_the_published_option(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("fixture".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            mux.update(cx, |mux, _| {
+                install_fake_connection(mux, HostId::LOCAL);
+            });
+            assert!(
+                !mux.read(cx).focus_follows_mouse(),
+                "the option's own default is off"
+            );
+            for (value, expected) in [("on", true), ("off", false)] {
+                mux.update(cx, |mux, _| {
+                    let mut options = MuxOptions::default();
+                    options.set(
+                        MuxOptionKey::FocusFollowsMouse,
+                        value,
+                        zz_protocol::MuxOptionSource::RuntimeCommand,
+                    );
+                    mux.seed_core(EventPayload::MuxOptionsChanged { options });
+                });
+                assert_eq!(mux.read(cx).focus_follows_mouse(), expected, "{value}");
+            }
+        });
     }
 
     #[gpui::test]

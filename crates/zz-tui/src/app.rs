@@ -1046,6 +1046,14 @@ pub(crate) fn mouse_option_enabled(options: &zz_protocol::MuxOptions) -> bool {
         .is_some_and(|option| option.value == "on")
 }
 
+/// The pin reads `focus-follows-mouse` from the session the client is attached
+/// to; the daemon stamps that value into the map every client receives.
+pub(crate) fn focus_follows_mouse_enabled(options: &zz_protocol::MuxOptions) -> bool {
+    options
+        .get(zz_protocol::MuxOptionKey::FocusFollowsMouse)
+        .is_some_and(|option| option.value == "on")
+}
+
 fn escape_timeout_ms(options: &zz_protocol::MuxOptions) -> u64 {
     options
         .get(zz_protocol::MuxOptionKey::EscapeTime)
@@ -1059,6 +1067,7 @@ fn refresh_terminal_options(model: &mut Model, core: &Mutex<ClientCore>, escape_
     let options = core.mux_options();
     escape_time.store(escape_timeout_ms(options), Ordering::Relaxed);
     model.mouse_option = mouse_option_enabled(options);
+    model.focus_follows_mouse = focus_follows_mouse_enabled(options);
 }
 
 /// The pin's `server_client_reset_state`: outer mouse modes follow the option,

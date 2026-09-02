@@ -14,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_ninety_three() {
-    assert_eq!(PROTOCOL_VERSION, 93);
+fn protocol_version_on_this_commit_is_ninety_four() {
+    assert_eq!(PROTOCOL_VERSION, 94);
 }
 
 #[test]
@@ -242,10 +242,11 @@ fn target_lookup_errors_use_tmux_wording() {
 }
 
 #[test]
-fn mux_option_key_has_seventeen_daemon_owned_keys() {
-    assert_eq!(MuxOptionKey::ALL.len(), 17);
+fn mux_option_key_has_eighteen_daemon_owned_keys() {
+    assert_eq!(MuxOptionKey::ALL.len(), 18);
     assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::HistoryTrickle));
     assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::Prefix2));
+    assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::FocusFollowsMouse));
 }
 
 #[cfg(unix)]
@@ -312,7 +313,7 @@ fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5D, 0x00, 0x00, 0x5D, 0x00, 0x00, 0x00, 0x00,
+            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5E, 0x00, 0x00, 0x5E, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00, 0x00, 0x07,
         ]
     );

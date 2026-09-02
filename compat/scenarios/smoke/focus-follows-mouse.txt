@@ -1,0 +1,12 @@
+corpus: none
+# server_client_check_mouse turns a MOUSEMOVE over a pane that is not the
+# active one into window_set_active_pane while `focus-follows-mouse` is on. The
+# switch is read before the mouse key becomes a binding, so it runs with `mouse`
+# off too, and a held button reports as MOUSEDRAG and never switches. The probe
+# writes SGR reports on a real client's pty because only an attached client
+# resolves a pointer position to a pane.
+stage: fixtures/focus-follows-mouse.sh ~/focus-follows-mouse.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu FOCUS_FOLLOWS_MOUSE
+run-shell 'sh ~/focus-follows-mouse.sh'
+out: show-environment -g FOCUS_FOLLOWS_MOUSE

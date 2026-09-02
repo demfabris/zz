@@ -2033,13 +2033,13 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "copy-mode",
         aliases: &[],
         description: "Enter copy mode",
-        usage: "[-deHMqu] [-t target-pane]",
+        usage: "[-dekHMqu] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-d", "scroll one page down"),
             CommandOptionSpec::flag("-u", "scroll one page up"),
             CommandOptionSpec::flag("-e", "exit copy mode at the bottom of history"),
-            CommandOptionSpec::unsupported_flag("-k"),
+            CommandOptionSpec::flag("-k", "kill the pane when copy mode ends"),
             CommandOptionSpec::flag("-H", "hide the copy position indicator"),
             CommandOptionSpec::flag("-M", "mouse-drag entry; no-op without a mouse event"),
             CommandOptionSpec::flag("-q", "cancel copy mode"),
@@ -2817,7 +2817,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (462, 41));
+        assert_eq!((supported, unsupported), (463, 40));
         assert_eq!(usage_overrides.len(), 22);
         assert_eq!(
             usage_overrides,

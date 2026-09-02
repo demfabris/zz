@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/copy-mode-kill-on-exit.sh ~/copy-mode-kill-on-exit.sh
+stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+out: set-environment -gu COPY_MODE_KILL_ON_EXIT
+run-shell 'sh ~/copy-mode-kill-on-exit.sh'
+out: show-environment -g COPY_MODE_KILL_ON_EXIT

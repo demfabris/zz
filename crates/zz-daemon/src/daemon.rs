@@ -7409,6 +7409,15 @@ impl Shared {
                                 .push(DeferredTerminalCommand::ResetScreen { terminals });
                         }
                     }
+                    MuxEffect::ArmCopyModeKill { pane } => {
+                        if !inner
+                            .copy_sessions
+                            .values()
+                            .any(|session| session.pane == *pane && !session.exiting)
+                        {
+                            inner.pending_copy_kill = Some(*pane);
+                        }
+                    }
                     MuxEffect::CopyModeRepeat {
                         pane,
                         count,
@@ -16915,6 +16924,33 @@ impl Shared {
         }
     }
 
+    /// `window_pane_reset_mode` kills a `copy-mode -k` pane once the mode is
+    /// gone, with every consequence killing the last pane of a window,
+    /// session, or server has.
+    fn reap_copy_mode_kill_panes(self: &Arc<Self>) {
+        let panes = std::mem::take(&mut self.inner.lock().copy_kill_panes);
+        for pane in panes {
+            let Some(mut context) = ({
+                let inner = self.inner.lock();
+                ExecutionContext::for_pane(&inner.engine.state, pane)
+            }) else {
+                continue;
+            };
+            let target = pane.to_string();
+            if let Err(error) = self.execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-pane", ["-t", target.as_str()]),
+            ) {
+                log::debug!(
+                    target: "zz_daemon::diagnostics::terminal",
+                    "failed to kill copy-mode -k pane={pane}: {error}"
+                );
+            }
+        }
+    }
+
     fn execute_chooser_command(
         self: &Arc<Self>,
         client: ClientId,
@@ -20905,10 +20941,11 @@ impl Shared {
         current: &TerminalViewport,
         terminal: &TerminalSession,
     ) {
-        let (subscriber, kind, foreground_panes, unclaimed, mode_event) = {
+        let (subscriber, kind, foreground_panes, unclaimed, mode_event, kill_pending) = {
             let mut inner = self.inner.lock();
             let (unclaimed, mode_changed) =
                 reconcile_copy_session(&mut inner, pane, client, current.mode);
+            let kill_pending = !inner.copy_kill_panes.is_empty();
             let kind = inner
                 .engine
                 .state
@@ -20944,13 +20981,23 @@ impl Shared {
                         PendingHookEvent::pane("pane-mode-changed", pane, state, &snapshot)
                     })
                 });
-            (subscriber, kind, foreground_panes, unclaimed, mode_event)
+            (
+                subscriber,
+                kind,
+                foreground_panes,
+                unclaimed,
+                mode_event,
+                kill_pending,
+            )
         };
         if let Some(terminal) = unclaimed {
             terminal.view_action(
                 TerminalViewId(client.0),
                 zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel),
             );
+        }
+        if kill_pending {
+            self.reap_copy_mode_kill_panes();
         }
         if let Some(subscriber) = subscriber {
             let kind = kind.expect("a terminal subscriber has a stream kind");
@@ -24811,6 +24858,12 @@ struct ServerState {
     choose_trees: BTreeMap<ClientId, ChooseTreeSession>,
     choose_buffers: BTreeMap<ClientId, ChooseBufferSession>,
     chooser_kill_panes: Vec<PaneId>,
+    /// The pane a `copy-mode -k` in the current effect batch armed, consumed
+    /// by the entry that follows it.
+    pending_copy_kill: Option<PaneId>,
+    /// Panes whose `copy-mode -k` session has ended, waiting for the kill that
+    /// `window_pane_reset_mode` runs.
+    copy_kill_panes: Vec<PaneId>,
     display_panes: BTreeMap<ClientId, DisplayPanesSession>,
     silence_deadlines: BTreeMap<WindowId, SilenceDeadline>,
     next_silence_token: u64,
@@ -24943,6 +24996,8 @@ struct CopySession {
     pane: PaneId,
     observed: bool,
     scroll_exit: bool,
+    /// `wme->kill`: the pane goes when this mode is torn down.
+    kill: bool,
     exiting: bool,
 }
 
@@ -27306,12 +27361,21 @@ fn enter_copy_session(
         .entry(client)
         .or_default()
         .switch_table(Some(table));
+    // `window_pane_set_mode` returns before it assigns `wme->kill` when the
+    // pane already holds this mode, so a re-entry neither arms nor clears the
+    // bit an earlier `copy-mode -k` set.
+    let kill = inner.pending_copy_kill.take() == Some(pane)
+        || inner
+            .copy_sessions
+            .get(&client)
+            .is_some_and(|session| session.pane == pane && !session.exiting && session.kill);
     inner.copy_sessions.insert(
         client,
         CopySession {
             pane,
             observed: false,
             scroll_exit: false,
+            kill,
             exiting: false,
         },
     );
@@ -27574,7 +27638,11 @@ fn reconcile_copy_session(
             if session.pane == pane
                 && (session.observed || session.scroll_exit || session.exiting) =>
         {
+            let kill = session.kill;
             exit_copy_session(inner, client);
+            if kill {
+                inner.copy_kill_panes.push(pane);
+            }
             (None, true)
         }
         _ => (None, false),

@@ -2453,7 +2453,7 @@ mod tests {
     }
 
     /// Measured on pinned tmux d77c9dc6 on 2026-09-02: a `display-menu` typed on
-    /// a command line has no invoking mouse event, so it is MENU_NOMOUSE and
+    /// a command line has no invoking mouse event, so it is `MENU_NOMOUSE` and
     /// answers only button 1. A button-1 press left it up with `Enter` still
     /// running its starting row, while a release, a motion with no button held
     /// and a button-3 press each closed it with nothing run.

@@ -162,6 +162,7 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "mode-style",
     "pane-border-style",
     "pane-active-border-style",
+    "pane-colours",
     "copy-mode-match-style",
     "copy-mode-current-match-style",
     "copy-mode-mark-style",
@@ -1474,7 +1475,7 @@ fn parse_format_option(input: &str) -> Option<(TmuxOption, FormatOptionIndex)> {
     }
     if matches!(
         option.name,
-        "command-alias" | "status-format" | "update-environment"
+        "command-alias" | "pane-colours" | "status-format" | "update-environment"
     ) {
         return Some((option, index));
     }
@@ -1752,6 +1753,7 @@ pub struct TerminalWorkerOptions {
     pub window_style: Option<String>,
     pub window_active_style: Option<String>,
     pub active_pane: bool,
+    pub pane_colours: Vec<(u8, String)>,
 }
 
 /// Explicit `pane-border-style` / `pane-active-border-style` values resolved
@@ -2242,7 +2244,7 @@ impl MuxEngine {
     fn format_option_array(&self, target: TmuxOptionTarget, name: &str) -> Option<&StringArray> {
         matches!(
             name,
-            "command-alias" | "status-format" | "update-environment"
+            "command-alias" | "pane-colours" | "status-format" | "update-environment"
         )
         .then(|| {
             self.array_option_readback(target, name, true)
@@ -2393,6 +2395,28 @@ impl MuxEngine {
                 .scalar_option_explicit(target, "window-active-style")
                 .map(str::to_owned),
         }
+    }
+
+    /// The `pane-colours` entries `colour_palette_from_option` would copy into
+    /// this pane's default palette: the nearest array in pane -> window ->
+    /// global-window order, keeping only the numeric indices below 256 that
+    /// `options_array_getv(o, "%u", i)` reaches.
+    #[must_use]
+    pub fn pane_colours_for_pane(&self, pane: PaneId) -> Vec<(u8, String)> {
+        let Some((array, _)) =
+            self.array_option_readback(TmuxOptionTarget::Pane(pane), "pane-colours", true)
+        else {
+            return Vec::new();
+        };
+        array
+            .iter()
+            .filter_map(|(index, value)| match index {
+                ArrayIndex::Numeric(index) => u8::try_from(*index)
+                    .ok()
+                    .map(|index| (index, value.clone())),
+                ArrayIndex::Named(_) => None,
+            })
+            .collect()
     }
 
     #[must_use]
@@ -2767,6 +2791,7 @@ impl MuxEngine {
                 .windows
                 .get(&window)
                 .is_some_and(|window| window.active_pane == pane),
+            pane_colours: self.pane_colours_for_pane(pane),
         })
     }
 
@@ -8518,6 +8543,7 @@ impl MuxEngine {
         }
         if unset {
             let whole = index.is_none();
+            let stored = self.array_option(target, name).is_some();
             self.unset_array_option(target, name, index.as_ref());
             if let Some(before) = status_format_before {
                 return Ok(self.status_format_execution(
@@ -8526,7 +8552,7 @@ impl MuxEngine {
                     whole.then_some(false),
                 ));
             }
-            return Ok(Execution::default());
+            return Ok(pane_colours_execution(name, stored));
         }
         let value = value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
         if let Some(index) = index {
@@ -8546,7 +8572,7 @@ impl MuxEngine {
             if let Some(before) = status_format_before {
                 return Ok(self.status_format_execution(target, before.as_ref(), Some(true)));
             }
-            return Ok(Execution::default());
+            return Ok(pane_colours_execution(name, true));
         }
         let append = options.has("-a");
         if !append {
@@ -8570,7 +8596,7 @@ impl MuxEngine {
         if let Some(before) = status_format_before {
             return Ok(self.status_format_execution(target, before.as_ref(), Some(true)));
         }
-        Ok(Execution::default())
+        Ok(pane_colours_execution(name, true))
     }
 
     fn status_format_execution(
@@ -12256,6 +12282,19 @@ fn remove_option_override<K: Copy + Ord, O: Copy + Ord>(
             values.remove(&target);
         }
     }
+}
+
+/// `options_push_changes` rebuilds every pane's default palette whenever
+/// `pane-colours` changes at any scope, and skips the push when an unset found
+/// nothing stored there.
+fn pane_colours_execution(name: &str, changed: bool) -> Execution {
+    if name == "pane-colours" && changed {
+        return Execution::effect(MuxEffect::TerminalKnobsChanged {
+            window: None,
+            pane: None,
+        });
+    }
+    Execution::default()
 }
 
 fn stored_scalar_execution(name: &str, target: TmuxOptionTarget) -> Execution {
@@ -29728,6 +29767,7 @@ mod tests {
                 window_style: None,
                 window_active_style: None,
                 active_pane: true,
+                pane_colours: Vec::new(),
             }
         );
         assert_eq!(
@@ -31905,7 +31945,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 105);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 106);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)
@@ -31968,9 +32008,48 @@ mod tests {
             expand_option(&engine, FormatContext::default(), "base-ind", &mut hooks),
             "hook:base-ind"
         );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-gw", "pane-colours[0]", "red"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-gw", "pane-colours[1]", "#123456"]),
+            )
+            .unwrap();
         assert_eq!(
             expand_option(&engine, FormatContext::default(), "pane-colors", &mut hooks),
-            "hook:pane-colors"
+            "red #123456"
+        );
+        assert_eq!(
+            expand_option(
+                &engine,
+                FormatContext::default(),
+                "pane-colours",
+                &mut hooks
+            ),
+            "red #123456"
+        );
+        assert_eq!(
+            expand_option(
+                &engine,
+                FormatContext::default(),
+                "pane-colors[0]",
+                &mut hooks
+            ),
+            "red"
+        );
+        assert_eq!(
+            expand_option(
+                &engine,
+                FormatContext::default(),
+                "pane-border-format",
+                &mut hooks
+            ),
+            "hook:pane-border-format"
         );
     }
 

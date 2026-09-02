@@ -1,0 +1,11 @@
+corpus: none
+# pane-colours is the array colour_palette_from_option copies into each pane's
+# default palette below any OSC 4 override, so the proof is the colour an
+# attached client actually writes for an indexed cell: the option's entries at
+# window and pane scope, the whole-array shadowing options_get gives a pane, the
+# entries "%u" never reaches, and the live repaint every mutation triggers.
+stage: fixtures/pane-colours-palette.sh ~/pane-colours-palette.sh
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+out: set-environment -gu PANE_COLOURS_PALETTE
+run-shell 'sh ~/pane-colours-palette.sh'
+out: show-environment -g PANE_COLOURS_PALETTE

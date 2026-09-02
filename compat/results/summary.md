@@ -150,6 +150,7 @@
 | smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |
 | smoke/oh-my-tmux | 15 | yes | 0 | yes | yes | yes |
 | smoke/own-conf | 6 | yes | 0 | yes | yes | yes |
+| smoke/pane-colours-palette | 3 | yes | 0 | yes | yes | yes |
 | smoke/positional-maximums | 3 | yes | 0 | yes | yes | yes |
 | smoke/positional-minimums | 3 | yes | 0 | yes | yes | yes |
 | smoke/resurrect-init | 3 | yes | 0 | yes | yes | yes |

@@ -1,0 +1,14 @@
+corpus: none
+# popup_key_cb's menu arm on both binaries, driven with SGR mouse reports on a
+# client attached to a real pty. Button 3 anywhere outside the popup raises the
+# menu tmux builds from popup_menu_items - Close, the paste row, Fill Space,
+# Centre, To Horizontal Pane and To Vertical Pane - over the popup rather than
+# in place of it, and choosing Centre moves the box. The menu belongs to the
+# popup, not to the client's overlay slot: cmd_display_menu_exec refuses a
+# client whose overlay_draw is already set, so `display-menu -c` over an open
+# popup is a no-op on both binaries and is not what this measures.
+stage: fixtures/display-popup-menu.sh ~/display-popup-menu.sh
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+out: set-environment -gu DISPLAY_POPUP_MENU
+run-shell 'sh ~/display-popup-menu.sh'
+out: show-environment -g DISPLAY_POPUP_MENU

@@ -1,0 +1,14 @@
+corpus: none
+# popup_make_pane on both binaries. The popup's context menu is raised with a
+# button 3 SGR report outside the box on a client attached to a real pty, and
+# 'h' picks To Horizontal Pane: tmux splits the active pane below
+# cmd_split_window, hands the popup's job over with job_transfer and moves the
+# popup's screen into the new pane's base, then closes the popup and makes the
+# new pane active. The facts are daemon-side and so comparable between the two
+# binaries: the pane count, which pane is active, the popup's own output read
+# back with capture-pane, and the transferred job still running.
+stage: fixtures/display-popup-to-pane.sh ~/display-popup-to-pane.sh
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+out: set-environment -gu DISPLAY_POPUP_TO_PANE
+run-shell 'sh ~/display-popup-to-pane.sh'
+out: show-environment -g DISPLAY_POPUP_TO_PANE

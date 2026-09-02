@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v95)
+title: zz wire protocol (v96)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 95`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 96`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (95) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (96) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -613,9 +613,16 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 95`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 96`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v96 appends `PopupAction::Pointer { pointer: PopupPointer, view: Option<TerminalViewAction> }`
+  after `Close`, and adds the two types it carries: `PopupPointer` (`column`, `row`, `button`,
+  `drag`, `release`, `meta`) and `PopupPointerButton` (`None`, `Left`, `Middle`, `Right`). tmux
+  keeps the popup's border, drag, and menu policy in `popup_key_cb`, so a client reports the
+  pointer event in its own cell grid and hands over the `TerminalViewAction` it would have given
+  the popup's job; the daemon runs the policy and executes exactly one of the two. Appended, so a
+  v95 peer decodes none of it. Nothing else on the wire changed.
 - v95 appends the pane border chrome to `MuxSnapshot`. `WindowSnapshot` gains four fields after
   `activity`: `pane_border_status` (`PaneBorderStatus`, the window's `pane-border-status` with the
   pin's `window_get_pane_status` folding of `top-floating`/`bottom-floating` back to off already

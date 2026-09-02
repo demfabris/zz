@@ -54,10 +54,10 @@ pub use message::{
     MAX_PASTE_UPLOAD_EXTENSION_BYTES, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MenuAction, MenuItem,
     MenuState, MuxOptionKey, MuxOptionSource, MuxOptionValue, MuxOptions,
     NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneIndicator, PasteUploadPurpose,
-    PastedImageFormat, PopupAction, PopupBorderLines, PopupState, PreparedCommand,
-    PreparedCommandResult, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError, ServerHello,
-    SourceSpan, StatusLine, StatusPosition, TerminalUiCommand, agent_update_batch_bytes,
-    paste_upload_extension_is_valid, split_command_words,
+    PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer, PopupPointerButton, PopupState,
+    PreparedCommand, PreparedCommandResult, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError,
+    ServerHello, SourceSpan, StatusLine, StatusPosition, TerminalUiCommand,
+    agent_update_batch_bytes, paste_upload_extension_is_valid, split_command_words,
 };
 pub use message::{
     MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,

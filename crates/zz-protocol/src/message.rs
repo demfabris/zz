@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 95;
+pub const PROTOCOL_VERSION: u16 = 96;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -2196,9 +2196,42 @@ pub struct PopupState {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PopupAction {
     Text(String),
-    Key { input: KeyInput, text_follows: bool },
+    Key {
+        input: KeyInput,
+        text_follows: bool,
+    },
     TerminalView(TerminalViewAction),
     Close,
+    /// One pointer event in the owning client's own cell grid, plus the
+    /// terminal action the client would have handed the popup's job for it.
+    /// tmux keeps the border, drag, and menu policy in `popup_key_cb`, so the
+    /// client reports the press and the daemon decides which of the two runs.
+    Pointer {
+        pointer: PopupPointer,
+        view: Option<TerminalViewAction>,
+    },
+}
+
+/// A pointer event as `popup_key_cb` reads one: a cell in the client's grid,
+/// the button, whether the report carried the drag or release flag, and
+/// whether meta was held.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PopupPointer {
+    pub column: u16,
+    pub row: u16,
+    pub button: PopupPointerButton,
+    pub drag: bool,
+    pub release: bool,
+    pub meta: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PopupPointerButton {
+    #[default]
+    None,
+    Left,
+    Middle,
+    Right,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -4126,7 +4159,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 95);
+        assert_eq!(super::PROTOCOL_VERSION, 96);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

@@ -46,12 +46,12 @@ use zz_protocol::{
     MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey,
     MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
     PaneId, PaneIndicator, PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction,
-    PopupBorderLines, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
-    ProtocolMessage, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId, SessionViewer,
-    SourceSpan, SplitId, StatusLine, WindowId, canonical_key, encode_protocol_message_into,
-    encode_terminal_viewport_event_into, is_key_name, layout_menu_row, menu_row_cells,
-    menu_row_width, read_protocol_message_into, resolve_command, terminal_patch_frame_len,
-    terminal_viewport_frame_len,
+    PopupBorderLines, PopupPointer, PopupPointerButton, PopupState, PreparedCommand,
+    PreparedCommandResult, ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError,
+    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, WindowId,
+    canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
+    layout_menu_row, menu_row_cells, menu_row_width, read_protocol_message_into, resolve_command,
+    terminal_patch_frame_len, terminal_viewport_frame_len,
 };
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
@@ -13182,6 +13182,7 @@ impl Shared {
                 PopupSession {
                     terminal: Arc::clone(&terminal),
                     state: state.clone(),
+                    pointer: PopupPointerState::default(),
                     preferred: PopupPlacement {
                         left: state.left,
                         top: state.top,
@@ -13689,6 +13690,7 @@ impl Shared {
                     state: state.clone(),
                     commands,
                     target,
+                    popup_owner: false,
                     styles: OverlayStyleOverrides {
                         style: parsed.style.clone(),
                         selected_style: parsed.selected_style.clone(),
@@ -15476,7 +15478,398 @@ impl Shared {
             PopupAction::TerminalView(action) => {
                 terminal.view_action(TerminalViewId(client.0), action);
             }
+            PopupAction::Pointer { pointer, view } => {
+                self.popup_pointer(client, &terminal, pointer, view);
+            }
             PopupAction::Close => {}
+        }
+    }
+
+    /// `popup_key_cb`'s mouse arm. A drag already under way owns every report
+    /// until the button lifts; outside the box only button 3 does anything, and
+    /// it raises the popup's own menu; button 3 with no modifier on the left or
+    /// top border raises the same menu; a meta drag, or a drag that began on a
+    /// border, moves the box with button 1 and resizes it with button 3; and
+    /// anything left over is the popup job's, which is the action the client
+    /// already built for it.
+    fn popup_pointer(
+        &self,
+        client: ClientId,
+        terminal: &Arc<TerminalSession>,
+        pointer: PopupPointer,
+        view: Option<zz_terminal::TerminalViewAction>,
+    ) {
+        enum PopupPointerOutcome {
+            Nothing,
+            Publish(PopupState, Option<(u16, u16)>),
+            Menu(u16, u16),
+            Job,
+        }
+        let outcome = {
+            let mut inner = self.inner.lock();
+            let Some(popup) = inner.popups.get_mut(&client) else {
+                return;
+            };
+            let mut state = popup.state.clone();
+            let mut cursor = popup.pointer;
+            let left = state.left;
+            let top = state.top;
+            let right = left.saturating_add(state.width).saturating_sub(1);
+            let bottom = top.saturating_add(state.height).saturating_sub(1);
+            let outcome = if cursor.dragging != PopupDrag::Off {
+                if !pointer.drag {
+                    cursor.dragging = PopupDrag::Off;
+                    PopupPointerOutcome::Nothing
+                } else if cursor.dragging == PopupDrag::Move {
+                    state.left = popup_drag_origin(
+                        pointer.column,
+                        cursor.dx,
+                        state.width,
+                        state.client_columns,
+                    );
+                    state.top =
+                        popup_drag_origin(pointer.row, cursor.dy, state.height, state.client_rows);
+                    cursor.dx = pointer.column.saturating_sub(state.left);
+                    cursor.dy = pointer.row.saturating_sub(state.top);
+                    PopupPointerOutcome::Publish(state.clone(), None)
+                } else {
+                    let margin = if matches!(state.border_lines, PopupBorderLines::None) {
+                        1
+                    } else {
+                        3
+                    };
+                    if pointer.column < left.saturating_add(margin)
+                        || pointer.row < top.saturating_add(margin)
+                    {
+                        PopupPointerOutcome::Nothing
+                    } else {
+                        state.width = pointer.column.saturating_sub(left);
+                        state.height = pointer.row.saturating_sub(top);
+                        PopupPointerOutcome::Publish(
+                            state.clone(),
+                            popup_content_size(&state).filter(|_| !state.dead),
+                        )
+                    }
+                }
+            } else if pointer.column < left
+                || pointer.column > right
+                || pointer.row < top
+                || pointer.row > bottom
+            {
+                if pointer.button == PopupPointerButton::Right {
+                    PopupPointerOutcome::Menu(pointer.column, pointer.row)
+                } else {
+                    return;
+                }
+            } else {
+                let border = if matches!(state.border_lines, PopupBorderLines::None) {
+                    PopupBorder::None
+                } else if pointer.column == left {
+                    PopupBorder::Left
+                } else if pointer.column == right {
+                    PopupBorder::Right
+                } else if pointer.row == top {
+                    PopupBorder::Top
+                } else if pointer.row == bottom {
+                    PopupBorder::Bottom
+                } else {
+                    PopupBorder::None
+                };
+                if !pointer.meta
+                    && pointer.button == PopupPointerButton::Right
+                    && matches!(border, PopupBorder::Left | PopupBorder::Top)
+                {
+                    PopupPointerOutcome::Menu(pointer.column, pointer.row)
+                } else if pointer.meta
+                    || (!matches!(border, PopupBorder::None) && !cursor.last_drag)
+                {
+                    if pointer.drag {
+                        cursor.dragging = match cursor.last_button {
+                            PopupPointerButton::Left => PopupDrag::Move,
+                            PopupPointerButton::Right => PopupDrag::Size,
+                            _ => PopupDrag::Off,
+                        };
+                        cursor.dx = cursor.last_column.saturating_sub(left);
+                        cursor.dy = cursor.last_row.saturating_sub(top);
+                    }
+                    PopupPointerOutcome::Nothing
+                } else {
+                    PopupPointerOutcome::Job
+                }
+            };
+            if matches!(outcome, PopupPointerOutcome::Job) {
+                popup.pointer = cursor;
+            } else {
+                cursor.last_column = pointer.column;
+                cursor.last_row = pointer.row;
+                cursor.last_button = pointer.button;
+                cursor.last_drag = pointer.drag;
+                popup.pointer = cursor;
+            }
+            if let PopupPointerOutcome::Publish(next, _) = &outcome {
+                popup.state = next.clone();
+                popup.preferred = PopupPlacement {
+                    left: next.left,
+                    top: next.top,
+                    width: next.width,
+                    height: next.height,
+                };
+            }
+            outcome
+        };
+        match outcome {
+            PopupPointerOutcome::Nothing => {}
+            PopupPointerOutcome::Job => {
+                if let Some(view) = view {
+                    terminal.view_action(TerminalViewId(client.0), view);
+                }
+            }
+            PopupPointerOutcome::Publish(state, resize) => {
+                if let Some((columns, rows)) = resize {
+                    terminal.resize(columns, rows, state.cell_width_px, state.cell_height_px);
+                }
+                self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
+            }
+            PopupPointerOutcome::Menu(column, row) => self.raise_popup_menu(client, column, row),
+        }
+    }
+
+    /// The menu `popup_key_cb` builds from `popup_menu_items`, kept on the
+    /// popup rather than raised through `display-menu`: `cmd_display_menu_exec`
+    /// refuses a client that already has an overlay, which is why the command
+    /// path stays gated on `any_overlay_present`.
+    fn raise_popup_menu(&self, client: ClientId, column: u16, row: u16) {
+        let state = {
+            let inner = self.inner.lock();
+            let Some(popup) = inner.popups.get(&client) else {
+                return;
+            };
+            let paste = find_buffer(&inner, None).map(|buffer| buffer.name.clone());
+            let columns = popup.state.client_columns;
+            let rows = popup.state.client_rows;
+            let row_room = usize::from(columns.saturating_sub(MENU_ROW_MARGIN));
+            let mut items = Vec::new();
+            for entry in popup_menu_rows(paste.as_deref()) {
+                let Some((name, key)) = entry else {
+                    items.push(None);
+                    continue;
+                };
+                let layout = layout_menu_row(&name, Some(key), row_room);
+                items.push(Some(MenuItem {
+                    name: layout.name,
+                    key: Some(key.to_owned()),
+                    annotation: layout.annotation,
+                    enabled: true,
+                }));
+            }
+            let width = items
+                .iter()
+                .flatten()
+                .map(|item| menu_row_cells(&item.name, item.annotation.as_deref()))
+                .max()
+                .unwrap_or_default()
+                .saturating_add(usize::from(MENU_ROW_MARGIN));
+            let height = items.len().saturating_add(2);
+            let (Ok(width), Ok(height)) = (u16::try_from(width), u16::try_from(height)) else {
+                return;
+            };
+            if width > columns || height > rows {
+                return;
+            }
+            let Some(window) = client_overlay_style_window(&inner, client) else {
+                return;
+            };
+            let Ok(defaults) = inner.engine.menu_options_for_window(window) else {
+                return;
+            };
+            let left =
+                overlay_origin_for_viewport(column.saturating_sub(width / 2), width, columns);
+            let top = overlay_origin_for_viewport(row, height, rows);
+            MenuState {
+                left,
+                top,
+                width,
+                height,
+                client_columns: columns,
+                client_rows: rows,
+                cell_width_px: popup.cell_width_px,
+                cell_height_px: popup.cell_height_px,
+                title: String::new(),
+                style: overlay_style(&defaults.style, None),
+                selected_style: overlay_style(&defaults.selected_style, None),
+                border_style: overlay_style(&defaults.border_style, None),
+                border_lines: defaults.border_lines,
+                items,
+                selected: None,
+                stay_open: false,
+                mouse_keys: true,
+            }
+        };
+        {
+            let mut inner = self.inner.lock();
+            if inner.menus.contains_key(&client) || !inner.popups.contains_key(&client) {
+                return;
+            }
+            let target = ExecutionContext::default();
+            inner.menus.insert(
+                client,
+                MenuSession {
+                    state: state.clone(),
+                    commands: vec![None; state.items.len()],
+                    target,
+                    styles: OverlayStyleOverrides::default(),
+                    waiter: None,
+                    popup_owner: true,
+                },
+            );
+        }
+        self.publish_to_client(client, EventPayload::Menu { state: Some(state) });
+    }
+
+    /// `popup_make_pane`: the popup's job and screen become a freshly split
+    /// pane's, the popup closes, and the new pane is the active one. tmux does
+    /// this below `cmd_split_window` - `layout_split_pane` plus
+    /// `window_add_pane` plus `job_transfer` - so this splits the model
+    /// directly and adopts the popup's terminal instead of spawning one.
+    fn popup_make_pane(self: &Arc<Self>, client: ClientId, axis: zz_protocol::Axis) {
+        let adopted = {
+            let mut inner = self.inner.lock();
+            let Some(session) = client_attached_session(&inner, client) else {
+                return;
+            };
+            let Some(source) = inner
+                .engine
+                .state
+                .sessions
+                .get(&session)
+                .map(|session| session.active_window)
+                .and_then(|window| inner.engine.state.windows.get(&window))
+                .map(|window| window.active_pane)
+            else {
+                return;
+            };
+            let Some((popup, subscriber)) = take_popup(&mut inner, client) else {
+                return;
+            };
+            let Some(window) = inner.engine.state.window_for_pane(source) else {
+                return;
+            };
+            if let Some(window) = inner.engine.state.windows.get_mut(&window) {
+                window.zoomed_pane = None;
+            }
+            let Ok(pane) = inner
+                .engine
+                .state
+                .split_pane(source, axis, PaneKind::Terminal)
+            else {
+                Self::retire_popup(client, (popup, subscriber), true);
+                return;
+            };
+            let terminal = Arc::clone(&popup.terminal);
+            inner.terminals.insert(pane, Arc::clone(&terminal));
+            let current_path = terminal_working_directory(&terminal)
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            inner.engine.set_pane_runtime_facts(
+                pane,
+                PaneRuntimeFacts {
+                    start_path: current_path.clone(),
+                    current_path,
+                    pid: terminal.process_id(),
+                    tty: terminal
+                        .tty()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    ..PaneRuntimeFacts::default()
+                },
+            );
+            let _ = inner.engine.state.select_pane(pane);
+            let geometry = terminal_resize_for_pane(&inner, pane).map(|(_, geometry)| geometry);
+            if let Some(subscriber) = subscriber {
+                subscriber.suspend_terminal(popup.state.pane);
+                Self::send_event(&subscriber, EventPayload::Popup { state: None });
+            }
+            if let Some(waiter) = popup.waiter {
+                let _ = waiter.wake.try_send(0);
+            }
+            (pane, terminal, geometry)
+        };
+        let (pane, terminal, geometry) = adopted;
+        if let Some(geometry) = geometry {
+            terminal.resize(
+                geometry.columns,
+                geometry.rows,
+                geometry.cell_width_px,
+                geometry.cell_height_px,
+            );
+        }
+        terminal.attach_view(TerminalViewId(client.0));
+        if let Err(error) = self.watch_terminal(pane, &terminal) {
+            log::warn!("could not watch the pane a popup became: {error}");
+        }
+        self.publish_snapshot();
+    }
+
+    /// `popup_menu_done`: the chosen row's key, not a command.
+    fn popup_menu_choice(self: &Arc<Self>, client: ClientId, key: &str) {
+        match key {
+            "q" => self.close_popup(client, true),
+            "p" => {
+                let (terminal, data) = {
+                    let inner = self.inner.lock();
+                    let Some(popup) = inner.popups.get(&client) else {
+                        return;
+                    };
+                    let Some(buffer) = find_buffer(&inner, None) else {
+                        return;
+                    };
+                    (Arc::clone(&popup.terminal), Arc::clone(&buffer.data))
+                };
+                terminal.paste_prepared_bytes(Some(TerminalViewId(client.0)), data, false);
+            }
+            "F" | "C" => {
+                let (state, resize) = {
+                    let mut inner = self.inner.lock();
+                    let Some(popup) = inner.popups.get_mut(&client) else {
+                        return;
+                    };
+                    let mut state = popup.state.clone();
+                    if key == "F" {
+                        state.width = state.client_columns;
+                        state.height = state.client_rows;
+                        state.left = 0;
+                        state.top = 0;
+                    } else {
+                        state.left = state
+                            .client_columns
+                            .saturating_div(2)
+                            .saturating_sub(state.width / 2);
+                        state.top = state
+                            .client_rows
+                            .saturating_div(2)
+                            .saturating_sub(state.height / 2);
+                    }
+                    popup.state = state.clone();
+                    popup.preferred = PopupPlacement {
+                        left: state.left,
+                        top: state.top,
+                        width: state.width,
+                        height: state.height,
+                    };
+                    let resize = (key == "F" && !state.dead)
+                        .then(|| popup_content_size(&state))
+                        .flatten()
+                        .map(|(columns, rows)| (Arc::clone(&popup.terminal), columns, rows));
+                    (state, resize)
+                };
+                if let Some((terminal, columns, rows)) = resize {
+                    terminal.resize(columns, rows, state.cell_width_px, state.cell_height_px);
+                }
+                self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
+            }
+            "h" => self.popup_make_pane(client, zz_protocol::Axis::Horizontal),
+            "v" => self.popup_make_pane(client, zz_protocol::Axis::Vertical),
+            _ => {}
         }
     }
 
@@ -15510,6 +15903,17 @@ impl Shared {
         let MenuAction::Choose(index) = action else {
             return;
         };
+        if session.popup_owner {
+            if let Some(key) = usize::try_from(index)
+                .ok()
+                .and_then(|index| session.state.items.get(index))
+                .and_then(Option::as_ref)
+                .and_then(|item| item.key.clone())
+            {
+                self.popup_menu_choice(client, &key);
+            }
+            return;
+        }
         let Some(command) = usize::try_from(index)
             .ok()
             .and_then(|index| session.commands.get(index))
@@ -26905,6 +27309,11 @@ struct ClientFileWaiter {
 struct PopupSession {
     terminal: Arc<TerminalSession>,
     state: PopupState,
+    /// What `popup_key_cb` keeps in `dragging`, `dx`/`dy` and `lx`/`ly`/`lb`:
+    /// the drag in progress, its grab offset inside the box, and the previous
+    /// pointer report, which is what decides whether a drag started on a
+    /// border and which button began it.
+    pointer: PopupPointerState,
     /// The position and size the popup asked for, kept for the life of the
     /// popup. The pin holds the same four numbers in `ppx`/`ppy`/`psx`/`psy`
     /// so a client that shrinks and grows again lands back where it started.
@@ -26936,12 +27345,35 @@ struct PopupPlacement {
     height: u16,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum PopupDrag {
+    #[default]
+    Off,
+    Move,
+    Size,
+}
+
+#[derive(Clone, Copy, Default)]
+struct PopupPointerState {
+    dragging: PopupDrag,
+    dx: u16,
+    dy: u16,
+    last_column: u16,
+    last_row: u16,
+    last_button: PopupPointerButton,
+    last_drag: bool,
+}
+
 struct MenuSession {
     state: MenuState,
     commands: Vec<Option<String>>,
     target: ExecutionContext,
     styles: OverlayStyleOverrides,
     waiter: Option<MenuWaiter>,
+    /// Set for the menu a popup raises for itself. tmux keeps that one in
+    /// `pd->md` rather than on the client, and `popup_menu_done` switches on
+    /// the chosen row's key instead of running a command.
+    popup_owner: bool,
 }
 
 struct MenuWaiter {
@@ -34445,6 +34877,44 @@ fn popup_exit_code(terminal: &TerminalSession) -> Option<u8> {
             .signal
             .unwrap_or_else(|| u8::try_from(completion.code).unwrap_or(u8::MAX))
     })
+}
+
+/// Which border cell the pointer is on, the way `popup_key_cb` names them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PopupBorder {
+    None,
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+/// `popup_handle_drag`'s move clamp: the grabbed offset is kept until the box
+/// would leave the viewport, and then the box parks against the edge.
+fn popup_drag_origin(position: u16, offset: u16, extent: u16, available: u16) -> u16 {
+    if position < offset {
+        0
+    } else if position.saturating_sub(offset).saturating_add(extent) > available {
+        available.saturating_sub(extent)
+    } else {
+        position.saturating_sub(offset)
+    }
+}
+
+/// `popup_menu_items`, with the pin's `#{?buffer_name,Paste #{buffer_name},}`
+/// row: a blank line when no buffer exists, because `menu_add_item` turns an
+/// empty name into a separator.
+fn popup_menu_rows(paste: Option<&str>) -> [Option<(String, &'static str)>; 8] {
+    [
+        Some(("Close".to_owned(), "q")),
+        paste.map(|name| (format!("Paste {name}"), "p")),
+        None,
+        Some(("Fill Space".to_owned(), "F")),
+        Some(("Centre".to_owned(), "C")),
+        None,
+        Some(("To Horizontal Pane".to_owned(), "h")),
+        Some(("To Vertical Pane".to_owned(), "v")),
+    ]
 }
 
 fn popup_content_size(state: &PopupState) -> Option<(u16, u16)> {

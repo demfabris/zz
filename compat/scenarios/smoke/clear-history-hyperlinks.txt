@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/clear-history-hyperlinks.sh ~/clear-history-hyperlinks.sh
+stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+out: set-environment -gu CLEAR_HISTORY_HYPERLINKS
+run-shell 'sh ~/clear-history-hyperlinks.sh'
+out: show-environment -g CLEAR_HISTORY_HYPERLINKS

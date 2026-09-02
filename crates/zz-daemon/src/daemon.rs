@@ -5431,25 +5431,19 @@ impl Shared {
             return Ok(execution);
         };
         if !matches!(kind, ClientKind::Command | ClientKind::Control) {
+            self.inner.lock().pane_exit_waits.remove(&pane);
             return Ok(execution);
         }
-        // The status is read and the waiter installed under one lock, so a child
-        // that is already gone answers here and one that exits next wakes the
-        // waiter it can now see.
-        let wait = {
-            let mut inner = self.inner.lock();
-            let Some(terminal) = inner.terminals.get(&pane).cloned() else {
-                return Ok(execution);
-            };
-            let status = terminal.latest_viewport().status.clone();
-            if terminal_status_should_close(&status) {
-                let exit_code = pane_wait_exit_code(&terminal, &status);
-                drop(inner);
-                return self.finish_pane_command(client, execution, exit_code);
-            }
-            let (wake, wait) = crossbeam_channel::bounded(1);
-            inner.pane_exit_waiters.entry(pane).or_default().push(wake);
-            wait
+        // The wait was registered under the lock that created the pane, so a
+        // child that has already exited left its status in the channel.
+        let Some(wait) = self
+            .inner
+            .lock()
+            .pane_exit_waits
+            .get(&pane)
+            .map(|entry| entry.wait.clone())
+        else {
+            return Ok(execution);
         };
         self.report_command_queue_park();
         let exit_code = loop {
@@ -5463,7 +5457,7 @@ impl Shared {
                 }
             }
         };
-        self.inner.lock().pane_exit_waiters.remove(&pane);
+        self.inner.lock().pane_exit_waits.remove(&pane);
         self.finish_pane_command(client, execution, exit_code)
     }
 
@@ -5489,9 +5483,9 @@ impl Shared {
         }
     }
 
-    fn wake_pane_exit_waiters(&self, inner: &mut ServerState, pane: PaneId, exit_code: u8) {
-        for wake in inner.pane_exit_waiters.remove(&pane).unwrap_or_default() {
-            let _ = wake.send(exit_code);
+    fn wake_pane_exit_wait(inner: &ServerState, pane: PaneId, exit_code: u8) {
+        if let Some(entry) = inner.pane_exit_waits.get(&pane) {
+            let _ = entry.wake.try_send(exit_code);
         }
     }
 
@@ -7440,8 +7434,11 @@ impl Shared {
                         kind: PaneKindSnapshot::Browser(_) | PaneKindSnapshot::Picker,
                         ..
                     }
-                    | MuxEffect::SuppressAfterHook
-                    | MuxEffect::PaneWaitForExit { .. } => {}
+                    | MuxEffect::SuppressAfterHook => {}
+                    MuxEffect::PaneWaitForExit { pane } => {
+                        let (wake, wait) = crossbeam_channel::bounded(1);
+                        inner.pane_exit_waits.insert(*pane, PaneExitWait { wake, wait });
+                    }
                     MuxEffect::PaneCreated {
                         pane,
                         kind: PaneKindSnapshot::Agent(descriptor),
@@ -7533,7 +7530,8 @@ impl Shared {
                             if let Some(pipe) = inner.pane_pipes.remove(pane) {
                                 pipes_to_close.push(pipe);
                             }
-                            self.wake_pane_exit_waiters(&mut inner, *pane, 0);
+                            Self::wake_pane_exit_wait(&inner, *pane, 0);
+                            inner.pane_exit_waits.remove(pane);
                             inner.terminals.remove(pane);
                             inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
@@ -20102,8 +20100,7 @@ impl Shared {
         let status = terminal.latest_viewport().status.clone();
         {
             let exit_code = pane_wait_exit_code(terminal, &status);
-            let mut inner = self.inner.lock();
-            self.wake_pane_exit_waiters(&mut inner, pane, exit_code);
+            Self::wake_pane_exit_wait(&self.inner.lock(), pane, exit_code);
         }
         let (failed, dead_status, dead_signal) = match status {
             zz_terminal::SessionStatus::Exited(status) => {
@@ -25477,10 +25474,11 @@ struct ServerState {
         HashMap<(ClientId, thread::ThreadId), Vec<CapturedControlCommandEvents>>,
     subscribers: BTreeMap<ClientId, Arc<OutboundMailbox>>,
     client_file_waiters: BTreeMap<u64, ClientFileWaiter>,
-    /// `new_wp->wait_item` for `split-window -W`: the queues parked on each
-    /// pane, woken with the child's status before the pane is retained or
-    /// removed.
-    pane_exit_waiters: BTreeMap<PaneId, Vec<crossbeam_channel::Sender<u8>>>,
+    /// `new_wp->wait_item` for `split-window -W`: registered when the pane is
+    /// created and woken with the child's status before the pane is retained or
+    /// removed. Both ends live here so a child that is already gone when the
+    /// invoking command returns still hands its status over.
+    pane_exit_waits: BTreeMap<PaneId, PaneExitWait>,
     next_client_file_request: u64,
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
     visible_terminals: BTreeMap<ClientId, BTreeSet<PaneId>>,
@@ -25728,6 +25726,11 @@ impl Default for AutomaticPasteBufferLimit {
     fn default() -> Self {
         Self(DEFAULT_BUFFER_LIMIT)
     }
+}
+
+struct PaneExitWait {
+    wake: crossbeam_channel::Sender<u8>,
+    wait: crossbeam_channel::Receiver<u8>,
 }
 
 #[derive(Debug)]

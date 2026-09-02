@@ -2772,9 +2772,6 @@ struct PendingHookEvent {
     context: ExecutionContext,
     variables: BTreeMap<String, String>,
     exclude_client: Option<ClientId>,
-    /// `notify_client`'s `fs.c`: the client this hook is about, which the
-    /// queued hook command reads its `#{client_*}` variables from.
-    format_client: Option<ClientId>,
 }
 
 const CURRENT_FILE_CONTEXT_FORMAT: &str = "current_file";
@@ -2870,7 +2867,6 @@ impl PendingHookEvent {
             name,
             context,
             exclude_client: None,
-            format_client: None,
             variables: BTreeMap::from([
                 (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
                 (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
@@ -2897,7 +2893,6 @@ impl PendingHookEvent {
             name,
             context: snapshot.window_context(window),
             exclude_client: None,
-            format_client: None,
             variables: BTreeMap::from([
                 (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
                 (
@@ -2930,7 +2925,6 @@ impl PendingHookEvent {
             name,
             context: snapshot.window_context(window),
             exclude_client: None,
-            format_client: None,
             variables: BTreeMap::from([
                 (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
                 (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
@@ -2967,7 +2961,6 @@ impl PendingHookEvent {
             name,
             context: ExecutionContext::new(Some(state.session), Some(state.window), Some(pane)),
             exclude_client: None,
-            format_client: None,
             variables: BTreeMap::from([
                 (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
                 (
@@ -3003,7 +2996,6 @@ impl PendingHookEvent {
             context,
             variables,
             exclude_client: (name == "client-detached").then_some(client),
-            format_client: Some(client),
         }
     }
 
@@ -3012,7 +3004,6 @@ impl PendingHookEvent {
             name,
             context: ExecutionContext::new(None, None, None),
             exclude_client: None,
-            format_client: None,
             variables: BTreeMap::from([
                 (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
                 ("hook_paste_buffer".to_owned(), buffer),
@@ -6335,7 +6326,6 @@ impl Shared {
                 context.set_no_client();
                 context.set_replay_client(None);
                 context.set_control_command_target(None);
-                context.set_hook_format_client(event.format_client);
                 let commands = inner.engine.event_hook_commands(&context, event.name);
                 (context, commands)
             };
@@ -6467,13 +6457,6 @@ impl Shared {
                 let format_client = target_session.and_then(|session| {
                     destination
                         .filter(|client| client_attached_session(&inner, *client) == Some(session))
-                        // `cmd_display_message_exec`'s `tc` is the item's target
-                        // client, which for a hook item is the notified client.
-                        .or_else(|| {
-                            context.hook_format_client().filter(|client| {
-                                client_attached_session(&inner, *client) == Some(session)
-                            })
-                        })
                         .or_else(|| best_display_message_format_client(&inner, session))
                         .and_then(|client| {
                             client_attached_session(&inner, client)
@@ -30329,11 +30312,6 @@ fn format_hook_facts_for_client(
             inner.client_environments.get(&invoking),
         ));
     }
-    if let Some(hook_client) = context.hook_format_client() {
-        facts.client = client_attached_session(inner, hook_client)
-            .map(|session| client_format_facts(inner, hook_client, session));
-        return facts;
-    }
     if !context.has_no_client()
         && let Some(client) = format_provenance_client(context, client)
             .and_then(|client| current_format_client(inner, client))
@@ -30349,8 +30327,7 @@ fn format_provenance_client(
     invoking_client: ClientId,
 ) -> Option<ClientId> {
     context
-        .hook_format_client()
-        .or_else(|| context.replay_client())
+        .replay_client()
         .or_else(|| context.control_command_target().map(|(client, _)| client))
         .or((invoking_client != ClientId(u64::MAX)).then_some(invoking_client))
 }
@@ -43321,72 +43298,6 @@ mod tests {
         assert!(inner.client_messages.contains_key(&first));
         assert!(inner.message_ignore_keys.contains(&first));
         assert_eq!(inner.window_latest_clients.get(&window), Some(&first));
-    }
-
-    #[test]
-    fn client_hooks_expand_the_notified_client() {
-        let shared = Arc::new(Shared::new(1));
-        let (session, pane, _) = output_view_session_fixture(&shared, "client-context", "context");
-        let (first, _) = shared.register_subscribed(
-            ClientKind::Interactive,
-            Some("first-reporter".to_owned()),
-            None,
-            OutboundMailbox::new(),
-        );
-        let (second, _) = shared.register_subscribed(
-            ClientKind::Interactive,
-            Some("second-reporter".to_owned()),
-            None,
-            OutboundMailbox::new(),
-        );
-        {
-            let mut inner = shared.inner.lock();
-            inner.client_ttys.insert(first, "/dev/pts/70".to_owned());
-            inner.client_ttys.insert(second, "/dev/pts/71".to_owned());
-        }
-        shared
-            .attach(first, session)
-            .expect("attach first reporter");
-        shared
-            .attach(second, session)
-            .expect("attach second reporter");
-        let mut hook_context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
-            .expect("client context");
-        shared
-            .execute(
-                ClientId(u64::MAX),
-                ClientKind::Command,
-                &mut hook_context,
-                &CommandInvocation::new(
-                    "set-hook",
-                    [
-                        "-g",
-                        "client-resized",
-                        "display-message '#{hook}|#{client_tty}|#{client_width}'",
-                    ],
-                ),
-            )
-            .expect("install client-resized hook");
-        shared.inner.lock().message_log.clear();
-
-        for (client, columns, rows) in [(first, 120, 40), (second, 90, 30)] {
-            shared
-                .input(
-                    client,
-                    ClientKind::Interactive,
-                    &mut ExecutionContext::default(),
-                    InputMessage::ClientTerminalSize { columns, rows },
-                )
-                .expect("report client terminal size");
-        }
-
-        assert_eq!(
-            client_event_log(&shared),
-            [
-                "client-resized|/dev/pts/70|120".to_owned(),
-                "client-resized|/dev/pts/71|90".to_owned(),
-            ]
-        );
     }
 
     #[test]

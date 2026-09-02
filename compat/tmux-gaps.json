@@ -151,6 +151,33 @@
       "reason": "The requested flag is retained and reported, but zz still has one window-global active pane while pinned tmux can select a pane per client and window."
     },
     {
+      "id": "clients.event-resize-context",
+      "title": "Defer client-resized until geometry settles",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "hard",
+      "impact": [
+        "scripts",
+        "remote"
+      ],
+      "owner": "protocol",
+      "items": [
+        "semantic:client-resized-post-geometry-context"
+      ],
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-tui/src/app.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "file:compat/attached-client.sh"
+      ],
+      "acceptance": [
+        "Changed and unchanged Interactive outer-resize reports each emit client-resized once after visible pane and window geometry has settled; a resulting client-active still precedes it, and Control refresh-client -C emits neither hook."
+      ],
+      "depends_on": [],
+      "reason": "Remeasured 2026-09-01 against the pin with a real pty client (pty-drive.py) on both binaries, and the acceptance clause as written does not describe the pin. server-client.c's MSG_RESIZE arm runs server_client_update_latest, tty_resize, recalculate_sizes and the redraw before notify_client(\"client-resized\"), but recalculate_sizes only marks the window; the actual layout resize lands in a later server-loop pass, after the hook's queued command has already expanded its formats. Measured on a client driven 80x24 -> 100x30 -> 61x19 with the hook body reading '#{client_width}x#{client_height}' and '#{window_width}x#{window_height}': the pin reports 80x24/80x23, then 100x30/80x23, then 61x19/100x29. The client size is current and the window and pane geometry is exactly one resize behind. zz reports the same one-resize window and pane lag (51x22 then 71x28 for the same drive, its own chrome reserving 29 columns and 2 rows), so deferring the hook to the end of the input batch would make zz lead the pin rather than match it. The two clauses that are testable already hold: a changed Interactive outer resize emits client-resized exactly once on both, and Control refresh-client -C 120,40 emits neither client-resized nor client-active on either binary while still resizing the window to 120x40 (repeat invocations included). One real divergence was found and it is not this group's: the pin's hook body carries the resized client as its format client, so '#{client_tty}' and '#{client_width}' answer, while zz populates only '#{hook_client}' and leaves the client-scoped variables empty. That producer gap belongs to formats.context-producer-fidelity. This group needs re-scoping to the client-context clause plus the measured lag before it can be closed."
+    },
+    {
       "id": "clients.interactive-refresh",
       "title": "Complete interactive client commands",
       "decision": "native",
@@ -2791,19 +2818,6 @@
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
       "resolution": "The daemon now retains the latest attached client for each window and produces client-active, client-focus-in, client-focus-out, client-resized, client-light-theme, and client-dark-theme at their retained report boundaries. client-active fires only when the window's latest client changes; repeated focus, theme, and positive Interactive size reports each fire, even when the retained value is unchanged. Focus-in precedes a resulting active event, resize follows a resulting active event, focus-out never changes the latest client, and loss of the latest client promotes the remaining client with greatest activity before client-detached. Control clients do not originate focus, theme, resize, or input-driven active events, but an attached Control client can win loss promotion. Hooks remain clientless: hook_client identifies the reporter, client notifications expose no hook-specific session variables, copied session, window, and shared active-pane state supplies ordinary target formats, and ordinary client facts keep their independent selection rules. Per-client active-pane behavior remains under clients.active-pane. Focused daemon tests cover all six names, duplicate reports, ordering, suppression, Control exclusions, and loss promotion; the real two-client fixture proves the TUI-drivable active, focus, and resize sequence against pinned tmux without a protocol change. Post-geometry format timing for changed resize reports remains under clients.event-resize-context."
-    },
-    {
-      "id": "clients.event-resize-context",
-      "title": "Give client-resized the pin's client context",
-      "closed_on": "2026-09-01",
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz-tui/src/app.rs",
-        "resource:knowledge/tmux/divergences.md",
-        "file:compat/attached-client.sh",
-        "scenario:compat/scenarios/smoke/client-resize-context.txt"
-      ],
-      "resolution": "RE-SCOPED and closed 2026-09-01. The old clause read: \"Changed and unchanged Interactive outer-resize reports each emit client-resized once after visible pane and window geometry has settled; a resulting client-active still precedes it, and Control refresh-client -C emits neither hook.\" It does not describe the pin. server-client.c's MSG_RESIZE arm runs server_client_update_latest, tty_resize, recalculate_sizes and the redraw before notify_client(\"client-resized\"), but recalculate_sizes only marks the window; the layout resize lands in a later server-loop pass, after the hook's queued command has already expanded its formats. Measured with a real pty client (pty-drive.py) driven 80x24 -> 100x30 -> 100x30 -> 61x19 on both binaries, with the hook body reading '#{client_width}x#{client_height}' and '#{window_width}': the pin reports client 80x24/window 80, then 100x30/80, then 61x19/100. The client size is current and the window and pane geometry is exactly one resize behind. zz shows the same one-resize window lag (51 then 71 for the same drive, its own chrome reserving 29 columns), so deferring the hook to the end of the input batch would make zz lead the pin rather than match it, which is why the clause was rewritten to the measured behaviour instead of implemented. The one real divergence was the hook's format client. tmux's notify_client sets the queued item's fs.c to the notified client, so the body's #{client_tty}, #{client_width} and #{client_height} answer; zz ran every hook command through ExecutionContext::set_no_client and filled only #{hook_client}, so those variables came back empty (measured before the change: 'tty= cw= ch=' against the pin's 'tty=/dev/pts/17 cw=100 ch=30'). PendingHookEvent now carries the notified client and the hook command's format facts are built from it, for every notify_client hook and not just this one. Two facts the differential records rather than hides. The pin also reports the attaching client's first size as a client-resized of its own where zz folds that into attach, so smoke/client-resize-context truncates its log once the client is attached and covers post-attach reports only. And the Control half runs one refresh-client -C per connection instead of two down one pipe, because zz's Control client still truncates a piped stdin queue to its first command; that is control-mode.disconnect-cancels-command-queue, not this group. Both binaries agree on all five checks: a changed report emits exactly one client-resized carrying the client's own size and tty, a repeated identical report emits none, and two Control size reports raise neither a client-resized nor a client-active naming the Control client."
     },
     {
       "id": "clients.local-control-terminal-facts",

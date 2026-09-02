@@ -545,7 +545,6 @@ pub struct ExecutionContext {
     client_attached: bool,
     client_attached_context: Option<(SessionId, WindowId, PaneId)>,
     target_format_client_override: Option<FormatClient>,
-    hook_format_client: Option<ClientId>,
     repeat_binding: bool,
     replay_client: Option<ClientId>,
     control_command_target: Option<(ClientId, u8)>,
@@ -577,7 +576,6 @@ impl fmt::Debug for ExecutionContext {
                 "target_format_client_override",
                 &self.target_format_client_override,
             )
-            .field("hook_format_client", &self.hook_format_client)
             .field("repeat_binding", &self.repeat_binding)
             .field("replay_client", &self.replay_client)
             .field("control_command_target", &self.control_command_target)
@@ -609,7 +607,6 @@ impl Default for ExecutionContext {
             client_attached: true,
             client_attached_context: None,
             target_format_client_override: None,
-            hook_format_client: None,
             repeat_binding: false,
             replay_client: None,
             control_command_target: None,
@@ -707,17 +704,6 @@ impl ExecutionContext {
 
     pub fn set_format_client(&mut self, format_client: FormatClient) {
         self.target_format_client_override = Some(format_client);
-    }
-
-    /// `notify_client` puts the notified client in the queued item's format
-    /// tree, so a client hook body reads that client's own `#{client_*}`.
-    pub fn set_hook_format_client(&mut self, client: Option<ClientId>) {
-        self.hook_format_client = client;
-    }
-
-    #[must_use]
-    pub const fn hook_format_client(&self) -> Option<ClientId> {
-        self.hook_format_client
     }
 
     #[must_use]

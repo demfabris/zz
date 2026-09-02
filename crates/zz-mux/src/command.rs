@@ -87,6 +87,7 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "allow-rename",
     "allow-set-title",
     "alternate-screen",
+    "remain-on-exit-format",
     "scroll-on-clear",
     "backspace",
     "cursor-style",
@@ -1785,6 +1786,9 @@ pub struct TerminalWorkerOptions {
     pub scroll_on_clear: bool,
     pub erase_byte: Option<u8>,
     pub verase_byte: u8,
+    /// The unexpanded `remain-on-exit-format` a retained pane draws after its
+    /// child exits; empty when the pane is not retained at all.
+    pub remain_on_exit_format: String,
     pub wrap_search: bool,
     pub cursor_style: &'static str,
     pub cursor_colour: String,
@@ -2873,6 +2877,21 @@ impl MuxEngine {
         }
     }
 
+    /// `screen_write_vnputs` draws the expanded `remain-on-exit-format` into a
+    /// retained pane after the child exits; the raw template is a store-only
+    /// scalar resolved pane -> window -> global.
+    #[must_use]
+    pub fn remain_on_exit_format_for_pane(&self, pane: PaneId) -> String {
+        let Some(option) = exact_tmux_option("remain-on-exit-format") else {
+            return String::new();
+        };
+        self.tmux_option_readback(option, TmuxOptionTarget::Pane(pane), true)
+            .ok()
+            .flatten()
+            .map(|(value, _)| value)
+            .unwrap_or_default()
+    }
+
     pub fn terminal_worker_options_for_pane(
         &self,
         pane: PaneId,
@@ -2890,6 +2909,7 @@ impl MuxEngine {
             scroll_on_clear: pane_options.scroll_on_clear,
             erase_byte: self.backspace_byte(),
             verase_byte: self.verase_byte(),
+            remain_on_exit_format: self.remain_on_exit_format_for_pane(pane),
             wrap_search: self.window_knobs(window).wrap_search,
             cursor_style: pane_options.cursor_style.as_str(),
             cursor_colour: pane_options.cursor_colour,
@@ -29972,6 +29992,13 @@ mod tests {
                 scroll_on_clear: false,
                 erase_byte: Some(0x7f),
                 verase_byte: 0x7f,
+                remain_on_exit_format: concat!(
+                    "Pane is dead (#{?#{!=:#{pane_dead_status},},",
+                    "status #{pane_dead_status},}",
+                    "#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, ",
+                    "#{t:pane_dead_time})",
+                )
+                .to_owned(),
                 wrap_search: false,
                 cursor_style: "blinking-underline",
                 cursor_colour: "sky blue".to_owned(),
@@ -32215,7 +32242,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 112);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 113);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

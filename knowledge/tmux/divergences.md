@@ -1103,7 +1103,7 @@ the DEL strict-key differential pass.
   `prompt-*cursor-*`; `clock-mode-colour`, `clock-mode-style`.
 - Generic scalar storage (39 of the 63 scalar-backed names) plus five of the eight
   arrays: everything else in the table,
-  including `remain-on-exit-format`, `status-keys`,
+  including `status-keys`,
   `copy-mode-selection-style`, `copy-mode-position-style`,
   `display-panes-colour`/`display-panes-active-colour`,
   `terminal-overrides[]`, `terminal-features[]`, `user-keys[]`,

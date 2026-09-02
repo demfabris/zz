@@ -19799,6 +19799,25 @@ impl Shared {
                 target: "zz_daemon::diagnostics::terminal",
                 "terminal worker finished pane={pane}; retaining dead pane"
             );
+            let notice = {
+                let inner = self.inner.lock();
+                let template = inner.engine.remain_on_exit_format_for_pane(pane);
+                (!template.is_empty()).then(|| {
+                    let window = inner.engine.state.window_for_pane(pane);
+                    let session = window
+                        .and_then(|window| inner.engine.state.windows.get(&window))
+                        .map(|window| window.session);
+                    Arc::<str>::from(expanded_style_value(
+                        &inner.engine,
+                        &inner.config_files,
+                        &template,
+                        session,
+                        window,
+                        Some(pane),
+                    ))
+                })
+            };
+            terminal.write_dead_notice(notice);
             if changed {
                 self.publish_snapshot();
             }
@@ -42155,6 +42174,14 @@ mod tests {
                 &CommandInvocation::new("set-window-option", ["-g", "remain-on-exit", "on"]),
             )
             .expect("enable retained exits");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "remain-on-exit-format", ""]),
+            )
+            .expect("silence the dead notice");
         shared
             .execute(
                 ClientId(u64::MAX),

@@ -764,8 +764,9 @@ impl Element for TerminalElement {
             .apply(f32::from(natural_line_height))
             .max(1.0));
         let line_height = snap_length(raw_line_height, scale);
-        let columns = grid_dimension(bounds.size.width, cell_width, scale);
-        let rows = grid_dimension(bounds.size.height, line_height, scale);
+        let measured = terminal_grid_size(bounds.size, cell_width, line_height, scale);
+        let columns = measured.columns;
+        let rows = measured.rows;
         let spare_height = (bounds.size.height - line_height * usize::from(rows)).max(px(0.0));
         let bottom_anchored = local_scroll_target.is_none()
             && matches!(viewport.mode, zz_terminal::TerminalMode::Live)
@@ -854,12 +855,7 @@ impl Element for TerminalElement {
                 cursor.column..cursor.column.saturating_add(width),
             ))
         });
-        let grid_size = GridSize {
-            columns,
-            rows,
-            cell_width_px: physical_pixels(cell_width, scale),
-            cell_height_px: physical_pixels(line_height, scale),
-        };
+        let grid_size = measured;
         let mut cached_row_hits = 0;
         let mut cached_row_misses = 0;
         let mut uncached_rows = 0;
@@ -2947,6 +2943,24 @@ fn last_visible_row_has_content(viewport: &TerminalViewport, visible_rows: u16) 
     })
 }
 
+/// The whole cell grid one pane's pixel box carries, which is what the desktop
+/// client writes back as the pane's PTY size. Pure so the writeback contract can
+/// be pinned without a window: pixel extent and cell metrics in, cells and the
+/// physical cell size out.
+fn terminal_grid_size(
+    available: gpui::Size<Pixels>,
+    cell_width: Pixels,
+    line_height: Pixels,
+    scale: f32,
+) -> GridSize {
+    GridSize {
+        columns: grid_dimension(available.width, cell_width, scale),
+        rows: grid_dimension(available.height, line_height, scale),
+        cell_width_px: physical_pixels(cell_width, scale),
+        cell_height_px: physical_pixels(line_height, scale),
+    }
+}
+
 fn grid_dimension(available: Pixels, cell: Pixels, scale: f32) -> u16 {
     let tolerance = device_pixel(scale) * 0.01;
     let cells = ((available + tolerance) / cell).floor();
@@ -3895,6 +3909,50 @@ mod tests {
         assert_eq!(grid_dimension(px(f32::NAN), px(8.0), 1.0), 1);
         assert_eq!(grid_dimension(px(f32::INFINITY), px(8.0), 1.0), 1);
         assert_eq!(grid_dimension(px(80.0), px(0.0), 1.0), 1);
+    }
+
+    /// The pane's PTY size is this measurement, and the daemon's own allocation
+    /// is carved from the client's window extent, so a pixel box that is not a
+    /// whole number of cells is exactly where the two can differ by a cell.
+    #[test]
+    fn a_pane_box_measures_the_cells_it_wholly_contains() {
+        let exact = terminal_grid_size(gpui::size(px(640.0), px(384.0)), px(8.0), px(16.0), 1.0);
+        assert_eq!(exact.columns, 80);
+        assert_eq!(exact.rows, 24);
+        assert_eq!(exact.cell_width_px, 8);
+        assert_eq!(exact.cell_height_px, 16);
+
+        let partial = terminal_grid_size(gpui::size(px(647.0), px(399.0)), px(8.0), px(16.0), 1.0);
+        assert_eq!(partial.columns, 80);
+        assert_eq!(partial.rows, 24);
+
+        let short = terminal_grid_size(gpui::size(px(639.0), px(383.0)), px(8.0), px(16.0), 1.0);
+        assert_eq!(short.columns, 79);
+        assert_eq!(short.rows, 23);
+    }
+
+    /// One device pixel of slack is tolerated so a box laid out at the exact
+    /// grid width does not lose its last column to float error, and the
+    /// physical cell size follows the scale factor the window is drawn at.
+    #[test]
+    fn the_measurement_tolerates_a_device_pixel_and_scales_its_cells() {
+        let scaled = terminal_grid_size(gpui::size(px(640.0), px(384.0)), px(8.0), px(16.0), 2.0);
+        assert_eq!(scaled.columns, 80);
+        assert_eq!(scaled.rows, 24);
+        assert_eq!(scaled.cell_width_px, 16);
+        assert_eq!(scaled.cell_height_px, 32);
+
+        let slack = terminal_grid_size(
+            gpui::size(px(640.0 - 0.001), px(384.0)),
+            px(8.0),
+            px(16.0),
+            1.0,
+        );
+        assert_eq!(slack.columns, 80);
+
+        let degenerate = terminal_grid_size(gpui::size(px(0.0), px(0.0)), px(8.0), px(16.0), 1.0);
+        assert_eq!(degenerate.columns, 1);
+        assert_eq!(degenerate.rows, 1);
     }
 
     #[test]

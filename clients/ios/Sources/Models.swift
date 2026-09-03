@@ -28,6 +28,12 @@ enum ZZPaneKind: UInt32, Sendable {
         case .editor: "doc.text"
         }
     }
+
+    /// Kinds the daemon will read `show-last-output` from: it captures OSC 133
+    /// marks out of a pane that owns a terminal.
+    var recordsCommands: Bool {
+        self == .terminal || self == .agent
+    }
 }
 
 struct ZZPane: Identifiable, Equatable, Sendable {
@@ -104,8 +110,29 @@ enum ZZConnectFailure: UInt32, Sendable {
 }
 
 enum ZZReconnectPolicy {
+    static let fastTierAttempts = 5
+    static let longOutageDelays = [30, 60, 120, 300, 600]
+    static let thawGraceSeconds: TimeInterval = 5
+    static let thawRetryDelay = 2
+
     static func delay(for attempt: Int) -> Int {
         1 << min(max(attempt - 1, 0), 4)
+    }
+
+    static func backoffDelay(for attempt: Int) -> Int {
+        guard attempt > fastTierAttempts else {
+            return delay(for: attempt)
+        }
+        let tier = min(attempt - fastTierAttempts, longOutageDelays.count)
+        return longOutageDelays[tier - 1]
+    }
+
+    static func nextAttempt(after attempt: Int, thawing: Bool) -> Int {
+        thawing ? max(attempt, 1) : attempt + 1
+    }
+
+    static func delaySeconds(attempt: Int, thawing: Bool) -> Int {
+        thawing ? thawRetryDelay : backoffDelay(for: attempt)
     }
 }
 
@@ -1561,6 +1588,99 @@ enum ZZCommandLine: Sendable {
     /// the daemon publishes the resulting state and every client renders it.
     static let chooseBufferArgs: [String] = []
     static let displayPanesArgs: [String] = ["-d", "0"]
+}
+
+/// The executed commands whose reply the store still wants. The daemon answers
+/// every command and the FFI keeps only the newest replies, so an id that is
+/// not tracked here is dropped instead of matched against a stale intent.
+struct ZZCommandRequests: Equatable, Sendable {
+    enum Purpose: Equatable, Sendable {
+        case lastOutput(pane: UInt64)
+    }
+
+    static let capacity = 8
+
+    private var order: [UInt64] = []
+    private var purposes: [UInt64: Purpose] = [:]
+
+    var count: Int {
+        order.count
+    }
+
+    /// `zz_client_execute_request` answers zero when the send failed, and that
+    /// request will never produce a reply.
+    mutating func register(_ request: UInt64, as purpose: Purpose) {
+        guard request != 0 else {
+            return
+        }
+        if purposes.updateValue(purpose, forKey: request) == nil {
+            order.append(request)
+        }
+        while order.count > Self.capacity {
+            purposes.removeValue(forKey: order.removeFirst())
+        }
+    }
+
+    mutating func take(_ request: UInt64) -> Purpose? {
+        guard let purpose = purposes.removeValue(forKey: request) else {
+            return nil
+        }
+        order.removeAll { $0 == request }
+        return purpose
+    }
+}
+
+/// `show-last-output`: the daemon replays the last OSC 133 command block from a
+/// pane. It needs shell integration, so the rejection is the common answer and
+/// carries the text that explains it.
+enum ZZLastOutput {
+    enum Result: Equatable, Sendable {
+        case copy(String)
+        case failure(String)
+    }
+
+    static func arguments(pane: UInt64) -> [String] {
+        ["-t", "%\(pane)"]
+    }
+
+    static func result(ok: Bool, output: String, error: String) -> Result {
+        guard ok else {
+            let rendered = error.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .failure(rendered.isEmpty ? "zz couldn’t read that pane’s last output." : rendered)
+        }
+        let text = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            return .failure("That pane hasn’t finished a command yet.")
+        }
+        return .copy(text)
+    }
+}
+
+/// A short-lived confirmation for an action that finishes without changing the
+/// visible workspace. Failures stay up longer because they carry the reason.
+struct ZZActionNotice: Identifiable, Equatable, Sendable {
+    enum Tone: Equatable, Sendable {
+        case success
+        case failure
+
+        var symbol: String {
+            switch self {
+            case .success: "checkmark.circle.fill"
+            case .failure: "exclamationmark.triangle.fill"
+            }
+        }
+
+        var seconds: TimeInterval {
+            switch self {
+            case .success: 2.5
+            case .failure: 6
+            }
+        }
+    }
+
+    let id: UInt64
+    let tone: Tone
+    let message: String
 }
 
 struct TerminalGeometryState: Equatable, Sendable {

@@ -118,9 +118,58 @@ pub(crate) const MAX_MUX_OPTION_VALUE_BYTES: usize = 64 * 1024;
 pub const DEFAULT_AGENT_COMMAND: &str = "npx -y @agentclientprotocol/codex-acp@1.3.0";
 pub const DEFAULT_AGENT_CLAUDE_CODE_COMMAND: &str =
     "npx -y @agentclientprotocol/claude-agent-acp@0.68.0";
-pub const DEFAULT_AGENT_AUTO_APPROVE: bool = true;
+pub const DEFAULT_AGENT_AUTO_APPROVE: AgentAutoApprove = AgentAutoApprove::Reads;
 /// Longest adapter command line an agent mux option may carry.
 pub const MAX_AGENT_COMMAND_BYTES: usize = 4 * 1024;
+
+/// How far an agent pane may answer its own permission requests. The tier is
+/// the tool's ACP kind, not the tool's name: `Reads` lets a read-only kind
+/// through and parks everything else — an exec, an edit, a delete, or a kind
+/// the adapter did not declare — on the permission wizard.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AgentAutoApprove {
+    /// Every request waits for a human.
+    Off,
+    /// Only read-only tool kinds are answered daemon-side.
+    #[default]
+    Reads,
+    /// Any kinded request is answered daemon-side.
+    All,
+}
+
+impl AgentAutoApprove {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Reads => "reads",
+            Self::All => "all",
+        }
+    }
+
+    /// The canonical spellings plus the flag spellings this option shipped
+    /// with, so an existing `agent-auto-approve = on` keeps meaning "approve
+    /// anything" instead of failing to parse.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        let value = value.trim();
+        let matches_any = |spellings: &[&str]| {
+            spellings
+                .iter()
+                .any(|spelling| value.eq_ignore_ascii_case(spelling))
+        };
+        if value == "0" || matches_any(&["off", "no", "false"]) {
+            return Some(Self::Off);
+        }
+        if value.eq_ignore_ascii_case("reads") {
+            return Some(Self::Reads);
+        }
+        if value == "1" || matches_any(&["all", "on", "yes", "true"]) {
+            return Some(Self::All);
+        }
+        None
+    }
+}
 
 pub type ConfigOverrideEntry = (String, String);
 
@@ -238,12 +287,7 @@ impl MuxOptionKey {
             Self::Prefix2 => "None".to_owned(),
             Self::AgentCommand => DEFAULT_AGENT_COMMAND.to_owned(),
             Self::AgentClaudeCodeCommand => DEFAULT_AGENT_CLAUDE_CODE_COMMAND.to_owned(),
-            Self::AgentAutoApprove => if DEFAULT_AGENT_AUTO_APPROVE {
-                "on"
-            } else {
-                "off"
-            }
-            .to_owned(),
+            Self::AgentAutoApprove => DEFAULT_AGENT_AUTO_APPROVE.as_str().to_owned(),
         }
     }
 }
@@ -3008,7 +3052,7 @@ mod tests {
         Modifiers, PointerCellEvent, TerminalMouseButton, TerminalMouseInput, TerminalMousePhase,
     };
 
-    use super::{MuxOptionKey, MuxOptions};
+    use super::{AgentAutoApprove, DEFAULT_AGENT_AUTO_APPROVE, MuxOptionKey, MuxOptions};
 
     #[derive(Serialize)]
     struct LegacyTerminalMouseInput {
@@ -3387,8 +3431,26 @@ mod tests {
                 .get(MuxOptionKey::AgentAutoApprove)
                 .expect("agent auto-approve default")
                 .value,
-            "on"
+            "reads"
         );
+    }
+
+    #[test]
+    fn the_auto_approve_tiers_keep_the_flag_spellings_they_shipped_with() {
+        assert_eq!(AgentAutoApprove::parse("on"), Some(AgentAutoApprove::All));
+        assert_eq!(AgentAutoApprove::parse("off"), Some(AgentAutoApprove::Off));
+        assert_eq!(
+            AgentAutoApprove::parse("FALSE"),
+            Some(AgentAutoApprove::Off)
+        );
+        assert_eq!(AgentAutoApprove::parse("1"), Some(AgentAutoApprove::All));
+        assert_eq!(
+            AgentAutoApprove::parse("reads"),
+            Some(AgentAutoApprove::Reads)
+        );
+        assert_eq!(AgentAutoApprove::parse("all"), Some(AgentAutoApprove::All));
+        assert_eq!(AgentAutoApprove::parse("sometimes"), None);
+        assert_eq!(AgentAutoApprove::default(), DEFAULT_AGENT_AUTO_APPROVE);
     }
 
     #[test]

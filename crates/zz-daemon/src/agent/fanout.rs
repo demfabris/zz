@@ -1888,7 +1888,12 @@ mod tests {
                     .recv()
                     .expect("release first restart");
             }
-            fixture_runner(spec.provider, Behavior::Chunk, false, true)
+            fixture_runner(
+                spec.provider,
+                Behavior::Chunk,
+                zz_protocol::AgentAutoApprove::Off,
+                true,
+            )
         }));
         let pane = PaneId(44);
         let spec = AgentPaneSpec {
@@ -1952,7 +1957,12 @@ mod tests {
         let publisher: Arc<dyn AgentPublisher> = Arc::<Recorder>::clone(&recorder);
         let runtime = AgentRuntime::new(&publisher, AgentSpawnConfig::default(), None);
         runtime.set_runner_factory(Box::new(|spec| {
-            fixture_runner(spec.provider, Behavior::Chunk, false, true)
+            fixture_runner(
+                spec.provider,
+                Behavior::Chunk,
+                zz_protocol::AgentAutoApprove::Off,
+                true,
+            )
         }));
         let pane = PaneId(45);
         let spec = AgentPaneSpec {

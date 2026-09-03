@@ -9,15 +9,16 @@ use std::{
 
 use parking_lot::Mutex;
 use zz_protocol::{
-    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind, ClientId,
-    CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution, CommandSpec,
-    DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
-    DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
-    MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES, PaneBorderIndicators, PaneBorderLines,
-    PaneBorderStatus, PaneId, PaneKindSnapshot, PopupBorderLines, ServerError, SessionId,
-    SourceSpan, TerminalUiCommand, WindowId, catalog_command_spec, command_specs,
-    normalize_browser_profile_name, parse_tmux_command_options, parse_tmux_options,
-    resolve_command, unimplemented_tmux_command_spec,
+    AgentAutoApprove, AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind,
+    ClientId, CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution,
+    CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
+    DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
+    MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES,
+    PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
+    PopupBorderLines, ServerError, SessionId, SourceSpan, TerminalUiCommand, WindowId,
+    catalog_command_spec, command_specs, normalize_browser_profile_name,
+    parse_tmux_command_options, parse_tmux_options, resolve_command,
+    unimplemented_tmux_command_spec,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy, CopyModeSearch,
@@ -1974,7 +1975,7 @@ impl StatusRowVariables {
 pub struct AgentOptions {
     pub command: String,
     pub claude_code_command: String,
-    pub auto_approve: bool,
+    pub auto_approve: AgentAutoApprove,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3633,9 +3634,7 @@ impl MuxEngine {
             .to_owned(),
             MuxOptionKey::AgentCommand => self.agent.command.clone(),
             MuxOptionKey::AgentClaudeCodeCommand => self.agent.claude_code_command.clone(),
-            MuxOptionKey::AgentAutoApprove => {
-                if self.agent.auto_approve { "on" } else { "off" }.to_owned()
-            }
+            MuxOptionKey::AgentAutoApprove => self.agent.auto_approve.as_str().to_owned(),
             MuxOptionKey::Mouse => tmux_flag(self.global_mouse).to_owned(),
             MuxOptionKey::EscapeTime => self.escape_time_ms.to_string(),
             MuxOptionKey::Prefix2 => self
@@ -10780,7 +10779,7 @@ impl MuxEngine {
             }
             "agent-command" => (self.agent.command.clone(), true),
             "agent-claude-code-command" => (self.agent.claude_code_command.clone(), true),
-            "agent-auto-approve" => (tmux_flag(self.agent.auto_approve).to_owned(), false),
+            "agent-auto-approve" => (self.agent.auto_approve.as_str().to_owned(), false),
             _ => unreachable!("native option is catalogued"),
         }
     }
@@ -10869,7 +10868,16 @@ impl MuxEngine {
                 }
             }
             "agent-auto-approve" => {
-                self.agent.auto_approve = parse_flag_value(value, self.agent.auto_approve)?;
+                let value = value.ok_or_else(|| {
+                    ServerError::InvalidCommand(
+                        "set-option agent-auto-approve needs a value".to_owned(),
+                    )
+                })?;
+                self.agent.auto_approve = AgentAutoApprove::parse(value).ok_or_else(|| {
+                    ServerError::InvalidCommand(format!(
+                        "invalid agent-auto-approve value: {value}"
+                    ))
+                })?;
                 MuxOptionKey::AgentAutoApprove
             }
             _ => unreachable!("native option is catalogued"),
@@ -22906,6 +22914,38 @@ mod tests {
         assert!(matches!(
             &engine.state.pane(editor).expect("editor state").kind,
             PaneKind::Editor(descriptor) if descriptor.path.is_none()
+        ));
+    }
+
+    #[test]
+    fn agent_auto_approve_reads_by_default_and_still_takes_the_flag_spellings() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        assert_eq!(
+            engine.mux_option_value(MuxOptionKey::AgentAutoApprove),
+            "reads"
+        );
+
+        for (written, effective) in [("on", "all"), ("off", "off"), ("all", "all")] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &["-g", "agent-auto-approve", written]),
+                )
+                .expect("set the auto-approve tier");
+            assert_eq!(
+                engine.mux_option_value(MuxOptionKey::AgentAutoApprove),
+                effective,
+                "{written} sets the {effective} tier"
+            );
+        }
+
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("set-option", &["-g", "agent-auto-approve", "sometimes"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message.contains("sometimes")
         ));
     }
 

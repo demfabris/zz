@@ -15,29 +15,6 @@ private struct ZZClientConnectionResult: @unchecked Sendable {
     }
 }
 
-extension ZZReconnectPolicy {
-    static let fastTierAttempts = 5
-    static let longOutageDelays = [30, 60, 120, 300, 600]
-    static let thawGraceSeconds: TimeInterval = 5
-    static let thawRetryDelay = 2
-
-    static func backoffDelay(for attempt: Int) -> Int {
-        guard attempt > fastTierAttempts else {
-            return delay(for: attempt)
-        }
-        let tier = min(attempt - fastTierAttempts, longOutageDelays.count)
-        return longOutageDelays[tier - 1]
-    }
-
-    static func nextAttempt(after attempt: Int, thawing: Bool) -> Int {
-        thawing ? max(attempt, 1) : attempt + 1
-    }
-
-    static func delaySeconds(attempt: Int, thawing: Bool) -> Int {
-        thawing ? thawRetryDelay : backoffDelay(for: attempt)
-    }
-}
-
 @MainActor
 final class ZZStore: ObservableObject {
     @Published private(set) var connectionState: ZZConnectionState = .idle
@@ -49,6 +26,7 @@ final class ZZStore: ObservableObject {
     @Published private(set) var sceneIsActive = true
     @Published private(set) var terminalModifierState = TerminalModifierLatchState()
     @Published private(set) var actionError: String?
+    @Published private(set) var actionNotice: ZZActionNotice?
     @Published private(set) var isCreatingSession = false
     @Published private(set) var hostEndpoint = ""
     @Published private(set) var sshPublicKey: String?
@@ -89,6 +67,9 @@ final class ZZStore: ObservableObject {
     private var agentThreadSlots: [UInt64: ZZAgentThreadSlot] = [:]
     @Published private(set) var agentSessionLists: [UInt64: ZZAgentSessionList] = [:]
     private var clipboardRequestID: UInt64 = 1
+    private var commandRequests = ZZCommandRequests()
+    private var noticeSequence: UInt64 = 1
+    private var noticeDismissal: Task<Void, Never>?
     private let networkMonitor = NWPathMonitor()
     private let networkQueue = DispatchQueue(label: "zz-ios-network")
     private var networkAvailable = true
@@ -417,6 +398,7 @@ final class ZZStore: ObservableObject {
         pendingAttachmentSessionID = nil
         hasEstablishedAttachment = false
         isCreatingSession = false
+        commandRequests = ZZCommandRequests()
         eventSource?.cancel()
         eventSource = nil
         if let client {
@@ -1092,6 +1074,40 @@ final class ZZStore: ObservableObject {
         _ = zz_client_copy_selection(client, pane, request)
     }
 
+    /// Ask the daemon for the pane's last OSC 133 command block and put it on
+    /// the clipboard once the reply lands.
+    func copyLastOutput(pane: UInt64) {
+        let request = executeRequest("show-last-output", args: ZZLastOutput.arguments(pane: pane))
+        guard request != 0 else {
+            post(.failure, "zz couldn’t ask for that pane’s last output.")
+            return
+        }
+        commandRequests.register(request, as: .lastOutput(pane: pane))
+    }
+
+    func dismissNotice() {
+        noticeDismissal?.cancel()
+        noticeDismissal = nil
+        actionNotice = nil
+    }
+
+    private func post(_ tone: ZZActionNotice.Tone, _ message: String) {
+        noticeSequence &+= 1
+        let notice = ZZActionNotice(id: noticeSequence, tone: tone, message: message)
+        actionNotice = notice
+        noticeDismissal?.cancel()
+        noticeDismissal = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(tone.seconds))
+            guard !Task.isCancelled else {
+                return
+            }
+            guard let self, actionNotice?.id == notice.id else {
+                return
+            }
+            actionNotice = nil
+        }
+    }
+
     func agentState(for pane: UInt64) -> ZZAgentState? {
         agentStates[pane]
     }
@@ -1483,15 +1499,21 @@ final class ZZStore: ObservableObject {
     }
 
     private func execute(_ name: String, args: [String]) -> Bool {
+        executeRequest(name, args: args) != 0
+    }
+
+    /// The request id the daemon's reply will carry, or zero when the command
+    /// could not be sent.
+    private func executeRequest(_ name: String, args: [String]) -> UInt64 {
         guard let client else {
-            return false
+            return 0
         }
         let allocated = args.map { argument in
             argument.withCString { strdup($0) }
         }
         guard allocated.allSatisfy({ $0 != nil }) else {
             allocated.forEach { free($0) }
-            return false
+            return 0
         }
         defer { allocated.forEach { free($0) } }
         let pointers = allocated.map { pointer in
@@ -1499,7 +1521,12 @@ final class ZZStore: ObservableObject {
         }
         return name.withCString { namePointer in
             pointers.withUnsafeBufferPointer { arguments in
-                zz_client_execute(client, namePointer, arguments.baseAddress, arguments.count)
+                zz_client_execute_request(
+                    client,
+                    namePointer,
+                    arguments.baseAddress,
+                    arguments.count
+                )
             }
         }
     }
@@ -1569,6 +1596,8 @@ final class ZZStore: ObservableObject {
                 drainAgentSessions()
             case ZZ_EVENT_CLIPBOARD:
                 drainClipboard(client)
+            case ZZ_EVENT_COMMAND_REPLY:
+                drainCommandReplies(client)
             case ZZ_EVENT_PREFIX_ARMED,
                  ZZ_EVENT_KEY_TABLES_CHANGED,
                  ZZ_EVENT_COMMAND_PROMPT_CHANGED,
@@ -1913,6 +1942,34 @@ final class ZZStore: ObservableObject {
         while let clipboard = zz_client_clipboard_next(client) {
             UIPasteboard.general.string = string(zz_clipboard_text(clipboard))
             zz_clipboard_release(clipboard)
+        }
+    }
+
+    /// Every executed command answers here, so the queue is drained whole and
+    /// the untracked replies are discarded. The reply's bytes belong to the
+    /// handle, so they are copied into Swift strings before it is released.
+    private func drainCommandReplies(_ client: OpaquePointer) {
+        while let reply = zz_client_command_reply_next(client) {
+            guard let purpose = commandRequests.take(zz_command_reply_request_id(reply)) else {
+                zz_command_reply_release(reply)
+                continue
+            }
+            let result = ZZLastOutput.result(
+                ok: zz_command_reply_ok(reply),
+                output: string(zz_command_reply_output(reply)),
+                error: string(zz_command_reply_error(reply))
+            )
+            zz_command_reply_release(reply)
+            switch purpose {
+            case .lastOutput:
+                switch result {
+                case let .copy(text):
+                    UIPasteboard.general.string = text
+                    post(.success, "Copied the last command’s output.")
+                case let .failure(message):
+                    post(.failure, message)
+                }
+            }
         }
     }
 

@@ -1149,4 +1149,66 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertNil(done.promptEndpoint)
         XCTAssertEqual(done.resultMessage, "Imported 1 new binding. It’s live now.")
     }
+
+    func testCommandRequestsMatchOneReplyEach() {
+        var requests = ZZCommandRequests()
+        requests.register(7, as: .lastOutput(pane: 3))
+        requests.register(9, as: .lastOutput(pane: 4))
+
+        XCTAssertNil(requests.take(8))
+        XCTAssertEqual(requests.take(9), .lastOutput(pane: 4))
+        XCTAssertNil(requests.take(9))
+        XCTAssertEqual(requests.take(7), .lastOutput(pane: 3))
+        XCTAssertEqual(requests.count, 0)
+    }
+
+    func testCommandRequestsIgnoreAFailedSendAndForgetTheOldest() {
+        var requests = ZZCommandRequests()
+        requests.register(0, as: .lastOutput(pane: 1))
+        XCTAssertEqual(requests.count, 0)
+        XCTAssertNil(requests.take(0))
+
+        for request in 1...UInt64(ZZCommandRequests.capacity + 2) {
+            requests.register(request, as: .lastOutput(pane: request))
+        }
+        XCTAssertEqual(requests.count, ZZCommandRequests.capacity)
+        XCTAssertNil(requests.take(1))
+        XCTAssertNil(requests.take(2))
+        XCTAssertEqual(requests.take(3), .lastOutput(pane: 3))
+    }
+
+    func testLastOutputTargetsThePaneAndSplitsOkFromRejected() {
+        XCTAssertEqual(ZZLastOutput.arguments(pane: 12), ["-t", "%12"])
+        XCTAssertEqual(
+            ZZLastOutput.result(ok: true, output: "%0 $ ls\n```\nCargo.toml\n```\n", error: ""),
+            .copy("%0 $ ls\n```\nCargo.toml\n```")
+        )
+        XCTAssertEqual(
+            ZZLastOutput.result(
+                ok: false,
+                output: "",
+                error: "%0 has no shell-integration marks; show-last-output needs OSC 133"
+            ),
+            .failure("%0 has no shell-integration marks; show-last-output needs OSC 133")
+        )
+    }
+
+    func testLastOutputExplainsAnAnswerWithNothingInIt() {
+        XCTAssertEqual(
+            ZZLastOutput.result(ok: true, output: "  \n", error: ""),
+            .failure("That pane hasn’t finished a command yet.")
+        )
+        XCTAssertEqual(
+            ZZLastOutput.result(ok: false, output: "", error: ""),
+            .failure("zz couldn’t read that pane’s last output.")
+        )
+    }
+
+    func testOnlyCommandRecordingPanesOfferTheirLastOutput() {
+        XCTAssertTrue(ZZPaneKind.terminal.recordsCommands)
+        XCTAssertTrue(ZZPaneKind.agent.recordsCommands)
+        XCTAssertFalse(ZZPaneKind.browser.recordsCommands)
+        XCTAssertFalse(ZZPaneKind.editor.recordsCommands)
+        XCTAssertFalse(ZZPaneKind.picker.recordsCommands)
+    }
 }

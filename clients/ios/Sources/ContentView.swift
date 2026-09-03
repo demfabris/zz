@@ -35,6 +35,8 @@ struct ContentView: View {
             }
         }
         .background(Color.zzCanvas.ignoresSafeArea())
+        .overlay(alignment: .top) { noticeOverlay }
+        .animation(.snappy(duration: 0.24), value: store.actionNotice)
         .alert(
             "Action failed",
             isPresented: Binding(
@@ -85,6 +87,17 @@ struct ContentView: View {
             )
         ) { prompt in
             SSHPromptSheet(prompt: prompt)
+        }
+    }
+
+    @ViewBuilder
+    private var noticeOverlay: some View {
+        if let notice = store.actionNotice {
+            ActionNoticeBanner(notice: notice)
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+                .id(notice.id)
+                .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -197,6 +210,39 @@ private struct ReconnectBanner: View {
             label += ", \(error)"
         }
         return label
+    }
+}
+
+/// The confirmation for an action whose result never shows up in the workspace,
+/// and the place a rejected command explains itself.
+private struct ActionNoticeBanner: View {
+    @EnvironmentObject private var store: ZZStore
+    let notice: ZZActionNotice
+
+    var body: some View {
+        Button {
+            store.dismissNotice()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: notice.tone.symbol)
+                    .foregroundStyle(notice.tone == .success ? Color.green : Color.orange)
+                Text(notice.message)
+                    .font(.footnote)
+                    .lineLimit(4)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 54)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .zzGlass(.regular, in: Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(notice.message)
+        .accessibilityHint("Dismisses this message")
+        .accessibilityIdentifier("action-notice")
     }
 }
 
@@ -601,7 +647,7 @@ private struct IPadSessionSidebar: View {
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
         .contextMenu {
-            deleteMenu(for: item)
+            itemMenu(for: item)
         }
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityValue(row.accessibilityValue)
@@ -610,13 +656,18 @@ private struct IPadSessionSidebar: View {
     }
 
     @ViewBuilder
-    private func deleteMenu(for item: IPadSidebarItem) -> some View {
+    private func itemMenu(for item: IPadSidebarItem) -> some View {
         switch item {
         case let .window(_, window):
             Button("Close Window", role: .destructive) {
                 windowToClose = window
             }
         case let .pane(_, _, pane):
+            if pane.kind.recordsCommands {
+                Button("Copy Last Output", systemImage: "doc.on.clipboard") {
+                    store.copyLastOutput(pane: pane.id)
+                }
+            }
             Button("Close Pane", role: .destructive) {
                 paneToClose = pane
             }
@@ -4175,6 +4226,9 @@ private struct FullscreenPane: View {
                 }
                 TerminalShortcutButton("Copy") {
                     store.copySelection(pane: pane.id)
+                }
+                TerminalShortcutButton("Last Out") {
+                    store.copyLastOutput(pane: pane.id)
                 }
                 TerminalShortcutButton("Compose") {
                     showsComposer = true

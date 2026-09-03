@@ -406,6 +406,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "smoke: printed command reply text is wrong\n");
         return 1;
     }
+    if (!zz_client_cancel_command_output(client)) {
+        fprintf(stderr, "smoke: command output cancel failed\n");
+        return 1;
+    }
 
     uint64_t rejected_request =
         zz_client_execute_request(client, "show-last-output", NULL, 0);

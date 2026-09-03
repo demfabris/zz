@@ -24,8 +24,9 @@ use zz_protocol::{
     ProtocolMessage, SessionId, SessionSnapshot, WindowSnapshot,
 };
 use zz_terminal::{
-    CellWidth, ClipboardTarget, CursorStyle, Glyph, KeyAction, KeyCode, KeyInput, Modifiers,
-    PackedStyle, PointerCellEvent, TerminalColorScheme, TerminalViewAction, TerminalViewport,
+    CellWidth, ClipboardTarget, CopyModeAction, CursorStyle, Glyph, KeyAction, KeyCode, KeyInput,
+    Modifiers, PackedStyle, PointerCellEvent, TerminalColorScheme, TerminalViewAction,
+    TerminalViewport,
 };
 
 const EVENT_DAMAGE_ALL: u32 = 1;
@@ -1223,6 +1224,30 @@ pub unsafe extern "C" fn zz_client_execute_request(
         return 0;
     };
     client.client.execute(command).unwrap_or(0)
+}
+
+/// Close the command-output view a printing command opened for this client.
+/// The daemon puts such a client on the pane's copy-mode key table and
+/// swallows its terminal input until the view is gone, so a shell that never
+/// renders the view has to close it explicitly. This asks for the view's own
+/// cancel rather than a key, which is what makes it work under
+/// `mode-keys vi`, where Escape is bound to `clear-selection` and leaves the
+/// view open. Harmless when no view is open.
+///
+/// # Safety
+///
+/// `client` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_cancel_command_output(client: *mut ZzClient) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    client
+        .client
+        .send_input(InputMessage::CommandOutputView {
+            action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+        })
+        .is_ok()
 }
 
 /// Report a terminal pane's geometry to the daemon.

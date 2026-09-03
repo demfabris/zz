@@ -28,8 +28,9 @@ The header exposes:
   identity's OpenSSH public key, free, the wake descriptor, typed events, appearance changes,
   disconnects, pane IDs, and viewport damage rows;
 - attach, literal text, pasted text, raw key press/repeat/release, tmux-style command execution,
-  terminal resize, client-window focus, terminal pane/application focus, line scrolling, semantic
-  selection, and asynchronous copy requests with typed clipboard results;
+  command-output-view cancellation, terminal resize, client-window focus, terminal pane/application
+  focus, line scrolling, semantic selection, and asynchronous copy requests with typed clipboard
+  results;
 - caller-owned mux snapshots with generation, session identity/name/attachment, compatibility
   accessors for the active window, the full window and pane hierarchy, zoom state, and normalized
   visible pane rectangles;
@@ -73,6 +74,14 @@ instead, the same wire route the desktop and TUI use, so the daemon strips contr
 newlines into carriage returns, and wraps the text in bracketed-paste markers only when the pane's
 program enabled DECSET 2004. Native shells paste with the second and type with the first.
 
+A command that prints anything opens a client-local output view on the daemon, which parks the
+client on the pane's copy-mode key table and drops its terminal input until the view closes. A shell
+that never renders that view leaves the pane deaf, and no key closes it for every user:
+`copy-mode-vi` binds Escape to `clear-selection`, which keeps the view open.
+`zz_client_cancel_command_output()` sends the view's own cancel instead, the same action the daemon
+uses to retire a replaced view, so it works under either `mode-keys` and does nothing when no view is
+open.
+
 `zz_viewport_row_text()` resolves scalar and interned-grapheme glyphs, emits one visible glyph for a
 wide cell, preserves blank cells as spaces, and truncates only between complete UTF-8 sequences.
 Graphical clients should consume the cell/style/grapheme planes directly.
@@ -103,6 +112,10 @@ bracketed-paste markers appear only after the program enabled DECSET 2004, and t
 that is the prefix key reaches the pty where the same byte typed through `zz_client_send_text` does
 not.
 
+`tests/command_output.rs` proves the cancel against a live daemon with `mode-keys vi`: a printing
+command puts the client on `copy-mode-vi`, typed bytes and an Escape vanish while the view is open,
+and only the byte typed after `zz_client_cancel_command_output()` reaches a raw-mode probe pane.
+
 Rust tests cover endpoint failure classification, SSH prompt mapping, normalized split geometry,
 interned graphemes, wide-cell spacers, UTF-8-safe truncation, and the real-daemon link boundary. The
 Apple build cross-compiles the crate for `aarch64-apple-ios-sim` on every Xcode build.
@@ -116,6 +129,7 @@ Apple build cross-compiles the crate for `aarch64-apple-ios-sim` on every Xcode 
 | `crates/zz-client-ffi/tests/smoke.c` | From-scratch C consumer with live daemon assertions. |
 | `crates/zz-client-ffi/tests/smoke.rs` | Harness that compiles, links, and runs the C client. |
 | `crates/zz-client-ffi/tests/paste.rs` | Byte-level proof of the paste encoding against a live daemon. |
+| `crates/zz-client-ffi/tests/command_output.rs` | Byte-level proof that cancelling the output view returns a vi pane's input. |
 | `clients/ios/Support/ZZ-Bridging-Header.h` | Swift import point for the ABI. |
 
 # Related

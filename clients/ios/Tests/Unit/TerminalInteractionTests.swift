@@ -845,11 +845,52 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertNil(ZZAgentPromptCommand.arguments(pane: 1, text: " \n\t"))
     }
 
-    func testReconnectBackoffCapsAtSixteenSeconds() {
+    func testFastReconnectTierCapsAtSixteenSeconds() {
         XCTAssertEqual(
             (1...7).map { ZZReconnectPolicy.delay(for: $0) },
             [1, 2, 4, 8, 16, 16, 16]
         )
+    }
+
+    func testReconnectLadderFallsBackToASlowTierAfterFiveAttempts() {
+        XCTAssertEqual(
+            (1...12).map { ZZReconnectPolicy.backoffDelay(for: $0) },
+            [1, 2, 4, 8, 16, 30, 60, 120, 300, 600, 600, 600]
+        )
+        XCTAssertEqual(
+            (1...ZZReconnectPolicy.fastTierAttempts).map {
+                ZZReconnectPolicy.backoffDelay(for: $0)
+            },
+            (1...ZZReconnectPolicy.fastTierAttempts).map { ZZReconnectPolicy.delay(for: $0) }
+        )
+    }
+
+    func testThawGraceHoldsTheLadderInsteadOfEscalating() {
+        var attempt = 0
+        for _ in 1...3 {
+            attempt = ZZReconnectPolicy.nextAttempt(after: attempt, thawing: false)
+        }
+        XCTAssertEqual(attempt, 3)
+        XCTAssertEqual(ZZReconnectPolicy.delaySeconds(attempt: attempt, thawing: false), 4)
+
+        let held = ZZReconnectPolicy.nextAttempt(after: attempt, thawing: true)
+        XCTAssertEqual(held, attempt)
+        XCTAssertEqual(
+            ZZReconnectPolicy.delaySeconds(attempt: held, thawing: true),
+            ZZReconnectPolicy.thawRetryDelay
+        )
+        XCTAssertEqual(ZZReconnectPolicy.nextAttempt(after: 0, thawing: true), 1)
+        XCTAssertLessThan(
+            ZZReconnectPolicy.thawRetryDelay,
+            ZZReconnectPolicy.delay(for: ZZReconnectPolicy.fastTierAttempts)
+        )
+        XCTAssertEqual(ZZReconnectPolicy.thawGraceSeconds, 5)
+    }
+
+    func testForcedAppearanceReachesTheWindowTraitCollection() {
+        XCTAssertEqual(ZZAppAppearance.system.interfaceStyle, .unspecified)
+        XCTAssertEqual(ZZAppAppearance.dark.interfaceStyle, .dark)
+        XCTAssertEqual(ZZAppAppearance.light.interfaceStyle, .light)
     }
 
     func testModifierTapIsOneShotAndDoubleTapLocks() {

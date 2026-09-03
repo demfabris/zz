@@ -15,6 +15,29 @@ private struct ZZClientConnectionResult: @unchecked Sendable {
     }
 }
 
+extension ZZReconnectPolicy {
+    static let fastTierAttempts = 5
+    static let longOutageDelays = [30, 60, 120, 300, 600]
+    static let thawGraceSeconds: TimeInterval = 5
+    static let thawRetryDelay = 2
+
+    static func backoffDelay(for attempt: Int) -> Int {
+        guard attempt > fastTierAttempts else {
+            return delay(for: attempt)
+        }
+        let tier = min(attempt - fastTierAttempts, longOutageDelays.count)
+        return longOutageDelays[tier - 1]
+    }
+
+    static func nextAttempt(after attempt: Int, thawing: Bool) -> Int {
+        thawing ? max(attempt, 1) : attempt + 1
+    }
+
+    static func delaySeconds(attempt: Int, thawing: Bool) -> Int {
+        thawing ? thawRetryDelay : backoffDelay(for: attempt)
+    }
+}
+
 @MainActor
 final class ZZStore: ObservableObject {
     @Published private(set) var connectionState: ZZConnectionState = .idle
@@ -50,6 +73,8 @@ final class ZZStore: ObservableObject {
     private var publicKeyTask: Task<Void, Never>?
     private var connectionAttempt: UInt64 = 0
     private var reconnectAttempt = 0
+    private var backgroundTask = UIBackgroundTaskIdentifier.invalid
+    private var thawGraceDeadline: TimeInterval = 0
     private var connectionEndpoint: String?
     private var connectionSavesHost = false
     private var connectionReturnsToHostSetup = false
@@ -74,6 +99,7 @@ final class ZZStore: ObservableObject {
     private static let controlModifier: UInt8 = 1 << 1
     private static let altModifier: UInt8 = 1 << 2
     private static let savedHostKey = "zz.saved-host"
+    private static let backgroundTaskName = "zz.connection"
 
     init() {
         networkMonitor.pathUpdateHandler = { [weak self] path in
@@ -291,6 +317,9 @@ final class ZZStore: ObservableObject {
         sceneIsActive = active
         terminalModifierState.reset()
         if active {
+            endBackgroundGrace()
+            thawGraceDeadline = Date.timeIntervalSinceReferenceDate
+                + ZZReconnectPolicy.thawGraceSeconds
             let wasConnected = client != nil
             start()
             if wasConnected, let client {
@@ -301,12 +330,7 @@ final class ZZStore: ObservableObject {
             }
             consumeShortcutCommand()
         } else {
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            if connectionTask != nil {
-                cancelConnectionAttempt()
-                connectionState = .disconnected
-            }
+            beginBackgroundGrace()
             if let client {
                 _ = zz_client_set_focused(client, false)
             }
@@ -314,6 +338,47 @@ final class ZZStore: ObservableObject {
                 focus(pane: pane, focused: false)
                 restoreStableGeometryAfterTransientInput(for: pane)
             }
+        }
+    }
+
+    private var isWithinThawGrace: Bool {
+        !sceneIsActive || Date.timeIntervalSinceReferenceDate < thawGraceDeadline
+    }
+
+    private func beginBackgroundGrace() {
+        guard backgroundTask == .invalid,
+              client != nil || connectionTask != nil || reconnectTask != nil else {
+            return
+        }
+        backgroundTask = UIApplication.shared.beginBackgroundTask(
+            withName: Self.backgroundTaskName
+        ) { [weak self] in
+            self?.suspendConnection()
+        }
+        if backgroundTask == .invalid {
+            suspendConnection()
+        }
+    }
+
+    private func endBackgroundGrace() {
+        guard backgroundTask != .invalid else {
+            return
+        }
+        let identifier = backgroundTask
+        backgroundTask = .invalid
+        UIApplication.shared.endBackgroundTask(identifier)
+    }
+
+    private func suspendConnection() {
+        endBackgroundGrace()
+        guard !sceneIsActive else {
+            return
+        }
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        if connectionTask != nil {
+            cancelConnectionAttempt()
+            connectionState = .disconnected
         }
     }
 
@@ -463,7 +528,7 @@ final class ZZStore: ObservableObject {
             let message = result.error.isEmpty
                 ? "zz couldn’t connect to \(endpoint)."
                 : result.error
-            if result.failure.shouldRetry, sceneIsActive {
+            if result.failure.shouldRetry {
                 scheduleReconnect(message: message)
             } else if returnsToHostSetup {
                 hostEndpoint = endpoint
@@ -510,8 +575,15 @@ final class ZZStore: ObservableObject {
             connectionState = .failed(message)
             return
         }
-        reconnectAttempt += 1
-        let delay = ZZReconnectPolicy.delay(for: reconnectAttempt)
+        let thawing = isWithinThawGrace
+        reconnectAttempt = ZZReconnectPolicy.nextAttempt(
+            after: reconnectAttempt,
+            thawing: thawing
+        )
+        let delay = ZZReconnectPolicy.delaySeconds(
+            attempt: reconnectAttempt,
+            thawing: thawing
+        )
         connectionState = .reconnecting(attempt: reconnectAttempt, delay: delay, error: message)
         guard sceneIsActive, networkAvailable else {
             return

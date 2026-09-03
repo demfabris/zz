@@ -16,9 +16,14 @@ struct ZZMobileApp: App {
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .onAppear {
                     store.setSceneActive(scenePhase == .active)
+                    ZZWindowAppearance.apply(settings.appearance)
                 }
                 .onChange(of: scenePhase) { _, phase in
                     store.setSceneActive(phase == .active)
+                    ZZWindowAppearance.apply(settings.appearance)
+                }
+                .onChange(of: settings.appearance) { _, appearance in
+                    ZZWindowAppearance.apply(appearance)
                 }
                 .onOpenURL { url in
                     store.open(url)

@@ -4,7 +4,7 @@ title: Native Agent pane
 description: The daemon-addressable Agent pane, its daemon-owned ACP v1 runtime, flat transcript, approvals, session controls, and restore metadata.
 resource: crates/zz/src/agent/controller.rs
 tags: [agent, gpui, markdown, mermaid, acp, pane, sessions, persistence, keyboard]
-timestamp: 2026-08-28T00:00:00-03:00
+timestamp: 2026-09-03T00:00:00-03:00
 ---
 
 # Overview
@@ -139,7 +139,7 @@ Three of the four agent keys are **mux options** now, because the daemon is what
 | --- | --- | --- |
 | `agent-command` | daemon (`MuxOptionKey::AgentCommand`) | the pinned `codex-acp` line above |
 | `agent-claude-code-command` | daemon (`MuxOptionKey::AgentClaudeCodeCommand`) | the pinned `claude-agent-acp` line above |
-| `agent-auto-approve` | daemon (`MuxOptionKey::AgentAutoApprove`) | `on` |
+| `agent-auto-approve` | daemon (`MuxOptionKey::AgentAutoApprove`) | `reads` |
 | `agent-working-directory` | local client | unset; it feeds local pane creation only |
 
 A user still writes all four in `zz/config`. The client's parser recognizes the three daemon keys and
@@ -151,7 +151,7 @@ Both adapter commands are rejected empty and bounded at `MAX_AGENT_COMMAND_BYTES
 agent-command = my-agent --stdio
 agent-claude-code-command = my-claude-agent --stdio
 agent-working-directory = /absolute/project/path
-agent-auto-approve = false
+agent-auto-approve = off
 ```
 
 A launch-config JSON object — `{"command": …, "args": [...], "env": {"NAME": "value"}}`, the SDK's
@@ -649,7 +649,8 @@ without a digit chip and are click-only. Digits are left to the composer while t
 mid-sentence and focused, and the whole key path sits behind the History picker,
 and the completion menu, so a wizard never steals a key one of those owns. Because auto-approve
 answers kinded requests before they reach `pending_permissions`, the wizard is what a user sees with
-`agent-auto-approve = false`, or when an agent advertises no allow option at all.
+`agent-auto-approve = off`, when the tier is `reads` and the tool is not read-only, or when an agent
+advertises no allow option at all.
 
 A surfaced request parks in the daemon with no timeout . a human decides . and rides
 `AgentPaneWire.pending_permission { request_id, payload }` (the tool call and its options as JSON,
@@ -759,7 +760,7 @@ turn, or shutting down responds `cancelled` to every outstanding permission befo
 connection. Authentication methods advertised during initialization appear beside retry when a
 session fails, and send ACP `authenticate` requests.
 
-`agent-auto-approve` (a mux option, default `on`) answers a *kinded* request in the daemon, without
+`agent-auto-approve` (a mux option, default `reads`) answers a *kinded* request in the daemon, without
 waiting for the user or for a client to be attached. `preferred_allow_option`
 (`zz-daemon/src/agent/runtime.rs:1288`) takes `AllowAlways` and falls back to `AllowOnce`, never a
 reject kind and never an empty option ID; a request that advertises no allow option falls through to

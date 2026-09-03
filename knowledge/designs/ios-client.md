@@ -12,7 +12,7 @@ tags:
 - uikit
 - client
 - ffi
-timestamp: 2026-08-31T00:00:00-03:00
+timestamp: 2026-09-03T00:00:00-03:00
 ---
 
 # Overview
@@ -53,7 +53,9 @@ append those standard install locations before lookup. SSH establishment runs aw
 actor, so the native connection screen remains responsive during DNS, authentication, and startup.
 
 An established connection that drops retains the immutable terminal frames and selected session and
-pane while a quiet reconnect banner counts through a capped 1, 2, 4, 8, 16-second retry ladder.
+pane while a quiet reconnect banner counts through a 1, 2, 4, 8, 16-second retry ladder that falls
+to a 30, 60, 120, 300, 600-second tier after five failures, so an outage lasting a night costs a
+handful of attempts rather than thousands.
 Network restoration starts the next attempt immediately. Authentication, rejected host keys,
 configuration errors, and protocol incompatibility stop automatic retries and return to setup;
 transport, probe, forwarding, and daemon-start failures retry. A successful reconnect creates a fresh
@@ -215,9 +217,21 @@ button is tapped again. Compose opens a native multiline editor, preserving IME,
 before sending the text as one terminal input. Hardware key press, repeat, and release events use the
 same raw-key FFI path. Direct text input remains Unicode and IME aware through `UIKeyInput`.
 
-A long press followed by a drag sends semantic selection press, drag, and release actions to the
-terminal engine. Copy asks the daemon for the selected text and writes the resulting typed clipboard
-event to `UIPasteboard`; Swift never rebuilds selection text from rendered cells.
+A press followed by a drag sends semantic selection press, drag, and release actions to the terminal
+engine. Selection arms after 150 milliseconds of stillness or as soon as the finger travels 5 points,
+whichever comes first, so a deliberate drag selects at once while a flick still scrolls; UIKit's own
+recognizer exclusion arbitrates the two. A `UITextLoupeSession` magnifies the drag, and selection
+haptics tick once per crossed cell rather than once per gesture. Copy asks the daemon for the
+selected text and writes the resulting typed clipboard event to `UIPasteboard`; Swift never rebuilds
+selection text from rendered cells.
+
+Paste is a separate verb from typing. `zz_client_paste` reaches the daemon's paste path, which wraps
+the text for bracketed-paste mode when the program enabled DECSET 2004, translates newlines
+otherwise, and keeps the bytes away from the key tables. Routing a paste through the typing verb
+would deliver line feeds a shell runs as separate commands and let a pasted prefix byte be swallowed.
+Any command this client runs that prints something also opens a daemon-side command-output view,
+which switches the client to the copy-mode key table and swallows its terminal input; the client does
+not render that view, so it sends the Escape that leaves it once a reply arrives.
 
 The store owns one explicit input target: no pane or one terminal pane. A focus request advances an
 activation token, and UIKit reconciles first-responder state on the next main-actor turn only while
@@ -229,7 +243,10 @@ flows. `zz_client_attach` returning true confirms the request write, so the stor
 focus from that return path. Attachment does not replay pane focus. A foreground or background
 transition sends the terminal input owner's distinct pane/application focus signal so the child
 application retains its `CSI I`/`CSI O` path. Backgrounding keeps the FFI client, reduced core, and
-retained viewports alive.
+retained viewports alive, and holds a `UIApplication` background task for whatever budget iOS grants
+so a brief app switch does not cost a reconnect; the connection is torn down only when that budget
+expires. Returning to the foreground suppresses failure escalation for five seconds, because a socket
+the system froze reads as stalled rather than dead.
 
 A two-finger pinch changes the current pane's terminal font in one-point steps from 9 through 23
 points. Each crossed step emits selection haptics and reports the resulting cell geometry to the
@@ -431,7 +448,15 @@ repository.
   (`zz_client_agent_sessions_next` plus list, new, switch, and delete ops), and the config and mode
   blobs with their setters; the app renders the transcript, the model, effort, and session pickers
   from them, and still skips richer payloads such as diffs, images, plans,
-  and usage until a native representation exists.
+  and usage until a native representation exists. Command replies now cross the ABI too
+  (`zz_client_execute_request` returns the request id a `zz_command_reply_*` handle carries back),
+  which is what lets the client copy a pane's last command output; the `zz_bytes` a reply lends are
+  borrowed from its handle and must be copied before release.
+- Stop the daemon opening a command-output view for a client that cannot render one. Today any
+  printing command this client runs opens one, which switches the client to the copy-mode key table
+  and swallows its terminal input until dismissed; the client works around it by sending Escape once
+  a reply arrives. Either gate `open_command_output` on a client capability or export the view's
+  dismissal through the C ABI, and drop the synthetic keystroke.
 - Add a push-capable background Agent inbox only if the product needs notifications while the app is
   suspended or terminated; the current local-notification path deliberately makes no such claim.
 - Add one daemon-backed UI automation smoke for software-keyboard frame behavior once the fixture can

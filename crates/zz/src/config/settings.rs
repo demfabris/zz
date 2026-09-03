@@ -2045,7 +2045,7 @@ impl ConfigFileKind {
 
     const fn max_bytes(self) -> usize {
         match self {
-            Self::Mux => config::import::MAX_MUX_CONFIG_BYTES,
+            Self::Mux => zz_daemon::MAX_TMUX_IMPORT_BYTES,
             Self::Terminal => config::MAX_CONFIG_BYTES,
         }
     }

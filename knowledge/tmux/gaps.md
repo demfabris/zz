@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **49**. Classified items: **438**.
+Tracked gap groups: **49**. Classified items: **439**.
 
 - Status: open: 7, accepted: 42.
 - Decision: adopt: 7, native: 32, never: 10.
 - Priority: later: 7, none: 42.
 - Closed history entries: 166.
-- Surface: command: 9, flag: 34, native-command: 21, option: 62, format: 55, key: 93, binding: 45, native-key: 58, semantic: 53, presentation: 6, protocol: 2.
+- Surface: command: 9, flag: 34, native-command: 22, option: 62, format: 55, key: 93, binding: 45, native-key: 58, semantic: 53, presentation: 6, protocol: 2.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 34 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 62 options absent from `BEHAVES`, 55 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 93 omitted default keys, 45 divergent shared default bindings, 58 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 34 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 22 native command names, 62 options absent from `BEHAVES`, 55 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 93 omitted default keys, 45 divergent shared default bindings, 58 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -276,7 +276,7 @@ The GUI superset needs its own names so tmux spellings can keep frozen tmux mean
 - Priority and ease: `none` / `none`
 - Owner: `protocol`
 - User impact: daily, gui, scripts
-- Items: `native-command:agent-send`, `native-command:capture-browser`, `native-command:copy-mode-search-prompt`, `native-command:debug-marker`, `native-command:focus-sidebar`, `native-command:new-browser`, `native-command:reload-config`, `native-command:restart-agent-pane`, `native-command:select-pane-kind`, `native-command:send-last-output`, `native-command:send-text`, `native-command:set-agent-provider`, `native-command:set-agent-session`, `native-command:set-browser-profile`, `native-command:set-browser-tabs`, `native-command:set-browser-url`, `native-command:set-editor-path`, `native-command:show-last-output`, `native-command:split-browser`, `native-command:split-picker`, `native-command:tools`
+- Items: `native-command:agent-send`, `native-command:capture-browser`, `native-command:copy-mode-search-prompt`, `native-command:debug-marker`, `native-command:focus-sidebar`, `native-command:import-tmux-config`, `native-command:new-browser`, `native-command:reload-config`, `native-command:restart-agent-pane`, `native-command:select-pane-kind`, `native-command:send-last-output`, `native-command:send-text`, `native-command:set-agent-provider`, `native-command:set-agent-session`, `native-command:set-browser-profile`, `native-command:set-browser-tabs`, `native-command:set-browser-url`, `native-command:set-editor-path`, `native-command:show-last-output`, `native-command:split-browser`, `native-command:split-picker`, `native-command:tools`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`

@@ -65,7 +65,10 @@ pub use lifecycle::{
     DaemonRecoveryError, RecoveredDaemon, daemon_identity_protocol_version,
     terminate_incompatible_daemon,
 };
-pub use paths::{default_mux_config, mux_config_candidates, mux_config_write_path};
+pub use paths::{
+    MAX_TMUX_IMPORT_BYTES, copy_tmux_config_into, default_mux_config, discover_tmux_config,
+    mux_config_candidates, mux_config_write_path,
+};
 #[cfg(target_os = "ios")]
 pub use russh_client::ios_ssh_public_key;
 pub use transport::default_socket_path;

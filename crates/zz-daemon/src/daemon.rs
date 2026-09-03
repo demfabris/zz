@@ -84,7 +84,10 @@ use crate::{
         send_tokens,
     },
     lifecycle::DaemonIdentityGuard,
-    paths::{default_mux_config, home_directory},
+    paths::{
+        copy_tmux_config_into, default_mux_config, discover_tmux_config, home_directory,
+        mux_config_write_path,
+    },
     shell_process,
     status::{
         BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
@@ -6868,6 +6871,7 @@ impl Shared {
         let mut monitor_silence_changed = false;
         let mut attach = None;
         let mut detach = None;
+        let mut import_tmux_config = false;
         let mut reload_config = false;
         let mut snapshot_changed = false;
         let mut mux_options_changed = false;
@@ -8499,6 +8503,9 @@ impl Shared {
                     MuxEffect::ReloadConfig => {
                         reload_config = true;
                     }
+                    MuxEffect::ImportTmuxConfig => {
+                        import_tmux_config = true;
+                    }
                     MuxEffect::KillServer => force_shutdown_requested = true,
                     MuxEffect::SnapshotChanged => snapshot_changed = true,
                     MuxEffect::ModeStylesChanged => mode_styles_changed = true,
@@ -8604,6 +8611,12 @@ impl Shared {
             }
             (execution, mux_options_changed, recheck_shutdown_requested)
         };
+
+        if import_tmux_config {
+            let summary = self.import_tmux_config()?;
+            append_inserted_output(&mut execution.output, &summary);
+            reload_config = true;
+        }
 
         if force_shutdown_requested {
             if let Some((control, _)) = context.control_command_target() {
@@ -22560,6 +22573,23 @@ impl Shared {
             appearance: Box::new((*published).clone()),
             provenance,
         });
+    }
+
+    fn import_tmux_config(&self) -> Result<String, DaemonError> {
+        let donor = discover_tmux_config().ok_or_else(|| {
+            DaemonError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "no tmux configuration found",
+            ))
+        })?;
+        let target = mux_config_write_path().ok_or_else(|| {
+            DaemonError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "cannot create zz/mux.conf because neither XDG_CONFIG_HOME nor HOME is available",
+            ))
+        })?;
+        let bytes = copy_tmux_config_into(&donor, &target).map_err(DaemonError::Io)?;
+        Ok(format!("imported {} ({} bytes)", donor.display(), bytes))
     }
 
     fn reload_user_config_with_source_base(

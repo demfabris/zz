@@ -369,7 +369,7 @@ fn append_config_line(source: &str, key: &str, value: &str) -> String {
     edited
 }
 
-fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
+pub(crate) fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(
             ErrorKind::InvalidInput,

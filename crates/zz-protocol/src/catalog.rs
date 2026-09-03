@@ -801,6 +801,7 @@ pub static NATIVE_COMMAND_NAMES: &[&str] = &[
     "copy-mode-search-prompt",
     "debug-marker",
     "focus-sidebar",
+    "import-tmux-config",
     "new-browser",
     "reload-config",
     "restart-agent-pane",
@@ -2409,6 +2410,15 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         variadic: None,
     },
     CommandSpec {
+        name: "import-tmux-config",
+        aliases: &[],
+        description: "Copy the host tmux configuration into zz/mux.conf and reload",
+        usage: "",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
         name: "start-server",
         aliases: &["start"],
         description: "Ensure the zz daemon is running",
@@ -3976,6 +3986,7 @@ mod tests {
             "show-environment",
             "source-file",
             "reload-config",
+            "import-tmux-config",
             "start-server",
             "kill-server",
         ]);

@@ -1094,6 +1094,7 @@ pub enum MuxEffect {
         context: ExecutionContext,
     },
     ReloadConfig,
+    ImportTmuxConfig,
     KillServer,
     SuppressAfterHook,
     SnapshotChanged,
@@ -4322,6 +4323,16 @@ impl MuxEngine {
                 } else {
                     return Err(ServerError::CommandParse(
                         "reload-config does not take arguments".to_owned(),
+                    ));
+                }
+            }
+            "import-tmux-config" => {
+                parse_command_options("import-tmux-config", &command.args)?;
+                if command.args.is_empty() {
+                    Execution::effect(MuxEffect::ImportTmuxConfig)
+                } else {
+                    return Err(ServerError::CommandParse(
+                        "import-tmux-config does not take arguments".to_owned(),
                     ));
                 }
             }
@@ -23136,6 +23147,23 @@ mod tests {
         assert_eq!(execution.effects, [MuxEffect::ReloadConfig]);
         assert!(matches!(
             engine.execute(&mut context, &command("reload-config", &["unexpected"])),
+            Err(ServerError::CommandParse(_))
+        ));
+    }
+
+    #[test]
+    fn import_tmux_config_is_a_native_argument_free_effect() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        let execution = engine
+            .execute(&mut context, &command("import-tmux-config", &[]))
+            .expect("import effect");
+        assert_eq!(execution.effects, [MuxEffect::ImportTmuxConfig]);
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("import-tmux-config", &["unexpected"])
+            ),
             Err(ServerError::CommandParse(_))
         ));
     }

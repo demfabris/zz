@@ -1,6 +1,13 @@
 //! Discovery of the zz-owned mux configuration file (`zz/mux.conf`).
 
-use std::path::{Path, PathBuf};
+use std::{
+    io::{self, Read as _},
+    path::{Path, PathBuf},
+};
+
+use crate::fleet_hosts::atomic_write;
+
+pub const MAX_TMUX_IMPORT_BYTES: usize = 1024 * 1024;
 
 const MUX_CONFIG_DIRECTORY_NAME: &str = "zz";
 const MUX_CONFIG_FILE_NAME: &str = "mux.conf";
@@ -145,6 +152,48 @@ pub fn mux_config_write_path() -> Option<PathBuf> {
         .or_else(|| candidates.into_iter().next())
 }
 
+#[must_use]
+fn tmux_config_candidates_for(home: Option<&Path>, xdg_config_home: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::with_capacity(3);
+    if let Some(home) = home {
+        candidates.push(home.join(".tmux.conf"));
+    }
+    if let Some(xdg) = xdg_config_home {
+        candidates.push(xdg.join("tmux/tmux.conf"));
+    }
+    if let Some(home) = home {
+        let fallback = home.join(".config/tmux/tmux.conf");
+        if !candidates.contains(&fallback) {
+            candidates.push(fallback);
+        }
+    }
+    candidates
+}
+
+#[must_use]
+pub fn discover_tmux_config() -> Option<PathBuf> {
+    let home = nonempty_env("HOME");
+    let xdg_config_home = nonempty_env("XDG_CONFIG_HOME");
+    tmux_config_candidates_for(home.as_deref(), xdg_config_home.as_deref())
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+}
+
+pub fn copy_tmux_config_into(donor: &Path, target: &Path) -> io::Result<u64> {
+    let file = std::fs::File::open(donor)?;
+    let byte_limit = u64::try_from(MAX_TMUX_IMPORT_BYTES).unwrap_or(u64::MAX - 1);
+    let mut contents = Vec::new();
+    file.take(byte_limit + 1).read_to_end(&mut contents)?;
+    if contents.len() > MAX_TMUX_IMPORT_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("tmux configuration exceeds the {MAX_TMUX_IMPORT_BYTES}-byte import limit"),
+        ));
+    }
+    atomic_write(target, &contents)?;
+    Ok(contents.len() as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,5 +285,63 @@ mod tests {
             },
         );
         assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn tmux_candidates_prefer_home_dotfile_then_xdg() {
+        let home = Path::new("/home/u");
+        let xdg = Path::new("/home/u/xdg");
+        assert_eq!(
+            tmux_config_candidates_for(Some(home), Some(xdg)),
+            vec![
+                PathBuf::from("/home/u/.tmux.conf"),
+                PathBuf::from("/home/u/xdg/tmux/tmux.conf"),
+                PathBuf::from("/home/u/.config/tmux/tmux.conf"),
+            ],
+        );
+    }
+
+    #[test]
+    fn tmux_candidates_dedupe_xdg_matching_home_config() {
+        let home = Path::new("/home/u");
+        let xdg = Path::new("/home/u/.config");
+        assert_eq!(
+            tmux_config_candidates_for(Some(home), Some(xdg)),
+            vec![
+                PathBuf::from("/home/u/.tmux.conf"),
+                PathBuf::from("/home/u/.config/tmux/tmux.conf"),
+            ],
+        );
+    }
+
+    #[test]
+    fn tmux_copy_is_verbatim_and_overwrites_on_reimport() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let donor = directory.path().join(".tmux.conf");
+        let target = directory.path().join("zz/mux.conf");
+        let first = b"set -g prefix C-a\nbind h select-pane -L\n";
+        std::fs::write(&donor, first).expect("write donor");
+
+        let bytes = copy_tmux_config_into(&donor, &target).expect("copy donor");
+        assert_eq!(bytes, first.len() as u64);
+        assert_eq!(std::fs::read(&target).expect("read copy"), first);
+
+        let second = b"set -g prefix C-b\n";
+        std::fs::write(&donor, second).expect("update donor");
+        copy_tmux_config_into(&donor, &target).expect("overwrite copy");
+        assert_eq!(
+            std::fs::read(&target).expect("read overwritten copy"),
+            second
+        );
+    }
+
+    #[test]
+    fn oversized_tmux_donor_is_rejected() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let big = directory.path().join("big.conf");
+        std::fs::write(&big, vec![b'#'; MAX_TMUX_IMPORT_BYTES + 1]).expect("write big donor");
+        let error = copy_tmux_config_into(&big, &directory.path().join("zz/mux.conf"))
+            .expect_err("donor past the bound must fail");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     }
 }

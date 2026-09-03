@@ -260,6 +260,7 @@
         "native-command:copy-mode-search-prompt",
         "native-command:debug-marker",
         "native-command:focus-sidebar",
+        "native-command:import-tmux-config",
         "native-command:new-browser",
         "native-command:reload-config",
         "native-command:restart-agent-pane",

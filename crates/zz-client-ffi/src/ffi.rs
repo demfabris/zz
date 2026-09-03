@@ -4,7 +4,7 @@ use std::{
     collections::VecDeque,
     ffi::{CStr, c_char, c_int, c_void},
     os::{fd::AsRawFd, unix::net::UnixStream},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, PoisonError},
     thread,
 };
@@ -19,8 +19,9 @@ use zz_client::{
 use zz_daemon::{AskpassPromptKind, AskpassReply, SshPrompts};
 use zz_daemon::{DaemonError, Endpoint, EndpointError, InteractiveClient};
 use zz_protocol::{
-    AgentConnectionPhase, AgentPaneWire, CommandInvocation, InputMessage, MuxSnapshot, PaneId,
-    PaneKindSnapshot, PaneSnapshot, ProtocolMessage, SessionId, SessionSnapshot, WindowSnapshot,
+    AgentConnectionPhase, AgentPaneWire, AgentSessionOpKind, CommandInvocation, InputMessage,
+    KeyBindingSnapshot, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, ProtocolMessage,
+    SessionId, SessionSnapshot, WindowSnapshot,
 };
 use zz_terminal::{
     CellWidth, ClipboardTarget, CursorStyle, Glyph, KeyAction, KeyCode, KeyInput, Modifiers,
@@ -49,6 +50,27 @@ pub enum ZzEventKind {
     Disconnected = 10,
     AgentStateChanged = 11,
     Clipboard = 12,
+    /// The daemon armed or cleared the prefix sequence; reread it with the
+    /// `zz_prefix_snapshot_*` family. `flags` is 1 while armed.
+    PrefixArmed = 13,
+    /// The published key tables changed; reread them with the
+    /// `zz_prefix_snapshot_*` family.
+    KeyTablesChanged = 14,
+    /// A `command-prompt` overlay opened or closed on the daemon.
+    CommandPromptChanged = 15,
+    /// A `choose-buffer` overlay opened or closed on the daemon.
+    ChooseBufferChanged = 16,
+    /// A `display-panes` overlay opened or closed on the daemon.
+    DisplayPanesChanged = 17,
+    /// One coalesced agent transcript batch arrived; pop it with
+    /// `zz_client_agent_updates_next`. `pane` names the pane.
+    AgentUpdates = 18,
+    /// The daemon cleared a pane's agent lane; catch up with
+    /// `zz_client_agent_lagged_next`, then replay from the shell's cursor.
+    AgentLagged = 19,
+    /// An agent session-list reply arrived; pop it with
+    /// `zz_client_agent_sessions_next`. `pane` names the pane.
+    AgentSessions = 20,
 }
 
 /// One drained event; `pane` is zero when the kind carries no pane.
@@ -166,6 +188,10 @@ impl ZzBytes {
     };
 
     fn new(value: &str) -> Self {
+        Self::from_bytes(value.as_bytes())
+    }
+
+    fn from_bytes(value: &[u8]) -> Self {
         Self {
             ptr: value.as_ptr(),
             len: value.len(),
@@ -210,10 +236,44 @@ pub struct ZzCursor {
 pub struct ZzClient {
     client: Arc<InteractiveClient>,
     core: Arc<Mutex<ClientCore>>,
-    events: Arc<Mutex<VecDeque<ZzEvent>>>,
-    clipboards: Arc<Mutex<VecDeque<ZzClipboard>>>,
+    queues: EventQueues,
     wake_read: UnixStream,
     reader: Option<thread::JoinHandle<()>>,
+}
+
+/// Every queue the reader thread fans core events into. One struct keeps
+/// `queue_event` and `spawn_reader` under the argument-count lint.
+#[derive(Clone, Default)]
+struct EventQueues {
+    events: Arc<Mutex<VecDeque<ZzEvent>>>,
+    clipboards: Arc<Mutex<VecDeque<ZzClipboard>>>,
+    agent_batches: Arc<Mutex<VecDeque<ZzAgentBatch>>>,
+    agent_lagged: Arc<Mutex<VecDeque<ZzAgentLag>>>,
+    agent_sessions: Arc<Mutex<VecDeque<ZzAgentSessionsReply>>>,
+}
+
+/// One coalesced agent transcript batch, caller-owned once popped with
+/// `zz_client_agent_updates_next`. `items` are the daemon's JSON stream
+/// items in order; `first_seq` numbers the first one.
+pub struct ZzAgentBatch {
+    pane: u64,
+    first_seq: u64,
+    items: Vec<Vec<u8>>,
+}
+
+struct ZzAgentLag {
+    pane: u64,
+    next_seq: u64,
+}
+
+/// One agent session-list reply, caller-owned once popped with
+/// `zz_client_agent_sessions_next`. `result` is the daemon's JSON reply:
+/// a `sessionsListed` payload on success, a `sessionListFailed` one after a
+/// rejected list request.
+pub struct ZzAgentSessionsReply {
+    pane: u64,
+    request_id: u64,
+    result: String,
 }
 
 pub struct ZzMuxSnapshot {
@@ -392,11 +452,14 @@ fn key_action(action: u32) -> Option<KeyAction> {
     }
 }
 
-fn queue_event(
-    events: &Mutex<VecDeque<ZzEvent>>,
-    clipboards: &Mutex<VecDeque<ZzClipboard>>,
-    event: &CoreEvent,
-) {
+fn queue_event(queues: &EventQueues, event: &CoreEvent) {
+    let EventQueues {
+        events,
+        clipboards,
+        agent_batches,
+        agent_lagged,
+        agent_sessions,
+    } = queues;
     let (kind, flags, pane, row_start, row_end) = match event {
         CoreEvent::HelloReceived => (ZzEventKind::Hello, 0, 0, 0, 0),
         CoreEvent::Attached { .. } => (ZzEventKind::Attached, 0, 0, 0, 0),
@@ -444,6 +507,42 @@ fn queue_event(
             });
             (ZzEventKind::Clipboard, 0, pane.0, 0, 0)
         }
+        CoreEvent::AgentUpdates {
+            pane,
+            first_seq,
+            items,
+        } => {
+            lock(agent_batches).push_back(ZzAgentBatch {
+                pane: pane.0,
+                first_seq: *first_seq,
+                items: items.clone(),
+            });
+            (ZzEventKind::AgentUpdates, 0, pane.0, 0, 0)
+        }
+        CoreEvent::AgentLagged { pane, next_seq } => {
+            lock(agent_lagged).push_back(ZzAgentLag {
+                pane: pane.0,
+                next_seq: *next_seq,
+            });
+            (ZzEventKind::AgentLagged, 0, pane.0, 0, 0)
+        }
+        CoreEvent::AgentSessions {
+            pane,
+            request_id,
+            result,
+        } => {
+            lock(agent_sessions).push_back(ZzAgentSessionsReply {
+                pane: pane.0,
+                request_id: *request_id,
+                result: result.clone(),
+            });
+            (ZzEventKind::AgentSessions, 0, pane.0, 0, 0)
+        }
+        CoreEvent::PrefixArmed { armed } => (ZzEventKind::PrefixArmed, u32::from(*armed), 0, 0, 0),
+        CoreEvent::KeyTablesChanged => (ZzEventKind::KeyTablesChanged, 0, 0, 0, 0),
+        CoreEvent::CommandPromptChanged => (ZzEventKind::CommandPromptChanged, 0, 0, 0, 0),
+        CoreEvent::ChooseBufferChanged => (ZzEventKind::ChooseBufferChanged, 0, 0, 0, 0),
+        CoreEvent::DisplayPanesChanged => (ZzEventKind::DisplayPanesChanged, 0, 0, 0, 0),
         _ => (ZzEventKind::Other, 0, 0, 0, 0),
     };
     lock(events).push_back(ZzEvent {
@@ -474,14 +573,12 @@ fn wake_event_fd(wake_write: &UnixStream) -> std::io::Result<()> {
 fn spawn_reader(
     client: &Arc<InteractiveClient>,
     core: &Arc<Mutex<ClientCore>>,
-    events: &Arc<Mutex<VecDeque<ZzEvent>>>,
-    clipboards: &Arc<Mutex<VecDeque<ZzClipboard>>>,
+    queues: &EventQueues,
     wake_write: UnixStream,
 ) -> std::io::Result<thread::JoinHandle<()>> {
     let client = Arc::clone(client);
     let core = Arc::clone(core);
-    let events = Arc::clone(events);
-    let clipboards = Arc::clone(clipboards);
+    let queues = queues.clone();
     thread::Builder::new()
         .name("zz-client-ffi-reader".to_owned())
         .spawn(move || {
@@ -497,7 +594,7 @@ fn spawn_reader(
                 }
                 let mut queued = false;
                 while let Some(event) = guard.poll_event() {
-                    queue_event(&events, &clipboards, &event);
+                    queue_event(&queues, &event);
                     queued = true;
                 }
                 drop(guard);
@@ -505,7 +602,7 @@ fn spawn_reader(
                     let _ = wake_event_fd(&wake_write);
                 }
             }
-            lock(&events).push_back(ZzEvent {
+            lock(&queues.events).push_back(ZzEvent {
                 kind: ZzEventKind::Disconnected,
                 flags: 0,
                 pane: 0,
@@ -536,26 +633,24 @@ fn start_client(client: InteractiveClient) -> Result<*mut ZzClient, String> {
     let client = Arc::new(client);
     let core = Arc::new(Mutex::new(ClientCore::new()));
     lock(&core).handle_message(ProtocolMessage::ServerHello(client.server_hello().clone()));
-    let events = Arc::new(Mutex::new(VecDeque::new()));
-    let clipboards = Arc::new(Mutex::new(VecDeque::new()));
+    let queues = EventQueues::default();
     let mut queued = false;
     {
         let mut guard = lock(&core);
         while let Some(event) = guard.poll_event() {
-            queue_event(&events, &clipboards, &event);
+            queue_event(&queues, &event);
             queued = true;
         }
     }
     if queued {
         wake_event_fd(&wake_write).map_err(|error| error.to_string())?;
     }
-    let reader = spawn_reader(&client, &core, &events, &clipboards, wake_write)
-        .map_err(|error| error.to_string())?;
+    let reader =
+        spawn_reader(&client, &core, &queues, wake_write).map_err(|error| error.to_string())?;
     Ok(Box::into_raw(Box::new(ZzClient {
         client,
         core,
-        events,
-        clipboards,
+        queues,
         wake_read,
         reader: Some(reader),
     })))
@@ -1468,6 +1563,120 @@ pub unsafe extern "C" fn zz_snapshot_session_pane_has_bell(
         .is_some_and(|(_, pane)| pane.bell)
 }
 
+/// An owned copy of the prefix arming plus the published `prefix` table's
+/// bindings, so Swift can read them after the core lock is released.
+pub struct ZzPrefixSnapshot {
+    armed: bool,
+    bindings: Vec<KeyBindingSnapshot>,
+    summaries: Vec<String>,
+}
+
+fn prefix_binding_at(snapshot: &ZzPrefixSnapshot, binding: usize) -> Option<&KeyBindingSnapshot> {
+    snapshot.bindings.get(binding)
+}
+
+/// One binding's command line for help surfaces: the first command's name
+/// plus its arguments (`split-window -h`), or empty when unbound.
+fn prefix_command_summary(binding: &KeyBindingSnapshot) -> String {
+    let Some(first) = binding.commands.first() else {
+        return String::new();
+    };
+    if first.args.is_empty() {
+        return first.name.clone();
+    }
+    let mut summary = first.name.clone();
+    for argument in &first.args {
+        summary.push(' ');
+        summary.push_str(argument);
+    }
+    summary
+}
+
+/// Acquire the prefix arming plus the published `prefix` table's bindings.
+/// Returns null for a null client. Free with [`zz_prefix_snapshot_release`].
+///
+/// # Safety
+///
+/// `client` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_prefix_snapshot_acquire(
+    client: *const ZzClient,
+) -> *mut ZzPrefixSnapshot {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    let core = lock(&client.core);
+    let bindings = core.prefix_bindings().to_vec();
+    let summaries = bindings.iter().map(prefix_command_summary).collect();
+    Box::into_raw(Box::new(ZzPrefixSnapshot {
+        armed: core.prefix_armed(),
+        bindings,
+        summaries,
+    }))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_prefix_snapshot_release(snapshot: *mut ZzPrefixSnapshot) {
+    if !snapshot.is_null() {
+        drop(unsafe { Box::from_raw(snapshot) });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_prefix_snapshot_armed(snapshot: *const ZzPrefixSnapshot) -> bool {
+    unsafe { snapshot.as_ref() }.is_some_and(|snapshot| snapshot.armed)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_prefix_binding_count(snapshot: *const ZzPrefixSnapshot) -> usize {
+    unsafe { snapshot.as_ref() }.map_or(0, |snapshot| snapshot.bindings.len())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_prefix_binding_key(
+    snapshot: *const ZzPrefixSnapshot,
+    binding: usize,
+) -> ZzBytes {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| prefix_binding_at(snapshot, binding))
+        .map_or(ZzBytes::EMPTY, |binding| ZzBytes::new(&binding.key))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_prefix_binding_repeat(
+    snapshot: *const ZzPrefixSnapshot,
+    binding: usize,
+) -> bool {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| prefix_binding_at(snapshot, binding))
+        .is_some_and(|binding| binding.repeat)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_prefix_binding_note(
+    snapshot: *const ZzPrefixSnapshot,
+    binding: usize,
+) -> ZzBytes {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| prefix_binding_at(snapshot, binding))
+        .and_then(|binding| binding.note.as_deref())
+        .map_or(ZzBytes::EMPTY, ZzBytes::new)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_prefix_binding_summary(
+    snapshot: *const ZzPrefixSnapshot,
+    binding: usize,
+) -> ZzBytes {
+    let Some(snapshot) = (unsafe { snapshot.as_ref() }) else {
+        return ZzBytes::EMPTY;
+    };
+    snapshot
+        .summaries
+        .get(binding)
+        .map_or(ZzBytes::EMPTY, |summary| ZzBytes::new(summary))
+}
+
 /// Write up to `capacity` terminal pane ids from the attached session into
 /// `out`; returns how many exist (which may exceed `capacity`). Empty until
 /// [`zz_client_attach`] succeeds and a snapshot arrives.
@@ -1741,7 +1950,7 @@ pub unsafe extern "C" fn zz_client_next_event(client: *mut ZzClient, out: *mut Z
     };
     let mut buffer = [0_u8; 64];
     while matches!(rustix::io::read(&client.wake_read, &mut buffer), Ok(count) if count > 0) {}
-    let Some(event) = lock(&client.events).pop_front() else {
+    let Some(event) = lock(&client.queues.events).pop_front() else {
         return false;
     };
     unsafe { out.write(event) };
@@ -1753,7 +1962,7 @@ pub unsafe extern "C" fn zz_client_clipboard_next(client: *mut ZzClient) -> *mut
     let Some(client) = (unsafe { client.as_ref() }) else {
         return std::ptr::null_mut();
     };
-    lock(&client.clipboards)
+    lock(&client.queues.clipboards)
         .pop_front()
         .map_or(std::ptr::null_mut(), |clipboard| {
             Box::into_raw(Box::new(clipboard))
@@ -1780,6 +1989,343 @@ pub unsafe extern "C" fn zz_clipboard_request_id(clipboard: *const ZzClipboard) 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zz_clipboard_text(clipboard: *const ZzClipboard) -> ZzBytes {
     unsafe { clipboard.as_ref() }.map_or(ZzBytes::EMPTY, |clipboard| ZzBytes::new(&clipboard.text))
+}
+
+/// Pop the oldest queued agent transcript batch, or null when none is queued.
+/// Batches arrive in journal order per pane; each item is one daemon JSON
+/// stream item and `zz_agent_updates_first_seq` numbers the first one. The
+/// batch is caller-owned: read it with the `zz_agent_updates_*` accessors,
+/// then free it with [`zz_agent_updates_release`].
+///
+/// # Safety
+///
+/// `client` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_updates_next(client: *mut ZzClient) -> *mut ZzAgentBatch {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    lock(&client.queues.agent_batches)
+        .pop_front()
+        .map_or(std::ptr::null_mut(), |batch| Box::into_raw(Box::new(batch)))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_updates_release(updates: *mut ZzAgentBatch) {
+    if !updates.is_null() {
+        drop(unsafe { Box::from_raw(updates) });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_updates_pane(updates: *const ZzAgentBatch) -> u64 {
+    unsafe { updates.as_ref() }.map_or(0, |updates| updates.pane)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_updates_first_seq(updates: *const ZzAgentBatch) -> u64 {
+    unsafe { updates.as_ref() }.map_or(0, |updates| updates.first_seq)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_updates_item_count(updates: *const ZzAgentBatch) -> usize {
+    unsafe { updates.as_ref() }.map_or(0, |updates| updates.items.len())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_updates_item_bytes(
+    updates: *const ZzAgentBatch,
+    index: usize,
+) -> ZzBytes {
+    unsafe { updates.as_ref() }.map_or(ZzBytes::EMPTY, |updates| {
+        updates
+            .items
+            .get(index)
+            .map_or(ZzBytes::EMPTY, |item| ZzBytes::from_bytes(item))
+    })
+}
+
+/// Pop the oldest queued agent-lane overflow notice. The daemon cleared the
+/// pane's lane from `next_seq_out`; answer with [`zz_client_agent_replay`]
+/// from the shell's cursor.
+///
+/// # Safety
+///
+/// `client` must be a live handle; both out pointers must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_lagged_next(
+    client: *mut ZzClient,
+    pane_out: *mut u64,
+    next_seq_out: *mut u64,
+) -> bool {
+    let (Some(client), false) = (
+        unsafe { client.as_ref() },
+        pane_out.is_null() || next_seq_out.is_null(),
+    ) else {
+        return false;
+    };
+    let Some(lagged) = lock(&client.queues.agent_lagged).pop_front() else {
+        return false;
+    };
+    unsafe {
+        pane_out.write(lagged.pane);
+        next_seq_out.write(lagged.next_seq);
+    }
+    true
+}
+
+/// Ask the daemon to replay a pane's agent stream from `from_seq`,
+/// inclusively, then tail it. Send on a journal gap, a lane overflow, and
+/// when a pane's view goes live without a cursor.
+///
+/// # Safety
+///
+/// `client` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_replay(
+    client: *mut ZzClient,
+    pane: u64,
+    from_seq: u64,
+) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    client.client.agent_replay(PaneId(pane), from_seq).is_ok()
+}
+
+unsafe fn c_string(ptr: *const c_char) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    unsafe { CStr::from_ptr(ptr) }
+        .to_str()
+        .ok()
+        .map(str::to_owned)
+}
+
+/// Pop the oldest queued agent session-list reply, or null when none is
+/// queued. Read it with the `zz_agent_sessions_*` accessors, then free it
+/// with [`zz_agent_sessions_release`].
+///
+/// # Safety
+///
+/// `client` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_sessions_next(
+    client: *mut ZzClient,
+) -> *mut ZzAgentSessionsReply {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    lock(&client.queues.agent_sessions)
+        .pop_front()
+        .map_or(std::ptr::null_mut(), |reply| Box::into_raw(Box::new(reply)))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_sessions_release(reply: *mut ZzAgentSessionsReply) {
+    if !reply.is_null() {
+        drop(unsafe { Box::from_raw(reply) });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_sessions_pane(reply: *const ZzAgentSessionsReply) -> u64 {
+    unsafe { reply.as_ref() }.map_or(0, |reply| reply.pane)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_sessions_request_id(reply: *const ZzAgentSessionsReply) -> u64 {
+    unsafe { reply.as_ref() }.map_or(0, |reply| reply.request_id)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_sessions_result(reply: *const ZzAgentSessionsReply) -> ZzBytes {
+    unsafe { reply.as_ref() }.map_or(ZzBytes::EMPTY, |reply| ZzBytes::new(&reply.result))
+}
+
+/// The pane's raw session-config JSON blob: an array of ACP
+/// `SessionConfigOption` values (`model`, `thoughtLevel`, and `mode`
+/// categories drive the pickers). Empty when the adapter published none.
+///
+/// # Safety
+///
+/// `state` must be a live handle; the bytes are borrowed from it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_config_options(state: *const ZzAgentState) -> ZzBytes {
+    unsafe { state.as_ref() }.map_or(ZzBytes::EMPTY, |state| {
+        ZzBytes::new(&state.wire.config_options)
+    })
+}
+
+/// The pane's raw legacy session-mode JSON blob (`SessionModeState`), used
+/// only when the adapter publishes no config options. Empty when absent.
+///
+/// # Safety
+///
+/// `state` must be a live handle; the bytes are borrowed from it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_modes(state: *const ZzAgentState) -> ZzBytes {
+    unsafe { state.as_ref() }.map_or(ZzBytes::EMPTY, |state| ZzBytes::new(&state.wire.modes))
+}
+
+/// Set one session config option (model, effort, permission mode) by id.
+///
+/// # Safety
+///
+/// `client`, `option_id`, and `value` must be live; the strings must be UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_set_config_option(
+    client: *mut ZzClient,
+    pane: u64,
+    option_id: *const c_char,
+    value: *const c_char,
+) -> bool {
+    let (Some(client), Some(option_id), Some(value)) = (
+        unsafe { client.as_ref() },
+        unsafe { c_string(option_id) },
+        unsafe { c_string(value) },
+    ) else {
+        return false;
+    };
+    client
+        .client
+        .agent_set_config_option(PaneId(pane), option_id, value)
+        .is_ok()
+}
+
+/// Set the pane's legacy session mode by id. Adapters with config options
+/// ignore this; it exists for adapters that only publish `modes`.
+///
+/// # Safety
+///
+/// `client` and `mode_id` must be live; `mode_id` must be UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_set_mode(
+    client: *mut ZzClient,
+    pane: u64,
+    mode_id: *const c_char,
+) -> bool {
+    let (Some(client), Some(mode_id)) = (unsafe { client.as_ref() }, unsafe { c_string(mode_id) })
+    else {
+        return false;
+    };
+    client.client.agent_set_mode(PaneId(pane), mode_id).is_ok()
+}
+
+/// Ask the daemon to list the pane's agent sessions across every project.
+/// The answer arrives as `ZZ_EVENT_AGENT_SESSIONS`.
+///
+/// # Safety
+///
+/// `client` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_list_sessions(client: *mut ZzClient, pane: u64) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    client
+        .client
+        .agent_session_op(
+            PaneId(pane),
+            AgentSessionOpKind::List {
+                cwd: None,
+                cursor: None,
+                replace: true,
+            },
+        )
+        .is_ok()
+}
+
+/// Start a new agent session in the pane with `cwd` as its working
+/// directory. The path must be absolute.
+///
+/// # Safety
+///
+/// `client` and `cwd` must be live; `cwd` must be UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_new_session(
+    client: *mut ZzClient,
+    pane: u64,
+    cwd: *const c_char,
+) -> bool {
+    let (Some(client), Some(cwd)) = (unsafe { client.as_ref() }, unsafe { c_string(cwd) }) else {
+        return false;
+    };
+    client
+        .client
+        .agent_session_op(
+            PaneId(pane),
+            AgentSessionOpKind::New {
+                cwd: PathBuf::from(cwd),
+            },
+        )
+        .is_ok()
+}
+
+/// Switch the pane to a listed agent session. `additional_directories_json`
+/// is a JSON array of absolute paths and may be null for none.
+///
+/// # Safety
+///
+/// `client`, `session_id`, and `cwd` must be live and UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_switch_session(
+    client: *mut ZzClient,
+    pane: u64,
+    session_id: *const c_char,
+    cwd: *const c_char,
+    additional_directories_json: *const c_char,
+) -> bool {
+    let (Some(client), Some(session_id), Some(cwd)) = (
+        unsafe { client.as_ref() },
+        unsafe { c_string(session_id) },
+        unsafe { c_string(cwd) },
+    ) else {
+        return false;
+    };
+    let encoded = unsafe { c_string(additional_directories_json) }.unwrap_or_default();
+    let additional_directories = if encoded.is_empty() {
+        Vec::new()
+    } else {
+        let Ok(directories) = serde_json::from_str::<Vec<String>>(&encoded) else {
+            return false;
+        };
+        directories.into_iter().map(PathBuf::from).collect()
+    };
+    client
+        .client
+        .agent_session_op(
+            PaneId(pane),
+            AgentSessionOpKind::Switch {
+                session_id,
+                cwd: PathBuf::from(cwd),
+                additional_directories,
+            },
+        )
+        .is_ok()
+}
+
+/// Delete a listed agent session by id.
+///
+/// # Safety
+///
+/// `client` and `session_id` must be live; `session_id` must be UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_delete_session(
+    client: *mut ZzClient,
+    pane: u64,
+    session_id: *const c_char,
+) -> bool {
+    let (Some(client), Some(session_id)) =
+        (unsafe { client.as_ref() }, unsafe { c_string(session_id) })
+    else {
+        return false;
+    };
+    client
+        .client
+        .agent_session_op(PaneId(pane), AgentSessionOpKind::Delete { session_id })
+        .is_ok()
 }
 
 /// Acquire the retained viewport for a pane, or null when none is held. The
@@ -2158,11 +2704,9 @@ mod tests {
 
     #[test]
     fn attention_edges_keep_their_ffi_flags() {
-        let events = Mutex::new(VecDeque::new());
-        let clipboards = Mutex::new(VecDeque::new());
+        let queues = EventQueues::default();
         queue_event(
-            &events,
-            &clipboards,
+            &queues,
             &CoreEvent::AgentStateChanged {
                 pane: PaneId(9),
                 attention: Some(AgentAttentionEdge::Request),
@@ -2170,7 +2714,7 @@ mod tests {
         );
 
         assert_eq!(
-            lock(&events).pop_front(),
+            lock(&queues.events).pop_front(),
             Some(ZzEvent {
                 kind: ZzEventKind::AgentStateChanged,
                 flags: EVENT_AGENT_REQUEST,
@@ -2178,6 +2722,212 @@ mod tests {
                 row_start: 0,
                 row_end: 0,
             })
+        );
+    }
+
+    #[test]
+    fn agent_update_batches_keep_order_and_their_event_kind() {
+        let queues = EventQueues::default();
+        for (pane, first_seq) in [(4_u64, 1_u64), (4_u64, 3_u64)] {
+            queue_event(
+                &queues,
+                &CoreEvent::AgentUpdates {
+                    pane: PaneId(pane),
+                    first_seq,
+                    items: vec![vec![7_u8, 8_u8]],
+                },
+            );
+        }
+
+        let kinds: Vec<ZzEvent> = std::iter::from_fn(|| lock(&queues.events).pop_front()).collect();
+        assert_eq!(
+            kinds
+                .iter()
+                .map(|event| (event.kind, event.pane))
+                .collect::<Vec<_>>(),
+            vec![
+                (ZzEventKind::AgentUpdates, 4),
+                (ZzEventKind::AgentUpdates, 4),
+            ]
+        );
+
+        let batches = lock(&queues.agent_batches);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].pane, 4);
+        assert_eq!(batches[0].first_seq, 1);
+        assert_eq!(batches[0].items, vec![vec![7_u8, 8_u8]]);
+        assert_eq!(batches[1].first_seq, 3);
+    }
+
+    #[test]
+    fn agent_lag_notices_keep_their_pane_and_sequence() {
+        let queues = EventQueues::default();
+        queue_event(
+            &queues,
+            &CoreEvent::AgentLagged {
+                pane: PaneId(6),
+                next_seq: 41,
+            },
+        );
+
+        assert_eq!(
+            lock(&queues.events).pop_front(),
+            Some(ZzEvent {
+                kind: ZzEventKind::AgentLagged,
+                flags: 0,
+                pane: 6,
+                row_start: 0,
+                row_end: 0,
+            })
+        );
+        let lagged = lock(&queues.agent_lagged);
+        assert_eq!(lagged.len(), 1);
+        assert_eq!(lagged[0].pane, 6);
+        assert_eq!(lagged[0].next_seq, 41);
+    }
+
+    #[test]
+    fn agent_session_replies_keep_pane_request_and_result() {
+        let queues = EventQueues::default();
+        queue_event(
+            &queues,
+            &CoreEvent::AgentSessions {
+                pane: PaneId(5),
+                request_id: 7,
+                result: "{\"item\":\"sessionsListed\"}".to_owned(),
+            },
+        );
+
+        assert_eq!(
+            lock(&queues.events).pop_front(),
+            Some(ZzEvent {
+                kind: ZzEventKind::AgentSessions,
+                flags: 0,
+                pane: 5,
+                row_start: 0,
+                row_end: 0,
+            })
+        );
+        let replies = lock(&queues.agent_sessions);
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].pane, 5);
+        assert_eq!(replies[0].request_id, 7);
+        assert_eq!(replies[0].result, "{\"item\":\"sessionsListed\"}");
+    }
+
+    fn prefix_binding(
+        key: &str,
+        name: &str,
+        args: &[&str],
+        repeat: bool,
+        note: Option<&str>,
+    ) -> KeyBindingSnapshot {
+        KeyBindingSnapshot {
+            key: key.to_owned(),
+            commands: vec![CommandInvocation::new(name, args.iter().copied())],
+            repeat,
+            note: note.map(str::to_owned),
+        }
+    }
+
+    fn zz_str(bytes: ZzBytes) -> String {
+        assert!(bytes.len == 0 || !bytes.ptr.is_null());
+        if bytes.len == 0 {
+            return String::new();
+        }
+        String::from_utf8(unsafe { std::slice::from_raw_parts(bytes.ptr, bytes.len).to_vec() })
+            .unwrap()
+    }
+
+    #[test]
+    fn prefix_command_summary_joins_first_command_and_args() {
+        let bound = prefix_binding("c", "new-window", &["-n", "work"], false, None);
+        assert_eq!(prefix_command_summary(&bound), "new-window -n work");
+        let bare = prefix_binding("x", "kill-pane", &[], false, None);
+        assert_eq!(prefix_command_summary(&bare), "kill-pane");
+        let unbound = KeyBindingSnapshot {
+            key: "y".to_owned(),
+            commands: Vec::new(),
+            repeat: false,
+            note: None,
+        };
+        assert_eq!(prefix_command_summary(&unbound), "");
+    }
+
+    #[test]
+    fn prefix_snapshot_reads_are_null_safe_and_bounded() {
+        assert!(unsafe { zz_prefix_snapshot_acquire(std::ptr::null()) }.is_null());
+        assert!(!unsafe { zz_prefix_snapshot_armed(std::ptr::null()) });
+        assert_eq!(unsafe { zz_prefix_binding_count(std::ptr::null()) }, 0);
+        assert_eq!(unsafe { zz_prefix_binding_key(std::ptr::null(), 0) }.len, 0);
+        assert!(!unsafe { zz_prefix_binding_repeat(std::ptr::null(), 0) });
+        assert_eq!(
+            unsafe { zz_prefix_binding_note(std::ptr::null(), 0) }.len,
+            0
+        );
+        assert_eq!(
+            unsafe { zz_prefix_binding_summary(std::ptr::null(), 0) }.len,
+            0
+        );
+        unsafe { zz_prefix_snapshot_release(std::ptr::null_mut()) };
+    }
+
+    #[test]
+    fn prefix_snapshot_exposes_key_note_repeat_and_summary() {
+        let snapshot = Box::into_raw(Box::new(ZzPrefixSnapshot {
+            armed: true,
+            bindings: vec![
+                prefix_binding("c", "new-window", &[], false, None),
+                prefix_binding("%", "split-window", &["-h"], true, Some("Split vertically")),
+            ],
+            summaries: vec!["new-window".to_owned(), "split-window -h".to_owned()],
+        }));
+        assert!(unsafe { zz_prefix_snapshot_armed(snapshot) });
+        assert_eq!(unsafe { zz_prefix_binding_count(snapshot) }, 2);
+        assert_eq!(unsafe { zz_str(zz_prefix_binding_key(snapshot, 0)) }, "c");
+        assert_eq!(
+            unsafe { zz_str(zz_prefix_binding_summary(snapshot, 1)) },
+            "split-window -h"
+        );
+        assert!(unsafe { zz_prefix_binding_repeat(snapshot, 1) });
+        assert!(!unsafe { zz_prefix_binding_repeat(snapshot, 0) });
+        assert_eq!(
+            unsafe { zz_str(zz_prefix_binding_note(snapshot, 1)) },
+            "Split vertically"
+        );
+        assert_eq!(unsafe { zz_prefix_binding_key(snapshot, 9) }.len, 0);
+        assert_eq!(unsafe { zz_prefix_binding_summary(snapshot, 9) }.len, 0);
+        unsafe { zz_prefix_snapshot_release(snapshot) };
+    }
+
+    #[test]
+    fn overlay_core_events_reach_their_own_ffi_kinds() {
+        let queues = EventQueues::default();
+        for event in [
+            CoreEvent::PrefixArmed { armed: true },
+            CoreEvent::PrefixArmed { armed: false },
+            CoreEvent::KeyTablesChanged,
+            CoreEvent::CommandPromptChanged,
+            CoreEvent::ChooseBufferChanged,
+            CoreEvent::DisplayPanesChanged,
+        ] {
+            queue_event(&queues, &event);
+        }
+        let queued: Vec<ZzEvent> =
+            std::iter::from_fn(|| lock(&queues.events).pop_front()).collect();
+        assert_eq!(
+            queued
+                .iter()
+                .map(|event| (event.kind, event.flags))
+                .collect::<Vec<_>>(),
+            vec![
+                (ZzEventKind::PrefixArmed, 1),
+                (ZzEventKind::PrefixArmed, 0),
+                (ZzEventKind::KeyTablesChanged, 0),
+                (ZzEventKind::CommandPromptChanged, 0),
+                (ZzEventKind::ChooseBufferChanged, 0),
+                (ZzEventKind::DisplayPanesChanged, 0),
+            ]
         );
     }
 }

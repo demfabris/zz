@@ -179,6 +179,14 @@ typedef enum zz_event_kind {
     ZZ_EVENT_DISCONNECTED = 10,
     ZZ_EVENT_AGENT_STATE_CHANGED = 11,
     ZZ_EVENT_CLIPBOARD = 12,
+    ZZ_EVENT_PREFIX_ARMED = 13,
+    ZZ_EVENT_KEY_TABLES_CHANGED = 14,
+    ZZ_EVENT_COMMAND_PROMPT_CHANGED = 15,
+    ZZ_EVENT_CHOOSE_BUFFER_CHANGED = 16,
+    ZZ_EVENT_DISPLAY_PANES_CHANGED = 17,
+    ZZ_EVENT_AGENT_UPDATES = 18,
+    ZZ_EVENT_AGENT_LAGGED = 19,
+    ZZ_EVENT_AGENT_SESSIONS = 20,
 } zz_event_kind;
 
 typedef struct zz_client_event {
@@ -282,6 +290,25 @@ bool zz_snapshot_session_pane_is_active(const zz_mux_snapshot *snapshot,
 bool zz_snapshot_session_pane_has_bell(const zz_mux_snapshot *snapshot,
                                        size_t session, size_t pane);
 
+typedef struct zz_prefix_snapshot zz_prefix_snapshot;
+
+/* Owned copy of the prefix arming plus the published `prefix` table's
+ * bindings. Acquire per refresh, read the accessors below, then release.
+ * String results borrow the snapshot and die with it. */
+zz_prefix_snapshot *zz_prefix_snapshot_acquire(const zz_client *client);
+void zz_prefix_snapshot_release(zz_prefix_snapshot *snapshot);
+bool zz_prefix_snapshot_armed(const zz_prefix_snapshot *snapshot);
+size_t zz_prefix_binding_count(const zz_prefix_snapshot *snapshot);
+zz_bytes zz_prefix_binding_key(const zz_prefix_snapshot *snapshot,
+                               size_t binding);
+bool zz_prefix_binding_repeat(const zz_prefix_snapshot *snapshot,
+                              size_t binding);
+zz_bytes zz_prefix_binding_note(const zz_prefix_snapshot *snapshot,
+                                size_t binding);
+/* First bound command as one line (`split-window -h`); empty when unbound. */
+zz_bytes zz_prefix_binding_summary(const zz_prefix_snapshot *snapshot,
+                                   size_t binding);
+
 /* Writes up to capacity terminal pane ids from the attached session;
  * returns the total count. Empty until an attach lands. */
 size_t zz_client_terminal_panes(const zz_client *client, uint64_t *out,
@@ -316,6 +343,85 @@ bool zz_client_agent_respond_permission(zz_client *client, uint64_t pane,
                                         uint64_t request_id,
                                         const char *option_id);
 bool zz_client_agent_cancel(zz_client *client, uint64_t pane);
+
+/* One coalesced agent transcript batch. Pop the oldest with
+ * zz_client_agent_updates_next (NULL when none is queued), read it with the
+ * accessors below, then free it with zz_agent_updates_release. Each item is
+ * one daemon JSON stream item; zz_agent_updates_first_seq numbers the first.
+ * Item bytes are borrowed from the batch and die with it. */
+typedef struct zz_agent_updates zz_agent_updates;
+
+zz_agent_updates *zz_client_agent_updates_next(zz_client *client);
+void zz_agent_updates_release(zz_agent_updates *updates);
+uint64_t zz_agent_updates_pane(const zz_agent_updates *updates);
+uint64_t zz_agent_updates_first_seq(const zz_agent_updates *updates);
+size_t zz_agent_updates_item_count(const zz_agent_updates *updates);
+zz_bytes zz_agent_updates_item_bytes(const zz_agent_updates *updates,
+                                     size_t index);
+
+/* Pop the oldest agent-lane overflow notice into the out pointers. The daemon
+ * cleared the pane's lane from next_seq; answer with zz_client_agent_replay
+ * from the shell's cursor. */
+bool zz_client_agent_lagged_next(zz_client *client, uint64_t *pane_out,
+                                 uint64_t *next_seq_out);
+
+/* Ask the daemon to replay a pane's agent stream from from_seq, inclusively,
+ * then tail it. Send on a journal gap, a lane overflow, and when a pane's
+ * view goes live without a cursor. */
+bool zz_client_agent_replay(zz_client *client, uint64_t pane,
+                            uint64_t from_seq);
+
+/* One agent session-list reply. Pop the oldest with
+ * zz_client_agent_sessions_next (NULL when none is queued), read it with the
+ * accessors below, then free it with zz_agent_sessions_release. The result is
+ * the daemon's JSON reply: a sessionsListed payload on success, a
+ * sessionListFailed one after a rejected list request. Result bytes are
+ * borrowed from the reply and die with it. */
+typedef struct zz_agent_sessions zz_agent_sessions;
+
+zz_agent_sessions *zz_client_agent_sessions_next(zz_client *client);
+void zz_agent_sessions_release(zz_agent_sessions *reply);
+uint64_t zz_agent_sessions_pane(const zz_agent_sessions *reply);
+uint64_t zz_agent_sessions_request_id(const zz_agent_sessions *reply);
+zz_bytes zz_agent_sessions_result(const zz_agent_sessions *reply);
+
+/* The pane's raw session-config JSON blob: an array of ACP
+ * SessionConfigOption values (model, thoughtLevel, and mode categories drive
+ * the pickers). Empty when the adapter published none. */
+zz_bytes zz_agent_config_options(const zz_agent_state *state);
+
+/* The pane's raw legacy session-mode JSON blob (SessionModeState), used only
+ * when the adapter publishes no config options. Empty when absent. */
+zz_bytes zz_agent_modes(const zz_agent_state *state);
+
+/* Set one session config option (model, effort, permission mode) by id. */
+bool zz_client_agent_set_config_option(zz_client *client, uint64_t pane,
+                                       const char *option_id,
+                                       const char *value);
+
+/* Set the pane's legacy session mode by id. Adapters with config options
+ * ignore this; it exists for adapters that only publish modes. */
+bool zz_client_agent_set_mode(zz_client *client, uint64_t pane,
+                              const char *mode_id);
+
+/* Ask the daemon to list the pane's agent sessions across every project. The
+ * answer arrives as ZZ_EVENT_AGENT_SESSIONS. */
+bool zz_client_agent_list_sessions(zz_client *client, uint64_t pane);
+
+/* Start a new agent session in the pane with cwd as its working directory.
+ * The path must be absolute. */
+bool zz_client_agent_new_session(zz_client *client, uint64_t pane,
+                                 const char *cwd);
+
+/* Switch the pane to a listed agent session. additional_directories_json is a
+ * JSON array of absolute paths and may be NULL for none. */
+bool zz_client_agent_switch_session(zz_client *client, uint64_t pane,
+                                    const char *session_id, const char *cwd,
+                                    const char *additional_directories_json);
+
+/* Delete a listed agent session by id. */
+bool zz_client_agent_delete_session(zz_client *client, uint64_t pane,
+                                    const char *session_id);
 
 zz_clipboard *zz_client_clipboard_next(zz_client *client);
 void zz_clipboard_release(zz_clipboard *clipboard);

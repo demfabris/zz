@@ -4,7 +4,11 @@ corpus: none
 # than the live option; the right step window_copy_cursor_jump_to_back takes
 # after a jump, which is allowed the emacs one-past column; and the scroll_only
 # row shift in window_copy_cursor_up and _down, which needs a scrolled revision
-# to show at all.
+# to show at all. Plus the tail of window_copy_command itself: the clear class
+# the command table gives every name, read against the live option, which drops
+# the search marks, the count and the incremental origin together; and the
+# emacs branch in window_copy_get_selection, which stops one cell short of the
+# cell the cursor stands on.
 stage: fixtures/copy-mode-mode-keys-tail.sh ~/copy-mode-mode-keys-tail.sh
 stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
 out: set-environment -gu COPY_MODE_MODE_KEYS_TAIL

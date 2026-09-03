@@ -7019,7 +7019,7 @@ fn apply_view_action(
                 || format_selection_text(terminal),
                 |mode| {
                     Ok(mode.selection.map_or_else(String::new, |selection| {
-                        mode.revision.format_selection(selection)
+                        mode.revision.format_selection(selection, mode_keys_vi)
                     }))
                 },
             )?;
@@ -7245,12 +7245,15 @@ fn mode_cursor_word(
         return None;
     }
     let (anchor, focus) = mode_word_bounds(revision, point, word_separators);
-    let text = revision.format_selection(ModeSelection {
-        anchor,
-        focus,
-        mode: SelectionMode::Word,
-        rectangle: false,
-    });
+    let text = revision.format_selection(
+        ModeSelection {
+            anchor,
+            focus,
+            mode: SelectionMode::Word,
+            rectangle: false,
+        },
+        true,
+    );
     (!text.is_empty()).then_some(text)
 }
 
@@ -8594,6 +8597,12 @@ fn apply_copy_mode_action(
         return Ok(ViewActionResult::None);
     };
 
+    if mode.search_marks && action.clears_search_marks(mode_keys_vi) {
+        mode.search_marks = false;
+        mode.search_count = None;
+        mode.incremental_origin = None;
+    }
+
     match action {
         ref movement @ (CopyModeAction::Left
         | CopyModeAction::Right
@@ -8833,7 +8842,7 @@ fn apply_copy_mode_action(
             Ok(ViewActionResult::Snapshot)
         }
         CopyModeAction::SelectLine => {
-            select_copy_mode_lines(&mut mode, 1);
+            select_copy_mode_lines(&mut mode, 1, mode_keys_vi);
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
@@ -8926,7 +8935,7 @@ fn apply_copy_mode_action(
         CopyModeAction::CopySelection(copy) => {
             let copy = *copy;
             let text = mode.selection.map_or_else(String::new, |selection| {
-                mode.revision.format_selection(selection)
+                mode.revision.format_selection(selection, mode_keys_vi)
             });
             let view_changed = copy.clear_selection || copy.cancel;
             if copy.cancel {
@@ -8951,7 +8960,7 @@ fn apply_copy_mode_action(
             })))
         }
         CopyModeAction::CopyEndOfLine(copy) => {
-            select_copy_mode_to_line_end(&mut mode, 1);
+            select_copy_mode_to_line_end(&mut mode, 1, mode_keys_vi);
             *copy_mode = Some(mode);
             apply_copy_mode_action(
                 terminal,
@@ -8964,7 +8973,7 @@ fn apply_copy_mode_action(
             )
         }
         CopyModeAction::CopyLine(copy) => {
-            select_copy_mode_whole_line(&mut mode, 1);
+            select_copy_mode_whole_line(&mut mode, 1, mode_keys_vi);
             *copy_mode = Some(mode);
             apply_copy_mode_action(
                 terminal,
@@ -8999,7 +9008,7 @@ fn apply_copy_mode_action(
     }
 }
 
-fn select_copy_mode_to_line_end(mode: &mut CopyModeState, count: u32) {
+fn select_copy_mode_to_line_end(mode: &mut CopyModeState, count: u32, mode_keys_vi: bool) {
     if count == 0 {
         return;
     }
@@ -9011,7 +9020,7 @@ fn select_copy_mode_to_line_end(mode: &mut CopyModeState, count: u32) {
     mode.selection = Some(ModeSelection {
         anchor: mode.cursor,
         focus: PointCoordinate {
-            x: revision_copy_line_end(&mode.revision, focus_y),
+            x: copy_cursor_limit(&mode.revision, focus_y, mode_keys_vi, false),
             y: focus_y,
         },
         mode: SelectionMode::Cell,
@@ -9077,7 +9086,7 @@ fn apply_counted_copy_mode_action(
             let Some(mode) = copy_mode.as_mut() else {
                 return Ok(ViewActionResult::None);
             };
-            select_copy_mode_lines(mode, count);
+            select_copy_mode_lines(mode, count, mode_keys_vi);
             Ok(ViewActionResult::Snapshot)
         }
         CopyModeCountPolicy::CopyEndOfLine => {
@@ -9087,7 +9096,7 @@ fn apply_counted_copy_mode_action(
             let Some(mut mode) = copy_mode.take() else {
                 return Ok(ViewActionResult::None);
             };
-            select_copy_mode_to_line_end(&mut mode, count);
+            select_copy_mode_to_line_end(&mut mode, count, mode_keys_vi);
             *copy_mode = Some(mode);
             apply_copy_mode_action(
                 terminal,
@@ -9106,7 +9115,7 @@ fn apply_counted_copy_mode_action(
             let Some(mut mode) = copy_mode.take() else {
                 return Ok(ViewActionResult::None);
             };
-            select_copy_mode_whole_line(&mut mode, count);
+            select_copy_mode_whole_line(&mut mode, count, mode_keys_vi);
             *copy_mode = Some(mode);
             apply_copy_mode_action(
                 terminal,
@@ -9125,7 +9134,7 @@ fn apply_counted_copy_mode_action(
 /// cursor to the start of its logical line, `np - 1` rows down, then the end of
 /// that logical line. The cursor itself is left alone, because the pin puts
 /// `cx`, `cy` and `oy` back after the copy.
-fn select_copy_mode_whole_line(mode: &mut CopyModeState, count: u32) {
+fn select_copy_mode_whole_line(mode: &mut CopyModeState, count: u32, mode_keys_vi: bool) {
     if count == 0 {
         return;
     }
@@ -9135,7 +9144,11 @@ fn select_copy_mode_whole_line(mode: &mut CopyModeState, count: u32) {
         .y
         .saturating_add(count.saturating_sub(1))
         .min(mode.revision.total_rows().saturating_sub(1));
-    let (_, focus) = mode_logical_line_bounds(&mode.revision, row);
+    let (_, end) = mode_logical_line_bounds(&mode.revision, row);
+    let focus = PointCoordinate {
+        x: copy_cursor_limit(&mode.revision, end.y, mode_keys_vi, false),
+        y: end.y,
+    };
     mode.selection_mode = CopySelectionMode::Char;
     mode.selection = Some(ModeSelection {
         anchor,
@@ -9146,7 +9159,7 @@ fn select_copy_mode_whole_line(mode: &mut CopyModeState, count: u32) {
     mode.selecting = true;
 }
 
-fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32) {
+fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32, mode_keys_vi: bool) {
     if count == 0 {
         return;
     }
@@ -9163,6 +9176,7 @@ fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32) {
         }
         focus = next_focus;
     }
+    focus.x = copy_cursor_limit(&mode.revision, focus.y, mode_keys_vi, false);
     mode.cursor = PointCoordinate {
         x: revision_copy_line_end(&mode.revision, focus.y),
         y: focus.y,
@@ -11346,11 +11360,10 @@ fn run_copy_mode_search(
     }
 
     let regex = spec.regex && spec.text.contains(|c| "^$*+()?[].\\".contains(c));
-    let visible_only = mode.search_marks
-        && mode
-            .search
-            .as_ref()
-            .is_some_and(|previous| previous.text == spec.text && previous.regex == spec.regex);
+    let visible_only = mode
+        .search
+        .as_ref()
+        .is_some_and(|previous| previous.text == spec.text && previous.regex == spec.regex);
     if !visible_only && mode.search_marks {
         mode.search_marks = false;
         mode.search_count = None;
@@ -17823,24 +17836,30 @@ mod tests {
         let two = row_with('t');
 
         assert_eq!(
-            revision.format_selection(ModeSelection {
-                anchor: PointCoordinate { x: 0, y: one },
-                focus: PointCoordinate { x: 6, y: two },
-                mode: SelectionMode::Cell,
-                rectangle: false,
-            }),
+            revision.format_selection(
+                ModeSelection {
+                    anchor: PointCoordinate { x: 0, y: one },
+                    focus: PointCoordinate { x: 6, y: two },
+                    mode: SelectionMode::Cell,
+                    rectangle: false,
+                },
+                true,
+            ),
             "  one\n\n    two"
         );
         assert_eq!(
-            revision.format_selection(ModeSelection {
-                anchor: PointCoordinate { x: 0, y: one },
-                focus: PointCoordinate {
-                    x: revision.columns - 1,
-                    y: one,
+            revision.format_selection(
+                ModeSelection {
+                    anchor: PointCoordinate { x: 0, y: one },
+                    focus: PointCoordinate {
+                        x: revision.columns - 1,
+                        y: one,
+                    },
+                    mode: SelectionMode::Line,
+                    rectangle: false,
                 },
-                mode: SelectionMode::Line,
-                rectangle: false,
-            }),
+                true,
+            ),
             "  one\n"
         );
     }
@@ -17860,12 +17879,15 @@ mod tests {
             .expect("wrapped row");
         assert!(revision.row(first).wrapped());
         assert_eq!(
-            revision.format_selection(ModeSelection {
-                anchor: PointCoordinate { x: 0, y: first },
-                focus: PointCoordinate { x: 2, y: first + 1 },
-                mode: SelectionMode::Cell,
-                rectangle: false,
-            }),
+            revision.format_selection(
+                ModeSelection {
+                    anchor: PointCoordinate { x: 0, y: first },
+                    focus: PointCoordinate { x: 2, y: first + 1 },
+                    mode: SelectionMode::Cell,
+                    rectangle: false,
+                },
+                true,
+            ),
             "ab  cdef"
         );
 
@@ -17884,13 +17906,28 @@ mod tests {
             .find(|row| revision.first_char(PointCoordinate { x: 0, y: *row }) == Some('c'))
             .expect("second rectangle row");
         assert_eq!(
-            revision.format_selection(ModeSelection {
-                anchor: PointCoordinate { x: 1, y: first },
-                focus: PointCoordinate { x: 3, y: second },
-                mode: SelectionMode::Cell,
-                rectangle: true,
-            }),
+            revision.format_selection(
+                ModeSelection {
+                    anchor: PointCoordinate { x: 1, y: first },
+                    focus: PointCoordinate { x: 3, y: second },
+                    mode: SelectionMode::Cell,
+                    rectangle: true,
+                },
+                true,
+            ),
             "b  \n   "
+        );
+        assert_eq!(
+            revision.format_selection(
+                ModeSelection {
+                    anchor: PointCoordinate { x: 1, y: first },
+                    focus: PointCoordinate { x: 3, y: second },
+                    mode: SelectionMode::Cell,
+                    rectangle: true,
+                },
+                false,
+            ),
+            "b \n  "
         );
     }
 
@@ -17950,7 +17987,7 @@ mod tests {
                 cancel: false,
             }),
             &WordSeparators::default(),
-            false,
+            true,
         )
         .expect("copy");
         let ViewActionResult::Copy(copy) = result else {

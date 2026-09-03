@@ -251,7 +251,140 @@ for keys in vi emacs; do
     X cancel
 done
 
-if [ "$check_count" -ne 22 ]; then
+
+# window_copy_command's tail: after every command whose name does not start
+# with `search-`, the marks a search laid down are dropped per the command
+# table's clear class, read against the live mode-keys, and searchx/searchy go
+# back to -1. The clear class is CLEAR_ALWAYS for 52 names, CLEAR_EMACS_ONLY
+# for 36 and CLEAR_NEVER for 7. cursor-down is emacs-only, begin-selection and
+# back-to-indentation are always, toggle-position is never. Losing the marks
+# also re-latches the incremental origin, and the re-lay a following search of
+# the same string does is visible-only, which leaves the count unset.
+main_client new-window -t "=$session" -n search cat
+spane="$(main_client list-panes -t "=$session:search" -F '#{pane_id}' | head -n 1)"
+
+await_search_output() {
+    attempt=0
+    while [ "$attempt" -lt 400 ]; do
+        if main_client capture-pane -p -t "$spane" 2>/dev/null | grep -q "$1"; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.05
+    done
+    record_failure "await-search-output-$1"
+    return 1
+}
+
+S() {
+    main_client send-keys -t "$spane" -X "$@"
+}
+
+marks() {
+    main_client display-message -p -t "$spane" \
+        '#{copy_cursor_x},#{copy_cursor_y}|#{search_present}|#{search_match}|#{search_count}|#{search_count_partial}|#{search_timed_out}'
+}
+
+# save-buffer writes the bytes; show-buffer does not, because zz's CLI ends
+# the buffer with a newline the pin does not add.
+buffered() {
+    rm -f "$work/copied"
+    main_client save-buffer "$work/copied"
+    tr '\n' '/' <"$work/copied"
+}
+
+printf 'alpha beta gamma\ndelta alpha epsilon\nzeta alpha\n' >"$work/search.txt"
+main_client load-buffer -b cmtail4 "$work/search.txt"
+main_client paste-buffer -b cmtail4 -t "$spane"
+await_search_output 'zeta alpha' || { echo "copy-mode-mode-keys-tail-$side: search-output"; exit 0; }
+
+for keys in vi emacs; do
+    main_client set-window-option -t "=$session:search" mode-keys "$keys"
+    if [ "$keys" = vi ]; then
+        found='6,1|1|alpha|6|0|0'
+        after_down='6,2|1|alpha|6|0|0'
+        after_again='0,3|1|alpha|6|0|0'
+        after_begin='0,3|0||||0'
+        after_toggle='6,1|1|alpha|6|0|0'
+        after_indent='0,1|0||||0'
+        inc_first='6,1|1|alpha|6|0|0'
+        inc_moved='6,4|1|alpha|6|0|0'
+        inc_again='0,2|1|zeta|2|0|0'
+        plain='alpha'
+        rectangle='alpha/delta'
+    else
+        found='5,0|1|alpha|6|0|0'
+        after_down='5,1|0||||0'
+        after_again='11,1|1|alpha|||0'
+        after_begin='11,1|0||||0'
+        after_toggle='5,0|1|alpha|6|0|0'
+        after_indent='0,0|0||||0'
+        inc_first='5,0|1|alpha|6|0|0'
+        inc_moved='5,3|0||||0'
+        inc_again='4,5|1|zeta|2|0|0'
+        plain='alph'
+        rectangle='alph/delt'
+    fi
+
+    main_client copy-mode -t "$spane"
+    S history-top
+    S search-forward alpha
+    check_equal "$keys-marks-after-the-first-search" "$found" "$(marks)"
+    S cursor-down
+    check_equal "$keys-marks-after-an-emacs-only-command" "$after_down" "$(marks)"
+    S search-again
+    check_equal "$keys-marks-relaid-without-a-count" "$after_again" "$(marks)"
+    S begin-selection
+    check_equal "$keys-marks-after-an-always-command" "$after_begin" "$(marks)"
+    S cancel
+
+    main_client copy-mode -t "$spane"
+    S history-top
+    S search-forward alpha
+    S toggle-position
+    check_equal "$keys-marks-after-a-never-command" "$after_toggle" "$(marks)"
+    S back-to-indentation
+    check_equal "$keys-marks-after-back-to-indentation" "$after_indent" "$(marks)"
+    S cancel
+
+    main_client copy-mode -t "$spane"
+    S history-top
+    S search-forward-incremental '=alpha'
+    check_equal "$keys-incremental-origin-latched" "$inc_first" "$(marks)"
+    S cursor-down
+    S cursor-down
+    S cursor-down
+    check_equal "$keys-incremental-origin-after-the-moves" "$inc_moved" "$(marks)"
+    S search-forward-incremental '=zeta'
+    check_equal "$keys-incremental-origin-relatched" "$inc_again" "$(marks)"
+    S cancel
+
+    main_client copy-mode -t "$spane"
+    S history-top
+    S begin-selection
+    S cursor-right
+    S cursor-right
+    S cursor-right
+    S cursor-right
+    S copy-selection
+    check_equal "$keys-selection-keeps-or-drops-the-focus-cell" "$plain" "$(buffered)"
+    S cancel
+
+    main_client copy-mode -t "$spane"
+    S history-top
+    S rectangle-on
+    S begin-selection
+    S cursor-right
+    S cursor-right
+    S cursor-right
+    S cursor-right
+    S cursor-down
+    S copy-selection
+    check_equal "$keys-rectangle-keeps-or-drops-the-cursor-column" "$rectangle" "$(buffered)"
+    S cancel
+done
+
+if [ "$check_count" -ne 44 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then

@@ -408,6 +408,18 @@ pub enum CopyModeAction {
     Search(Box<CopyModeSearch>),
 }
 
+/// `window_copy_cmd_table`'s `clear` column, which `window_copy_command` reads
+/// after every command whose name does not begin with `search-`: the marks a
+/// search laid down go away, and `data->searchx`/`searchy` go back to -1, for
+/// 52 names always, for 36 more only under emacs, and never for the remaining
+/// seven.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyModeClear {
+    Always,
+    EmacsOnly,
+    Never,
+}
+
 /// The pin's `selflag`: the unit a live selection extends by.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CopySelectionMode {
@@ -437,6 +449,120 @@ impl CopyModeAction {
     #[must_use]
     pub fn copy_end_of_line(copy: CopyModeCopy) -> Self {
         Self::CopyEndOfLine(Box::new(copy))
+    }
+
+    /// `window_copy_command` compares the name against `search-` before it
+    /// reads the clear column at all, so the six search entry points and
+    /// `search-again`/`search-reverse` leave the marks they just laid down
+    /// alone. zz's own `search-forward-cursor-word` spelling shares the prefix.
+    #[must_use]
+    pub fn is_search_command(&self) -> bool {
+        matches!(
+            self,
+            Self::Search(_) | Self::SearchAgain { .. } | Self::SearchCursorWord { .. }
+        )
+    }
+
+    /// Whether running this action drops `data->searchmark` and puts
+    /// `data->searchx`/`searchy` back to -1, which is the tail of
+    /// `window_copy_command` read against the live `mode-keys`.
+    #[must_use]
+    pub fn clears_search_marks(&self, mode_keys_vi: bool) -> bool {
+        if self.is_search_command() {
+            return false;
+        }
+        match self.clear_class() {
+            CopyModeClear::Always => true,
+            CopyModeClear::EmacsOnly => !mode_keys_vi,
+            CopyModeClear::Never => false,
+        }
+    }
+
+    /// The row this action's pinned name holds in `window_copy_cmd_table`.
+    /// `copy-selection-no-clear`, `copy-pipe-no-clear` and `pipe-no-clear` are
+    /// the three copy spellings that leave the marks alone, and they are the
+    /// three that neither clear the selection nor cancel.
+    #[must_use]
+    pub fn clear_class(&self) -> CopyModeClear {
+        match self {
+            Self::Left
+            | Self::Right
+            | Self::Up
+            | Self::Down
+            | Self::PageUp
+            | Self::PageDown
+            | Self::HalfPageUp
+            | Self::HalfPageDown
+            | Self::Top
+            | Self::Bottom
+            | Self::TopLine
+            | Self::MiddleLine
+            | Self::BottomLine
+            | Self::StartOfLine
+            | Self::EndOfLine
+            | Self::NextWord
+            | Self::PreviousWord
+            | Self::NextWordEnd
+            | Self::NextSpace
+            | Self::PreviousSpace
+            | Self::NextSpaceEnd
+            | Self::NextParagraph
+            | Self::PreviousParagraph
+            | Self::OtherEnd
+            | Self::ScrollUp
+            | Self::ScrollDown
+            | Self::CursorCentreVertical
+            | Self::CursorCentreHorizontal
+            | Self::GotoLine(_)
+            | Self::Jump(_)
+            | Self::RepeatJump { .. } => CopyModeClear::EmacsOnly,
+            Self::TogglePosition
+            | Self::RefreshOn
+            | Self::RefreshOff
+            | Self::RefreshToggle
+            | Self::RefreshRevision
+            | Self::SearchCursorWord { .. } => CopyModeClear::Never,
+            Self::CopySelection(copy) => {
+                if copy.clear_selection || copy.cancel {
+                    CopyModeClear::Always
+                } else {
+                    CopyModeClear::Never
+                }
+            }
+            Self::BackToIndentation
+            | Self::NextPrompt { .. }
+            | Self::PreviousPrompt { .. }
+            | Self::SearchAgain { .. }
+            | Self::Search(_)
+            | Self::StartSelection
+            | Self::SelectWord
+            | Self::SelectLine
+            | Self::ClearSelection
+            | Self::ClearSelectionOrCancel
+            | Self::ToggleRectangle
+            | Self::RectangleOn
+            | Self::RectangleOff
+            | Self::SetMark
+            | Self::JumpToMark
+            | Self::Cancel
+            | Self::ScrollMiddle
+            | Self::ScrollTop
+            | Self::ScrollBottom
+            | Self::NextMatchingBracket
+            | Self::PreviousMatchingBracket
+            | Self::RecentreTopBottom
+            | Self::CopyEndOfLine(_)
+            | Self::CopyLine(_)
+            | Self::PageDownScrollExit
+            | Self::HalfPageDownScrollExit
+            | Self::ScrollDownAndCancel
+            | Self::CursorDownAndCancel
+            | Self::SelectionMode(_)
+            | Self::StopSelection
+            | Self::ScrollExitOn
+            | Self::ScrollExitOff
+            | Self::ScrollExitToggle => CopyModeClear::Always,
+        }
     }
 
     #[must_use]

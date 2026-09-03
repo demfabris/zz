@@ -451,58 +451,168 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertEqual(ZZAgentToolLocation.parse(["path": "/a/b"])?.line, nil)
     }
 
-    func testAgentMarkdownParsesListsAndHeadings() {
-        let segments = ZZAgentMarkdown.segments(
-            "## Plan\n- Simple\n- Valid\n\n1. First\n2. Second\ntail prose"
-        )
-        XCTAssertEqual(segments.map(\.kind), [
+    func testMarkdownParsesHeadingsListsAndParagraphs() {
+        let blocks = ZZAgentMarkdown.blocks(
+            "## Plan\n\nlead in\n\n- Simple\n- Valid\n\n1. First\n2. Second"
+        ).map(\.block)
+
+        XCTAssertEqual(blocks, [
             .heading(level: 2, text: "Plan"),
-            .bullets(["Simple", "Valid"]),
-            .numbered(["First", "Second"]),
-            .prose("tail prose"),
+            .paragraph("lead in"),
+            .list(ZZMarkdownList(ordered: false, start: 1, items: [
+                ZZMarkdownListItem(checked: nil, blocks: [.paragraph("Simple")]),
+                ZZMarkdownListItem(checked: nil, blocks: [.paragraph("Valid")]),
+            ])),
+            .list(ZZMarkdownList(ordered: true, start: 1, items: [
+                ZZMarkdownListItem(checked: nil, blocks: [.paragraph("First")]),
+                ZZMarkdownListItem(checked: nil, blocks: [.paragraph("Second")]),
+            ])),
         ])
     }
 
-    func testAgentMarkdownLeavesNonListDashesAlone() {
-        // A bare dash with no space is not a list marker, and neither is a
-        // hash without one.
-        XCTAssertEqual(
-            ZZAgentMarkdown.segments("-notalist").map(\.kind),
-            [.prose("-notalist")]
-        )
-        XCTAssertEqual(
-            ZZAgentMarkdown.segments("#hashtag").map(\.kind),
-            [.prose("#hashtag")]
-        )
-        XCTAssertEqual(
-            ZZAgentMarkdown.segments("3.14 is pi").map(\.kind),
-            [.prose("3.14 is pi")]
-        )
+    func testMarkdownKeepsAdjacentFencesApart() {
+        // The failure this replaced: a second fenced block's contents leaked
+        // out as prose because fence tracking drifted between two blocks.
+        let blocks = ZZAgentMarkdown.blocks(
+            """
+            intro
+
+            ```md
+            # Notes
+            ```
+
+            ```rust
+            fn main() {}
+            ```
+
+            outro
+            """
+        ).map(\.block)
+
+        XCTAssertEqual(blocks, [
+            .paragraph("intro"),
+            .code(language: "md", code: "# Notes"),
+            .code(language: "rust", code: "fn main() {}"),
+            .paragraph("outro"),
+        ])
     }
 
-    func testAgentMarkdownSplitsFencedCodeFromProse() {
-        let segments = ZZAgentMarkdown.segments(
-            "Here is a fix:\n```swift\nlet x = 1\n```\nDone."
-        )
-        XCTAssertEqual(segments.count, 3)
-        XCTAssertEqual(segments[0].kind, .prose("Here is a fix:"))
-        XCTAssertEqual(segments[1].kind, .code(language: "swift", code: "let x = 1"))
-        XCTAssertEqual(segments[2].kind, .prose("Done."))
+    func testMarkdownHonorsLongerFencesAroundInnerOnes() {
+        // A four-backtick fence closes only on four; the inner three-backtick
+        // fence is content, not a delimiter.
+        let source = "````md\n```swift\nlet x = 1\n```\n````\nafter"
+        let blocks = ZZAgentMarkdown.blocks(source).map(\.block)
+
+        XCTAssertEqual(blocks, [
+            .code(language: "md", code: "```swift\nlet x = 1\n```"),
+            .paragraph("after"),
+        ])
     }
 
-    func testAgentMarkdownTreatsAnOpenFenceAsCodeWhileStreaming() {
+    func testMarkdownFenceWithInfoStringNeverClosesAnOuterBlock() {
+        // Agents demonstrating markdown nest a language fence inside an `md`
+        // one. A closing fence may carry no info string, so ```python is
+        // content and the following bare ``` closes the outer block.
+        let source = "```md\n## Title\n\n```python\nx = 1\n```\n\nafter"
+        let blocks = ZZAgentMarkdown.blocks(source).map(\.block)
+
+        XCTAssertEqual(blocks, [
+            .code(language: "md", code: "## Title\n\n```python\nx = 1"),
+            .paragraph("after"),
+        ])
+    }
+
+    func testMarkdownTreatsAnOpenFenceAsCodeWhileStreaming() {
         // A block still arriving has no closing fence yet; it must not flash
         // as prose until one lands.
-        let segments = ZZAgentMarkdown.segments("Try:\n```\nnpm test")
-        XCTAssertEqual(segments.count, 2)
-        XCTAssertEqual(segments[0].kind, .prose("Try:"))
-        XCTAssertEqual(segments[1].kind, .code(language: nil, code: "npm test"))
+        let blocks = ZZAgentMarkdown.blocks("Try:\n\n```\nnpm test").map(\.block)
 
-        XCTAssertEqual(
-            ZZAgentMarkdown.segments("just prose"),
-            [ZZAgentMarkdownSegment(id: 0, kind: .prose("just prose"))]
-        )
-        XCTAssertTrue(ZZAgentMarkdown.segments("   \n  ").isEmpty)
+        XCTAssertEqual(blocks, [
+            .paragraph("Try:"),
+            .code(language: nil, code: "npm test"),
+        ])
+    }
+
+    func testMarkdownParsesGFMTablesWithAlignments() {
+        let blocks = ZZAgentMarkdown.blocks(
+            """
+            | Status | Task | Owner |
+            |:-------|:----:|------:|
+            | done | Login flow | Alex |
+            | busy | Billing UI | Maya |
+            """
+        ).map(\.block)
+
+        XCTAssertEqual(blocks.count, 1)
+        guard case let .table(table) = blocks[0] else {
+            return XCTFail("expected a table")
+        }
+        XCTAssertEqual(table.head, ["Status", "Task", "Owner"])
+        XCTAssertEqual(table.rows, [
+            ["done", "Login flow", "Alex"],
+            ["busy", "Billing UI", "Maya"],
+        ])
+        XCTAssertEqual(table.columnCount, 3)
+        XCTAssertEqual(table.alignment(0), .leading)
+        XCTAssertEqual(table.alignment(1), .center)
+        XCTAssertEqual(table.alignment(2), .trailing)
+        // Past the last column the table answers rather than trapping.
+        XCTAssertEqual(table.alignment(9), .unspecified)
+        XCTAssertEqual(table.cell(row: table.head, column: 9), "")
+    }
+
+    func testMarkdownParsesTaskListsQuotesAndBreaks() {
+        let blocks = ZZAgentMarkdown.blocks(
+            """
+            - [x] Set up repo
+            - [ ] Ship MVP
+
+            > Tip: automate deployment next.
+
+            ---
+            """
+        ).map(\.block)
+
+        XCTAssertEqual(blocks, [
+            .list(ZZMarkdownList(ordered: false, start: 1, items: [
+                ZZMarkdownListItem(checked: true, blocks: [.paragraph("Set up repo")]),
+                ZZMarkdownListItem(checked: false, blocks: [.paragraph("Ship MVP")]),
+            ])),
+            .quote([.paragraph("Tip: automate deployment next.")]),
+            .thematicBreak,
+        ])
+    }
+
+    func testMarkdownKeepsInlineSyntaxForTheTextRenderer() {
+        // Inline styling is `AttributedString`'s job, so the block model hands
+        // it the source rather than flattening it.
+        let blocks = ZZAgentMarkdown.blocks("Keep config in one `config.toml`").map(\.block)
+        XCTAssertEqual(blocks, [.paragraph("Keep config in one `config.toml`")])
+
+        let styled = ZZAgentMarkdown.inline("a **bold** word")
+        XCTAssertEqual(String(styled.characters), "a bold word")
+    }
+
+    func testMarkdownNestsListsAndOrdersFromTheirStart() {
+        let blocks = ZZAgentMarkdown.blocks(
+            """
+            3. third
+            4. fourth
+               - nested
+            """
+        ).map(\.block)
+
+        XCTAssertEqual(blocks, [
+            .list(ZZMarkdownList(ordered: true, start: 3, items: [
+                ZZMarkdownListItem(checked: nil, blocks: [.paragraph("third")]),
+                ZZMarkdownListItem(checked: nil, blocks: [
+                    .paragraph("fourth"),
+                    .list(ZZMarkdownList(ordered: false, start: 1, items: [
+                        ZZMarkdownListItem(checked: nil, blocks: [.paragraph("nested")]),
+                    ])),
+                ]),
+            ])),
+        ])
     }
 
     func testAgentThreadRevisionAndSubmittedTurnsAdvance() {

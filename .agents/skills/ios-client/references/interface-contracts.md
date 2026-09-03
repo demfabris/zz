@@ -132,8 +132,12 @@ Agent panes, settings, reconnect presentation, or accessibility.
   streamed batch must not invalidate views for other panes, so keep it off `ZZStore`'s `@Published`
   surface.
 - Agent prose renders as full-width markdown, not a chat bubble: only the user's own turns get one.
-  Fenced code becomes a scrollable monospaced block, and a fence still streaming renders as code
-  before its closing fence arrives.
+  Block structure comes from the pinned `swift-markdown` package; walk its tree into the app's block
+  model rather than scanning lines, which cannot carry fence lengths, nesting, or GFM tables. Inline
+  syntax stays with `AttributedString`, and inline source must be read from a detached copy of a
+  node's inline children because `format()` inherits quote and list prefixes in place.
+- Keep `Markdown` imported only where the block model is built. It exports names that collide with
+  SwiftUI's, `Table` among them, so view code consumes the app's own types.
 - Tool rows carry the ACP `kind` icon, `title`, and the first `locations` entry as `path:line`. ACP
   replaces `locations` and `content` when present and leaves them alone when absent; preserve that
   merge rule.

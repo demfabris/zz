@@ -2756,27 +2756,8 @@ private struct AgentMessageBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(ZZAgentMarkdown.segments(text)) { segment in
-                switch segment.kind {
-                case let .prose(prose):
-                    Text(ZZAgentMarkdown.inline(prose))
-                        .font(.body)
-                        .lineSpacing(2)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                case let .code(language, code):
-                    AgentCodeBlock(language: language, code: code)
-                case let .bullets(items):
-                    AgentListBlock(items: items, ordered: false)
-                case let .numbered(items):
-                    AgentListBlock(items: items, ordered: true)
-                case let .heading(level, text):
-                    Text(ZZAgentMarkdown.inline(text))
-                        .font(level <= 1 ? .title3.bold() : .headline)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 2)
-                }
+            ForEach(ZZAgentMarkdown.blocks(text)) { node in
+                AgentMarkdownBlockView(block: node.block)
             }
         }
         .accessibilityElement(children: .combine)
@@ -2784,33 +2765,181 @@ private struct AgentMessageBlock: View {
     }
 }
 
+private struct AgentMarkdownBlockView: View {
+    let block: ZZMarkdownBlock
+
+    var body: some View {
+        switch block {
+        case let .paragraph(source):
+            AgentProseBlock(source: source)
+        case let .heading(level, text):
+            AgentHeadingBlock(level: level, text: text)
+        case let .code(language, code):
+            AgentCodeBlock(language: language, code: code)
+        case let .quote(blocks):
+            AgentQuoteBlock(blocks: blocks)
+        case let .list(list):
+            AgentListBlock(list: list)
+        case let .table(table):
+            AgentTableBlock(table: table)
+        case .thematicBreak:
+            Divider()
+                .padding(.vertical, 4)
+        }
+    }
+}
+
+private struct AgentProseBlock: View {
+    let source: String
+
+    var body: some View {
+        Text(ZZAgentMarkdown.inline(source))
+            .font(.body)
+            .lineSpacing(2)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct AgentHeadingBlock: View {
+    let level: Int
+    let text: String
+
+    var body: some View {
+        Text(ZZAgentMarkdown.inline(text))
+            .font(font)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, level <= 2 ? 6 : 2)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private var font: Font {
+        switch level {
+        case 1: .title2.bold()
+        case 2: .title3.bold()
+        case 3: .headline
+        default: .subheadline.weight(.semibold)
+        }
+    }
+}
+
+private struct AgentQuoteBlock: View {
+    let blocks: [ZZMarkdownBlock]
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Capsule()
+                .fill(Color.accentColor.opacity(0.45))
+                .frame(width: 3)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    AgentMarkdownBlockView(block: block)
+                }
+            }
+            .foregroundStyle(.secondary)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 private struct AgentListBlock: View {
-    let items: [String]
-    let ordered: Bool
+    let list: ZZMarkdownList
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+            ForEach(Array(list.items.enumerated()), id: \.offset) { index, item in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(marker(index))
-                        .font(.body)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .frame(minWidth: ordered ? 22 : 12, alignment: .trailing)
-                    Text(ZZAgentMarkdown.inline(item))
-                        .font(.body)
-                        .lineSpacing(2)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    marker(index: index, item: item)
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(item.blocks.enumerated()), id: \.offset) { _, block in
+                            AgentMarkdownBlockView(block: block)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
         .padding(.leading, 2)
-        .accessibilityElement(children: .combine)
     }
 
-    private func marker(_ index: Int) -> String {
-        ordered ? "\(index + 1)." : "•"
+    @ViewBuilder
+    private func marker(index: Int, item: ZZMarkdownListItem) -> some View {
+        if let checked = item.checked {
+            Image(systemName: checked ? "checkmark.square.fill" : "square")
+                .font(.body)
+                .foregroundStyle(checked ? Color.accentColor : Color.secondary)
+                .frame(minWidth: 20, alignment: .leading)
+                .accessibilityLabel(checked ? "Done" : "Not done")
+        } else {
+            Text(list.ordered ? "\(list.start + index)." : "•")
+                .font(.body)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(minWidth: list.ordered ? 22 : 12, alignment: .trailing)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+private struct AgentTableBlock: View {
+    let table: ZZMarkdownTable
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(0..<table.columnCount, id: \.self) { column in
+                        cell(table.cell(row: table.head, column: column), header: true)
+                            .gridColumnAlignment(alignment(column))
+                    }
+                }
+                .background(Color.primary.opacity(0.05))
+
+                ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
+                    Divider()
+                        .opacity(0.4)
+                        .gridCellUnsizedAxes(.horizontal)
+                        .gridCellColumns(table.columnCount)
+                    GridRow {
+                        ForEach(0..<table.columnCount, id: \.self) { column in
+                            cell(table.cell(row: row, column: column), header: false)
+                        }
+                    }
+                }
+            }
+            // The chrome wraps the grid rather than the scroll view, so a
+            // narrow table reads as a tidy card instead of a header fill that
+            // stops short of a full-width border.
+            .background(Color.zzCodeSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AgentMetrics.block, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AgentMetrics.block, style: .continuous)
+                    .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+            }
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Table with \(table.columnCount) columns and \(table.rows.count) rows")
+    }
+
+    private func cell(_ source: String, header: Bool) -> some View {
+        Text(ZZAgentMarkdown.inline(source))
+            .font(header ? .caption.weight(.semibold) : .callout)
+            .foregroundStyle(header ? Color.secondary : Color.primary)
+            .textSelection(.enabled)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(minWidth: 44, alignment: .leading)
+    }
+
+    private func alignment(_ column: Int) -> HorizontalAlignment {
+        switch table.alignment(column) {
+        case .leading, .unspecified: .leading
+        case .center: .center
+        case .trailing: .trailing
+        }
     }
 }
 
@@ -4327,34 +4456,41 @@ private struct TerminalComposer: View {
 }
 
 private extension Color {
+    /// Surfaces are a neutral graphite ramp. They carry no hue of their own so
+    /// the accent colour, terminal palette, and syntax colours are the only
+    /// chroma on screen.
+    ///
+    /// `#0A0A0B` — the window behind every pane.
     static let zzCanvas = Color(
         uiColor: UIColor { traits in
             traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.035, green: 0.04, blue: 0.065, alpha: 1)
-                : UIColor(red: 0.955, green: 0.96, blue: 0.98, alpha: 1)
+                ? UIColor(red: 0.039, green: 0.039, blue: 0.043, alpha: 1)
+                : UIColor(red: 0.969, green: 0.969, blue: 0.973, alpha: 1)
         }
     )
+    /// `#121214` — a pane's own fill, one step up from the canvas.
     static let zzCard = Color(
         uiColor: UIColor { traits in
             traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.07, green: 0.075, blue: 0.105, alpha: 1)
+                ? UIColor(red: 0.071, green: 0.071, blue: 0.078, alpha: 1)
                 : UIColor(red: 1, green: 1, blue: 1, alpha: 1)
         }
     )
-    /// Top of the agent canvas. A flat fill reads as a void behind a long
-    /// transcript; a few percent of lift at the top gives it a horizon.
+    /// `#191A1C` — top of the agent canvas. A flat fill reads as a void behind
+    /// a long transcript; a few percent of lift at the top gives it a horizon.
     static let zzAgentCanvasTop = Color(
         uiColor: UIColor { traits in
             traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.098, green: 0.105, blue: 0.142, alpha: 1)
-                : UIColor(red: 0.988, green: 0.99, blue: 1, alpha: 1)
+                ? UIColor(red: 0.098, green: 0.102, blue: 0.110, alpha: 1)
+                : UIColor(red: 0.988, green: 0.988, blue: 0.992, alpha: 1)
         }
     )
+    /// `#1C1D20` — code blocks and table cards, the highest surface.
     static let zzCodeSurface = Color(
         uiColor: UIColor { traits in
             traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.11, green: 0.12, blue: 0.16, alpha: 1)
-                : UIColor(red: 0.965, green: 0.968, blue: 0.98, alpha: 1)
+                ? UIColor(red: 0.110, green: 0.114, blue: 0.125, alpha: 1)
+                : UIColor(red: 0.961, green: 0.961, blue: 0.969, alpha: 1)
         }
     )
 

@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Markdown
 
 enum ZZPaneKind: UInt32, Sendable {
     case picker = 0
@@ -948,190 +949,164 @@ final class ZZAgentThreadSlot: ObservableObject {
     }
 }
 
-/// One block of agent output: prose, a fenced code block, a list, or a heading.
-struct ZZAgentMarkdownSegment: Identifiable, Equatable, Sendable {
-    enum Kind: Equatable, Sendable {
-        case prose(String)
-        case code(language: String?, code: String)
-        case bullets([String])
-        case numbered([String])
-        case heading(level: Int, text: String)
-    }
-
-    let id: Int
-    let kind: Kind
+/// Alignment of one markdown table column.
+enum ZZMarkdownAlignment: Equatable, Sendable {
+    case leading
+    case center
+    case trailing
+    case unspecified
 }
 
-/// Splits agent text into the blocks the pane renders. `AttributedString`
-/// parses inline markdown (emphasis, code spans, links) but has no block
-/// grammar, so fences, lists, and headings are separated here and only the
-/// leaf text is handed to it.
+struct ZZMarkdownTable: Equatable, Sendable {
+    let alignments: [ZZMarkdownAlignment]
+    let head: [String]
+    let rows: [[String]]
+
+    var columnCount: Int {
+        max(head.count, rows.map(\.count).max() ?? 0)
+    }
+
+    func alignment(_ column: Int) -> ZZMarkdownAlignment {
+        alignments.indices.contains(column) ? alignments[column] : .unspecified
+    }
+
+    func cell(row: [String], column: Int) -> String {
+        row.indices.contains(column) ? row[column] : ""
+    }
+}
+
+struct ZZMarkdownListItem: Equatable, Sendable {
+    /// `nil` when the item is not a task-list item.
+    let checked: Bool?
+    let blocks: [ZZMarkdownBlock]
+}
+
+struct ZZMarkdownList: Equatable, Sendable {
+    let ordered: Bool
+    let start: Int
+    let items: [ZZMarkdownListItem]
+}
+
+/// One block of agent output. Leaf text stays as markdown source so inline
+/// styling (emphasis, code spans, links) can be applied at draw time.
+indirect enum ZZMarkdownBlock: Equatable, Sendable {
+    case paragraph(String)
+    case heading(level: Int, text: String)
+    case code(language: String?, code: String)
+    case quote([ZZMarkdownBlock])
+    case list(ZZMarkdownList)
+    case table(ZZMarkdownTable)
+    case thematicBreak
+}
+
+struct ZZMarkdownNode: Identifiable, Equatable, Sendable {
+    let id: Int
+    let block: ZZMarkdownBlock
+}
+
+/// Agent output parsed into blocks.
+///
+/// Block structure comes from `swift-markdown` (cmark-gfm), which is what the
+/// desktop does with the `markdown` crate: take the parser's tree, render it
+/// yourself. Hand-rolled line scanning cannot carry CommonMark — fence lengths,
+/// nesting, lazy continuation, GFM tables — and drifts out of sync on exactly
+/// the documents agents produce.
+///
+/// Inline syntax stays with `AttributedString`, which handles it natively.
 enum ZZAgentMarkdown: Sendable {
-    /// A fence that opened but has not closed yet still yields a code segment,
-    /// so a block being streamed renders as code from its first line instead
-    /// of flashing as prose until the closing fence arrives.
-    static func segments(_ text: String) -> [ZZAgentMarkdownSegment] {
-        var kinds: [ZZAgentMarkdownSegment.Kind] = []
-        var prose: [Substring] = []
-        var code: [Substring] = []
-        var language: String?
-        var inFence = false
+    static func blocks(_ text: String) -> [ZZMarkdownNode] {
+        let document = Document(parsing: text)
+        return convert(Array(document.children))
+            .enumerated()
+            .map { ZZMarkdownNode(id: $0.offset, block: $0.element) }
+    }
 
-        func flushProse() {
-            let lines = prose
-            prose.removeAll()
-            kinds.append(contentsOf: blocks(in: lines))
+    private static func convert(_ markups: [Markup]) -> [ZZMarkdownBlock] {
+        markups.compactMap(convert)
+    }
+
+    private static func convert(_ markup: Markup) -> ZZMarkdownBlock? {
+        switch markup {
+        case let heading as Heading:
+            return .heading(level: heading.level, text: inlineSource(heading))
+        case let code as CodeBlock:
+            let language = code.language?.trimmingCharacters(in: .whitespaces)
+            return .code(
+                language: (language?.isEmpty == false) ? language : nil,
+                // cmark keeps the block's trailing newline; it would render as
+                // a blank final line.
+                code: String(code.code.reversed().drop { $0 == "\n" }.reversed())
+            )
+        case let quote as BlockQuote:
+            return .quote(convert(Array(quote.children)))
+        case let list as UnorderedList:
+            return .list(
+                ZZMarkdownList(ordered: false, start: 1, items: items(in: list))
+            )
+        case let list as OrderedList:
+            return .list(
+                ZZMarkdownList(
+                    ordered: true,
+                    start: Int(list.startIndex),
+                    items: items(in: list)
+                )
+            )
+        case let table as Table:
+            return .table(convert(table))
+        case is ThematicBreak:
+            return .thematicBreak
+        case let paragraph as Paragraph:
+            return .paragraph(inlineSource(paragraph))
+        default:
+            // HTML blocks, block directives, and anything else the parser knows
+            // but the pane has no representation for: show the source rather
+            // than dropping it.
+            let source = markup.format()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return source.isEmpty ? nil : .paragraph(source)
         }
+    }
 
-        func flushCode() {
-            let joined = code.joined(separator: "\n")
-            code.removeAll()
-            kinds.append(.code(language: language, code: joined))
-            language = nil
+    private static func items(in list: Markup) -> [ZZMarkdownListItem] {
+        list.children.compactMap { $0 as? ListItem }.map { item in
+            ZZMarkdownListItem(
+                checked: item.checkbox.map { $0 == .checked },
+                blocks: convert(Array(item.children))
+            )
         }
+    }
 
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let fence = line.trimmingCharacters(in: .whitespaces)
-            if fence.hasPrefix("```") {
-                if inFence {
-                    flushCode()
-                    inFence = false
-                } else {
-                    flushProse()
-                    let tag = fence.dropFirst(3).trimmingCharacters(in: .whitespaces)
-                    language = tag.isEmpty ? nil : tag
-                    inFence = true
+    private static func convert(_ table: Table) -> ZZMarkdownTable {
+        ZZMarkdownTable(
+            alignments: table.columnAlignments.map { alignment in
+                switch alignment {
+                case .left: .leading
+                case .center: .center
+                case .right: .trailing
+                case nil: .unspecified
                 }
-                continue
+            },
+            head: table.head.children.map(inlineSource),
+            rows: table.body.children.map { row in
+                row.children.map(inlineSource)
             }
-            if inFence {
-                code.append(line)
-            } else {
-                prose.append(line)
-            }
-        }
-        if inFence {
-            flushCode()
-        } else {
-            flushProse()
-        }
-        return kinds.enumerated().map {
-            ZZAgentMarkdownSegment(id: $0.offset, kind: $0.element)
-        }
+        )
     }
 
-    /// Group a fence-free run into headings, list runs, and paragraphs.
-    private static func blocks(
-        in lines: [Substring]
-    ) -> [ZZAgentMarkdownSegment.Kind] {
-        var kinds: [ZZAgentMarkdownSegment.Kind] = []
-        var paragraph: [Substring] = []
-        var bullets: [String] = []
-        var numbered: [String] = []
-
-        func flushParagraph() {
-            let joined = paragraph.joined(separator: "\n")
-            paragraph.removeAll()
-            guard !joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return
-            }
-            kinds.append(.prose(joined))
+    /// The markdown source of a node's inline children, so heading hashes and
+    /// list markers do not survive into the rendered text.
+    ///
+    /// `format()` is ancestor-aware: formatting a paragraph where it sits
+    /// carries its block-quote or list prefix into the text. Formatting a
+    /// detached copy of just the inline children yields the leaf source.
+    private static func inlineSource(_ markup: Markup) -> String {
+        let inlines = markup.children.compactMap { $0 as? InlineMarkup }
+        guard !inlines.isEmpty else {
+            return ""
         }
-
-        func flushLists() {
-            if !bullets.isEmpty {
-                kinds.append(.bullets(bullets))
-                bullets.removeAll()
-            }
-            if !numbered.isEmpty {
-                kinds.append(.numbered(numbered))
-                numbered.removeAll()
-            }
-        }
-
-        for line in lines {
-            if let heading = heading(in: line) {
-                flushParagraph()
-                flushLists()
-                kinds.append(heading)
-                continue
-            }
-            if let item = bulletItem(in: line) {
-                flushParagraph()
-                if !numbered.isEmpty {
-                    flushLists()
-                }
-                bullets.append(item)
-                continue
-            }
-            if let item = numberedItem(in: line) {
-                flushParagraph()
-                if !bullets.isEmpty {
-                    flushLists()
-                }
-                numbered.append(item)
-                continue
-            }
-            // A blank line closes a list run; text after one continues it as
-            // a new paragraph rather than joining the list.
-            if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                flushLists()
-            } else {
-                flushLists()
-            }
-            paragraph.append(line)
-        }
-        flushParagraph()
-        flushLists()
-        return kinds
-    }
-
-    private static func heading(in line: Substring) -> ZZAgentMarkdownSegment.Kind? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        let hashes = trimmed.prefix { $0 == "#" }
-        guard !hashes.isEmpty, hashes.count <= 6 else {
-            return nil
-        }
-        let rest = trimmed.dropFirst(hashes.count)
-        guard rest.hasPrefix(" ") else {
-            return nil
-        }
-        let text = rest.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else {
-            return nil
-        }
-        return .heading(level: hashes.count, text: text)
-    }
-
-    private static func bulletItem(in line: Substring) -> String? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard let marker = trimmed.first, "-*+".contains(marker) else {
-            return nil
-        }
-        let rest = trimmed.dropFirst()
-        guard rest.hasPrefix(" ") else {
-            return nil
-        }
-        let item = rest.trimmingCharacters(in: .whitespaces)
-        return item.isEmpty ? nil : item
-    }
-
-    private static func numberedItem(in line: Substring) -> String? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        let digits = trimmed.prefix(while: \.isNumber)
-        guard !digits.isEmpty, digits.count <= 3 else {
-            return nil
-        }
-        let rest = trimmed.dropFirst(digits.count)
-        guard let separator = rest.first, separator == "." || separator == ")" else {
-            return nil
-        }
-        let body = rest.dropFirst()
-        guard body.hasPrefix(" ") else {
-            return nil
-        }
-        let item = body.trimmingCharacters(in: .whitespaces)
-        return item.isEmpty ? nil : item
+        return Paragraph(inlines)
+            .format()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func inline(_ text: String) -> AttributedString {

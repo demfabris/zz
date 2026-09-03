@@ -259,11 +259,18 @@ per-pane cursor, idempotent overlap, gap-triggered replay from the cursor, resto
 and replay on lane overflow. Swift parses message chunks, thought chunks, and tool calls from the
 ACP `session/update` payloads and skips the variants it has no rendering for, including user
 echoes the thread already shows. Agent prose renders as full-width markdown rather than a chat bubble, so only the reader's own turns
-carry one and a narrow split tile keeps its text column. Fenced code becomes a scrollable monospaced
-block with a language tag and a copy button; a fence that is still streaming renders as code from its
-first line instead of flashing as prose until the closing fence arrives. Inline emphasis, code spans,
-and links come from `AttributedString`'s markdown parsing, which has no block grammar, so fences are
-separated before the prose runs reach it. Tool rows carry the ACP `kind` as an icon, the title, and
+carry one and a narrow split tile keeps its text column. Block structure comes from `swift-markdown`
+(cmark-gfm), pinned at 0.8.0 and declared in `project.yml`; the app walks that tree into its own
+block model and draws it, which is what the desktop does with the `markdown` crate. Hand-rolled line
+scanning was tried first and could not carry CommonMark: fence lengths, nesting, lazy continuation
+and GFM tables all drift, and adjacent fenced blocks desynchronised on ordinary agent output.
+Headings, paragraphs, ordered and unordered lists with nesting, task-list checkboxes, block quotes,
+thematic breaks, fenced code, and GFM tables with per-column alignment all render. Fenced code keeps
+its language tag and a copy button, and an unclosed fence renders as code while it streams because
+CommonMark ends one at the end of the document. Inline emphasis, code spans, strikethrough, and links
+stay with `AttributedString`, so leaf text is carried through the block model as markdown source;
+`format()` is ancestor-aware, so inline source is taken from a detached copy of a node's inline
+children rather than the node in place, which would inherit a quote or list prefix. Tool rows carry the ACP `kind` as an icon, the title, and
 the first `locations` entry as `path:line`; ACP replaces `locations` and `content` when present and
 leaves them untouched when absent, and the reducer preserves that. Non-text content blocks degrade to
 the same placeholders the desktop uses instead of vanishing. The transcript follows new output only
@@ -439,8 +446,9 @@ edges and SSH prompt and failure classification.
 The Swift suite covers host endpoint normalization, live and keyboard-sized grid calculation, stable
 reconnect selection, bounded backoff, deduplicated layout updates, exclusive input ownership,
 modifier locking, known deep-link routes, persisted client settings including the home-indicator
-option, per-pane Agent drafts, thread receipts, transcript cursor rules, markdown and fenced-code
-segmentation, tool-call delta merging, config, mode, and session parsing, and composer action policy,
+option, per-pane Agent drafts, thread receipts, transcript cursor rules, markdown block parsing
+(adjacent and longer fences, streaming fences, GFM tables with alignment, task lists, quotes, nested
+lists), tool-call delta merging, config, mode, and session parsing, and composer action policy,
 global font size plus per-pane zoom, and cursor blink policy.
 
 # Key files
@@ -459,6 +467,7 @@ global font size plus per-pane zoom, and cursor blink policy.
 | `clients/ios/Sources/ClientSettings.swift` | Persisted appearance, terminal, and iPad layout settings. |
 | `clients/ios/Sources/ClientSettingsView.swift` | Native settings form and live terminal preview. |
 | `clients/ios/Sources/AgentPromptEditor.swift` | UIKit prompt field carrying the desktop key contract. |
+| `clients/ios/project.yml` | XcodeGen spec, including the pinned `swift-markdown` package. |
 | `clients/ios/Tests/Unit/TerminalInteractionTests.swift` | Simulator policy regressions. |
 | `crates/zz-client-ffi/include/zz-client.h` | Stable C boundary consumed by Swift. |
 | `scripts/ios-sim.sh` | Simulator build, install, socket injection, and launch. |

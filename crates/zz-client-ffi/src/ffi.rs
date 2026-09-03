@@ -19,9 +19,9 @@ use zz_client::{
 use zz_daemon::{AskpassPromptKind, AskpassReply, SshPrompts};
 use zz_daemon::{DaemonError, Endpoint, EndpointError, InteractiveClient};
 use zz_protocol::{
-    AgentConnectionPhase, AgentPaneWire, AgentSessionOpKind, CommandInvocation, InputMessage,
-    KeyBindingSnapshot, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, ProtocolMessage,
-    SessionId, SessionSnapshot, WindowSnapshot,
+    AgentConnectionPhase, AgentPaneWire, AgentSessionOpKind, CommandInvocation, CommandResponse,
+    InputMessage, KeyBindingSnapshot, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot,
+    ProtocolMessage, SessionId, SessionSnapshot, WindowSnapshot,
 };
 use zz_terminal::{
     CellWidth, ClipboardTarget, CursorStyle, Glyph, KeyAction, KeyCode, KeyInput, Modifiers,
@@ -32,6 +32,10 @@ const EVENT_DAMAGE_ALL: u32 = 1;
 const EVENT_AGENT_REQUEST: u32 = 1 << 1;
 const EVENT_AGENT_DONE: u32 = 1 << 2;
 const EVENT_AGENT_FAILED: u32 = 1 << 3;
+
+/// How many unread command replies the queue keeps before it drops the
+/// oldest, so a shell that only fires commands never grows without bound.
+const MAX_QUEUED_COMMAND_REPLIES: usize = 64;
 
 /// Event kinds mirrored in `include/zz-client.h`; values are ABI.
 #[repr(u32)]
@@ -71,6 +75,10 @@ pub enum ZzEventKind {
     /// An agent session-list reply arrived; pop it with
     /// `zz_client_agent_sessions_next`. `pane` names the pane.
     AgentSessions = 20,
+    /// An executed command answered; pop the reply with
+    /// `zz_client_command_reply_next` and match its request id against the one
+    /// `zz_client_execute_request` returned.
+    CommandReply = 21,
 }
 
 /// One drained event; `pane` is zero when the kind carries no pane.
@@ -250,6 +258,7 @@ struct EventQueues {
     agent_batches: Arc<Mutex<VecDeque<ZzAgentBatch>>>,
     agent_lagged: Arc<Mutex<VecDeque<ZzAgentLag>>>,
     agent_sessions: Arc<Mutex<VecDeque<ZzAgentSessionsReply>>>,
+    command_replies: Arc<Mutex<VecDeque<ZzCommandReply>>>,
 }
 
 /// One coalesced agent transcript batch, caller-owned once popped with
@@ -274,6 +283,49 @@ pub struct ZzAgentSessionsReply {
     pane: u64,
     request_id: u64,
     result: String,
+}
+
+/// One executed command's answer, caller-owned once popped with
+/// `zz_client_command_reply_next`. `output` is the reply text the daemon
+/// prints for that verb (`show-last-output`, `display-message -p`,
+/// `list-sessions`, …); `error` holds the rendered server error when the
+/// command failed, and is empty otherwise.
+pub struct ZzCommandReply {
+    request_id: u64,
+    ok: bool,
+    exit_code: u8,
+    output: String,
+    error: String,
+}
+
+impl ZzCommandReply {
+    fn new(response: &CommandResponse) -> Self {
+        match response {
+            CommandResponse::Success {
+                request_id,
+                output,
+                exit_code,
+                ..
+            } => Self {
+                request_id: *request_id,
+                ok: true,
+                exit_code: *exit_code,
+                output: output.clone(),
+                error: String::new(),
+            },
+            CommandResponse::Error {
+                request_id,
+                error,
+                output,
+            } => Self {
+                request_id: *request_id,
+                ok: false,
+                exit_code: 1,
+                output: output.clone(),
+                error: error.to_string(),
+            },
+        }
+    }
 }
 
 pub struct ZzMuxSnapshot {
@@ -459,6 +511,7 @@ fn queue_event(queues: &EventQueues, event: &CoreEvent) {
         agent_batches,
         agent_lagged,
         agent_sessions,
+        command_replies,
     } = queues;
     let (kind, flags, pane, row_start, row_end) = match event {
         CoreEvent::HelloReceived => (ZzEventKind::Hello, 0, 0, 0, 0),
@@ -537,6 +590,15 @@ fn queue_event(queues: &EventQueues, event: &CoreEvent) {
                 result: result.clone(),
             });
             (ZzEventKind::AgentSessions, 0, pane.0, 0, 0)
+        }
+        CoreEvent::CommandResponse(response) => {
+            let mut queue = lock(command_replies);
+            while queue.len() >= MAX_QUEUED_COMMAND_REPLIES {
+                queue.pop_front();
+            }
+            queue.push_back(ZzCommandReply::new(response));
+            drop(queue);
+            (ZzEventKind::CommandReply, 0, 0, 0, 0)
         }
         CoreEvent::PrefixArmed { armed } => (ZzEventKind::PrefixArmed, u32::from(*armed), 0, 0, 0),
         CoreEvent::KeyTablesChanged => (ZzEventKind::KeyTablesChanged, 0, 0, 0, 0),
@@ -1070,7 +1132,25 @@ pub unsafe extern "C" fn zz_client_send_key(
         .is_ok()
 }
 
-/// Execute a tmux-style command (`name` plus arguments) on the daemon.
+unsafe fn command_invocation(
+    name: *const c_char,
+    args: *const *const c_char,
+    args_len: usize,
+) -> Option<CommandInvocation> {
+    let name = unsafe { c_string(name) }?;
+    let mut arguments = Vec::with_capacity(args_len);
+    for index in 0..args_len {
+        if args.is_null() {
+            return None;
+        }
+        arguments.push(unsafe { c_string(*args.add(index)) }?);
+    }
+    Some(CommandInvocation::new(name, arguments))
+}
+
+/// Execute a tmux-style command (`name` plus arguments) on the daemon,
+/// discarding whatever it replies. Use [`zz_client_execute_request`] when the
+/// reply text matters.
 ///
 /// # Safety
 ///
@@ -1084,30 +1164,34 @@ pub unsafe extern "C" fn zz_client_execute(
     args: *const *const c_char,
     args_len: usize,
 ) -> bool {
-    let (Some(client), false) = (unsafe { client.as_mut() }, name.is_null()) else {
-        return false;
+    unsafe { zz_client_execute_request(client, name, args, args_len) != 0 }
+}
+
+/// Execute a tmux-style command and return the request id its reply will
+/// carry; zero when the request could not be sent. The daemon answers every
+/// command, so a `ZZ_EVENT_COMMAND_REPLY` event follows; pop the reply with
+/// [`zz_client_command_reply_next`] and match `zz_command_reply_request_id`
+/// against the id returned here.
+///
+/// # Safety
+///
+/// `client` must be a live handle; `name` a valid NUL-terminated string;
+/// `args` must point to `args_len` valid NUL-terminated strings (may be null
+/// when `args_len` is zero).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_execute_request(
+    client: *mut ZzClient,
+    name: *const c_char,
+    args: *const *const c_char,
+    args_len: usize,
+) -> u64 {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return 0;
     };
-    let Ok(name) = unsafe { CStr::from_ptr(name) }.to_str() else {
-        return false;
+    let Some(command) = (unsafe { command_invocation(name, args, args_len) }) else {
+        return 0;
     };
-    let mut arguments = Vec::with_capacity(args_len);
-    for index in 0..args_len {
-        if args.is_null() {
-            return false;
-        }
-        let argument = unsafe { *args.add(index) };
-        if argument.is_null() {
-            return false;
-        }
-        let Ok(argument) = unsafe { CStr::from_ptr(argument) }.to_str() else {
-            return false;
-        };
-        arguments.push(argument.to_owned());
-    }
-    client
-        .client
-        .execute(CommandInvocation::new(name, arguments))
-        .is_ok()
+    client.client.execute(command).unwrap_or(0)
 }
 
 /// Report a terminal pane's geometry to the daemon.
@@ -1989,6 +2073,60 @@ pub unsafe extern "C" fn zz_clipboard_request_id(clipboard: *const ZzClipboard) 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zz_clipboard_text(clipboard: *const ZzClipboard) -> ZzBytes {
     unsafe { clipboard.as_ref() }.map_or(ZzBytes::EMPTY, |clipboard| ZzBytes::new(&clipboard.text))
+}
+
+/// Pop the oldest queued command reply, or null when none is queued. Replies
+/// arrive in the order the daemon answers, one per executed command. The
+/// reply is caller-owned: read it with the `zz_command_reply_*` accessors,
+/// then free it with [`zz_command_reply_release`].
+///
+/// # Safety
+///
+/// `client` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_command_reply_next(
+    client: *mut ZzClient,
+) -> *mut ZzCommandReply {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    lock(&client.queues.command_replies)
+        .pop_front()
+        .map_or(std::ptr::null_mut(), |reply| Box::into_raw(Box::new(reply)))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_command_reply_release(reply: *mut ZzCommandReply) {
+    if !reply.is_null() {
+        drop(unsafe { Box::from_raw(reply) });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_command_reply_request_id(reply: *const ZzCommandReply) -> u64 {
+    unsafe { reply.as_ref() }.map_or(0, |reply| reply.request_id)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_command_reply_ok(reply: *const ZzCommandReply) -> bool {
+    unsafe { reply.as_ref() }.is_some_and(|reply| reply.ok)
+}
+
+/// The command's exit code: zero on success, and one for a rejected command,
+/// which the wire reports as an error rather than an exit status.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_command_reply_exit_code(reply: *const ZzCommandReply) -> u8 {
+    unsafe { reply.as_ref() }.map_or(0, |reply| reply.exit_code)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_command_reply_output(reply: *const ZzCommandReply) -> ZzBytes {
+    unsafe { reply.as_ref() }.map_or(ZzBytes::EMPTY, |reply| ZzBytes::new(&reply.output))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_command_reply_error(reply: *const ZzCommandReply) -> ZzBytes {
+    unsafe { reply.as_ref() }.map_or(ZzBytes::EMPTY, |reply| ZzBytes::new(&reply.error))
 }
 
 /// Pop the oldest queued agent transcript batch, or null when none is queued.
@@ -2898,6 +3036,88 @@ mod tests {
         assert_eq!(unsafe { zz_prefix_binding_key(snapshot, 9) }.len, 0);
         assert_eq!(unsafe { zz_prefix_binding_summary(snapshot, 9) }.len, 0);
         unsafe { zz_prefix_snapshot_release(snapshot) };
+    }
+
+    #[test]
+    fn command_replies_carry_output_and_error_text_to_the_abi() {
+        let queues = EventQueues::default();
+        queue_event(
+            &queues,
+            &CoreEvent::CommandResponse(CommandResponse::Success {
+                request_id: 3,
+                output: "%1: last output".to_owned(),
+                exit_code: 0,
+                stderr: String::new(),
+            }),
+        );
+        queue_event(
+            &queues,
+            &CoreEvent::CommandResponse(CommandResponse::Error {
+                request_id: 4,
+                error: zz_protocol::ServerError::MissingTarget("current pane".to_owned()),
+                output: String::new(),
+            }),
+        );
+
+        let queued: Vec<ZzEvent> =
+            std::iter::from_fn(|| lock(&queues.events).pop_front()).collect();
+        assert_eq!(
+            queued.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            vec![ZzEventKind::CommandReply, ZzEventKind::CommandReply]
+        );
+
+        let replies = lock(&queues.command_replies);
+        assert_eq!(replies.len(), 2);
+        assert_eq!(replies[0].request_id, 3);
+        assert!(replies[0].ok);
+        assert_eq!(replies[0].output, "%1: last output");
+        assert!(replies[0].error.is_empty());
+        assert_eq!(replies[1].request_id, 4);
+        assert!(!replies[1].ok);
+        assert_eq!(replies[1].exit_code, 1);
+        assert_eq!(replies[1].error, "target not found: current pane");
+    }
+
+    #[test]
+    fn unread_command_replies_drop_the_oldest_at_the_cap() {
+        let queues = EventQueues::default();
+        for request_id in 0..u64::try_from(MAX_QUEUED_COMMAND_REPLIES).unwrap() + 2 {
+            queue_event(
+                &queues,
+                &CoreEvent::CommandResponse(CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 0,
+                    stderr: String::new(),
+                }),
+            );
+        }
+
+        let replies = lock(&queues.command_replies);
+        assert_eq!(replies.len(), MAX_QUEUED_COMMAND_REPLIES);
+        assert_eq!(replies[0].request_id, 2);
+    }
+
+    #[test]
+    fn command_reply_reads_are_null_safe_and_release_owns_the_handle() {
+        assert_eq!(unsafe { zz_command_reply_request_id(std::ptr::null()) }, 0);
+        assert!(!unsafe { zz_command_reply_ok(std::ptr::null()) });
+        assert_eq!(unsafe { zz_command_reply_exit_code(std::ptr::null()) }, 0);
+        assert_eq!(unsafe { zz_command_reply_output(std::ptr::null()) }.len, 0);
+        assert_eq!(unsafe { zz_command_reply_error(std::ptr::null()) }.len, 0);
+        unsafe { zz_command_reply_release(std::ptr::null_mut()) };
+
+        let reply = Box::into_raw(Box::new(ZzCommandReply::new(&CommandResponse::Success {
+            request_id: 11,
+            output: "ok".to_owned(),
+            exit_code: 0,
+            stderr: String::new(),
+        })));
+        assert_eq!(unsafe { zz_command_reply_request_id(reply) }, 11);
+        assert!(unsafe { zz_command_reply_ok(reply) });
+        assert_eq!(unsafe { zz_str(zz_command_reply_output(reply)) }, "ok");
+        assert_eq!(unsafe { zz_command_reply_error(reply) }.len, 0);
+        unsafe { zz_command_reply_release(reply) };
     }
 
     #[test]

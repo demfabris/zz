@@ -1,0 +1,15 @@
+corpus: none
+# What popup_menu_done does and does not touch, and how long the popup's menu
+# lives, driven with SGR mouse reports on a client attached to a real pty.
+# Fill Space and Centre set pd->px/py (and sx/sy for Fill Space) and call
+# server_redraw_client and nothing else: neither resizes pd->s or the job, and
+# neither writes ppx/ppy/psx/psy, so the next owning-client resize puts the box
+# back at the placement display-popup asked for. The menu itself is pd->md,
+# drawn by popup_draw_cb and freed by popup_free, so a menu still up when an
+# -E popup's job exits leaves with the popup instead of swallowing the keys
+# that follow.
+stage: fixtures/display-popup-menu-policy.sh ~/display-popup-menu-policy.sh
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+out: set-environment -gu DISPLAY_POPUP_MENU_POLICY
+run-shell 'sh ~/display-popup-menu-policy.sh'
+out: show-environment -g DISPLAY_POPUP_MENU_POLICY

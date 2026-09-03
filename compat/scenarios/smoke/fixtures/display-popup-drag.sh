@@ -150,6 +150,27 @@ fi
 row="${opened%,*}"
 column="${opened#*,}"
 
+# The arming condition reads the previous report from the tty, which
+# tty_keys_mouse refreshes from every report it decodes. A drag that began on
+# the border, wandered into the content and came back onto the border is
+# therefore still a drag as far as m->lb is concerned, so it never arms a move.
+drive "$(sgr 0 $((column + 4)) "$row")"
+sleep 0.3
+drive "$(sgr 32 $((column + 6)) $((row + 3)))"
+sleep 0.3
+drive "$(sgr 32 $((column + 8)) "$row")"
+sleep 0.3
+drive "$(sgr 32 $((column + 14)) $((row + 5)))"
+sleep 0.5
+drive "$(sgr_up 0 $((column + 14)) $((row + 5)))"
+sleep 0.8
+drive "snap reentry"
+reentry="$(corner reentry)"
+case "$reentry" in
+none | "$opened") reentry=unmoved ;;
+esac
+check_equal a-drag-back-onto-the-border-does-not-arm-a-move unmoved "$reentry"
+
 # A press on the top border, a drag still on the border - which is what arms
 # mode MOVE, because popup_key_cb reads the border from the drag report's own
 # position and the button from the previous one - then a drag away from it.
@@ -182,11 +203,11 @@ none | "$((row + 5)),$((column + 10))") inside=unmoved ;;
 esac
 check_equal an-inside-drag-leaves-the-popup-where-it-is unmoved "$inside"
 
-if [ "$check_count" -ne 3 ]; then
+if [ "$check_count" -ne 4 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g DISPLAY_POPUP_DRAG clean:3
+    main_client set-environment -g DISPLAY_POPUP_DRAG clean:4
 else
     sed "s/^/display-popup-drag-$side: /" "$work/failures"
 fi

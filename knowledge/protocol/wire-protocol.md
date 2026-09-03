@@ -157,7 +157,7 @@ introduced in v17): `Info | Success | Warning | Error`.
 | `CommandPrompt` | `action: CommandPromptAction::{Update, Submit, Close}` |
 | `ResizeSplit` | `window: WindowId`, `split: SplitId`, `ratio_basis_points: u16` (fixed-point over `SPLIT_RATIO_BASIS = 10_000`) |
 | `CancelPrefix` | `request_id: u64`; retire an armed one-shot prefix table without forwarding a key to the pane |
-| `Popup` | `action: PopupAction::{Text(String), Key { input, text_follows }, TerminalView(TerminalViewAction), Close}`; input and view control for the client's open `display-popup` |
+| `Popup` | `action: PopupAction::{Text(String), Key { input, text_follows }, TerminalView(TerminalViewAction), Close, Pointer { pointer: PopupPointer, view: Option<TerminalViewAction> }}`; input, pointer and view control for the client's open `display-popup` |
 | `Menu` | `action: MenuAction::{Choose(u32), Cancel}`; drives the client's open `display-menu` |
 | `Confirm` | `action: ConfirmAction::Reply(bool)`; answers the client's open `confirm-before` prompt |
 | `ClientTerminalSize` | `columns: u16`, `rows: u16`; current producer is the TUI terminal surface, which reports later outer-terminal resizes |

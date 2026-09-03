@@ -102,6 +102,22 @@ drawn() {
     fi
 }
 
+# How many rows of the menu the client drew as a separator, counted as distinct
+# screen rows so a repaint of the same menu does not count twice.
+separator_rows() {
+    python3 -c 'import re, sys
+data = open(sys.argv[1], "rb").read()
+token = re.compile(rb"\x1b\[(\d+);\d+H|\xe2\x94\x9c")
+rows = set()
+row = None
+for match in token.finditer(data):
+    if match.group(1) is not None:
+        row = int(match.group(1))
+    elif row is not None:
+        rows.add(row)
+sys.stdout.write(str(len(rows)))' "$snaps/$1"
+}
+
 sgr() {
     printf 'keys %s\n' "$(printf '\033[<%s;%s;%sM' "$1" "$2" "$3" | od -An -tx1 | tr -d ' \n')"
 }
@@ -168,6 +184,12 @@ check_equal the-menu-offers-fill-space-and-centre yes \
 check_equal the-menu-offers-both-to-pane-rows yes \
     "$([ "$(drawn menu 'To Horizontal Pane')" = yes ] && [ "$(drawn menu 'To Vertical Pane')" = yes ] && printf yes || printf no)"
 
+# popup_menu_items carries two separator rows and a paste row whose format
+# expands empty with no buffer. menu_add_item drops a row that expands empty
+# rather than turning it into a separator, so a fresh server with no buffer
+# draws two separators and not three.
+check_equal the-menu-draws-one-separator-per-group 2 "$(separator_rows menu)"
+
 # Choosing Centre moves the box to the middle of the client grid, which is a
 # move measured against the box the client already drew rather than against an
 # absolute cell, because the two binaries do not share a screen layout.
@@ -182,11 +204,11 @@ else
 fi
 check_equal centre-moves-the-popup moved "$centred"
 
-if [ "$check_count" -ne 5 ]; then
+if [ "$check_count" -ne 6 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g DISPLAY_POPUP_MENU clean:5
+    main_client set-environment -g DISPLAY_POPUP_MENU clean:6
 else
     sed "s/^/display-popup-menu-$side: /" "$work/failures"
 fi

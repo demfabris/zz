@@ -165,6 +165,7 @@
 | smoke/display-popup-kitty-noresize | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-drag | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-menu | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-menu-policy | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-style-refresh | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-to-pane | 3 | yes | 0 | yes | yes | yes |

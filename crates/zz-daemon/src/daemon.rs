@@ -4450,7 +4450,7 @@ impl Shared {
                 .into_iter()
                 .map(|(client, popup)| {
                     let subscriber = inner.subscribers.get(&client).cloned();
-                    (client, (popup, subscriber))
+                    (client, (popup, subscriber, false))
                 })
                 .collect::<Vec<_>>();
             let menu_waiters = std::mem::take(&mut inner.menus)
@@ -15638,7 +15638,10 @@ impl Shared {
     /// top border raises the same menu; a meta drag, or a drag that began on a
     /// border, moves the box with button 1 and resizes it with button 3; and
     /// anything left over is the popup job's, which is the action the client
-    /// already built for it.
+    /// already built for it. The `m->lb`/`m->lx`/`m->ly` the arming condition
+    /// reads are the tty's, which `tty_keys_mouse` refreshes from every report
+    /// it decodes, so the previous report is remembered here whatever this one
+    /// turned out to be.
     fn popup_pointer(
         &self,
         client: ClientId,
@@ -15706,7 +15709,7 @@ impl Shared {
                 if pointer.button == PopupPointerButton::Right {
                     PopupPointerOutcome::Menu(pointer.column, pointer.row)
                 } else {
-                    return;
+                    PopupPointerOutcome::Nothing
                 }
             } else {
                 let border = if matches!(state.border_lines, PopupBorderLines::None) {
@@ -15744,15 +15747,11 @@ impl Shared {
                     PopupPointerOutcome::Job
                 }
             };
-            if matches!(outcome, PopupPointerOutcome::Job) {
-                popup.pointer = cursor;
-            } else {
-                cursor.last_column = pointer.column;
-                cursor.last_row = pointer.row;
-                cursor.last_button = pointer.button;
-                cursor.last_drag = pointer.drag;
-                popup.pointer = cursor;
-            }
+            cursor.last_column = pointer.column;
+            cursor.last_row = pointer.row;
+            cursor.last_button = pointer.button;
+            cursor.last_drag = pointer.drag;
+            popup.pointer = cursor;
             if let PopupPointerOutcome::Publish(next, _) = &outcome {
                 popup.state = next.clone();
                 popup.preferred = PopupPlacement {
@@ -15795,12 +15794,18 @@ impl Shared {
             let columns = popup.state.client_columns;
             let rows = popup.state.client_rows;
             let row_room = usize::from(columns.saturating_sub(MENU_ROW_MARGIN));
-            let mut items = Vec::new();
+            let mut items: Vec<Option<MenuItem>> = Vec::new();
             for entry in popup_menu_rows(paste.as_deref()) {
                 let Some((name, key)) = entry else {
+                    if matches!(items.last(), None | Some(None)) {
+                        continue;
+                    }
                     items.push(None);
                     continue;
                 };
+                if name.is_empty() {
+                    continue;
+                }
                 let layout = layout_menu_row(&name, Some(key), row_room);
                 items.push(Some(MenuItem {
                     name: layout.name,
@@ -15895,7 +15900,7 @@ impl Shared {
             else {
                 return;
             };
-            let Some((popup, subscriber)) = take_popup(&mut inner, client) else {
+            let Some((popup, subscriber, menu)) = take_popup(&mut inner, client) else {
                 return;
             };
             let Some(window) = inner.engine.state.window_for_pane(source) else {
@@ -15909,7 +15914,7 @@ impl Shared {
                 .state
                 .split_pane(source, axis, PaneKind::Terminal)
             else {
-                Self::retire_popup(client, (popup, subscriber), true);
+                Self::retire_popup(client, (popup, subscriber, menu), true);
                 return;
             };
             let terminal = Arc::clone(&popup.terminal);
@@ -15935,6 +15940,9 @@ impl Shared {
             if let Some(subscriber) = subscriber {
                 subscriber.suspend_terminal(popup.state.pane);
                 Self::send_event(&subscriber, EventPayload::Popup { state: None });
+                if menu {
+                    Self::send_event(&subscriber, EventPayload::Menu { state: None });
+                }
             }
             if let Some(waiter) = popup.waiter {
                 let _ = waiter.wake.try_send(0);
@@ -15957,7 +15965,12 @@ impl Shared {
         self.publish_snapshot();
     }
 
-    /// `popup_menu_done`: the chosen row's key, not a command.
+    /// `popup_menu_done`: the chosen row's key, not a command. `F` and `C` are
+    /// box moves and nothing else - neither resizes `pd->s` or the job, and
+    /// neither touches `ppx`/`ppy`/`psx`/`psy`, so `Fill Space` leaves the
+    /// content at its old size in the corner of the enlarged box and the next
+    /// owning-client resize puts the box back where `display-popup` asked for
+    /// it.
     fn popup_menu_choice(self: &Arc<Self>, client: ClientId, key: &str) {
         match key {
             "q" => self.close_popup(client, true),
@@ -15975,7 +15988,7 @@ impl Shared {
                 terminal.paste_prepared_bytes(Some(TerminalViewId(client.0)), data, false);
             }
             "F" | "C" => {
-                let (state, resize) = {
+                let state = {
                     let mut inner = self.inner.lock();
                     let Some(popup) = inner.popups.get_mut(&client) else {
                         return;
@@ -15997,21 +16010,8 @@ impl Shared {
                             .saturating_sub(state.height / 2);
                     }
                     popup.state = state.clone();
-                    popup.preferred = PopupPlacement {
-                        left: state.left,
-                        top: state.top,
-                        width: state.width,
-                        height: state.height,
-                    };
-                    let resize = (key == "F" && !state.dead)
-                        .then(|| popup_content_size(&state))
-                        .flatten()
-                        .map(|(columns, rows)| (Arc::clone(&popup.terminal), columns, rows));
-                    (state, resize)
+                    state
                 };
-                if let Some((terminal, columns, rows)) = resize {
-                    terminal.resize(columns, rows, state.cell_width_px, state.cell_height_px);
-                }
                 self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
             }
             "h" => self.popup_make_pane(client, zz_protocol::Axis::Horizontal),
@@ -20100,7 +20100,11 @@ impl Shared {
         }
     }
 
-    fn retire_popup(client: ClientId, (mut popup, subscriber): RetiredPopup, terminate: bool) {
+    fn retire_popup(
+        client: ClientId,
+        (mut popup, subscriber, menu): RetiredPopup,
+        terminate: bool,
+    ) {
         let exit_code = popup_exit_code(&popup.terminal);
         if terminate && exit_code.is_none() {
             popup.terminal.terminate();
@@ -20109,6 +20113,9 @@ impl Shared {
         if let Some(subscriber) = subscriber {
             subscriber.suspend_terminal(popup.state.pane);
             Self::send_event(&subscriber, EventPayload::Popup { state: None });
+            if menu {
+                Self::send_event(&subscriber, EventPayload::Menu { state: None });
+            }
         }
         if let Some(waiter) = popup.waiter.take() {
             let _ = waiter.wake.try_send(exit_code.unwrap_or(129));
@@ -27657,7 +27664,7 @@ fn current_command_output_subscriber(
 }
 
 type RetiredCommandOutput = (CommandOutputSession, Option<Arc<OutboundMailbox>>);
-type RetiredPopup = (PopupSession, Option<Arc<OutboundMailbox>>);
+type RetiredPopup = (PopupSession, Option<Arc<OutboundMailbox>>, bool);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Overlay {
@@ -27731,10 +27738,19 @@ fn take_command_output(inner: &mut ServerState, client: ClientId) -> Option<Reti
     Some((output, subscriber))
 }
 
+/// The popup's menu is `pd->md`, drawn by `popup_draw_cb` and freed by
+/// `popup_free`, so it cannot outlive the popup that raised it.
 fn take_popup(inner: &mut ServerState, client: ClientId) -> Option<RetiredPopup> {
     let popup = inner.popups.remove(&client)?;
+    let menu = inner
+        .menus
+        .get(&client)
+        .is_some_and(|menu| menu.popup_owner);
+    if menu {
+        inner.menus.remove(&client);
+    }
     let subscriber = inner.subscribers.get(&client).cloned();
-    Some((popup, subscriber))
+    Some((popup, subscriber, menu))
 }
 
 #[derive(Clone, Debug)]
@@ -35096,13 +35112,17 @@ fn popup_drag_origin(position: u16, offset: u16, extent: u16, available: u16) ->
     }
 }
 
-/// `popup_menu_items`, with the pin's `#{?buffer_name,Paste #{buffer_name},}`
-/// row: a blank line when no buffer exists, because `menu_add_item` turns an
-/// empty name into a separator.
+/// `popup_menu_items`, whose `#{?buffer_name,Paste #{buffer_name},}` row
+/// expands empty when no buffer exists. `None` is one of the list's two
+/// literal separator rows; a row whose name expands empty is a row
+/// `menu_add_item` drops, not a separator.
 fn popup_menu_rows(paste: Option<&str>) -> [Option<(String, &'static str)>; 8] {
     [
         Some(("Close".to_owned(), "q")),
-        paste.map(|name| (format!("Paste {name}"), "p")),
+        Some((
+            paste.map(|name| format!("Paste {name}")).unwrap_or_default(),
+            "p",
+        )),
         None,
         Some(("Fill Space".to_owned(), "F")),
         Some(("Centre".to_owned(), "C")),

@@ -247,3 +247,51 @@ script now carries the box traps through `args` defaults (`boxNote`, `gitNote`) 
 hard-coded macbook text, and the gate uses one shared `zz-gate-target` build directory. `gh` had no
 usable token on this box at launch, so board claims and ledger entries are replayed from
 `board-replay-10.sh` once it does; the workers never touch the board.
+
+## 2026-09-02/03: cycle 10 on the ubuntu box, meter 90.5% to 96.1%, the client lane in a follow-up gate
+
+Seven agents in the main run, 5h54m wall, 2.43M subagent tokens; the reviewer of the client lane
+ended its turn waiting on a background monitor instead of reporting, which the pipeline counts as a
+failed stage, so the main gate integrated two lanes and the third went through
+`opus-compat-run-10b.js` (its worker report embedded, a review-only stage first so it ran beside
+the queue worker, then the gate resumed from the same run). Merges: queue `fd19cce` (Control
+clients get the per-connection command worker that three cycles bounced; hard loss frees the
+not-yet-started queue while the in-flight item finishes, graceful EOF runs every queued line
+through the first yielding one and drops the rest, replacing the client-side truncation;
+`split-window -W` parks the invoker on the pane it made and hands back the child's exit or signal
+status; the display-panes template residue stays recorded; protocol 95 to 96 appends
+`ProtocolMessage::CommandQueueParked`; gate fixes from the review: an instant-exit `-W` answered 0
+one run in ten because the pane-removal arm raced the waiter's removal, and a non-zero `-W` status
+skipped the after-hook), copy `cd03bb8` (copy-mode text search moved from a client surface into
+the engine as `CopyModeAction::Search`, with the search formats; the mode-keys tail; `send-keys -F`
+as the pin's search-string expansion, not a general key expansion; the sixteen stock binding
+strings under the `-P` decision, with `prompt.pane-rendered` closed rather than kept accepted
+because the manifest refuses a flag item on a promoted flag; the environment tail in format
+expansion, a divergence with no slug; gate fixes: the reviewer measured three more mode-keys reads
+the eleven-place enumeration missed, so `copy-mode.action-fidelity` is open again with the fix
+shape instead of a revert that would have taken the search engine with it, and the new prompt
+bindings dropped the armed count prefix, now kept for the answer the way `window-copy.c` does),
+ledger `2af51ff` (207 scenarios / 2,586 steps / PASS). Skips worth reading: the environment bytes
+are priced at four channels and 99 read sites behind 65 signatures in the mux alone, the monitors
+and the `-v` trace ran out of budget, the chooser vocabulary found that the pin's kill and `:`
+prompts belong to the mode overlay (an overlay-owned nested overlay, the shape the popup context
+menu took this cycle, is the prerequisite), and the GUI pane width needs a decision about which
+extent the window formats report for a client that draws chrome (the gpui test harness already
+exists). Box lore: three compat rows are red on Linux before any lane (`smoke/remain-on-exit-format`
+wants `term` where Linux answers signal 15, `smoke/format-modifier-interrogate` sees `smxx` in the
+harness's outer TERM, `smoke/pane-engine-knobs-input` flakes pin-side under load) and pass
+`--check-summary` only because `summary.md` was recorded on the macbook; `zz-gate-target` (47G)
+holds a reflinked ghostty source for `GHOSTTY_SOURCE_DIR`; the queue lane ran 4h15m because its
+foundation group was given an open budget, so cycle 11 caps every group. Process lore: subagents
+must run everything in the foreground and finish with the structured report (the `FOREGROUND`
+rule in 10b), and `board.py renew` on a front the holder does not hold posts a harmless RENEW.
+
+Pause, 2026-09-03 ~00:30Z: fabrico needed the box for a machine move while the client gate was
+twenty minutes in (rebased onto `2af51ff`, no fixes applied, no tests run), so the gate was
+stopped. Its rebased tip is `campaign/batch-client-choosers-popups-opus-gated` (`affcfc9`), the
+review (approve-with-fixes, six must-fixes: an extra menu separator with no paste buffer, a
+popup-owned menu outliving its popup, drag re-entry arming a move the pin refuses, Fill Space
+resizing the job, Centre and Fill Space rewriting the preferred placement, one stale schema row)
+is embedded in `opus-compat-run-10b.js`, and `args: {stage: "gate"}` runs only the gate from that
+tip on any machine. The client lock was released with that note; MAIN was used for the records
+push and released. `HANDOFF.md` has the census and the first task.

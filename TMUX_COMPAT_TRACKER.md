@@ -10,7 +10,7 @@
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 10 INTEGRATED 2026-09-02 ON THE UBUNTU BOX (2 OF 3 LANES; THE CLIENT LANE GATES IN A FOLLOW-UP RUN AFTER ITS REVIEWER DIED), CAMPAIGN CONTINUING; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **CYCLE 10 INTEGRATED 2026-09-03 ON THE UBUNTU BOX (QUEUE + COPY LANES; THE CLIENT LANE IS REVIEWED AND REBASED ON `campaign/batch-client-choosers-popups-opus-gated`, GATE PENDING), CAMPAIGN PAUSED FOR A MACHINE MOVE; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint

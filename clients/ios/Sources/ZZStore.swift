@@ -31,6 +31,9 @@ final class ZZStore: ObservableObject {
     @Published private(set) var sshPublicKey: String?
     @Published private(set) var sshPrompt: ZZSSHPromptRequest?
     @Published private(set) var agentStates: [UInt64: ZZAgentState] = [:]
+    @Published private(set) var prefixArmed = false
+    @Published private(set) var prefixBindings: [ZZPrefixBinding] = []
+    @Published private(set) var tmuxImportPhase = ZZTMuxImportPhase.hidden
 
     private var client: OpaquePointer?
     private var eventSource: DispatchSourceRead?
@@ -41,6 +44,7 @@ final class ZZStore: ObservableObject {
     private var pendingAttachmentSessionID: UInt64?
     private var hasEstablishedAttachment = false
     private var sessionCreationTimeout: Task<Void, Never>?
+    private var tmuxImportTask: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var publicKeyTask: Task<Void, Never>?
@@ -57,6 +61,8 @@ final class ZZStore: ObservableObject {
     private var terminalPreviewRequested = false
     private var unseenAgentCompletions: Set<UInt64> = []
     private var agentDrafts = ZZAgentDrafts()
+    @Published private(set) var agentThreads: [UInt64: ZZAgentThread] = [:]
+    @Published private(set) var agentSessionLists: [UInt64: ZZAgentSessionList] = [:]
     private var clipboardRequestID: UInt64 = 1
     private let networkMonitor = NWPathMonitor()
     private let networkQueue = DispatchQueue(label: "zz-ios-network")
@@ -359,12 +365,19 @@ final class ZZStore: ObservableObject {
             clearFrameSlots()
             agentStates = [:]
             agentDrafts = ZZAgentDrafts()
+            agentThreads = [:]
+            agentSessionLists = [:]
             unseenAgentCompletions = []
             selectedSessionID = nil
             selectedPaneID = nil
             terminalInput = TerminalInputState()
         }
         terminalModifierState.reset()
+        prefixArmed = false
+        prefixBindings = []
+        tmuxImportTask?.cancel()
+        tmuxImportTask = nil
+        tmuxImportPhase = .hidden
         connectionState = .idle
     }
 
@@ -825,6 +838,141 @@ final class ZZStore: ObservableObject {
         terminalModifierState.reset()
     }
 
+    /// Run one daemon command typed into the command-prompt sheet. The first
+    /// whitespace-separated token names the command; the rest are arguments.
+    /// Returns false when the line is blank or no client is connected.
+    @discardableResult
+    func submitCommand(_ line: String) -> Bool {
+        guard let parsed = ZZCommandLine.split(line) else {
+            return false
+        }
+        return execute(parsed.name, args: parsed.args)
+    }
+
+    /// Ask the daemon for its full key list (`list-keys`). The daemon answers
+    /// through command output, which iOS cannot render yet (see the key-list
+    /// sheet): the published `prefixBindings` below cover the prefix table.
+    @discardableResult
+    func requestKeyList() -> Bool {
+        execute("list-keys", args: [])
+    }
+
+    func maybeOfferTmuxImport() {
+        guard tmuxImportPhase == .hidden else {
+            return
+        }
+        let offered = ZZTMuxImport.offeredHosts(in: .standard)
+        guard ZZTMuxImport.shouldOffer(endpoint: hostEndpoint, offered: offered) else {
+            return
+        }
+        tmuxImportPhase = .prompting(endpoint: hostEndpoint)
+    }
+
+    func declineTmuxImport() {
+        guard case .prompting(let endpoint) = tmuxImportPhase else {
+            return
+        }
+        ZZTMuxImport.markOffered(endpoint: endpoint, in: .standard)
+        tmuxImportPhase = .hidden
+    }
+
+    func runTmuxImportManually() {
+        ZZTMuxImport.markOffered(endpoint: hostEndpoint, in: .standard)
+        beginTmuxImport()
+    }
+
+    func dismissTmuxImport() {
+        tmuxImportTask?.cancel()
+        tmuxImportTask = nil
+        tmuxImportPhase = .hidden
+    }
+
+    func acknowledgeTmuxImport() {
+        guard tmuxImportPhase.needsAlert else {
+            return
+        }
+        if tmuxImportPhase.promptEndpoint != nil {
+            declineTmuxImport()
+        } else {
+            dismissTmuxImport()
+        }
+    }
+
+    private func beginTmuxImport() {
+        tmuxImportTask?.cancel()
+        let baseline = prefixBindings
+        _ = execute("import-tmux-config", args: [])
+        tmuxImportPhase = .working(baseline: baseline)
+        tmuxImportTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: ZZTMuxImport.settleDelayNanoseconds)
+            } catch {
+                return
+            }
+            self?.settleTmuxImportUnchanged()
+        }
+    }
+
+    private func settleTmuxImport(after current: [ZZPrefixBinding]) {
+        guard case .working(let baseline) = tmuxImportPhase else {
+            return
+        }
+        guard let message = ZZTMuxImport.resultMessage(baseline: baseline, current: current) else {
+            return
+        }
+        tmuxImportTask?.cancel()
+        tmuxImportTask = nil
+        tmuxImportPhase = .done(message: message)
+    }
+
+    private func settleTmuxImportUnchanged() {
+        guard case .working = tmuxImportPhase else {
+            return
+        }
+        tmuxImportTask = nil
+        tmuxImportPhase = .done(message: ZZTMuxImport.unchangedMessage)
+    }
+
+    /// Open the daemon's `choose-buffer` overlay. Interactive selection needs
+    /// `ChooseBufferState` FFI that does not exist yet; until then the daemon
+    /// overlay is driven from the attached terminal like on desktop.
+    @discardableResult
+    func requestChooseBuffer() -> Bool {
+        execute("choose-buffer", args: ZZCommandLine.chooseBufferArgs)
+    }
+
+    /// Flash the daemon's `display-panes` overlay. Interactive selection needs
+    /// `DisplayPanesState` FFI that does not exist yet; until then the overlay
+    /// is driven from the attached terminal like on desktop.
+    @discardableResult
+    func requestDisplayPanes() -> Bool {
+        execute("display-panes", args: ZZCommandLine.displayPanesArgs)
+    }
+
+    private func refreshPrefixState() {
+        guard let client,
+              let snapshot = zz_prefix_snapshot_acquire(client) else {
+            return
+        }
+        defer { zz_prefix_snapshot_release(snapshot) }
+        prefixArmed = zz_prefix_snapshot_armed(snapshot)
+        let count = Int(zz_prefix_binding_count(snapshot))
+        var next: [ZZPrefixBinding] = []
+        next.reserveCapacity(count)
+        for index in 0..<count {
+            next.append(
+                ZZPrefixBinding(
+                    key: string(zz_prefix_binding_key(snapshot, index)),
+                    summary: string(zz_prefix_binding_summary(snapshot, index)),
+                    note: string(zz_prefix_binding_note(snapshot, index)),
+                    repeats: zz_prefix_binding_repeat(snapshot, index)
+                )
+            )
+        }
+        prefixBindings = next
+        settleTmuxImport(after: next)
+    }
+
     func sendShortcutKey(_ code: UInt32, to pane: UInt64) {
         sendKey(code, to: pane)
     }
@@ -884,6 +1032,216 @@ final class ZZStore: ObservableObject {
         agentDrafts.save(text, for: pane)
     }
 
+    func agentThread(for pane: UInt64) -> ZZAgentThread {
+        agentThreads[pane] ?? ZZAgentThread()
+    }
+
+    func ensureAgentStream(for pane: UInt64) {
+        if agentThreads[pane] == nil {
+            agentThreads[pane] = ZZAgentThread()
+        }
+        requestAgentReplay(for: pane)
+    }
+
+    func requestAgentReplay(for pane: UInt64) {
+        guard let client else {
+            return
+        }
+        var thread = agentThreads[pane] ?? ZZAgentThread()
+        guard !thread.replayPending else {
+            agentThreads[pane] = thread
+            return
+        }
+        guard zz_client_agent_replay(client, pane, thread.cursor) else {
+            return
+        }
+        thread.replayPending = true
+        agentThreads[pane] = thread
+    }
+
+    func drainAgentUpdates() {
+        guard let client else {
+            return
+        }
+        while let batch = zz_client_agent_updates_next(client) {
+            defer { zz_agent_updates_release(batch) }
+            let pane = zz_agent_updates_pane(batch)
+            let firstSeq = zz_agent_updates_first_seq(batch)
+            let count = Int(zz_agent_updates_item_count(batch))
+            var items: [Data] = []
+            items.reserveCapacity(count)
+            for index in 0..<count {
+                let bytes = zz_agent_updates_item_bytes(batch, index)
+                guard let pointer = bytes.ptr, bytes.len > 0 else {
+                    continue
+                }
+                items.append(Data(buffer: UnsafeBufferPointer(start: pointer, count: bytes.len)))
+            }
+            var thread = agentThreads[pane] ?? ZZAgentThread()
+            if thread.applyBatch(firstSeq: firstSeq, items: items) == .needsReplay {
+                agentThreads[pane] = thread
+                requestAgentReplay(for: pane)
+            } else {
+                agentThreads[pane] = thread
+            }
+        }
+    }
+
+    func drainAgentLagged() {
+        guard let client else {
+            return
+        }
+        var pane: UInt64 = 0
+        var nextSeq: UInt64 = 0
+        while zz_client_agent_lagged_next(client, &pane, &nextSeq) {
+            requestAgentReplay(for: pane)
+        }
+    }
+
+    func agentSessionList(for pane: UInt64) -> ZZAgentSessionList {
+        agentSessionLists[pane] ?? ZZAgentSessionList()
+    }
+
+    func ensureAgentSessions(for pane: UInt64) {
+        guard agentSessionLists[pane] == nil else {
+            return
+        }
+        listAgentSessions(pane: pane)
+    }
+
+    func listAgentSessions(pane: UInt64) {
+        guard let client else {
+            return
+        }
+        var list = agentSessionLists[pane] ?? ZZAgentSessionList()
+        list.loading = true
+        list.error = nil
+        agentSessionLists[pane] = list
+        if !zz_client_agent_list_sessions(client, pane) {
+            var failed = agentSessionLists[pane] ?? ZZAgentSessionList()
+            failed.loading = false
+            failed.error = "zz couldn’t load those sessions."
+            agentSessionLists[pane] = failed
+        }
+    }
+
+    func drainAgentSessions() {
+        guard let client else {
+            return
+        }
+        while let reply = zz_client_agent_sessions_next(client) {
+            defer { zz_agent_sessions_release(reply) }
+            let pane = zz_agent_sessions_pane(reply)
+            let bytes = zz_agent_sessions_result(reply)
+            guard let pointer = bytes.ptr, bytes.len > 0 else {
+                continue
+            }
+            let data = Data(buffer: UnsafeBufferPointer(start: pointer, count: bytes.len))
+            var list = agentSessionLists[pane] ?? ZZAgentSessionList()
+            list.loading = false
+            if let sessions = ZZAgentSessionSummary.parseList(data) {
+                list.sessions = sessions
+                list.error = nil
+            } else if let message = ZZAgentSessionSummary.parseListFailure(data) {
+                list.error = message
+            } else {
+                list.error = "zz couldn’t read those sessions."
+            }
+            agentSessionLists[pane] = list
+        }
+    }
+
+    func setAgentConfigOption(pane: UInt64, option: String, value: String) {
+        guard let client else {
+            actionError = "zz couldn’t change that setting."
+            return
+        }
+        let ok = option.withCString { optionPointer in
+            value.withCString { valuePointer in
+                zz_client_agent_set_config_option(client, pane, optionPointer, valuePointer)
+            }
+        }
+        if !ok {
+            actionError = "zz couldn’t change that setting."
+        }
+    }
+
+    func setAgentMode(pane: UInt64, mode: String) {
+        guard let client else {
+            actionError = "zz couldn’t change that mode."
+            return
+        }
+        let ok = mode.withCString { modePointer in
+            zz_client_agent_set_mode(client, pane, modePointer)
+        }
+        if !ok {
+            actionError = "zz couldn’t change that mode."
+        }
+    }
+
+    func startAgentSession(pane: UInt64, cwd: String) {
+        let path = cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard path.hasPrefix("/") else {
+            actionError = "Use an absolute path for the new working directory."
+            return
+        }
+        guard let client else {
+            actionError = "zz couldn’t start a session there."
+            return
+        }
+        let ok = path.withCString { pathPointer in
+            zz_client_agent_new_session(client, pane, pathPointer)
+        }
+        if !ok {
+            actionError = "zz couldn’t start a session there."
+        }
+    }
+
+    func switchAgentSession(pane: UInt64, session: ZZAgentSessionSummary) {
+        guard let client else {
+            actionError = "zz couldn’t switch to that session."
+            return
+        }
+        let ok = session.sessionID.withCString { sessionPointer in
+            session.cwd.withCString { cwdPointer in
+                session.additionalDirectoriesJSON().withCString { dirsPointer in
+                    zz_client_agent_switch_session(
+                        client,
+                        pane,
+                        sessionPointer,
+                        cwdPointer,
+                        dirsPointer
+                    )
+                }
+            }
+        }
+        if !ok {
+            actionError = "zz couldn’t switch to that session."
+        }
+    }
+
+    func deleteAgentSession(pane: UInt64, session: ZZAgentSessionSummary) {
+        guard let client else {
+            actionError = "zz couldn’t delete that session."
+            return
+        }
+        let ok = session.sessionID.withCString { sessionPointer in
+            zz_client_agent_delete_session(client, pane, sessionPointer)
+        }
+        if !ok {
+            actionError = "zz couldn’t delete that session."
+            return
+        }
+        listAgentSessions(pane: pane)
+    }
+
+    func primeAgentState(for pane: UInt64) {
+        guard agentStates[pane] == nil else {
+            return
+        }
+        refreshAgentState(pane: pane, flags: 0)
+    }
+
     @discardableResult
     func submitAgentPrompt(_ text: String, pane: UInt64) -> Bool {
         guard let args = ZZAgentPromptCommand.arguments(pane: pane, text: text) else {
@@ -894,6 +1252,9 @@ final class ZZStore: ObservableObject {
             return false
         }
         agentDrafts.remove(pane: pane)
+        var thread = agentThreads[pane] ?? ZZAgentThread()
+        thread.appendUserTurn(text)
+        agentThreads[pane] = thread
         return true
     }
 
@@ -1011,16 +1372,14 @@ final class ZZStore: ObservableObject {
     }
 
     func closePane(_ pane: UInt64) {
-        if selectedPaneID == pane {
-            selectedPaneID = nil
-        }
-        if terminalInput.owner.owns(pane) {
-            releaseTerminalInput()
-        }
-        terminalGeometries.removeValue(forKey: pane)
-        terminalFontSizeSteps.removeValue(forKey: pane)
         if !execute("kill-pane", args: ["-t", "%\(pane)"]) {
             actionError = "zz couldn’t close that pane."
+        }
+    }
+
+    func closeWindow(_ window: UInt64) {
+        if !execute("kill-window", args: ["-t", "@\(window)"]) {
+            actionError = "zz couldn’t close that window."
         }
     }
 
@@ -1076,6 +1435,7 @@ final class ZZStore: ObservableObject {
         var event = zz_client_event()
         var refreshMux = false
         var disconnected = false
+        var replacingInputPane: UInt64?
         while !disconnected, zz_client_next_event(client, &event) {
             switch event.kind {
             case ZZ_EVENT_HELLO:
@@ -1089,6 +1449,15 @@ final class ZZStore: ObservableObject {
                 unseenAgentCompletions = []
                 navigationCommandSent = false
                 refreshMux = true
+                maybeOfferTmuxImport()
+                for window in sessions.flatMap(\.windows) {
+                    for pane in window.panes where pane.kind == .agent {
+                        var thread = agentThreads[pane.id] ?? ZZAgentThread()
+                        thread.resetStream()
+                        agentThreads[pane.id] = thread
+                        requestAgentReplay(for: pane.id)
+                    }
+                }
             case ZZ_EVENT_SNAPSHOT_CHANGED:
                 refreshMux = true
             case ZZ_EVENT_VIEWPORT_CHANGED:
@@ -1104,9 +1473,12 @@ final class ZZStore: ObservableObject {
                 terminalFontSizeSteps.removeValue(forKey: event.pane)
                 agentStates.removeValue(forKey: event.pane)
                 agentDrafts.remove(pane: event.pane)
+                agentThreads.removeValue(forKey: event.pane)
+                agentSessionLists.removeValue(forKey: event.pane)
                 unseenAgentCompletions.remove(event.pane)
                 agentNotifications.clear(pane: event.pane)
                 if terminalInput.owner.owns(event.pane) {
+                    replacingInputPane = event.pane
                     terminalInput.release()
                 }
                 refreshMux = true
@@ -1115,8 +1487,20 @@ final class ZZStore: ObservableObject {
                 refreshMux = true
             case ZZ_EVENT_AGENT_STATE_CHANGED:
                 refreshAgentState(pane: event.pane, flags: event.flags)
+            case ZZ_EVENT_AGENT_UPDATES:
+                drainAgentUpdates()
+            case ZZ_EVENT_AGENT_LAGGED:
+                drainAgentLagged()
+            case ZZ_EVENT_AGENT_SESSIONS:
+                drainAgentSessions()
             case ZZ_EVENT_CLIPBOARD:
                 drainClipboard(client)
+            case ZZ_EVENT_PREFIX_ARMED,
+                 ZZ_EVENT_KEY_TABLES_CHANGED,
+                 ZZ_EVENT_COMMAND_PROMPT_CHANGED,
+                 ZZ_EVENT_CHOOSE_BUFFER_CHANGED,
+                 ZZ_EVENT_DISPLAY_PANES_CHANGED:
+                refreshPrefixState()
             case ZZ_EVENT_SERVER_STOPPING, ZZ_EVENT_DISCONNECTED:
                 disconnected = true
             default:
@@ -1128,11 +1512,11 @@ final class ZZStore: ObservableObject {
             return
         }
         if refreshMux {
-            refreshSnapshot()
+            refreshSnapshot(replacingInputFor: replacingInputPane)
         }
     }
 
-    private func refreshSnapshot() {
+    private func refreshSnapshot(replacingInputFor replacingPane: UInt64? = nil) {
         guard let client, let snapshot = zz_client_snapshot_acquire(client) else {
             return
         }
@@ -1274,6 +1658,14 @@ final class ZZStore: ObservableObject {
                 selectedSessionID = nextSessions.first?.id
             }
         }
+        if let targetPaneID = terminalInput.snapshotTarget(
+            selectedPane: selectedPaneID,
+            activePane: attached?.activeWindow?.activePane,
+            replacingPane: replacingPane,
+            navigationPending: pendingNavigation != nil || pendingAttachmentSessionID != nil
+        ), let targetPane = attached?.panes.first(where: { $0.id == targetPaneID }) {
+            openPane(targetPane)
+        }
         if let selectedPaneID,
            !nextSessions.lazy.flatMap(\.panes).contains(where: { $0.id == selectedPaneID }) {
             self.selectedPaneID = nil
@@ -1324,6 +1716,7 @@ final class ZZStore: ObservableObject {
                 actionError = "zz couldn’t recover after that session closed."
             }
         }
+        refreshPrefixState()
         resolvePendingNavigation()
     }
 
@@ -1375,6 +1768,9 @@ final class ZZStore: ObservableObject {
                 deletions: zz_agent_git_deletions(snapshot)
             )
             : nil
+        let configOptions = blobData(zz_agent_config_options(snapshot))
+            .map(ZZAgentConfigOption.parseAll) ?? []
+        let modeState = blobData(zz_agent_modes(snapshot)).flatMap(ZZAgentModeState.parse)
         let state = ZZAgentState(
             pane: pane,
             phase: phase,
@@ -1384,9 +1780,30 @@ final class ZZStore: ObservableObject {
             title: optionalString(zz_agent_title(snapshot)),
             error: optionalString(zz_agent_error(snapshot)),
             permission: permission,
-            git: git
+            git: git,
+            configOptions: configOptions,
+            modeState: modeState
         )
+        if let previous = agentStates[pane],
+           let nextSession = state.sessionID,
+           previous.sessionID != nil,
+           previous.sessionID != nextSession,
+           var thread = agentThreads[pane] {
+            thread.resetStream()
+            agentThreads[pane] = thread
+        }
         agentStates[pane] = state
+
+        if flags & UInt32(ZZ_EVENT_AGENT_DONE) != 0 {
+            var thread = agentThreads[pane] ?? ZZAgentThread()
+            thread.settleOldestWorkingTurn(.done)
+            agentThreads[pane] = thread
+        }
+        if flags & UInt32(ZZ_EVENT_AGENT_FAILED) != 0 {
+            var thread = agentThreads[pane] ?? ZZAgentThread()
+            thread.settleOldestWorkingTurn(.failed)
+            agentThreads[pane] = thread
+        }
 
         let hidden = !sceneIsActive || selectedPaneID != pane
         let session = attachedSessionID
@@ -1488,6 +1905,13 @@ final class ZZStore: ObservableObject {
     private func optionalString(_ bytes: zz_bytes) -> String? {
         let value = string(bytes)
         return value.isEmpty ? nil : value
+    }
+
+    private func blobData(_ bytes: zz_bytes) -> Data? {
+        guard let pointer = bytes.ptr, bytes.len > 0 else {
+            return nil
+        }
+        return Data(buffer: UnsafeBufferPointer(start: pointer, count: bytes.len))
     }
 
     private func refreshFrame(pane: UInt64, damage: TerminalDamage) {

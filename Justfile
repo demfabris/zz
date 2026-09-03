@@ -65,6 +65,10 @@ ios-device device="iphone":
     @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-device requires macOS" >&2; exit 2; fi
     @scripts/ios-device.sh {{ device }}
 
+ios-preview build="":
+    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-preview requires macOS" >&2; exit 2; fi
+    @scripts/ios-testflight.sh "{{ build }}"
+
 # Build a release-optimized macOS bundle with matching source-level dSYMs.
 profile-build platform:
     @if [[ "{{ platform }}" != "mac" ]]; then echo "profiling bundles currently support macOS only" >&2; exit 2; fi

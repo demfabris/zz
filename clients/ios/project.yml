@@ -38,8 +38,11 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
     sources:
       - Sources
+      - path: ../../assets/zz.icon
+        buildPhase: resources
     settings:
       base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: zz
         PRODUCT_BUNDLE_IDENTIFIER: dev.zz.ios
         PRODUCT_NAME: ZZ
         TARGETED_DEVICE_FAMILY: "1,2"

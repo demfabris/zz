@@ -2,7 +2,7 @@
 type: Design Plan
 title: Native Apple client
 description: Adaptive SwiftUI and UIKit iPhone and iPad client over zz-client-ffi, with SSH attach, Agent supervision and prompting, mobile navigation, a native session tree, and live split terminal panes.
-status: Native phone slice, adaptive iPad workspace, centered window status rail, Agent creation and composer, all-session Panorama with attached-session live previews, and persisted client settings implemented; native Browser and Editor panes remain future work
+status: Native phone slice, adaptive iPad workspace, native session menu with segmented window picker, Agent creation and composer, all-session Panorama with attached-session live previews, and persisted client settings implemented; native Browser and Editor panes remain future work
 tags:
 - ios
 - iphone
@@ -64,6 +64,12 @@ This slice deliberately selects one host at a time. It does not reproduce the de
 or aggregate sessions from several daemons. `ZZ_SOCKET` remains the simulator override and bypasses
 saved-host setup for the local development loop.
 
+The first attach to a host offers a one-time tmux config import, mirroring the desktop first-run
+flow: accepting runs the daemon's `import-tmux-config`, which copies the host's `~/.tmux.conf` (then
+`$XDG_CONFIG_HOME/tmux/tmux.conf`, then `~/.config/tmux/tmux.conf`) verbatim into `zz/mux.conf` and
+reloads, so host binds like hjkl pane navigation go live. The offer is remembered per normalized
+endpoint; the Prefix Keys sheet re-runs the import on demand and shows the resulting live table.
+
 ## Pane overview
 
 - The selected session's active window is the only window represented.
@@ -91,8 +97,10 @@ waits for the next reduced snapshot as confirmation.
 
 The outline follows the Swift Playgrounds source-list grammar: each session is a strong section row,
 each window is nested one level below its session, and each pane is nested one more level below its
-window. Branch chevrons stay on the trailing edge and the whole 44-point row toggles immediately.
-Pane labels are centered within their indented row and do not use state dots. Only the selected pane
+window. Branch chevrons stay on the trailing edge and the whole 44-point row toggles with a short
+expand animation. Pane labels sit next to their icons and do not use state dots. A long press on a
+window or pane row offers Close Window or Close Pane through a context menu, each confirmed by a
+destructive alert because closing stops the running processes. Only the selected pane
 receives the Playgrounds-matched full-width source-list capsule; the attached session's active pane
 is the visual fallback before an explicit pane selection exists. The balanced split-view style keeps
 the material sidebar beside the workspace at regular widths while retaining the native visibility
@@ -109,7 +117,10 @@ Every visible terminal has its own retained `TerminalSurface`, stable pane-local
 path, and resize report. A viewport event publishes only through that pane's slot instead of
 invalidating every view that observes `ZZStore`. The store still owns exactly one terminal input
 target. Tapping a terminal selects the mux pane, transfers first responder and terminal focus, and
-leaves the other panes live but non-keyboard-owning.
+leaves the other panes live but non-keyboard-owning. When a prefix binding changes the daemon's
+active pane, the next snapshot transfers that existing selection and input ownership. Panorama's
+empty selection remains unchanged. Removing the selected pane transfers input to the replacement
+active pane chosen by the daemon.
 Standard toolbars provide New Session, New Pane, reconnect, and host actions. The iPad New Pane menu
 offers Terminal and Agent. Agent creation sends one daemon command list that splits a pending picker
 and materializes it while that picker remains the active command target. The connected daemon must
@@ -117,11 +128,12 @@ already have `experimental-agent-pane` enabled. The detail column omits a duplic
 and lets pane content fill each tile directly; pane identity and selection remain in the sidebar, so
 per-pane chrome does not consume terminal bounds.
 
-The principal toolbar item is a centered, snapshot-backed status rail. It shows the attached session
-and a bounded set of windows around the active window, including bell and zoom state, and opens the
-selected window through the normal exact-pane navigation path. The daemon-expanded `StatusLine`
-payload is not exposed by the current C ABI, so custom `status-left`, `status-right`, justification,
-and clock text are not duplicated in Swift.
+The system-sized principal toolbar item uses a native session menu and a flexible segmented window
+picker centered around the active window. Panorama, New Pane, and More stay in the trailing native
+action group, with Settings inside More. Window labels surface the structured bell, Agent, and zoom
+state available in the client snapshot. The controls use the normal attachment and exact-pane
+navigation paths. The current C ABI does not expose the daemon-expanded `StatusLine` payload, so
+Swift does not duplicate custom `status-left`, `status-right`, justification, or clock text.
 
 ### Client settings
 
@@ -137,27 +149,31 @@ Settings uses the same modal sheet at compact and regular widths. Opening it the
 live iPad detail column at its current width and does not send a terminal resize merely because the
 settings UI appeared. App appearance affects native chrome only. Terminal cell colors, cursor color,
 shape, and visibility continue to come from the daemon-provided viewport frame. Turning off cursor
-blinking makes the cursor steady without disabling ANSI blinking text.
+blinking makes the cursor steady without disabling ANSI blinking text. In a live split, only the
+selected pane animates its cursor; other panes remain live and may still animate ANSI blinking text.
 
 ### Panorama
 
 Regular-width iPad layouts open in Panorama, a horizontal set of session columns. Each column keeps
-its session name above a window stack with its own scroll. Window names use plain mux notation such
-as `1:bash`; the session, window, and pane material bars are absent so the terminal geometry carries
-the hierarchy. A single circular glass X closes Panorama from the top-right corner. Window cards
-preserve the normalized pane rectangles supplied by `zz-client`, so their miniature topology matches
-the daemon rather than inventing a Swift-only grid.
+its session name above a window stack with its own scroll. Windows have no outer container or title;
+each window's panes sit inline in the stack. The session, window, and pane material bars are absent
+so the terminal geometry carries the hierarchy. A single circular glass X closes Panorama from the
+top-right corner. Each window's panes preserve the normalized pane rectangles supplied by
+`zz-client`, so their miniature topology matches the daemon rather than inventing a Swift-only grid.
 
 The outer scroller and each window stack use view-aligned targets with one-target paging. During a
 drag, nearby columns and cards recede by four percent, then return to full size at rest. Entering
 Panorama waits for the first real window snapshot instead of completing while the app is still
 connecting. The active window is captured as one fixed-size passive workspace surface at the detail
-column's settled bounds. SwiftUI animates only that surface's position and horizontal and vertical
-scale into the measured window-card rectangle. Other windows use short opacity, offset, and small
-scale changes. Leaving reverses the same fixed surface after the detail navigation bar returns and
-the destination geometry settles. The target rectangle is locked before movement starts, and the
-live workspace is mounted only after the 240-millisecond exit completes. Reduce Motion fades the
-Panorama layer before swapping view branches and performs no transform animation.
+column's settled bounds. Entering removes the detail navigation bar without animation, waits for the
+resulting geometry, then flies that surface into the measured window rectangle on an ease-out
+curve while the session columns cascade in with a short stagger and the scroll surface fades up
+behind them; the grid itself does not scale, so the measured card rectangle stays valid through the
+flight. Leaving fades the surrounding content out fast and grows the fixed surface back to
+fullscreen on an ease-in-out curve after the detail navigation bar returns and the destination
+geometry settles. The target rectangle is locked before movement starts, and the live workspace
+mounts after the exit completes. Reduce Motion fades the Panorama layer before swapping view
+branches and performs no transform animation.
 
 Panorama creates no additional interactive terminals. While it is open, the app enables the v87
 terminal preview stream and retains a stable pane-local frame slot for every terminal across every
@@ -180,7 +196,7 @@ report its final settled geometry only after it replaces the transition surface.
 Each pane cell is an accessible button. A tap uses the existing exact-pane navigation path, attaches
 another session or selects another window as needed, then returns to the live split workspace. The
 app releases terminal input ownership before it enters Panorama. Zoomed windows display the one
-full-card pane that owns a normalized rectangle; the sidebar retains the hidden siblings because the
+full-size pane that owns a normalized rectangle; the sidebar retains the hidden siblings because the
 current snapshot does not expose their pre-zoom rectangles.
 
 ## Fullscreen terminal
@@ -229,8 +245,24 @@ responses and turn cancellation travel through the daemon-owned Agent commands.
 
 The mounted multiline composer keeps an independent draft for every pane. Submit sends
 `agent-send --submit` to an idle Agent or queues the prompt while it is running; an empty action while
-running becomes Stop. The pane renders current daemon activity as a timeline row, but it does not
-invent a chat transcript while the ABI omits turn items and streaming deltas.
+running becomes Stop. The pane renders the conversation as a thread: every submitted prompt appears
+as a user bubble with a Working, Done, or Failed receipt, interleaved with the agent's streamed
+text, collapsible thought blocks, and tool-call rows carrying their live status. The receipts come
+from the thread's record of prompts the app sent, settled by the daemon's done and failed attention
+edges. The transcript itself arrives as JSON journal batches through
+`zz_client_agent_updates_next`, reduced in Swift with the same cursor rules as the desktop shell:
+per-pane cursor, idempotent overlap, gap-triggered replay from the cursor, restoring-reset jumps,
+and replay on lane overflow. Swift parses message chunks, thought chunks, and tool calls from the
+ACP `session/update` payloads and skips the variants it has no rendering for, including user
+echoes the thread already shows. A settings bar above the composer holds the session, model, and
+effort pickers. The model and effort menus come from the adapter's session config options, with the
+legacy mode list as fallback; all three lock while a turn runs or an approval is pending, matching
+the desktop. The session button shows the current working directory and opens the session sheet,
+which lists every project session with its directory, switches between them, deletes them with
+confirmation, or starts a new session in a typed absolute path. Switching sessions resets the
+visible transcript because the journal belongs to the previous session. Swift primes retained
+agent state when an agent pane appears without any, so attaching to a session with live agents
+does not stick on the connecting empty state while the daemon already holds their state.
 
 `ClientCore` derives attention edges while reducing Agent state. A transition into a permission
 request, working to idle, or first failure becomes a lossless event flag, so a fast transition cannot
@@ -328,7 +360,8 @@ sessions never inherit the docked keyboard's height.
 `XcodeGen` generates `clients/ios/ZZMobile.xcodeproj` and `Support/Info.plist` from `project.yml`.
 The project is intentionally generated and ignored. Its pre-build phase cross-compiles
 `zz-client-ffi` as an arm64 static library for the selected Apple SDK and links it into Swift through
-`ZZ-Bridging-Header.h`.
+`ZZ-Bridging-Header.h`. The universal target compiles the shared `assets/zz.icon` Icon Composer
+document for its iPhone, iPad, and App Store icon variants.
 
 ```sh
 just ios-build
@@ -339,6 +372,7 @@ just ipad-test
 just ipad
 just ios-device <device-name>
 ZZ_IOS_REUSE_CLIENT_CORE=1 just ios-device <device-name>
+just ios-preview [build-number]
 ```
 
 `just ios` builds, boots an available iPhone simulator, installs `dev.zz.ios`, injects `ZZ_SOCKET`,
@@ -351,6 +385,14 @@ device family. For a Swift-only device iteration, `ZZ_IOS_REUSE_CLIENT_CORE=1` s
 the existing target archive; it fails when that archive is missing, and must not be used after a Rust
 or FFI change.
 
+`just ios-preview` creates a fresh Release archive, derives the marketing version from the workspace,
+uses the optional numeric argument or a UTC timestamp as the unique build number, and uploads through
+Xcode automatic signing. Its export options mark the build TestFlight Internal Only, so that uploaded
+build can be assigned only to internal tester groups and cannot be promoted to external testing or the
+App Store. Local runs use the developer account saved in Xcode. Automation can instead provide
+`APPLE_API_KEY_PATH`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER_ID` without storing credentials in the
+repository.
+
 # Boundaries and next work
 
 - Decide whether the one-host phone model needs a small host history without importing the desktop
@@ -361,7 +403,12 @@ or FFI change.
   gives the zoomed pane a rectangle.
 - Decide native representations for Browser, Editor, and picker panes.
 - Export the daemon-expanded status payload through the C ABI before reproducing custom tmux status
-  formats, and export Agent turn items before adding transcript bubbles or streaming deltas.
+  formats. The C ABI now exports Agent journal batches (`zz_client_agent_updates_next`,
+  `zz_client_agent_lagged_next`, `zz_client_agent_replay`), session replies
+  (`zz_client_agent_sessions_next` plus list, new, switch, and delete ops), and the config and mode
+  blobs with their setters; the app renders the transcript, the model, effort, and session pickers
+  from them, and still skips richer payloads such as diffs, images, plans,
+  and usage until a native representation exists.
 - Add a push-capable background Agent inbox only if the product needs notifications while the app is
   suspended or terminated; the current local-notification path deliberately makes no such claim.
 - Add one daemon-backed UI automation smoke for software-keyboard frame behavior once the fixture can
@@ -376,7 +423,7 @@ edges and SSH prompt and failure classification.
 The Swift suite covers host endpoint normalization, live and keyboard-sized grid calculation, stable
 reconnect selection, bounded backoff, deduplicated layout updates, exclusive input ownership,
 modifier locking, known deep-link routes, persisted client settings including the home-indicator
-option, per-pane Agent drafts and composer action policy, global font size plus per-pane zoom, and
+option, per-pane Agent drafts, thread receipts, transcript cursor rules, config, mode, and session parsing, and composer action policy, global font size plus per-pane zoom, and
 cursor blink policy.
 
 # Key files
@@ -397,6 +444,7 @@ cursor blink policy.
 | `clients/ios/Tests/Unit/TerminalInteractionTests.swift` | Simulator policy regressions. |
 | `crates/zz-client-ffi/include/zz-client.h` | Stable C boundary consumed by Swift. |
 | `scripts/ios-sim.sh` | Simulator build, install, socket injection, and launch. |
+| `scripts/ios-testflight.sh` | Release archive and internal-only TestFlight upload. |
 
 # Related
 

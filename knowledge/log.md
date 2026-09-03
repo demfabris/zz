@@ -1,6 +1,8 @@
 # Update Log
 
 ## 2026-09-02
+* **Update**: Added a native iOS preview release path that compiles the shared Icon Composer document and uploads uniquely numbered builds as TestFlight Internal Only.
+* **Update**: Refined the native iPad toolbar layout and Panorama entrance to prevent clipping and navigation-bar animation.
 * **Update**: Paused the campaign after cycle 9 (agreed-scope meter 84.2% to 90.5%, protocol v94 to v95, all three lanes integrated on the macbook); rewrote `compat/orchestration/HANDOFF.md` as a paused state with the 30-item census, a plain-language description of the campaign, and a checklist for resuming on another machine; landed the `rm $HOME` guard hook beside it.
 * **Update**: Paused campaign cycle 6 for a machine move: exported the cached lane reports into `compat/orchestration/opus-compat-run-6-continue.js` (machine facts via workflow `args`), snapshotted the client lane on its wip branch, and rewrote the handoff around the in-flight state.
 

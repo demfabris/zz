@@ -53,24 +53,124 @@ enum TerminalFontZoom {
 
 enum TerminalBlinkPolicy {
     static func cursorShouldAnimate(
+        cursorActive: Bool,
         frameRequestsBlink: Bool,
         cursorBlinking: Bool
     ) -> Bool {
-        frameRequestsBlink && cursorBlinking
+        cursorActive && frameRequestsBlink && cursorBlinking
     }
 
     static func shouldRunTimer(
         interactive: Bool,
+        cursorActive: Bool,
         cursorRequestsBlink: Bool,
         blinkingText: Bool,
         cursorBlinking: Bool
     ) -> Bool {
         interactive && (
             blinkingText || cursorShouldAnimate(
+                cursorActive: cursorActive,
                 frameRequestsBlink: cursorRequestsBlink,
                 cursorBlinking: cursorBlinking
             )
         )
+    }
+
+    /// Sorted rows containing at least one cell whose style blinks.
+    static func blinkingRows(
+        cellStyleIndices: [Int],
+        columns: Int,
+        rowCount: Int,
+        styleAttributes: [UInt16]
+    ) -> [Int] {
+        guard columns > 0, rowCount > 0 else {
+            return []
+        }
+        var rows: [Int] = []
+        for row in 0..<rowCount {
+            var found = false
+            for column in 0..<columns {
+                let index = row * columns + column
+                guard cellStyleIndices.indices.contains(index) else {
+                    break
+                }
+                let styleIndex = cellStyleIndices[index]
+                guard styleAttributes.indices.contains(styleIndex) else {
+                    continue
+                }
+                if styleAttributes[styleIndex] & UInt16(ZZ_ATTR_BLINK) != 0 {
+                    found = true
+                    break
+                }
+            }
+            if found {
+                rows.append(row)
+            }
+        }
+        return rows
+    }
+
+    /// Display rects covering one blink tick: full-width bands for contiguous
+    /// runs of blinking rows plus the animating cursor cell. The cursor rect is
+    /// omitted when a band already covers it.
+    static func blinkDirtyRects(
+        cursorColumn: Int?,
+        cursorRow: Int?,
+        cursorAnimates: Bool,
+        blinkingRows: [Int],
+        columns: Int,
+        rowCount: Int,
+        cellSize: CGSize,
+        boundsWidth: CGFloat
+    ) -> [CGRect] {
+        guard cellSize.width > 0, cellSize.height > 0, columns > 0, rowCount > 0 else {
+            return []
+        }
+        let rows = Array(Set(blinkingRows.filter { $0 >= 0 && $0 < rowCount })).sorted()
+        var rects: [CGRect] = []
+        var runStart: Int?
+        var runEnd = 0
+        for row in rows {
+            if runStart != nil, row == runEnd + 1 {
+                runEnd = row
+            } else {
+                if let start = runStart {
+                    rects.append(CGRect(
+                        x: 0,
+                        y: CGFloat(start) * cellSize.height,
+                        width: boundsWidth,
+                        height: CGFloat(runEnd - start + 1) * cellSize.height
+                    ))
+                }
+                runStart = row
+                runEnd = row
+            }
+        }
+        if let start = runStart {
+            rects.append(CGRect(
+                x: 0,
+                y: CGFloat(start) * cellSize.height,
+                width: boundsWidth,
+                height: CGFloat(runEnd - start + 1) * cellSize.height
+            ))
+        }
+        if cursorAnimates,
+           let cursorColumn,
+           let cursorRow,
+           cursorColumn >= 0, cursorColumn < columns,
+           cursorRow >= 0, cursorRow < rowCount
+        {
+            let cursorRect = CGRect(
+                x: CGFloat(cursorColumn) * cellSize.width,
+                y: CGFloat(cursorRow) * cellSize.height,
+                width: cellSize.width,
+                height: cellSize.height
+            )
+            if !rects.contains(where: { $0.contains(cursorRect) }) {
+                rects.append(cursorRect)
+            }
+        }
+        return rects
     }
 }
 
@@ -113,8 +213,10 @@ final class TerminalGridView: UIView, UIKeyInput {
     private var pinchAnchorStep = 0
     private var pinchReportedStep = 0
     private var cursorVisible = true
+    private var cursorActive = false
     private var cursorBlinking = true
     private var blinkTimer: Timer?
+    private var blinkingRows: [Int] = []
     private var colors: [UInt32: UIColor] = [:]
     private let fontFeedback = UISelectionFeedbackGenerator()
     private var inputRequested = false
@@ -189,6 +291,7 @@ final class TerminalGridView: UIView, UIKeyInput {
         fontSizeStep: Int,
         terminalFont: ZZTerminalFont,
         basePointSize: CGFloat,
+        cursorActive: Bool,
         cursorBlinking: Bool,
         inputRequested: Bool,
         sceneActive: Bool,
@@ -204,10 +307,22 @@ final class TerminalGridView: UIView, UIKeyInput {
         let fontChanged = self.terminalFont != terminalFont ||
             abs(self.basePointSize - basePointSize) > 0.01
         let previewChanged = self.preview != preview
+        let cursorActiveChanged = self.cursorActive != cursorActive
         let cursorBlinkingChanged = self.cursorBlinking != cursorBlinking
         viewport = frame
+        if generationChanged {
+            blinkingRows = frame.map {
+                TerminalBlinkPolicy.blinkingRows(
+                    cellStyleIndices: $0.cells.map { Int($0.style) },
+                    columns: $0.columns,
+                    rowCount: $0.rows,
+                    styleAttributes: $0.styles.map { $0.attributes }
+                )
+            } ?? []
+        }
         self.interactive = interactive
         self.preview = preview
+        self.cursorActive = cursorActive
         self.cursorBlinking = cursorBlinking
         self.inputRequested = inputRequested
         self.sceneActive = sceneActive
@@ -244,7 +359,7 @@ final class TerminalGridView: UIView, UIKeyInput {
         }
         updateMetrics()
         updateBlinkTimer()
-        if fontChanged || previewChanged || cursorBlinkingChanged {
+        if fontChanged || previewChanged || cursorActiveChanged || cursorBlinkingChanged {
             setNeedsDisplay()
         } else if generationChanged, let frame, !frame.damage.all {
             let first = CGFloat(frame.damage.firstRow) * measuredCell.height
@@ -529,16 +644,14 @@ final class TerminalGridView: UIView, UIKeyInput {
     }
 
     private func updateBlinkTimer() {
-        let blinkingText = viewport?.styles.contains {
-            $0.attributes & UInt16(ZZ_ATTR_BLINK) != 0
-        } ?? false
         let cursorRequestsBlink = viewport?.cursor.map {
             $0.visible != 0 && $0.blinking != 0
         } ?? false
         let shouldRun = TerminalBlinkPolicy.shouldRunTimer(
             interactive: interactive,
+            cursorActive: cursorActive,
             cursorRequestsBlink: cursorRequestsBlink,
-            blinkingText: blinkingText,
+            blinkingText: !blinkingRows.isEmpty,
             cursorBlinking: cursorBlinking
         )
         guard shouldRun, window != nil else {
@@ -565,7 +678,40 @@ final class TerminalGridView: UIView, UIKeyInput {
 
     @objc private func blinkCursor() {
         cursorVisible.toggle()
-        setNeedsDisplay()
+        let rects = currentBlinkDirtyRects()
+        if rects.isEmpty {
+            setNeedsDisplay()
+        } else {
+            for rect in rects {
+                setNeedsDisplay(rect)
+            }
+        }
+    }
+
+    /// Dirty region for one blink tick: the animating cursor cell plus rows
+    /// holding ANSI-blinking text. Narrower than a full-surface redraw; the
+    /// draw path already clips to the invalidated rect.
+    private func currentBlinkDirtyRects() -> [CGRect] {
+        guard let viewport, viewport.columns > 0, viewport.rows > 0 else {
+            return []
+        }
+        let cursorAnimates = viewport.cursor.map {
+            TerminalBlinkPolicy.cursorShouldAnimate(
+                cursorActive: cursorActive,
+                frameRequestsBlink: $0.blinking != 0,
+                cursorBlinking: cursorBlinking
+            )
+        } ?? false
+        return TerminalBlinkPolicy.blinkDirtyRects(
+            cursorColumn: viewport.cursor.map { Int($0.column) },
+            cursorRow: viewport.cursor.map { Int($0.row) },
+            cursorAnimates: cursorAnimates,
+            blinkingRows: blinkingRows,
+            columns: viewport.columns,
+            rowCount: viewport.rows,
+            cellSize: measuredCell,
+            boundsWidth: bounds.width
+        )
     }
 
     private func draw(row: Int, viewport: TerminalFrame, context: CGContext) {
@@ -696,6 +842,7 @@ final class TerminalGridView: UIView, UIKeyInput {
             return
         }
         let shouldAnimate = TerminalBlinkPolicy.cursorShouldAnimate(
+            cursorActive: cursorActive,
             frameRequestsBlink: cursor.blinking != 0,
             cursorBlinking: cursorBlinking
         )
@@ -763,8 +910,20 @@ final class TerminalGridView: UIView, UIKeyInput {
     }
 
     private func map(_ key: UIKey) -> (code: UInt32, scalar: UInt32)? {
+        Self.map(
+            keyCode: key.keyCode,
+            charactersIgnoringModifiers: key.charactersIgnoringModifiers,
+            modifierFlags: key.modifierFlags
+        )
+    }
+
+    static func map(
+        keyCode: UIKeyboardHIDUsage,
+        charactersIgnoringModifiers: String,
+        modifierFlags: UIKeyModifierFlags
+    ) -> (code: UInt32, scalar: UInt32)? {
         let code: UInt32?
-        switch key.keyCode {
+        switch keyCode {
         case .keyboardDeleteOrBackspace: code = UInt32(ZZ_KEY_BACKSPACE.rawValue)
         case .keyboardReturnOrEnter: code = UInt32(ZZ_KEY_ENTER.rawValue)
         case .keyboardTab: code = UInt32(ZZ_KEY_TAB.rawValue)
@@ -783,12 +942,12 @@ final class TerminalGridView: UIView, UIKeyInput {
         if let code {
             return (code, 0)
         }
-        let hasTerminalModifier = key.modifierFlags.contains(.control) ||
-            key.modifierFlags.contains(.alternate) ||
-            key.modifierFlags.contains(.command)
+        let hasTerminalModifier = modifierFlags.contains(.control) ||
+            modifierFlags.contains(.alternate) ||
+            modifierFlags.contains(.command)
         guard hasTerminalModifier,
-              key.charactersIgnoringModifiers.unicodeScalars.count == 1,
-              let scalar = key.charactersIgnoringModifiers.unicodeScalars.first else {
+              charactersIgnoringModifiers.unicodeScalars.count == 1,
+              let scalar = charactersIgnoringModifiers.unicodeScalars.first else {
             return nil
         }
         return (UInt32(ZZ_KEY_CHARACTER.rawValue), scalar.value)
@@ -876,10 +1035,21 @@ struct TerminalSurface: UIViewRepresentable {
             fontSizeStep: store.terminalFontSizeStep(for: pane),
             terminalFont: terminalPresentation.font,
             basePointSize: terminalPresentation.pointSize,
+            cursorActive: cursorActive,
             cursorBlinking: terminalPresentation.cursorBlinking,
             inputRequested: interactive && store.terminalInput.owner.owns(pane),
             sceneActive: store.sceneIsActive,
             inputActivation: store.terminalInput.activation
         )
+    }
+
+    private var cursorActive: Bool {
+        guard interactive else {
+            return false
+        }
+        if let selectedPaneID = store.selectedPaneID {
+            return selectedPaneID == pane
+        }
+        return store.selectedSession?.activeWindow?.activePane == pane
     }
 }

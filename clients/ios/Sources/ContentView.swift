@@ -48,6 +48,32 @@ struct ContentView: View {
         } message: {
             Text(store.actionError ?? "zz couldn’t complete that action.")
         }
+        .alert(
+            "Tmux config",
+            isPresented: Binding(
+                get: { store.tmuxImportPhase.needsAlert },
+                set: { if !$0 { store.acknowledgeTmuxImport() } }
+            )
+        ) {
+            if store.tmuxImportPhase.promptEndpoint != nil {
+                Button("Import") {
+                    store.runTmuxImportManually()
+                }
+                Button("Not now", role: .cancel) {
+                    store.declineTmuxImport()
+                }
+            } else {
+                Button("OK", role: .cancel) {
+                    store.dismissTmuxImport()
+                }
+            }
+        } message: {
+            if let endpoint = store.tmuxImportPhase.promptEndpoint {
+                Text(ZZTMuxImport.promptMessage(endpoint: endpoint))
+            } else {
+                Text(store.tmuxImportPhase.resultMessage ?? "Import finished.")
+            }
+        }
         .sheet(
             item: Binding(
                 get: { store.sshPrompt },
@@ -443,6 +469,8 @@ private struct IPadSessionSidebar: View {
     @EnvironmentObject private var store: ZZStore
     @State private var expandedSessions: Set<UInt64> = []
     @State private var expandedWindows: Set<IPadSidebarWindowKey> = []
+    @State private var paneToClose: ZZPane?
+    @State private var windowToClose: ZZWindow?
 
     var body: some View {
         List {
@@ -476,6 +504,42 @@ private struct IPadSessionSidebar: View {
                 }
                 .disabled(store.isCreatingSession)
             }
+        }
+        .alert(
+            "Close pane?",
+            isPresented: Binding(
+                get: { paneToClose != nil },
+                set: { if !$0 { paneToClose = nil } }
+            ),
+            presenting: paneToClose
+        ) { pane in
+            Button("Close Pane", role: .destructive) {
+                store.closePane(pane.id)
+                paneToClose = nil
+            }
+            Button("Cancel", role: .cancel) {
+                paneToClose = nil
+            }
+        } message: { pane in
+            Text("zz will stop the process running in “\(pane.title)”.")
+        }
+        .alert(
+            "Close window?",
+            isPresented: Binding(
+                get: { windowToClose != nil },
+                set: { if !$0 { windowToClose = nil } }
+            ),
+            presenting: windowToClose
+        ) { window in
+            Button("Close Window", role: .destructive) {
+                store.closeWindow(window.id)
+                windowToClose = nil
+            }
+            Button("Cancel", role: .cancel) {
+                windowToClose = nil
+            }
+        } message: { _ in
+            Text("zz will stop every process running in this window.")
         }
         .onChange(of: store.selectedSessionID, initial: true) {
             expandCurrentSelection()
@@ -526,7 +590,6 @@ private struct IPadSessionSidebar: View {
                 level: row.level,
                 selected: row.selected,
                 emphasized: row.emphasized,
-                centersTitle: row.centersTitle,
                 iconColor: row.iconColor,
                 isExpanded: row.isExpanded,
                 badgeSymbol: row.badgeSymbol,
@@ -537,10 +600,27 @@ private struct IPadSessionSidebar: View {
         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
+        .contextMenu {
+            deleteMenu(for: item)
+        }
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityValue(row.accessibilityValue)
         .accessibilityAddTraits(row.selected ? .isSelected : [])
         .accessibilityIdentifier(row.accessibilityIdentifier)
+    }
+
+    @ViewBuilder
+    private func deleteMenu(for item: IPadSidebarItem) -> some View {
+        switch item {
+        case let .window(_, window):
+            Button("Close Window", role: .destructive) {
+                windowToClose = window
+            }
+        case let .pane(_, _, pane):
+            Button("Close Pane", role: .destructive) {
+                paneToClose = pane
+            }
+        }
     }
 
     private func outlineItems(for session: ZZSession) -> [IPadSidebarItem] {
@@ -571,15 +651,15 @@ private struct IPadSessionSidebar: View {
 
     private func toggleSession(_ session: ZZSession) {
         if !session.isAttached {
-            withoutTreeAnimation {
-                expandedSessions.insert(session.id)
+            withAnimation(.snappy(duration: 0.25)) {
+                _ = expandedSessions.insert(session.id)
             }
             store.selectSession(session)
             return
         }
 
         let expanding = !expandedSessions.contains(session.id)
-        withoutTreeAnimation {
+        withAnimation(.snappy(duration: 0.25)) {
             if expanding {
                 expandedSessions.insert(session.id)
             } else {
@@ -589,7 +669,7 @@ private struct IPadSessionSidebar: View {
     }
 
     private func toggleWindow(_ key: IPadSidebarWindowKey) {
-        withoutTreeAnimation {
+        withAnimation(.snappy(duration: 0.25)) {
             if expandedWindows.contains(key) {
                 expandedWindows.remove(key)
             } else {
@@ -636,7 +716,6 @@ private struct IPadSessionSidebar: View {
                 level: 1,
                 selected: false,
                 emphasized: window.isCurrent,
-                centersTitle: false,
                 iconColor: window.isCurrent ? .accentColor : .secondary,
                 isExpanded: expandedWindows.contains(key),
                 badgeSymbol: window.zoomedPane == nil
@@ -662,7 +741,6 @@ private struct IPadSessionSidebar: View {
                 level: 2,
                 selected: selected,
                 emphasized: pane.isActive || selected,
-                centersTitle: true,
                 iconColor: pane.hasBell ? .orange : .secondary,
                 isExpanded: nil,
                 badgeSymbol: nil,
@@ -705,7 +783,6 @@ private struct IPadSidebarRowModel {
     let level: Int
     let selected: Bool
     let emphasized: Bool
-    let centersTitle: Bool
     let iconColor: Color
     let isExpanded: Bool?
     let badgeSymbol: String?
@@ -729,7 +806,6 @@ private struct IPadSidebarTreeRow: View {
     let level: Int
     var selected = false
     var emphasized = false
-    var centersTitle = false
     var iconColor: Color = .secondary
     let isExpanded: Bool?
     var badgeSymbol: String?
@@ -745,26 +821,19 @@ private struct IPadSidebarTreeRow: View {
             }
             Text(title)
                 .lineLimit(1)
-                .frame(maxWidth: centersTitle ? .infinity : nil, alignment: .center)
-            if centersTitle {
-                Color.clear
-                    .frame(width: symbol == nil ? 0 : 20)
+            Spacer(minLength: 6)
+            if let badgeSymbol {
+                Image(systemName: badgeSymbol)
+                    .font(.caption2)
+                    .foregroundStyle(selected ? Color.white : badgeColor)
                     .accessibilityHidden(true)
-            } else {
-                Spacer(minLength: 6)
-                if let badgeSymbol {
-                    Image(systemName: badgeSymbol)
-                        .font(.caption2)
-                        .foregroundStyle(selected ? Color.white : badgeColor)
-                        .accessibilityHidden(true)
-                }
-                if let isExpanded {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(selected ? Color.white : Color.secondary)
-                        .frame(width: 18)
-                        .accessibilityHidden(true)
-                }
+            }
+            if let isExpanded {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(selected ? Color.white : Color.secondary)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
             }
         }
         .font(symbol == nil ? .headline : .body.weight(emphasized ? .semibold : .regular))
@@ -807,9 +876,18 @@ private struct IPadPaneWorkspace: View {
     @State private var panoramaTransitionWindowSnapshot: ZZWindow?
     @State private var panoramaTransitionFrames: [UInt64: TerminalFrame] = [:]
     @State private var panoramaTransitionAgentStates: [UInt64: ZZAgentState] = [:]
+    @State private var panoramaEntranceArmed = false
 
-    private static let entranceDuration = 0.36
-    private static let exitDuration = 0.24
+    fileprivate static let entranceDuration = 0.30
+    fileprivate static let exitDuration = 0.28
+
+    fileprivate static var entranceAnimation: Animation {
+        .easeOut(duration: entranceDuration)
+    }
+
+    fileprivate static var exitAnimation: Animation {
+        .easeInOut(duration: exitDuration)
+    }
 
     var body: some View {
         Group {
@@ -853,13 +931,13 @@ private struct IPadPaneWorkspace: View {
                             )
                             .position(
                                 x: panoramaWindowAtOverview
-                                    ? targetFrame.midX - panoramaWorkspaceFrame.minX
-                                    : panoramaTransitionWorkspaceFrame.midX
-                                        - panoramaWorkspaceFrame.minX,
+                                    ? targetFrame.midX
+                                        - panoramaTransitionWorkspaceFrame.minX
+                                    : panoramaTransitionWorkspaceFrame.width / 2,
                                 y: panoramaWindowAtOverview
-                                    ? targetFrame.midY - panoramaWorkspaceFrame.minY
-                                    : panoramaTransitionWorkspaceFrame.midY
-                                        - panoramaWorkspaceFrame.minY
+                                    ? targetFrame.midY
+                                        - panoramaTransitionWorkspaceFrame.minY
+                                    : panoramaTransitionWorkspaceFrame.height / 2
                             )
                             .zIndex(3)
                     }
@@ -935,27 +1013,30 @@ private struct IPadPaneWorkspace: View {
                 .disabled(store.selectedSession == nil)
                 .accessibilityIdentifier("ipad-new-pane-menu")
 
-                Button(action: showSettings) {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .accessibilityIdentifier("settings")
-
                 Menu {
-                    Button {
-                        store.retry()
-                    } label: {
-                        Label("Refresh Connection", systemImage: "arrow.clockwise")
+                    Button(action: showSettings) {
+                        Label("Settings", systemImage: "gearshape")
                     }
-                    if store.canConfigureHost {
+                    .accessibilityIdentifier("settings")
+
+                    Section {
                         Button {
-                            store.showHostSetup()
+                            store.retry()
                         } label: {
-                            Label("Change Host", systemImage: "server.rack")
+                            Label("Refresh Connection", systemImage: "arrow.clockwise")
+                        }
+                        if store.canConfigureHost {
+                            Button {
+                                store.showHostSetup()
+                            } label: {
+                                Label("Change Host", systemImage: "server.rack")
+                            }
                         }
                     }
                 } label: {
-                    Label("Connection", systemImage: "ellipsis")
+                    Label("More", systemImage: "ellipsis")
                 }
+                .accessibilityIdentifier("ipad-overflow-menu")
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -997,6 +1078,18 @@ private struct IPadPaneWorkspace: View {
             }
             dismissPanorama(toward: windowKey(containing: paneID))
         }
+        .onChange(of: panoramaTransitionTargetFrame) { _, _ in
+            guard panoramaEntranceArmed else {
+                return
+            }
+            _ = tryBeginPanoramaEntrance(revision: panoramaMotionRevision)
+        }
+        .onChange(of: panoramaWorkspaceFrame) { _, _ in
+            guard panoramaEntranceArmed else {
+                return
+            }
+            _ = tryBeginPanoramaEntrance(revision: panoramaMotionRevision)
+        }
     }
 
     private func presentPanorama() {
@@ -1004,13 +1097,22 @@ private struct IPadPaneWorkspace: View {
         store.setTerminalPreview(true)
         prepareTransition(toward: origin)
         panoramaTransitionWorkspaceFrame = panoramaWorkspaceFrame
-        panoramaNavigationBarVisible = false
         panoramaOpacity = 1
         store.showOverview()
         guard !panoramaWindowKeys.isEmpty else {
-            panoramaPhase = .entering
             panoramaWindowAtOverview = false
-            showsPanorama = true
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            UIView.setAnimationsEnabled(false)
+            withTransaction(transaction) {
+                panoramaPhase = .entering
+                panoramaNavigationBarVisible = false
+                showsPanorama = true
+            }
+            Task { @MainActor in
+                await Task.yield()
+                UIView.setAnimationsEnabled(true)
+            }
             return
         }
         startPanoramaEntrance(from: origin)
@@ -1023,20 +1125,23 @@ private struct IPadPaneWorkspace: View {
             prepareTransition(toward: window)
         }
         panoramaWindowAtOverview = false
-        panoramaNavigationBarVisible = false
 
         if reduceMotion {
+            panoramaEntranceArmed = false
             panoramaPhase = .visible
             panoramaWindowAtOverview = true
             panoramaOpacity = 0
             var transaction = Transaction(animation: nil)
             transaction.disablesAnimations = true
+            UIView.setAnimationsEnabled(false)
             withTransaction(transaction) {
+                panoramaNavigationBarVisible = false
                 showsPanorama = true
             }
             clearTransition()
             Task { @MainActor in
                 await Task.yield()
+                UIView.setAnimationsEnabled(true)
                 guard showsPanorama, panoramaMotionRevision == revision else {
                     return
                 }
@@ -1047,36 +1152,64 @@ private struct IPadPaneWorkspace: View {
             return
         }
 
-        panoramaPhase = .entering
-        showsPanorama = true
+        panoramaEntranceArmed = true
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        UIView.setAnimationsEnabled(false)
+        withTransaction(transaction) {
+            panoramaPhase = .entering
+            panoramaNavigationBarVisible = false
+            showsPanorama = true
+        }
         Task { @MainActor in
-            for _ in 0..<12 {
-                if panoramaTransitionWindow == nil
-                    || (panoramaTransitionTargetFrame != nil
-                        && panoramaWorkspaceFrame.width > 1
-                        && panoramaWorkspaceFrame.height > 1) {
-                    break
-                }
-                try? await Task.sleep(for: .milliseconds(16))
-                guard showsPanorama, panoramaMotionRevision == revision else {
-                    return
-                }
+            await Task.yield()
+            UIView.setAnimationsEnabled(true)
+            guard showsPanorama, panoramaMotionRevision == revision else {
+                return
             }
-            if panoramaTransitionWorkspaceFrame.width <= 1
-                || panoramaTransitionWorkspaceFrame.height <= 1 {
-                panoramaTransitionWorkspaceFrame = panoramaWorkspaceFrame
+            if tryBeginPanoramaEntrance(revision: revision) {
+                return
             }
-            panoramaTransitionTargetLocked = true
-            withAnimation(.smooth(duration: Self.entranceDuration)) {
-                panoramaPhase = .visible
-                panoramaWindowAtOverview = true
+            try? await Task.sleep(for: .milliseconds(500))
+            guard showsPanorama, panoramaMotionRevision == revision else {
+                return
             }
-            try? await Task.sleep(for: .seconds(Self.entranceDuration))
+            _ = tryBeginPanoramaEntrance(revision: revision, fallback: true)
+        }
+    }
+
+    private func tryBeginPanoramaEntrance(
+        revision: Int,
+        fallback: Bool = false
+    ) -> Bool {
+        guard panoramaEntranceArmed,
+              showsPanorama,
+              panoramaMotionRevision == revision
+        else {
+            return false
+        }
+        let targetReady =
+            panoramaTransitionWindow == nil || panoramaTransitionTargetFrame != nil
+        let workspaceReady =
+            panoramaWorkspaceFrame.width > 1 && panoramaWorkspaceFrame.height > 1
+        guard fallback || (targetReady && workspaceReady) else {
+            return false
+        }
+        panoramaEntranceArmed = false
+        if workspaceReady {
+            panoramaTransitionWorkspaceFrame = panoramaWorkspaceFrame
+        }
+        panoramaTransitionTargetLocked = true
+        withAnimation(Self.entranceAnimation, completionCriteria: .logicallyComplete) {
+            panoramaPhase = .visible
+            panoramaWindowAtOverview = true
+        } completion: {
             guard showsPanorama, panoramaMotionRevision == revision else {
                 return
             }
             clearTransition()
         }
+        return true
     }
 
     private func dismissPanorama(toward window: IPadSidebarWindowKey?) {
@@ -1090,6 +1223,7 @@ private struct IPadPaneWorkspace: View {
 
         panoramaMotionRevision += 1
         let revision = panoramaMotionRevision
+        panoramaEntranceArmed = false
         var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = true
         withTransaction(transaction) {
@@ -1122,11 +1256,11 @@ private struct IPadPaneWorkspace: View {
         }
 
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(30))
+            try? await Task.sleep(for: .milliseconds(16))
             guard showsPanorama, panoramaMotionRevision == revision else {
                 return
             }
-            for _ in 0..<12 {
+            for _ in 0..<4 {
                 if panoramaTransitionWindow == nil
                     || (panoramaTransitionTargetFrame != nil
                         && panoramaWorkspaceFrame.width > 1
@@ -1144,7 +1278,7 @@ private struct IPadPaneWorkspace: View {
             guard showsPanorama, panoramaMotionRevision == revision else {
                 return
             }
-            withAnimation(.smooth(duration: Self.exitDuration)) {
+            withAnimation(Self.exitAnimation) {
                 panoramaPhase = .exiting
                 panoramaWindowAtOverview = false
             }
@@ -1192,6 +1326,7 @@ private struct IPadPaneWorkspace: View {
     }
 
     private func clearTransition() {
+        panoramaEntranceArmed = false
         panoramaTransitionWindow = nil
         panoramaTransitionTargetFrame = nil
         panoramaTransitionTargetLocked = false
@@ -1256,17 +1391,21 @@ private struct IPadStatusBar: View {
 
     var body: some View {
         if let session = store.selectedSession, !session.windows.isEmpty {
-            HStack(spacing: 4) {
-                Text("[\(session.name)]")
-                    .font(.caption.monospaced().weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: 96)
+            HStack(spacing: 8) {
+                sessionMenu(session)
 
-                ForEach(visibleWindows(in: session)) { window in
-                    windowButton(window, session: session)
+                Picker("Window", selection: windowSelection(in: session)) {
+                    ForEach(visibleWindows(in: session)) { window in
+                        windowPickerLabel(window)
+                            .tag(window.id)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+                .layoutPriority(1)
+                .accessibilityLabel("Window")
+                .accessibilityValue(activeWindowAccessibilityValue(in: session))
 
                 let overflow = overflowWindows(in: session)
                 if !overflow.isEmpty {
@@ -1277,7 +1416,7 @@ private struct IPadStatusBar: View {
                             } label: {
                                 Label(
                                     windowTitle(window),
-                                    systemImage: window.isCurrent ? "checkmark" : "macwindow"
+                                    systemImage: windowMenuSymbol(window)
                                 )
                             }
                         }
@@ -1288,42 +1427,94 @@ private struct IPadStatusBar: View {
                     .accessibilityLabel("More windows")
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("tmux status, session \(session.name)")
         }
     }
 
-    private func windowButton(_ window: ZZWindow, session: ZZSession) -> some View {
-        Button {
-            open(window, in: session)
-        } label: {
-            HStack(spacing: 5) {
-                if window.panes.contains(where: \.hasBell) {
-                    Image(systemName: "bell.fill")
-                        .foregroundStyle(.orange)
-                }
-                Text(windowTitle(window))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: 96)
-                if window.zoomedPane != nil {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.caption2)
+    private func sessionMenu(_ session: ZZSession) -> some View {
+        Menu {
+            ForEach(store.sessions) { candidate in
+                Button {
+                    store.selectSession(candidate)
+                } label: {
+                    Label(
+                        candidate.name,
+                        systemImage: candidate.id == session.id
+                            ? "checkmark"
+                            : "square.stack.3d.up"
+                    )
                 }
             }
-            .font(.caption.monospaced().weight(window.isCurrent ? .semibold : .regular))
-            .foregroundStyle(window.isCurrent ? Color.primary : Color.secondary)
-            .padding(.horizontal, 9)
-            .frame(height: 28)
-            .background(
-                window.isCurrent ? Color.primary.opacity(0.12) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        } label: {
+            Label {
+                Text(session.name)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } icon: {
+                Image(systemName: "square.stack.3d.up")
+            }
+            .labelStyle(.titleAndIcon)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Window \(window.index), \(window.name)")
-        .accessibilityValue(window.isCurrent ? "Current" : "")
+        .frame(maxWidth: 120)
+        .accessibilityLabel("Session")
+        .accessibilityValue(session.name)
+    }
+
+    private func windowPickerLabel(_ window: ZZWindow) -> some View {
+        Label(windowTitle(window), systemImage: windowMenuSymbol(window))
+            .labelStyle(.titleAndIcon)
+            .lineLimit(1)
+            .accessibilityLabel(windowAccessibilityValue(window))
+    }
+
+    private func windowSelection(in session: ZZSession) -> Binding<UInt64> {
+        Binding {
+            session.activeWindowID
+        } set: { windowID in
+            guard let window = session.windows.first(where: { $0.id == windowID }) else {
+                return
+            }
+            open(window, in: session)
+        }
+    }
+
+    private func activeWindowAccessibilityValue(in session: ZZSession) -> String {
+        guard let window = session.activeWindow else {
+            return ""
+        }
+        return windowAccessibilityValue(window)
+    }
+
+    private func windowAccessibilityValue(_ window: ZZWindow) -> String {
+        var parts = ["Window \(window.index)"]
+        if !window.name.isEmpty {
+            parts.append(window.name)
+        }
+        if window.panes.contains(where: { $0.kind == .agent }) {
+            parts.append("Agent")
+        }
+        if window.panes.contains(where: \.hasBell) {
+            parts.append("bell")
+        }
+        if window.zoomedPane != nil {
+            parts.append("zoomed")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private func windowMenuSymbol(_ window: ZZWindow) -> String {
+        if window.panes.contains(where: \.hasBell) {
+            return "bell.fill"
+        }
+        if window.panes.contains(where: { $0.kind == .agent }) {
+            return "sparkles"
+        }
+        if window.zoomedPane != nil {
+            return "arrow.up.left.and.arrow.down.right"
+        }
+        return "macwindow"
     }
 
     private func visibleWindows(in session: ZZSession) -> [ZZWindow] {
@@ -1343,7 +1534,7 @@ private struct IPadStatusBar: View {
     }
 
     private func windowTitle(_ window: ZZWindow) -> String {
-        "\(window.index):\(window.name.isEmpty ? "window" : window.name)"
+        "\(window.index) \(window.name.isEmpty ? "Window" : window.name)"
     }
 
     private func open(_ window: ZZWindow, in session: ZZSession) {
@@ -1467,10 +1658,10 @@ private struct IPadPanorama: View {
             } else {
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 20) {
-                        ForEach(store.sessions) { session in
+                        ForEach(Array(store.sessions.enumerated()), id: \.element.id) { index, session in
                             IPadPanoramaSessionColumn(
+                                order: index,
                                 session: session,
-                                sessionOrder: sessionOrder(for: session),
                                 phase: phase,
                                 transitionWindow: transitionWindow,
                                 onTransitionFrameChange: onTransitionFrameChange
@@ -1479,6 +1670,8 @@ private struct IPadPanorama: View {
                                 min(max(length * 0.84, 340), 480)
                             }
                             .containerRelativeFrame(.vertical)
+                            .opacity(columnOpacity(for: phase, reduceMotion: prefersReducedMotion))
+                            .animation(columnAnimation(for: index, phase: phase, reduceMotion: prefersReducedMotion), value: phase)
                             .scrollTransition(.interactive, axis: .horizontal) { content, scrollPhase in
                                 content
                                     .opacity(
@@ -1505,6 +1698,8 @@ private struct IPadPanorama: View {
                 .scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))
                 .scrollIndicators(.hidden)
                 .scrollClipDisabled()
+                .opacity(contentOpacity)
+                .animation(contentAnimation, value: phase)
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Session panorama")
             }
@@ -1534,15 +1729,48 @@ private struct IPadPanorama: View {
         .allowsHitTesting(phase == .visible && transitionWindow == nil)
     }
 
-    private func sessionOrder(for session: ZZSession) -> Int {
-        store.sessions.firstIndex(where: { $0.id == session.id }) ?? 0
+    private var contentOpacity: Double {
+        guard !reduceMotion else {
+            return 1
+        }
+        return switch phase {
+        case .entering: 0.18
+        case .visible: 1
+        case .exiting: 0
+        }
+    }
+
+    private var contentAnimation: Animation? {
+        guard !reduceMotion else {
+            return nil
+        }
+        return phase == .visible
+            ? .easeOut(duration: 0.25)
+            : .easeIn(duration: 0.15)
+    }
+
+    private func columnOpacity(for phase: IPadPanoramaMotionPhase, reduceMotion: Bool) -> Double {
+        guard !reduceMotion, phase != .visible else {
+            return 1
+        }
+        return 0
+    }
+
+    private func columnAnimation(for order: Int, phase: IPadPanoramaMotionPhase, reduceMotion: Bool) -> Animation? {
+        guard !reduceMotion else {
+            return nil
+        }
+        if phase == .visible {
+            return .easeOut(duration: 0.25).delay(Double(order) * 0.03)
+        }
+        return .easeIn(duration: 0.15)
     }
 }
 
 private struct IPadPanoramaSessionColumn: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let order: Int
     let session: ZZSession
-    let sessionOrder: Int
     let phase: IPadPanoramaMotionPhase
     let transitionWindow: IPadSidebarWindowKey?
     let onTransitionFrameChange: (IPadSidebarWindowKey, CGRect) -> Void
@@ -1566,9 +1794,6 @@ private struct IPadPanoramaSessionColumn: View {
             .accessibilityLabel(
                 "Session \(session.name)" + (session.isAttached ? ", attached" : "")
             )
-            .opacity(phase == .visible ? 1 : 0)
-            .offset(y: phase == .visible ? 0 : -10)
-            .animation(sessionLabelAnimation, value: phase)
 
             if session.windows.isEmpty {
                 VStack(spacing: 10) {
@@ -1586,9 +1811,6 @@ private struct IPadPanoramaSessionColumn: View {
                             IPadPanoramaWindowCard(
                                 session: session,
                                 window: window,
-                                sessionOrder: sessionOrder,
-                                windowOrder: windowOrder(for: window),
-                                phase: phase,
                                 transitionWindow: transitionWindow,
                                 onTransitionFrameChange: onTransitionFrameChange
                             )
@@ -1630,82 +1852,38 @@ private struct IPadPanoramaSessionColumn: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
-
-    private var sessionLabelAnimation: Animation? {
-        guard !reduceMotion else {
-            return nil
-        }
-        return phase == .visible
-            ? .smooth(duration: 0.26).delay(Double(sessionOrder) * 0.04 + 0.08)
-            : .smooth(duration: 0.18)
-    }
-
-    private func windowOrder(for window: ZZWindow) -> Int {
-        session.windows.firstIndex(where: { $0.id == window.id }) ?? 0
-    }
 }
 
 private struct IPadPanoramaWindowCard: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let session: ZZSession
     let window: ZZWindow
-    let sessionOrder: Int
-    let windowOrder: Int
-    let phase: IPadPanoramaMotionPhase
     let transitionWindow: IPadSidebarWindowKey?
     let onTransitionFrameChange: (IPadSidebarWindowKey, CGRect) -> Void
 
     var body: some View {
         let reportsTransitionFrame = isTransitionTarget
 
-        VStack(alignment: .leading, spacing: 8) {
-            Text(windowTitle)
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
-                .lineLimit(1)
-                .padding(.horizontal, 4)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(windowAccessibilityLabel)
-
-            IPadPanoramaWindowPreview(
-                session: session,
-                window: window
-            )
-            .opacity(isTransitionTarget ? 0 : 1)
-            .background(Color(uiColor: .secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(
-                        session.isAttached && window.isCurrent
-                            ? Color.accentColor.opacity(0.48)
-                            : Color.primary.opacity(0.11),
-                        lineWidth: 1
-                    )
-            }
-            .onGeometryChange(
-                for: CGRect?.self,
-                of: { geometry in
-                    reportsTransitionFrame
-                        ? geometry.frame(in: .named(IPadPanoramaCoordinateSpace.name))
-                        : nil
-                },
-                action: { frame in
-                    if let frame {
-                        onTransitionFrameChange(windowKey, frame)
-                    }
+        IPadPanoramaWindowPreview(
+            session: session,
+            window: window
+        )
+        .opacity(isTransitionTarget ? 0 : 1)
+        .onGeometryChange(
+            for: CGRect?.self,
+            of: { geometry in
+                reportsTransitionFrame
+                    ? geometry.frame(in: .named(IPadPanoramaCoordinateSpace.name))
+                    : nil
+            },
+            action: { frame in
+                if let frame {
+                    onTransitionFrameChange(windowKey, frame)
                 }
-            )
-        }
-        .scaleEffect(motionScale)
-        .offset(y: motionOffset)
-        .opacity(motionOpacity)
+            }
+        )
         .zIndex(isTransitionTarget ? 1 : 0)
-        .animation(motionAnimation, value: phase)
-    }
-
-    private var windowTitle: String {
-        "\(window.index):\(window.name.isEmpty ? "window" : window.name)"
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(windowAccessibilityLabel)
     }
 
     private var windowAccessibilityLabel: String {
@@ -1722,60 +1900,12 @@ private struct IPadPanoramaWindowCard: View {
         return value
     }
 
-    private var isExitTarget: Bool {
-        phase == .exiting && isTransitionTarget
-    }
-
     private var isTransitionTarget: Bool {
         transitionWindow == windowKey
     }
 
     private var windowKey: IPadSidebarWindowKey {
         IPadSidebarWindowKey(session: session.id, window: window.id)
-    }
-
-    private var motionScale: CGFloat {
-        switch phase {
-        case .entering:
-            isTransitionTarget ? 1 : 1.04
-        case .visible:
-            1
-        case .exiting:
-            isExitTarget ? 1 : 0.96
-        }
-    }
-
-    private var motionOffset: CGFloat {
-        switch phase {
-        case .entering:
-            isTransitionTarget ? 0 : 22 + CGFloat(windowOrder) * 6
-        case .visible:
-            0
-        case .exiting:
-            isExitTarget ? 0 : 18
-        }
-    }
-
-    private var motionOpacity: Double {
-        switch phase {
-        case .entering:
-            isTransitionTarget ? 1 : 0.28
-        case .visible:
-            1
-        case .exiting:
-            isExitTarget ? 1 : 0
-        }
-    }
-
-    private var motionAnimation: Animation? {
-        guard !reduceMotion else {
-            return nil
-        }
-        if phase == .visible {
-            let delay = Double(sessionOrder) * 0.04 + Double(windowOrder) * 0.055
-            return .smooth(duration: 0.36).delay(delay)
-        }
-        return .smooth(duration: 0.24)
     }
 }
 
@@ -2366,45 +2496,74 @@ private struct AgentPaneView: View {
     var bottomAccessoryInset: CGFloat = 0
     @State private var draft = ""
 
+    private static let threadBottomID = "agent-thread-bottom"
+
     var body: some View {
         let state = store.agentState(for: pane.id)
+        let thread = store.agentThread(for: pane.id)
 
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                if let state {
-                    AgentStatusHeader(pane: pane, state: state)
-                    AgentActivityRow(state: state)
-                    if let permission = state.permission {
-                        AgentPermissionCard(pane: pane.id, permission: permission)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if thread.blocks.isEmpty, state == nil {
+                        AgentEmptyState()
+                            .frame(maxWidth: .infinity, minHeight: 260)
+                    } else {
+                        ForEach(thread.blocks) { block in
+                            AgentThreadBlockView(block: block)
+                        }
+                        if let state {
+                            if state.phase == .starting || state.phase == .running {
+                                AgentLiveStatusRow(state: state)
+                            }
+                            if let permission = state.permission {
+                                AgentPermissionCard(pane: pane.id, permission: permission)
+                            }
+                            if let error = state.error, !error.isEmpty {
+                                AgentErrorCard(message: error)
+                            }
+                            if let git = state.git {
+                                AgentGitCard(git: git)
+                            }
+                        }
                     }
-                    if let error = state.error, !error.isEmpty {
-                        AgentErrorCard(message: error)
-                    }
-                    if let git = state.git {
-                        AgentGitCard(git: git)
-                    }
-                } else {
-                    ContentUnavailableView {
-                        Label("Connecting to Agent", systemImage: "sparkles")
-                    } description: {
-                        Text("Waiting for the daemon’s retained Agent state.")
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 260)
+                }
+                .padding(20)
+                .frame(maxWidth: 720)
+                .frame(maxWidth: .infinity)
+                Color.clear
+                    .frame(height: 1)
+                    .id(Self.threadBottomID)
+            }
+            .scrollIndicators(.hidden)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    AgentSettingsBar(pane: pane.id, state: state)
+                    AgentComposer(
+                        pane: pane.id,
+                        phase: state?.phase ?? .starting,
+                        queuedPrompts: state?.queuedPrompts ?? 0,
+                        draft: $draft
+                    )
+                }
+                .padding(.bottom, bottomAccessoryInset)
+            }
+            .onChange(of: thread) { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(Self.threadBottomID, anchor: .bottom)
                 }
             }
-            .padding(20)
-            .frame(maxWidth: 720)
-            .frame(maxWidth: .infinity)
-        }
-        .scrollIndicators(.hidden)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            AgentComposer(
-                pane: pane.id,
-                phase: state?.phase ?? .starting,
-                queuedPrompts: state?.queuedPrompts ?? 0,
-                draft: $draft
-            )
-            .padding(.bottom, bottomAccessoryInset)
+            .onChange(of: state?.phase) { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(Self.threadBottomID, anchor: .bottom)
+                }
+            }
+            .onAppear {
+                store.primeAgentState(for: pane.id)
+                store.ensureAgentStream(for: pane.id)
+                store.ensureAgentSessions(for: pane.id)
+                proxy.scrollTo(Self.threadBottomID, anchor: .bottom)
+            }
         }
         .background(Color.zzCard)
         .onAppear {
@@ -2412,6 +2571,9 @@ private struct AgentPaneView: View {
         }
         .onChange(of: pane.id) { _, paneID in
             draft = store.agentDraft(for: paneID)
+            store.primeAgentState(for: paneID)
+            store.ensureAgentStream(for: paneID)
+            store.ensureAgentSessions(for: paneID)
         }
         .onChange(of: draft) { _, text in
             store.saveAgentDraft(text, for: pane.id)
@@ -2419,130 +2581,237 @@ private struct AgentPaneView: View {
     }
 }
 
-private struct AgentStatusHeader: View {
-    let pane: ZZPane
-    let state: ZZAgentState
+private struct AgentEmptyState: View {
+    var body: some View {
+        ContentUnavailableView {
+            Label("Start the conversation", systemImage: "sparkles")
+        } description: {
+            Text("Send a prompt below. If this never connects, the daemon needs agent support enabled.")
+        }
+    }
+}
+
+private struct AgentThreadBlockView: View {
+    let block: ZZAgentThreadBlock
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.title3)
-                .foregroundStyle(color)
-                .symbolEffect(.pulse, isActive: state.status == .working)
-                .frame(width: 28)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(state.title ?? (pane.title.isEmpty ? "Agent" : pane.title))
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(state.phase.label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        switch block.kind {
+        case let .user(turn):
+            AgentTurnBubble(turn: turn)
+        case let .agentText(_, text):
+            AgentTextBlock(text: text)
+        case let .thought(_, text):
+            AgentThoughtBlock(text: text)
+        case let .tool(_, title, status):
+            AgentToolRow(title: title, status: status)
+        }
+    }
+}
+
+private struct AgentTextBlock: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(text)
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        Color.primary.opacity(0.07),
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    )
             }
-            Spacer(minLength: 8)
-            if state.queuedPrompts > 0 {
-                Text("\(state.queuedPrompts) queued")
-                    .font(.caption.weight(.medium))
+            Spacer(minLength: 56)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Agent said \(text)")
+    }
+}
+
+private struct AgentThoughtBlock: View {
+    let text: String
+    @State private var expanded = false
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        expanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "brain")
+                            .font(.caption)
+                        Text("Thought")
+                            .font(.caption.weight(.semibold))
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                    }
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 9)
-                    .frame(height: 26)
-                    .background(Color.primary.opacity(0.07), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(expanded ? "Hide thought" : "Show thought")
+                if expanded {
+                    Text(text)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer(minLength: 56)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Agent thought \(text)")
+    }
+}
+
+private struct AgentToolRow: View {
+    let title: String
+    let status: ZZAgentToolStatus
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.callout)
+                .foregroundStyle(color)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.callout.weight(.medium))
+                .lineLimit(2)
+            Spacer(minLength: 4)
+            if status == .running {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityHidden(true)
             }
         }
-        .padding(14)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("Tool \(title), \(statusLabel)")
     }
 
     private var symbol: String {
-        switch state.status {
-        case .idle: "checkmark.circle.fill"
-        case .working: "sparkles"
-        case .needsInput: "hand.raised.fill"
-        case .failed: "exclamationmark.triangle.fill"
+        switch status {
+        case .pending: "circle"
+        case .running: "circle.dotted"
+        case .done: "checkmark.circle.fill"
+        case .failed: "exclamationmark.circle.fill"
         }
     }
 
     private var color: Color {
-        switch state.status {
-        case .idle: .green
-        case .working: .accentColor
-        case .needsInput: .orange
+        switch status {
+        case .pending: .secondary
+        case .running: .accentColor
+        case .done: .green
+        case .failed: .red
+        }
+    }
+
+    private var statusLabel: String {
+        switch status {
+        case .pending: "pending"
+        case .running: "running"
+        case .done: "done"
+        case .failed: "failed"
+        }
+    }
+}
+
+private struct AgentTurnBubble: View {
+    let turn: ZZAgentTurn
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Spacer(minLength: 56)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(turn.text)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        Color.accentColor,
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    )
+                    .textSelection(.enabled)
+                HStack(spacing: 4) {
+                    Text(turn.sentAt, style: .time)
+                    statusIcon
+                    Text(statusLabel)
+                }
+                .font(.caption2)
+                .foregroundStyle(statusColor)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("You said \(turn.text), \(statusLabel)")
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch turn.status {
+        case .working:
+            Image(systemName: "clock")
+        case .done:
+            Image(systemName: "checkmark")
+        case .failed:
+            Image(systemName: "exclamationmark.circle.fill")
+        }
+    }
+
+    private var statusLabel: String {
+        switch turn.status {
+        case .working: "Working"
+        case .done: "Done"
+        case .failed: "Failed"
+        }
+    }
+
+    private var statusColor: Color {
+        switch turn.status {
+        case .working, .done: .secondary
         case .failed: .red
         }
     }
 }
 
-private struct AgentActivityRow: View {
+private struct AgentLiveStatusRow: View {
     let state: ZZAgentState
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            activitySymbol
-                .frame(width: 24, height: 24)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.body.weight(.semibold))
-                Text(detail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder
-    private var activitySymbol: some View {
-        if state.phase == .starting || state.phase == .running {
+        HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-        } else {
-            Image(systemName: symbol)
-                .foregroundStyle(color)
+            Text(label)
+                .font(.caption.weight(.medium))
         }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(Color.primary.opacity(0.06), in: Capsule())
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
     }
 
-    private var title: String {
+    private var label: String {
         switch state.phase {
-        case .starting: "Starting Agent"
-        case .ready: "Ready for a prompt"
-        case .running: "Agent is working"
-        case .awaitingPermission: "Waiting for your approval"
-        case .failed: "Agent needs attention"
-        }
-    }
-
-    private var detail: String {
-        switch state.phase {
-        case .starting: "Connecting to the configured ACP adapter."
-        case .ready: "Ask about the current workspace or queue the next task."
+        case .starting:
+            "Starting Agent"
         case .running:
             state.queuedPrompts == 0
-                ? "You can queue a follow-up while this turn runs."
-                : "\(state.queuedPrompts) follow-up \(state.queuedPrompts == 1 ? "is" : "are") queued."
-        case .awaitingPermission: "Choose an option below, queue another prompt, or stop the turn."
-        case .failed: "Review the error below before trying again."
-        }
-    }
-
-    private var symbol: String {
-        switch state.phase {
-        case .ready: "text.bubble.fill"
-        case .awaitingPermission: "hand.raised.fill"
-        case .failed: "exclamationmark.triangle.fill"
-        case .starting, .running: "sparkles"
-        }
-    }
-
-    private var color: Color {
-        switch state.phase {
-        case .ready: .accentColor
-        case .awaitingPermission: .orange
-        case .failed: .red
-        case .starting, .running: .secondary
+                ? "Agent is working"
+                : "Agent is working · \(state.queuedPrompts) queued"
+        case .ready, .awaitingPermission, .failed:
+            state.phase.label
         }
     }
 }
@@ -2627,6 +2896,312 @@ private struct AgentGitCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct AgentSettingsBar: View {
+    @EnvironmentObject private var store: ZZStore
+    let pane: UInt64
+    let state: ZZAgentState?
+    @State private var showsSessions = false
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                Button(action: { showsSessions = true }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder")
+                        Text(directoryName)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
+                    }
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color.primary.opacity(0.07), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Agent sessions, \(directoryName)")
+
+                if let option = state?.configOption(category: .model) {
+                    configMenu(option: option, icon: "asterisk")
+                }
+                if let option = state?.configOption(category: .thoughtLevel) {
+                    configMenu(option: option, icon: "cpu")
+                }
+                if state?.configOption(category: .mode) == nil,
+                   let modes = state?.modeState,
+                   !modes.modes.isEmpty {
+                    legacyModeMenu(modes: modes)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+        .scrollIndicators(.hidden)
+        .background(.ultraThinMaterial)
+        .sheet(isPresented: $showsSessions) {
+            AgentSessionSheet(pane: pane)
+        }
+    }
+
+    private var settingsLocked: Bool {
+        state?.phase != .ready || state?.permission != nil
+    }
+
+    private var directoryName: String {
+        if let sessionID = state?.sessionID,
+           let match = store.agentSessionList(for: pane).sessions.first(where: {
+               $0.sessionID == sessionID
+           }) {
+            let last = (match.cwd as NSString).lastPathComponent
+            return last.isEmpty ? match.cwd : last
+        }
+        return "Sessions"
+    }
+
+    private func configMenu(option: ZZAgentConfigOption, icon: String) -> some View {
+        Menu {
+            ForEach(option.choices) { choice in
+                Button {
+                    store.setAgentConfigOption(pane: pane, option: option.id, value: choice.value)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            if choice.value == option.currentValue {
+                                Image(systemName: "checkmark")
+                            }
+                            Text(choice.name)
+                        }
+                        if let description = choice.description {
+                            Text(description)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                Text(option.currentChoiceName)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+            }
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(0.07), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(settingsLocked || option.choices.isEmpty)
+        .accessibilityLabel("\(option.name), \(option.currentChoiceName)")
+    }
+
+    private func legacyModeMenu(modes: ZZAgentModeState) -> some View {
+        Menu {
+            ForEach(modes.modes) { mode in
+                Button {
+                    store.setAgentMode(pane: pane, mode: mode.id)
+                } label: {
+                    HStack(spacing: 6) {
+                        if mode.id == modes.currentID {
+                            Image(systemName: "checkmark")
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(mode.name)
+                            if let description = mode.description {
+                                Text(description)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "checklist")
+                Text(modes.currentName ?? "Mode")
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+            }
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(0.07), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(settingsLocked)
+        .accessibilityLabel("Session mode, \(modes.currentName ?? "unknown")")
+    }
+}
+
+private struct AgentSessionSheet: View {
+    @EnvironmentObject private var store: ZZStore
+    @Environment(\.dismiss) private var dismiss
+    let pane: UInt64
+    @State private var newDirectory = ""
+    @State private var sessionToDelete: ZZAgentSessionSummary?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                statusRows
+                sessionsSection
+                newSessionSection
+            }
+            .navigationTitle("Agent Sessions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                }
+            }
+            .alert(
+                "Delete session?",
+                isPresented: Binding(
+                    get: { sessionToDelete != nil },
+                    set: { if !$0 { sessionToDelete = nil } }
+                ),
+                presenting: sessionToDelete
+            ) { session in
+                Button("Delete Session", role: .destructive) {
+                    store.deleteAgentSession(pane: pane, session: session)
+                    sessionToDelete = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    sessionToDelete = nil
+                }
+            } message: { session in
+                Text("zz will forget “\(session.displayTitle)”.")
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .onAppear {
+            store.listAgentSessions(pane: pane)
+        }
+    }
+
+    @ViewBuilder
+    private var statusRows: some View {
+        let list = store.agentSessionList(for: pane)
+        if list.loading, list.sessions.isEmpty {
+            HStack {
+                Spacer()
+                ProgressView("Loading sessions")
+                Spacer()
+            }
+            .listRowBackground(Color.clear)
+        }
+        if let error = list.error {
+            Text(error)
+                .font(.callout)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private var sessionsSection: some View {
+        let currentID = store.agentState(for: pane)?.sessionID
+        let locked = self.locked
+        return Section("Sessions") {
+            ForEach(store.agentSessionList(for: pane).sessions) { session in
+                sessionRow(
+                    session,
+                    isCurrent: session.sessionID == currentID,
+                    locked: locked
+                )
+            }
+        }
+    }
+
+    private var newSessionSection: some View {
+        Section {
+            TextField("/absolute/path", text: $newDirectory)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                .onSubmit(startSession)
+            Button("Start Session Here") {
+                startSession()
+            }
+            .disabled(locked || !isAbsolutePath)
+        } header: {
+            Text("New session")
+        } footer: {
+            Text("Starts a new agent session with that working directory.")
+        }
+    }
+
+    private func sessionRow(
+        _ session: ZZAgentSessionSummary,
+        isCurrent: Bool,
+        locked: Bool
+    ) -> some View {
+        Button {
+            store.switchAgentSession(pane: pane, session: session)
+            dismiss()
+        } label: {
+            AgentSessionRowLabel(session: session, isCurrent: isCurrent)
+        }
+        .buttonStyle(.plain)
+        .disabled(locked || isCurrent)
+        .contextMenu {
+            Button("Delete Session", role: .destructive) {
+                sessionToDelete = session
+            }
+            .disabled(locked)
+        }
+        .accessibilityLabel("Switch to \(session.displayTitle)")
+    }
+
+    private var locked: Bool {
+        guard let state = store.agentState(for: pane) else {
+            return true
+        }
+        return state.phase != .ready || state.permission != nil
+    }
+
+    private var isAbsolutePath: Bool {
+        newDirectory.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
+    }
+
+    private func startSession() {
+        store.startAgentSession(pane: pane, cwd: newDirectory)
+        newDirectory = ""
+        dismiss()
+    }
+}
+
+private struct AgentSessionRowLabel: View {
+    let session: ZZAgentSessionSummary
+    let isCurrent: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.displayTitle)
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
+                Text(session.cwd)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            if isCurrent {
+                Image(systemName: "checkmark")
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -2923,6 +3498,8 @@ private struct FullscreenPane: View {
     @State private var visiblePaneID: UInt64?
     @State private var showsComposer = false
     @State private var composedText = ""
+    @State private var showsCommandPrompt = false
+    @State private var showsKeyList = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -2944,9 +3521,12 @@ private struct FullscreenPane: View {
             }
             .matchedGeometryEffect(id: pane.id, in: namespace)
 
-            paneBar
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
+            VStack(spacing: 6) {
+                prefixBindingsStrip
+                paneBar
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 8)
         }
         .background {
             if pane.kind == .terminal {
@@ -2984,6 +3564,20 @@ private struct FullscreenPane: View {
                 composedText = ""
                 showsComposer = false
                 store.sendText(text, to: pane.id)
+            }
+        }
+        .sheet(isPresented: $showsCommandPrompt) {
+            CommandPromptSheet { line in
+                showsCommandPrompt = false
+                _ = store.submitCommand(line)
+            }
+        }
+        .sheet(isPresented: $showsKeyList) {
+            KeyListSheet(bindings: store.prefixBindings) {
+                showsKeyList = false
+                _ = store.requestKeyList()
+            } importTmuxConfig: {
+                store.runTmuxImportManually()
             }
         }
     }
@@ -3135,7 +3729,10 @@ private struct FullscreenPane: View {
                 TerminalShortcutButton("→") {
                     store.sendShortcutKey(UInt32(ZZ_KEY_ARROW_RIGHT.rawValue), to: pane.id)
                 }
-                TerminalShortcutButton("Prefix") {
+                TerminalShortcutButton(
+                    store.prefixArmed ? "Prefix ●" : "Prefix",
+                    selected: store.prefixArmed
+                ) {
                     store.sendPrefix(to: pane.id)
                 }
                 TerminalShortcutButton("Copy") {
@@ -3143,6 +3740,18 @@ private struct FullscreenPane: View {
                 }
                 TerminalShortcutButton("Compose") {
                     showsComposer = true
+                }
+                TerminalShortcutButton("Cmd") {
+                    showsCommandPrompt = true
+                }
+                TerminalShortcutButton("Keys") {
+                    showsKeyList = true
+                }
+                TerminalShortcutButton("Bufs") {
+                    store.requestChooseBuffer()
+                }
+                TerminalShortcutButton("Panes") {
+                    store.requestDisplayPanes()
                 }
             }
             .padding(.horizontal, 8)
@@ -3152,6 +3761,42 @@ private struct FullscreenPane: View {
         .glassEffect(.regular, in: Capsule())
         .disabled(!store.isConnected)
         .accessibilityIdentifier("keyboard-shortcuts")
+    }
+
+    /// Daemon-published prefix bindings, shown while the prefix is armed so a
+    /// soft-keyboard user sees what each key does without daemon changes.
+    private var prefixBindingsStrip: some View {
+        Group {
+            if store.prefixArmed, !store.prefixBindings.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(store.prefixBindings.prefix(24)) { binding in
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(binding.displayKey)
+                                    .font(.caption.weight(.bold).monospaced())
+                                Text(
+                                    binding.note.isEmpty ? binding.summary : binding.note
+                                )
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            }
+                            .padding(.horizontal, 10)
+                            .frame(height: 44)
+                            .glassEffect(.regular, in: Capsule())
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(
+                                "\(binding.displayKey), \(binding.note.isEmpty ? binding.summary : binding.note)"
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+                .scrollIndicators(.hidden)
+                .frame(height: 48)
+                .accessibilityIdentifier("prefix-bindings")
+            }
+        }
     }
 
     private var panes: [ZZPane] {
@@ -3215,6 +3860,131 @@ private struct TerminalShortcutButton: View {
         .buttonStyle(.plain)
         .accessibilityValue(locked ? "Locked" : selected ? "Once" : "Off")
         .accessibilityIdentifier("shortcut-\(title.lowercased())")
+    }
+}
+
+/// Minimal command prompt: one line naming a daemon command plus arguments,
+/// sent through the existing `zz_client_execute` path without daemon changes.
+private struct CommandPromptSheet: View {
+    let submit: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var focused: Bool
+    @State private var line = ""
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Run a daemon command, e.g. new-window or kill-pane -t %1.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                TextField("new-session -s work", text: $line)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.go)
+                    .focused($focused)
+                    .onSubmit(run)
+                    .padding(16)
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+                    .accessibilityIdentifier("command-prompt-field")
+                Spacer()
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .navigationTitle("Command Prompt")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Run", action: run)
+                        .disabled(ZZCommandLine.split(line) == nil)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .onAppear {
+            focused = true
+        }
+    }
+
+    private func run() {
+        guard ZZCommandLine.split(line) != nil else {
+            return
+        }
+        submit(line)
+    }
+}
+
+/// Prefix-table key list from the daemon-published bindings. The full
+/// `list-keys` output still needs command-output FFI (see
+/// `ZZStore.requestKeyList`); until then this covers the prefix table every
+/// iOS user actually navigates.
+private struct KeyListSheet: View {
+    let bindings: [ZZPrefixBinding]
+    let requestFullList: () -> Void
+    let importTmuxConfig: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if bindings.isEmpty {
+                    Text("No prefix bindings published yet. Attach to a session first.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(bindings) { binding in
+                        HStack {
+                            Text(binding.displayKey)
+                                .font(.body.monospaced())
+                                .frame(minWidth: 110, alignment: .leading)
+                            VStack(alignment: .leading) {
+                                Text(binding.summary.isEmpty ? "(unbound)" : binding.summary)
+                                    .font(.callout)
+                                if !binding.note.isEmpty {
+                                    Text(binding.note)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(binding.displayKey), \(binding.summary)")
+                    }
+                }
+                Section {
+                    Button("Request Full list-keys Output") {
+                        requestFullList()
+                    }
+                    .accessibilityIdentifier("request-full-key-list")
+                    Text("The daemon answers list-keys through command output, which iOS cannot display yet. The output lands in the attached session.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section {
+                    Button("Import Tmux Config From This Host") {
+                        importTmuxConfig()
+                    }
+                    .accessibilityIdentifier("import-tmux-config")
+                    Text("Copies the host’s tmux config into zz/mux.conf and reloads, so custom binds appear above.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Prefix Keys")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .accessibilityIdentifier("key-list")
     }
 }
 

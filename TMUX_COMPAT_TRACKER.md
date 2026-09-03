@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 9 INTEGRATED (DAEMON + TERMINAL + CLIENT LANES; SEND-KEYS -K + FORMAT I MODIFIER WITH THE TERMINFO OVERRIDES PASS, PANE ENGINE KNOBS + RETAINED-PANE HISTORY + REMAIN-ON-EXIT-FORMAT + OSC 9;4 PROGRESS + COPY-MODE -S/CLEAR-HISTORY -H, PANE BORDER CHROME (STATUS/FORMAT/LINES/INDICATORS/Z-ORDER); PROTOCOL V95); CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **CYCLE 10 INTEGRATED (QUEUE + COPY LANES; A PER-CONNECTION CONTROL COMMAND WORKER WHOSE QUEUE DIES WITH THE CONNECTION + SPLIT-WINDOW -W, COPY-MODE TEXT SEARCH IN THE ENGINE + THE SIXTEEN STOCK PROMPT BINDINGS + THE FORMAT ENVIRONMENT TAIL + COMMAND-PROMPT -P AS A CLIENT HINT; PROTOCOL V96); THE CLIENT LANE GATES IN A FOLLOW-UP RUN; CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **10 UNRESOLVED GROUPS (10 OPEN + 0 BLOCKED = 10)**
+> Live work: **7 UNRESOLVED GROUPS (7 OPEN + 0 BLOCKED = 7)**
 >
-> Ledger settlement: **95.3% (205 of 215 known groups: 100 x (162 CLOSED + 43 ACCEPTED) / (162 CLOSED + 53 LIVE)); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **96.7% (208 of 215 known groups: 100 x (166 CLOSED + 42 ACCEPTED) / (166 CLOSED + 49 LIVE)); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **199 SCENARIOS, 2,527 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
+> Exit evidence: **207 SCENARIOS, 2,586 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 9 INTEGRATED 2026-09-02 ON THE MACBOOK (3 OF 3 LANES), CAMPAIGN PAUSED; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **CYCLE 10 INTEGRATED 2026-09-02 ON THE UBUNTU BOX (2 OF 3 LANES; THE CLIENT LANE GATES IN A FOLLOW-UP RUN AFTER ITS REVIEWER DIED), CAMPAIGN CONTINUING; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,23 +76,23 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | `origin/main` at `6f307120` (cycle-9 client merge) plus this ledger recompute |
+| Published branch | `origin/main` at `cd03bb8d` (cycle-10 copy merge) plus this ledger recompute |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Cycle 9 of the orchestrated Opus/Fable loop, 3 of 3 lanes integrated: `send-keys -K` through the client's own key handler and the format `I` modifier from a port of `tty_term_create` with the `terminal-overrides` pass (`5e6de65a`); the pane engine knobs, `copy-mode -s`, `clear-history -H`, `remain-on-exit-format` with a retained pane that keeps its whole grid so `capture-pane` reaches the scrollback the dead notice scrolled away, the OSC 9;4 progress bar as `pane_pb_state`/`pane_pb_progress`, and the copy cursor's per-line limit with the mode-keys branches (`4cb913dc`); `pane-border-status`/`-format`/`-lines`/`-indicators` with the pin's z-order border ownership and the v95 snapshot fields (`6f307120`). Protocol v94 to v95 (six appended fields) |
-| Orchestration | Cycle 9 launched and finished 2026-09-02 on the macbook through `opus-compat-run-9.js`: three Opus lanes, one Fable reviewer per lane, one serialized Fable gate running alone on the box. All three lanes integrated in daemon, terminal, client order; every reviewer must-fix was applied at the gate with the reviewer's probe re-run, and one close (`semantic:display-popup-kitty-images`) was reopened on the reviewer's no-resize measurement. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; the three lock fronts are INTEGRATED and released on the board |
+| Delivery | Cycle 10 of the orchestrated Opus/Fable loop, 2 of 3 lanes integrated on the ubuntu box: a per-connection command worker for Control clients whose queue is freed the moment the connection's reader leaves, `ProtocolMessage::CommandQueueParked` so a Control client at end of file exits at the first parked command the way `cmdq_next` stops on `CMD_RETURN_WAIT`, and `split-window -W` parking the invoking Command or Control item on the pane it made until the child's status, or 128 plus its signal, comes back (`fd19cce1`); copy-mode text search inside the engine with the pin's search marks, smart case, regex downgrade and the five `search_*` formats, the sixteen stock copy-mode prompt bindings stored the way the pin stores them with `command-prompt -P` accepted as a client-surface hint, the jump family rebuilt on the grid reader, and the format environment tail (`cd03bb8d`). Protocol v95 to v96 (one appended message, one appended copy action). The client lane (`campaign/batch-client-choosers-popups-opus`) was not gated in this run because its reviewer died; `opus-compat-run-10b.js` reviews and gates it |
+| Orchestration | Cycle 10 launched 2026-09-02 on the ubuntu box through `opus-compat-run-10.js`: three Opus lanes, one Fable reviewer per lane, one serialized Fable gate running alone on the box. Queue and copy integrated in that order; every reviewer must-fix was applied at the gate with the reviewer's probe re-run, and one close (`copy-mode.action-fidelity`) was reopened on the reviewer's clear-class, incremental-origin and emacs-trim measurements. The client lane's reviewer died mid-run, so that lane gates in `opus-compat-run-10b.js`. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; F-PANE-COMMAND-COMPLETION and F-COPY-SEARCH-FORMATS-MONITORS are INTEGRATED and released on the board, F-CLIENT-CHOOSERS-POPUPS-V2 stays claimed for the follow-up gate |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
-| Agreed-scope meter | 90.5% (275 of 304 items frozen on 2026-08-31), 55 of 65 groups done; `python3 compat/progress.py` |
-| Completed fixed cohort | Cycle 9: 3 of 3 lanes integrated, agreed-scope meter 84.2% to 90.5%, unresolved groups 19 to 10 |
-| Previous completed cohort | Cycle 8: 2 of 3 lanes integrated (terminal skipped), agreed-scope meter 77.6% to 84.2% |
-| Campaign point | `send-keys -K` injects through the target client's key table, `#{I/c:}`/`#{I/f:}`/`#{I/e:}` answer from the client's own terminfo entry with `terminal-features` and `terminal-overrides` applied the way `tty_term_create` does, a retained pane keeps its frozen grid for `capture-pane`, the pane engine knobs and `remain-on-exit-format` are live, the OSC 9;4 progress bar is a format, and the raw TUI draws the pin's pane border status, lines, indicators and z-order ownership. The biggest remaining baskets are the popup Kitty image publish without a client resize, the chooser key vocabulary, the nested popup overlays and pointer route, `display-message -v` trace, the set-hook -B monitor subsystem, the non-UTF-8 environment bytes, and the five open copy-mode branches |
-| Live registry | 53 active groups, 457 active items, 162 closed records |
-| Active status | 10 open, 0 blocked, 43 accepted |
+| Agreed-scope meter | 96.1% (292 of 304 items frozen on 2026-08-31), 58 of 65 groups done; `python3 compat/progress.py` |
+| Completed fixed cohort | Cycle 10: 2 of 3 lanes integrated (the client lane gates in a follow-up run), agreed-scope meter 90.5% to 96.1%, unresolved groups 10 to 7 |
+| Previous completed cohort | Cycle 9: 3 of 3 lanes integrated, agreed-scope meter 84.2% to 90.5% |
+| Campaign point | A Control client's command queue is its own worker and dies with the connection, `split-window -W` answers the child's status to an unattached client, copy-mode search lives in the daemon's engine with the pin's marks and formats, the stock copy-mode prompt keys carry the pin's exact bindings from a real keyboard, and formats fall back to the session and global environment the way `format_find` does. The biggest remaining baskets are the copy-mode mode-keys lifecycle (the per-command search-mark clear class, the incremental origin, the emacs selection trim), the chooser key vocabulary and its mode-owned prompts, the popup pointer route on the desktop client, `display-message -v` trace, the set-hook -B monitor subsystem, the non-UTF-8 environment bytes, the display-panes template residue, and the window-format extent decision for a chrome-drawing client |
+| Live registry | 49 active groups, 438 active items, 166 closed records |
+| Active status | 7 open, 0 blocked, 42 accepted |
 | Known differentials | 3 registered cases: two geometry, one geometry plus output |
 
-Cycles 2 through 9 reached `origin/main` through the board's MAIN lock; cycle 9 ends at the
-ledger recompute that follows `6f307120`. Resolve the commit containing the latest tracker update with
+Cycles 2 through 10 reached `origin/main` through the board's MAIN lock; cycle 10 ends at the
+ledger recompute that follows `cd03bb8d`. Resolve the commit containing the latest tracker update with
 `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -106,15 +106,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 9: 3 of 3 lanes integrated |
-| Previous completed cohort | Cycle 8: 2 of 3 lanes integrated (terminal skipped) |
+| Completed fixed cohort | Cycle 10: 2 of 3 lanes integrated (the client lane gates in a follow-up run) |
+| Previous completed cohort | Cycle 9: 3 of 3 lanes integrated |
 | New residual groups | Since the 2026-08-31 freeze: 1 item across 1 group, tracked outside the agreed-scope meter |
-| Unresolved movement | Cycle 9: 19 at launch, 10 at close |
-| Live unresolved | 10 open + 0 blocked = 10 |
+| Unresolved movement | Cycle 10: 10 at launch, 7 at close |
+| Live unresolved | 7 open + 0 blocked = 7 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 199 scenarios, 2,527 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
-| Differential SHA-256 | `385ca4f51bc33dc8415be9473566c99664c2712f504ff30f788121fe6954ea08` |
-| Ledger settlement | 205 of 215 known groups = 95.3% |
+| Latest differential | 207 scenarios, 2,586 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
+| Differential SHA-256 | `c6a62985ce6e0e05710f3973f628ff7a190ac241a2224a8b176863daa99d49e9` |
+| Ledger settlement | 208 of 215 known groups = 96.7% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -128,7 +128,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(162 + 43) / (162 + 53) = 205 / 215 = 95.3%
+(166 + 42) / (166 + 49) = 208 / 215 = 96.7%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -174,6 +174,17 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-02 cycle-10 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `fd19cce1` (a per-connection command worker for Control clients with the queue freed the moment the reader leaves, `ProtocolMessage::CommandQueueParked` so a Control client at end of file exits at the first parked command the way `cmdq_next` stops on `CMD_RETURN_WAIT`, and `split-window -W` parking the invoking Command or Control item on the pane it made with the child's status or 128 plus its signal; catalog 467/36 to 468/35; protocol v95 to v96), `cd03bb8d` (copy-mode text search in the engine with the pin's search marks, smart case, regex downgrade and the five `search_*` formats; the sixteen stock prompt bindings as the pin stores them with `command-prompt -P` accepted as a client-surface hint; the jump family rebuilt on the grid reader; the format environment tail; catalog 468/35 to 469/34; protocol v96 gains `CopyModeAction::Search`). The client lane (`campaign/batch-client-choosers-popups-opus`) was not gated in this run: its reviewer died, and `opus-compat-run-10b.js` reviews and gates it |
+| Review stage | One Fable reviewer per gated lane, verdicts approve-with-fixes on both; every must-fix applied at the gate with the reviewer's probe re-run. Queue: the `PanesRemoved` arm stopped removing the `-W` waiter entry (6 of 80 instant-exit runs answered 0, now 80 of 80 answer the status on zz as on the pin) and a non-zero `-W` status no longer swaps `after-split-window` for `command-error` (the hook is picked from the unchanged execution and the status converted afterwards; hook + `exit 2` + trailing `display-message` pinned in `smoke/split-window-wait`). Copy: one blocker, a wrong close of `copy-mode.action-fidelity`, reopened with the reviewer's three mode-keys measurements (the per-command search-mark clear class in `window_copy_command`'s tail, the incremental origin it re-latches, the emacs trim in `window_copy_get_selection`) written into its reason; the key engine keeps an armed count across a `command-prompt` binding the way `wme->prefix` survives until the answer ran (`3 f a` lands 12,0 and `2 / alpha Enter` 5,2 on both binaries, pressed in `smoke/copy-mode-prompt-bindings`); seven plain comments dropped; `send-keys -F` described as the pin's search-string expansion |
+| Workspace gates | Full workspace tests and clippy with warnings denied, green on both lanes (58 suites, 3,432 tests). Red rows: `daemon_native_split_resize_commits_exactly_and_rejects_stale_contexts` once under the copy lane's loaded run, a known flake, 3/3 exact-solo |
+| Differential | Queue delta: 174 scenarios (every `smoke/control-*` and `smoke/client-*` included); copy delta: 161 scenarios (each four shards plus `smoke/source-replay-diagnostics` solo, 60 steps clean); every channel clean under `--strict-geometry` and the three registered known rows at their exact tuples. Three rows are this box's pre-existing environment, not either lane, and fail the same way on the pin side: `smoke/remain-on-exit-format` (the pin answers `#{pane_dead_signal}` 15 where the fixture wants `term`, Linux `sys_signame`), `smoke/format-modifier-interrogate` (both sides, the harness's outer TERM carries smxx), and `smoke/pane-engine-knobs-input` (the pin side returned 1 once under load and passed solo) |
+| Records gate | Tracker check, board fold tests, and the stored summary check pass: 207 scenarios, 2,586 steps, attached-client `PASS` |
+| Summary SHA-256 | `c6a62985ce6e0e05710f3973f628ff7a190ac241a2224a8b176863daa99d49e9` |
 
 ### 2026-09-02 cycle-9 integration checkpoint
 

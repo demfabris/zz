@@ -582,11 +582,30 @@ enum ZZAgentTurnStatus: Equatable, Sendable {
     case failed
 }
 
-struct ZZAgentTurn: Identifiable, Equatable, Sendable {
-    let id: UInt64
-    let text: String
+/// What this client knows about a prompt it sent itself: when it left and how
+/// the daemon's attention edges settled it. A prompt that only arrived over the
+/// journal carries neither.
+struct ZZAgentTurnReceipt: Equatable, Sendable {
     let sentAt: Date
     var status: ZZAgentTurnStatus
+}
+
+/// Whether the journal has confirmed a bubble yet. A local echo is the one
+/// block a replay cannot reproduce, so it survives a replay and is the only
+/// bubble a replayed prompt may adopt instead of duplicating.
+enum ZZAgentTurnSource: Equatable, Sendable {
+    case localEcho
+    case stream
+}
+
+struct ZZAgentTurn: Identifiable, Equatable, Sendable {
+    let id: UInt64
+    var text: String
+    var source: ZZAgentTurnSource
+    var receipt: ZZAgentTurnReceipt?
+    /// The journal's `messageId` once the stream confirms the turn. Later
+    /// chunks of the same message extend this bubble.
+    var messageID: String?
 }
 
 /// ACP `ToolKind`. Drives the row icon; unknown wire values fall to `other`
@@ -749,11 +768,15 @@ struct ZZAgentThreadBlock: Identifiable, Equatable, Sendable {
     let id: String
     var kind: Kind
 
-    var isUserTurn: Bool {
-        if case .user = kind {
-            return true
+    var userTurn: ZZAgentTurn? {
+        if case let .user(turn) = kind {
+            return turn
         }
-        return false
+        return nil
+    }
+
+    var isLocalEcho: Bool {
+        userTurn?.source == .localEcho
     }
 }
 
@@ -774,7 +797,7 @@ struct ZZAgentThread: Equatable, Sendable {
     /// Prompts this client submitted. Lets a view tell "the user just sent
     /// something" apart from "the agent streamed more".
     private(set) var submittedTurns: UInt64 = 0
-    private var nextLocalID: UInt64 = 1
+    private var nextTurnID: UInt64 = 1
 
     mutating func markReplayPending() {
         replayPending = true
@@ -782,18 +805,20 @@ struct ZZAgentThread: Equatable, Sendable {
     }
 
     mutating func appendUserTurn(_ text: String, at date: Date = Date()) {
-        let turn = ZZAgentTurn(id: nextLocalID, text: text, sentAt: date, status: .working)
-        nextLocalID += 1
-        blocks.append(ZZAgentThreadBlock(id: "user-\(turn.id)", kind: .user(turn: turn)))
+        appendTurn(
+            text: text,
+            source: .localEcho,
+            receipt: ZZAgentTurnReceipt(sentAt: date, status: .working),
+            messageID: nil
+        )
         submittedTurns &+= 1
-        trim()
         revision &+= 1
     }
 
     mutating func settleOldestWorkingTurn(_ status: ZZAgentTurnStatus) {
         for index in blocks.indices {
-            if case var .user(turn) = blocks[index].kind, turn.status == .working {
-                turn.status = status
+            if case var .user(turn) = blocks[index].kind, turn.receipt?.status == .working {
+                turn.receipt?.status = status
                 blocks[index].kind = .user(turn: turn)
                 revision &+= 1
                 return
@@ -801,8 +826,19 @@ struct ZZAgentThread: Equatable, Sendable {
         }
     }
 
-    mutating func resetStream() {
-        blocks.removeAll { !$0.isUserTurn }
+    /// Reconnect or replay from the cursor: the journal reproduces everything
+    /// it holds, so only a prompt it has not confirmed yet survives.
+    mutating func prepareForReplay() {
+        dropReplayableBlocks()
+        cursor = 0
+        replayPending = false
+        revision &+= 1
+    }
+
+    /// The pane's ACP session changed: none of the previous conversation
+    /// belongs to it, this client's own prompts included.
+    mutating func resetForNewSession() {
+        blocks.removeAll()
         cursor = 0
         replayPending = false
         revision &+= 1
@@ -842,7 +878,7 @@ struct ZZAgentThread: Equatable, Sendable {
     private mutating func applyItem(_ envelope: ZZAgentStreamEnvelope) {
         switch envelope.item {
         case .sessionReset:
-            blocks.removeAll { !$0.isUserTurn }
+            dropReplayableBlocks()
         case let .update(update):
             applyUpdate(update, seq: envelope.seq)
         case .ignored:
@@ -865,11 +901,11 @@ struct ZZAgentThread: Equatable, Sendable {
             let targetID = update.messageID.map { "message-\($0)" }
             if let targetID,
                let index = blocks.firstIndex(where: { $0.id == targetID }) {
-                appendText(text, toTextBlockAt: index)
+                appendText(text, toBlockAt: index)
             } else if targetID == nil,
                       let last = blocks.last,
                       last.isStreamText(isThought: isThought) {
-                appendText(text, toTextBlockAt: blocks.count - 1)
+                appendText(text, toBlockAt: blocks.count - 1)
             } else {
                 let id = targetID ?? "stream-\(isThought ? "thought" : "agent")-\(seq)"
                 let kind = isThought
@@ -880,18 +916,95 @@ struct ZZAgentThread: Equatable, Sendable {
             trim()
         case let .toolCall(delta), let .toolCallUpdate(delta):
             upsertTool(delta)
-        case .userText, .ignored:
+        case let .userText(text):
+            applyUserText(text, messageID: update.messageID)
+        case .ignored:
             break
         }
     }
 
-    private mutating func appendText(_ text: String, toTextBlockAt index: Int) {
+    /// A prompt the journal replays. It is the same turn the submitting client
+    /// echoed locally, so it adopts that bubble with its receipt and takes the
+    /// journal's position instead of appending a second copy of the text.
+    private mutating func applyUserText(_ text: String, messageID: String?) {
+        guard !text.isEmpty else {
+            return
+        }
+        if let index = openStreamTurnIndex(messageID: messageID) {
+            appendText(text, toBlockAt: index)
+            return
+        }
+        let echo = blocks.firstIndex { block in
+            guard let turn = block.userTurn else {
+                return false
+            }
+            return turn.source == .localEcho && turn.text == text
+        }
+        guard let echo else {
+            appendTurn(text: text, source: .stream, receipt: nil, messageID: messageID)
+            return
+        }
+        var block = blocks.remove(at: echo)
+        if case var .user(turn) = block.kind {
+            turn.source = .stream
+            turn.messageID = messageID
+            block.kind = .user(turn: turn)
+        }
+        blocks.append(block)
+    }
+
+    /// The bubble a further chunk of the same user message extends: the one
+    /// carrying that `messageId`, or the last stream turn when the payload
+    /// named none, matching how id-less agent chunks continue their run.
+    private func openStreamTurnIndex(messageID: String?) -> Int? {
+        guard let messageID else {
+            guard let turn = blocks.last?.userTurn,
+                  turn.source == .stream,
+                  turn.messageID == nil else {
+                return nil
+            }
+            return blocks.count - 1
+        }
+        return blocks.lastIndex { block in
+            guard let turn = block.userTurn else {
+                return false
+            }
+            return turn.source == .stream && turn.messageID == messageID
+        }
+    }
+
+    private mutating func appendTurn(
+        text: String,
+        source: ZZAgentTurnSource,
+        receipt: ZZAgentTurnReceipt?,
+        messageID: String?
+    ) {
+        let turn = ZZAgentTurn(
+            id: nextTurnID,
+            text: text,
+            source: source,
+            receipt: receipt,
+            messageID: messageID
+        )
+        nextTurnID &+= 1
+        blocks.append(ZZAgentThreadBlock(id: "user-\(turn.id)", kind: .user(turn: turn)))
+        trim()
+    }
+
+    private mutating func dropReplayableBlocks() {
+        blocks.removeAll { !$0.isLocalEcho }
+    }
+
+    private mutating func appendText(_ text: String, toBlockAt index: Int) {
         switch blocks[index].kind {
         case let .agentText(messageID, existing):
             blocks[index].kind = .agentText(messageID: messageID, text: existing + text)
         case let .thought(messageID, existing):
             blocks[index].kind = .thought(messageID: messageID, text: existing + text)
-        case .user, .tool:
+        case var .user(turn):
+            turn.text += text
+            blocks[index].kind = .user(turn: turn)
+        case .tool:
             break
         }
     }
@@ -932,7 +1045,7 @@ struct ZZAgentThread: Equatable, Sendable {
 
     private mutating func trim() {
         while blocks.count > Self.maximumBlocks {
-            if let index = blocks.firstIndex(where: { !$0.isUserTurn }) {
+            if let index = blocks.firstIndex(where: { !$0.isLocalEcho }) {
                 blocks.remove(at: index)
             } else {
                 blocks.removeFirst()
@@ -1152,7 +1265,7 @@ struct ZZAgentStreamUpdate {
         case thought(String)
         case toolCall(ZZAgentToolCallDelta)
         case toolCallUpdate(ZZAgentToolCallDelta)
-        case userText
+        case userText(String)
         case ignored
     }
 
@@ -1186,7 +1299,7 @@ struct ZZAgentStreamUpdate {
             }
             return ZZAgentStreamUpdate(kind: .toolCallUpdate(delta), messageID: nil)
         case "user_message_chunk":
-            return ZZAgentStreamUpdate(kind: .userText, messageID: messageID)
+            return ZZAgentStreamUpdate(kind: .userText(chunkText(dict)), messageID: messageID)
         default:
             return ZZAgentStreamUpdate(kind: .ignored, messageID: nil)
         }
@@ -1583,11 +1696,6 @@ enum ZZCommandLine: Sendable {
         }
         return (name, Array(parts.dropFirst()))
     }
-
-    /// Arguments that open the daemon overlays without any daemon changes:
-    /// the daemon publishes the resulting state and every client renders it.
-    static let chooseBufferArgs: [String] = []
-    static let displayPanesArgs: [String] = ["-d", "0"]
 }
 
 /// The executed commands whose reply the store still wants. The daemon answers

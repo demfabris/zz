@@ -997,22 +997,6 @@ final class ZZStore: ObservableObject {
         tmuxImportPhase = .done(message: ZZTMuxImport.unchangedMessage)
     }
 
-    /// Open the daemon's `choose-buffer` overlay. Interactive selection needs
-    /// `ChooseBufferState` FFI that does not exist yet; until then the daemon
-    /// overlay is driven from the attached terminal like on desktop.
-    @discardableResult
-    func requestChooseBuffer() -> Bool {
-        execute("choose-buffer", args: ZZCommandLine.chooseBufferArgs)
-    }
-
-    /// Flash the daemon's `display-panes` overlay. Interactive selection needs
-    /// `DisplayPanesState` FFI that does not exist yet; until then the overlay
-    /// is driven from the attached terminal like on desktop.
-    @discardableResult
-    func requestDisplayPanes() -> Bool {
-        execute("display-panes", args: ZZCommandLine.displayPanesArgs)
-    }
-
     private func refreshPrefixState() {
         guard let client,
               let snapshot = zz_prefix_snapshot_acquire(client) else {
@@ -1574,7 +1558,7 @@ final class ZZStore: ObservableObject {
                 maybeOfferTmuxImport()
                 for window in sessions.flatMap(\.windows) {
                     for pane in window.panes where pane.kind == .agent {
-                        agentThreadSlot(for: pane.id).mutate { $0.resetStream() }
+                        agentThreadSlot(for: pane.id).mutate { $0.prepareForReplay() }
                         requestAgentReplay(for: pane.id)
                     }
                 }
@@ -1911,7 +1895,7 @@ final class ZZStore: ObservableObject {
            previous.sessionID != nil,
            previous.sessionID != nextSession,
            let slot = agentThreadSlots[pane] {
-            slot.mutate { $0.resetStream() }
+            slot.mutate { $0.resetForNewSession() }
         }
         agentStates[pane] = state
 

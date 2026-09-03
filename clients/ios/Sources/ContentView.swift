@@ -3194,23 +3194,50 @@ private struct AgentTurnBubble: View {
                         in: RoundedRectangle(cornerRadius: AgentMetrics.bubble, style: .continuous)
                     )
                     .textSelection(.enabled)
-                HStack(spacing: 4) {
-                    Text(turn.sentAt, style: .time)
-                        .monospacedDigit()
-                    statusIcon
-                    Text(statusLabel)
+                if let receipt = turn.receipt {
+                    AgentTurnReceiptRow(receipt: receipt)
                 }
-                .font(.caption2)
-                .foregroundStyle(statusColor)
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("You said \(turn.text), \(statusLabel)")
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        guard let receipt = turn.receipt else {
+            return "You said \(turn.text)"
+        }
+        return "You said \(turn.text), \(AgentTurnReceiptRow.label(receipt.status))"
+    }
+}
+
+/// Shown only under a prompt this client sent: a replayed prompt has no
+/// send time and no receipt to report.
+private struct AgentTurnReceiptRow: View {
+    let receipt: ZZAgentTurnReceipt
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(receipt.sentAt, style: .time)
+                .monospacedDigit()
+            icon
+            Text(Self.label(receipt.status))
+        }
+        .font(.caption2)
+        .foregroundStyle(color)
+    }
+
+    static func label(_ status: ZZAgentTurnStatus) -> String {
+        switch status {
+        case .working: "Working"
+        case .done: "Done"
+        case .failed: "Failed"
+        }
     }
 
     @ViewBuilder
-    private var statusIcon: some View {
-        switch turn.status {
+    private var icon: some View {
+        switch receipt.status {
         case .working:
             Image(systemName: "clock")
         case .done:
@@ -3220,16 +3247,8 @@ private struct AgentTurnBubble: View {
         }
     }
 
-    private var statusLabel: String {
-        switch turn.status {
-        case .working: "Working"
-        case .done: "Done"
-        case .failed: "Failed"
-        }
-    }
-
-    private var statusColor: Color {
-        switch turn.status {
+    private var color: Color {
+        switch receipt.status {
         case .working, .done: .secondary
         case .failed: .red
         }
@@ -4238,12 +4257,6 @@ private struct FullscreenPane: View {
                 }
                 TerminalShortcutButton("Keys") {
                     showsKeyList = true
-                }
-                TerminalShortcutButton("Bufs") {
-                    store.requestChooseBuffer()
-                }
-                TerminalShortcutButton("Panes") {
-                    store.requestDisplayPanes()
                 }
             }
             .padding(.horizontal, 8)

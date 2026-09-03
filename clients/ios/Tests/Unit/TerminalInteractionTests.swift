@@ -650,17 +650,70 @@ final class TerminalInteractionTests: XCTestCase {
         )
     }
 
-    func testAgentThreadSkipsUserEchoesAndUnknownTags() {
+    func testAgentThreadReplaysUserPromptsAndSkipsUnknownTags() {
         var thread = ZZAgentThread()
         let effect = thread.applyBatch(firstSeq: 1, items: [
             agentItem(1, #"update"#, #"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hi"},"messageId":"u1"}"#),
-            agentItem(2, #"update"#, #"{"sessionUpdate":"from_the_future"}"#),
-            agentItem(3, #"plan"#, #"{"unknown":true}"#),
+            agentItem(2, #"update"#, #"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":" there"},"messageId":"u1"}"#),
+            agentItem(3, #"update"#, #"{"sessionUpdate":"from_the_future"}"#),
+            agentItem(4, #"plan"#, #"{"unknown":true}"#),
         ])
 
         XCTAssertEqual(effect, .applied)
-        XCTAssertEqual(thread.cursor, 3)
-        XCTAssertTrue(thread.blocks.isEmpty)
+        XCTAssertEqual(thread.cursor, 4)
+        // A cold client renders the prompts that produced the replies, and the
+        // chunks of one message land in one bubble.
+        XCTAssertEqual(thread.blocks.count, 1)
+        XCTAssertEqual(thread.blocks[0].userTurn?.text, "hi there")
+        XCTAssertEqual(thread.blocks[0].userTurn?.source, .stream)
+        // A prompt this client did not send carries no receipt to report.
+        XCTAssertNil(thread.blocks[0].userTurn?.receipt)
+        XCTAssertEqual(thread.submittedTurns, 0)
+    }
+
+    func testAgentThreadAdoptsTheLocalEchoOfAReplayedPrompt() {
+        var thread = ZZAgentThread()
+        thread.appendUserTurn("go")
+        thread.settleOldestWorkingTurn(.done)
+
+        _ = thread.applyBatch(firstSeq: 1, items: [
+            agentItem(1, #"update"#, #"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"go"},"messageId":"u1"}"#),
+            agentItem(2, #"update"#, #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"},"messageId":"m1"}"#),
+            agentItem(3, #"update"#, #"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"go"},"messageId":"u2"}"#),
+        ])
+
+        XCTAssertEqual(thread.blocks.count, 3)
+        // The echo the app already drew keeps its receipt instead of being
+        // drawn twice.
+        XCTAssertEqual(thread.blocks[0].userTurn?.text, "go")
+        XCTAssertEqual(thread.blocks[0].userTurn?.source, .stream)
+        XCTAssertEqual(thread.blocks[0].userTurn?.receipt?.status, .done)
+        XCTAssertEqual(thread.blocks[1].kind, .agentText(messageID: "m1", text: "done"))
+        // A second identical prompt has no unclaimed echo left to adopt.
+        XCTAssertEqual(thread.blocks[2].userTurn?.text, "go")
+        XCTAssertNil(thread.blocks[2].userTurn?.receipt)
+    }
+
+    func testAgentThreadReplayRestoresTurnsInJournalOrder() {
+        var thread = ZZAgentThread()
+        thread.appendUserTurn("first")
+        thread.appendUserTurn("second")
+        _ = thread.applyBatch(firstSeq: 1, items: [
+            agentItem(1, #"update"#, #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"one"},"messageId":"m1"}"#),
+        ])
+
+        thread.prepareForReplay()
+        _ = thread.applyBatch(firstSeq: 1, items: [
+            agentItem(1, #"update"#, #"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"first"},"messageId":"u1"}"#),
+            agentItem(2, #"update"#, #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"one"},"messageId":"m1"}"#),
+            agentItem(3, #"update"#, #"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"second"},"messageId":"u2"}"#),
+        ])
+
+        XCTAssertEqual(thread.blocks.count, 3)
+        XCTAssertEqual(thread.blocks[0].userTurn?.text, "first")
+        XCTAssertEqual(thread.blocks[1].kind, .agentText(messageID: "m1", text: "one"))
+        XCTAssertEqual(thread.blocks[2].userTurn?.text, "second")
+        XCTAssertTrue(thread.blocks.compactMap(\.userTurn).allSatisfy { $0.receipt != nil })
     }
 
     func testAgentThreadRequestsReplayOnGapAndClosesIt() {
@@ -709,7 +762,7 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertEqual(effect, .applied)
         XCTAssertEqual(thread.cursor, 11)
         XCTAssertEqual(thread.blocks.count, 2)
-        XCTAssertTrue(thread.blocks[0].isUserTurn)
+        XCTAssertEqual(thread.blocks[0].userTurn?.text, "fix it")
         XCTAssertEqual(
             thread.blocks[1].kind,
             .agentText(messageID: "m9", text: "fresh")
@@ -732,30 +785,40 @@ final class TerminalInteractionTests: XCTestCase {
         )
     }
 
-    func testAgentThreadSettlesTurnsAndResetsStream() {
+    func testAgentThreadSettlesTurnsAndKeepsUnconfirmedEchoesForReplay() {
         var thread = ZZAgentThread()
         thread.appendUserTurn("first")
         thread.appendUserTurn("second")
         thread.settleOldestWorkingTurn(.done)
         thread.settleOldestWorkingTurn(.failed)
 
-        let receipts = thread.blocks.compactMap { block -> ZZAgentTurnStatus? in
-            if case let .user(turn) = block.kind {
-                return turn.status
-            }
-            return nil
-        }
+        let receipts = thread.blocks.compactMap { $0.userTurn?.receipt?.status }
         XCTAssertEqual(receipts, [.done, .failed])
 
         _ = thread.applyBatch(firstSeq: 1, items: [
             agentItem(1, #"update"#, #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"},"messageId":"m1"}"#),
         ])
-        thread.resetStream()
+        thread.prepareForReplay()
 
         XCTAssertEqual(thread.cursor, 0)
         XCTAssertFalse(thread.replayPending)
         XCTAssertEqual(thread.blocks.count, 2)
-        XCTAssertTrue(thread.blocks.allSatisfy(\.isUserTurn))
+        XCTAssertTrue(thread.blocks.allSatisfy(\.isLocalEcho))
+    }
+
+    func testAgentThreadSessionChangeReplacesTheWholeTranscript() {
+        var thread = ZZAgentThread()
+        thread.appendUserTurn("first")
+        _ = thread.applyBatch(firstSeq: 1, items: [
+            agentItem(1, #"update"#, #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"},"messageId":"m1"}"#),
+        ])
+
+        thread.resetForNewSession()
+
+        // The previous session's prompts are not this session's history.
+        XCTAssertTrue(thread.blocks.isEmpty)
+        XCTAssertEqual(thread.cursor, 0)
+        XCTAssertFalse(thread.replayPending)
     }
 
     func testAgentConfigOptionsParseSelectsAndSkipBooleans() {
@@ -1075,11 +1138,6 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertEqual(parsed?.args, ["-t", "%1"])
         XCTAssertEqual(ZZCommandLine.split("list-keys")?.args, [])
         XCTAssertNil(ZZCommandLine.split("   "))
-    }
-
-    func testOverlayShortcutsReuseExistingDaemonCommands() {
-        XCTAssertEqual(ZZCommandLine.chooseBufferArgs, [])
-        XCTAssertEqual(ZZCommandLine.displayPanesArgs, ["-d", "0"])
     }
 
     func testTmuxImportOffersOncePerHost() {

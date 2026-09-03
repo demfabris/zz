@@ -34,8 +34,9 @@ use crate::{
     copy_actions::pinned_copy_action,
     formats::{
         CommandHooks, FormatClient, FormatClientRow, FormatContext, FormatEnvironRow,
-        FormatOptionRow, FormatType, StatusHooks, expand_format_time_with_hooks,
-        expand_format_with_hooks, format_listing, format_true, parse_tmux_colour,
+        FormatOptionRow, FormatType, StatusHooks, expand_format_time_traced,
+        expand_format_time_with_hooks, expand_format_with_hooks, format_listing, format_true,
+        parse_tmux_colour,
     },
     honest_knobs::{
         AllowPassthrough, PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption,
@@ -8063,14 +8064,41 @@ impl MuxEngine {
             }
             return Ok(Execution::output(listing.trim_end_matches('\n').to_owned()));
         }
+        // format_log1 gates only on `ft->item != NULL` and FORMAT_VERBOSE, so
+        // the trace reaches the command's stdout through cmdq_print ahead of
+        // the result whether or not -p was given, and -l skips the expansion
+        // that would have written it.
+        let mut trace = Vec::new();
         let text = if options.has("-l") {
             format
+        } else if options.has("-v") {
+            let (text, lines) = expand_format_time_traced(&format, self, format_context, hooks);
+            trace = lines;
+            text
         } else {
             expand_format_time_with_hooks(&format, self, format_context, hooks)
         };
         if options.has("-p") {
-            Ok(Execution::output(text))
-        } else {
+            if trace.is_empty() {
+                return Ok(Execution::output(text));
+            }
+            trace.push(text);
+            return Ok(Execution::output(trace.join("\n")));
+        }
+        if !trace.is_empty() {
+            let mut execution = Execution::output(trace.join("\n"));
+            execution.effects.push(MuxEffect::DisplayMessage {
+                pane,
+                target_client: options.value("-c").map(str::to_owned),
+                text,
+                duration_ms: delay
+                    .map(|delay| u32::try_from(delay).expect("delay was bounded to u32")),
+                freeze: !options.has("-C"),
+                ignore_keys: options.has("-N"),
+            });
+            return Ok(execution);
+        }
+        {
             Ok(Execution::effect(MuxEffect::DisplayMessage {
                 pane,
                 target_client: options.value("-c").map(str::to_owned),
@@ -29979,6 +30007,95 @@ mod tests {
         );
         assert_eq!(variables["hook_pane"], pane.to_string());
         assert_eq!(variables.len(), 9);
+    }
+
+    #[test]
+    fn display_message_verbose_prints_the_pinned_format_log_lines() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "trace"]))
+            .expect("session");
+        engine
+            .execute(&mut context, &command("select-pane", &["-T", "macbook"]))
+            .expect("title");
+
+        let traced = engine
+            .execute(
+                &mut context,
+                &command(
+                    "display-message",
+                    &["-v", "-p", "#{?pane_dead,dead,#{=3:pane_title}}"],
+                ),
+            )
+            .expect("verbose expansion")
+            .output;
+        assert_eq!(
+            traced,
+            concat!(
+                "# expanding format: #{?pane_dead,dead,#{=3:pane_title}}\n",
+                "# found #{}: ?pane_dead,dead,#{=3:pane_title}\n",
+                "# condition is: pane_dead\n",
+                "# condition 'pane_dead' found: 0\n",
+                "# condition 'pane_dead' is false\n",
+                "# no condition matched in 'pane_dead,dead,#{=3:pane_title}'; using last arg\n",
+                "#  expanding format: #{=3:pane_title}\n",
+                "#  found #{}: =3:pane_title\n",
+                "#   expanding format: 3\n",
+                "#   result is: 3\n",
+                "#  modifier 0 is =\n",
+                "#  modifier 0 argument 0: 3\n",
+                "#  format 'pane_title' found: macbook\n",
+                "#  applied length limit 3: mac\n",
+                "#  replaced '=3:pane_title' with 'mac'\n",
+                "#  result is: mac\n",
+                "# replaced '?pane_dead,dead,#{=3:pane_title}' with 'mac'\n",
+                "# result is: mac\n",
+                "mac"
+            )
+        );
+
+        // format_skip1's bracket counter is signed, so the unmatched `}` in a
+        // modifier argument fails the whole list and the body is expanded as a
+        // plain format instead.
+        let literal = engine
+            .execute(
+                &mut context,
+                &command(
+                    "display-message",
+                    &["-v", "-p", "#{=#{pane_title}:pane_title}"],
+                ),
+            )
+            .expect("failed modifier parse")
+            .output;
+        assert_eq!(
+            literal,
+            concat!(
+                "# expanding format: #{=#{pane_title}:pane_title}\n",
+                "# found #{}: =#{pane_title}:pane_title\n",
+                "# expanding inner format '=#{pane_title}:pane_title'\n",
+                "#  expanding format: =#{pane_title}:pane_title\n",
+                "#  found #{}: pane_title\n",
+                "#  format 'pane_title' found: macbook\n",
+                "#  replaced 'pane_title' with 'macbook'\n",
+                "#  result is: =macbook:pane_title\n",
+                "# replaced '=#{pane_title}:pane_title' with '=macbook:pane_title'\n",
+                "# result is: =macbook:pane_title\n",
+                "=macbook:pane_title"
+            )
+        );
+
+        // -l skips the expansion the trace would have been written by.
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("display-message", &["-v", "-p", "-l", "#{pane_title}"]),
+                )
+                .expect("literal message")
+                .output,
+            "#{pane_title}"
+        );
     }
 
     #[test]

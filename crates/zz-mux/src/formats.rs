@@ -1542,6 +1542,7 @@ pub fn expand_status(
         hooks,
         time: true,
         client_row: None,
+        trace: None,
     };
     expander.expand(format, 0)
 }
@@ -1556,6 +1557,7 @@ pub fn expand_format_values(
         hooks,
         time: false,
         client_row: None,
+        trace: None,
     };
     expander.expand(format, 0)
 }
@@ -1728,7 +1730,7 @@ pub(crate) fn expand_format_with_hooks(
     context: FormatContext,
     hooks: &mut impl StatusHooks,
 ) -> String {
-    expand_format_inner(format, engine, context, hooks, false)
+    expand_format_inner(format, engine, context, hooks, false, false).0
 }
 
 /// The pin's `format_expand_time` surface: the whole string passes through
@@ -1741,7 +1743,19 @@ pub(crate) fn expand_format_time_with_hooks(
     context: FormatContext,
     hooks: &mut impl StatusHooks,
 ) -> String {
-    expand_format_inner(format, engine, context, hooks, true)
+    expand_format_inner(format, engine, context, hooks, true, false).0
+}
+
+/// `display-message -v`: the same expansion as the ordinary path, plus
+/// `format_log1`'s ordered parse and replacement trace, each line already
+/// carrying its `#` and its `es->loop` indent.
+pub(crate) fn expand_format_time_traced(
+    format: &str,
+    engine: &MuxEngine,
+    context: FormatContext,
+    hooks: &mut impl StatusHooks,
+) -> (String, Vec<String>) {
+    expand_format_inner(format, engine, context, hooks, true, true)
 }
 
 fn expand_format_inner(
@@ -1750,7 +1764,8 @@ fn expand_format_inner(
     context: FormatContext,
     hooks: &mut impl StatusHooks,
     time: bool,
-) -> String {
+    trace: bool,
+) -> (String, Vec<String>) {
     let option_fallback =
         (context.session.is_none() && context.window.is_none() && context.pane.is_none())
             .then(|| context.format_client.attached_session())
@@ -1766,6 +1781,7 @@ fn expand_format_inner(
                 ))
             });
     let context = context.resolve(engine);
+    let mut sink = Vec::new();
     let mut hooks = OptionFormatHooks {
         engine,
         inner: hooks,
@@ -1776,8 +1792,11 @@ fn expand_format_inner(
         hooks: &mut hooks,
         time,
         client_row: None,
+        trace: trace.then_some(&mut sink),
     };
-    expander.expand(format, 0)
+    let value = expander.expand(format, 0);
+    let _ = expander;
+    (value, sink)
 }
 
 struct OptionFormatHooks<'a, H> {
@@ -1853,16 +1872,42 @@ struct Expander<'a, V: FormatVariables + ?Sized, H: StatusHooks> {
     hooks: &'a mut H,
     time: bool,
     client_row: Option<&'a FormatClientRow>,
+    trace: Option<&'a mut Vec<String>>,
 }
 
 impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
+    const fn tracing(&self) -> bool {
+        self.trace.is_some()
+    }
+
+    /// `format_log1`: `#`, then `es->loop` spaces taken from a ten-space
+    /// literal, then the message.
+    fn log(&mut self, depth: usize, message: &str) {
+        if let Some(trace) = self.trace.as_deref_mut() {
+            let indent = depth.min(FORMAT_LOOP_LIMIT);
+            trace.push(format!("#{:indent$}{message}", ""));
+        }
+    }
+
     fn expand(&mut self, format: &str, depth: usize) -> String {
-        if depth == FORMAT_LOOP_LIMIT || format.is_empty() {
+        if format.is_empty() {
             return String::new();
+        }
+        if depth == FORMAT_LOOP_LIMIT {
+            if self.tracing() {
+                self.log(depth, &format!("reached loop limit ({FORMAT_LOOP_LIMIT})"));
+            }
+            return String::new();
+        }
+        if self.tracing() {
+            self.log(depth + 1, &format!("expanding format: {format}"));
         }
         let time_expanded;
         let format = if self.time && format.contains('%') {
             time_expanded = self.hooks.strftime(format);
+            if self.tracing() && time_expanded != format {
+                self.log(depth + 1, &format!("after time expanded: {time_expanded}"));
+            }
             time_expanded.as_str()
         } else {
             format
@@ -1887,6 +1932,9 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 let Some(end) = find_style_end(format, hashes_end + 1) else {
                     break;
                 };
+                if self.tracing() {
+                    self.log(depth + 1, &format!("found #*{}[", hashes_end - index));
+                }
                 self.flush(&mut output, &mut literal);
                 output.push_str(&format[index..=hashes_end]);
                 output.push_str(&self.expand_style_body(&format[hashes_end + 1..end], depth));
@@ -1901,6 +1949,9 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             let after_next = next_index + next.len_utf8();
             match next {
                 '#' | '}' | ',' => {
+                    if self.tracing() {
+                        self.log(depth + 1, &format!("found #{next}"));
+                    }
                     literal.push(next);
                     index = after_next;
                 }
@@ -1910,7 +1961,17 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                         break;
                     };
                     self.flush(&mut output, &mut literal);
-                    output.push_str(&self.hooks.shell(&format[after_next..end]));
+                    if self.tracing() {
+                        self.log(
+                            depth + 1,
+                            &format!("found #(): {}", &format[after_next..end]),
+                        );
+                    }
+                    let out = self.hooks.shell(&format[after_next..end]);
+                    if self.tracing() {
+                        self.log(depth + 1, &format!("#() result: {out}"));
+                    }
+                    output.push_str(&out);
                     index = end + 1;
                 }
                 '{' => {
@@ -1918,6 +1979,12 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                         break;
                     };
                     self.flush(&mut output, &mut literal);
+                    if self.tracing() {
+                        self.log(
+                            depth + 1,
+                            &format!("found #{{}}: {}", &format[after_next..end]),
+                        );
+                    }
                     match self.expand_replacement(&format[after_next..end], depth + 1) {
                         Ok(value) => output.push_str(&value),
                         Err(()) => break,
@@ -1927,7 +1994,19 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 _ => {
                     if let Some(name) = shorthand(next) {
                         self.flush(&mut output, &mut literal);
-                        output.push_str(&self.context.variable(name).unwrap_or_default());
+                        let found = self.context.variable(name);
+                        if self.tracing() {
+                            self.log(depth + 1, &format!("found #{next}: {name}"));
+                            match found.as_deref() {
+                                Some(value) => {
+                                    self.log(depth + 1, &format!("format '{name}' found: {value}"));
+                                }
+                                None => self.log(depth + 1, &format!("format '{name}' not found")),
+                            }
+                            let value = found.clone().unwrap_or_default();
+                            self.log(depth + 1, &format!("replaced '{name}' with '{value}'"));
+                        }
+                        output.push_str(&found.unwrap_or_default());
                     } else {
                         literal.push('#');
                         literal.push(next);
@@ -1937,6 +2016,9 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             }
         }
         self.flush(&mut output, &mut literal);
+        if self.tracing() {
+            self.log(depth + 1, &format!("result is: {output}"));
+        }
         output
     }
 
@@ -1961,6 +2043,12 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     let Some(end) = find_format_end(body, index) else {
                         break;
                     };
+                    if self.tracing() {
+                        self.log(
+                            depth + 1,
+                            &format!("found #{{}}: {}", &body[index + 2..end]),
+                        );
+                    }
                     match self.expand_replacement(&body[index + 2..end], depth + 1) {
                         Ok(value) => output.push_str(&value),
                         Err(()) => break,
@@ -1997,14 +2085,41 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
     }
 
     fn expand_replacement(&mut self, body: &str, depth: usize) -> Result<String, ()> {
+        let value = self.expand_replacement_inner(body, depth);
+        if self.tracing() {
+            match value.as_deref() {
+                Ok(value) => self.log(depth, &format!("replaced '{body}' with '{value}'")),
+                Err(()) => self.log(depth, &format!("failed {body}")),
+            }
+        }
+        value
+    }
+
+    fn expand_replacement_inner(&mut self, body: &str, depth: usize) -> Result<String, ()> {
         let (modifiers, copy) = self.build_modifiers(body, depth).map_or_else(
             || (Vec::new(), body),
             |(modifiers, offset)| (modifiers, &body[offset..]),
         );
+        if self.tracing() {
+            for (index, modifier) in modifiers.iter().enumerate() {
+                let text = modifier.text;
+                let arguments = modifier.args.clone();
+                self.log(depth, &format!("modifier {index} is {text}"));
+                for (argument, value) in arguments.iter().enumerate() {
+                    self.log(
+                        depth,
+                        &format!("modifier {index} argument {argument}: {value}"),
+                    );
+                }
+            }
+        }
         let flags = ModifierFlags::from_modifiers(&modifiers);
         let mut value = if let Some(word) = flags.interrogate {
             self.expand_interrogate(copy, word)
         } else if flags.literal {
+            if self.tracing() {
+                self.log(depth, &format!("literal string is '{copy}'"));
+            }
             unescape(copy)
         } else if flags.character {
             self.expand_character(copy, depth)
@@ -2043,9 +2158,19 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         } else if let Some(expression) = flags.expression {
             self.expand_expression(copy, depth, expression)
         } else if copy.contains("#{") {
+            if self.tracing() {
+                self.log(depth, &format!("expanding inner format '{copy}'"));
+            }
             self.expand(copy, depth)
         } else {
-            self.lookup(copy, &flags).unwrap_or_default()
+            let found = self.lookup(copy, &flags);
+            if self.tracing() {
+                match found.as_deref() {
+                    Some(value) => self.log(depth, &format!("format '{copy}' found: {value}")),
+                    None => self.log(depth, &format!("format '{copy}' not found")),
+                }
+            }
+            found.unwrap_or_default()
         };
 
         if flags.expand {
@@ -2067,18 +2192,37 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     .get(2)
                     .is_some_and(|flags| flags.contains('i')),
             );
+            if self.tracing() {
+                self.log(
+                    depth,
+                    &format!("substitute '{pattern}' to '{replacement}': {value}"),
+                );
+            }
         }
         if let Some((limit, marker)) = flags.limit {
             value = truncate_value(&value, limit, marker.as_deref());
+            if self.tracing() {
+                self.log(depth, &format!("applied length limit {limit}: {value}"));
+            }
         }
         if flags.padding != 0 {
             value = pad_value(&value, flags.padding);
+            if self.tracing() {
+                let width = flags.padding;
+                self.log(depth, &format!("applied padding width {width}: {value}"));
+            }
         }
         if flags.length {
             value = value.len().to_string();
+            if self.tracing() {
+                self.log(depth, &format!("replacing with length: {value}"));
+            }
         }
         if flags.width {
             value = styled_display_width(&value).to_string();
+            if self.tracing() {
+                self.log(depth, &format!("replacing with width: {value}"));
+            }
         }
         Ok(value)
     }
@@ -2105,16 +2249,17 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                         .get(spec.text.len())
                         .is_some_and(|next| is_modifier_end(*next))
                 {
-                    matched = Some((spec.kind, spec.text.len()));
+                    matched = Some((spec.kind, spec.text));
                     break;
                 }
             }
-            if let Some((kind, size)) = matched {
+            if let Some((kind, text)) = matched {
                 modifiers.push(Modifier {
                     kind,
+                    text,
                     args: Vec::new(),
                 });
-                position += size;
+                position += text.len();
                 continue;
             }
             let character = remaining.as_bytes()[0];
@@ -2125,6 +2270,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             if next.is_some_and(is_modifier_end) {
                 modifiers.push(Modifier {
                     kind: spec.kind,
+                    text: spec.text,
                     args: Vec::new(),
                 });
                 position += 1;
@@ -2134,6 +2280,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 return None;
             }
             let kind = spec.kind;
+            let text = spec.text;
             position += 1;
             if position >= body.len() {
                 return None;
@@ -2141,6 +2288,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             if is_modifier_end(body.as_bytes()[position]) {
                 modifiers.push(Modifier {
                     kind,
+                    text,
                     args: Vec::new(),
                 });
                 continue;
@@ -2173,7 +2321,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 args.push(self.expand(&value, depth));
                 position = end;
             }
-            modifiers.push(Modifier { kind, args });
+            modifiers.push(Modifier { kind, text, args });
         }
         if body.as_bytes().get(position) == Some(&b':') {
             Some((modifiers, position + 1))
@@ -2482,6 +2630,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 hooks: &mut *self.hooks,
                 time: self.time,
                 client_row: self.client_row,
+                trace: self.trace.as_deref_mut(),
             };
             output.push_str(&expander.expand(selected, depth));
         }
@@ -2517,6 +2666,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 hooks: &mut *self.hooks,
                 time: self.time,
                 client_row: Some(row),
+                trace: None,
             };
             output.push_str(&expander.expand(copy, depth));
         }
@@ -2557,6 +2707,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 hooks: &mut *self.hooks,
                 time: self.time,
                 client_row: self.client_row,
+                trace: self.trace.as_deref_mut(),
             };
             output.push_str(&expander.expand(copy, depth));
         }
@@ -2584,6 +2735,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 hooks: &mut *self.hooks,
                 time: self.time,
                 client_row: self.client_row,
+                trace: self.trace.as_deref_mut(),
             };
             output.push_str(&expander.expand(copy, depth));
         }
@@ -2617,10 +2769,19 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
     ) -> Result<String, ()> {
         let (left, right) = split_once_top(copy, ',');
         let Some(right) = right else {
+            if self.tracing() {
+                let text = comparison_text(comparison);
+                self.log(depth, &format!("compare {text} syntax error: {copy}"));
+            }
             return Err(());
         };
         let left = self.expand(left, depth);
         let right = self.expand(right, depth);
+        if self.tracing() {
+            let text = comparison_text(comparison);
+            self.log(depth, &format!("compare {text} left is: {left}"));
+            self.log(depth, &format!("compare {text} right is: {right}"));
+        }
         let value = match comparison {
             Comparison::Equal => bool_string(left == right).to_owned(),
             Comparison::NotEqual => bool_string(left != right).to_owned(),
@@ -2643,21 +2804,52 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         let paired = parts.len() / 2 * 2;
         for pair in parts[..paired].chunks_exact(2) {
             let condition = pair[0];
-            let found = self.lookup(condition, flags).unwrap_or_else(|| {
+            if self.tracing() {
+                self.log(depth, &format!("condition is: {condition}"));
+            }
+            let found = if let Some(value) = self.lookup(condition, flags) {
+                if self.tracing() {
+                    self.log(depth, &format!("condition '{condition}' found: {value}"));
+                }
+                value
+            } else {
                 let expanded = self.expand(condition, depth);
                 if expanded == condition {
+                    if self.tracing() {
+                        self.log(
+                            depth,
+                            &format!("condition '{condition}' not found; assuming false"),
+                        );
+                    }
                     String::new()
                 } else {
                     expanded
                 }
-            });
-            if format_true(&found) {
+            };
+            let truthy = format_true(&found);
+            if self.tracing() {
+                let state = if truthy { "true" } else { "false" };
+                self.log(depth, &format!("condition '{condition}' is {state}"));
+            }
+            if truthy {
                 return self.expand(pair[1], depth);
             }
         }
         if parts.len() % 2 == 1 {
+            if self.tracing() {
+                self.log(
+                    depth,
+                    &format!("no condition matched in '{copy}'; using last arg"),
+                );
+            }
             self.expand(parts[parts.len() - 1], depth)
         } else {
+            if self.tracing() {
+                self.log(
+                    depth,
+                    &format!("no condition matched in '{copy}'; using empty string"),
+                );
+            }
             String::new()
         }
     }
@@ -2833,6 +3025,7 @@ pub(crate) fn format_modifier_names() -> impl Iterator<Item = &'static str> {
 
 struct Modifier {
     kind: ModifierKind,
+    text: &'static str,
     args: Vec<String>,
 }
 
@@ -2894,6 +3087,20 @@ enum Comparison<'a> {
     LessEqual,
     GreaterEqual,
     Match(&'a str),
+}
+
+/// The modifier spelling `format_replace` logs beside a comparison, which is
+/// `cmp->modifier` and never the flag word an `m` carries.
+const fn comparison_text(comparison: Comparison<'_>) -> &'static str {
+    match comparison {
+        Comparison::Equal => "==",
+        Comparison::NotEqual => "!=",
+        Comparison::Less => "<",
+        Comparison::Greater => ">",
+        Comparison::LessEqual => "<=",
+        Comparison::GreaterEqual => ">=",
+        Comparison::Match(_) => "m",
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -3600,9 +3807,13 @@ fn find_measured_style_end(bytes: &[u8], start: usize) -> Option<usize> {
     None
 }
 
+/// `format_skip1`'s bracket accounting, whose counter is signed: a `}` with no
+/// opening `#{` drives it below zero and no later terminator is ever at depth
+/// zero again, so the whole modifier list fails to parse and the body falls
+/// through to a plain format.
 fn find_modifier_argument(text: &str, start: usize, wrapper: u8) -> Option<usize> {
     let bytes = text.as_bytes();
-    let mut depth = 0usize;
+    let mut depth = 0isize;
     let mut position = start;
     while position < bytes.len() {
         if bytes[position] == b'#' && bytes.get(position + 1) == Some(&b'{') {
@@ -3618,7 +3829,7 @@ fn find_modifier_argument(text: &str, start: usize, wrapper: u8) -> Option<usize
             position += 2;
             continue;
         }
-        if bytes[position] == b'}' && depth > 0 {
+        if bytes[position] == b'}' {
             depth -= 1;
             position += 1;
             continue;

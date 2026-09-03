@@ -759,23 +759,18 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             )
         })
         .collect::<BTreeMap<_, _>>();
-    for (item, owner, decision, status) in [(
-        "semantic:native-format-context-producers",
-        "formats.native-typed-context-producers",
-        "native",
-        "accepted",
-    )] {
-        assert_eq!(
-            items.get(item).map(String::as_str),
-            Some(owner),
-            "wrong manifest owner for {item}"
-        );
-        assert_eq!(
-            groups.get(owner).copied(),
-            Some((decision, status)),
-            "wrong manifest decision or status for {owner}"
-        );
-    }
+    let item = "semantic:native-format-context-producers";
+    let owner = "formats.native-typed-context-producers";
+    assert_eq!(
+        items.get(item).map(String::as_str),
+        Some(owner),
+        "wrong manifest owner for {item}"
+    );
+    assert_eq!(
+        groups.get(owner).copied(),
+        Some(("native", "accepted")),
+        "wrong manifest decision or status for {owner}"
+    );
     for (item, owner) in missing_modifier_items.values() {
         assert_eq!(
             items.get(*item).map(String::as_str),

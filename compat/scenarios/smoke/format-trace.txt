@@ -1,0 +1,33 @@
+corpus: none
+# format_log1 writes the pin's ordered parse and replacement trace to the
+# command's stdout ahead of the result, one line per message, each `#` then
+# `es->loop` spaces taken from a ten-space literal.
+new-session -d -s tv -n first
+select-pane -t tv:0.0 -T macbook
+set-option -g @c red
+set-option -g @three 3
+out: display-message -v -p -t tv:0.0 #{session_name}
+out: display-message -v -p -t tv:0.0 <#{nosuchname}>
+out: display-message -v -p -t tv:0.0 #S
+out: display-message -v -p -t tv:0.0 #{?pane_dead,dead,#{=3:pane_title}}
+out: display-message -v -p -t tv:0.0 #{?nosuchname,yes,no}
+out: display-message -v -p -t tv:0.0 <#{?pane_dead,dead}>
+out: display-message -v -p -t tv:0.0 #{?#{==:#{pane_title},macbook},yes,no}
+out: display-message -v -p -t tv:0.0 #{l:hello}
+out: display-message -v -p -t tv:0.0 #{=3:pane_title}
+out: display-message -v -p -t tv:0.0 #{=-3:pane_title}
+out: display-message -v -p -t tv:0.0 #{p-10:pane_title}
+out: display-message -v -p -t tv:0.0 #{p10:pane_title}
+out: display-message -v -p -t tv:0.0 #{==:a,a}
+out: display-message -v -p -t tv:0.0 #{s/mac/X/:pane_title}
+out: display-message -v -p -t tv:0.0 #{n:pane_title}
+out: display-message -v -p -t tv:0.0 #{w:pane_title}
+out: display-message -v -p -t tv:0.0 <#{E:@notset}>
+out: display-message -v -p -t tv:0.0 #[fg=#{@c}]x#{pane_title}
+out: display-message -v -p -t tv:0.0 ##[fg=red]x
+out: display-message -v -p -t tv:0.0 x#,y##z
+out: display-message -v -p -t tv:0.0 #{=#{@three}:pane_title}
+out: display-message -v -p -t tv:0.0 #{s/#{@three}/X/:pane_title}
+out: display-message -v -t tv:0.0 #{session_name}
+out: display-message -v -p -l -t tv:0.0 #{session_name}
+out: display-message -p -t tv:0.0 #{=#{@three}:pane_title}

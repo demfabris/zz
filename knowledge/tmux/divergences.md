@@ -1356,6 +1356,38 @@ reading missed: `set-hook -Bu @watch` removes nothing because `-B` takes a value
 parsed, unlike an ordinary `after-*` hook body whose `#{...}` both binaries store literally.
 `compat/scenarios/smoke/format-monitor-hooks.txt` holds thirteen rows on both binaries.
 
+## `display-message -v` format trace (2026-09-03)
+
+`format_log1` writes `#`, then `es->loop` spaces taken from a ten-space literal, then the message, and
+sends it to the command's stdout through `cmdq_print` ahead of the result whether or not `-p` was
+given, because it gates only on `ft->item != NULL` and `FORMAT_VERBOSE`. zz's expander logs at
+`depth + 1` from `expand`, and `expand_replacement`, which is called with `depth + 1`, logs at its own
+`depth`, so the indents agree by construction. `compat/scenarios/smoke/format-trace.txt` asserts 29
+rows on both binaries and every trace line matches byte for byte.
+
+One structural difference the earlier reading called work was already gone: `build_modifiers` already
+expands each modifier argument while it parses the list and already implements the pin's
+punctuation-wrapper rule. What was left of it was one line of bracket accounting. `format_skip1`'s
+counter is signed, so the unmatched `}` in `#{=#{@three}:pane_title}` drives it below zero, no later
+`:` is ever seen at depth zero, the whole modifier list fails to parse, and the body is expanded as a
+plain format: the pin answers the literal `=3:pane_title`. zz clamped that counter at zero and
+answered the plain title; it is signed now and both binaries agree, while `#{s/#{@three}/X/:pane_title}`
+still substitutes and `#{I/c:X}`'s body is still never expanded.
+
+Three pin line families have no reachable site in zz and are deliberately not faked: `reached time
+limit` and `format is too long`, because zz has no `format_check_time` and no strftime overflow; the
+per-row loop headers (`session loop:`, `window loop:`, `pane loop:`, `option loop:`, `environment
+loop:`, `client loop:` and their missing-context lines), though a loop body's nested `expanding
+format:` and `found #{}:` lines do appear because the sub-expander shares the trace sink; and the
+expression family of seven plus `operator %s has operand:`, the two content-search lines, and
+`repeat syntax error:`, whose zz implementations have no matching decision point. A `#S` shorthand
+reads the format table directly instead of going through `format_replace`, so zz writes its
+`format '...' found:` and `replaced '...' with '...'` lines beside the `found #S:` line; the printed
+result is the same three lines.
+
+One pre-existing divergence sits beside this and is not the trace's: `display-message -p` of an empty
+expansion prints one empty line on the pin and prints nothing on zz.
+
 ## Window runtime formats split (2026-09-01)
 
 `formats.window-runtime` held five names in one container. They are three producer families, and the

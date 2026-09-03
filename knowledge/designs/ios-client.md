@@ -230,8 +230,10 @@ the text for bracketed-paste mode when the program enabled DECSET 2004, translat
 otherwise, and keeps the bytes away from the key tables. Routing a paste through the typing verb
 would deliver line feeds a shell runs as separate commands and let a pasted prefix byte be swallowed.
 Any command this client runs that prints something also opens a daemon-side command-output view,
-which switches the client to the copy-mode key table and swallows its terminal input; the client does
-not render that view, so it sends the Escape that leaves it once a reply arrives.
+which switches the client to the pane's copy-mode table and swallows its terminal input; the client
+does not render that view, so it cancels it through `zz_client_cancel_command_output` once a reply
+arrives. The cancel is a semantic action rather than a keystroke because `mode-keys vi` resolves
+Escape to clear-selection, which leaves copy mode running.
 
 The store owns one explicit input target: no pane or one terminal pane. A focus request advances an
 activation token, and UIKit reconciles first-responder state on the next main-actor turn only while
@@ -274,8 +276,16 @@ edges. The transcript itself arrives as JSON journal batches through
 `zz_client_agent_updates_next`, reduced in Swift with the same cursor rules as the desktop shell:
 per-pane cursor, idempotent overlap, gap-triggered replay from the cursor, restoring-reset jumps,
 and replay on lane overflow. Swift parses message chunks, thought chunks, and tool calls from the
-ACP `session/update` payloads and skips the variants it has no rendering for, including user
-echoes the thread already shows. Agent prose renders as full-width markdown rather than a chat bubble, so only the reader's own turns
+ACP `session/update` payloads and skips the variants it has no rendering for. User message chunks
+are reduced too, so a cold client replaying a thread shows the prompts that produced each reply. A
+turn records whether it came from a local echo or the journal: a replayed chunk continues an open
+stream turn by message id, else adopts an unconfirmed local echo with matching text and moves it to
+the journal's position, so text equality only ever chooses among this client's own unconfirmed
+bubbles. A replayed prompt this client never sent carries no send receipt and hides its caption row.
+Replay and a session change are distinct resets. Replay drops whatever the journal can reproduce and
+keeps unconfirmed echoes, because a fresh pane opens its session before the queued first prompt is
+sent. A changed ACP session id clears the transcript outright, so one session's prompts cannot sit
+under another's replies. Agent prose renders as full-width markdown rather than a chat bubble, so only the reader's own turns
 carry one and a narrow split tile keeps its text column. Block structure comes from `swift-markdown`
 (cmark-gfm), pinned at 0.8.0 and declared in `project.yml`; the app walks that tree into its own
 block model and draws it, which is what the desktop does with the `markdown` crate. Hand-rolled line
@@ -452,11 +462,11 @@ repository.
   (`zz_client_execute_request` returns the request id a `zz_command_reply_*` handle carries back),
   which is what lets the client copy a pane's last command output; the `zz_bytes` a reply lends are
   borrowed from its handle and must be copied before release.
-- Stop the daemon opening a command-output view for a client that cannot render one. Today any
-  printing command this client runs opens one, which switches the client to the copy-mode key table
-  and swallows its terminal input until dismissed; the client works around it by sending Escape once
-  a reply arrives. Either gate `open_command_output` on a client capability or export the view's
-  dismissal through the C ABI, and drop the synthetic keystroke.
+- Export the daemon's chooser and command-output viewports so the client can render them, or keep
+  refusing to offer controls that open them. Choose-buffer and display-panes were removed from the
+  shortcut bar for exactly this reason: the C ABI maps `CommandOutputChanged` to the generic event
+  and exports no viewport accessor, and `display-panes -d 0` never expires, so an unrendered overlay
+  swallowed the user's keys with no way back.
 - Add a push-capable background Agent inbox only if the product needs notifications while the app is
   suspended or terminated; the current local-notification path deliberately makes no such claim.
 - Add one daemon-backed UI automation smoke for software-keyboard frame behavior once the fixture can

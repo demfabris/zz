@@ -1080,12 +1080,17 @@ final class ZZStore: ObservableObject {
     }
 
     /// Any command this client runs that prints something opens a daemon-side
-    /// output view, which switches the client to the copy-mode key table and
+    /// output view, which switches the client to the pane's copy-mode table and
     /// swallows its terminal input until the view is dismissed. This client
-    /// never renders that view, so a pane would go silently deaf. Escape is
-    /// what leaves it, and a reply carrying text is proof one was opened.
-    private func dismissCommandOutputView(pane: UInt64) {
-        sendShortcutKey(UInt32(ZZ_KEY_ESCAPE.rawValue), to: pane)
+    /// never renders that view, so a pane would go silently deaf. The view is
+    /// per client rather than per pane, and cancelling it is a semantic action
+    /// because Escape resolves to clear-selection under `mode-keys vi`, which
+    /// leaves copy mode running. Sending this with no view open is a no-op.
+    private func dismissCommandOutputView() {
+        guard let client else {
+            return
+        }
+        _ = zz_client_cancel_command_output(client)
     }
 
     func dismissNotice() {
@@ -1964,11 +1969,11 @@ final class ZZStore: ObservableObject {
             )
             zz_command_reply_release(reply)
             switch purpose {
-            case let .lastOutput(pane):
+            case .lastOutput:
                 switch result {
                 case let .copy(text):
                     UIPasteboard.general.string = text
-                    dismissCommandOutputView(pane: pane)
+                    dismissCommandOutputView()
                     post(.success, "Copied the last command’s output.")
                 case let .failure(message):
                     post(.failure, message)

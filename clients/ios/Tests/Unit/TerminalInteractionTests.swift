@@ -387,15 +387,156 @@ final class TerminalInteractionTests: XCTestCase {
     func testAgentThreadTracksToolsAcrossCallAndUpdate() {
         var thread = ZZAgentThread()
         _ = thread.applyBatch(firstSeq: 1, items: [
-            agentItem(1, #"update"#, #"{"sessionUpdate":"tool_call","toolCallId":"t1","title":"Run tests"}"#),
+            agentItem(1, #"update"#, #"{"sessionUpdate":"tool_call","toolCallId":"t1","title":"Run tests","kind":"execute","locations":[{"path":"/work/app/main.swift","line":42}]}"#),
             agentItem(2, #"update"#, #"{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"in_progress"}"#),
             agentItem(3, #"update"#, #"{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed"}"#),
         ])
 
         XCTAssertEqual(thread.blocks.count, 1)
+        guard case let .tool(call) = thread.blocks[0].kind else {
+            return XCTFail("expected a tool block")
+        }
+        XCTAssertEqual(call.title, "Run tests")
+        XCTAssertEqual(call.kind, .execute)
+        XCTAssertEqual(call.status, .done)
+        // An update that names neither title nor locations leaves both alone.
+        XCTAssertEqual(call.location?.path, "/work/app/main.swift")
+        XCTAssertEqual(call.target, "main.swift:42")
+    }
+
+    func testAgentToolUpdatesReplaceCollectionsOnlyWhenPresent() {
+        var thread = ZZAgentThread()
+        _ = thread.applyBatch(firstSeq: 1, items: [
+            agentItem(1, #"update"#, #"{"sessionUpdate":"tool_call","toolCallId":"t1","title":"Edit","kind":"edit","locations":[{"path":"/a/one.swift"}],"content":[{"type":"diff","path":"/a/one.swift","newText":"x"}]}"#),
+        ])
+        guard case let .tool(first) = thread.blocks[0].kind else {
+            return XCTFail("expected a tool block")
+        }
+        XCTAssertEqual(first.location?.display, "one.swift")
+        XCTAssertEqual(first.changedPaths, ["/a/one.swift"])
+
+        // ACP replaces a collection when the key is present, so an empty array
+        // clears it while an absent key leaves it untouched.
+        _ = thread.applyBatch(firstSeq: 2, items: [
+            agentItem(2, #"update"#, #"{"sessionUpdate":"tool_call_update","toolCallId":"t1","locations":[],"status":"completed"}"#),
+        ])
+        guard case let .tool(second) = thread.blocks[0].kind else {
+            return XCTFail("expected a tool block")
+        }
+        XCTAssertNil(second.location)
+        XCTAssertEqual(second.changedPaths, ["/a/one.swift"])
+        XCTAssertEqual(second.status, .done)
+        XCTAssertEqual(second.title, "Edit")
+        XCTAssertEqual(second.kind, .edit)
+        XCTAssertEqual(second.target, "one.swift")
+    }
+
+    func testAgentToolKindFallsBackForUnknownWireValues() {
+        XCTAssertEqual(ZZAgentToolKind(wireValue: "execute"), .execute)
+        XCTAssertEqual(ZZAgentToolKind(wireValue: "switch_mode"), .switchMode)
+        XCTAssertEqual(ZZAgentToolKind(wireValue: "from_the_future"), .other)
+        XCTAssertEqual(ZZAgentToolKind(wireValue: nil), .other)
+    }
+
+    func testAgentToolLocationDisplayPrefersBasenameAndLine() {
+        XCTAssertEqual(
+            ZZAgentToolLocation(path: "/work/app/Sources/Main.swift", line: 12).display,
+            "Main.swift:12"
+        )
+        XCTAssertEqual(
+            ZZAgentToolLocation(path: "/work/app/Sources/Main.swift", line: nil).display,
+            "Main.swift"
+        )
+        XCTAssertNil(ZZAgentToolLocation.parse(["path": ""]))
+        XCTAssertEqual(ZZAgentToolLocation.parse(["path": "/a/b"])?.line, nil)
+    }
+
+    func testAgentMarkdownParsesListsAndHeadings() {
+        let segments = ZZAgentMarkdown.segments(
+            "## Plan\n- Simple\n- Valid\n\n1. First\n2. Second\ntail prose"
+        )
+        XCTAssertEqual(segments.map(\.kind), [
+            .heading(level: 2, text: "Plan"),
+            .bullets(["Simple", "Valid"]),
+            .numbered(["First", "Second"]),
+            .prose("tail prose"),
+        ])
+    }
+
+    func testAgentMarkdownLeavesNonListDashesAlone() {
+        // A bare dash with no space is not a list marker, and neither is a
+        // hash without one.
+        XCTAssertEqual(
+            ZZAgentMarkdown.segments("-notalist").map(\.kind),
+            [.prose("-notalist")]
+        )
+        XCTAssertEqual(
+            ZZAgentMarkdown.segments("#hashtag").map(\.kind),
+            [.prose("#hashtag")]
+        )
+        XCTAssertEqual(
+            ZZAgentMarkdown.segments("3.14 is pi").map(\.kind),
+            [.prose("3.14 is pi")]
+        )
+    }
+
+    func testAgentMarkdownSplitsFencedCodeFromProse() {
+        let segments = ZZAgentMarkdown.segments(
+            "Here is a fix:\n```swift\nlet x = 1\n```\nDone."
+        )
+        XCTAssertEqual(segments.count, 3)
+        XCTAssertEqual(segments[0].kind, .prose("Here is a fix:"))
+        XCTAssertEqual(segments[1].kind, .code(language: "swift", code: "let x = 1"))
+        XCTAssertEqual(segments[2].kind, .prose("Done."))
+    }
+
+    func testAgentMarkdownTreatsAnOpenFenceAsCodeWhileStreaming() {
+        // A block still arriving has no closing fence yet; it must not flash
+        // as prose until one lands.
+        let segments = ZZAgentMarkdown.segments("Try:\n```\nnpm test")
+        XCTAssertEqual(segments.count, 2)
+        XCTAssertEqual(segments[0].kind, .prose("Try:"))
+        XCTAssertEqual(segments[1].kind, .code(language: nil, code: "npm test"))
+
+        XCTAssertEqual(
+            ZZAgentMarkdown.segments("just prose"),
+            [ZZAgentMarkdownSegment(id: 0, kind: .prose("just prose"))]
+        )
+        XCTAssertTrue(ZZAgentMarkdown.segments("   \n  ").isEmpty)
+    }
+
+    func testAgentThreadRevisionAndSubmittedTurnsAdvance() {
+        var thread = ZZAgentThread()
+        XCTAssertEqual(thread.revision, 0)
+        XCTAssertEqual(thread.submittedTurns, 0)
+
+        thread.appendUserTurn("go")
+        let afterSubmit = thread.revision
+        XCTAssertGreaterThan(afterSubmit, 0)
+        XCTAssertEqual(thread.submittedTurns, 1)
+
+        _ = thread.applyBatch(firstSeq: 1, items: [
+            agentItem(1, #"update"#, #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"},"messageId":"m1"}"#),
+        ])
+        XCTAssertGreaterThan(thread.revision, afterSubmit)
+        // Streaming is not a submission: the view uses this to tell them apart.
+        XCTAssertEqual(thread.submittedTurns, 1)
+    }
+
+    func testAgentChunkTextDegradesNonTextBlocks() {
+        var thread = ZZAgentThread()
+        _ = thread.applyBatch(firstSeq: 1, items: [
+            agentItem(1, #"update"#, #"{"sessionUpdate":"agent_message_chunk","content":{"type":"image","mimeType":"image/png"},"messageId":"m1"}"#),
+            agentItem(2, #"update"#, #"{"sessionUpdate":"agent_message_chunk","content":{"type":"resource_link","uri":"file:///a/b.txt","name":"b.txt"},"messageId":"m2"}"#),
+        ])
+
         XCTAssertEqual(
             thread.blocks[0].kind,
-            .tool(id: "t1", title: "Run tests", status: .done)
+            .agentText(messageID: "m1", text: "*[Image: image/png]*")
+        )
+        XCTAssertEqual(
+            thread.blocks[1].kind,
+            .agentText(messageID: "m2", text: "[b.txt](file:///a/b.txt)")
         )
     }
 
@@ -425,7 +566,7 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertEqual(gap, .needsReplay)
         XCTAssertEqual(thread.cursor, 2)
 
-        thread.replayPending = true
+        thread.markReplayPending()
         let replay = thread.applyBatch(firstSeq: 2, items: [
             agentItem(2, #"update"#, #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"B"},"messageId":"m1"}"#),
             agentItem(3, #"update"#, #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"C"},"messageId":"m1"}"#),

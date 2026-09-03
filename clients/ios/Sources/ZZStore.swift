@@ -61,7 +61,7 @@ final class ZZStore: ObservableObject {
     private var terminalPreviewRequested = false
     private var unseenAgentCompletions: Set<UInt64> = []
     private var agentDrafts = ZZAgentDrafts()
-    @Published private(set) var agentThreads: [UInt64: ZZAgentThread] = [:]
+    private var agentThreadSlots: [UInt64: ZZAgentThreadSlot] = [:]
     @Published private(set) var agentSessionLists: [UInt64: ZZAgentSessionList] = [:]
     private var clipboardRequestID: UInt64 = 1
     private let networkMonitor = NWPathMonitor()
@@ -365,7 +365,7 @@ final class ZZStore: ObservableObject {
             clearFrameSlots()
             agentStates = [:]
             agentDrafts = ZZAgentDrafts()
-            agentThreads = [:]
+            agentThreadSlots = [:]
             agentSessionLists = [:]
             unseenAgentCompletions = []
             selectedSessionID = nil
@@ -1032,14 +1032,23 @@ final class ZZStore: ObservableObject {
         agentDrafts.save(text, for: pane)
     }
 
+    /// The pane's transcript slot. Views observe this instead of the store so
+    /// a streamed batch redraws one pane, not the whole workspace.
+    func agentThreadSlot(for pane: UInt64) -> ZZAgentThreadSlot {
+        if let slot = agentThreadSlots[pane] {
+            return slot
+        }
+        let slot = ZZAgentThreadSlot()
+        agentThreadSlots[pane] = slot
+        return slot
+    }
+
     func agentThread(for pane: UInt64) -> ZZAgentThread {
-        agentThreads[pane] ?? ZZAgentThread()
+        agentThreadSlots[pane]?.thread ?? ZZAgentThread()
     }
 
     func ensureAgentStream(for pane: UInt64) {
-        if agentThreads[pane] == nil {
-            agentThreads[pane] = ZZAgentThread()
-        }
+        _ = agentThreadSlot(for: pane)
         requestAgentReplay(for: pane)
     }
 
@@ -1047,16 +1056,14 @@ final class ZZStore: ObservableObject {
         guard let client else {
             return
         }
-        var thread = agentThreads[pane] ?? ZZAgentThread()
-        guard !thread.replayPending else {
-            agentThreads[pane] = thread
+        let slot = agentThreadSlot(for: pane)
+        guard !slot.thread.replayPending else {
             return
         }
-        guard zz_client_agent_replay(client, pane, thread.cursor) else {
+        guard zz_client_agent_replay(client, pane, slot.thread.cursor) else {
             return
         }
-        thread.replayPending = true
-        agentThreads[pane] = thread
+        slot.mutate { $0.markReplayPending() }
     }
 
     func drainAgentUpdates() {
@@ -1077,12 +1084,11 @@ final class ZZStore: ObservableObject {
                 }
                 items.append(Data(buffer: UnsafeBufferPointer(start: pointer, count: bytes.len)))
             }
-            var thread = agentThreads[pane] ?? ZZAgentThread()
-            if thread.applyBatch(firstSeq: firstSeq, items: items) == .needsReplay {
-                agentThreads[pane] = thread
+            let effect = agentThreadSlot(for: pane).mutate {
+                $0.applyBatch(firstSeq: firstSeq, items: items)
+            }
+            if effect == .needsReplay {
                 requestAgentReplay(for: pane)
-            } else {
-                agentThreads[pane] = thread
             }
         }
     }
@@ -1252,9 +1258,7 @@ final class ZZStore: ObservableObject {
             return false
         }
         agentDrafts.remove(pane: pane)
-        var thread = agentThreads[pane] ?? ZZAgentThread()
-        thread.appendUserTurn(text)
-        agentThreads[pane] = thread
+        agentThreadSlot(for: pane).mutate { $0.appendUserTurn(text) }
         return true
     }
 
@@ -1452,9 +1456,7 @@ final class ZZStore: ObservableObject {
                 maybeOfferTmuxImport()
                 for window in sessions.flatMap(\.windows) {
                     for pane in window.panes where pane.kind == .agent {
-                        var thread = agentThreads[pane.id] ?? ZZAgentThread()
-                        thread.resetStream()
-                        agentThreads[pane.id] = thread
+                        agentThreadSlot(for: pane.id).mutate { $0.resetStream() }
                         requestAgentReplay(for: pane.id)
                     }
                 }
@@ -1473,7 +1475,7 @@ final class ZZStore: ObservableObject {
                 terminalFontSizeSteps.removeValue(forKey: event.pane)
                 agentStates.removeValue(forKey: event.pane)
                 agentDrafts.remove(pane: event.pane)
-                agentThreads.removeValue(forKey: event.pane)
+                agentThreadSlots.removeValue(forKey: event.pane)
                 agentSessionLists.removeValue(forKey: event.pane)
                 unseenAgentCompletions.remove(event.pane)
                 agentNotifications.clear(pane: event.pane)
@@ -1788,21 +1790,16 @@ final class ZZStore: ObservableObject {
            let nextSession = state.sessionID,
            previous.sessionID != nil,
            previous.sessionID != nextSession,
-           var thread = agentThreads[pane] {
-            thread.resetStream()
-            agentThreads[pane] = thread
+           let slot = agentThreadSlots[pane] {
+            slot.mutate { $0.resetStream() }
         }
         agentStates[pane] = state
 
         if flags & UInt32(ZZ_EVENT_AGENT_DONE) != 0 {
-            var thread = agentThreads[pane] ?? ZZAgentThread()
-            thread.settleOldestWorkingTurn(.done)
-            agentThreads[pane] = thread
+            agentThreadSlot(for: pane).mutate { $0.settleOldestWorkingTurn(.done) }
         }
         if flags & UInt32(ZZ_EVENT_AGENT_FAILED) != 0 {
-            var thread = agentThreads[pane] ?? ZZAgentThread()
-            thread.settleOldestWorkingTurn(.failed)
-            agentThreads[pane] = thread
+            agentThreadSlot(for: pane).mutate { $0.settleOldestWorkingTurn(.failed) }
         }
 
         let hidden = !sceneIsActive || selectedPaneID != pane

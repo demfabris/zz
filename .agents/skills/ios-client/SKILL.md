@@ -60,7 +60,8 @@ no Apple-client behavior belongs to `new-client` and needs no iOS simulator or d
 - Keep terminal colors, cursor appearance, cell semantics, selection, and clipboard extraction owned
   by the viewport/core. Do not add a Swift VT parser or reconstruct selection text from drawn cells.
 - Keep Browser and Editor panes explicit placeholders until the native viewport contract exists.
-  Agent panes may render the typed retained summary, not a transcript the FFI does not expose.
+  Agent panes render the daemon's journal transcript through `zz_client_agent_updates_next`; reduce
+  it with the published cursor rules instead of inventing client-side history.
 - Keep the current one-host mobile model unless the user asks for fleet aggregation. Saved host
   selection and desktop multi-host presentation are different product surfaces.
 

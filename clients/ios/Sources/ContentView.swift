@@ -1584,6 +1584,15 @@ private struct IPadPaneTile: View {
             )
         } else if pane.kind == .agent {
             AgentPaneView(pane: pane)
+                // A terminal tile selects through its UIKit surface and a
+                // placeholder through a plain tap. The agent pane carries its
+                // own interactive chrome, so selection rides alongside those
+                // gestures instead of consuming the touch.
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        store.selectPane(pane, in: session)
+                    }
+                )
         } else {
             PanePlaceholder(pane: pane)
                 .onTapGesture {
@@ -2490,94 +2499,224 @@ private struct AgentPaneSummaryContent: View {
     }
 }
 
+private enum AgentMetrics {
+    /// Concentric radii: an inner surface is its container's radius minus the
+    /// padding between them.
+    static let block: CGFloat = 14
+    static let blockPadding: CGFloat = 6
+    static let inner: CGFloat = block - blockPadding
+    static let bubble: CGFloat = 18
+    static let card: CGFloat = 22
+    static let cardPadding: CGFloat = 6
+    static let field: CGFloat = card - cardPadding
+    /// The gutter opposite a user bubble. A split tile can be far narrower
+    /// than a phone, so it collapses rather than eating the text column.
+    static func gutter(width: CGFloat) -> CGFloat {
+        width < 480 ? 24 : 56
+    }
+
+    static func isCompact(width: CGFloat) -> Bool {
+        width < 480
+    }
+}
+
+private extension View {
+    /// A settings-bar chip: 34 points of glass inside a 44-point hit area.
+    func agentChip() -> some View {
+        font(.caption.weight(.medium))
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+            .glassEffect(.regular.interactive(), in: Capsule())
+            .padding(.vertical, 4)
+            .contentShape(Capsule())
+    }
+}
+
+/// Tactile press feedback. 0.96 is the smallest scale that still reads as a
+/// press without looking exaggerated.
+private struct AgentPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.snappy(duration: 0.18), value: configuration.isPressed)
+    }
+}
+
 private struct AgentPaneView: View {
     @EnvironmentObject private var store: ZZStore
     let pane: ZZPane
     var bottomAccessoryInset: CGFloat = 0
     @State private var draft = ""
 
-    private static let threadBottomID = "agent-thread-bottom"
+    var body: some View {
+        AgentThreadScroll(
+            slot: store.agentThreadSlot(for: pane.id),
+            pane: pane.id,
+            state: store.agentState(for: pane.id),
+            bottomAccessoryInset: bottomAccessoryInset,
+            draft: $draft
+        )
+        .background {
+            LinearGradient(
+                colors: [.zzAgentCanvasTop, .zzCard],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+        .onAppear {
+            draft = store.agentDraft(for: pane.id)
+            prime(pane.id)
+        }
+        .onChange(of: pane.id) { _, paneID in
+            draft = store.agentDraft(for: paneID)
+            prime(paneID)
+        }
+        .onChange(of: draft) { _, text in
+            store.saveAgentDraft(text, for: pane.id)
+        }
+    }
+
+    private func prime(_ paneID: UInt64) {
+        store.primeAgentState(for: paneID)
+        store.ensureAgentStream(for: paneID)
+        store.ensureAgentSessions(for: paneID)
+    }
+}
+
+/// Observes one pane's transcript slot rather than the whole store, so a
+/// streamed batch redraws this pane instead of every tile in the workspace.
+private struct AgentThreadScroll: View {
+    @ObservedObject var slot: ZZAgentThreadSlot
+    let pane: UInt64
+    let state: ZZAgentState?
+    let bottomAccessoryInset: CGFloat
+    @Binding var draft: String
+
+    @State private var pinnedToBottom = true
+    @State private var width: CGFloat = 0
+
+    private static let bottomID = "agent-thread-bottom"
 
     var body: some View {
-        let state = store.agentState(for: pane.id)
-        let thread = store.agentThread(for: pane.id)
+        let thread = slot.thread
 
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if thread.blocks.isEmpty, state == nil {
                         AgentEmptyState()
                             .frame(maxWidth: .infinity, minHeight: 260)
                     } else {
                         ForEach(thread.blocks) { block in
-                            AgentThreadBlockView(block: block)
+                            AgentThreadBlockView(block: block, width: width)
                         }
                         if let state {
-                            if state.phase == .starting || state.phase == .running {
-                                AgentLiveStatusRow(state: state)
-                            }
-                            if let permission = state.permission {
-                                AgentPermissionCard(pane: pane.id, permission: permission)
-                            }
-                            if let error = state.error, !error.isEmpty {
-                                AgentErrorCard(message: error)
-                            }
-                            if let git = state.git {
-                                AgentGitCard(git: git)
-                            }
+                            AgentThreadFooter(pane: pane, state: state)
                         }
                     }
                 }
-                .padding(20)
-                .frame(maxWidth: 720)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 22)
+                .frame(maxWidth: 760)
                 .frame(maxWidth: .infinity)
+
                 Color.clear
                     .frame(height: 1)
-                    .id(Self.threadBottomID)
+                    .id(Self.bottomID)
             }
             .scrollIndicators(.hidden)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { width = $0 }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height
+                let end = geometry.contentSize.height + geometry.contentInsets.bottom
+                return end - visibleBottom <= 40
+            } action: { _, atBottom in
+                pinnedToBottom = atBottom
+            }
+            .overlay(alignment: .bottom) {
+                AgentJumpToLatest(visible: !pinnedToBottom) {
+                    pinnedToBottom = true
+                    withAnimation(.snappy(duration: 0.28)) {
+                        proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                    }
+                }
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 0) {
-                    AgentSettingsBar(pane: pane.id, state: state)
-                    AgentComposer(
-                        pane: pane.id,
-                        phase: state?.phase ?? .starting,
-                        queuedPrompts: state?.queuedPrompts ?? 0,
-                        draft: $draft
-                    )
-                }
-                .padding(.bottom, bottomAccessoryInset)
+                AgentComposerBar(pane: pane, state: state, draft: $draft)
+                    .padding(.bottom, bottomAccessoryInset)
             }
-            .onChange(of: thread) { _, _ in
+            // Streaming only follows the transcript while the reader is
+            // already at the end, so scrolling up to read stays put.
+            .onChange(of: thread.revision) { _, _ in
+                guard pinnedToBottom else {
+                    return
+                }
                 withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo(Self.threadBottomID, anchor: .bottom)
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
                 }
             }
-            .onChange(of: state?.phase) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo(Self.threadBottomID, anchor: .bottom)
+            // Sending always returns to the end: the reader asked for it.
+            .onChange(of: thread.submittedTurns) { _, _ in
+                pinnedToBottom = true
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
                 }
             }
             .onAppear {
-                store.primeAgentState(for: pane.id)
-                store.ensureAgentStream(for: pane.id)
-                store.ensureAgentSessions(for: pane.id)
-                proxy.scrollTo(Self.threadBottomID, anchor: .bottom)
+                proxy.scrollTo(Self.bottomID, anchor: .bottom)
             }
         }
-        .background(Color.zzCard)
-        .onAppear {
-            draft = store.agentDraft(for: pane.id)
+    }
+}
+
+private struct AgentThreadFooter: View {
+    let pane: UInt64
+    let state: ZZAgentState
+
+    var body: some View {
+        if state.phase == .starting || state.phase == .running {
+            AgentLiveStatusRow(state: state)
         }
-        .onChange(of: pane.id) { _, paneID in
-            draft = store.agentDraft(for: paneID)
-            store.primeAgentState(for: paneID)
-            store.ensureAgentStream(for: paneID)
-            store.ensureAgentSessions(for: paneID)
+        if let permission = state.permission {
+            AgentPermissionCard(pane: pane, permission: permission)
         }
-        .onChange(of: draft) { _, text in
-            store.saveAgentDraft(text, for: pane.id)
+        if let error = state.error, !error.isEmpty {
+            AgentErrorCard(message: error)
         }
+        if let git = state.git {
+            AgentGitCard(git: git)
+        }
+    }
+}
+
+private struct AgentJumpToLatest: View {
+    let visible: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down")
+                    .font(.caption.weight(.bold))
+                Text("Latest")
+                    .font(.caption.weight(.semibold))
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+            .glassEffect(.regular.interactive(), in: Capsule())
+        }
+        .buttonStyle(AgentPressStyle())
+        .padding(.bottom, 12)
+        .opacity(visible ? 1 : 0)
+        .scaleEffect(visible ? 1 : 0.9)
+        .blur(radius: visible ? 0 : 4)
+        .animation(.snappy(duration: 0.24), value: visible)
+        .allowsHitTesting(visible)
+        .accessibilityLabel("Jump to latest")
+        .accessibilityHidden(!visible)
     }
 }
 
@@ -2593,41 +2732,136 @@ private struct AgentEmptyState: View {
 
 private struct AgentThreadBlockView: View {
     let block: ZZAgentThreadBlock
+    let width: CGFloat
 
     var body: some View {
         switch block.kind {
         case let .user(turn):
-            AgentTurnBubble(turn: turn)
+            AgentTurnBubble(turn: turn, width: width)
         case let .agentText(_, text):
-            AgentTextBlock(text: text)
+            AgentMessageBlock(text: text)
         case let .thought(_, text):
             AgentThoughtBlock(text: text)
-        case let .tool(_, title, status):
-            AgentToolRow(title: title, status: status)
+        case let .tool(call):
+            AgentToolRow(call: call)
         }
     }
 }
 
-private struct AgentTextBlock: View {
+/// Agent output reads as full-width prose rather than a bubble: it is the
+/// document, not one side of a chat, and a bubble's gutter would strangle the
+/// text column in a narrow split tile.
+private struct AgentMessageBlock: View {
     let text: String
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(text)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(
-                        Color.primary.opacity(0.07),
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    )
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(ZZAgentMarkdown.segments(text)) { segment in
+                switch segment.kind {
+                case let .prose(prose):
+                    Text(ZZAgentMarkdown.inline(prose))
+                        .font(.body)
+                        .lineSpacing(2)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                case let .code(language, code):
+                    AgentCodeBlock(language: language, code: code)
+                case let .bullets(items):
+                    AgentListBlock(items: items, ordered: false)
+                case let .numbered(items):
+                    AgentListBlock(items: items, ordered: true)
+                case let .heading(level, text):
+                    Text(ZZAgentMarkdown.inline(text))
+                        .font(level <= 1 ? .title3.bold() : .headline)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 2)
+                }
             }
-            Spacer(minLength: 56)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Agent said \(text)")
+    }
+}
+
+private struct AgentListBlock: View {
+    let items: [String]
+    let ordered: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(marker(index))
+                        .font(.body)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: ordered ? 22 : 12, alignment: .trailing)
+                    Text(ZZAgentMarkdown.inline(item))
+                        .font(.body)
+                        .lineSpacing(2)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(.leading, 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func marker(_ index: Int) -> String {
+        ordered ? "\(index + 1)." : "•"
+    }
+}
+
+private struct AgentCodeBlock: View {
+    let language: String?
+    let code: String
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text(language?.uppercased() ?? "CODE")
+                    .font(.caption2.weight(.semibold).monospaced())
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button {
+                    UIPasteboard.general.string = code
+                    withAnimation(.snappy(duration: 0.2)) {
+                        copied = true
+                    }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(copied ? Color.green : Color.secondary)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(AgentPressStyle())
+                .accessibilityLabel(copied ? "Copied" : "Copy code")
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 2)
+            .frame(height: 34)
+
+            ScrollView(.horizontal) {
+                Text(code)
+                    .font(.callout.monospaced())
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .background(Color.zzCodeSurface, in: RoundedRectangle(cornerRadius: AgentMetrics.block, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AgentMetrics.block, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Code block, \(language ?? "unknown language")")
     }
 }
 
@@ -2636,78 +2870,102 @@ private struct AgentThoughtBlock: View {
     @State private var expanded = false
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 6) {
-                Button {
-                    withAnimation(.snappy(duration: 0.2)) {
-                        expanded.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "brain")
-                            .font(.caption)
-                        Text("Thought")
-                            .font(.caption.weight(.semibold))
-                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                            .font(.caption2.weight(.semibold))
-                    }
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.snappy(duration: 0.22)) {
+                    expanded.toggle()
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(expanded ? "Hide thought" : "Show thought")
-                if expanded {
-                    Text(text)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkle")
+                        .font(.caption2)
+                    Text("Thought")
+                        .font(.caption.weight(.semibold))
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
                 }
+                .foregroundStyle(.secondary)
+                .padding(.trailing, 8)
+                .frame(height: 40)
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 56)
+            .buttonStyle(AgentPressStyle())
+            .accessibilityLabel(expanded ? "Hide thought" : "Show thought")
+
+            if expanded {
+                Text(ZZAgentMarkdown.inline(text))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(2)
+                    .textSelection(.enabled)
+                    .padding(.leading, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Agent thought \(text)")
     }
 }
 
 private struct AgentToolRow: View {
-    let title: String
-    let status: ZZAgentToolStatus
+    let call: ZZAgentToolCall
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.callout)
-                .foregroundStyle(color)
-                .frame(width: 22)
-                .accessibilityHidden(true)
-            Text(title)
-                .font(.callout.weight(.medium))
-                .lineLimit(2)
-            Spacer(minLength: 4)
-            if status == .running {
-                ProgressView()
-                    .controlSize(.small)
+            ZStack {
+                RoundedRectangle(cornerRadius: AgentMetrics.inner, style: .continuous)
+                    .fill(color.opacity(0.14))
+                if call.status == .running {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: call.kind.symbol)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(color)
+                }
+            }
+            .frame(width: 28, height: 28)
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(call.title)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(2)
+                if let target = call.target {
+                    Text(target)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if call.status == .failed {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
                     .accessibilityHidden(true)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Tool \(title), \(statusLabel)")
-    }
-
-    private var symbol: String {
-        switch status {
-        case .pending: "circle"
-        case .running: "circle.dotted"
-        case .done: "checkmark.circle.fill"
-        case .failed: "exclamationmark.circle.fill"
+        .padding(AgentMetrics.blockPadding)
+        .padding(.trailing, 8)
+        .background(
+            Color.primary.opacity(0.04),
+            in: RoundedRectangle(cornerRadius: AgentMetrics.block, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: AgentMetrics.block, style: .continuous)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
     }
 
     private var color: Color {
-        switch status {
+        switch call.status {
         case .pending: .secondary
         case .running: .accentColor
         case .done: .green
@@ -2716,22 +2974,32 @@ private struct AgentToolRow: View {
     }
 
     private var statusLabel: String {
-        switch status {
+        switch call.status {
         case .pending: "pending"
         case .running: "running"
         case .done: "done"
         case .failed: "failed"
         }
     }
+
+    private var accessibilityLabel: String {
+        var parts = ["Tool \(call.title)"]
+        if let target = call.target {
+            parts.append(target)
+        }
+        parts.append(statusLabel)
+        return parts.joined(separator: ", ")
+    }
 }
 
 private struct AgentTurnBubble: View {
     let turn: ZZAgentTurn
+    let width: CGFloat
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            Spacer(minLength: 56)
-            VStack(alignment: .trailing, spacing: 4) {
+            Spacer(minLength: AgentMetrics.gutter(width: width))
+            VStack(alignment: .trailing, spacing: 5) {
                 Text(turn.text)
                     .font(.body)
                     .foregroundStyle(.white)
@@ -2739,11 +3007,12 @@ private struct AgentTurnBubble: View {
                     .padding(.vertical, 10)
                     .background(
                         Color.accentColor,
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        in: RoundedRectangle(cornerRadius: AgentMetrics.bubble, style: .continuous)
                     )
                     .textSelection(.enabled)
                 HStack(spacing: 4) {
                     Text(turn.sentAt, style: .time)
+                        .monospacedDigit()
                     statusIcon
                     Text(statusLabel)
                 }
@@ -2792,12 +3061,12 @@ private struct AgentLiveStatusRow: View {
                 .controlSize(.small)
             Text(label)
                 .font(.caption.weight(.medium))
+                .monospacedDigit()
         }
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(Color.primary.opacity(0.06), in: Capsule())
-        .frame(maxWidth: .infinity)
+        .frame(height: 34)
+        .background(Color.primary.opacity(0.05), in: Capsule())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
     }
@@ -2916,12 +3185,9 @@ private struct AgentSettingsBar: View {
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.caption2)
                     }
-                    .font(.caption.weight(.medium))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Color.primary.opacity(0.07), in: Capsule())
+                    .agentChip()
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(AgentPressStyle())
                 .accessibilityLabel("Agent sessions, \(directoryName)")
 
                 if let option = state?.configOption(category: .model) {
@@ -2936,11 +3202,9 @@ private struct AgentSettingsBar: View {
                     legacyModeMenu(modes: modes)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 2)
         }
         .scrollIndicators(.hidden)
-        .background(.ultraThinMaterial)
         .sheet(isPresented: $showsSessions) {
             AgentSessionSheet(pane: pane)
         }
@@ -2990,12 +3254,9 @@ private struct AgentSettingsBar: View {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2)
             }
-            .font(.caption.weight(.medium))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Color.primary.opacity(0.07), in: Capsule())
+            .agentChip()
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AgentPressStyle())
         .disabled(settingsLocked || option.choices.isEmpty)
         .accessibilityLabel("\(option.name), \(option.currentChoiceName)")
     }
@@ -3029,12 +3290,9 @@ private struct AgentSettingsBar: View {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2)
             }
-            .font(.caption.weight(.medium))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Color.primary.opacity(0.07), in: Capsule())
+            .agentChip()
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AgentPressStyle())
         .disabled(settingsLocked)
         .accessibilityLabel("Session mode, \(modes.currentName ?? "unknown")")
     }
@@ -3205,16 +3463,45 @@ private struct AgentSessionRowLabel: View {
     }
 }
 
-private struct AgentComposer: View {
+/// The prompt field and its pickers as one lifted card. Two flush material
+/// slabs read as a wall across the bottom of a split tile; a single inset card
+/// keeps the transcript's edges visible around it.
+private struct AgentComposerBar: View {
+    let pane: UInt64
+    let state: ZZAgentState?
+    @Binding var draft: String
+
+    var body: some View {
+        AgentComposer(
+            pane: pane,
+            phase: state?.phase ?? .starting,
+            queuedPrompts: state?.queuedPrompts ?? 0,
+            draft: $draft
+        ) {
+            AgentSettingsBar(pane: pane, state: state)
+        }
+        .padding(AgentMetrics.cardPadding)
+        .glassEffect(
+            .regular,
+            in: RoundedRectangle(cornerRadius: AgentMetrics.card, style: .continuous)
+        )
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
+    }
+}
+
+private struct AgentComposer<Controls: View>: View {
     @EnvironmentObject private var store: ZZStore
     let pane: UInt64
     let phase: ZZAgentPhase
     let queuedPrompts: UInt32
     @Binding var draft: String
-    @FocusState private var focused: Bool
+    @ViewBuilder var controls: () -> Controls
+    @State private var editorHeight: CGFloat = 40
+    @State private var focusRequest = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             if queuedPrompts > 0 {
                 Label(
                     "\(queuedPrompts) queued \(queuedPrompts == 1 ? "prompt" : "prompts")",
@@ -3222,43 +3509,53 @@ private struct AgentComposer: View {
                 )
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.top, 2)
             }
 
-            HStack(alignment: .bottom, spacing: 10) {
-                TextField(placeholder, text: $draft, axis: .vertical)
-                    .lineLimit(1...6)
-                    .textInputAutocapitalization(.sentences)
-                    .focused($focused)
-                    .submitLabel(.send)
-                    .disabled(!acceptsText)
-                    .onSubmit {
+            ZStack(alignment: .topLeading) {
+                if draft.isEmpty {
+                    Text(placeholder)
+                        .font(.body)
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 13)
+                        .padding(.top, 10)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                AgentPromptEditor(
+                    text: $draft,
+                    height: $editorHeight,
+                    enabled: acceptsText,
+                    focusRequest: focusRequest,
+                    submit: {
                         if hasPrompt {
                             performAction()
                         }
                     }
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 11)
-                    .background(
-                        Color.primary.opacity(0.07),
-                        in: RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    )
+                )
+                .frame(height: editorHeight)
+                .padding(.horizontal, 5)
+                .accessibilityLabel(placeholder)
+            }
 
+            HStack(spacing: 8) {
+                controls()
+                Spacer(minLength: 4)
                 Button(action: performAction) {
                     Image(systemName: buttonSymbol)
                         .font(.system(size: 15, weight: .bold))
-                        .frame(width: 42, height: 42)
+                        .frame(width: 36, height: 36)
                         .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(AgentPressStyle())
                 .foregroundStyle(action == .stop ? Color.red : Color.primary)
                 .glassEffect(buttonGlass, in: Circle())
                 .disabled(action == .unavailable)
+                .keyboardShortcut(.return, modifiers: .command)
                 .accessibilityLabel(buttonLabel)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(.ultraThinMaterial)
     }
 
     private var hasPrompt: Bool {
@@ -3293,7 +3590,10 @@ private struct AgentComposer: View {
         switch action {
         case .send, .queue: "arrow.up"
         case .stop: "stop.fill"
-        case .unavailable: phase == .failed ? "exclamationmark" : "ellipsis"
+        // Keep the send arrow's identity while it is merely disabled. On the
+        // action row an ellipsis reads as an overflow menu, not as "nothing
+        // to send yet".
+        case .unavailable: phase == .failed ? "exclamationmark" : "arrow.up"
         }
     }
 
@@ -3327,11 +3627,14 @@ private struct AgentComposer: View {
     private func performAction() {
         switch action {
         case .send, .queue:
-            guard store.submitAgentPrompt(draft, pane: pane) else {
+            // Trim before sending: Shift-Return makes trailing blank lines easy
+            // to leave behind, and they only pad the turn bubble.
+            let prompt = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard store.submitAgentPrompt(prompt, pane: pane) else {
                 return
             }
             draft = ""
-            focused = true
+            focusRequest += 1
         case .stop:
             store.cancelAgent(pane: pane)
         case .unavailable:
@@ -4036,6 +4339,22 @@ private extension Color {
             traits.userInterfaceStyle == .dark
                 ? UIColor(red: 0.07, green: 0.075, blue: 0.105, alpha: 1)
                 : UIColor(red: 1, green: 1, blue: 1, alpha: 1)
+        }
+    )
+    /// Top of the agent canvas. A flat fill reads as a void behind a long
+    /// transcript; a few percent of lift at the top gives it a horizon.
+    static let zzAgentCanvasTop = Color(
+        uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.098, green: 0.105, blue: 0.142, alpha: 1)
+                : UIColor(red: 0.988, green: 0.99, blue: 1, alpha: 1)
+        }
+    )
+    static let zzCodeSurface = Color(
+        uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.11, green: 0.12, blue: 0.16, alpha: 1)
+                : UIColor(red: 0.965, green: 0.968, blue: 0.98, alpha: 1)
         }
     )
 

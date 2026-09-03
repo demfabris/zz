@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 enum ZZPaneKind: UInt32, Sendable {
@@ -560,6 +561,139 @@ struct ZZAgentTurn: Identifiable, Equatable, Sendable {
     var status: ZZAgentTurnStatus
 }
 
+/// ACP `ToolKind`. Drives the row icon; unknown wire values fall to `other`
+/// the same way the schema's `#[serde(other)]` does.
+enum ZZAgentToolKind: String, Equatable, Sendable {
+    case read
+    case edit
+    case delete
+    case move
+    case search
+    case execute
+    case think
+    case fetch
+    case switchMode
+    case other
+
+    init(wireValue: String?) {
+        switch wireValue {
+        case "read": self = .read
+        case "edit": self = .edit
+        case "delete": self = .delete
+        case "move": self = .move
+        case "search": self = .search
+        case "execute": self = .execute
+        case "think": self = .think
+        case "fetch": self = .fetch
+        case "switch_mode": self = .switchMode
+        default: self = .other
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .read: "doc.text"
+        case .edit: "square.and.pencil"
+        case .delete: "trash"
+        case .move: "arrow.right.doc.on.clipboard"
+        case .search: "magnifyingglass"
+        case .execute: "terminal"
+        case .think: "brain"
+        case .fetch: "globe"
+        case .switchMode: "arrow.triangle.2.circlepath"
+        case .other: "wrench.and.screwdriver"
+        }
+    }
+}
+
+/// One entry of an ACP `locations` array.
+struct ZZAgentToolLocation: Equatable, Sendable {
+    let path: String
+    let line: UInt32?
+
+    static func parse(_ dict: [String: Any]) -> ZZAgentToolLocation? {
+        guard let path = dict["path"] as? String, !path.isEmpty else {
+            return nil
+        }
+        return ZZAgentToolLocation(
+            path: path,
+            line: (dict["line"] as? NSNumber)?.uint32Value
+        )
+    }
+
+    /// Last path component plus a line when the payload named one. The full
+    /// path is absolute and too wide for a split tile.
+    var display: String {
+        let name = (path as NSString).lastPathComponent
+        let base = name.isEmpty ? path : name
+        guard let line else {
+            return base
+        }
+        return "\(base):\(line)"
+    }
+}
+
+/// The reduced tool call a row renders.
+struct ZZAgentToolCall: Equatable, Sendable {
+    let id: String
+    var title: String
+    var kind: ZZAgentToolKind
+    var status: ZZAgentToolStatus
+    /// First location, matching the desktop's choice.
+    var location: ZZAgentToolLocation?
+    /// Paths named by `content` diff blocks.
+    var changedPaths: [String]
+
+    /// The one identifier worth showing beside the title.
+    var target: String? {
+        if let location {
+            return location.display
+        }
+        guard let first = changedPaths.first else {
+            return nil
+        }
+        let name = (first as NSString).lastPathComponent
+        return name.isEmpty ? first : name
+    }
+}
+
+/// One `tool_call` or `tool_call_update` payload. ACP replaces collections
+/// when they are present and leaves them untouched when absent, so a nil
+/// array means "unchanged" and an empty one means "cleared".
+struct ZZAgentToolCallDelta: Equatable, Sendable {
+    let id: String
+    var title: String?
+    var kind: ZZAgentToolKind?
+    var status: ZZAgentToolStatus?
+    var locations: [ZZAgentToolLocation]?
+    var changedPaths: [String]?
+
+    static func parse(_ dict: [String: Any]) -> ZZAgentToolCallDelta? {
+        guard let id = dict["toolCallId"] as? String else {
+            return nil
+        }
+        let locations = (dict["locations"] as? [[String: Any]])
+            .map { $0.compactMap(ZZAgentToolLocation.parse) }
+        let changedPaths = (dict["content"] as? [[String: Any]]).map { blocks in
+            blocks.compactMap { block -> String? in
+                guard block["type"] as? String == "diff" else {
+                    return nil
+                }
+                return block["path"] as? String
+            }
+        }
+        let title = dict["title"] as? String
+        return ZZAgentToolCallDelta(
+            id: id,
+            title: (title?.isEmpty == false) ? title : nil,
+            kind: dict["kind"].map { ZZAgentToolKind(wireValue: $0 as? String) },
+            status: (dict["status"] as? String).map(ZZAgentToolStatus.init(wireValue:)),
+            locations: locations,
+            changedPaths: changedPaths
+        )
+    }
+}
+
 enum ZZAgentToolStatus: String, Equatable, Sendable {
     case pending
     case running
@@ -581,7 +715,7 @@ struct ZZAgentThreadBlock: Identifiable, Equatable, Sendable {
         case user(turn: ZZAgentTurn)
         case agentText(messageID: String?, text: String)
         case thought(messageID: String?, text: String)
-        case tool(id: String, title: String, status: ZZAgentToolStatus)
+        case tool(ZZAgentToolCall)
     }
 
     let id: String
@@ -603,16 +737,29 @@ struct ZZAgentThread: Equatable, Sendable {
         case needsReplay
     }
 
-    var cursor: UInt64 = 0
-    var replayPending = false
-    var blocks: [ZZAgentThreadBlock] = []
+    private(set) var cursor: UInt64 = 0
+    private(set) var replayPending = false
+    private(set) var blocks: [ZZAgentThreadBlock] = []
+    /// Bumped by every mutation that changes something, so a view can detect
+    /// change without comparing the whole transcript.
+    private(set) var revision: UInt64 = 0
+    /// Prompts this client submitted. Lets a view tell "the user just sent
+    /// something" apart from "the agent streamed more".
+    private(set) var submittedTurns: UInt64 = 0
     private var nextLocalID: UInt64 = 1
+
+    mutating func markReplayPending() {
+        replayPending = true
+        revision &+= 1
+    }
 
     mutating func appendUserTurn(_ text: String, at date: Date = Date()) {
         let turn = ZZAgentTurn(id: nextLocalID, text: text, sentAt: date, status: .working)
         nextLocalID += 1
         blocks.append(ZZAgentThreadBlock(id: "user-\(turn.id)", kind: .user(turn: turn)))
+        submittedTurns &+= 1
         trim()
+        revision &+= 1
     }
 
     mutating func settleOldestWorkingTurn(_ status: ZZAgentTurnStatus) {
@@ -620,6 +767,7 @@ struct ZZAgentThread: Equatable, Sendable {
             if case var .user(turn) = blocks[index].kind, turn.status == .working {
                 turn.status = status
                 blocks[index].kind = .user(turn: turn)
+                revision &+= 1
                 return
             }
         }
@@ -629,6 +777,7 @@ struct ZZAgentThread: Equatable, Sendable {
         blocks.removeAll { !$0.isUserTurn }
         cursor = 0
         replayPending = false
+        revision &+= 1
     }
 
     mutating func applyBatch(firstSeq: UInt64, items: [Data]) -> BatchEffect {
@@ -654,6 +803,7 @@ struct ZZAgentThread: Equatable, Sendable {
             cursor = seq
             applyItem(envelope)
         }
+        revision &+= 1
         if gapped {
             return .needsReplay
         }
@@ -700,10 +850,8 @@ struct ZZAgentThread: Equatable, Sendable {
                 blocks.append(ZZAgentThreadBlock(id: id, kind: kind))
             }
             trim()
-        case let .toolCall(id, title, status):
-            upsertTool(id: id, title: title, status: status)
-        case let .toolCallUpdate(id, title, status):
-            upsertTool(id: id, title: title, status: status)
+        case let .toolCall(delta), let .toolCallUpdate(delta):
+            upsertTool(delta)
         case .userText, .ignored:
             break
         }
@@ -720,24 +868,35 @@ struct ZZAgentThread: Equatable, Sendable {
         }
     }
 
-    private mutating func upsertTool(id: String, title: String?, status: ZZAgentToolStatus?) {
-        let blockID = "tool-\(id)"
-        if let index = blocks.firstIndex(where: { $0.id == blockID }) {
-            if case let .tool(_, existingTitle, existingStatus) = blocks[index].kind {
-                let resolvedTitle = (title?.isEmpty == false) ? title! : existingTitle
-                blocks[index].kind = .tool(
-                    id: id,
-                    title: resolvedTitle,
-                    status: status ?? existingStatus
-                )
+    private mutating func upsertTool(_ delta: ZZAgentToolCallDelta) {
+        let blockID = "tool-\(delta.id)"
+        if let index = blocks.firstIndex(where: { $0.id == blockID }),
+           case var .tool(call) = blocks[index].kind {
+            call.title = delta.title ?? call.title
+            call.kind = delta.kind ?? call.kind
+            call.status = delta.status ?? call.status
+            if let locations = delta.locations {
+                call.location = locations.first
             }
+            if let changedPaths = delta.changedPaths {
+                call.changedPaths = changedPaths
+            }
+            blocks[index].kind = .tool(call)
             return
         }
-        let resolvedTitle = (title?.isEmpty == false) ? title! : "Tool"
         blocks.append(
             ZZAgentThreadBlock(
                 id: blockID,
-                kind: .tool(id: id, title: resolvedTitle, status: status ?? .pending)
+                kind: .tool(
+                    ZZAgentToolCall(
+                        id: delta.id,
+                        title: delta.title ?? "Tool",
+                        kind: delta.kind ?? .other,
+                        status: delta.status ?? .pending,
+                        location: delta.locations?.first,
+                        changedPaths: delta.changedPaths ?? []
+                    )
+                )
             )
         )
         trim()
@@ -767,12 +926,230 @@ private extension ZZAgentThreadBlock {
     }
 }
 
+/// One pane's transcript, published on its own object so a streamed batch
+/// invalidates that pane's thread view instead of every view observing
+/// `ZZStore`. Mirrors `TerminalFrameSlot`.
+@MainActor
+final class ZZAgentThreadSlot: ObservableObject {
+    @Published private(set) var thread: ZZAgentThread
+
+    init(thread: ZZAgentThread = ZZAgentThread()) {
+        self.thread = thread
+    }
+
+    @discardableResult
+    func mutate<T>(_ body: (inout ZZAgentThread) -> T) -> T {
+        var next = thread
+        let result = body(&next)
+        if next.revision != thread.revision {
+            thread = next
+        }
+        return result
+    }
+}
+
+/// One block of agent output: prose, a fenced code block, a list, or a heading.
+struct ZZAgentMarkdownSegment: Identifiable, Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        case prose(String)
+        case code(language: String?, code: String)
+        case bullets([String])
+        case numbered([String])
+        case heading(level: Int, text: String)
+    }
+
+    let id: Int
+    let kind: Kind
+}
+
+/// Splits agent text into the blocks the pane renders. `AttributedString`
+/// parses inline markdown (emphasis, code spans, links) but has no block
+/// grammar, so fences, lists, and headings are separated here and only the
+/// leaf text is handed to it.
+enum ZZAgentMarkdown: Sendable {
+    /// A fence that opened but has not closed yet still yields a code segment,
+    /// so a block being streamed renders as code from its first line instead
+    /// of flashing as prose until the closing fence arrives.
+    static func segments(_ text: String) -> [ZZAgentMarkdownSegment] {
+        var kinds: [ZZAgentMarkdownSegment.Kind] = []
+        var prose: [Substring] = []
+        var code: [Substring] = []
+        var language: String?
+        var inFence = false
+
+        func flushProse() {
+            let lines = prose
+            prose.removeAll()
+            kinds.append(contentsOf: blocks(in: lines))
+        }
+
+        func flushCode() {
+            let joined = code.joined(separator: "\n")
+            code.removeAll()
+            kinds.append(.code(language: language, code: joined))
+            language = nil
+        }
+
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let fence = line.trimmingCharacters(in: .whitespaces)
+            if fence.hasPrefix("```") {
+                if inFence {
+                    flushCode()
+                    inFence = false
+                } else {
+                    flushProse()
+                    let tag = fence.dropFirst(3).trimmingCharacters(in: .whitespaces)
+                    language = tag.isEmpty ? nil : tag
+                    inFence = true
+                }
+                continue
+            }
+            if inFence {
+                code.append(line)
+            } else {
+                prose.append(line)
+            }
+        }
+        if inFence {
+            flushCode()
+        } else {
+            flushProse()
+        }
+        return kinds.enumerated().map {
+            ZZAgentMarkdownSegment(id: $0.offset, kind: $0.element)
+        }
+    }
+
+    /// Group a fence-free run into headings, list runs, and paragraphs.
+    private static func blocks(
+        in lines: [Substring]
+    ) -> [ZZAgentMarkdownSegment.Kind] {
+        var kinds: [ZZAgentMarkdownSegment.Kind] = []
+        var paragraph: [Substring] = []
+        var bullets: [String] = []
+        var numbered: [String] = []
+
+        func flushParagraph() {
+            let joined = paragraph.joined(separator: "\n")
+            paragraph.removeAll()
+            guard !joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+            kinds.append(.prose(joined))
+        }
+
+        func flushLists() {
+            if !bullets.isEmpty {
+                kinds.append(.bullets(bullets))
+                bullets.removeAll()
+            }
+            if !numbered.isEmpty {
+                kinds.append(.numbered(numbered))
+                numbered.removeAll()
+            }
+        }
+
+        for line in lines {
+            if let heading = heading(in: line) {
+                flushParagraph()
+                flushLists()
+                kinds.append(heading)
+                continue
+            }
+            if let item = bulletItem(in: line) {
+                flushParagraph()
+                if !numbered.isEmpty {
+                    flushLists()
+                }
+                bullets.append(item)
+                continue
+            }
+            if let item = numberedItem(in: line) {
+                flushParagraph()
+                if !bullets.isEmpty {
+                    flushLists()
+                }
+                numbered.append(item)
+                continue
+            }
+            // A blank line closes a list run; text after one continues it as
+            // a new paragraph rather than joining the list.
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                flushLists()
+            } else {
+                flushLists()
+            }
+            paragraph.append(line)
+        }
+        flushParagraph()
+        flushLists()
+        return kinds
+    }
+
+    private static func heading(in line: Substring) -> ZZAgentMarkdownSegment.Kind? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let hashes = trimmed.prefix { $0 == "#" }
+        guard !hashes.isEmpty, hashes.count <= 6 else {
+            return nil
+        }
+        let rest = trimmed.dropFirst(hashes.count)
+        guard rest.hasPrefix(" ") else {
+            return nil
+        }
+        let text = rest.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else {
+            return nil
+        }
+        return .heading(level: hashes.count, text: text)
+    }
+
+    private static func bulletItem(in line: Substring) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard let marker = trimmed.first, "-*+".contains(marker) else {
+            return nil
+        }
+        let rest = trimmed.dropFirst()
+        guard rest.hasPrefix(" ") else {
+            return nil
+        }
+        let item = rest.trimmingCharacters(in: .whitespaces)
+        return item.isEmpty ? nil : item
+    }
+
+    private static func numberedItem(in line: Substring) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let digits = trimmed.prefix(while: \.isNumber)
+        guard !digits.isEmpty, digits.count <= 3 else {
+            return nil
+        }
+        let rest = trimmed.dropFirst(digits.count)
+        guard let separator = rest.first, separator == "." || separator == ")" else {
+            return nil
+        }
+        let body = rest.dropFirst()
+        guard body.hasPrefix(" ") else {
+            return nil
+        }
+        let item = body.trimmingCharacters(in: .whitespaces)
+        return item.isEmpty ? nil : item
+    }
+
+    static func inline(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text,
+            options: AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace
+            )
+        )) ?? AttributedString(text)
+    }
+}
+
 struct ZZAgentStreamUpdate {
     enum Kind {
         case agentText(String)
         case thought(String)
-        case toolCall(id: String, title: String?, status: ZZAgentToolStatus?)
-        case toolCallUpdate(id: String, title: String?, status: ZZAgentToolStatus?)
+        case toolCall(ZZAgentToolCallDelta)
+        case toolCallUpdate(ZZAgentToolCallDelta)
         case userText
         case ignored
     }
@@ -797,29 +1174,15 @@ struct ZZAgentStreamUpdate {
                 messageID: messageID
             )
         case "tool_call":
-            guard let id = dict["toolCallId"] as? String else {
+            guard let delta = ZZAgentToolCallDelta.parse(dict) else {
                 return ZZAgentStreamUpdate(kind: .ignored, messageID: nil)
             }
-            return ZZAgentStreamUpdate(
-                kind: .toolCall(
-                    id: id,
-                    title: dict["title"] as? String,
-                    status: (dict["status"] as? String).map(ZZAgentToolStatus.init(wireValue:))
-                ),
-                messageID: nil
-            )
+            return ZZAgentStreamUpdate(kind: .toolCall(delta), messageID: nil)
         case "tool_call_update":
-            guard let id = dict["toolCallId"] as? String else {
+            guard let delta = ZZAgentToolCallDelta.parse(dict) else {
                 return ZZAgentStreamUpdate(kind: .ignored, messageID: nil)
             }
-            return ZZAgentStreamUpdate(
-                kind: .toolCallUpdate(
-                    id: id,
-                    title: dict["title"] as? String,
-                    status: (dict["status"] as? String).map(ZZAgentToolStatus.init(wireValue:))
-                ),
-                messageID: nil
-            )
+            return ZZAgentStreamUpdate(kind: .toolCallUpdate(delta), messageID: nil)
         case "user_message_chunk":
             return ZZAgentStreamUpdate(kind: .userText, messageID: messageID)
         default:
@@ -827,14 +1190,35 @@ struct ZZAgentStreamUpdate {
         }
     }
 
+    /// `content` is one ACP `ContentBlock`, not an array. Non-text blocks
+    /// degrade to the same placeholders the desktop uses so they leave a mark
+    /// rather than vanishing.
     private static func chunkText(_ dict: [String: Any]) -> String {
-        guard let content = dict["content"] as? [String: Any],
-              content["type"] as? String == "text",
-              let text = content["text"] as? String
-        else {
+        guard let content = dict["content"] as? [String: Any] else {
             return ""
         }
-        return text
+        switch content["type"] as? String {
+        case "text":
+            return content["text"] as? String ?? ""
+        case "image":
+            return "*[Image: \(content["mimeType"] as? String ?? "image")]*"
+        case "audio":
+            return "*[Audio: \(content["mimeType"] as? String ?? "audio")]*"
+        case "resource_link":
+            let uri = content["uri"] as? String ?? ""
+            let label = content["title"] as? String
+                ?? content["name"] as? String
+                ?? uri
+            return "[\(label)](\(uri))"
+        case "resource":
+            if let resource = content["resource"] as? [String: Any],
+               let text = resource["text"] as? String {
+                return text
+            }
+            return "*[Embedded resource]*"
+        default:
+            return ""
+        }
     }
 }
 
@@ -877,6 +1261,7 @@ struct ZZAgentStreamEnvelope {
         }
     }
 }
+
 
 enum ZZAgentAttentionKind: Int, Comparable, Sendable {
     case working = 0

@@ -245,7 +245,11 @@ responses and turn cancellation travel through the daemon-owned Agent commands.
 
 The mounted multiline composer keeps an independent draft for every pane. Submit sends
 `agent-send --submit` to an idle Agent or queues the prompt while it is running; an empty action while
-running becomes Stop. The pane renders the conversation as a thread: every submitted prompt appears
+running becomes Stop. The Agent composer is UIKit-backed so it can carry the desktop key contract in
+`crates/zz-ui/src/widget/input/state.rs`: Return submits, Shift-Return inserts a newline, and
+Command-Return submits from anywhere in the field. `TextField(axis: .vertical)` cannot express it,
+because a hardware Return there always reaches `onSubmit` and a prompt could never hold a second
+line. The pane renders the conversation as a thread: every submitted prompt appears
 as a user bubble with a Working, Done, or Failed receipt, interleaved with the agent's streamed
 text, collapsible thought blocks, and tool-call rows carrying their live status. The receipts come
 from the thread's record of prompts the app sent, settled by the daemon's done and failed attention
@@ -254,8 +258,20 @@ edges. The transcript itself arrives as JSON journal batches through
 per-pane cursor, idempotent overlap, gap-triggered replay from the cursor, restoring-reset jumps,
 and replay on lane overflow. Swift parses message chunks, thought chunks, and tool calls from the
 ACP `session/update` payloads and skips the variants it has no rendering for, including user
-echoes the thread already shows. A settings bar above the composer holds the session, model, and
-effort pickers. The model and effort menus come from the adapter's session config options, with the
+echoes the thread already shows. Agent prose renders as full-width markdown rather than a chat bubble, so only the reader's own turns
+carry one and a narrow split tile keeps its text column. Fenced code becomes a scrollable monospaced
+block with a language tag and a copy button; a fence that is still streaming renders as code from its
+first line instead of flashing as prose until the closing fence arrives. Inline emphasis, code spans,
+and links come from `AttributedString`'s markdown parsing, which has no block grammar, so fences are
+separated before the prose runs reach it. Tool rows carry the ACP `kind` as an icon, the title, and
+the first `locations` entry as `path:line`; ACP replaces `locations` and `content` when present and
+leaves them untouched when absent, and the reducer preserves that. Non-text content blocks degrade to
+the same placeholders the desktop uses instead of vanishing. The transcript follows new output only
+while the reader is already at the end, so scrolling up to read holds position and a Latest control
+returns; submitting a prompt always scrolls back because the reader asked for it. Each pane's
+transcript lives in its own `ZZAgentThreadSlot`, mirroring `TerminalFrameSlot`, so a streamed batch
+redraws one pane instead of every tile the workspace mounts. A settings bar above the composer holds
+the session, model, and effort pickers. The model and effort menus come from the adapter's session config options, with the
 legacy mode list as fallback; all three lock while a turn runs or an approval is pending, matching
 the desktop. The session button shows the current working directory and opens the session sheet,
 which lists every project session with its directory, switches between them, deletes them with
@@ -423,8 +439,9 @@ edges and SSH prompt and failure classification.
 The Swift suite covers host endpoint normalization, live and keyboard-sized grid calculation, stable
 reconnect selection, bounded backoff, deduplicated layout updates, exclusive input ownership,
 modifier locking, known deep-link routes, persisted client settings including the home-indicator
-option, per-pane Agent drafts, thread receipts, transcript cursor rules, config, mode, and session parsing, and composer action policy, global font size plus per-pane zoom, and
-cursor blink policy.
+option, per-pane Agent drafts, thread receipts, transcript cursor rules, markdown and fenced-code
+segmentation, tool-call delta merging, config, mode, and session parsing, and composer action policy,
+global font size plus per-pane zoom, and cursor blink policy.
 
 # Key files
 
@@ -441,6 +458,7 @@ cursor blink policy.
 | `clients/ios/Sources/AppIntents.swift` | Open, reconnect, and Agent-attention App Shortcuts. |
 | `clients/ios/Sources/ClientSettings.swift` | Persisted appearance, terminal, and iPad layout settings. |
 | `clients/ios/Sources/ClientSettingsView.swift` | Native settings form and live terminal preview. |
+| `clients/ios/Sources/AgentPromptEditor.swift` | UIKit prompt field carrying the desktop key contract. |
 | `clients/ios/Tests/Unit/TerminalInteractionTests.swift` | Simulator policy regressions. |
 | `crates/zz-client-ffi/include/zz-client.h` | Stable C boundary consumed by Swift. |
 | `scripts/ios-sim.sh` | Simulator build, install, socket injection, and launch. |

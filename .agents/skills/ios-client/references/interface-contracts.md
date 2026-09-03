@@ -40,8 +40,8 @@ Agent panes, settings, reconnect presentation, or accessibility.
   replace that convergence.
 - The attached session's active pane is the visual fallback until the user makes an explicit pane
   selection.
-- Sidebar rows remain full-width 44-point buttons. Window chevrons stay trailing, pane labels stay
-  optically centered, and only the selected pane receives the selection capsule and trait.
+- Sidebar rows remain full-width 44-point buttons. Window chevrons stay trailing, pane labels sit
+  beside their icons, and only the selected pane receives the selection capsule and trait.
 - `IPadPaneWorkspace` mounts panes whose snapshot layout is present. Zoom-hidden siblings stay in the
   sidebar but do not mount without rectangles.
 - `IPadPaneSplitLayout` multiplies the normalized rectangles supplied by `zz-client` by current detail
@@ -124,8 +124,24 @@ Agent panes, settings, reconnect presentation, or accessibility.
 
 ## Agent panes, settings, and reconnects
 
-- Render Agent status, activity, permission, error, git summary, queue count, and composer from the
-  retained typed state. Do not invent transcript bubbles or streaming deltas.
+- Render Agent status, permission, error, git summary, queue count, and composer from the retained
+  typed state, and the conversation from the daemon's journal batches. Reduce those batches with the
+  published cursor rules (per-pane cursor, idempotent overlap, gap and lane-overflow replay,
+  restoring-reset jumps); never synthesize transcript the daemon did not send.
+- Each pane's transcript lives in its own `ZZAgentThreadSlot`, mirroring `TerminalFrameSlot`. A
+  streamed batch must not invalidate views for other panes, so keep it off `ZZStore`'s `@Published`
+  surface.
+- Agent prose renders as full-width markdown, not a chat bubble: only the user's own turns get one.
+  Fenced code becomes a scrollable monospaced block, and a fence still streaming renders as code
+  before its closing fence arrives.
+- Tool rows carry the ACP `kind` icon, `title`, and the first `locations` entry as `path:line`. ACP
+  replaces `locations` and `content` when present and leaves them alone when absent; preserve that
+  merge rule.
+- The transcript follows new output only while the reader is already at the end. Submitting a prompt
+  always returns to the end because the reader asked for it.
+- The composer matches the desktop key contract in `crates/zz-ui/src/widget/input/state.rs`: Return
+  submits, Shift-Return inserts a newline, Command-Return submits. `TextField(axis: .vertical)`
+  cannot express it, so the field is UIKit-backed.
 - Keep drafts independent per pane. Composer behavior follows daemon phase: send while ready; queue
   up to four prompts while running or awaiting permission; use an empty action to stop in either
   phase; and disable actions during startup or failure.

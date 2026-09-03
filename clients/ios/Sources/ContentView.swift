@@ -184,7 +184,7 @@ private struct ReconnectBanner: View {
         }
         .padding(.horizontal, 14)
         .frame(minHeight: 54)
-        .glassEffect(.regular, in: Capsule())
+        .zzGlass(.regular, in: Capsule())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
     }
@@ -1722,7 +1722,7 @@ private struct IPadPanorama: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: Circle())
+            .zzGlass(.regular.interactive(), in: Circle())
             .padding(.top, 8)
             .padding(.trailing, 20)
             .opacity(phase == .visible ? 1 : 0)
@@ -2412,7 +2412,11 @@ private struct PaneCard: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .bold))
                         .frame(width: 30, height: 30)
-                        .glassEffect(.regular.interactive(), in: Circle())
+                        .zzGlass(
+                            .regular.interactive(),
+                            in: Circle(),
+                            fallback: .zzCodeSurface
+                        )
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -2526,7 +2530,7 @@ private extension View {
         font(.caption.weight(.medium))
             .padding(.horizontal, 12)
             .frame(height: 32)
-            .glassEffect(.regular.interactive(), in: Capsule())
+            .zzGlass(.regular.interactive(), in: Capsule())
             .padding(.vertical, 4)
             .contentShape(Capsule())
     }
@@ -2706,7 +2710,7 @@ private struct AgentJumpToLatest: View {
             }
             .padding(.horizontal, 14)
             .frame(height: 40)
-            .glassEffect(.regular.interactive(), in: Capsule())
+            .zzGlass(.regular.interactive(), in: Capsule())
         }
         .buttonStyle(AgentPressStyle())
         .padding(.bottom, 12)
@@ -3610,9 +3614,10 @@ private struct AgentComposerBar: View {
             AgentSettingsBar(pane: pane, state: state)
         }
         .padding(AgentMetrics.cardPadding)
-        .glassEffect(
+        .zzGlass(
             .regular,
-            in: RoundedRectangle(cornerRadius: AgentMetrics.card, style: .continuous)
+            in: RoundedRectangle(cornerRadius: AgentMetrics.card, style: .continuous),
+            fallback: .zzCodeSurface
         )
         .padding(.horizontal, 10)
         .padding(.bottom, 10)
@@ -3679,7 +3684,7 @@ private struct AgentComposer<Controls: View>: View {
                 }
                 .buttonStyle(AgentPressStyle())
                 .foregroundStyle(action == .stop ? Color.red : Color.primary)
-                .glassEffect(buttonGlass, in: Circle())
+                .zzGlass(buttonGlass, in: Circle())
                 .disabled(action == .unavailable)
                 .keyboardShortcut(.return, modifiers: .command)
                 .accessibilityLabel(buttonLabel)
@@ -3795,7 +3800,7 @@ private struct SessionRail: View {
                 .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: Circle())
+            .zzGlass(.regular.interactive(), in: Circle())
             .disabled(store.isCreatingSession)
             .accessibilityLabel("New Session")
             .accessibilityIdentifier("new-session")
@@ -3805,7 +3810,7 @@ private struct SessionRail: View {
                     .font(.headline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 48)
-                    .glassEffect(.regular, in: Capsule())
+                    .zzGlass(.regular, in: Capsule())
             } else {
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 10) {
@@ -3872,7 +3877,7 @@ private struct SessionRail: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: Circle())
+            .zzGlass(.regular.interactive(), in: Circle())
             .accessibilityLabel("Session Actions")
             .accessibilityIdentifier("session-menu")
         }
@@ -3910,11 +3915,12 @@ private struct SessionRail: View {
                 session.id == store.selectedSessionID ? Color.white : Color.primary
             )
             .contentShape(Capsule())
-            .glassEffect(
+            .zzGlass(
                 session.id == store.selectedSessionID
                     ? .regular.tint(Color.accentColor.opacity(0.65)).interactive()
                     : .regular.interactive(),
-                in: Capsule()
+                in: Capsule(),
+                fallback: session.id == store.selectedSessionID ? .accentColor : .zzCard
             )
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Session \(session.name)")
@@ -4026,7 +4032,7 @@ private struct FullscreenPane: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: Circle())
+            .zzGlass(.regular.interactive(), in: Circle())
             .accessibilityLabel("Show Pane Overview")
             .accessibilityIdentifier("show-overview")
 
@@ -4052,7 +4058,7 @@ private struct FullscreenPane: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(showsShortcuts ? Color.accentColor : Color.primary)
-            .glassEffect(
+            .zzGlass(
                 showsShortcuts
                     ? .regular.tint(Color.accentColor.opacity(0.28)).interactive()
                     : .regular.interactive(),
@@ -4108,7 +4114,7 @@ private struct FullscreenPane: View {
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, minHeight: 48)
         .contentShape(Capsule())
-        .glassEffect(
+        .zzGlass(
             candidate.id == pane.id
                 ? .regular.tint(Color.accentColor.opacity(0.26)).interactive()
                 : .regular.interactive(),
@@ -4190,7 +4196,7 @@ private struct FullscreenPane: View {
         }
         .scrollIndicators(.hidden)
         .frame(height: 48)
-        .glassEffect(.regular, in: Capsule())
+        .zzGlass(.regular, in: Capsule())
         .disabled(!store.isConnected)
         .accessibilityIdentifier("keyboard-shortcuts")
     }
@@ -4215,7 +4221,7 @@ private struct FullscreenPane: View {
                             }
                             .padding(.horizontal, 10)
                             .frame(height: 44)
-                            .glassEffect(.regular, in: Capsule())
+                            .zzGlass(.regular, in: Capsule())
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel(
                                 "\(binding.displayKey), \(binding.note.isEmpty ? binding.summary : binding.note)"
@@ -4452,6 +4458,34 @@ private struct TerminalComposer: View {
         .onAppear {
             focused = true
         }
+    }
+}
+
+private struct ZZGlassSurface<Surface: Shape>: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    let glass: Glass
+    let shape: Surface
+    let fallback: Color
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceTransparency || contrast == .increased {
+            content.background(fallback, in: shape)
+        } else {
+            content.glassEffect(glass, in: shape)
+        }
+    }
+}
+
+private extension View {
+    func zzGlass(
+        _ glass: Glass = .regular,
+        in shape: some Shape,
+        fallback: Color = .zzCard
+    ) -> some View {
+        modifier(ZZGlassSurface(glass: glass, shape: shape, fallback: fallback))
     }
 }
 

@@ -24,6 +24,29 @@ enum ZZAppAppearance: String, CaseIterable, Identifiable, Sendable {
         case .light: .light
         }
     }
+
+    var interfaceStyle: UIUserInterfaceStyle {
+        switch self {
+        case .system: .unspecified
+        case .dark: .dark
+        case .light: .light
+        }
+    }
+}
+
+enum ZZWindowAppearance {
+    @MainActor
+    static func apply(_ appearance: ZZAppAppearance) {
+        let style = appearance.interfaceStyle
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else {
+                continue
+            }
+            for window in windowScene.windows {
+                window.overrideUserInterfaceStyle = style
+            }
+        }
+    }
 }
 
 enum ZZTerminalFont: String, CaseIterable, Identifiable, Sendable {

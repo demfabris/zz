@@ -295,3 +295,27 @@ resizing the job, Centre and Fill Space rewriting the preferred placement, one s
 is embedded in `opus-compat-run-10b.js`, and `args: {stage: "gate"}` runs only the gate from that
 tip on any machine. The client lock was released with that note; MAIN was used for the records
 push and released. `HANDOFF.md` has the census and the first task.
+
+Cycle 10b, 2026-09-03 on the ubuntu box (74 minutes, 0.26M subagent tokens, one Opus 5 gate at
+xhigh): the paused client lane landed. `origin/main` `383fdcb`, meter 96.1% to 97.4% (296/304),
+`display-popup.behavior-fidelity` closed, 207 scenarios / 2,586 steps / PASS. The gate rebased
+`affcfc9` over the 22 non-campaign commits main took during the pause (the iOS and iPad client, the
+C ABI paste/reply/output-cancel verbs, `import-tmux-config`) and hit exactly one conflict, twice,
+both in the generated `knowledge/tmux/gaps.md`; a `git merge-tree --write-tree` probe run before
+launch had predicted exactly that, and it is worth running before any gate whose branch has sat.
+All six review must-fixes landed as `9ddeae0` before the gate, each proved by reverting it. Two
+things to carry: a review's probes must live in the repo or on a branch, because this one's lived
+in a session scratchpad under `/tmp` and the machine move erased them, costing the gate its first
+hour; and the lane worker's reported item count was wrong (it claimed 457 to 453 where the registry
+says 438 to 435), so a ledger recomputes from the registry, never from a worker report.
+
+Cycle 11 launch, 2026-09-03: fabrico's instruction is now TWO lanes per cycle and Opus 5 at xhigh
+for every agent, workers, reviewers and gate alike; the Fable reviewers and gates of cycles 6 to 10
+are history. Fronts `F-FORMATS-MONITORS-TRACE` (the `set-hook -B` monitors plus the `-v` trace) and
+`F-CHOOSERS-VOCAB-COPY-TAIL` (the copy-mode mode-keys tail plus the chooser vocabulary on an
+overlay-owned prompt), zones pairwise disjoint, script `opus-compat-run-11.js`. Every group carries
+a HARD budget in minutes, the `FOREGROUND` rule is in all three prompt kinds, and exactly one lane
+(choosers) is told it owns the 96 to 97 bump while the other is told it owns none.
+`clients.path-encoding` is deliberately not scheduled: its reason prices it across four channels
+and half-landing has been refused twice, so it gets a lane to itself in cycle 12.
+`rendering.geometry-residue` is the orchestrator's decision to take, not a lane's.

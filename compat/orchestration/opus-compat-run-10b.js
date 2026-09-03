@@ -1,9 +1,9 @@
 export const meta = {
   name: 'opus-compat-run-10b',
-  description: 'Cycle 10b: Fable review and Fable gate for the cycle-10 client lane (popup Kitty viewport, popup pointer trio, desktop grid measurement) whose reviewer died mid-run',
+  description: 'Cycle 10b: Opus 5 gate for the cycle-10 client lane (popup Kitty viewport, popup pointer trio, desktop grid measurement), relaunched 2026-09-03 after the machine-move pause',
   phases: [
-    { title: 'Review', detail: 'one Fable reviewer, adversarial, foreground only' },
-    { title: 'Integrate', detail: 'Fable MAIN gate for the single client branch: workspace tests, clippy, delta corpus, records, board ledger' },
+    { title: 'Review', detail: 'one Opus 5 reviewer at xhigh, adversarial, foreground only (skipped in stage gate)' },
+    { title: 'Integrate', detail: 'Opus 5 MAIN gate at xhigh for the single client branch: workspace tests, clippy, delta corpus, records, board ledger' },
   ],
 }
 
@@ -201,7 +201,7 @@ const review = (A.stage === 'gate') ? CLIENT_REVIEW : await agent(REVIEW_COMMON 
 
 LANE: client. BRANCH: ${CLIENT_REPORT.branch}. REVIEWDIR: zz-review-client.
 WORKER REPORT (verify, do not trust):
-${JSON.stringify(CLIENT_REPORT, null, 2)}`, { label: 'review:client', phase: 'Review', model: 'fable', schema: REVIEW_SCHEMA })
+${JSON.stringify(CLIENT_REPORT, null, 2)}`, { label: 'review:client', phase: 'Review', model: 'opus', effort: 'xhigh', schema: REVIEW_SCHEMA })
 
 if (A.stage === 'gate') log('Gate-only stage: using the embedded cycle-10 client review (approve-with-fixes, six must-fixes) from 2026-09-03')
 if ((A.stage || 'all') === 'review') {
@@ -211,7 +211,7 @@ if ((A.stage || 'all') === 'review') {
 
 phase('Integrate')
 const summaries = [{ key: 'client', lock_front: 'F-CLIENT-CHOOSERS-POPUPS-V2', review: review || null, ...CLIENT_REPORT }]
-const gatePrompt = `You are the integration gate for the zz tmux-compat campaign (repo demfabris/zz, board = GitHub issue 7). You integrate ONE branch, the cycle-10 client lane, whose reviewer died in the main cycle-10 run; the queue and copy lanes of cycle 10 are already on origin/main together with the cycle-10 ledger recompute (2af51ff). If this gate runs on a different machine than the ubuntu box, the machine facts come in through args (root, dev, holder, cores, jobs, shards, protected, bash, boxNote, gitNote), the same way opus-compat-run-10.js takes them. You run ALONE on this ${M.machine}, full speed. ${FOREGROUND}
+const gatePrompt = `You are the integration gate for the zz tmux-compat campaign (repo demfabris/zz, board = GitHub issue 7). You integrate ONE branch, the cycle-10 client lane, whose reviewer died in the main cycle-10 run; the queue and copy lanes of cycle 10 are already on origin/main together with the cycle-10 ledger recompute (2af51ff). SINCE THAT PAUSE origin/main took 22 commits of NON-CAMPAIGN work (the iOS/iPad client, C ABI verbs for paste, command replies and command-output cancel, agent-pane work, and 'Import the host tmux config from the daemon' which added one command spec and moved the catalog counters). None of it moved the meter. A merge probe on 2026-09-03 (git merge-tree --write-tree origin/main <gated tip>) reported exactly ONE conflict, in the generated knowledge/tmux/gaps.md; compat/tmux-gaps.json, crates/zz-daemon/src/daemon.rs and crates/zz-protocol/src/{lib,message}.rs all auto-merged. Re-measure rather than trust that, but expect the rebase to be cheap and the catalog/manifest recount to be the real work. If this gate runs on a different machine than the ubuntu box, the machine facts come in through args (root, dev, holder, cores, jobs, shards, protected, bash, boxNote, gitNote), the same way opus-compat-run-10.js takes them. You run ALONE on this ${M.machine}, full speed. ${FOREGROUND}
 
 Lane summary, worker report + Fable review verdict:
 ${JSON.stringify(summaries, null, 2)}
@@ -227,7 +227,7 @@ PROTOCOL RECONCILE: origin/main is already at PROTOCOL_VERSION 96 (the queue and
 THIS BOX: ${M.boxNote} Use the shared build directory CARGO_TARGET_DIR=${M.dev}/zz-gate-target for the gate worktree (leave it in place afterwards). Never touch ${M.protected}.
 
 STEPS:
-1. Fresh worktree: git -C ${M.root} worktree add ${M.root}-gate-client origin/main (remove leftovers with --force first). The lane's tip was already rebased onto 2af51ff and pushed as ${GATED_BRANCH} when the campaign paused on 2026-09-03 (the original campaign/batch-client-choosers-popups-opus stays at ff66ddc): fetch it, check it out in the gate worktree, and rebase it onto the current origin/main (which may have moved since); no fixes were applied yet, so every must-fix in the review is still owed.
+1. Fresh worktree: git -C ${M.root} worktree add ${M.root}-gate-client origin/main (remove leftovers with --force first). The lane's tip was already rebased onto 2af51ff and pushed as ${GATED_BRANCH} when the campaign paused on 2026-09-03 (the original campaign/batch-client-choosers-popups-opus stays at ff66ddc): fetch it, check it out in the gate worktree, and rebase it onto the current origin/main (which HAS moved: 22 non-campaign commits, e91f5c2 at launch); no fixes were applied yet, so every must-fix in the review is still owed.
 2. Claim MAIN --lease 2h; hold it until the ledger recompute is pushed.
 3. Gate stages, in order:
    a. cargo test --workspace --all-features --no-fail-fast --jobs ${M.gateJobs} -- --test-threads=${M.gateThreads} > log 2>&1 (check exit code; never pipe through tail). wait_exit_holds_the_control_process_until_a_second_blank_line can HANG under load; if the run wedges >20min with no output, sample the process; a lost-wakeup hang there counts as the known flake (verify solo).
@@ -244,6 +244,6 @@ STEPS:
 
 Never stash/reset anything in ${M.root}. Never kill tmux or zz servers you did not start (${M.protected}). Report via structured output: merged/sha/gate_summary/review_actions/flakes, full progress output, board records, problems.`
 
-const gate = await agent(gatePrompt, { label: 'gate:client', phase: 'Integrate', model: 'fable', schema: GATE_SCHEMA })
+const gate = await agent(gatePrompt, { label: 'gate:client', phase: 'Integrate', model: 'opus', effort: 'xhigh', schema: GATE_SCHEMA })
 
 return { review, gate }

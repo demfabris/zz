@@ -13,7 +13,7 @@ use async_channel::{Receiver, Sender};
 use parking_lot::Mutex;
 use serde_json::Value;
 #[cfg(test)]
-use zz_protocol::ClientInstanceId;
+use zz_protocol::{AgentAutoApprove, ClientInstanceId};
 use zz_protocol::{
     AgentGitSummary, AgentProvider, ClientId, MAX_AGENT_PROMPT_BYTES, MAX_AGENT_QUEUED_PROMPTS,
     PaneId,
@@ -1333,7 +1333,7 @@ fn settle_turn(state: &mut AgentPaneState) {
 #[cfg(test)]
 mod tests {
     use agent_client_protocol::schema::v1::{
-        ContentBlock, ContentChunk, MessageId, SessionUpdate, TextContent,
+        ContentBlock, ContentChunk, MessageId, SessionUpdate, TextContent, ToolKind,
     };
 
     use super::*;
@@ -1488,7 +1488,7 @@ mod tests {
     }
 
     impl Fixture {
-        fn open(behavior: Behavior, auto_approve: bool) -> Self {
+        fn open(behavior: Behavior, auto_approve: AgentAutoApprove) -> Self {
             Self::build(behavior, auto_approve, true, None, None, None)
         }
 
@@ -1516,7 +1516,7 @@ mod tests {
 
         fn build(
             behavior: Behavior,
-            auto_approve: bool,
+            auto_approve: AgentAutoApprove,
             load: bool,
             journal: Option<&Arc<AgentJournal>>,
             resume_session: Option<String>,
@@ -1620,7 +1620,7 @@ mod tests {
 
     #[test]
     fn a_pane_streams_from_spawn_through_a_prompt_to_a_finished_turn() {
-        let fixture = Fixture::open(Behavior::Chunk, false);
+        let fixture = Fixture::open(Behavior::Chunk, AgentAutoApprove::Off);
         fixture.wait_for_session();
         fixture.prompt("go");
         let payloads = fixture.recorder.wait("the turn to finish", |payload| {
@@ -1655,7 +1655,7 @@ mod tests {
 
     #[test]
     fn a_waiting_prompt_receives_the_turns_text() {
-        let fixture = Fixture::open(Behavior::Chunk, false);
+        let fixture = Fixture::open(Behavior::Chunk, AgentAutoApprove::Off);
         fixture.wait_for_session();
         let reply = fixture.prompt_waiting("go");
         assert_eq!(
@@ -1670,7 +1670,7 @@ mod tests {
 
     #[test]
     fn a_prompt_queued_behind_a_hung_turn_is_handed_back_on_cancel() {
-        let fixture = Fixture::open(Behavior::Hang, false);
+        let fixture = Fixture::open(Behavior::Hang, AgentAutoApprove::Off);
         fixture.wait_for_session();
         let hung = fixture.prompt_waiting("first");
         fixture.recorder.wait("the turn to start", |payload| {
@@ -1704,7 +1704,7 @@ mod tests {
 
     #[test]
     fn a_prompt_past_the_queue_limit_settles_as_reclaimed() {
-        let fixture = Fixture::open(Behavior::Hang, false);
+        let fixture = Fixture::open(Behavior::Hang, AgentAutoApprove::Off);
         fixture.wait_for_session();
         let _hung = fixture.prompt_waiting("first");
         fixture.recorder.wait("the turn to start", |payload| {
@@ -1736,7 +1736,7 @@ mod tests {
 
     #[test]
     fn dispatch_publishes_running_with_a_turn_boundary_before_the_agent_speaks() {
-        let fixture = Fixture::open(Behavior::Hang, false);
+        let fixture = Fixture::open(Behavior::Hang, AgentAutoApprove::Off);
         fixture.wait_for_session();
         fixture.prompt("think quietly");
         let deadline = Instant::now() + DEADLINE;
@@ -1765,7 +1765,7 @@ mod tests {
 
     #[test]
     fn an_auto_approved_tool_never_reaches_a_client() {
-        let fixture = Fixture::open(Behavior::AskPermission, true);
+        let fixture = Fixture::open(Behavior::AskPermission, AgentAutoApprove::All);
         fixture.wait_for_session();
         fixture.prompt("go");
         let payloads = fixture.recorder.wait("the turn to finish", |payload| {
@@ -1791,8 +1791,54 @@ mod tests {
     }
 
     #[test]
+    fn the_reads_tier_answers_a_read_tool_daemon_side() {
+        let fixture = Fixture::open(
+            Behavior::AskKindedPermission(ToolKind::Read),
+            AgentAutoApprove::Reads,
+        );
+        fixture.wait_for_session();
+        fixture.prompt("go");
+        let payloads = fixture.recorder.wait("the turn to finish", |payload| {
+            matches!(payload, AgentStreamPayload::PromptFinished { .. })
+        });
+
+        assert!(
+            !payloads
+                .iter()
+                .any(|payload| matches!(payload, AgentStreamPayload::PermissionRequested { .. })),
+            "a read-only kind is answered daemon-side: {payloads:?}"
+        );
+        assert!(fixture.state().pending_permissions.is_empty());
+        fixture.close();
+    }
+
+    #[test]
+    fn the_reads_tier_sends_an_execute_tool_to_the_wizard() {
+        let fixture = Fixture::open(
+            Behavior::AskKindedPermission(ToolKind::Execute),
+            AgentAutoApprove::Reads,
+        );
+        fixture.wait_for_session();
+        fixture.prompt("go");
+        fixture.recorder.wait("the permission request", |payload| {
+            matches!(payload, AgentStreamPayload::PermissionRequested { .. })
+        });
+
+        assert_eq!(fixture.state().pending_permissions.len(), 1);
+        assert!(
+            !fixture
+                .recorder
+                .payloads()
+                .iter()
+                .any(|payload| matches!(payload, AgentStreamPayload::PromptFinished { .. })),
+            "running a command waits for the human"
+        );
+        fixture.close();
+    }
+
+    #[test]
     fn a_surfaced_permission_waits_for_an_answer_and_then_resolves() {
-        let fixture = Fixture::open(Behavior::AskPermission, false);
+        let fixture = Fixture::open(Behavior::AskPermission, AgentAutoApprove::Off);
         fixture.wait_for_session();
         fixture.prompt("go");
         let payloads = fixture.recorder.wait("the permission request", |payload| {
@@ -1842,7 +1888,7 @@ mod tests {
 
     #[test]
     fn a_prompt_typed_during_a_turn_queues_and_dispatches_when_it_settles() {
-        let fixture = Fixture::open(Behavior::AskPermission, false);
+        let fixture = Fixture::open(Behavior::AskPermission, AgentAutoApprove::Off);
         fixture.wait_for_session();
         fixture.prompt("first");
         let payloads = fixture.recorder.wait("the permission request", |payload| {
@@ -1884,7 +1930,7 @@ mod tests {
 
     #[test]
     fn a_session_change_cannot_cross_an_active_turn() {
-        let fixture = Fixture::open(Behavior::Hang, false);
+        let fixture = Fixture::open(Behavior::Hang, AgentAutoApprove::Off);
         fixture.wait_for_session();
         fixture.prompt("running");
         fixture
@@ -2082,7 +2128,7 @@ mod tests {
 
     #[test]
     fn unqueueing_hands_the_queued_prompts_back_with_their_images() {
-        let fixture = Fixture::open(Behavior::Hang, false);
+        let fixture = Fixture::open(Behavior::Hang, AgentAutoApprove::Off);
         fixture.wait_for_session();
         fixture.prompt("running");
         fixture.command(HostCommand::Prompt(
@@ -2121,7 +2167,7 @@ mod tests {
 
     #[test]
     fn queued_prompts_stay_inside_one_reclaim_frame() {
-        let fixture = Fixture::open(Behavior::Hang, false);
+        let fixture = Fixture::open(Behavior::Hang, AgentAutoApprove::Off);
         fixture.wait_for_session();
         fixture.prompt("running");
         fixture.command(HostCommand::Prompt(
@@ -2177,7 +2223,7 @@ mod tests {
 
         let fixture = Fixture::build(
             Behavior::Chunk,
-            false,
+            AgentAutoApprove::Off,
             false,
             Some(&journal),
             Some("stale-session".to_owned()),
@@ -2217,7 +2263,7 @@ mod tests {
         let scratch = tempfile::tempdir().expect("temporary directory");
         let fixture = Fixture::build(
             Behavior::Chunk,
-            false,
+            AgentAutoApprove::Off,
             true,
             None,
             None,
@@ -2236,7 +2282,7 @@ mod tests {
         };
         let fixture = Fixture::build(
             Behavior::AskPermission,
-            false,
+            AgentAutoApprove::Off,
             true,
             None,
             None,
@@ -2342,7 +2388,14 @@ mod tests {
         let Some((_scratch, root)) = seeded_git_repo() else {
             return;
         };
-        let fixture = Fixture::build(Behavior::Hang, false, true, None, None, Some(root.clone()));
+        let fixture = Fixture::build(
+            Behavior::Hang,
+            AgentAutoApprove::Off,
+            true,
+            None,
+            None,
+            Some(root.clone()),
+        );
         fixture.wait_for_session();
         let deadline = Instant::now() + DEADLINE;
         while fixture.state().git.is_none() && Instant::now() < deadline {
@@ -2402,7 +2455,7 @@ mod tests {
 
     #[test]
     fn closing_a_pane_cancels_what_it_still_owed() {
-        let fixture = Fixture::open(Behavior::AskPermission, false);
+        let fixture = Fixture::open(Behavior::AskPermission, AgentAutoApprove::Off);
         fixture.wait_for_session();
         fixture.prompt("go");
         fixture.recorder.wait("the permission request", |payload| {

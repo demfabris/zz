@@ -31,6 +31,7 @@ use agent_client_protocol::{
             RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
             SessionConfigOptionValue, SessionConfigOptionsCapabilities, SessionId as AcpSessionId,
             SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
+            ToolKind,
         },
     },
 };
@@ -41,7 +42,7 @@ use serde_json::Value;
 #[cfg(test)]
 use zz_protocol::ClientInstanceId;
 use zz_protocol::{
-    AgentProvider, ClientId, MAX_AGENT_AUTH_METHODS, MAX_AGENT_PERMISSION_BYTES,
+    AgentAutoApprove, AgentProvider, ClientId, MAX_AGENT_AUTH_METHODS, MAX_AGENT_PERMISSION_BYTES,
     MAX_AGENT_RESULT_BYTES, MAX_AGENT_SESSION_DIRECTORIES, MAX_AGENT_UPDATES_BYTES,
     MAX_GUI_TEXT_BYTES,
 };
@@ -241,7 +242,7 @@ impl RuntimeRouting {
 pub(crate) struct AgentSpawnConfig {
     pub(crate) command: String,
     pub(crate) claude_code_command: String,
-    pub(crate) auto_approve: bool,
+    pub(crate) auto_approve: AgentAutoApprove,
     pub(crate) workspace: AgentWorkspaceEnvironment,
 }
 
@@ -597,7 +598,7 @@ async fn complete_staged_session(
 
 pub(crate) async fn run_agent_connection(
     provider: AgentProvider,
-    auto_approve: bool,
+    auto_approve: AgentAutoApprove,
     agent: impl ConnectTo<AcpClientRole>,
     permission_ids: Arc<AtomicU64>,
     journal: Option<Arc<AgentJournal>>,
@@ -665,7 +666,7 @@ pub(crate) async fn run_agent_connection(
                         RequestPermissionOutcome::Cancelled,
                     ));
                 }
-                if auto_approve
+                if tier_approves(auto_approve, request.tool_call.fields.kind)
                     && !is_user_question(&request.options)
                     && let Some(option_id) = preferred_allow_option(&request.options)
                 {
@@ -1696,6 +1697,22 @@ fn auth_method_model(method: &AuthMethod) -> AgentAuthMethod {
         id: method.id().0.to_string(),
         name: method.name().to_owned(),
         description: method.description().map(ToOwned::to_owned),
+    }
+}
+
+/// Whether the pane's tier lets this request be answered without a human.
+/// `Reads` judges the ACP tool kind the adapter declared: reading, searching,
+/// fetching, and thinking are answered daemon-side, and anything that can
+/// change the machine — plus an absent kind, plus the catch-all `Other` an
+/// unknown kind deserializes into — waits for the wizard.
+fn tier_approves(tier: AgentAutoApprove, kind: Option<ToolKind>) -> bool {
+    match tier {
+        AgentAutoApprove::Off => false,
+        AgentAutoApprove::All => true,
+        AgentAutoApprove::Reads => matches!(
+            kind,
+            Some(ToolKind::Read | ToolKind::Search | ToolKind::Fetch | ToolKind::Think)
+        ),
     }
 }
 

@@ -93162,7 +93162,12 @@ bind - split-window -v -c "#{pane_current_path}"
                 .build_agent_runtime(Some(journal))
                 .expect("agent runtime");
             runtime.set_runner_factory(Box::new(move |_| {
-                fixture_runner(AgentProvider::Codex, behavior, false, true)
+                fixture_runner(
+                    AgentProvider::Codex,
+                    behavior,
+                    zz_protocol::AgentAutoApprove::Off,
+                    true,
+                )
             }));
 
             let mut context = ExecutionContext::default();
@@ -93700,7 +93705,7 @@ bind - split-window -v -c "#{pane_current_path}"
             let config = workspace.runtime.spawn_config();
             assert_eq!(config.command, "my-codex --acp");
             assert_eq!(config.claude_code_command, "my-claude --acp");
-            assert!(!config.auto_approve);
+            assert_eq!(config.auto_approve, zz_protocol::AgentAutoApprove::Off);
             assert_eq!(
                 workspace
                     .shared
@@ -93727,7 +93732,12 @@ bind - split-window -v -c "#{pane_current_path}"
             let seen = Arc::clone(&providers);
             workspace.runtime.set_runner_factory(Box::new(move |spec| {
                 seen.lock().push(spec.provider);
-                fixture_runner(spec.provider, Behavior::Chunk, false, true)
+                fixture_runner(
+                    spec.provider,
+                    Behavior::Chunk,
+                    zz_protocol::AgentAutoApprove::Off,
+                    true,
+                )
             }));
 
             let mut context = ExecutionContext::default();

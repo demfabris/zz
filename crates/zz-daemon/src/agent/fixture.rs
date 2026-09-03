@@ -16,10 +16,10 @@ use agent_client_protocol::{
         NewSessionResponse, PermissionOption, PermissionOptionId, PermissionOptionKind,
         PromptRequest, PromptResponse, RequestPermissionRequest, SessionNotification,
         SessionUpdate, StopReason, TextContent, ToolCallStatus, ToolCallUpdate,
-        ToolCallUpdateFields,
+        ToolCallUpdateFields, ToolKind,
     },
 };
-use zz_protocol::AgentProvider;
+use zz_protocol::{AgentAutoApprove, AgentProvider};
 
 use crate::agent::{
     host::{PaneRunner, RuntimeChannels},
@@ -31,16 +31,27 @@ use crate::agent::{
 pub(crate) enum Behavior {
     /// One message chunk, then the turn ends.
     Chunk,
-    /// A tool call that asks permission before it settles.
+    /// A tool call that asks permission before it settles, declaring no kind.
     AskPermission,
+    /// The same, with the tool kind the risk tier judges.
+    AskKindedPermission(ToolKind),
     /// A turn that never answers, so the pane stays RUNNING.
     Hang,
+}
+
+impl Behavior {
+    const fn permission_kind(self) -> Option<ToolKind> {
+        match self {
+            Self::AskKindedPermission(kind) => Some(kind),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) fn fixture_runner(
     provider: AgentProvider,
     behavior: Behavior,
-    auto_approve: bool,
+    auto_approve: AgentAutoApprove,
     load: bool,
 ) -> PaneRunner {
     Box::new(move |channels: RuntimeChannels| {
@@ -107,12 +118,13 @@ pub(crate) fn fixture_agent(behavior: Behavior, load: bool) -> impl ConnectTo<Ac
                     // A real adapter answers the prompt from a task of its own;
                     // awaiting the permission inline would wedge the fixture's
                     // own dispatch loop.
-                    Behavior::AskPermission => {
+                    Behavior::AskPermission | Behavior::AskKindedPermission(_) => {
                         let tool = ToolCallUpdate::new(
                             "tool-1",
                             ToolCallUpdateFields::new()
                                 .status(ToolCallStatus::Pending)
-                                .title("run it".to_owned()),
+                                .title("run it".to_owned())
+                                .kind(behavior.permission_kind()),
                         );
                         let permission = connection.send_request(RequestPermissionRequest::new(
                             session_id,

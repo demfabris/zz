@@ -1382,7 +1382,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         303,
         "pinned binding count changed"
     );
-    assert_eq!(zz_keys.len(), 268, "zz default binding count changed");
+    assert_eq!(zz_keys.len(), 273, "zz default binding count changed");
     assert_eq!(
         shared_keys.len(),
         210,
@@ -1395,7 +1395,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         native_keys.len(),
-        58,
+        63,
         "native default binding count changed"
     );
     assert_eq!(

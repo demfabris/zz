@@ -80,8 +80,8 @@ use crate::agent::{
 use crate::{
     DaemonError, configure_shell_job_environment, diagnostic_elapsed_us, diagnostic_timer,
     keys::{
-        choose_buffer_key_action, choose_tree_key_action, client_key_inputs, input_key_name,
-        send_tokens,
+        choose_buffer_key_action, choose_tree_key_action, chooser_prompt_answer, client_key_inputs,
+        input_key_name, send_tokens,
     },
     lifecycle::DaemonIdentityGuard,
     paths::{
@@ -7922,6 +7922,7 @@ impl Shared {
                         format,
                         hide_source,
                         kill_source,
+                        prompt_accept,
                         sort,
                         key_format,
                         template,
@@ -7947,6 +7948,7 @@ impl Shared {
                             format.clone(),
                             *hide_source,
                             *kill_source,
+                            *prompt_accept,
                             *sort,
                             key_format.clone(),
                         )?;
@@ -17096,56 +17098,85 @@ impl Shared {
         if read_only {
             return Ok(());
         }
-        let (result, state, delta, command) = {
+        let (result, state, delta, command, kills) = {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner.choose_trees.remove(&client) else {
                 return Ok(());
             };
-            let action = match action {
-                ChooseTreeAction::Key(input) => {
-                    let searching = chooser.search.is_some();
-                    if let Some(row) =
-                        chooser_row_for_key(&chooser.rendered.items, &input, searching, |item| {
-                            &item.key
-                        })
-                    {
-                        ChooseTreeAction::ActivateIndex(row)
-                    } else if let Some(action) =
-                        choose_tree_key_action(&inner.engine.keys, &input, searching)
-                    {
-                        action
-                    } else {
+            let prompt_answer = match &action {
+                ChooseTreeAction::Key(input) if chooser.prompt.is_some() => {
+                    let Some(answer) = chooser_prompt_answer(input) else {
                         inner.choose_trees.insert(client, chooser);
                         return Ok(());
-                    }
+                    };
+                    Some(answer)
                 }
-                action => action,
+                _ => None,
             };
             let attached_session = client_attached_session(&inner, client);
             let facts = format_hook_facts(&inner);
-            let result = match chooser.apply(action, &inner.engine, attached_session, &facts) {
-                Ok(result) => result,
-                Err(error) => {
-                    inner.choose_trees.insert(client, chooser);
-                    return Err(error.into());
+            let result = if let Some(answer) = prompt_answer {
+                chooser.answer_kill_prompt(answer)
+            } else {
+                let action = match action {
+                    ChooseTreeAction::Key(input) => {
+                        let searching = chooser.search.is_some();
+                        if let Some(row) = chooser_row_for_key(
+                            &chooser.rendered.items,
+                            &input,
+                            searching,
+                            |item| &item.key,
+                        ) {
+                            ChooseTreeAction::ActivateIndex(row)
+                        } else if let Some(action) =
+                            choose_tree_key_action(&inner.engine.keys, &input, searching)
+                        {
+                            action
+                        } else {
+                            inner.choose_trees.insert(client, chooser);
+                            return Ok(());
+                        }
+                    }
+                    action => action,
+                };
+                match chooser.apply(action, &inner.engine, attached_session, &facts) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        inner.choose_trees.insert(client, chooser);
+                        return Err(error.into());
+                    }
                 }
             };
             let state = (result == ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full))
                 .then(|| chooser.rendered.clone());
             let delta = (result == ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta))
                 .then(|| (chooser.rendered.selected, chooser.rendered.search.clone()));
-            let command = match (result, chooser.template.clone()) {
+            let command = match (&result, chooser.template.clone()) {
                 (ChooseTreeResult::Activate(target), Some(template)) => {
-                    Some((template, choose_tree_command_target(&inner.engine, target)))
+                    Some((template, choose_tree_command_target(&inner.engine, *target)))
                 }
                 _ => None,
             };
-            if matches!(result, ChooseTreeResult::Updated(_)) {
+            let kills = match &result {
+                ChooseTreeResult::Kill(targets) => targets
+                    .iter()
+                    .filter_map(|target| {
+                        choose_tree_command_target(&inner.engine, *target)
+                            .ok()
+                            .map(|name| (choose_tree_kill_command(*target), name))
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            if matches!(
+                result,
+                ChooseTreeResult::Updated(_) | ChooseTreeResult::Kill(_)
+            ) {
                 inner.choose_trees.insert(client, chooser);
             } else if chooser.kill_source {
                 inner.chooser_kill_panes.push(chooser.source_pane);
             }
-            (result, state, delta, command)
+            (result, state, delta, command, kills)
         };
 
         match result {
@@ -17158,6 +17189,19 @@ impl Shared {
             }
             ChooseTreeResult::Close => {
                 self.publish_to_client(client, EventPayload::ChooseTree { state: None });
+            }
+            ChooseTreeResult::Kill(_) => {
+                {
+                    let mut inner = self.inner.lock();
+                    if let Some(chooser) = inner.choose_trees.get_mut(&client) {
+                        chooser.pending_row = Some(chooser.rendered.selected);
+                    }
+                }
+                let kills: Vec<(&'static str, String)> = kills;
+                for (template, name) in kills {
+                    self.execute_chooser_command(client, context, template, &name, "choose-tree");
+                }
+                self.refresh_choose_trees();
             }
             ChooseTreeResult::Activate(target) => {
                 self.publish_to_client(client, EventPayload::ChooseTree { state: None });
@@ -26745,6 +26789,39 @@ fn bounded_choose_buffer_preview(data: &[u8]) -> String {
     preview
 }
 
+/// `window_tree_key`'s `x` arm: the prompt names the row it is about, and a
+/// row whose target has gone raises nothing at all.
+fn choose_tree_kill_prompt(engine: &MuxEngine, target: ChooseTreeTarget) -> Option<String> {
+    match target {
+        ChooseTreeTarget::Session(session) => engine
+            .state
+            .sessions
+            .get(&session)
+            .map(|session| format!("Kill session {}? ", session.name)),
+        ChooseTreeTarget::Window(window) => engine
+            .state
+            .windows
+            .get(&window)
+            .map(|window| format!("Kill window {}? ", window.index)),
+        ChooseTreeTarget::Pane(pane) => {
+            let window = engine.state.window_for_pane(pane)?;
+            let index = engine.state.windows[&window]
+                .panes
+                .keys()
+                .position(|candidate| *candidate == pane)?;
+            Some(format!("Kill pane {index}? "))
+        }
+    }
+}
+
+fn choose_tree_kill_command(target: ChooseTreeTarget) -> &'static str {
+    match target {
+        ChooseTreeTarget::Session(_) => "kill-session -t %%",
+        ChooseTreeTarget::Window(_) => "kill-window -t %%",
+        ChooseTreeTarget::Pane(_) => "kill-pane -t %%",
+    }
+}
+
 fn choose_tree_command_target(
     engine: &MuxEngine,
     target: ChooseTreeTarget,
@@ -26791,11 +26868,23 @@ fn choose_tree_command_target(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum ChooseTreeResult {
     Updated(ChooseTreeUpdateKind),
     Close,
     Activate(ChooseTreeTarget),
+    /// `window_tree_kill_each` over the current row or over every tagged one,
+    /// which leaves the mode open and rebuilds it.
+    Kill(Vec<ChooseTreeTarget>),
+}
+
+/// `mode_tree_set_prompt`'s state for the two kill keys: the string the pin
+/// builds from the row it is about, and whether the answer kills the tagged
+/// set or the current row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ChooserKillPrompt {
+    text: String,
+    targets: Vec<ChooseTreeTarget>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26814,6 +26903,19 @@ struct ChooseTreeSession {
     format: Option<String>,
     hide_source: bool,
     kill_source: bool,
+    /// `data->prompt_flags`: `choose-tree -y` is `PROMPT_ACCEPT`, which
+    /// `mode_tree_set_prompt` turns into a queued `y` on the kill prompts and
+    /// on nothing else, because only they pass `PROMPT_SINGLE` beside it.
+    prompt_accept: bool,
+    /// `mode_tree_item.tagged`, kept by target rather than by row so a rebuild
+    /// carries the tags.
+    tagged: BTreeSet<ChooseTreeTarget>,
+    /// `mtd->prompt`: the chooser's own confirm prompt, which answers a key
+    /// before the chooser's vocabulary sees it and dies with the chooser.
+    prompt: Option<ChooserKillPrompt>,
+    /// `mtd->current` is a line index, so the row a kill emptied keeps its
+    /// place in the rebuilt tree instead of falling back to the source pane.
+    pending_row: Option<u32>,
     sort: TmuxSort,
     key_format: Option<String>,
     template: Option<String>,
@@ -26826,6 +26928,7 @@ struct ChooseTreeSession {
 }
 
 impl ChooseTreeSession {
+    #[allow(clippy::fn_params_excessive_bools)]
     fn new(
         kind: ChooseTreeKind,
         sessions_only: bool,
@@ -26837,6 +26940,7 @@ impl ChooseTreeSession {
         format: Option<String>,
         hide_source: bool,
         kill_source: bool,
+        prompt_accept: bool,
         sort: TmuxSort,
         key_format: Option<String>,
     ) -> Result<Self, ServerError> {
@@ -26875,6 +26979,10 @@ impl ChooseTreeSession {
             format,
             hide_source,
             kill_source,
+            prompt_accept,
+            tagged: BTreeSet::new(),
+            prompt: None,
+            pending_row: None,
             sort,
             key_format,
             template: None,
@@ -26889,6 +26997,7 @@ impl ChooseTreeSession {
                 selected: 0,
                 kind,
                 filter_no_matches: false,
+                prompt: String::new(),
             },
         };
         chooser.rebuild(engine, attached_session, facts);
@@ -27241,8 +27350,13 @@ impl ChooseTreeSession {
             }
         });
         let selected = self
-            .selected
-            .and_then(|target| items.iter().position(|item| item.target == target))
+            .pending_row
+            .take()
+            .map(|row| usize::try_from(row).unwrap_or(usize::MAX))
+            .or_else(|| {
+                self.selected
+                    .and_then(|target| items.iter().position(|item| item.target == target))
+            })
             .or_else(|| {
                 fallback.and_then(|target| items.iter().position(|item| item.target == target))
             })
@@ -27255,7 +27369,29 @@ impl ChooseTreeSession {
             selected: u32::try_from(selected).unwrap_or(u32::MAX),
             kind: self.kind,
             filter_no_matches,
+            prompt: self
+                .prompt
+                .as_ref()
+                .map(|prompt| prompt.text.clone())
+                .unwrap_or_default(),
         };
+        self.tagged.retain(|target| {
+            self.rendered
+                .items
+                .iter()
+                .any(|item| item.target == *target)
+        });
+        self.mark_tagged_rows();
+    }
+
+    fn mark_tagged_rows(&mut self) {
+        for item in &mut self.rendered.items {
+            if self.tagged.contains(&item.target) {
+                item.flags |= ChooseTreeItem::TAGGED;
+            } else {
+                item.flags &= !ChooseTreeItem::TAGGED;
+            }
+        }
     }
 
     fn apply(
@@ -27374,9 +27510,120 @@ impl ChooseTreeSession {
                 }
             }
             ChooseTreeAction::Close => return Ok(ChooseTreeResult::Close),
+            ChooseTreeAction::Tag => {
+                if let Some(target) = self.rendered.items.get(current).map(|item| item.target) {
+                    if self.tagged.remove(&target) {
+                        self.mark_tagged_rows();
+                    } else {
+                        for relative in self.relatives(current) {
+                            self.tagged.remove(&relative);
+                        }
+                        self.tagged.insert(target);
+                        self.mark_tagged_rows();
+                    }
+                    self.select_index((current + 1).min(len.saturating_sub(1)));
+                    update = ChooseTreeUpdateKind::Full;
+                }
+            }
+            ChooseTreeAction::TagNone => {
+                self.tagged.clear();
+                self.mark_tagged_rows();
+                update = ChooseTreeUpdateKind::Full;
+            }
+            ChooseTreeAction::TagAll => {
+                self.tagged = self
+                    .rendered
+                    .items
+                    .iter()
+                    .filter(|item| item.depth == 0)
+                    .map(|item| item.target)
+                    .collect();
+                self.mark_tagged_rows();
+                update = ChooseTreeUpdateKind::Full;
+            }
+            ChooseTreeAction::KillCurrent => {
+                let Some(target) = self.rendered.items.get(current).map(|item| item.target) else {
+                    return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
+                };
+                let Some(text) = choose_tree_kill_prompt(engine, target) else {
+                    return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
+                };
+                return Ok(self.raise_kill_prompt(text, vec![target]));
+            }
+            ChooseTreeAction::KillTagged => {
+                let targets = self
+                    .rendered
+                    .items
+                    .iter()
+                    .filter(|item| self.tagged.contains(&item.target))
+                    .map(|item| item.target)
+                    .collect::<Vec<_>>();
+                if targets.is_empty() {
+                    return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
+                }
+                let text = format!("Kill {} tagged? ", targets.len());
+                return Ok(self.raise_kill_prompt(text, targets));
+            }
             ChooseTreeAction::Key(_) => {}
         }
         Ok(ChooseTreeResult::Updated(update))
+    }
+
+    /// `mode_tree_key`'s `t`: every parent and every child of the current row
+    /// loses its tag before the row takes one.
+    fn relatives(&self, current: usize) -> Vec<ChooseTreeTarget> {
+        let Some(row) = self.rendered.items.get(current) else {
+            return Vec::new();
+        };
+        let depth = row.depth;
+        let mut relatives = Vec::new();
+        let mut wanted = depth;
+        for item in self.rendered.items[..current].iter().rev() {
+            if item.depth < wanted {
+                wanted = item.depth;
+                relatives.push(item.target);
+                if wanted == 0 {
+                    break;
+                }
+            }
+        }
+        for item in &self.rendered.items[current.saturating_add(1)..] {
+            if item.depth <= depth {
+                break;
+            }
+            relatives.push(item.target);
+        }
+        relatives
+    }
+
+    /// `mode_tree_set_prompt` with `PROMPT_SINGLE`, plus the queued `y` that
+    /// `PROMPT_ACCEPT` adds when `-y` was given.
+    fn raise_kill_prompt(
+        &mut self,
+        text: String,
+        targets: Vec<ChooseTreeTarget>,
+    ) -> ChooseTreeResult {
+        if self.prompt_accept {
+            return ChooseTreeResult::Kill(targets);
+        }
+        self.rendered.prompt.clone_from(&text);
+        self.prompt = Some(ChooserKillPrompt { text, targets });
+        ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
+    }
+
+    /// `prompt_key` under `PROMPT_SINGLE`: one character closes the prompt and is
+    /// the whole answer, and `window_tree_kill_current_callback` kills only for
+    /// `y` or `Y`. A key that carries no character leaves the prompt open.
+    fn answer_kill_prompt(&mut self, answer: char) -> ChooseTreeResult {
+        let Some(prompt) = self.prompt.take() else {
+            return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta);
+        };
+        self.rendered.prompt.clear();
+        if answer.eq_ignore_ascii_case(&'y') {
+            ChooseTreeResult::Kill(prompt.targets)
+        } else {
+            ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
+        }
     }
 
     fn select_index(&mut self, index: usize) {
@@ -35120,7 +35367,9 @@ fn popup_menu_rows(paste: Option<&str>) -> [Option<(String, &'static str)>; 8] {
     [
         Some(("Close".to_owned(), "q")),
         Some((
-            paste.map(|name| format!("Paste {name}")).unwrap_or_default(),
+            paste
+                .map(|name| format!("Paste {name}"))
+                .unwrap_or_default(),
             "p",
         )),
         None,
@@ -72077,6 +72326,7 @@ bind - split-window -v -c "#{pane_current_path}"
             None,
             false,
             false,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
             None,
         )
@@ -72426,6 +72676,7 @@ bind - split-window -v -c "#{pane_current_path}"
             None,
             false,
             false,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Name)).unwrap(),
             None,
         )
@@ -72496,6 +72747,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 None,
                 false,
                 false,
+                false,
                 TmuxSort::parse(None, false, Some(TmuxSortOrder::Name)).unwrap(),
                 Some(format.to_owned()),
             )
@@ -72537,6 +72789,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &facts,
             None,
             None,
+            false,
             false,
             false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Name)).unwrap(),
@@ -72640,6 +72893,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 None,
                 false,
                 false,
+                false,
                 TmuxSort::parse(None, reversed, Some(TmuxSortOrder::Index)).unwrap(),
                 None,
             )
@@ -72697,6 +72951,7 @@ bind - split-window -v -c "#{pane_current_path}"
             None,
             false,
             false,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
             None,
         )
@@ -72721,6 +72976,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &facts,
             None,
             None,
+            false,
             false,
             false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
@@ -72753,6 +73009,7 @@ bind - split-window -v -c "#{pane_current_path}"
             None,
             false,
             false,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
             None,
         )
@@ -72772,6 +73029,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &facts,
             Some("#{==:#{session_name},missing}".to_owned()),
             None,
+            false,
             false,
             false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
@@ -88399,6 +88657,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &facts,
                 None,
                 None,
+                false,
                 false,
                 false,
                 TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),

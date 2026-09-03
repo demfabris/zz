@@ -1,0 +1,12 @@
+corpus: none
+# window_tree_key's x and X raise a prompt that belongs to the mode: it is drawn
+# inside the chooser's own screen and mode_tree_key answers it before any of the
+# chooser's own keys, PROMPT_SINGLE takes one character as the whole answer, and
+# only y or Y reaches window_tree_kill_each. X does nothing at all when
+# mode_tree_count_tagged is zero, which t, T and C-t decide, and choose-tree -y
+# is the PROMPT_ACCEPT that queues that y for both keys.
+stage: fixtures/chooser-kill-keys.sh ~/chooser-kill-keys.sh
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+out: set-environment -gu CHOOSER_KILL_KEYS
+run-shell 'sh ~/chooser-kill-keys.sh'
+out: show-environment -g CHOOSER_KILL_KEYS

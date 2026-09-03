@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v96)
+title: zz wire protocol (v97)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 96`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 97`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (96) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (97) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -613,9 +613,20 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 96`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 97`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v97 carries the chooser's own kill vocabulary. `ChooseTreeAction` gains five variants appended
+  after `Key`: `Tag`, `TagNone`, `TagAll`, `KillCurrent` and `KillTagged`, the actions the daemon
+  resolves `t`, `T`, `C-t`, `x` and `X` to through the `choose-tree` key table. `ChooseTreeState`
+  gains a `prompt: String` field appended after `filter_no_matches`, empty when no prompt is open,
+  which carries the confirm prompt `mode_tree_set_prompt` puts inside the mode's own screen so the
+  client draws it above the rows and knows the chooser is answering it. `ChooseTreeItem.flags`
+  gains a fourth bit, `ChooseTreeItem::TAGGED = 1 << 3`, beside `EXPANDED`, `HAS_CHILDREN` and
+  `ACTIVE`; the field's type does not change but its contents do, so a v96 client would draw a
+  tagged row as untagged. `ChooseTreeAction` reaches the wire through `InputMessage::ChooseTree`
+  and `ChooseTreeState` through `EventPayload::ChooseTree`. Nothing is inserted and nothing is
+  removed; a v96 peer cannot decode the appended variants or the appended field.
 - v96 appends `ProtocolMessage::CommandQueueParked { request_id: u64 }` after `HomeDirectoryResponse`.
   The daemon sends it from a Control client's command worker at the moment that client's command
   queue parks on a request that has not answered yet: a blocking `run-shell` or `if-shell` waiting

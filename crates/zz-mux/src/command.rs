@@ -997,6 +997,7 @@ pub enum MuxEffect {
         format: Option<String>,
         hide_source: bool,
         kill_source: bool,
+        prompt_accept: bool,
         sort: TmuxSort,
         key_format: Option<String>,
         template: Option<String>,
@@ -7857,6 +7858,7 @@ impl MuxEngine {
             format: options.value("-F").map(str::to_owned),
             hide_source: options.has("-h"),
             kill_source: options.has("-k"),
+            prompt_accept: options.has("-y"),
             sort,
             key_format: options.value("-K").map(str::to_owned),
             template: chooser_command_template(invocation, positional_start, &positional),
@@ -37673,6 +37675,7 @@ mod tests {
                 format: None,
                 hide_source: false,
                 kill_source: false,
+                prompt_accept: false,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
@@ -37697,6 +37700,7 @@ mod tests {
                 format: None,
                 hide_source: false,
                 kill_source: false,
+                prompt_accept: false,
                 sort: TmuxSort::parse(Some("name"), true, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
@@ -37723,6 +37727,7 @@ mod tests {
                 format: None,
                 hide_source: false,
                 kill_source: false,
+                prompt_accept: false,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
@@ -37742,6 +37747,7 @@ mod tests {
                 format: None,
                 hide_source: false,
                 kill_source: false,
+                prompt_accept: false,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
@@ -37818,6 +37824,7 @@ mod tests {
                 format: Some("<#{pane_id}>".to_owned()),
                 hide_source: true,
                 kill_source: true,
+                prompt_accept: false,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
@@ -37843,9 +37850,16 @@ mod tests {
                 "choose-buffer {args:?}"
             );
         }
+        let accepted = engine
+            .execute(&mut context, &command("choose-tree", &["-y"]))
+            .unwrap()
+            .effects;
         assert!(matches!(
-            engine.execute(&mut context, &command("choose-tree", &["-y"])),
-            Err(ServerError::UnsupportedCommand(message)) if message == "choose-tree -y"
+            accepted.as_slice(),
+            [MuxEffect::ChooseTree {
+                prompt_accept: true,
+                ..
+            }]
         ));
     }
 

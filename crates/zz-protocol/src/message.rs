@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 96;
+pub const PROTOCOL_VERSION: u16 = 97;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -2002,6 +2002,8 @@ impl ChooseTreeItem {
     pub const EXPANDED: u8 = 1 << 0;
     pub const HAS_CHILDREN: u8 = 1 << 1;
     pub const ACTIVE: u8 = 1 << 2;
+    /// `mode_tree_item.tagged`: the row `t` marked, which `X` kills as a set.
+    pub const TAGGED: u8 = 1 << 3;
 
     #[must_use]
     pub const fn expanded(&self) -> bool {
@@ -2016,6 +2018,11 @@ impl ChooseTreeItem {
     #[must_use]
     pub const fn active(&self) -> bool {
         self.flags & Self::ACTIVE != 0
+    }
+
+    #[must_use]
+    pub const fn tagged(&self) -> bool {
+        self.flags & Self::TAGGED != 0
     }
 }
 
@@ -2032,6 +2039,11 @@ pub struct ChooseTreeState {
     pub selected: u32,
     pub kind: ChooseTreeKind,
     pub filter_no_matches: bool,
+    /// `mtd->prompt`: the confirm prompt the chooser owns and draws in its own
+    /// screen, empty when none is open. It answers keys before the chooser's
+    /// own vocabulary does.
+    #[serde(default, deserialize_with = "deserialize_choose_item_text")]
+    pub prompt: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2061,6 +2073,17 @@ pub enum ChooseTreeAction {
     /// A raw key press the daemon resolves through the `choose-tree` key
     /// table, so bindings stay rebindable and identical for every client.
     Key(KeyInput),
+    /// `t`: tag the current row, untagging every parent and child of it first.
+    Tag,
+    /// `T`: untag every row.
+    TagNone,
+    /// `C-t`: tag every row whose parent is absent and untag every other.
+    TagAll,
+    /// `x`: raise the chooser's own `Kill session/window/pane?` prompt, or run
+    /// the kill outright when `choose-tree -y` armed the accept.
+    KillCurrent,
+    /// `X`: the same for every tagged row, inert when nothing is tagged.
+    KillTagged,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -4229,7 +4252,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 96);
+        assert_eq!(super::PROTOCOL_VERSION, 97);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

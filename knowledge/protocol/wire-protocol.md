@@ -258,9 +258,9 @@ Surfaces must match the identity before dropping anything, so a retired message'
 never take down the message that replaced it.
 
 The wire already carries enough identity for the slice 10ai Control-exit fix. On EOF or a blank
-Return, the front-end must stop rendering pending and later `PaneOutput` and `PaneOutputAged` bytes
+Return, the front-end stops rendering pending and later `PaneOutput` and `PaneOutputAged` bytes
 while it drains guards, diagnostics, command output, flow notifications, retained status, and one
-final exit. The active `control-mode.exit-pane-output` item requires no protocol field or version.
+final exit. `control-mode.exit-pane-output` closed on 2026-08-30 without a protocol field or version.
 
 Slice 10ah closed `control-mode.kill-server-response-order` with existing messages. Shutdown now
 freezes new response admissions, waits for admitted Command and Control responses, publishes
@@ -348,11 +348,12 @@ loud or quiet miss, a matched parser error, and `source-file -`. A depth-refused
 syntax, arity, or unknown-flag rejection publish none. Parser-owned flags-1 and immediate-hook
 flags-0 sources share this event path. The daemon reads every matched file before replay, so multiple
 raw read diagnostics precede the first replayed child while the single completion follows all
-descendants. Non-UTF-8 content remains under `config.non-utf8-file-bytes`: the pin's measured
-lone-`0xff` case also consumes an extra invisible empty-command item that zz does not model. Source
-stdin transport, Control sourced-hook cwd, and deferred event-hook client selection retain their
-separate gaps. The `aliases.command-bodies` closure covers the alias queue's source and hook yield
-boundaries.
+descendants. `config.non-utf8-file-bytes` closed on 2026-09-01: the loaders read config files as
+bytes, and a non-empty file that parses to no command now consumes the pin's invisible
+empty-command item, so Control clients see the pin's hidden numbering for byte, comment-only, and
+blank files alike. Source stdin transport, Control sourced-hook cwd, and deferred event-hook client
+selection retain their separate gaps. The `aliases.command-bodies` closure covers the alias queue's
+source and hook yield boundaries.
 Slice 10z closes config file-unit construction in daemon-local state without a protocol field.
 Config command-name and lexer diagnostics remain generic Warning events on the
 `%config-error` classification path.

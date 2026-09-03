@@ -91,8 +91,8 @@ columns the TUI paints.
 `compat/attached-client.sh` creates 96 output lines and runs the same semantic checks on zz and pinned
 tmux: line and page movement, search editing, `n`/`N`, selection-to-paste-buffer, a live custom
 binding, and both vi and emacs tables. The fixture compares terminal state and visible markers. It
-does not prove mouse behavior, SSH transport, pixel parity, or the stored canonical summary. The 29
-unsupported `window-copy` actions below remain open.
+does not prove mouse behavior, SSH transport, pixel parity, or the stored canonical summary. The one
+unsupported `window-copy` action, `scroll-to-mouse`, remains open.
 
 # Schema: `send-keys -X` action families
 
@@ -119,10 +119,11 @@ them: each carries the behavior category that owns it and the pin's `WINDOW_COPY
 bit, while support is derived from the `send-keys -X` parser rather than stored. The categories are
 the `copy-mode.action-fidelity` items: vocabulary, cursor geometry, logical-line and mode-key
 behavior, goto-line, selection lifecycle, jump/page/prompt actions, and copy formatting and
-destination effects. Cursor geometry, goto-line, selection lifecycle, and the jump, page, and
-prompt family are settled; logical-line and mode-key behavior and copy formatting stay open. Its tests pin the mapped count, assert every mapped name reproduces the pin's
-read-only classification, and list the missing names per category, so mapping one action shrinks
-that list instead of drifting from the code. The table above describes the mapped surface only.
+destination effects. Cursor geometry, goto-line, selection lifecycle, the jump, page, and prompt
+family, and copy formatting are settled; only logical-line and mode-key behavior stays open. Its
+tests pin the mapped count, assert every mapped name reproduces the pin's read-only classification,
+and list the missing names per category, so mapping one action shrinks that list instead of
+drifting from the code. The table above describes the mapped surface only.
 
 Because a detached `send-keys -X` fails on the pin with `not in a mode`, an action zz has not mapped
 exits zero where tmux exits one. `compat/scenarios/copy-mode-*.txt` measure exactly that: a name in
@@ -141,8 +142,8 @@ the middle, then the top, then the bottom of the view, and the cycle restarts at
 the cursor changed line since the last press. Unlike the scroll placements it clamps rather than
 refusing, matching the pin's partial scroll. `toggle-position` flips `hide_position`, the same bit
 `copy-mode -H` latches at entry, so the published position readout appears and disappears without
-leaving the mode. None of that covers `history-bottom`, logical-line behavior, or the actions still
-missing from the vocabulary.
+leaving the mode. None of that covers `history-bottom`, logical-line behavior, or the one action
+still missing from the vocabulary.
 
 Copy/pipe actions build a `CopyModeCopy` whose flags mirror tmux: `clipboard` is set unless `-C` or
 `set-clipboard off`; a paste buffer is created unless `-P` (append variants append); `pipe` runs the

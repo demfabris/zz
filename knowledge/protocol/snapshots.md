@@ -75,9 +75,12 @@ renaming the containing window.
 
 `layout_dump` and `visible_layout_dump` carry tmux's checksummed cell-tree strings. Protocol v69
 appended the daemon-expanded `status_label` for the TUI's window-status loop. GUI clients ignore
-that label. Protocol v86 appends `activity` as the final field; the daemon copies its latched
-window-activity flag there, and selection clears it. Native window strips can render the flag from
-structured state without parsing status text.
+that label. Protocol v86 appended `activity`; the daemon copies its latched window-activity flag
+there, and selection clears it. Native window strips can render the flag from structured state
+without parsing status text. Protocol v95 then appended the window's pane border chrome after it:
+`pane_border_status`, `pane_border_lines`, `pane_border_indicators`, `pane_order` (the order
+`window_pane_index` counts) and `pane_z_order` (which of two panes owns a border cell they both
+touch).
 
 `Picker` is a durable, runtime-free pane state used by the native split-picker flow. It occupies a real
 layout leaf and survives GUI detach/reattach, but the daemon owns no PTY and the GUI owns no CEF

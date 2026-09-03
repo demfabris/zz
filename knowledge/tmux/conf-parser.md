@@ -5,8 +5,8 @@ description: A single-pass tmux-style tokenizer plus the daemon replay layer tha
 resource: crates/zz-mux/src/parser.rs
 tags: [tmux, parser, config, tokenizer, mux-conf]
 timestamp: 2026-08-26T00:00:00-03:00
-last_updated: 2026-08-30
-last_updated_by: Codex
+last_updated: 2026-09-03
+last_updated_by: Claude
 ---
 
 # Overview
@@ -160,12 +160,16 @@ paths use that path without text classification. A pinned
 config containing only byte `0xff` behaves differently: direct Command and Control sources succeed
 without a visible diagnostic, Control consumes an extra hidden empty-command item plus the ordinary
 source completion, and a synchronous `if-shell` source emits successful parent and source guards
-before later root commands run. zz currently rejects that byte during
-`read_to_string`, emits `stream did not contain valid UTF-8`, and returns status 1.
-`config.non-utf8-file-bytes` owns the byte-input matrix and fix.
-The `source-file -` completion number agrees, but caller stdin transport remains open under
-`protocol.binary-streams`. Control sourced-hook cwd, deferred event-hook cwd and routing, and
-hard-disconnect queue cancellation also remain under their named gaps.
+before later root commands run. zz now matches that: the startup and runtime loaders read config
+files as bytes and keep the pin's two input shapes apart, so a runtime `source-file` goes through
+`parse_config_buffer_bytes`, where the pin's signed-char reading makes `0xff` one EOF that ends the
+current line while the rest of the file keeps parsing, and a startup `-f` file goes through
+`parse_config_file_bytes`, which keeps the byte inside the token so the command name stays unknown.
+Nothing is replaced with lossy text: a surviving command name or argument that still holds non-UTF-8
+bytes keeps the typed read error. `config.non-utf8-file-bytes` closed on 2026-09-01; that argument
+limit and the `source-file -` caller stdin transport, whose completion number already agrees, stay
+accepted under `protocol.binary-streams`. Control sourced-hook cwd, deferred event-hook cwd and
+routing, and hard-disconnect queue cancellation also remain under their named gaps.
 No-match, glob, and located depth diagnostics stay inside the source command's guard. Config
 summaries and lexer-owned diagnostics remain generic Warning events
 behind the prose classifier in `control-mode.diagnostic-typing`. The known-family Warning fallback
@@ -269,8 +273,8 @@ cover these rules. At the slice-10z checkpoint, recognized unsupported `choose-c
 retained separate owners. Under the 2026-08-30 `aliases.command-bodies` closure, the daemon now
 carries valid multi-command and empty bodies through replay as one opaque prepared group. Children
 retain their physical source groups, caller arguments reach only the final child, and a yielded
-nested source stops at its owning queue boundary. The other three exclusions retain their existing
-owners.
+nested source stops at its owning queue boundary. Non-UTF-8 config bytes closed later under
+`config.non-utf8-file-bytes`; the other two exclusions retain their existing owners.
 `-t` resolves one pane target before path expansion and replay. A missing target follows tmux's
 `CMD_FIND_CANFAIL` path: the file still loads with an empty target context, while the invoking client
 cwd remains the source base. `-F` reads the resolved target context. `-v` emits canonical parsed

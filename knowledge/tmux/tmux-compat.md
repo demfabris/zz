@@ -5,8 +5,8 @@ description: "The contract for a tmux-compatible zz CLI: tmux spellings keep tmu
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, philosophy, reimplementation, cli]
 timestamp: 2026-08-24T00:00:00-03:00
-last_updated: 2026-08-31
-last_updated_by: Codex
+last_updated: 2026-09-03
+last_updated_by: Claude
 ---
 
 # Overview
@@ -55,13 +55,13 @@ and maximum metadata. It parses nine custom `args_parse` callbacks used by 14 co
 them to six effective rules. The remaining inventories contain 180 options, 198 global format-table
 names, 31 literal context-producer scopes with 153 scoped pairs and 108 unique names, 10 derived
 context families, five propagation records, 36 format modifiers, 68 hooks, and 303 default bindings
-across five tables. The 198 global names divide into 95 values resolved directly by the mux, 32
-delegated to daemon `StatusHooks`, and 71 constant-backed names that remain active `format:` gaps.
-The literal scoped pairs divide into 58 implemented, 54 native, and 41 active gaps. The derived
-families divide into eight implemented and two active gaps; the modifier vocabulary divides into 31
-implemented and five active gaps: `I`, `L`, `O`, `V`, and `w`. `formats.command-item-context`
-closed on 2026-08-24 when the shared
-`command` name became a command-queue-item fact that every command the mux engine runs carries.
+across five tables. The 198 global names divide into 99 values resolved directly by the mux, 44
+delegated to daemon `StatusHooks`, and 55 constant-backed names that remain active `format:` gaps.
+The literal scoped pairs divide into 73 resolved by the mux, 32 delegated, 39 accepted-native, and
+9 active gaps. The derived families divide into nine mux families and one delegated family,
+`run-shell-position`, with no active gap left; the modifier vocabulary is implemented in full at
+all 36 tokens. `formats.command-item-context` closed on 2026-08-24 when the shared `command` name
+became a command-queue-item fact that every command the mux engine runs carries.
 
 The same command-item hooks reach the five arguments that tmux expands: both rename names, both
 show-option names, and `select-pane -T`. Each handler expands after target resolution in the old
@@ -95,9 +95,9 @@ the catalog minus the pinned oracle, then checks every pinned canonical prefix a
 resolver. It pairs every
 constant-backed format with a manifest item and tracks every missing default key across `root`,
 `prefix`, `copy-mode`, `copy-mode-vi`, and `move`. For each shared default key, it reconciles the
-rendered command and repeat bit or requires a named `binding:` divergence. Slice 10m pins the exact
-303 pinned, 251 zz, 193 shared, 110 missing, 58 native, 51 divergent, and 142 structurally matching
-counts. The structural matches divide into 49 copy-mode, 61 copy-mode-vi, and 32 prefix entries.
+rendered command and repeat bit or requires a named `binding:` divergence. The gate pins the exact
+303 pinned, 268 zz, 210 shared, 93 missing, 58 native, 45 divergent, and 165 structurally matching
+counts. The structural matches divide into 61 copy-mode, 72 copy-mode-vi, and 32 prefix entries.
 
 Slice 10l closes hook-producer discovery with a daemon-owned source invariant. It names 30 explicit
 event producers and derives 37 generic `after-<command>` producers whose suffix names an implemented
@@ -109,11 +109,10 @@ unspecified metadata, applies only requested `-N` and `-r` changes, and silently
 unbound after ensuring its table. Structural key equality still does not prove every downstream
 command or copy action. Those consumers retain their existing owners. Slice 10v closes the
 open-ended context and modifier registration blind spot. Slice 10w implements `R`; the gate still
-does not prove context values or the five remaining modifier semantics. Slice 10ad later
-source-registers option consumers, and slice 10ae closes option-name format runtime parity across
-that registered roster.
+does not prove context values. Slice 10ad later source-registers option consumers, and slice 10ae
+closes option-name format runtime parity across that registered roster.
 `formats.context-producer-fidelity` owns context values as adopt/open,
-`formats.modifier-fidelity` owns modifier semantics as adopt/open, and
+`formats.modifier-fidelity` owned modifier semantics until it closed on 2026-09-02, and
 `formats.native-typed-context-producers` records native typed producers as native/accepted.
 Closed `tracker.semantic-coverage` owns the option-consumer source partition. Closed
 `options.option-name-format-coverage` owns generic lookup, target scope, inheritance, array lookup,
@@ -351,12 +350,12 @@ relative sources and literal metacharacter paths, then clears it before runtime 
 isolated differential passes exactly on both engines without a public protocol change. The full
 eight-case diagnostic then exposed queued pane output during Control exit, which slice 10ai closes.
 
-The live registry has 87 active groups, 586 items, and 124 closed records: 45 open, 20 blocked, and
-22 accepted. Sixty-five groups remain unresolved. Closed records plus accepted active groups
-resolve 146 of 211 known groups (69.2%). The persisted accepted artifact covers 109 scenarios and
-1,755 steps, with attached-client `PASS`, exactly two approved GEO
-rows, every other channel clean, and SHA-256
-`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`. Slice 10ai starts Control
+The live registry has 48 active groups, 435 items, and 167 closed records. The active groups divide
+into 6 open, none blocked, and 42 accepted, so only those 6 remain unresolved. Closed records plus
+accepted active groups resolve 209 of 215 known groups (97.2%). The persisted accepted artifact
+covers 212 scenarios and 2,601 steps, with attached-client `PASS`, three registered known GEO rows,
+every other channel clean, and SHA-256
+`19504bd7e10af6b4e3157637d4d6be25b20ef3edd327ae6138c0ecc6e21821fa`. Slice 10ai starts Control
 stdin observation before initial preparation, discards queued and future pane-byte records after
 EOF or blank Return, and retains all non-pane Control records plus one final exit. Shell-job cwd and
 literal DEL identity are closed with their focused and aggregate proof.
@@ -383,10 +382,11 @@ nonempty groups preserve child
 boundaries and physical source groups through mux, daemon, stored command, config, local CLI, and
 Control execution. The wrapper is never dispatched or framed; Control emits each child with the
 enclosing queue's flags. Its eight-step differential has zero mismatches. Forced-shutdown
-multi-window `window-unlinked` order remains explicitly open under
-`hooks.shutdown-window-unlinked-order` because tmux derives it from winlink red-black-tree history
-that zz does not retain. Closure review advanced protocol v85 for typed post-admission callback
-provenance and daemon-authoritative `Attached` reconnect state, not for an alias child-vector field.
+multi-window `window-unlinked` order is an accepted divergence under
+`hooks.shutdown-window-unlinked-order`, decided `never`, because tmux derives it from winlink
+red-black-tree history that zz does not retain. Closure review advanced protocol v85 for typed
+post-admission callback provenance and daemon-authoritative `Attached` reconnect state, not for an
+alias child-vector field.
 The next worker claims the dispatch-board front from published `origin/main`.
 
 Protocol v84 closes all six runtime rules

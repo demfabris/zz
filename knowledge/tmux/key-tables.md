@@ -156,9 +156,9 @@ bindings name the zz-native `split-picker` verb instead, which opens the pane-ki
 
 # Default bindings (seeded in `KeyTables::default`)
 
-The pinned 303 defaults and zz's 266 defaults contain 208 shared keys. The live manifest owns 95
-missing keys, 58 zz-native keys, and 61 shared command-or-repeat divergences. The remaining 147
-shared entries match structurally: 53 in `copy-mode`, 62 in `copy-mode-vi`, and 32 in `prefix`.
+The pinned 303 defaults and zz's 268 defaults contain 210 shared keys. The live manifest owns 93
+missing keys, 58 zz-native keys, and 45 shared command-or-repeat divergences. The remaining 165
+shared entries match structurally: 61 in `copy-mode`, 72 in `copy-mode-vi`, and 32 in `prefix`.
 That structural equality does not claim complete command or action behavior; the existing consumer
 groups retain those runtime contracts.
 
@@ -249,14 +249,14 @@ Five of those stock action keys are now installed: `copy-mode-vi P` and `copy-mo
 `recentre-top-bottom`, and `copy-mode M-l` sends `cursor-centre-horizontal`, each with the pin's
 stored command and nonrepeat metadata.
 
-Two stock keyboard keys remain open. The emacs table now binds `M-1` through `M-9` to zz's own
-numeric capture and `g` to the goto-line prompt vi `:` opens, so only the two `r` keys are left.
-They name `refresh-toggle`, which unfreezes the copy backing rather than
-switching off a live pane: measured on the pin, `#{scroll_position}` holds at 0 after entry, climbs
-while `refresh-on` re-clones the backing on its 50ms timer, and freezes again after
-`refresh-toggle`. That re-sync belongs to the daemon's copy revisions, so both `r` keys wait on it.
-Those keys depend on `copy-mode.action-fidelity`, whose source audit classifies all 95 pinned
-actions across seven behavior categories. The default-key group does not own the other missing
+No stock action key is left open. The emacs table binds `M-1` through `M-9` to zz's own numeric
+capture and `g` to the goto-line prompt vi `:` opens, and both `r` keys now send `refresh-toggle`,
+which unfreezes the copy backing rather than switching off a live pane: measured on the pin,
+`#{scroll_position}` holds at 0 after entry, climbs while `refresh-on` re-clones the backing on its
+50ms timer, and freezes again after `refresh-toggle`. That re-sync rides the daemon's copy
+revisions, and `keys.copy-mode-unsupported-default-actions` closed on 2026-09-02. What is left of
+the action vocabulary sits under `copy-mode.action-fidelity`, whose source audit classifies all 95
+pinned actions across seven behavior categories; the default-key group does not own those missing
 actions. Pointer pseudo-bindings stay in the direct mouse route.
 
 Copy-mode movement, jump capture, and numeric repetition do not read the binding repeat field;

@@ -1,10 +1,14 @@
-# Handoff for the tmux-compat campaign (after cycle 10)
+# Handoff for the tmux-compat campaign (cycle 11 running)
 
-Written 2026-09-03 ~00:40Z on the ubuntu box and updated the same day after the client gate.
-Cycle 10 is fully integrated: the queue and copy lanes merged at `2af51ff`, and the client lane
-(the four popup items) merged at `9ddeae0` in a follow-up gate, after `origin/main` had taken 22
-non-campaign commits. Meter 97.4%. The board is idle again (MAIN and TRIAGE free, no lane locks
-held) and no renewer runs.
+Written 2026-09-03 ~00:40Z on the ubuntu box, updated after the client gate, and rewritten at
+~17:50Z when cycle 11 launched. Cycle 10 is fully integrated: the queue and copy lanes merged at
+`2af51ff`, and the client lane (the four popup items) merged at `9ddeae0` in a follow-up gate,
+after `origin/main` had taken 22 non-campaign commits. Meter 97.4%. Cycle 11 is IN FLIGHT.
+
+THE CYCLE SHAPE CHANGED ON 2026-09-03 and this overrides every older script. Fabrico's instruction
+is TWO work lanes per cycle, not three, and every agent is Opus 5 at `effort: 'xhigh'`: workers,
+reviewers and the gate alike. The Fable reviewers and Fable gates of cycles 6 to 10 are history.
+Copy `opus-compat-run-11.js`, not `opus-compat-run-10.js`.
 
 The standing instruction from fabrico (2026-09-02) is "turn on the goal and go all the way": run
 cycles until the registry is closed, taking the product decisions the earlier handoff had parked
@@ -27,7 +31,7 @@ The pieces, in the order a new reader meets them:
   Real tmux is the truth, not the man page; workers read its C source freely.
 - **The harness**, `compat/run.sh`, runs the same scenario script against tmux and zz and diffs the
   answers: layout geometry, format expansions, command output, hooks. `compat/scenarios/` holds
-  the corpus (207 scenarios at the pause), `smoke/` the ones with real pty clients.
+  the corpus (212 scenarios after cycle 10), `smoke/` the ones with real pty clients.
 - **The registry**, `compat/tmux-gaps.json`, lists every known difference in groups, each item with
   the exact proof that closes it. Closing an item means removing it after that proof; a difference
   we keep on purpose is relocated into an accepted group with the measured tmux behaviour and the
@@ -60,7 +64,7 @@ read. The desktop GPUI app keeps its own look entirely.
 | Corpus | 212 scenarios / 2,601 steps, attached-client PASS (recorded on this box) |
 | `PROTOCOL_VERSION` | 96 (hex hello frame 0x60, test `..._ninety_six`), three v96 changelog bullets on main (`CommandQueueParked`, `CopyModeAction::Search`, `PopupAction::Pointer`); the next wire change bumps to 97 (0x61) |
 | Unmerged work | None. `campaign/batch-client-choosers-popups-opus` stays at `ff66ddc` and `...-gated` at `affcfc9`; neither was force-pushed, and both are history now that the rebased tip plus the six must-fixes landed as `9ddeae0` |
-| Board (issue #7) | MAIN and TRIAGE free. `F-PANE-COMMAND-COMPLETION`, `F-COPY-SEARCH-FORMATS-MONITORS` and `F-CLIENT-CHOOSERS-POPUPS-V2` all INTEGRATED and released; the `F-SPLIT-MUX-*-V5` chain untouched |
+| Board (issue #7) | MAIN and TRIAGE free. Cycle 10's three lock fronts are INTEGRATED and released. Cycle 11 holds `F-FORMATS-MONITORS-TRACE` and `F-CHOOSERS-VOCAB-COPY-TAIL`, both claimed by `ubuntu/orchestrator` until 2026-09-04T02:43Z; the `F-SPLIT-MUX-*-V5` chain untouched |
 | Remotes | SSH (`git@github.com:demfabris/zz.git`) works on the ubuntu box; the macbook was switched to HTTPS through gh's credential helper in cycle 7 |
 
 ## The client lane landed (2026-09-03)
@@ -79,7 +83,7 @@ Three corpus rows fail on this box and are NOT any lane's: `smoke/format-modifie
 alone and again in a baseline worktree at `origin/main`, where they fail identically, two of them
 on the pin side only. Treat them as this box's terminfo and signal-name environment.
 
-## What is left, and what a cycle 11 could take
+## What is left, and what cycle 11 took
 
 The census is `compat/tmux-gaps.json` gaps with status open (nothing is blocked); every reason
 carries the measurement and the recipe. Eight items in six groups:
@@ -93,22 +97,47 @@ carries the measurement and the recipe. Eight items in six groups:
 | `clients.path-encoding` | 1 | Environment bytes; priced in the reason at four channels (hello entry, `CommandInvocation.args` read as `&str` in 99 places behind 65 signatures in the mux, the environment store, `CommandResponse::Success.output`); the probes in the reason are the acceptance test. Half-landing was refused twice; it is one honest lane on its own |
 | `rendering.geometry-residue` | 1 | GUI-only. Cycle 10 refuted the recipe: the gpui harness exists (`crates/zz/src/workspace/view.rs` drives `TerminalView::update_geometry` under `#[gpui::test]`), and the writeback is not the problem; what is needed is a product decision about which extent `window_width`/`window_height` report for a client that draws chrome inside the window it reports. The pure measurement `terminal_grid_size` with tests is on the client branch |
 
-A cycle 11 with three lanes (choosers on the overlay-owned prompt; the mode-keys tail plus the
-monitors plus the `-v` trace; the environment bytes) could close seven, leaving only the GUI
-extent decision, which the orchestrator should take (record the stance, close or relocate the
-item) rather than schedule. Give every group a HARD budget this time, foundation groups included:
-the cycle-10 queue lane ran 4h15m on an open budget and made the whole cycle six hours. Put the
-`FOREGROUND` rule from `opus-compat-run-10b.js` into every worker, reviewer and gate prompt: a
-reviewer in cycle 10 ended its turn waiting on a background monitor and the pipeline dropped the
-lane. Protocol: 96 to 97 (0x60 to 0x61, `..._ninety_seven`).
+Cycle 11 launched 2026-09-03 ~17:45Z as `opus-compat-run-11.js` with two lanes, six items:
 
-Launch shape (unchanged since cycle 6): write `opus-compat-run-11.js` from `opus-compat-run-10.js`
-(same `M` block with the `boxNote`/`gitNote` defaults, three new lane batches, new lock names),
-mint the lock fronts under TRIAGE with pairwise-disjoint zones, commit the records under MAIN,
-claim the fronts (`--lease 6h`), launch with the machine facts as `args` (omit them on the ubuntu
-box), and run a lease renewer (a loop renewing the fronts and MAIN with `--lease 6h` every ~100
-minutes; kill it by pid, never by a pattern that matches your own shell). Cycle 10 took 5h54m and
-2.43M subagent tokens for the main run plus 0.23M for the client review.
+- `F-FORMATS-MONITORS-TRACE`, branch `batch-formats-monitors-trace-opus`, worktree
+  `zz-opus-termopts`: the `set-hook -B` monitors (HARD 100 min) then the `-v` trace (HARD 100 min).
+  Told it owns NO protocol bump.
+- `F-CHOOSERS-VOCAB-COPY-TAIL`, branch `batch-choosers-copy-tail-opus`, worktree `zz-opus-panes`:
+  the copy-mode mode-keys tail first (HARD 60 min, bounded) then the chooser vocabulary on an
+  overlay-owned prompt (HARD 140 min). Owns the 96 to 97 bump.
+
+Zones are pairwise disjoint on the board, and each prompt carries the real per-file ownership.
+Every group has a HARD budget in minutes, because the cycle-10 queue lane ran 4h15m on an open
+budget and made that cycle six hours. The `FOREGROUND` rule is in all three prompt kinds, because a
+cycle-10 reviewer ended its turn waiting on a background monitor and the pipeline dropped the lane.
+
+CYCLE 12, after this one gates, is also two lanes and closes the campaign:
+
+- `clients.path-encoding` alone. Its reason prices the byte across four channels and half-landing
+  was refused twice, so it gets a whole lane.
+- `rendering.geometry-residue`. The orchestrator narrowed this on 2026-09-03 rather than closing it
+  blind, and the narrowing is the useful part. The parked question was "which extent do the window
+  formats report for a client that draws chrome". Two of the three options are already refuted by
+  measurement: carving the PTY from the client's whole extent oversizes and clips the pane, and
+  carving the window extent from the drawn grid changes what `window_width` reports and breaks
+  fixture rows that were derived from the pin, which would be re-scoping a contract to match an
+  implementation. `window_width` and `window_height` therefore STAY the client's whole window, the
+  way tmux's own `window_width` is the client's tty. What was never measured is the third option:
+  the divergence is that an Interactive client's per-pane report reaches the PTY while the format
+  reports the engine's allocation, so the question is not which window extent to report but which
+  of the two PANE numbers is observable truth. tmux has no such split (`window_pane_resize` moves
+  the screen and the PTY together), which argues the format should follow the PTY. The probe:
+  drive `TerminalView::update_geometry` in the existing `#[gpui::test]` harness with a pixel box
+  that is not a whole number of cells, then compare `#{pane_width}` against the columns the PTY
+  actually got. Schedule that, do not decide it from prose.
+
+Launch shape: copy `opus-compat-run-11.js` (its `M` block carries the `boxNote`/`gitNote`
+defaults), write the new lane batches and lock names, mint the lock fronts under TRIAGE with
+pairwise-disjoint zones, commit the records under MAIN, claim the fronts (`--lease 6h`), and launch
+with the machine facts as `args` (omit them on the ubuntu box). A 6h lease covers a two-lane cycle,
+so no renewer process is needed; renew by hand at a check-in instead, which also removes the
+`pkill -f` hazard that killed the orchestrator's own tool shell twice. Cycle 10 took 5h54m and
+2.43M subagent tokens for three lanes; the 10b client gate alone took 74m and 0.26M.
 
 ## The cycle, in general
 
@@ -190,6 +219,7 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
 - `release` and `withdraw` require `--reason`; `note` takes `--note`; `candidate` takes `--commit
   --branch --base` plus repeatable `--proof`; `integrated` takes `--merge` and optional `--gate`;
   `front` takes `--contract --zones` plus `--priority --kind {work,lock} --deps --path --notes`.
+- `front --priority` takes an INTEGER (`--priority 3`), not the `p3` the status listing prints.
 - `renew <FRONT> --lease 2h`: a bare number is silently ignored, always give a unit; the new expiry
   is the comment time plus the lease, so a short renew can shorten a long lease. A renew on a
   front the holder does not hold posts a harmless RENEW comment.
@@ -218,6 +248,15 @@ already carries everything the client gate needs.
 
 ## Lore the prompts already encode
 
+Two lessons from the 10b gate, both cheap to avoid and expensive to hit. A review's probes must
+live in the repo or on a branch: 10b's reviewer left eight ready-made probe scripts in a session
+scratchpad under `/tmp`, the machine move erased them, and the gate spent its first hour rebuilding
+every measurement from the review's prose. And a ledger recomputes from the registry, never from a
+worker report: the client lane's report claimed the open-item count went 457 to 453 where the
+registry said 438 to 435. Before gating a branch that has sat while main moved, run
+`git merge-tree --write-tree origin/main <tip>` first; it predicted 10b's single conflict exactly
+and costs one command.
+
 Flaky-under-load list (all pass exact-solo): `client_focus_closes_display_panes_and_preserves_chooser_modes`
 (also fails about one run in three exact-solo), `event_hooks_fire_after_mutation_with_captured_formats`
 (automatic-rename race), `history_request_is_guarded_clamped_and_returns_self_contained_rows`,
@@ -228,7 +267,7 @@ copy-mode reconcile tests, `daemon_native_split_resize_commits_exactly_and_rejec
 `display_menu_resize_lifecycle::a_resize_moves_the_menu_and_keeps_everything_else`,
 zz-terminal `pty_output_drains_while_the_input_writer_is_backpressured`,
 `wait_exit_holds_the_control_process_until_a_second_blank_line` (hangs under load; timeout-guard
-cli_binary runs), `concurrent_default_interactive_attaches_share_session_zero` (headless "not a
+cli_binary runs), `concurrent_default_interactive_attaches_atomically_share_session_zero` (renamed in 96ab56b, so an older prompt's copy of the short name finds nothing; headless "not a
 terminal", may be misattributed), `smoke/source-replay-diagnostics` (pin-side crash under
 concurrent scenario load; run it solo after sharded gates), `smoke/pane-engine-knobs-input`
 (pin-side under shard load), `behavior-options` (one TOPO row under shard load), and

@@ -5,8 +5,8 @@ description: The daemon expands tmux status formats per client for the cell-fait
 resource: crates/zz-mux/src/formats.rs
 tags: [tmux, status-line, formats, gui, tui, options]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-31
-last_updated_by: Codex
+last_updated: 2026-09-03
+last_updated_by: Claude
 ---
 
 # Overview
@@ -139,16 +139,15 @@ without leaking literal `R` syntax into either row.
 
 ## Current compatibility checkpoint
 
-At the current 2026-08-31 checkpoint, zz implements 31 of the pin's 36 format modifiers. Five active
-tokens remain: `I`, `L`, `O`, `V`, and `w`. The live registry has 87 active groups, 586 active items,
-and 124 closed records: 45 open, 20 blocked, and 22 accepted. Sixty-five groups remain unresolved.
-Closed records plus accepted active groups resolve 146 of 211 known groups (69.2%). The persisted
-accepted artifact covers 109 scenarios and 1,755 steps with attached-client `PASS`, exactly two
-approved GEO rows, every other
-channel clean, and SHA-256
-`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`. The 45-step
-`formats-values` row passes as part of that artifact. The source
-partition contains 95 direct mux values, 32 daemon-delegated values, and 71 active gaps.
+At the 2026-09-02 checkpoint, zz implements all 36 of the pin's format modifiers.
+`formats.modifier-fidelity` closed on 2026-09-02, and no modifier token is still tracked. The live
+registry has 48 active groups, 435 active items, and 167 closed records: 6 open, 0 blocked, and 42
+accepted. Six groups remain unresolved. Closed records plus accepted active groups resolve 209 of
+215 known groups (97.2%). The persisted accepted artifact covers 212 scenarios and 2,601 steps with
+attached-client `PASS`, three registered known rows carrying GEO differences, every other channel
+clean, and SHA-256 `19504bd7e10af6b4e3157637d4d6be25b20ef3edd327ae6138c0ecc6e21821fa`. The 45-step
+`formats-values` row passes as part of that artifact. The source partition contains 99 direct mux
+values, 44 daemon-delegated values, and 55 active gaps.
 
 Source Replay V3 contributes a 60-step clean row for located source diagnostics, physical command
 groups, Command stderr, Control frames, and detached callback shutdown order. The ten-step

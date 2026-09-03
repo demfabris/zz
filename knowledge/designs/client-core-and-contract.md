@@ -2,7 +2,7 @@
 type: Design Plan
 title: Client core & contract - one brain, every face
 description: Decision record for the shared client contract - protocol-owned commands and keys, sans-IO reduction, typed Agent attention, and a native-shell C ABI.
-status: Contract consolidation, live key tables, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native Apple ABI gained mux and styled terminal surfaces on 2026-08-15, endpoint connection and its iOS SSH identity on 2026-08-25, interactive SSH trust and authentication, Agent supervision, semantic selection, and clipboard delivery on 2026-08-26, full window trees and normalized visible pane geometry on 2026-08-30, then passive attached-session terminal preview control on 2026-08-31. History, Kitty, multi-host selection, Browser and Editor viewports, and the Agent transcript stream remain open. GPUI cross-surface rebinding still needs a restart
+status: Contract consolidation, live key tables, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native Apple ABI gained mux and styled terminal surfaces on 2026-08-15, endpoint connection and its iOS SSH identity on 2026-08-25, interactive SSH trust and authentication, Agent supervision, semantic selection, and clipboard delivery on 2026-08-26, full window trees and normalized visible pane geometry on 2026-08-30, then passive attached-session terminal preview control on 2026-08-31, and the Agent transcript stream, agent session lists, and the published prefix table on 2026-09-02. History, Kitty, multi-host selection, and Browser and Editor viewports remain open. GPUI cross-surface rebinding still needs a restart
 tags:
 - client
 - ffi
@@ -31,9 +31,11 @@ pane geometry, damage rows, terminal focus
 and scrolling, passive attached-session terminal preview control, semantic selection and typed
 clipboard delivery, appearance, disconnect events,
 interactive endpoint connection with typed failures and SSH prompts, its iOS SSH public identity, and
-retained Agent summaries, attention edges, permission responses, and cancellation. Catalog/table
-access, chrome actions, history, Kitty images, multi-host presentation, Browser and Editor viewports,
-and the heavy Agent transcript stream remain outside the ABI.
+retained Agent summaries, attention edges, permission responses, and cancellation. The Agent
+transcript stream, its lag and replay path, agent session lists, and the published prefix table
+joined the header on 2026-09-02. The command catalog and the other live key tables, chrome actions,
+history, Kitty images, multi-host presentation, and Browser and Editor viewports remain outside the
+ABI.
 
 The sections below retain the original proposal and its acceptance criteria. The rung ladder marks
 the parts that shipped and the parts that remain design intent.
@@ -172,7 +174,8 @@ window trees and normalized visible pane rectangles, passive attached-session te
 caller-owned
 styled terminal viewports, raw key and text input, command execution, resize, separate client-window
 and terminal pane focus, scrolling, semantic selection, typed clipboard delivery, retained Agent
-summaries and actions, attention edges, damage, appearance, and disconnect events. The
+summaries and actions, attention edges, agent transcript batches with lag and replay, agent session
+lists, the published prefix table, damage, appearance, and disconnect events. The
 viewport is the render contract: a flat cell plane plus style table, grapheme arena, cursor, colors,
 and generation counters remain alive until the caller releases the handle. The reader stays inside
 the core and toolkits integrate its wake fd with GSource, `QSocketNotifier`, or DispatchSource; Rust
@@ -186,8 +189,8 @@ The C link client compiles and links the contract, rejects an invalid interactiv
 failure, creates sessions and panes, renders styled content, types through the raw-key path, exercises
 the selection, clipboard, and Agent symbols, reports client focus and blur, kills the attached
 session, reattaches a survivor and recovers its viewport, then frees and reconnects in one process.
-Catalog and live key-table access, resolved chrome action events, history, Kitty images, Browser and
-Editor viewports, and the Agent transcript stream remain outside the ABI.
+The command catalog and live key-table access beyond the published prefix table, resolved chrome
+action events, history, Kitty images, and Browser and Editor viewports remain outside the ABI.
 
 The desktop shell caches its desired window-focus state outside the pane-focus path. Construction
 seeds `true` only when the window is already active; an inactive window waits for its first real

@@ -395,11 +395,10 @@ bind -n F1 select-window -t :1
 bind -T copy-mode-vi v send-keys -X begin-selection
 ```
 
-Two quirks to know before you file a bug. `bind-key` does not cluster its flags,
-so write `-n -r` rather than `-nr`, and it wants `-T copy-mode-vi` with a space
-rather than `-Tcopy-mode-vi`. Chords chain on a literal `\;`. Application
-shortcuts (`cmd-,`, UI zoom, browser tabs) are compiled in and stay where they
-are.
+Flags follow tmux's grammar, so clustered and attached forms parse: `-nr` works
+as well as `-n -r`, and `-Tcopy-mode-vi` as well as `-T copy-mode-vi`. Chords
+chain on a literal `\;`. Application shortcuts (`cmd-,`, UI zoom, browser tabs)
+are compiled in and stay where they are.
 
 ### Settings
 

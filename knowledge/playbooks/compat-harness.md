@@ -57,8 +57,9 @@ callbacks as six effective rules. The remaining inventories contain 180 options,
 format-table names, 31 literal context-producer scopes with 153 scoped pairs and 108 unique names,
 10 derived families, five propagation records, 36 modifier tokens, 68 hooks, and 303 default
 bindings across `root`, `prefix`, `copy-mode`, `copy-mode-vi`, and `move`. The 198 global names
-divide into 95 values resolved directly by the mux, 32 delegated to daemon `StatusHooks`, and 71
-constant-backed names that remain active `format:` gaps.
+divide into 99 values resolved directly by the mux, 44 delegated to daemon `StatusHooks`, and 55
+constant-backed names, all of which are now carried as accepted `format:` items rather than open
+gaps.
 
 The Rust gate reconciles command and alias names, flag arities, positional bounds, custom argument
 rules, option names, global formats, the complete schema 5 context and modifier inventories, and
@@ -124,15 +125,15 @@ emits no wrapper guard for the opaque group: each child keeps the originating fl
 body emits no guard. The daemon preserves ordinary failure, source-yield, structural-hook,
 foreground and detached job, and deferred-shutdown ordering across the queue boundary. The focused
 eight-step `aliases-multi-body` run reports zero differences in every channel; focused mux, daemon,
-Control, CLI, and binary regressions back it. Exact forced-shutdown multi-window
-`window-unlinked` hook order remains open under `hooks.shutdown-window-unlinked-order`: tmux derives
-it from retained winlink RB-tree history, while zz retains only the final index-ordered map. The
-alias group itself reuses protocol v84's `CommandInvocation` shape. Closure review advanced v85 for
-typed callback provenance and daemon-authoritative `Attached` reconnect state; no alias child-vector
-field or snapshot field is added.
-The persisted aggregate now covers 109 scenarios and 1,755 steps with attached-client `PASS`,
-exactly two approved GEO rows, every other channel clean, and SHA-256
-`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`.
+Control, CLI, and binary regressions back it. Exact forced-shutdown multi-window `window-unlinked`
+hook order is accepted as a permanent divergence under `hooks.shutdown-window-unlinked-order`
+(`decision: never`): tmux derives it from retained winlink RB-tree history, while zz retains only
+the final index-ordered map. The alias group itself reuses protocol v84's `CommandInvocation` shape.
+Closure review advanced v85 for typed callback provenance and daemon-authoritative `Attached`
+reconnect state; no alias child-vector field or snapshot field is added.
+The persisted aggregate now covers 212 scenarios and 2,601 steps with attached-client `PASS`,
+three registered known rows carrying GEO differences, every other channel clean, and SHA-256
+`19504bd7e10af6b4e3157637d4d6be25b20ef3edd327ae6138c0ecc6e21821fa`.
 
 The 2026-08-31 Source Replay V3 close keeps each syntax or command diagnostic on its physical
 source path and line. Command stderr, Control flags, command-error hooks, later siblings, and
@@ -148,9 +149,9 @@ same-side ties choose the lower `PaneId`. The focused `pane-border-span-owner` r
 steps with zero TOPO, GEO, FMT, OUT, or WARN differences. Protocol, snapshots, and GPUI retain their
 prior contracts, and GPUI continues to take pane colors from its theme. Mutable tiled order after
 `join-pane`, `swap-pane`, or serialized `select-layout` remains under `F-PANE-BORDER-ZORDER`. The
-live registry has 87 active groups and 586 items, with 45 open, 20 blocked, 22 accepted, and 124
-closed records. Sixty-five groups remain unresolved; closed records plus accepted active groups
-resolve 146 of 211 known groups (69.2%).
+live registry has 48 active groups holding 435 items, with 6 groups open, none blocked, 42 accepted,
+and 167 closed records; only 8 of those items sit in an open group. Six groups remain unresolved;
+closed records plus accepted active groups resolve 209 of 215 known groups (97.2%).
 
 The remaining `w` modifier needs a wider proof than the earlier forecast recorded. Pinned
 `format_width` handles leading hashes, `#[...]` style spans, malformed markup, controls,
@@ -314,16 +315,16 @@ stored-command, parser, postcard, mux, and daemon proofs. All 12 implemented cal
 apply their pinned rules. The unimplemented `choose-client` and `switch-mode` callbacks need no
 `args-parse:` item because their `command:` items cover the whole command.
 
-Hook-producer discovery closed in slice 10l. The daemon-owned invariant names 27 explicit event
+Hook-producer discovery closed in slice 10l. The daemon-owned invariant names 30 explicit event
 producers and derives 37 generic `after-<command>` producers from implemented command names. A
 later pin audit classifies `after-queue` as explicit-only: ordinary queues do not produce it, while
-`set-hook -R` runs it. The current partition contains those 64 automatic producers, the
-explicit-only hook, and three active gaps: `pane-focus-in`, `pane-focus-out`, and
-`pane-set-clipboard`.
+`set-hook -R` runs it. The current partition contains those 67 automatic producers and the
+explicit-only hook, with no `hook:` gaps left in the registry: `hooks.pane-events`, which held
+`pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`, closed on 2026-09-02.
 `just compat-check` requires the exact
 `daemon::tests::pinned_hook_producer_partition_matches_the_oracle` and
 `status::tests::daemon_delegated_format_consumers_match_mux_inventory` tests. The second test seeds
-buffer, client, and session facts, then requires every one of the 32 delegated names to resolve
+buffer, client, and session facts, then requires every one of the 44 delegated names to resolve
 through the production `DaemonFormatHooks` consumer. At the slice 10s close, the mux manifest test
 required the 92 direct, 32 delegated, and 74 tracked sets to stay pairwise disjoint and equal the
 198-name pin.
@@ -337,8 +338,8 @@ its separate owners. Slice 10v closes `tracker.format-vocabulary-registration` w
 source inventory and disjoint, exhaustive production-owned partitions. New or stale literal,
 derived, propagation, or modifier entries fail `just compat-check`.
 
-Runtime and context-value fidelity remain under `formats.context-producer-fidelity` (`adopt`, open)
-and `formats.modifier-fidelity` (`adopt`, open). Native typed producers remain accepted under
+Runtime and context-value fidelity remain under `formats.context-producer-fidelity` (`adopt`, open);
+`formats.modifier-fidelity` closed on 2026-09-02. Native typed producers remain accepted under
 `formats.native-typed-context-producers` (`native`, accepted). Slice 10v changes no protocol,
 snapshot, differential scenario, or accepted artifact. The resumed rerank corrected the stale
 parser-abort ledger item because first-diagnostic whole-file abort was already implemented and
@@ -474,10 +475,11 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted acceptance artifact. It records 109 scenarios and 1,755
+`compat/results/summary.md` is the persisted acceptance artifact. It records 212 scenarios and 2,601
 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean, the attached-client
-fixture is `PASS`, and exactly two approved rows carry GEO differences. Its SHA-256 is
-`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`.
+fixture is `PASS`, and exactly three registered `known/` rows carry GEO differences, one of them an
+approved OUT difference as well. Its SHA-256 is
+`19504bd7e10af6b4e3157637d4d6be25b20ef3edd327ae6138c0ecc6e21821fa`.
 
 Slice 10ag extends `compat/startup-diagnostics.sh` to eight cases. Its startup-client-cwd case builds
 distinct initial-client, top-level-config, containing-directory, runtime-client, and glob-decoy
@@ -739,7 +741,7 @@ contains 10. `smoke/config-alias-parse-unit` and `smoke/config-chain-parse-abort
 `smoke/jobs-command-environment` contains 3, `aliases-multi-body` contains 8, and
 `option-name-formats` contains 60.
 The summary SHA-256 is
-`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`.
+`19504bd7e10af6b4e3157637d4d6be25b20ef3edd327ae6138c0ecc6e21821fa`.
 The historical 10r and 10s checkpoints remain 98 scenarios and 1,517 steps at SHA-256
 `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 The combined chooser row contributes three harness steps and 26 internal checks with zero TOPO,
@@ -1100,10 +1102,13 @@ Put a scenario with an accepted strict mismatch under `compat/scenarios/known/`.
 still executes every step and writes its diffs. It accepts the result only when the scenario's gap
 ID resolves to the exact registered `TOPO GEO FMT OUT WARN` tuple. An unregistered known scenario,
 a missing tuple, or any tuple drift fails the run.
-The two current entries pin the deliberate refusals of upstream layout bugs:
-`known-main-preset-two-panes.txt` (the pin never sizes the lone "other" pane) and
-`known-spread-mixed.txt` (the pin's `-E` corrupts a parent mixing leaf and node children).
-They use `layout.main-horizontal-upstream-bug` and `layout.spread-mixed-upstream-bug`.
+The three current entries pin two deliberate refusals of upstream layout bugs plus one native
+presentation choice: `known-main-preset-two-panes.txt` (the pin never sizes the lone "other" pane),
+`known-spread-mixed.txt` (the pin's `-E` corrupts a parent mixing leaf and node children), and
+`known-pane-scrollbar-columns.txt` (the pin builds its pane scrollbar from grid cells, so it costs
+each pane a column, while zz draws one in client chrome outside the cell grid). They use
+`layout.main-horizontal-upstream-bug`, `layout.spread-mixed-upstream-bug`, and
+`options.native-pane-scrollbars`.
 
 Inspect a registered tuple directly with:
 

@@ -89,11 +89,12 @@ Graphical clients should consume the cell/style/grapheme planes directly.
 # Scope boundary
 
 The ABI is renderer-neutral and sufficient for the native iPhone terminal, iPad split workspace,
-and Agent-supervision slices. It still does not export the command catalog, live chrome key
-tables/actions, history chunk access, Kitty image extraction, multi-host selection, the retained
-daemon-expanded status payload, the heavy Agent transcript stream, or Browser and Editor viewport
+and Agent-supervision slices. The coalesced Agent transcript stream, its lag and replay controls,
+and the published prefix table now cross the ABI. It still does not export the command catalog, the
+rest of the live chrome key tables and their actions, history chunk access, Kitty image extraction,
+multi-host selection, the retained daemon-expanded status payload, or Browser and Editor viewport
 data. `ZZ_EVENT_STATUS_CHANGED` can wake a shell, but no status snapshot accessors currently let it
-read the formatted fields. Those remain shared-core work rather than Swift responsibilities.
+read the formatted fields. Those gaps remain shared-core work rather than Swift responsibilities.
 
 # Testing
 

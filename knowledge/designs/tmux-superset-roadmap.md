@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; F-SOURCE-REPLAY-DIAGNOSTICS-V3 integrated and F-PANE-BORDER-SPANS-V2 closed 2026-08-31; dispatch board active
+status: In Progress; cycle 10 fully integrated 2026-09-03 with protocol v96, the agreed-scope meter at 97.4% (296 of 304 items, 59 of 65 groups done); cycle 11 is running two lanes, the format monitors with the -v trace and the chooser vocabulary with the copy-mode tail; six open groups and eight items remain, resume from compat/orchestration/HANDOFF.md
 tags:
 - tmux
 - compatibility

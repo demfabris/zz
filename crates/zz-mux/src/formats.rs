@@ -2666,7 +2666,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 hooks: &mut *self.hooks,
                 time: self.time,
                 client_row: Some(row),
-                trace: None,
+                trace: self.trace.as_deref_mut(),
             };
             output.push_str(&expander.expand(copy, depth));
         }
@@ -5542,5 +5542,61 @@ mod tests {
         assert_eq!(expand(&nested), "x");
         let hostile = (0..110).fold("#{l:x}".to_owned(), |value, _| format!("#{{E:{value}}}"));
         assert_eq!(expand(&hostile), "");
+    }
+
+    /// format.c hands every loop expander the same `format_expand_state`, so a
+    /// loop body's own parse lines land in the trace beside the outer ones. The
+    /// client loop is the only one the compat corpus cannot reach: every
+    /// scenario server is detached, so its roster is empty and the body never
+    /// runs.
+    #[test]
+    fn the_client_loop_body_traces_through_the_shared_sink() {
+        struct Roster;
+
+        impl StatusHooks for Roster {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str) -> String {
+                String::new()
+            }
+
+            fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+                vec![FormatClientRow {
+                    name: "/dev/pts/2".to_owned(),
+                    activity: 0,
+                    variables: BTreeMap::from([(
+                        "client_name".to_owned(),
+                        "/dev/pts/2".to_owned(),
+                    )]),
+                    environment: Vec::new(),
+                }]
+            }
+        }
+
+        let engine = MuxEngine::default();
+        let (value, trace) = expand_format_time_traced(
+            "#{L:<#{client_name}>}",
+            &engine,
+            FormatContext::default(),
+            &mut Roster,
+        );
+        assert_eq!(value, "</dev/pts/2>");
+        assert_eq!(
+            trace,
+            vec![
+                "# expanding format: #{L:<#{client_name}>}",
+                "# found #{}: L:<#{client_name}>",
+                "# modifier 0 is L",
+                "#  expanding format: <#{client_name}>",
+                "#  found #{}: client_name",
+                "#  format 'client_name' found: /dev/pts/2",
+                "#  replaced 'client_name' with '/dev/pts/2'",
+                "#  result is: </dev/pts/2>",
+                "# replaced 'L:<#{client_name}>' with '</dev/pts/2>'",
+                "# result is: </dev/pts/2>",
+            ]
+        );
     }
 }

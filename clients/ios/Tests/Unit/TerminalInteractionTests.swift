@@ -938,6 +938,96 @@ final class TerminalInteractionTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testSelectionEntryRacesTheScrollPanInsteadOfOutwaitingIt() throws {
+        let view = TerminalGridView()
+        let recognizers = view.gestureRecognizers ?? []
+        let press = try XCTUnwrap(
+            recognizers.compactMap { $0 as? UILongPressGestureRecognizer }.first
+        )
+        XCTAssertEqual(press.minimumPressDuration, 0.15, accuracy: 0.0001)
+        XCTAssertEqual(press.allowableMovement, 5, accuracy: 0.0001)
+
+        let pan = try XCTUnwrap(recognizers.compactMap { $0 as? UIPanGestureRecognizer }.first)
+        XCTAssertEqual(pan.maximumNumberOfTouches, 1)
+        XCTAssertEqual(pan.minimumNumberOfTouches, 1)
+    }
+
+    func testSelectionHapticsTickOncePerCrossedCell() {
+        let cellSize = CGSize(width: 10, height: 20)
+        let origin = TerminalGridCell(point: CGPoint(x: 4, y: 5), cellSize: cellSize, columns: 8, rows: 4)
+        XCTAssertEqual(origin, TerminalGridCell(column: 0, row: 0))
+        XCTAssertEqual(
+            TerminalGridCell(point: CGPoint(x: 25, y: 45), cellSize: cellSize, columns: 8, rows: 4),
+            TerminalGridCell(column: 2, row: 2)
+        )
+        XCTAssertEqual(
+            TerminalGridCell(point: CGPoint(x: -8, y: 900), cellSize: cellSize, columns: 8, rows: 4),
+            TerminalGridCell(column: 0, row: 3)
+        )
+
+        var feedback = TerminalSelectionFeedback()
+        XCTAssertTrue(feedback.shouldTick(at: origin))
+        XCTAssertFalse(feedback.shouldTick(at: origin))
+        XCTAssertFalse(
+            feedback.shouldTick(
+                at: TerminalGridCell(point: CGPoint(x: 9, y: 19), cellSize: cellSize, columns: 8, rows: 4)
+            )
+        )
+        XCTAssertTrue(feedback.shouldTick(at: TerminalGridCell(column: 1, row: 0)))
+        XCTAssertTrue(feedback.shouldTick(at: TerminalGridCell(column: 1, row: 1)))
+        feedback.reset()
+        XCTAssertTrue(feedback.shouldTick(at: TerminalGridCell(column: 1, row: 1)))
+    }
+
+    func testPasteMenuValidationNeverReadsPasteboardContent() {
+        XCTAssertTrue(TerminalPaste.canPaste(hasStrings: true, hasURLs: false, itemCount: 1))
+        XCTAssertTrue(TerminalPaste.canPaste(hasStrings: false, hasURLs: true, itemCount: 1))
+        XCTAssertTrue(TerminalPaste.canPaste(hasStrings: false, hasURLs: false, itemCount: 1))
+        XCTAssertFalse(TerminalPaste.canPaste(hasStrings: false, hasURLs: false, itemCount: 0))
+    }
+
+    func testPasteShortcutMatchesTheSharedTerminalBindings() {
+        XCTAssertTrue(TerminalPaste.isShortcut(characters: "v", modifierFlags: .command))
+        XCTAssertTrue(TerminalPaste.isShortcut(characters: "V", modifierFlags: [.control, .shift]))
+        XCTAssertFalse(TerminalPaste.isShortcut(characters: "v", modifierFlags: []))
+        XCTAssertFalse(TerminalPaste.isShortcut(characters: "v", modifierFlags: .control))
+        XCTAssertFalse(TerminalPaste.isShortcut(characters: "v", modifierFlags: [.command, .shift]))
+        XCTAssertFalse(TerminalPaste.isShortcut(characters: "c", modifierFlags: .command))
+    }
+
+    func testPastedTextPrefersFilePathsThenStringsThenURLs() {
+        XCTAssertEqual(
+            TerminalPaste.text(
+                pasteboardString: "file:///tmp/a b.txt",
+                urls: [URL(fileURLWithPath: "/tmp/a b.txt"), URL(fileURLWithPath: "/tmp/plain.txt")]
+            ),
+            "'/tmp/a b.txt' /tmp/plain.txt"
+        )
+        XCTAssertEqual(
+            TerminalPaste.text(
+                pasteboardString: "see https://zzmux.sh for more",
+                urls: [URL(string: "https://zzmux.sh")!]
+            ),
+            "see https://zzmux.sh for more"
+        )
+        XCTAssertEqual(
+            TerminalPaste.text(pasteboardString: nil, urls: [URL(string: "https://zzmux.sh")!]),
+            "https://zzmux.sh"
+        )
+        XCTAssertEqual(TerminalPaste.text(pasteboardString: "  ", urls: []), "  ")
+        XCTAssertNil(TerminalPaste.text(pasteboardString: "", urls: []))
+        XCTAssertNil(TerminalPaste.text(pasteboardString: nil, urls: []))
+    }
+
+    func testShellEscapingQuotesOnlyWhatNeedsIt() {
+        XCTAssertEqual(TerminalPaste.shellEscaped("/tmp/notes.txt"), "/tmp/notes.txt")
+        XCTAssertEqual(TerminalPaste.shellEscaped("/tmp/a b.txt"), "'/tmp/a b.txt'")
+        XCTAssertEqual(TerminalPaste.shellEscaped("/tmp/it's"), "'/tmp/it'\\''s'")
+        XCTAssertEqual(TerminalPaste.shellEscaped("/tmp/$(rm -rf ~)"), "'/tmp/$(rm -rf ~)'")
+        XCTAssertEqual(TerminalPaste.shellEscaped(""), "''")
+    }
+
     func testCommandPromptSplitsNameAndArguments() {
         let parsed = ZZCommandLine.split("  kill-pane   -t  %1  ")
         XCTAssertEqual(parsed?.name, "kill-pane")

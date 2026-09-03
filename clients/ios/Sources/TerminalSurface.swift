@@ -174,8 +174,55 @@ enum TerminalBlinkPolicy {
     }
 }
 
+enum TerminalPaste {
+    static func canPaste(hasStrings: Bool, hasURLs: Bool, itemCount: Int) -> Bool {
+        hasStrings || hasURLs || itemCount > 0
+    }
+
+    static func isShortcut(characters: String, modifierFlags: UIKeyModifierFlags) -> Bool {
+        guard characters.lowercased() == "v" else {
+            return false
+        }
+        let flags = modifierFlags.intersection([.command, .control, .alternate, .shift])
+        return flags == .command || flags == [.control, .shift]
+    }
+
+    static func text(pasteboardString: String?, urls: [URL]) -> String? {
+        if !urls.isEmpty, urls.allSatisfy(\.isFileURL) {
+            return urls.map { shellEscaped($0.path) }.joined(separator: " ")
+        }
+        if let pasteboardString, !pasteboardString.isEmpty {
+            return pasteboardString
+        }
+        guard !urls.isEmpty else {
+            return nil
+        }
+        return urls.map(\.absoluteString).joined(separator: " ")
+    }
+
+    static func shellEscaped(_ path: String) -> String {
+        guard !path.isEmpty else {
+            return "''"
+        }
+        let bare = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_./:@%+=,"))
+        guard path.unicodeScalars.contains(where: { !bare.contains($0) }) else {
+            return path
+        }
+        return "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
+extension UIPasteboard {
+    var hasPasteableContentWithoutPrompt: Bool {
+        TerminalPaste.canPaste(hasStrings: hasStrings, hasURLs: hasURLs, itemCount: numberOfItems)
+    }
+}
+
 @MainActor
 final class TerminalGridView: UIView, UIKeyInput {
+    static let selectionHoldDuration: TimeInterval = 0.15
+    static let selectionAllowableMovement: CGFloat = 5
+
     private static var softwareKeyboardVisible = false
 
     var pane: UInt64 = 0 {
@@ -219,6 +266,10 @@ final class TerminalGridView: UIView, UIKeyInput {
     private var blinkingRows: [Int] = []
     private var colors: [UInt32: UIColor] = [:]
     private let fontFeedback = UISelectionFeedbackGenerator()
+    private let selectionHaptics = UISelectionFeedbackGenerator()
+    private var selectionFeedback = TerminalSelectionFeedback()
+    private var selectionOrigin: TerminalGridCell?
+    private let selectionLoupe = TerminalSelectionLoupe()
     private var inputRequested = false
     private var sceneActive = true
     private var inputActivation: UInt64 = 0
@@ -236,8 +287,8 @@ final class TerminalGridView: UIView, UIKeyInput {
         pan.maximumNumberOfTouches = 1
         addGestureRecognizer(pan)
         let selection = UILongPressGestureRecognizer(target: self, action: #selector(selectText(_:)))
-        selection.minimumPressDuration = 0.35
-        pan.require(toFail: selection)
+        selection.minimumPressDuration = Self.selectionHoldDuration
+        selection.allowableMovement = Self.selectionAllowableMovement
         addGestureRecognizer(selection)
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(zoom(_:)))
         addGestureRecognizer(pinch)
@@ -381,6 +432,8 @@ final class TerminalGridView: UIView, UIKeyInput {
         if window == nil {
             blinkTimer?.invalidate()
             blinkTimer = nil
+            selectionLoupe.end()
+            selectionFeedback.reset()
         } else {
             updateBlinkTimer()
             resizeIfNeeded()
@@ -419,45 +472,64 @@ final class TerminalGridView: UIView, UIKeyInput {
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        var forwarded = false
-        for press in presses {
-            guard let key = press.key, let mapped = map(key) else {
-                continue
-            }
-            forwarded = true
-            onKey?(mapped.code, mapped.scalar, modifierBits(key.modifierFlags), UInt8(ZZ_KEY_PRESS.rawValue))
-        }
-        if !forwarded {
+        if !forward(presses, action: UInt8(ZZ_KEY_PRESS.rawValue)) {
             super.pressesBegan(presses, with: event)
         }
     }
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        var forwarded = false
-        for press in presses {
-            guard let key = press.key, let mapped = map(key) else {
-                continue
-            }
-            forwarded = true
-            onKey?(mapped.code, mapped.scalar, modifierBits(key.modifierFlags), UInt8(ZZ_KEY_RELEASE.rawValue))
-        }
-        if !forwarded {
+        if !forward(presses, action: UInt8(ZZ_KEY_RELEASE.rawValue)) {
             super.pressesEnded(presses, with: event)
         }
     }
 
     override func pressesChanged(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if !forward(presses, action: UInt8(ZZ_KEY_REPEAT.rawValue)) {
+            super.pressesChanged(presses, with: event)
+        }
+    }
+
+    private func forward(_ presses: Set<UIPress>, action: UInt8) -> Bool {
         var forwarded = false
         for press in presses {
-            guard let key = press.key, let mapped = map(key) else {
+            guard let key = press.key else {
+                continue
+            }
+            if TerminalPaste.isShortcut(
+                characters: key.charactersIgnoringModifiers,
+                modifierFlags: key.modifierFlags
+            ) {
+                forwarded = true
+                if action == UInt8(ZZ_KEY_PRESS.rawValue) {
+                    paste(nil)
+                }
+                continue
+            }
+            guard let mapped = map(key) else {
                 continue
             }
             forwarded = true
-            onKey?(mapped.code, mapped.scalar, modifierBits(key.modifierFlags), UInt8(ZZ_KEY_REPEAT.rawValue))
+            onKey?(mapped.code, mapped.scalar, modifierBits(key.modifierFlags), action)
         }
-        if !forwarded {
-            super.pressesChanged(presses, with: event)
+        return forwarded
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        guard action == #selector(paste(_:)) else {
+            return super.canPerformAction(action, withSender: sender)
         }
+        return UIPasteboard.general.hasPasteableContentWithoutPrompt
+    }
+
+    override func paste(_ sender: Any?) {
+        let pasteboard = UIPasteboard.general
+        guard let text = TerminalPaste.text(
+            pasteboardString: pasteboard.hasStrings ? pasteboard.string : nil,
+            urls: pasteboard.hasURLs ? pasteboard.urls ?? [] : []
+        ) else {
+            return
+        }
+        insertText(text)
     }
 
     @objc private func focusInput() {
@@ -488,32 +560,50 @@ final class TerminalGridView: UIView, UIKeyInput {
             return
         }
         let location = gesture.location(in: self)
-        let column = min(
-            max(Int(floor(location.x / max(measuredCell.width, 1))), 0),
-            viewport.columns - 1
-        )
-        let row = min(
-            max(Int(floor(location.y / max(measuredCell.height, 1))), 0),
-            viewport.rows - 1
+        let cell = TerminalGridCell(
+            point: location,
+            cellSize: measuredCell,
+            columns: viewport.columns,
+            rows: viewport.rows
         )
         let phase: UInt32
         switch gesture.state {
         case .began:
             phase = 0
-            UISelectionFeedbackGenerator().selectionChanged()
+            selectionOrigin = cell
+            selectionFeedback.reset()
+            selectionHaptics.prepare()
+            selectionLoupe.begin(at: location, in: self)
         case .changed:
             phase = 1
+            if selectionOrigin != cell {
+                selectionOrigin = nil
+            }
+            selectionLoupe.move(to: location)
         case .ended, .cancelled:
             phase = 2
+            selectionLoupe.end()
+            selectionFeedback.reset()
         default:
             return
         }
+        if phase != 2, selectionFeedback.shouldTick(at: cell) {
+            selectionHaptics.selectionChanged()
+            selectionHaptics.prepare()
+        }
         onSelection?(
             phase,
-            UInt16(clamping: column),
-            UInt16(clamping: row),
+            UInt16(clamping: cell.column),
+            UInt16(clamping: cell.row),
             false
         )
+        if phase == 2 {
+            let stationary = gesture.state == .ended && selectionOrigin == cell
+            selectionOrigin = nil
+            if stationary {
+                onFocus?()
+            }
+        }
     }
 
     @objc private func zoom(_ gesture: UIPinchGestureRecognizer) {

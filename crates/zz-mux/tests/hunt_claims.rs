@@ -88,7 +88,7 @@ fn attaching_client_flag_values_reach_the_daemon_effect_without_mux_interpretati
 
 #[test]
 fn catalog_covers_the_options_the_handlers_read() {
-    assert_eq!(COMMAND_SPECS.len(), 76);
+    assert_eq!(COMMAND_SPECS.len(), 77);
     for name in ["kill-session", "kill-window", "kill-pane"] {
         let spec = COMMAND_SPECS
             .iter()

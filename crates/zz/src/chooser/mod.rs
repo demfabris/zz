@@ -67,6 +67,12 @@ pub(crate) trait ChooserSpec: Default + 'static {
     }
     fn synchronize_local(&mut self, _: &Self::State, _: &MuxClient) {}
     fn search(state: &Self::State) -> Option<ChooserSearch<'_>>;
+    /// The single-key confirmation the daemon's chooser session owns. Every key
+    /// still goes to the daemon while it stands, so a client that does not draw
+    /// it answers a kill the viewer never saw.
+    fn prompt(_: &Self::State) -> Option<&str> {
+        None
+    }
     fn title(state: &Self::State) -> &'static str;
     fn subtitle(state: &Self::State, count: usize) -> String;
     fn row(
@@ -340,6 +346,7 @@ impl<S: ChooserSpec> Render for Chooser<S> {
             close,
             TERMINAL_FONT,
         )
+        .prompt(S::prompt(&state).map(|prompt| prompt.to_owned().into()))
         .search(search)
         .hints(S::HINTS);
 

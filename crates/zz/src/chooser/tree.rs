@@ -80,6 +80,10 @@ impl ChooserSpec for TreeChooser {
         })
     }
 
+    fn prompt(state: &Self::State) -> Option<&str> {
+        (!state.prompt.is_empty()).then_some(state.prompt.as_str())
+    }
+
     fn title(state: &Self::State) -> &'static str {
         match state.kind {
             ChooseTreeKind::Windows => "Choose window",
@@ -170,6 +174,7 @@ fn tree_row_element(
         ChooseTreePaneKind::Editor => ChooserPaneKind::Editor,
     });
     let active = item.active();
+    let tagged = item.tagged();
     let (label, detail) = tree_row_text(&item);
     tree_chooser_row(
         TreeChooser::ROW_ID,
@@ -183,6 +188,7 @@ fn tree_row_element(
         disclosure,
         pane_kind,
         active,
+        tagged,
         selected,
         theme,
         TERMINAL_FONT,

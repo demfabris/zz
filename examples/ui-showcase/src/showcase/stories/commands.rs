@@ -220,6 +220,7 @@ fn tree_row(
         },
         pane_kind,
         target == "%1",
+        false,
         selected,
         ChooserRowTheme::from_theme(cx),
         cx.theme().mono_font_family.clone(),

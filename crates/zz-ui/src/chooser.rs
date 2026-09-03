@@ -66,6 +66,7 @@ pub struct ChooserModal {
     dimensions: ChooserDimensions,
     rows: AnyElement,
     close: AnyElement,
+    prompt: Option<SharedString>,
     search: Option<ChooserSearch>,
     hints: &'static [ChooserHint],
     font_family: SharedString,
@@ -88,10 +89,20 @@ impl ChooserModal {
             dimensions,
             rows: rows.into_any_element(),
             close: close.into_any_element(),
+            prompt: None,
             search: None,
             hints: &[],
             font_family: font_family.into(),
         }
+    }
+
+    /// The single-key confirmation the mode owns, drawn above the rows the way
+    /// `mode_tree_draw` puts `mtd->prompt` there. Rows keep answering keys
+    /// while it stands, so a client that does not draw it kills silently.
+    #[must_use]
+    pub fn prompt(mut self, prompt: Option<SharedString>) -> Self {
+        self.prompt = prompt;
+        self
     }
 
     #[must_use]
@@ -159,6 +170,19 @@ impl RenderOnce for ChooserModal {
                     .child(div().flex_1())
                     .child(self.close),
             )
+            .children(self.prompt.map(|prompt| {
+                div()
+                    .flex_none()
+                    .px(px(16.0))
+                    .py(px(9.0))
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().background.raised(2))
+                    .font_family(self.font_family.clone())
+                    .text_size(crate::rems_from_px(11.0))
+                    .text_color(cx.theme().foreground)
+                    .child(prompt)
+            }))
             .child(
                 div()
                     .flex()
@@ -292,6 +316,7 @@ fn chooser_key_cell(
         .child(chooser_key_label(key))
 }
 
+#[allow(clippy::fn_params_excessive_bools)]
 pub fn tree_chooser_row(
     id: &'static str,
     index: usize,
@@ -304,6 +329,7 @@ pub fn tree_chooser_row(
     disclosure: impl Into<SharedString>,
     pane_kind: Option<ChooserPaneKind>,
     active: bool,
+    tagged: bool,
     selected: bool,
     theme: ChooserRowTheme,
     font_family: impl Into<SharedString>,
@@ -392,6 +418,16 @@ pub fn tree_chooser_row(
                             ChooserPaneKind::Editor => "EDIT",
                         })
                 }))
+                .when(tagged, |row| {
+                    row.child(
+                        Tag::primary()
+                            .small()
+                            .ml(px(8.0))
+                            .font_family(font_family.clone())
+                            .text_size(crate::rems_from_px(9.0))
+                            .child("TAGGED"),
+                    )
+                })
                 .when(active, |row| {
                     row.child(
                         Tag::success()

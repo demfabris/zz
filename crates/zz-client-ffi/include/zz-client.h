@@ -187,6 +187,7 @@ typedef enum zz_event_kind {
     ZZ_EVENT_AGENT_UPDATES = 18,
     ZZ_EVENT_AGENT_LAGGED = 19,
     ZZ_EVENT_AGENT_SESSIONS = 20,
+    ZZ_EVENT_COMMAND_REPLY = 21,
 } zz_event_kind;
 
 typedef struct zz_client_event {
@@ -220,8 +221,15 @@ bool zz_client_send_key(zz_client *client, uint64_t pane, uint32_t code,
                         uint32_t codepoint, uint8_t function, uint32_t action,
                         uint8_t modifiers, const char *text,
                         bool text_follows);
+/* Execute a tmux-style command and throw the reply away. */
 bool zz_client_execute(zz_client *client, const char *name,
                        const char *const *args, size_t args_len);
+/* Execute a tmux-style command and return the request id its reply carries;
+ * 0 when the request could not be sent. The daemon answers every command, so
+ * a ZZ_EVENT_COMMAND_REPLY follows: pop it with
+ * zz_client_command_reply_next and match the request id. */
+uint64_t zz_client_execute_request(zz_client *client, const char *name,
+                                   const char *const *args, size_t args_len);
 bool zz_client_resize_terminal(zz_client *client, uint64_t pane,
                                uint16_t columns, uint16_t rows,
                                uint32_t cell_width_px, uint32_t cell_height_px);
@@ -428,6 +436,23 @@ void zz_clipboard_release(zz_clipboard *clipboard);
 uint64_t zz_clipboard_pane(const zz_clipboard *clipboard);
 uint64_t zz_clipboard_request_id(const zz_clipboard *clipboard);
 zz_bytes zz_clipboard_text(const zz_clipboard *clipboard);
+
+/* One executed command's answer. Pop the oldest with
+ * zz_client_command_reply_next (NULL when none is queued), read it with the
+ * accessors below, then free it with zz_command_reply_release. Output is the
+ * text the verb prints (show-last-output, display-message -p, list-sessions,
+ * ...); error carries the rendered server error and is empty on success.
+ * Both borrow the reply and die with it. The queue keeps the 64 newest
+ * unread replies, so drain it whenever you care about one. */
+typedef struct zz_command_reply zz_command_reply;
+
+zz_command_reply *zz_client_command_reply_next(zz_client *client);
+void zz_command_reply_release(zz_command_reply *reply);
+uint64_t zz_command_reply_request_id(const zz_command_reply *reply);
+bool zz_command_reply_ok(const zz_command_reply *reply);
+uint8_t zz_command_reply_exit_code(const zz_command_reply *reply);
+zz_bytes zz_command_reply_output(const zz_command_reply *reply);
+zz_bytes zz_command_reply_error(const zz_command_reply *reply);
 
 /* Caller-owned viewport snapshot; NULL when the pane holds none. Cheap to
  * acquire (shared immutable planes) and stable until released. */

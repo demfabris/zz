@@ -12,6 +12,7 @@
 static const char READY[] = "zz-smoke-ready";
 static const char PREVIEW_READY[] = "zz-preview-ready";
 static const char TYPED[] = "hello-from-c";
+static const char REPLY_TEXT[] = "zz-reply-from-c";
 
 static int bytes_equal(zz_bytes value, const char *expected) {
     size_t expected_len = strlen(expected);
@@ -87,6 +88,27 @@ static int wait_for_attached_shape(zz_client *client, const char *excluded_name,
         (void)poll(&wake, 1, 50);
     }
     return 0;
+}
+
+/* Drain replies until the one this request id owns turns up; the caller
+ * releases it. Replies for other commands are freed on the way past. */
+static zz_command_reply *wait_for_command_reply(zz_client *client,
+                                                uint64_t request_id) {
+    struct pollfd wake = {.fd = zz_client_event_fd(client), .events = POLLIN};
+    for (int attempt = 0; attempt < 400; attempt++) {
+        zz_client_event event;
+        while (zz_client_next_event(client, &event)) {
+        }
+        zz_command_reply *reply = NULL;
+        while ((reply = zz_client_command_reply_next(client)) != NULL) {
+            if (zz_command_reply_request_id(reply) == request_id) {
+                return reply;
+            }
+            zz_command_reply_release(reply);
+        }
+        (void)poll(&wake, 1, 50);
+    }
+    return NULL;
 }
 
 static int wait_for_detached_shape(zz_client *client, size_t session_count) {
@@ -351,6 +373,48 @@ int main(int argc, char **argv) {
                                  &recovered_session, &recovered_pane) ||
         recovered_pane != pane || !wait_for_text(client, recovered_pane, READY)) {
         fprintf(stderr, "smoke: surviving session viewport did not recover\n");
+        return 1;
+    }
+
+    const char *printed[] = {"-p", "-l", REPLY_TEXT};
+    uint64_t printed_request =
+        zz_client_execute_request(client, "display-message", printed, 3);
+    if (printed_request == 0) {
+        fprintf(stderr, "smoke: printing command send failed\n");
+        return 1;
+    }
+    zz_command_reply *reply = wait_for_command_reply(client, printed_request);
+    if (reply == NULL) {
+        fprintf(stderr, "smoke: printing command never replied\n");
+        return 1;
+    }
+    int printed_ok = zz_command_reply_ok(reply) &&
+                     zz_command_reply_exit_code(reply) == 0 &&
+                     zz_command_reply_error(reply).len == 0 &&
+                     bytes_equal(zz_command_reply_output(reply), REPLY_TEXT);
+    zz_command_reply_release(reply);
+    if (!printed_ok) {
+        fprintf(stderr, "smoke: printed command reply text is wrong\n");
+        return 1;
+    }
+
+    uint64_t rejected_request =
+        zz_client_execute_request(client, "show-last-output", NULL, 0);
+    if (rejected_request == 0) {
+        fprintf(stderr, "smoke: show-last-output send failed\n");
+        return 1;
+    }
+    reply = wait_for_command_reply(client, rejected_request);
+    if (reply == NULL) {
+        fprintf(stderr, "smoke: show-last-output never replied\n");
+        return 1;
+    }
+    int rejection_reported = !zz_command_reply_ok(reply) &&
+                             zz_command_reply_exit_code(reply) == 1 &&
+                             zz_command_reply_error(reply).len > 0;
+    zz_command_reply_release(reply);
+    if (!rejection_reported) {
+        fprintf(stderr, "smoke: rejected command carried no error text\n");
         return 1;
     }
 

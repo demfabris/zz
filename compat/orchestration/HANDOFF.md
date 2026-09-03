@@ -1,10 +1,10 @@
-# Paused handoff for the tmux-compat campaign (after cycle 10)
+# Handoff for the tmux-compat campaign (after cycle 10)
 
-Written 2026-09-03 ~00:40Z on the ubuntu box. Cycle 10's queue and copy lanes are merged and
-ledgered (`origin/main` `2af51ff`, meter 96.1%). The third lane (client: the four popup items) is
-reviewed, rebased and pushed but NOT gated: fabrico paused for a machine move while its gate was
-twenty minutes in. The board is idle (MAIN and TRIAGE free, no lane locks held), no renewer runs,
-and local `main` on this box matches `origin/main` plus the records commit that carries this file.
+Written 2026-09-03 ~00:40Z on the ubuntu box and updated the same day after the client gate.
+Cycle 10 is fully integrated: the queue and copy lanes merged at `2af51ff`, and the client lane
+(the four popup items) merged at `9ddeae0` in a follow-up gate, after `origin/main` had taken 22
+non-campaign commits. Meter 97.4%. The board is idle again (MAIN and TRIAGE free, no lane locks
+held) and no renewer runs.
 
 The standing instruction from fabrico (2026-09-02) is "turn on the goal and go all the way": run
 cycles until the registry is closed, taking the product decisions the earlier handoff had parked
@@ -54,39 +54,35 @@ read. The desktop GPUI app keeps its own look entirely.
 
 | Fact | Value |
 | --- | --- |
-| `origin/main` | `2af51ff` (cycle-10 ledger; lanes `fd19cce` queue, `cd03bb8` copy) plus this records commit |
-| Agreed-scope meter | 96.1% (292/304 items), 58/65 groups done, 5 partially burned; `python3 compat/progress.py`. The unmerged client lane holds four more items (`display-popup.behavior-fidelity`), which would make it 97.4% |
-| Live registry | 7 open groups, 0 blocked, 12 items (6 groups / 8 items once the client lane lands); 166 closed records, 42 accepted groups |
-| Corpus | 207 scenarios / 2,586 steps, attached-client PASS (recorded on this box) |
-| `PROTOCOL_VERSION` | 96 (hex hello frame 0x60, test `..._ninety_six`), two v96 changelog bullets on main (`CommandQueueParked`, `CopyModeAction::Search`); the client lane adds a third v96 bullet (`PopupAction::Pointer`); the next wire change AFTER that bumps to 97 (0x61) |
-| Unmerged work | `campaign/batch-client-choosers-popups-opus` (`ff66ddc`, the worker's tip) and `campaign/batch-client-choosers-popups-opus-gated` (`affcfc9`, the same four commits rebased onto `2af51ff`, no fixes applied). Review: approve-with-fixes, six must-fixes, embedded in `opus-compat-run-10b.js` |
-| Board (issue #7) | MAIN and TRIAGE free. `F-PANE-COMMAND-COMPLETION` and `F-COPY-SEARCH-FORMATS-MONITORS` INTEGRATED; `F-CLIENT-CHOOSERS-POPUPS-V2` released with the pause note (reads READY); the `F-SPLIT-MUX-*-V5` chain untouched |
+| `origin/main` | `9ddeae0` (cycle-10 client merge; lanes `fd19cce` queue, `cd03bb8` copy, `9ddeae0` client) plus the ledger recompute |
+| Agreed-scope meter | 97.4% (296/304 items), 59/65 groups done, 4 partially burned; `python3 compat/progress.py` |
+| Live registry | 6 open groups, 0 blocked, 8 items; 167 closed records, 42 accepted groups |
+| Corpus | 212 scenarios / 2,601 steps, attached-client PASS (recorded on this box) |
+| `PROTOCOL_VERSION` | 96 (hex hello frame 0x60, test `..._ninety_six`), three v96 changelog bullets on main (`CommandQueueParked`, `CopyModeAction::Search`, `PopupAction::Pointer`); the next wire change bumps to 97 (0x61) |
+| Unmerged work | None. `campaign/batch-client-choosers-popups-opus` stays at `ff66ddc` and `...-gated` at `affcfc9`; neither was force-pushed, and both are history now that the rebased tip plus the six must-fixes landed as `9ddeae0` |
+| Board (issue #7) | MAIN and TRIAGE free. `F-PANE-COMMAND-COMPLETION`, `F-COPY-SEARCH-FORMATS-MONITORS` and `F-CLIENT-CHOOSERS-POPUPS-V2` all INTEGRATED and released; the `F-SPLIT-MUX-*-V5` chain untouched |
 | Remotes | SSH (`git@github.com:demfabris/zz.git`) works on the ubuntu box; the macbook was switched to HTTPS through gh's credential helper in cycle 7 |
 
-## First task on the next machine: land the client lane
+## The client lane landed (2026-09-03)
 
-Nothing needs rewriting. After the machine checklist below:
+`opus-compat-run-10b.js` ran its `stage: "gate"` on the ubuntu box and the lane is merged at
+`9ddeae0`. All six reviewer must-fixes went in first, each with the reviewer's measurement
+reproduced by reverting the fix: `menu_add_item` drops a row whose format expands empty instead of
+turning it into a separator; a popup-owned `MenuSession` leaves with the popup; `popup_pointer`
+records the previous report on every report the way `tty_keys_mouse` refreshes `tty->mouse_last_*`;
+`Fill Space` stops resizing the popup's job; neither `Fill Space` nor `Centre` rewrites
+`ppx`/`ppy`/`psx`/`psy`; and the `ProtocolMessage::Popup` schema row gained its v96 `Pointer`
+variant. New scenario `smoke/display-popup-menu-policy` pins the last three on both binaries.
 
-```js
-Workflow({
-  scriptPath: "<checkout>/compat/orchestration/opus-compat-run-10b.js",
-  args: { stage: "gate", root: "<checkout>", dev: "<dir holding the checkout>", holder: "<host>/orchestrator",
-          machine: "...", cores: N, workerJobs: ..., workerThreads: ..., gateJobs: ..., gateThreads: ..., shards: ...,
-          protected: "...", bash: "/bin/bash", boxNote: "...", gitNote: "..." }
-})
-```
+Three corpus rows fail on this box and are NOT any lane's: `smoke/format-modifier-interrogate`,
+`smoke/pane-engine-knobs-input` and `smoke/remain-on-exit-format`. The client gate re-ran all three
+alone and again in a baseline worktree at `origin/main`, where they fail identically, two of them
+on the pin side only. Treat them as this box's terminfo and signal-name environment.
 
-`stage: "gate"` skips the review agent and uses the embedded verdict; the gate fetches the
-`-gated` branch, rebases it onto the current `origin/main`, applies the six must-fixes with the
-reviewer's probes re-run, runs the workspace gate and the sharded delta corpus, pushes main,
-ledgers `F-CLIENT-CHOOSERS-POPUPS-V2` (claim it under your holder first, `--lease 3h`), and adds
-the client merge to the cycle-10 checkpoint table in `TMUX_COMPAT_TRACKER.md`. Omit the machine
-args on the ubuntu box. About an hour; one Fable agent.
-
-## What is left after that, and what a cycle 11 could take
+## What is left, and what a cycle 11 could take
 
 The census is `compat/tmux-gaps.json` gaps with status open (nothing is blocked); every reason
-carries the measurement and the recipe. Eight items in six groups once the client lane lands:
+carries the measurement and the recipe. Eight items in six groups:
 
 | Group | Items | Standing |
 | --- | --- | --- |
@@ -159,7 +155,7 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
    (`systemd-inhibit` from a non-tty shell did not stay up on the ubuntu box).
 6. Optional: carry the orchestrator's memory over as described under "Moving the Claude Code
    session itself". The repository and the board are the durable state.
-7. First task: the client gate above. Then the census.
+7. First task: the census below; the client gate that used to stand here is done.
 
 ## Machine notes
 
@@ -167,8 +163,8 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
   and 10. SSH origin works. Worktrees `~/dev/zz-opus-dint`, `~/dev/zz-opus-panes`,
   `~/dev/zz-opus-termopts` are clean and warm at the cycle-10 lane tips (20-30 GB targets each;
   reuse with `git checkout --detach origin/main`); `~/dev/zz-review-client`, `~/dev/zz-review-dint`,
-  `~/dev/zz-review-copy` are review scratch; `~/dev/zz-gate-client` holds the rebased client tip
-  (`affcfc9`, same as the `-gated` branch) and `~/dev/zz-gate-target` (47 GB) is the shared gate
+  `~/dev/zz-review-copy` are review scratch; the client gate's `~/dev/zz-gate-client` worktree was
+  removed after the merge, and `~/dev/zz-gate-target` (47 GB) is the shared gate
   build dir with a reflinked ghostty source at `zz-gate-target/ghostty-src` for
   `GHOSTTY_SOURCE_DIR`; the queue and copy gate worktrees were removed. Three compat rows are red
   here before any lane and pass `--check-summary` only because the stored summary tolerates them:

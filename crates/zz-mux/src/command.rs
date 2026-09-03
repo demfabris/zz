@@ -247,6 +247,14 @@ const HOOK_CONTEXT_FORMAT: &str = "hook";
 const HOOK_ARGUMENTS_CONTEXT_FORMAT: &str = "hook_arguments";
 const HOOK_ARGUMENT_CONTEXT_PATTERN: &str = "hook_argument_N";
 const HOOK_ARGUMENT_CONTEXT_PREFIX: &str = "hook_argument_";
+const HOOK_LAST_CONTEXT_FORMAT: &str = "hook_last";
+const HOOK_PANE_CONTEXT_FORMAT: &str = "hook_pane";
+const HOOK_SESSION_CONTEXT_FORMAT: &str = "hook_session";
+const HOOK_SESSION_NAME_CONTEXT_FORMAT: &str = "hook_session_name";
+const HOOK_VALUE_CONTEXT_FORMAT: &str = "hook_value";
+const HOOK_WINDOW_CONTEXT_FORMAT: &str = "hook_window";
+const HOOK_WINDOW_INDEX_CONTEXT_FORMAT: &str = "hook_window_index";
+const HOOK_WINDOW_NAME_CONTEXT_FORMAT: &str = "hook_window_name";
 const HOOK_FLAG_CONTEXT_PATTERN: &str = "hook_flag_X";
 const HOOK_FLAG_CONTEXT_PREFIX: &str = "hook_flag_";
 const HOOK_FLAG_VALUE_CONTEXT_PATTERN: &str = "hook_flag_X_N";
@@ -288,6 +296,21 @@ const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
         COMMAND_ITEM_CONTEXT_FORMATS,
     ),
     ("notify.c", "notify_hook", &[HOOK_CONTEXT_FORMAT]),
+    (
+        "notify.c",
+        "notify_monitor_cb",
+        &[
+            HOOK_CONTEXT_FORMAT,
+            HOOK_LAST_CONTEXT_FORMAT,
+            HOOK_PANE_CONTEXT_FORMAT,
+            HOOK_SESSION_CONTEXT_FORMAT,
+            HOOK_SESSION_NAME_CONTEXT_FORMAT,
+            HOOK_VALUE_CONTEXT_FORMAT,
+            HOOK_WINDOW_CONTEXT_FORMAT,
+            HOOK_WINDOW_INDEX_CONTEXT_FORMAT,
+            HOOK_WINDOW_NAME_CONTEXT_FORMAT,
+        ],
+    ),
     (
         "window-copy.c",
         "window_copy_formats",
@@ -383,21 +406,7 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
         ],
     ),
 ];
-const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[(
-    "notify.c",
-    "notify_monitor_cb",
-    &[
-        "hook",
-        "hook_last",
-        "hook_pane",
-        "hook_session",
-        "hook_session_name",
-        "hook_value",
-        "hook_window",
-        "hook_window_index",
-        "hook_window_name",
-    ],
-)];
+const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[];
 const MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[];
 
 #[doc(hidden)]
@@ -1482,6 +1491,105 @@ pub(crate) enum TmuxOptionTarget {
     Pane(PaneId),
 }
 
+/// The subscribed set of a `set-hook -B name:what:format` monitor, from
+/// `monitor_parse`: `%*` all panes, `%N` one pane, `@*` all windows, `@N` one
+/// window, and anything else the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FormatMonitorScope {
+    Session,
+    Pane(PaneId),
+    AllPanes,
+    Window(WindowId),
+    AllWindows,
+}
+
+/// One object a monitor's format is re-expanded against on each tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FormatMonitorTarget {
+    pub session: Option<SessionId>,
+    pub window: Option<WindowId>,
+    pub pane: Option<PaneId>,
+}
+
+/// A live monitor as the daemon's tick sees it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FormatMonitor {
+    pub id: u64,
+    pub name: String,
+    pub scope: FormatMonitorScope,
+    pub format: String,
+    pub session: Option<SessionId>,
+}
+
+#[derive(Debug)]
+struct FormatMonitorEntry {
+    id: u64,
+    name: String,
+    target: TmuxOptionTarget,
+    scope: FormatMonitorScope,
+    format: String,
+    session: Option<SessionId>,
+    previous: BTreeMap<FormatMonitorTarget, String>,
+}
+
+fn scanned_object_id(text: &str) -> Option<u64> {
+    let digits = text
+        .char_indices()
+        .take_while(|(_, character)| character.is_ascii_digit())
+        .count();
+    if digits == 0 {
+        return None;
+    }
+    text[..digits].parse().ok()
+}
+
+fn format_monitor_scope(what: &str) -> FormatMonitorScope {
+    if what == "%*" {
+        return FormatMonitorScope::AllPanes;
+    }
+    if let Some(rest) = what.strip_prefix('%')
+        && let Some(id) = scanned_object_id(rest)
+    {
+        return FormatMonitorScope::Pane(PaneId(id));
+    }
+    if what == "@*" {
+        return FormatMonitorScope::AllWindows;
+    }
+    if let Some(rest) = what.strip_prefix('@')
+        && let Some(id) = scanned_object_id(rest)
+    {
+        return FormatMonitorScope::Window(WindowId(id));
+    }
+    FormatMonitorScope::Session
+}
+
+/// `monitor_parse`: split on the first two colons into name, what and format,
+/// and fail without both colons.
+fn parse_format_monitor(value: &str) -> Option<(String, FormatMonitorScope, String)> {
+    let mut fields = value.splitn(3, ':');
+    let name = fields.next()?;
+    let what = fields.next()?;
+    let format = fields.next()?;
+    Some((
+        name.to_owned(),
+        format_monitor_scope(what),
+        format.to_owned(),
+    ))
+}
+
+/// `notify_monitor_to_string`: the subscription read back as
+/// `name:what:format`.
+fn format_monitor_display(name: &str, scope: FormatMonitorScope, format: &str) -> String {
+    let what = match scope {
+        FormatMonitorScope::Session => String::new(),
+        FormatMonitorScope::Pane(pane) => format!("%{}", pane.0),
+        FormatMonitorScope::AllPanes => "%*".to_owned(),
+        FormatMonitorScope::Window(window) => format!("@{}", window.0),
+        FormatMonitorScope::AllWindows => "@*".to_owned(),
+    };
+    format!("{name}:{what}:{format}")
+}
+
 #[derive(Clone, Copy)]
 enum ShowOptionArgument {
     Expand,
@@ -1850,6 +1958,8 @@ pub struct MuxEngine {
     experimental_agent_pane: bool,
     experimental_editor_pane: bool,
     agent: AgentOptions,
+    format_monitors: Vec<FormatMonitorEntry>,
+    next_format_monitor_id: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -2125,6 +2235,8 @@ impl Default for MuxEngine {
             experimental_agent_pane: false,
             experimental_editor_pane: false,
             agent: AgentOptions::default(),
+            format_monitors: Vec::new(),
+            next_format_monitor_id: 0,
         }
     }
 }
@@ -8390,8 +8502,25 @@ impl MuxEngine {
             .len()
             .saturating_sub(parsed_options.positionals.len());
         let (options, positional) = parse_command_options("set-hook", &invocation.args)?;
-        if options.value("-B").is_some() {
-            return Err(ServerError::CommandParse("invalid flag -B".to_owned()));
+        if let Some(subscription) = options.value("-B") {
+            let subscription = subscription.to_owned();
+            if positional.len() > 1 {
+                return Err(ServerError::CommandParse("too many arguments".to_owned()));
+            }
+            let body = positional
+                .first()
+                .map(|value| {
+                    if invocation.argument_is_command_block(positional_start) {
+                        normalize_typed_command_block(
+                            self,
+                            crate::parser::command_block_body(value).unwrap_or(value),
+                        )
+                    } else {
+                        Ok(value.clone())
+                    }
+                })
+                .transpose()?;
+            return self.set_hook_monitor(context, &options, body.as_deref(), &subscription);
         }
         let Some(argument) = positional.first() else {
             return Err(ServerError::CommandParse("missing argument".to_owned()));
@@ -8486,6 +8615,240 @@ impl MuxEngine {
         let target =
             self.resolve_tmux_option_target(context, &options, false, table_option.scope)?;
         self.set_hook_array_option(target, table_option.name, parsed.index, value, &options)
+    }
+
+    fn set_hook_monitor(
+        &mut self,
+        context: &ExecutionContext,
+        options: &Options,
+        body: Option<&str>,
+        subscription: &str,
+    ) -> Result<Execution, ServerError> {
+        let unset = options.has("-u");
+        let (name, scope, format) = match parse_format_monitor(subscription) {
+            Some(parsed) => parsed,
+            None if unset => (
+                subscription.to_owned(),
+                FormatMonitorScope::Session,
+                String::new(),
+            ),
+            None => {
+                return Err(ServerError::InvalidCommand(format!(
+                    "invalid subscription: {subscription}"
+                )));
+            }
+        };
+        if !name.starts_with('@') {
+            return Err(ServerError::InvalidCommand(
+                "monitor hook name must start with @".to_owned(),
+            ));
+        }
+        let target = self.resolve_user_option_target(context, options, false)?;
+        if unset {
+            self.format_monitors
+                .retain(|monitor| monitor.target != target || monitor.name != name);
+            return Ok(Execution::default());
+        }
+        let mut execution = Execution::default();
+        if let Some(body) = body {
+            let already = self.user_option_at_target(target, &name).is_some();
+            if !options.has("-o") || !already {
+                let value = if options.has("-a") {
+                    let old = self
+                        .user_option_at_target(target, &name)
+                        .unwrap_or_default();
+                    format!("{old}{body}")
+                } else {
+                    body.to_owned()
+                };
+                self.user_options_at_target_mut(target)
+                    .insert(name.clone(), value);
+                execution = self.user_option_changed(context, target, &name);
+            }
+        } else if self.user_option_at_target(target, &name).is_none() {
+            self.user_options_at_target_mut(target)
+                .insert(name.clone(), String::new());
+        }
+        self.format_monitors
+            .retain(|monitor| monitor.target != target || monitor.name != name);
+        let id = self.next_format_monitor_id;
+        self.next_format_monitor_id += 1;
+        self.format_monitors.push(FormatMonitorEntry {
+            id,
+            name,
+            target,
+            scope,
+            format,
+            session: context.session,
+            previous: BTreeMap::new(),
+        });
+        Ok(execution)
+    }
+
+    fn show_hooks_monitor(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+        argument: Option<&String>,
+    ) -> Result<Execution, ServerError> {
+        let target = self.hook_listing_target(context, options)?;
+        let mut monitors = self
+            .format_monitors
+            .iter()
+            .filter(|monitor| monitor.target == target)
+            .collect::<Vec<_>>();
+        monitors.sort_by(|left, right| left.name.cmp(&right.name));
+        let Some(argument) = argument else {
+            let lines = monitors
+                .into_iter()
+                .map(|monitor| {
+                    format_monitor_display(&monitor.name, monitor.scope, &monitor.format)
+                })
+                .collect::<Vec<_>>();
+            return Ok(Execution::output(lines.join("\n")));
+        };
+        let parsed = parse_tmux_option(argument)
+            .map_err(|()| ServerError::InvalidCommand(format!("invalid option: {argument}")))?;
+        if let Some(monitor) = monitors
+            .into_iter()
+            .find(|monitor| monitor.name == parsed.name)
+        {
+            return Ok(Execution::output(format_monitor_display(
+                &monitor.name,
+                monitor.scope,
+                &monitor.format,
+            )));
+        }
+        if parsed.name.starts_with('@') && self.user_option_at_target(target, parsed.name).is_none()
+        {
+            return Err(ServerError::InvalidCommand(format!(
+                "invalid option: {argument}"
+            )));
+        }
+        Ok(Execution::default())
+    }
+
+    /// The live `set-hook -B` subscriptions, for the daemon's one-second tick.
+    #[must_use]
+    pub fn format_monitors(&self) -> Vec<FormatMonitor> {
+        self.format_monitors
+            .iter()
+            .map(|monitor| FormatMonitor {
+                id: monitor.id,
+                name: monitor.name.clone(),
+                scope: monitor.scope,
+                format: monitor.format.clone(),
+                session: monitor.session,
+            })
+            .collect()
+    }
+
+    /// `monitor_check_value`: the first sample of an object records the
+    /// baseline and reports nothing, and a later sample reports the previous
+    /// string only when the new one differs.
+    pub fn record_format_monitor_sample(
+        &mut self,
+        id: u64,
+        target: FormatMonitorTarget,
+        value: &str,
+    ) -> Option<String> {
+        let monitor = self
+            .format_monitors
+            .iter_mut()
+            .find(|monitor| monitor.id == id)?;
+        match monitor.previous.insert(target, value.to_owned()) {
+            Some(last) if last != value => Some(last),
+            Some(_) | None => None,
+        }
+    }
+
+    /// `monitor_sweep_all_panes` and `monitor_sweep_all_windows`: an all-panes
+    /// or all-windows subscription forgets the baseline of every object the
+    /// scan did not see.
+    pub fn sweep_format_monitor_targets(&mut self, id: u64, seen: &BTreeSet<FormatMonitorTarget>) {
+        let Some(monitor) = self
+            .format_monitors
+            .iter_mut()
+            .find(|monitor| monitor.id == id)
+        else {
+            return;
+        };
+        if !matches!(
+            monitor.scope,
+            FormatMonitorScope::AllPanes | FormatMonitorScope::AllWindows
+        ) {
+            return;
+        }
+        monitor.previous.retain(|target, _| seen.contains(target));
+    }
+
+    /// `notify_insert_hook`: a monitor's hook body is the value of its own
+    /// option on the store the subscription was created against.
+    #[must_use]
+    pub fn format_monitor_hook_body(&self, id: u64) -> Option<String> {
+        let monitor = self
+            .format_monitors
+            .iter()
+            .find(|monitor| monitor.id == id)?;
+        let value = self.user_option_at_target(monitor.target, &monitor.name)?;
+        if value.is_empty() {
+            return None;
+        }
+        Some(value.to_owned())
+    }
+
+    /// `notify_parse_hook` with `expand` set, which `notify_monitor_add` always
+    /// asks for: a monitor body is format-expanded and only then parsed.
+    #[must_use]
+    pub fn parse_monitor_hook_body(&self, body: &str) -> Option<Vec<Vec<CommandInvocation>>> {
+        if body.is_empty() {
+            return None;
+        }
+        let commands = parse_hook_commands(self, body).ok()?;
+        Some(vec![commands])
+    }
+
+    /// `notify_monitor_cb`: the nine names a monitor's hook body sees, each
+    /// left out where the change's scope has no such object.
+    #[must_use]
+    pub fn format_monitor_hook_variables(
+        &self,
+        name: &str,
+        value: &str,
+        last: &str,
+        target: FormatMonitorTarget,
+    ) -> BTreeMap<String, String> {
+        let mut variables = BTreeMap::from([
+            (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
+            (HOOK_VALUE_CONTEXT_FORMAT.to_owned(), value.to_owned()),
+            (HOOK_LAST_CONTEXT_FORMAT.to_owned(), last.to_owned()),
+        ]);
+        if let Some(session) = target.session {
+            variables.insert(HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string());
+            if let Some(state) = self.state.sessions.get(&session) {
+                variables.insert(
+                    HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
+                    state.name.clone(),
+                );
+            }
+        }
+        if let Some(window) = target.window {
+            variables.insert(HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string());
+            if let Some(state) = self.state.windows.get(&window) {
+                variables.insert(
+                    HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                    state.name.clone(),
+                );
+                variables.insert(
+                    HOOK_WINDOW_INDEX_CONTEXT_FORMAT.to_owned(),
+                    state.index.to_string(),
+                );
+            }
+        }
+        if let Some(pane) = target.pane {
+            variables.insert(HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string());
+        }
+        variables
     }
 
     fn set_hook_array_option(
@@ -9112,7 +9475,10 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("show-hooks", args)?;
         if options.has("-B") {
-            return Err(ServerError::CommandParse("invalid flag -B".to_owned()));
+            if positional.len() > 1 {
+                return Err(ServerError::CommandParse("too many arguments".to_owned()));
+            }
+            return self.show_hooks_monitor(context, &options, positional.first());
         }
         if positional.len() > 1 {
             return Err(ServerError::CommandParse("too many arguments".to_owned()));
@@ -28272,18 +28638,32 @@ mod tests {
         let monitor = CommandInvocation::new(
             "set-hook",
             [
+                "-g",
                 "-B",
-                "@monitor:window:#{window_name}",
-                "{ display-message ignored }",
+                "@monitor:@*:#{window_name}",
+                "{ display-message stored }",
             ],
         )
-        .with_command_blocks([2]);
+        .with_command_blocks([3]);
+        engine
+            .execute(&mut context, &monitor)
+            .expect("format monitor arms");
         assert_eq!(
             engine
-                .execute(&mut context, &monitor)
-                .expect_err("unsupported format monitor")
-                .tmux_message(),
-            "invalid flag -B"
+                .execute(&mut context, &command("show-hooks", &["-g", "-B"]))
+                .expect("monitor readback")
+                .output,
+            "@monitor:@*:#{window_name}"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "-v", "@monitor"])
+                )
+                .expect("monitor body readback")
+                .output,
+            "display-message stored"
         );
     }
 
@@ -29081,7 +29461,12 @@ mod tests {
             (&[] as &[&str], "missing argument", true),
             (&["not-a-hook"], "invalid option: not-a-hook", false),
             (&["after-"], "ambiguous option: after-", false),
-            (&["-B", "name:what:format"], "invalid flag -B", true),
+            (
+                &["-B", "name:what:format"],
+                "monitor hook name must start with @",
+                false,
+            ),
+            (&["-B", "@name"], "invalid subscription: @name", false),
         ] {
             let error = engine
                 .execute(&mut context, &command("set-hook", args))
@@ -29097,10 +29482,13 @@ mod tests {
             Err(ServerError::InvalidCommand(message))
                 if message == "not an array: base-index[0]"
         ));
-        assert!(matches!(
-            engine.execute(&mut context, &command("show-hooks", &["-B"])),
-            Err(ServerError::CommandParse(message)) if message == "invalid flag -B"
-        ));
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-hooks", &["-B"]))
+                .expect("empty monitor listing")
+                .output,
+            String::new()
+        );
 
         let invalid = "display-message \\";
         let expected = crate::parse_config("<set-hook>", invalid)
@@ -29388,6 +29776,209 @@ mod tests {
         assert_eq!(variables["hook_argument_0"], "@name");
         assert_eq!(variables["hook_argument_1"], "two words");
         assert_eq!(variables["hook_flag_g"], "1");
+    }
+
+    #[test]
+    fn format_monitor_subscriptions_follow_monitor_parse_and_check_value() {
+        assert_eq!(parse_format_monitor("nocolons"), None);
+        assert_eq!(parse_format_monitor("one:colon"), None);
+        for (value, scope, readback) in [
+            (
+                "@w:%*:#{pane_title}",
+                FormatMonitorScope::AllPanes,
+                "@w:%*:#{pane_title}",
+            ),
+            (
+                "@w:%0:#{pane_title}",
+                FormatMonitorScope::Pane(PaneId(0)),
+                "@w:%0:#{pane_title}",
+            ),
+            (
+                "@w:%0abc:#{pane_title}",
+                FormatMonitorScope::Pane(PaneId(0)),
+                "@w:%0:#{pane_title}",
+            ),
+            (
+                "@w:@*:#{window_name}",
+                FormatMonitorScope::AllWindows,
+                "@w:@*:#{window_name}",
+            ),
+            (
+                "@w:@7:#{window_name}",
+                FormatMonitorScope::Window(WindowId(7)),
+                "@w:@7:#{window_name}",
+            ),
+            (
+                "@w::#{session_name}",
+                FormatMonitorScope::Session,
+                "@w::#{session_name}",
+            ),
+            (
+                "@w:junk:#{session_name}",
+                FormatMonitorScope::Session,
+                "@w::#{session_name}",
+            ),
+            (
+                "@w:%:#{session_name}",
+                FormatMonitorScope::Session,
+                "@w::#{session_name}",
+            ),
+            (
+                "@w:@-1:#{session_name}",
+                FormatMonitorScope::Session,
+                "@w::#{session_name}",
+            ),
+        ] {
+            let (name, parsed, format) =
+                parse_format_monitor(value).expect("two colons parse a subscription");
+            assert_eq!(name, "@w");
+            assert_eq!(parsed, scope, "{value}");
+            assert_eq!(format_monitor_display(&name, parsed, &format), readback);
+        }
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "mon"]))
+            .expect("session");
+        for (subscription, body) in [
+            ("@watch:@*:#{window_name}", "set -g @fired one"),
+            ("@sess::#{session_name}", "set -g @fired two"),
+            ("@panes:%*:#{pane_title}", "set -g @fired three"),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-hook", &["-B", subscription, body]),
+                )
+                .expect("arm subscription");
+        }
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-hooks", &["-B"]))
+                .expect("listing")
+                .output,
+            "@panes:%*:#{pane_title}\n@sess::#{session_name}\n@watch:@*:#{window_name}"
+        );
+
+        let monitors = engine.format_monitors();
+        assert_eq!(monitors.len(), 3);
+        let watch = monitors
+            .iter()
+            .find(|monitor| monitor.name == "@watch")
+            .expect("window subscription");
+        assert_eq!(watch.scope, FormatMonitorScope::AllWindows);
+        assert_eq!(watch.format, "#{window_name}");
+        assert_eq!(
+            engine.format_monitor_hook_body(watch.id).as_deref(),
+            Some("set -g @fired one")
+        );
+
+        let window = engine.state.windows.keys().copied().next().expect("window");
+        let session = engine.state.windows[&window].session;
+        let target = FormatMonitorTarget {
+            session: Some(session),
+            window: Some(window),
+            pane: None,
+        };
+        assert_eq!(
+            engine.record_format_monitor_sample(watch.id, target, "first"),
+            None
+        );
+        assert_eq!(
+            engine.record_format_monitor_sample(watch.id, target, "first"),
+            None
+        );
+        assert_eq!(
+            engine.record_format_monitor_sample(watch.id, target, "renamed"),
+            Some("first".to_owned())
+        );
+        engine.sweep_format_monitor_targets(watch.id, &BTreeSet::new());
+        assert_eq!(
+            engine.record_format_monitor_sample(watch.id, target, "renamed"),
+            None
+        );
+
+        engine
+            .execute(&mut context, &command("set-hook", &["-u", "-B", "@watch"]))
+            .expect("remove subscription");
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-hooks", &["-B", "@watch"]))
+                .expect("removed listing")
+                .output,
+            String::new()
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("set-hook", &["-Bu", "@watch"]))
+                .expect_err("-B swallows the u")
+                .tmux_message(),
+            "invalid subscription: u"
+        );
+    }
+
+    #[test]
+    fn format_monitor_hook_variables_carry_notify_monitor_cb_names() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "mon"]))
+            .expect("session");
+        let window = engine.state.windows.keys().copied().next().expect("window");
+        let session = engine.state.windows[&window].session;
+        let pane = engine.state.windows[&window].active_pane;
+
+        let variables = engine.format_monitor_hook_variables(
+            "@watch",
+            "renamed",
+            "first",
+            FormatMonitorTarget {
+                session: Some(session),
+                window: Some(window),
+                pane: None,
+            },
+        );
+        assert_eq!(variables["hook"], "@watch");
+        assert_eq!(variables["hook_value"], "renamed");
+        assert_eq!(variables["hook_last"], "first");
+        assert_eq!(variables["hook_window"], window.to_string());
+        assert_eq!(
+            variables["hook_window_name"],
+            engine.state.windows[&window].name
+        );
+        assert_eq!(variables["hook_window_index"], "0");
+        assert_eq!(variables["hook_session"], session.to_string());
+        assert_eq!(variables["hook_session_name"], "mon");
+        assert!(!variables.contains_key("hook_pane"));
+
+        let variables = engine.format_monitor_hook_variables(
+            "@sess",
+            "mon2",
+            "mon",
+            FormatMonitorTarget {
+                session: Some(session),
+                window: None,
+                pane: None,
+            },
+        );
+        assert!(!variables.contains_key("hook_window"));
+        assert!(!variables.contains_key("hook_window_name"));
+        assert!(!variables.contains_key("hook_window_index"));
+        assert!(!variables.contains_key("hook_pane"));
+
+        let variables = engine.format_monitor_hook_variables(
+            "@panes",
+            "after",
+            "before",
+            FormatMonitorTarget {
+                session: Some(session),
+                window: Some(window),
+                pane: Some(pane),
+            },
+        );
+        assert_eq!(variables["hook_pane"], pane.to_string());
+        assert_eq!(variables.len(), 9);
     }
 
     #[test]

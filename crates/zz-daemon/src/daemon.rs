@@ -23,12 +23,13 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     CellLayout, CommandAliasResolution, CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic,
     CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
-    FormatClient, KeyDecision, KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind,
-    PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes, RetainedJobEnvironment, StatusHooks,
-    TmuxColour, TmuxSort, TmuxSortOrder, WindowSize, canonical_command, command_block_body,
-    copy_mode_action_is_read_only_safe, expand_format_values, expand_status, format_command,
-    format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
-    send_keys_is_read_only_safe, send_keys_target_client, validate_static_command_chain,
+    FormatClient, FormatMonitorScope, FormatMonitorTarget, KeyDecision, KeyEngine, KeyTables,
+    MuxEffect, MuxEngine, PaneKind, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes,
+    RetainedJobEnvironment, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
+    canonical_command, command_block_body, copy_mode_action_is_read_only_safe,
+    expand_format_values, expand_status, format_command, format_true, hook_format_variables,
+    if_shell_truthy, parse_tmux_colour, send_keys_is_read_only_safe, send_keys_target_client,
+    validate_static_command_chain,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
@@ -4672,6 +4673,117 @@ impl Shared {
         }
     }
 
+    /// `monitor_timer`: every second each `set-hook -B` subscription
+    /// re-expands its format per subscribed object, and the object whose string
+    /// changed since its baseline runs the subscription's own option value as a
+    /// hook carrying `notify_monitor_cb`'s nine names.
+    fn run_format_monitors(self: &Arc<Self>) {
+        let fires = {
+            let mut inner = self.inner.lock();
+            let monitors = inner.engine.format_monitors();
+            if monitors.is_empty() {
+                return;
+            }
+            inner.engine.set_format_now(unix_timestamp());
+            let base_facts = format_hook_facts(&inner);
+            let mut fires = Vec::new();
+            for monitor in monitors {
+                let Some(session) = monitor
+                    .session
+                    .filter(|session| inner.engine.state.sessions.contains_key(session))
+                    .or_else(|| inner.engine.state.sessions.keys().next().copied())
+                else {
+                    continue;
+                };
+                let scope = match monitor.scope {
+                    FormatMonitorScope::Session => ControlSubscriptionScope::Session,
+                    FormatMonitorScope::Pane(pane) => ControlSubscriptionScope::Pane(pane),
+                    FormatMonitorScope::AllPanes => ControlSubscriptionScope::AllPanes,
+                    FormatMonitorScope::Window(window) => ControlSubscriptionScope::Window(window),
+                    FormatMonitorScope::AllWindows => ControlSubscriptionScope::AllWindows,
+                };
+                let mut seen = BTreeSet::new();
+                let mut samples = Vec::new();
+                for target in control_subscription_targets(&inner, session, scope) {
+                    let mut context = inner.engine.format_status_context(
+                        Some(target.session),
+                        target.window,
+                        target.pane,
+                    );
+                    context.config_files.clone_from(&inner.config_files);
+                    let mut hooks =
+                        DaemonFormatHooks::command(&base_facts).with_option_engine(&inner.engine);
+                    let value = expand_format_values(&monitor.format, &context, &mut hooks);
+                    let key = FormatMonitorTarget {
+                        session: Some(target.session),
+                        window: target.window,
+                        pane: target.pane,
+                    };
+                    seen.insert(key);
+                    samples.push((key, value));
+                }
+                for (key, value) in samples {
+                    if let Some(last) = inner
+                        .engine
+                        .record_format_monitor_sample(monitor.id, key, &value)
+                    {
+                        fires.push((monitor.id, monitor.name.clone(), value, last, key));
+                    }
+                }
+                inner.engine.sweep_format_monitor_targets(monitor.id, &seen);
+            }
+            fires
+        };
+        for (id, name, value, last, key) in fires {
+            let prepared = {
+                let inner = self.inner.lock();
+                let variables = inner
+                    .engine
+                    .format_monitor_hook_variables(&name, &value, &last, key);
+                inner
+                    .engine
+                    .format_monitor_hook_body(id)
+                    .and_then(|body| {
+                        let facts = format_hook_facts(&inner);
+                        let mut format_context =
+                            inner
+                                .engine
+                                .format_status_context(key.session, key.window, key.pane);
+                        format_context.config_files.clone_from(&inner.config_files);
+                        let expanded = {
+                            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                                &facts,
+                                Some(&variables),
+                            )
+                            .with_option_engine(&inner.engine);
+                            expand_format_values(&body, &format_context, &mut hooks)
+                        };
+                        inner.engine.parse_monitor_hook_body(&expanded)
+                    })
+                    .map(|commands| {
+                        let mut context = monitor_hook_context(&inner, key);
+                        context.set_no_client();
+                        context.set_replay_client(None);
+                        context.set_control_command_target(None);
+                        (context, commands, variables)
+                    })
+            };
+            let Some((context, commands, variables)) = prepared else {
+                continue;
+            };
+            self.run_hook_commands_with_policy(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &context,
+                commands,
+                &variables,
+                true,
+                None,
+                false,
+            );
+        }
+    }
+
     fn start_status_sampler(self: &Arc<Self>) -> Result<(), DaemonError> {
         let shared = Arc::downgrade(self);
         thread::Builder::new()
@@ -4687,6 +4799,7 @@ impl Shared {
                         break;
                     }
                     shared.refresh_control_subscriptions();
+                    shared.run_format_monitors();
                     let interval = {
                         let inner = shared.inner.lock();
                         inner
@@ -34211,6 +34324,32 @@ fn control_subscription_target(
     }
 }
 
+fn monitor_hook_context(inner: &ServerState, target: FormatMonitorTarget) -> ExecutionContext {
+    if let Some(pane) = target.pane
+        && let Some(context) = ExecutionContext::for_pane(&inner.engine.state, pane)
+    {
+        return context;
+    }
+    if let Some(window) = target.window
+        && let Some(state) = inner.engine.state.windows.get(&window)
+    {
+        return ExecutionContext::new(Some(state.session), Some(window), Some(state.active_pane));
+    }
+    let Some(session) = target.session else {
+        return ExecutionContext::new(None, None, None);
+    };
+    let Some(state) = inner.engine.state.sessions.get(&session) else {
+        return ExecutionContext::new(Some(session), None, None);
+    };
+    let pane = inner
+        .engine
+        .state
+        .windows
+        .get(&state.active_window)
+        .map(|window| window.active_pane);
+    ExecutionContext::new(Some(session), Some(state.active_window), pane)
+}
+
 fn control_subscription_targets(
     inner: &ServerState,
     session: SessionId,
@@ -35120,7 +35259,9 @@ fn popup_menu_rows(paste: Option<&str>) -> [Option<(String, &'static str)>; 8] {
     [
         Some(("Close".to_owned(), "q")),
         Some((
-            paste.map(|name| format!("Paste {name}")).unwrap_or_default(),
+            paste
+                .map(|name| format!("Paste {name}"))
+                .unwrap_or_default(),
             "p",
         )),
         None,

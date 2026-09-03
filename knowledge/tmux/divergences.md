@@ -83,8 +83,8 @@ waits — they get the pin's clientless errors (scripts are faithful).
 
 `set-hook` / `show-hooks` shipped in wave 5c (`40ddd63`): full 68-name storage
 with pin scope, after-* + command-error + event hooks fire (events clientless
-like the pin), `@`-user hooks share the option slot. Ledgered: `-B` monitors
-are rejected. The 2026-08-27 client hook slice added the six report-driven
+like the pin), `@`-user hooks share the option slot. `-B` format monitors landed
+on 2026-09-03 with the pin's grammar, one-second polling, and nine-name fire. The 2026-08-27 client hook slice added the six report-driven
 client producers. `client-active` fires only when the latest client changes;
 focus, theme, and positive Interactive size reports fire even when repeated.
 Control clients do not originate those reports but can win latest-client
@@ -453,9 +453,9 @@ remain with the parser and command-chain owners.
 The `set-hook` slice of the `set-hook-monitor-or-value` rule closed on 2026-08-28 without another
 wire change. Without `-B`, only value position 1 accepts a typed block or string. The hook name and
 extra positionals remain strings. With `-B`, every positional lexically accepts either type, while
-the `-B` and `-t` option values stay strings. zz still rejects `-B` during execution because it has
-no format-monitor runtime. This closure covers the callback argument rule and leaves monitor
-behavior under its existing owner.
+the `-B` and `-t` option values stay strings. zz executed neither shape until 2026-09-03, when the
+format-monitor runtime landed under `formats.context-producer-fidelity`. This closure covered the
+callback argument rule only.
 
 Every typed child constructs before parent type, arity, or effect validation. Accepted typed values
 normalize through recursive canonical printing before they enter one of three storage paths:
@@ -481,8 +481,8 @@ built-in versus custom quoted braces, replacement and local-inheritance ordering
 forwarding, stored bindings, and exact Control framing. Both servers finish with
 `ARGS_PARSE_SET_HOOK=clean:24`.
 
-Eager whole-file construction, multiline inner-source diagnostic placement, `-B` monitor
-semantics, and broader replay placement retain their existing owners. Slice 10y later closes the
+Eager whole-file construction, multiline inner-source diagnostic placement, and broader replay
+placement retain their existing owners; `-B` monitor semantics closed on 2026-09-03. Slice 10y later closes the
 same-file alias snapshot.
 
 ## `display-menu` argument blocks
@@ -1317,10 +1317,10 @@ panes report `40x24@0,0` and `39x24@41,0`.
   `presentation:border-style-owner-z-order` needs `MuxSnapshot` to transport mutable tiled pane
   z-order, so closing it carries a protocol bump.
 
-## What the last two format gaps need (2026-09-01)
+## What the last two format gaps needed (2026-09-01, monitors closed 2026-09-03)
 
 The `I` modifier and the `notify_monitor_cb` producer are both measured now, and neither is a format
-engine slice.
+engine slice. `I` landed in cycle 10 and the monitor subsystem in cycle 11.
 
 `I` takes one flag word. Against the pin with an 80 by 24 pty client and `FOO` in its environment,
 `#{I/f:RGB}` and `#{I/f:256}` answer `1`, `#{I/f:nosuchfeature}` answers `0`, `#{I/c:smcup}` and
@@ -1342,9 +1342,19 @@ pin, `set-hook -B '@watch:@*:#{window_name}'` fired nothing when it armed, becau
 `notify_monitor_add` passes no `MONITOR_NOTIFY_INITIAL` and the first sample is only a baseline, then
 fired once after `rename-window` with `hook=@watch`, `hook_value=renamed`, `hook_last=bash`,
 `hook_window=@0`, `hook_window_name=renamed`, `hook_window_index=0`, `hook_session=$0`,
-`hook_session_name=mon`, and an empty `hook_pane` for a window-scoped monitor. zz answers
-`invalid flag -B` and exits 1, so the nine names have no monitor to be produced by. Closing it needs
-the monitor subsystem in the daemon and the `-B` grammar in the command layer.
+`hook_session_name=mon`, and an empty `hook_pane` for a window-scoped monitor.
+
+zz carries that subsystem since 2026-09-03. The `monitor_parse` grammar and the
+`notify_monitor_to_string` readback live on `MuxEngine` in `crates/zz-mux/src/command.rs`, the
+one-second tick rides the daemon's existing status sampler thread and reuses
+`control_subscription_targets` for the polling set, `monitor_check_value`'s baseline-then-change
+detection and the all-panes and all-windows sweeps live on the store, and the nine names are a
+producer beside `hook_format_variables` rather than a format-table entry. Two pin facts the first
+reading missed: `set-hook -Bu @watch` removes nothing because `-B` takes a value and swallows the
+`u` (it answers `invalid subscription: u` at status 1) while `set-hook -u -B @watch` removes, and
+`notify_monitor_add` always asks for `ne->expand`, so a monitor body is format-expanded before it is
+parsed, unlike an ordinary `after-*` hook body whose `#{...}` both binaries store literally.
+`compat/scenarios/smoke/format-monitor-hooks.txt` holds thirteen rows on both binaries.
 
 ## Window runtime formats split (2026-09-01)
 

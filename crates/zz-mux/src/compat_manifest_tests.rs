@@ -547,7 +547,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(mux_literals.len(), 73);
+    assert_eq!(mux_literals.len(), 82);
     assert!(mux_literals.is_subset(&upstream_literals));
 
     let mut accepted_native_literals = BTreeSet::new();
@@ -576,7 +576,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(missing_literals.len(), 9);
+    assert_eq!(missing_literals.len(), 0);
     assert!(missing_literals.is_subset(&upstream_literals));
     assert!(mux_literals.is_disjoint(&missing_literals));
     assert!(accepted_native_literals.is_disjoint(&missing_literals));
@@ -759,20 +759,12 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             )
         })
         .collect::<BTreeMap<_, _>>();
-    for (item, owner, decision, status) in [
-        (
-            "semantic:format-context-producer-fidelity",
-            "formats.context-producer-fidelity",
-            "adopt",
-            "open",
-        ),
-        (
-            "semantic:native-format-context-producers",
-            "formats.native-typed-context-producers",
-            "native",
-            "accepted",
-        ),
-    ] {
+    for (item, owner, decision, status) in [(
+        "semantic:native-format-context-producers",
+        "formats.native-typed-context-producers",
+        "native",
+        "accepted",
+    )] {
         assert_eq!(
             items.get(item).map(String::as_str),
             Some(owner),
@@ -810,10 +802,15 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         "implemented repeat modifier tracker must be closed"
     );
     assert!(
+        closed.contains("formats.context-producer-fidelity"),
+        "implemented context producer tracker must be closed"
+    );
+    assert!(
         [
             "semantic:tracker-format-modifier-vocabulary",
             "semantic:tracker-open-context-format-vocabulary",
             "semantic:format-modifier-repeat",
+            "semantic:format-context-producer-fidelity",
         ]
         .iter()
         .all(|item| !items.contains_key(*item)),

@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/format-monitor-hooks.sh ~/format-monitor-hooks.sh
+out: set-environment -gu FORMAT_MONITOR_HOOKS
+run-shell 'sh ~/format-monitor-hooks.sh'
+out: show-environment -g FORMAT_MONITOR_HOOKS

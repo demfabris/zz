@@ -22,8 +22,9 @@ pub use command::TMUX_OPTION_CONSUMERS as BEHAVES;
 pub use command::{
     AgentOptions, CommandAliasBodyError, CommandAliasResolution, CommandPromptStep,
     CommandPromptTemplate, CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachRequest, DetachScope,
-    Execution, ExecutionContext, FormatFacts, MAX_WORD_SEPARATORS_BYTES, MenuOptions, MuxEffect,
-    MuxEngine, PaneBorderStyleValues, PaneRuntimeFacts, PopupOptions, RetainedJobEnvironment,
+    Execution, ExecutionContext, FormatFacts, FormatMonitor, FormatMonitorScope,
+    FormatMonitorTarget, MAX_WORD_SEPARATORS_BYTES, MenuOptions, MuxEffect, MuxEngine,
+    PaneBorderStyleValues, PaneRuntimeFacts, PopupOptions, RetainedJobEnvironment,
     StatusRowVariables, TMUX_OPTION_CONSUMERS, TerminalWorkerOptions, WindowStyleValues,
     copy_mode_action_is_read_only_safe, format_command, hook_format_variables, if_shell_truthy,
     parse_tmux_key, send_keys_is_read_only_safe, send_keys_target_client,

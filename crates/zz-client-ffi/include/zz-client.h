@@ -236,6 +236,13 @@ bool zz_client_execute(zz_client *client, const char *name,
  * zz_client_command_reply_next and match the request id. */
 uint64_t zz_client_execute_request(zz_client *client, const char *name,
                                    const char *const *args, size_t args_len);
+/* Close the command-output view a printing command opened for this client.
+ * The daemon puts such a client on the pane's copy-mode key table and
+ * swallows its terminal input until the view is gone, so a shell that never
+ * renders the view has to close it explicitly. Sending a key cannot do this
+ * under mode-keys vi, where Escape is bound to clear-selection and leaves the
+ * view open. Harmless when no view is open. */
+bool zz_client_cancel_command_output(zz_client *client);
 bool zz_client_resize_terminal(zz_client *client, uint64_t pane,
                                uint16_t columns, uint16_t rows,
                                uint32_t cell_width_px, uint32_t cell_height_px);

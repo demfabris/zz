@@ -235,6 +235,7 @@ final class TerminalGridView: UIView, UIKeyInput {
         }
     }
     var onText: ((String) -> Void)?
+    var onPaste: ((String) -> Void)?
     var onKey: ((UInt32, UInt32, UInt8, UInt8) -> Void)?
     var onResize: ((TerminalLayout, Bool) -> Void)?
     var onScroll: ((Int) -> Void)?
@@ -529,7 +530,7 @@ final class TerminalGridView: UIView, UIKeyInput {
         ) else {
             return
         }
-        insertText(text)
+        onPaste?(text)
     }
 
     @objc private func focusInput() {
@@ -1100,6 +1101,7 @@ struct TerminalSurface: UIViewRepresentable {
     private func configure(_ view: TerminalGridView) {
         view.pane = pane
         view.onText = { text in store.sendText(text, to: pane) }
+        view.onPaste = { text in store.paste(text, to: pane) }
         view.onKey = { code, scalar, modifiers, action in
             store.sendKey(code, to: pane, codepoint: scalar, action: UInt32(action), modifiers: modifiers)
         }

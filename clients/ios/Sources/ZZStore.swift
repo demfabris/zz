@@ -838,6 +838,16 @@ final class ZZStore: ObservableObject {
         terminalModifierState.consumeOneShot()
     }
 
+    /// Pasting is not typing: the daemon wraps this text for bracketed-paste
+    /// mode, translates its newlines, and keeps it away from the key tables,
+    /// so a multi-line paste cannot run as a sequence of commands.
+    func paste(_ text: String, to pane: UInt64) {
+        guard let client, !text.isEmpty else {
+            return
+        }
+        _ = text.withCString { zz_client_paste(client, pane, $0) }
+    }
+
     func sendKey(
         _ code: UInt32,
         to pane: UInt64,
@@ -1083,6 +1093,15 @@ final class ZZStore: ObservableObject {
             return
         }
         commandRequests.register(request, as: .lastOutput(pane: pane))
+    }
+
+    /// Any command this client runs that prints something opens a daemon-side
+    /// output view, which switches the client to the copy-mode key table and
+    /// swallows its terminal input until the view is dismissed. This client
+    /// never renders that view, so a pane would go silently deaf. Escape is
+    /// what leaves it, and a reply carrying text is proof one was opened.
+    private func dismissCommandOutputView(pane: UInt64) {
+        sendShortcutKey(UInt32(ZZ_KEY_ESCAPE.rawValue), to: pane)
     }
 
     func dismissNotice() {
@@ -1961,10 +1980,11 @@ final class ZZStore: ObservableObject {
             )
             zz_command_reply_release(reply)
             switch purpose {
-            case .lastOutput:
+            case let .lastOutput(pane):
                 switch result {
                 case let .copy(text):
                     UIPasteboard.general.string = text
+                    dismissCommandOutputView(pane: pane)
                     post(.success, "Copied the last command’s output.")
                 case let .failure(message):
                     post(.failure, message)

@@ -473,7 +473,11 @@ impl ModeRevision {
         }
     }
 
-    pub(super) fn format_selection(&self, selection: ModeSelection) -> String {
+    /// `window_copy_get_selection`: the last row is trimmed to its own length
+    /// and then, under emacs, stops one cell short of the bottom-right cell
+    /// the cursor stands on. A dragged rectangle drops that column on every
+    /// row instead, and only when the selection started left of the cursor.
+    pub(super) fn format_selection(&self, selection: ModeSelection, mode_keys_vi: bool) -> String {
         let mut output = String::new();
         let (start, end) = ordered_points(selection.anchor, selection.focus);
         let (left, right) = if selection.rectangle {
@@ -500,7 +504,17 @@ impl ModeRevision {
                 self.columns.saturating_sub(1)
             };
             let line_end = self.selection_row_end(row);
-            let selected_end = row_end.saturating_add(1).min(line_end);
+            let drops_focus_cell = !mode_keys_vi
+                && if selection.rectangle {
+                    selection.anchor.x < selection.focus.x
+                } else {
+                    row == end.y
+                };
+            let selected_end = if drops_focus_cell {
+                row_end.min(line_end)
+            } else {
+                row_end.saturating_add(1).min(line_end)
+            };
             if row_start < selected_end {
                 for column in row_start..selected_end {
                     self.push_selection_cell_text(

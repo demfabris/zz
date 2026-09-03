@@ -4564,6 +4564,7 @@ mod tests {
                     selected: 0,
                     kind: crate::ChooseTreeKind::Windows,
                     filter_no_matches: true,
+                    prompt: String::new(),
                 }),
             },
         });

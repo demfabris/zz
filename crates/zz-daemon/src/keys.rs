@@ -49,6 +49,26 @@ pub(crate) fn choose_tree_key_action(
         "search-backward" => Some(ChooseTreeAction::SearchStart { reverse: true }),
         "search-again" => Some(ChooseTreeAction::SearchNext { reverse: false }),
         "search-reverse" => Some(ChooseTreeAction::SearchNext { reverse: true }),
+        "tag" => Some(ChooseTreeAction::Tag),
+        "tag-none" => Some(ChooseTreeAction::TagNone),
+        "tag-all" => Some(ChooseTreeAction::TagAll),
+        "kill" => Some(ChooseTreeAction::KillCurrent),
+        "kill-tagged" => Some(ChooseTreeAction::KillTagged),
+        _ => None,
+    }
+}
+
+/// `prompt_key` under `PROMPT_SINGLE` takes one character as the whole answer;
+/// a key that carries none is handled and leaves the prompt open.
+pub(crate) fn chooser_prompt_answer(input: &KeyInput) -> Option<char> {
+    if let Some(text) = input_typed_text(input) {
+        return text.chars().next();
+    }
+    match input_key_name(input).as_str() {
+        "Escape" | "C-[" => Some('\u{1b}'),
+        "Enter" => Some('\r'),
+        "Space" => Some(' '),
+        "BSpace" => Some('\u{7f}'),
         _ => None,
     }
 }

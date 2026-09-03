@@ -2088,7 +2088,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "choose-tree",
         aliases: &[],
         description: "Choose a session, window, or pane",
-        usage: "[-hkNrswZ] [-F format] [-f filter] [-K key-format] [-O order] [-t target-pane] [template]",
+        usage: "[-hkNrswyZ] [-F format] [-f filter] [-K key-format] [-O order] [-t target-pane] [template]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-s", "show sessions"),
@@ -2103,7 +2103,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-N", "disable the preview, already zz's only layout"),
             CommandOptionSpec::value("-O", FreeForm, "sort order"),
             CommandOptionSpec::flag("-r", "reverse sort order"),
-            CommandOptionSpec::unsupported_flag("-y"),
+            CommandOptionSpec::flag("-y", "answer the kill prompt for x and X"),
         ],
         positionals: &[FreeForm],
         variadic: None,

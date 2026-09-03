@@ -1412,6 +1412,17 @@ impl Renderer {
                 model.appearance.link_color,
             );
             let mut start_row = 1;
+            if !state.prompt.is_empty() {
+                write_colored_text(
+                    &mut self.output,
+                    0,
+                    start_row,
+                    &padded_segment(&state.prompt, model.size.columns, ' '),
+                    model.appearance.background,
+                    model.appearance.link_color,
+                );
+                start_row += 1;
+            }
             if state.filter_no_matches {
                 write_colored_text(
                     &mut self.output,
@@ -1442,6 +1453,8 @@ impl Renderer {
                 }
                 let marker = if u32::try_from(index).ok() == Some(state.selected) {
                     ">"
+                } else if item.tagged() {
+                    "*"
                 } else {
                     " "
                 };
@@ -3370,6 +3383,7 @@ mod tests {
             selected: 0,
             kind: zz_protocol::ChooseTreeKind::Windows,
             filter_no_matches: false,
+            prompt: String::new(),
         });
         let mut renderer = Renderer::new();
         renderer.paint_chooser(&model);
@@ -3398,6 +3412,7 @@ mod tests {
             selected: 0,
             kind: zz_protocol::ChooseTreeKind::Windows,
             filter_no_matches: false,
+            prompt: String::new(),
         });
         let mut renderer = Renderer::new();
         renderer.paint_chooser(&model);

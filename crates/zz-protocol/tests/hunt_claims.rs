@@ -14,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_ninety_six() {
-    assert_eq!(PROTOCOL_VERSION, 96);
+fn protocol_version_on_this_commit_is_ninety_seven() {
+    assert_eq!(PROTOCOL_VERSION, 97);
 }
 
 #[test]
@@ -44,13 +44,14 @@ fn chooser_states_append_the_v72_filter_fallback_flag() {
         selected: 2,
         kind: zz_protocol::ChooseTreeKind::Panes,
         filter_no_matches: true,
+        prompt: String::new(),
     };
     assert_eq!(
         postcard::to_stdvec(&tree).expect("encode tree chooser state"),
-        [0, 0, 2, 1, 1]
+        [0, 0, 2, 1, 1, 0]
     );
     assert_eq!(
-        postcard::from_bytes::<zz_protocol::ChooseTreeState>(&[0, 0, 2, 1, 1])
+        postcard::from_bytes::<zz_protocol::ChooseTreeState>(&[0, 0, 2, 1, 1, 0])
             .expect("decode tree chooser state"),
         tree
     );
@@ -318,7 +319,7 @@ fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0x00,
+            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x61, 0x00, 0x00, 0x61, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00, 0x00, 0x07,
         ]
     );

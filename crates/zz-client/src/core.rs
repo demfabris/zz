@@ -1526,6 +1526,7 @@ mod tests {
                 selected: 0,
                 kind: zz_protocol::ChooseTreeKind::Windows,
                 filter_no_matches: true,
+                prompt: String::new(),
             }),
         }));
         core.handle_message(event(EventPayload::ChooseTreeUpdate {
@@ -1701,6 +1702,7 @@ mod tests {
             selected: 0,
             kind: zz_protocol::ChooseTreeKind::Windows,
             filter_no_matches: false,
+            prompt: String::new(),
         });
         core.choose_buffer = Some(ChooseBufferState {
             items: Vec::new(),

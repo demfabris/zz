@@ -1086,6 +1086,37 @@ pub unsafe extern "C" fn zz_client_send_text(
         .is_ok()
 }
 
+/// Paste text into a terminal pane. The text never reaches the key tables, so
+/// a pasted prefix byte stays a byte; the daemon encodes it exactly the way
+/// the desktop does, turning newlines into carriage returns and adding
+/// bracketed-paste markers only when the pane's program enabled DECSET 2004.
+/// Use this for clipboard and drag-and-drop text; [`zz_client_send_text`] is
+/// for typing.
+///
+/// # Safety
+///
+/// `client` must be a live handle; `text` a valid NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_paste(
+    client: *mut ZzClient,
+    pane: u64,
+    text: *const c_char,
+) -> bool {
+    let (Some(client), false) = (unsafe { client.as_mut() }, text.is_null()) else {
+        return false;
+    };
+    let Ok(text) = unsafe { CStr::from_ptr(text) }.to_str() else {
+        return false;
+    };
+    client
+        .client
+        .send_input(InputMessage::TerminalView {
+            pane: PaneId(pane),
+            action: TerminalViewAction::Paste(text.to_owned()),
+        })
+        .is_ok()
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zz_client_send_key(
     client: *mut ZzClient,

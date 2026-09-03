@@ -4,7 +4,7 @@ title: zz-client-ffi crate
 description: Unix C ABI over zz-client for native shells, with interactive SSH, Agent supervision, pollable events, mux snapshots, semantic terminal actions, and caller-owned styled viewports.
 resource: crates/zz-client-ffi/include/zz-client.h
 tags: [client, ffi, c-abi, unix, ios, ipad, crate]
-timestamp: 2026-08-30T00:00:00-03:00
+timestamp: 2026-09-03T00:00:00-03:00
 ---
 
 # Overview
@@ -27,9 +27,9 @@ The header exposes:
   callback for trust, secrets, confirmations, and keyboard-interactive batches, the iOS app
   identity's OpenSSH public key, free, the wake descriptor, typed events, appearance changes,
   disconnects, pane IDs, and viewport damage rows;
-- attach, literal text, raw key press/repeat/release, tmux-style command execution, terminal resize,
-  client-window focus, terminal pane/application focus, line scrolling, semantic selection, and
-  asynchronous copy requests with typed clipboard results;
+- attach, literal text, pasted text, raw key press/repeat/release, tmux-style command execution,
+  terminal resize, client-window focus, terminal pane/application focus, line scrolling, semantic
+  selection, and asynchronous copy requests with typed clipboard results;
 - caller-owned mux snapshots with generation, session identity/name/attachment, compatibility
   accessors for the active window, the full window and pane hierarchy, zoom state, and normalized
   visible pane rectangles;
@@ -66,6 +66,13 @@ first-failure edge flags in addition to the current state. Clipboard extraction 
 the caller sends a request ID, receives `ZZ_EVENT_CLIPBOARD`, and drains caller-owned clipboard
 objects rather than reconstructing text from viewport cells.
 
+`zz_client_send_text()` is typing: the daemon reduces it through the key tables one character at a
+time, so a prefix byte in it arms the prefix and a newline in it reaches the pty as a line feed a
+shell runs. `zz_client_paste()` is the clipboard verb and carries `TerminalViewAction::Paste`
+instead, the same wire route the desktop and TUI use, so the daemon strips control bytes, turns
+newlines into carriage returns, and wraps the text in bracketed-paste markers only when the pane's
+program enabled DECSET 2004. Native shells paste with the second and type with the first.
+
 `zz_viewport_row_text()` resolves scalar and interned-grapheme glyphs, emits one visible glyph for a
 wide cell, preserves blank cells as spaces, and truncates only between complete UTF-8 sequences.
 Graphical clients should consume the cell/style/grapheme planes directly.
@@ -87,8 +94,14 @@ mux/session/pane metadata, creates and attaches another session, creates a secon
 terminal planes, sends raw Enter, exercises selection, copy, Agent, and clipboard symbols, reports
 client focus and blur through `zz_client_set_focused`, kills that attached session, observes the
 detached snapshot, explicitly reattaches the surviving session, recovers its terminal content, then
-frees and reconnects in the same C process. `zz_client_focus_terminal` remains the separate
-pane/application signal.
+frees and reconnects in the same C process, and pastes through `zz_client_paste`.
+`zz_client_focus_terminal` remains the separate pane/application signal.
+
+`tests/paste.rs` pins the encoding at the pty rather than on the screen: raw-mode probe panes report
+the exact bytes they read as hex, proving that a pasted newline arrives as a carriage return, that
+bracketed-paste markers appear only after the program enabled DECSET 2004, and that a pasted byte
+that is the prefix key reaches the pty where the same byte typed through `zz_client_send_text` does
+not.
 
 Rust tests cover endpoint failure classification, SSH prompt mapping, normalized split geometry,
 interned graphemes, wide-cell spacers, UTF-8-safe truncation, and the real-daemon link boundary. The
@@ -102,6 +115,7 @@ Apple build cross-compiles the crate for `aarch64-apple-ios-sim` on every Xcode 
 | `crates/zz-client-ffi/src/ffi.rs` | Lifecycle, transport reader, wake fd, reduction, snapshots, and exports. |
 | `crates/zz-client-ffi/tests/smoke.c` | From-scratch C consumer with live daemon assertions. |
 | `crates/zz-client-ffi/tests/smoke.rs` | Harness that compiles, links, and runs the C client. |
+| `crates/zz-client-ffi/tests/paste.rs` | Byte-level proof of the paste encoding against a live daemon. |
 | `clients/ios/Support/ZZ-Bridging-Header.h` | Swift import point for the ABI. |
 
 # Related

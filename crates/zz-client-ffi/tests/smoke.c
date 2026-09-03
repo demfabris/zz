@@ -12,6 +12,7 @@
 static const char READY[] = "zz-smoke-ready";
 static const char PREVIEW_READY[] = "zz-preview-ready";
 static const char TYPED[] = "hello-from-c";
+static const char PASTED[] = "pasted-from-c";
 static const char REPLY_TEXT[] = "zz-reply-from-c";
 
 static int bytes_equal(zz_bytes value, const char *expected) {
@@ -323,6 +324,14 @@ int main(int argc, char **argv) {
     }
     if (!wait_for_text(client, pane, TYPED)) {
         fprintf(stderr, "smoke: typed text never echoed\n");
+        return 1;
+    }
+    if (!zz_client_paste(client, pane, PASTED)) {
+        fprintf(stderr, "smoke: paste failed\n");
+        return 1;
+    }
+    if (!wait_for_text(client, pane, PASTED)) {
+        fprintf(stderr, "smoke: pasted text never echoed\n");
         return 1;
     }
 

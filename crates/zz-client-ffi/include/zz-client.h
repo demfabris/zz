@@ -217,6 +217,12 @@ bool zz_client_next_event(zz_client *client, zz_client_event *out);
 bool zz_client_attach(zz_client *client, const char *session);
 bool zz_client_set_terminal_preview(zz_client *client, bool enabled);
 bool zz_client_send_text(zz_client *client, uint64_t pane, const char *text);
+/* Paste text into a terminal pane. The text skips the key tables, so a pasted
+ * prefix byte stays a byte, and the daemon encodes it the way the desktop
+ * does: newlines become carriage returns, and bracketed-paste markers are
+ * added only when the pane's program enabled DECSET 2004. Use this for
+ * clipboard and drag-and-drop text; zz_client_send_text is for typing. */
+bool zz_client_paste(zz_client *client, uint64_t pane, const char *text);
 bool zz_client_send_key(zz_client *client, uint64_t pane, uint32_t code,
                         uint32_t codepoint, uint8_t function, uint32_t action,
                         uint8_t modifiers, const char *text,

@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 10 FULLY INTEGRATED (QUEUE + COPY + CLIENT LANES; A PER-CONNECTION CONTROL COMMAND WORKER WHOSE QUEUE DIES WITH THE CONNECTION + SPLIT-WINDOW -W, COPY-MODE TEXT SEARCH IN THE ENGINE + THE SIXTEEN STOCK PROMPT BINDINGS + THE FORMAT ENVIRONMENT TAIL + COMMAND-PROMPT -P AS A CLIENT HINT, THE POPUP POINTER ROUTE WITH POPUP_KEY_CB'S MENU AND BORDER DRAG + POPUP-TO-PANE + POPUP KITTY IMAGES; PROTOCOL V96); CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **CYCLE 11 FULLY INTEGRATED (FORMATS + CHOOSERS LANES; THE SET-HOOK -B FORMAT MONITOR SUBSYSTEM WITH ITS ONE-SECOND TICK AND NINE NOTIFY_MONITOR_CB NAMES + THE DISPLAY-MESSAGE -V EXPANSION TRACE, THE COPY-MODE MODE-KEYS TAIL WITH THE PER-ACTION SEARCH-MARK CLEAR CLASS AND THE EMACS SELECTION TRIM + CHOOSE-TREE -Y AND THE FIRST FIVE CHOOSER KEYS ON AN OVERLAY-OWNED PROMPT; PROTOCOL V97); CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **6 UNRESOLVED GROUPS (6 OPEN + 0 BLOCKED = 6)**
+> Live work: **3 UNRESOLVED GROUPS (3 OPEN + 0 BLOCKED = 3)**
 >
-> Ledger settlement: **97.2% (209 of 215 known groups: 100 x (167 CLOSED + 42 ACCEPTED) / (167 CLOSED + 48 LIVE)); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **98.6% (212 of 215 known groups: 100 x (170 CLOSED + 42 ACCEPTED) / (170 CLOSED + 45 LIVE)); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **212 SCENARIOS, 2,601 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
+> Exit evidence: **215 SCENARIOS, 2,636 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 10 FULLY INTEGRATED 2026-09-03 ON THE UBUNTU BOX (QUEUE + COPY IN THE MAIN RUN, THE CLIENT LANE IN A FOLLOW-UP GATE AFTER ITS REVIEWER DIED); RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **CYCLE 11 FULLY INTEGRATED 2026-09-04 ON THE UBUNTU BOX (TWO OPUS 5 LANES AT XHIGH; THE FORMATS LANE BY THE GATE AGENT, THE CHOOSERS LANE FINISHED BY HAND AFTER THAT AGENT TIMED OUT MID-CORPUS); RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -106,15 +106,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 10: 3 of 3 lanes integrated (the client lane in a follow-up gate) |
-| Previous completed cohort | Cycle 9: 3 of 3 lanes integrated |
+| Completed fixed cohort | Cycle 11: 2 of 2 lanes integrated (the choosers lane finished by the orchestrator after the gate agent timed out) |
+| Previous completed cohort | Cycle 10: 3 of 3 lanes integrated (the client lane in a follow-up gate) |
 | New residual groups | Since the 2026-08-31 freeze: 1 item across 1 group, tracked outside the agreed-scope meter |
-| Unresolved movement | Cycle 10: 10 at launch, 6 at close |
-| Live unresolved | 6 open + 0 blocked = 6 |
+| Unresolved movement | Cycle 11: 6 at launch, 3 at close |
+| Live unresolved | 3 open + 0 blocked = 3 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 212 scenarios, 2,601 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
-| Differential SHA-256 | `19504bd7e10af6b4e3157637d4d6be25b20ef3edd327ae6138c0ecc6e21821fa` |
-| Ledger settlement | 209 of 215 known groups = 97.2% |
+| Latest differential | 215 scenarios, 2,636 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
+| Differential SHA-256 | `fdb38caafb85b65b4649b88198231371815c3738741511862bff9a50cb49bcec` |
+| Ledger settlement | 212 of 215 known groups = 98.6% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -128,7 +128,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(167 + 42) / (167 + 48) = 209 / 215 = 97.2%
+(170 + 42) / (170 + 45) = 212 / 215 = 98.6%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -174,6 +174,18 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-04 cycle-11 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `9f9a637` + `c733b6f` + `89f36ac` (the `set-hook -B` format monitor subsystem: `monitor_parse`'s name:what:format grammar with `%*`, `%N`, `@*`, `@N` and session-otherwise, the one-second tick that re-expands each subscription per subscribed object, `monitor_check_value`'s baseline-then-fire so nothing fires on arm or on an unchanged value, `show-hooks -B` listing in name order, and the nine `notify_monitor_cb` names produced on the existing `hook_format_variables` path rather than as table entries; plus `display-message -v`, the pin's expansion trace with `format_log1`'s indentation rule, which required moving modifier-argument expansion into parsing, an observable change the pin's own `#{=#{@three}:pane_title}` literal answer pins; catalog 470/33 to 471/32 on the `-v` promotion; no wire change and no bump). `3eda6ed` (the copy-mode mode-keys tail: a per-action clear class on `CopyModeAction` mirroring `window_copy_command`'s table applied against the live `mode_keys_vi` knob, the incremental-origin re-latch, the emacs trim in `format_selection`, and `previous_word`'s `stop_at_eol`; plus `choose-tree -y` and the first five chooser keys `t`, `T`, `C-t`, `x` and `X` on the overlay-owned prompt cycle 10 identified as the prerequisite, copied from the popup context menu's `popup_owner` shape; catalog 470/33 to 471/32; protocol v96 to v97) |
+| Review stage | One Opus 5 reviewer per lane at xhigh, both approve-with-fixes. Formats, one must-fix: `expand_client_loop` built its sub-expander with `trace: None` while the four sibling loop expanders share the sink, so a verbose expansion of `#{L:...}` printed no body lines at all, contradicting what the closed record and `knowledge/tmux/divergences.md` both assert; fixed in `89f36ac` with a unit test, because every corpus scenario server is detached and the client roster is empty, so the body never runs there. Choosers, two must-fixes, both applied and verified present at the tip by the orchestrator rather than trusted from a report the gate never emitted: the GPUI desktop chooser performed a silent destructive kill, since `crates/zz/src/chooser/mod.rs` forwarded every key to the daemon with no local filtering while `key.rs` newly mapped choose-tree `x` to `kill`, so the daemon raised its confirm prompt and the desktop client never rendered it, and the chooser now draws `state.prompt` and the tagged flag; and the copy-mode closed record omitted a divergence the worker had disclosed only in its notes, that the pin's `visible_only` re-lay reads `wp->searchstr`, which is pane-scoped and outlives the mode where zz's is mode-scoped, now recorded with its measurement |
+| Workspace gates | Full workspace tests and clippy with warnings denied, green on both lanes. Red row on the choosers tip: `history_request_is_guarded_clamped_and_returns_self_contained_rows` once under the loaded run, a known flake, 3/3 exact-solo. `examples/ui-showcase` is workspace-excluded, so no workspace command covers it; the lane's new `tagged` argument was checked separately with `cargo check` in that crate |
+| Differential | Formats delta by the gate agent; choosers delta by hand: 142 scenarios listed twice and reconciled against `git diff --name-only`, run as four disjoint shards with `smoke/source-replay-diagnostics` held back and clean solo at 60 steps. Every channel clean under `--strict-geometry` except the three rows that are this box's own environment and fail identically at `origin/main`: `smoke/format-modifier-interrogate` (the harness's outer TERM carries smxx, `absent-smxx want=[0] got=[1]`), `smoke/pane-engine-knobs-input` (the pin's own fixture stalls with no zz involvement), and `smoke/remain-on-exit-format` (Linux `sys_signame` answers 15 where the fixture wants `term`) |
+| Records gate | Tracker check, board fold tests, and the stored summary check pass: 215 scenarios, 2,636 steps, attached-client `PASS` |
+| Summary SHA-256 | `fdb38caafb85b65b4649b88198231371815c3738741511862bff9a50cb49bcec` |
+| Interruption | The cycle-11 gate agent died on a network timeout at 20:17Z on 2026-09-03 while sharding the choosers corpus, after it had merged the formats lane, rebased the choosers lane onto `89f36ac`, applied both must-fixes and cleared the workspace suite and clippy. Its worktree survived intact; the rebased tip was pushed as `campaign/batch-choosers-copy-tail-opus-gated` before anything else, then the remaining stages were run by hand. Nothing was rebuilt or re-decided |
 
 ### 2026-09-02 cycle-10 integration checkpoint
 

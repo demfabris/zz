@@ -111,8 +111,9 @@ command or copy action. Those consumers retain their existing owners. Slice 10v 
 open-ended context and modifier registration blind spot. Slice 10w implements `R`; the gate still
 does not prove context values. Slice 10ad later source-registers option consumers, and slice 10ae
 closes option-name format runtime parity across that registered roster.
-`formats.context-producer-fidelity` owns context values as adopt/open,
-`formats.modifier-fidelity` owned modifier semantics until it closed on 2026-09-02, and
+`formats.context-producer-fidelity` owned context values until it closed on 2026-09-04 with the
+`set-hook -B` monitor subsystem, `formats.modifier-fidelity` owned modifier semantics until it
+closed on 2026-09-02, and
 `formats.native-typed-context-producers` records native typed producers as native/accepted.
 Closed `tracker.semantic-coverage` owns the option-consumer source partition. Closed
 `options.option-name-format-coverage` owns generic lookup, target scope, inheritance, array lookup,
@@ -166,8 +167,8 @@ Slice 10v closes `tracker.format-vocabulary-registration` on 2026-08-28. Oracle 
 31 literal producer scopes, 153 scoped pairs, and 108 unique names, plus 10 derived families, five
 propagation records, and all 36 modifier tokens. The source-owned partitions classify literal pairs
 as 58 implemented, 54 native, and 41 active gaps; derived families as eight implemented and two
-active gaps; and modifiers as 30 implemented and six active gaps. The two adopt/open successors are
-`formats.context-producer-fidelity` and `formats.modifier-fidelity`.
+active gaps; and modifiers as 30 implemented and six active gaps. Both adopt successors,
+`formats.context-producer-fidelity` and `formats.modifier-fidelity`, have since closed.
 `formats.native-typed-context-producers` records the native/accepted source registrations.
 
 Slice 10v changes no runtime modifier behavior, context values, option consumers, protocol,
@@ -350,12 +351,12 @@ relative sources and literal metacharacter paths, then clears it before runtime 
 isolated differential passes exactly on both engines without a public protocol change. The full
 eight-case diagnostic then exposed queued pane output during Control exit, which slice 10ai closes.
 
-The live registry has 48 active groups, 435 items, and 167 closed records. The active groups divide
+The live registry has 45 active groups, 435 items, and 170 closed records. The active groups divide
 into 6 open, none blocked, and 42 accepted, so only those 6 remain unresolved. Closed records plus
-accepted active groups resolve 209 of 215 known groups (97.2%). The persisted accepted artifact
-covers 212 scenarios and 2,601 steps, with attached-client `PASS`, three registered known GEO rows,
+accepted active groups resolve 212 of 215 known groups (98.6%). The persisted accepted artifact
+covers 215 scenarios and 2,636 steps, with attached-client `PASS`, three registered known GEO rows,
 every other channel clean, and SHA-256
-`19504bd7e10af6b4e3157637d4d6be25b20ef3edd327ae6138c0ecc6e21821fa`. Slice 10ai starts Control
+`fdb38caafb85b65b4649b88198231371815c3738741511862bff9a50cb49bcec`. Slice 10ai starts Control
 stdin observation before initial preparation, discards queued and future pane-byte records after
 EOF or blank Return, and retains all non-pane Control records plus one final exit. Shell-job cwd and
 literal DEL identity are closed with their focused and aggregate proof.

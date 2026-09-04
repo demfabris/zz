@@ -1,9 +1,8 @@
-# Handoff for the tmux-compat campaign (cycle 11 running)
+# Handoff for the tmux-compat campaign (cycle 12 is the last one)
 
-Written 2026-09-03 ~00:40Z on the ubuntu box, updated after the client gate, and rewritten at
-~17:50Z when cycle 11 launched. Cycle 10 is fully integrated: the queue and copy lanes merged at
-`2af51ff`, and the client lane (the four popup items) merged at `9ddeae0` in a follow-up gate,
-after `origin/main` had taken 22 non-campaign commits. Meter 97.4%. Cycle 11 is IN FLIGHT.
+Written 2026-09-03 ~00:40Z on the ubuntu box and rewritten 2026-09-04 after cycle 11 integrated.
+Cycles 10 and 11 are both fully integrated. Meter 99.0%, THREE items left, all three in their own
+group. One more cycle closes the registry.
 
 THE CYCLE SHAPE CHANGED ON 2026-09-03 and this overrides every older script. Fabrico's instruction
 is TWO work lanes per cycle, not three, and every agent is Opus 5 at `effort: 'xhigh'`: workers,
@@ -58,13 +57,13 @@ read. The desktop GPUI app keeps its own look entirely.
 
 | Fact | Value |
 | --- | --- |
-| `origin/main` | `9ddeae0` (cycle-10 client merge; lanes `fd19cce` queue, `cd03bb8` copy, `9ddeae0` client) plus the ledger recompute |
-| Agreed-scope meter | 97.4% (296/304 items), 59/65 groups done, 4 partially burned; `python3 compat/progress.py` |
-| Live registry | 6 open groups, 0 blocked, 8 items; 167 closed records, 42 accepted groups |
-| Corpus | 212 scenarios / 2,601 steps, attached-client PASS (recorded on this box) |
-| `PROTOCOL_VERSION` | 96 (hex hello frame 0x60, test `..._ninety_six`), three v96 changelog bullets on main (`CommandQueueParked`, `CopyModeAction::Search`, `PopupAction::Pointer`); the next wire change bumps to 97 (0x61) |
-| Unmerged work | None. `campaign/batch-client-choosers-popups-opus` stays at `ff66ddc` and `...-gated` at `affcfc9`; neither was force-pushed, and both are history now that the rebased tip plus the six must-fixes landed as `9ddeae0` |
-| Board (issue #7) | MAIN and TRIAGE free. Cycle 10's three lock fronts are INTEGRATED and released. Cycle 11 holds `F-FORMATS-MONITORS-TRACE` and `F-CHOOSERS-VOCAB-COPY-TAIL`, both claimed by `ubuntu/orchestrator` until 2026-09-04T02:43Z; the `F-SPLIT-MUX-*-V5` chain untouched |
+| `origin/main` | `3eda6ed` (cycle-11 choosers merge; formats lane `89f36ac`) plus the ledger recompute |
+| Agreed-scope meter | 99.0% (301/304 items), 62/65 groups done, 3 partially burned; `python3 compat/progress.py` |
+| Live registry | 3 open groups, 0 blocked, 3 items; 170 closed records, 42 accepted groups |
+| Corpus | 215 scenarios / 2,636 steps, attached-client PASS (recorded on this box) |
+| `PROTOCOL_VERSION` | 97 (hex hello frame 0x61, test `..._ninety_seven`); the next wire change bumps to 98 (0x62) |
+| Unmerged work | None. `campaign/batch-choosers-copy-tail-opus-gated` (`3eda6ed`) is the tip that landed, pushed before the by-hand finish as insurance; it is history now |
+| Board (issue #7) | MAIN and TRIAGE free. Every cycle-10 and cycle-11 lock front is INTEGRATED and released; the `F-SPLIT-MUX-*-V5` chain untouched |
 | Remotes | SSH (`git@github.com:demfabris/zz.git`) works on the ubuntu box; the macbook was switched to HTTPS through gh's credential helper in cycle 7 |
 
 ## The client lane landed (2026-09-03)
@@ -83,61 +82,92 @@ Three corpus rows fail on this box and are NOT any lane's: `smoke/format-modifie
 alone and again in a baseline worktree at `origin/main`, where they fail identically, two of them
 on the pin side only. Treat them as this box's terminfo and signal-name environment.
 
-## What is left, and what cycle 11 took
+## What is left: three items, one cycle
 
-The census is `compat/tmux-gaps.json` gaps with status open (nothing is blocked); every reason
-carries the measurement and the recipe. Eight items in six groups:
+Cycle 11 integrated on 2026-09-04. The formats lane (`89f36ac`) closed
+`formats.context-producer-fidelity` and `display-message.verbose-trace`; the choosers lane
+(`3eda6ed`) closed `copy-mode.action-fidelity` and `flag:choose-tree:-y`, bumped the protocol to 97,
+and landed the first five chooser keys on a real overlay-owned prompt. Both lanes finished inside
+their hard budgets, which is the rule to keep.
 
 | Group | Items | Standing |
 | --- | --- | --- |
-| `choosers.command-flags` | 2 | The vocabulary (17 keys) plus `-y`. Cycle 10 found the prerequisite: the pin's `x`/`X`/`:` prompts belong to the mode overlay (`mode_tree_set_prompt`), and zz has no overlay-owned prompt; the popup context menu built in cycle 10 (a `MenuSession` marked `popup_owner`, inserted by the overlay) is the shape to copy. Four sizing corrections are in the reason (kill prompts carry their target, `-y` only answers `x`/`X`, `O` steps a per-mode order sequence, the buffer chooser adds `e`/`d`/`D`/`P`) |
-| `copy-mode.action-fidelity` | 1 | Reopened at the cycle-10 gate: three mode-keys reads the eleven-place enumeration missed (the per-command search-mark clear class, 51 ALWAYS / 36 EMACS_ONLY / 7 NEVER; the incremental-origin re-latch; the emacs copy-selection trim) plus `previous_word`'s `stop_at_eol`. Fix shape in the reason: a per-action clear class on `CopyModeAction` applied against the live `mode_keys_vi` knob, and an emacs branch in `format_selection` |
-| `display-message.verbose-trace` | 2 | `-v` and the trace; the full line grammar and two structural mismatches are in the reason (modifier-argument expansion must move into parsing; no `format_check_time`). Rebase on the merged copy lane, which touched `Expander::lookup` |
-| `formats.context-producer-fidelity` | 1 | The `set-hook -B` monitor subsystem; the reason holds the complete measured shape (parse rules, one-second tick, baseline-then-fire, nine names via `hook_format_variables`) |
-| `clients.path-encoding` | 1 | Environment bytes; priced in the reason at four channels (hello entry, `CommandInvocation.args` read as `&str` in 99 places behind 65 signatures in the mux, the environment store, `CommandResponse::Success.output`); the probes in the reason are the acceptance test. Half-landing was refused twice; it is one honest lane on its own |
-| `rendering.geometry-residue` | 1 | GUI-only. Cycle 10 refuted the recipe: the gpui harness exists (`crates/zz/src/workspace/view.rs` drives `TerminalView::update_geometry` under `#[gpui::test]`), and the writeback is not the problem; what is needed is a product decision about which extent `window_width`/`window_height` report for a client that draws chrome inside the window it reports. The pure measurement `terminal_grid_size` with tests is on the client branch |
+| `choosers.command-flags` | 1 | `semantic:chooser-key-vocabulary`. The prerequisite is DONE: the overlay-owned prompt exists and `t`, `T`, `C-t`, `x` and `X` are proved against the pin. What is left is the rest of `mode_tree_key`, sized in the group reason by the worker that stopped at its budget: `K`/`J`/`S-Up`/`S-Down` (`mode_tree_swap`), `O` and `r` (the per-mode order sequences and `sort_next_order`'s wrap), `F1`/`C-h` (the help screen the next key of any kind closes), `M--` and `M-+` (collapse or expand every top-level item, not the current one), the `m` mark, the `:` prompt (`(%u tagged) ` or `(current) `, which `-y` never answers because it does not pass `PROMPT_SINGLE`), and `window_buffer_key`'s `e`, `d`, `D` and `P`. Mechanical rather than exploratory now |
+| `clients.path-encoding` | 1 | `semantic:client-environment-non-utf8`. Untouched and deliberately so: the reason prices the byte across four channels (the hello entry, `CommandInvocation.args` read as `&str` in 99 places behind 65 signatures in the mux alone, the environment store, `CommandResponse::Success.output`), and half-landing was refused twice because channels (i) and (iii) alone change nothing observable. One lane on its own. The probes in the reason are the acceptance test |
+| `rendering.geometry-residue` | 1 | `semantic:attached-gui-pane-width`. Narrowed by the orchestrator on 2026-09-03 rather than closed blind, see below |
 
-Cycle 11 launched 2026-09-03 ~17:45Z as `opus-compat-run-11.js` with two lanes, six items:
+### The geometry decision, narrowed
 
-- `F-FORMATS-MONITORS-TRACE`, branch `batch-formats-monitors-trace-opus`, worktree
-  `zz-opus-termopts`: the `set-hook -B` monitors (HARD 100 min) then the `-v` trace (HARD 100 min).
-  Told it owns NO protocol bump.
-- `F-CHOOSERS-VOCAB-COPY-TAIL`, branch `batch-choosers-copy-tail-opus`, worktree `zz-opus-panes`:
-  the copy-mode mode-keys tail first (HARD 60 min, bounded) then the chooser vocabulary on an
-  overlay-owned prompt (HARD 140 min). Owns the 96 to 97 bump.
+The parked question was "which extent do the window formats report for a client that draws chrome".
+Two of the three options are refuted by measurement already recorded in the group reason: carving
+the PTY from the client's whole extent oversizes and clips the pane, and carving the window extent
+from the drawn grid changes what `window_width` reports and breaks fixture rows derived from the
+pin, which would be re-scoping a contract to match an implementation. So `window_width` and
+`window_height` STAY the client's whole window, the way tmux's own `window_width` is the client's
+tty.
 
-Zones are pairwise disjoint on the board, and each prompt carries the real per-file ownership.
-Every group has a HARD budget in minutes, because the cycle-10 queue lane ran 4h15m on an open
-budget and made that cycle six hours. The `FOREGROUND` rule is in all three prompt kinds, because a
-cycle-10 reviewer ended its turn waiting on a background monitor and the pipeline dropped the lane.
+What was never measured is the third option, and it reframes the item. The divergence is that an
+Interactive client under latest, largest or smallest has its own per-pane report reach the PTY while
+the format reports the engine's allocation. The question is therefore not which WINDOW extent to
+report but which of the two PANE numbers is observable truth. tmux has no such split, because
+`window_pane_resize` moves the screen and the PTY together, which argues the format should follow
+the PTY. The probe: drive `TerminalView::update_geometry` in the `#[gpui::test]` harness that
+already exists in `crates/zz/src/workspace/view.rs`, with a pixel box that is not a whole number of
+cells, and compare `#{pane_width}` against the columns the PTY actually got. The pure measurement
+`terminal_grid_size` in `crates/zz/src/terminal/element.rs` is already on main with unit tests.
+Schedule that; do not decide it from prose.
 
-CYCLE 12, after this one gates, is also two lanes and closes the campaign:
+### Cycle 12 shape
 
-- `clients.path-encoding` alone. Its reason prices the byte across four channels and half-landing
-  was refused twice, so it gets a whole lane.
-- `rendering.geometry-residue`. The orchestrator narrowed this on 2026-09-03 rather than closing it
-  blind, and the narrowing is the useful part. The parked question was "which extent do the window
-  formats report for a client that draws chrome". Two of the three options are already refuted by
-  measurement: carving the PTY from the client's whole extent oversizes and clips the pane, and
-  carving the window extent from the drawn grid changes what `window_width` reports and breaks
-  fixture rows that were derived from the pin, which would be re-scoping a contract to match an
-  implementation. `window_width` and `window_height` therefore STAY the client's whole window, the
-  way tmux's own `window_width` is the client's tty. What was never measured is the third option:
-  the divergence is that an Interactive client's per-pane report reaches the PTY while the format
-  reports the engine's allocation, so the question is not which window extent to report but which
-  of the two PANE numbers is observable truth. tmux has no such split (`window_pane_resize` moves
-  the screen and the PTY together), which argues the format should follow the PTY. The probe:
-  drive `TerminalView::update_geometry` in the existing `#[gpui::test]` harness with a pixel box
-  that is not a whole number of cells, then compare `#{pane_width}` against the columns the PTY
-  actually got. Schedule that, do not decide it from prose.
+Two lanes, Opus 5 at xhigh, hard budgets, exactly one lane owning any protocol bump (97 to 98,
+0x61 to 0x62, `..._ninety_eight`):
+
+- Lane A: `clients.path-encoding` alone, the whole cycle if it needs it.
+- Lane B: the chooser vocabulary tail plus the geometry probe above. Both are bounded and named.
+
+That closes the registry. When it does, the campaign's exit is the meter at 304/304 with the three
+accepted-native decisions standing, and the `F-SPLIT-MUX-*-V5` chain is the only board work left.
 
 Launch shape: copy `opus-compat-run-11.js` (its `M` block carries the `boxNote`/`gitNote`
 defaults), write the new lane batches and lock names, mint the lock fronts under TRIAGE with
 pairwise-disjoint zones, commit the records under MAIN, claim the fronts (`--lease 6h`), and launch
 with the machine facts as `args` (omit them on the ubuntu box). A 6h lease covers a two-lane cycle,
 so no renewer process is needed; renew by hand at a check-in instead, which also removes the
-`pkill -f` hazard that killed the orchestrator's own tool shell twice. Cycle 10 took 5h54m and
-2.43M subagent tokens for three lanes; the 10b client gate alone took 74m and 0.26M.
+`pkill -f` hazard that killed the orchestrator's own tool shell twice.
+
+### If the gate dies mid-cycle
+
+It happened in cycle 11: the gate agent hit a network timeout at 20:17Z on 2026-09-03 while
+sharding the second lane's corpus, after it had already merged the first lane, rebased the second
+onto main, applied both must-fixes and cleared the workspace suite and clippy. Recovery took about
+an hour and rebuilt nothing. The order that worked, and the order to repeat:
+
+1. Read `origin/main` and every `zz-gate-*` worktree before touching anything. The worktree holds
+   the gate's fix commits and they are usually the expensive part.
+2. Push the rebased tip as `campaign/<name>-gated` FIRST, as insurance, before running anything.
+3. Verify the reviewer's must-fixes are actually present at that tip. The gate never reported, so
+   its claims do not exist; check the code and the registry yourself.
+4. Re-run the stages the gate had not finished, plus any stage whose inputs changed after it ran
+   (cycle 11's clippy predated two fix commits, so clippy was re-run).
+5. Then push, ledger, recompute, release, exactly as the gate's own steps say.
+
+## Pages that carry live checkpoint numbers
+
+An audit on 2026-09-03 found 47 stale facts across the bundle, a third of them the SAME checkpoint
+paragraph copied into several pages and left five cycles behind. They are hand-written prose, not
+generated, so nothing refreshes them: `compat/tmux-tracker.py write-report` regenerates only
+`knowledge/tmux/gaps.md`. Fencing them for a generator was considered and rejected: the numbers sit
+mid-paragraph in bespoke sentences, so a fence would mean restructuring eight pages to suit a tool,
+and the campaign has one or two cycles left to amortise it. The cheap fix instead: the GATE already
+recomputes `TMUX_COMPAT_TRACKER.md` from the merged registry in its step 7, so give it this list
+and let it refresh these in the same pass.
+
+Present-tense registry, corpus or partition numbers live in `knowledge/tmux/tmux-compat.md`,
+`knowledge/tmux/status-line.md`, `knowledge/tmux/key-tables.md`, `knowledge/tmux/copy-mode.md`,
+`knowledge/tmux/commands.md`, `knowledge/tmux/divergences.md`,
+`knowledge/playbooks/compat-harness.md` and `knowledge/playbooks/tmux-compat-cohorts.md`. Leave
+dated historical sentences alone ("at that checkpoint the tracker had ..."): they are correct about
+the past and are not drift.
 
 ## The cycle, in general
 

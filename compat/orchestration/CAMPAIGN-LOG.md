@@ -319,3 +319,37 @@ a HARD budget in minutes, the `FOREGROUND` rule is in all three prompt kinds, an
 `clients.path-encoding` is deliberately not scheduled: its reason prices it across four channels
 and half-landing has been refused twice, so it gets a lane to itself in cycle 12.
 `rendering.geometry-residue` is the orchestrator's decision to take, not a lane's.
+
+Cycle 11, 2026-09-03/04 on the ubuntu box (two Opus 5 lanes at xhigh, workers about 1h50m, the
+whole cycle spread across a network outage): meter 97.4% to 99.0% (301/304), 62/65 groups, three
+items left. Formats lane `89f36ac` closed `formats.context-producer-fidelity` (the `set-hook -B`
+monitor subsystem: the name:what:format grammar, the one-second tick, baseline-then-fire, and the
+nine `notify_monitor_cb` names produced on the existing `hook_format_variables` path rather than as
+table entries) and `display-message.verbose-trace` (the pin's expansion trace, which required moving
+modifier-argument expansion into parsing, an observable behaviour change the pin's own
+`#{=#{@three}:pane_title}` literal answer pins). Choosers lane `3eda6ed` closed
+`copy-mode.action-fidelity` (the per-action search-mark clear class, the incremental-origin re-latch,
+the emacs selection trim, `previous_word`'s `stop_at_eol`) and `flag:choose-tree:-y`, bumped the
+protocol to 97, and landed `t`, `T`, `C-t`, `x` and `X` on the overlay-owned prompt that cycle 10
+identified as the prerequisite. Both lanes finished inside their hard budgets, against cycle 10's
+open-budget lane that ran 4h15m alone, so the budgets stay.
+
+The reviews were worth more than the tests this cycle. The choosers reviewer found that the new `x`
+binding made the GPUI desktop chooser perform a SILENT DESTRUCTIVE KILL: the desktop client forwards
+every key to the daemon with no local filtering, so the daemon raised its confirm prompt and the
+client never drew it. No test could have caught it, because the corpus proves the raw TUI. The
+formats reviewer found `expand_client_loop` building its sub-expander with `trace: None` while the
+four sibling loop expanders share the sink, which the closed record and `divergences.md` both
+asserted was not the case; it needed a unit test rather than a scenario, because every corpus server
+is detached and the client roster is empty.
+
+The gate agent died on a network timeout at 20:17Z while sharding the choosers corpus, after
+merging formats, rebasing choosers, applying both must-fixes and clearing the workspace suite and
+clippy. Nothing was lost and nothing was rebuilt: its worktree survived, the rebased tip went to
+`campaign/batch-choosers-copy-tail-opus-gated` as insurance before anything else, both must-fixes
+were verified present at the tip rather than trusted from a report that never existed, clippy was
+re-run because two fix commits landed after the gate's own clippy, and the remaining stages ran by
+hand. The recovery order is written into `HANDOFF.md` under "If the gate dies mid-cycle". One thing
+that has now bitten twice: a lane touching `crates/zz-ui` must also fix `examples/ui-showcase`,
+which is workspace-excluded, so `cargo test --workspace` cannot see it; the choosers lane got it
+right and it was confirmed with a `cargo check` in that crate.

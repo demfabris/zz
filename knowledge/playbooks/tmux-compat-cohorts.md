@@ -219,8 +219,9 @@ families and two active gaps. The modifier partition is 30 implemented tokens an
 registration. The slice changes no runtime format behavior, context-value semantics, option
 consumers, protocol, snapshot, scenario, or accepted artifact.
 
-Runtime and option-consumer work remains under `formats.context-producer-fidelity` (`adopt`, open).
-`formats.modifier-fidelity` closed on 2026-09-02, and native typed producers remain accepted under
+`formats.context-producer-fidelity` closed on 2026-09-04, when the `set-hook -B` monitor subsystem
+landed and produced its nine `notify_monitor_cb` names. `formats.modifier-fidelity` closed on
+2026-09-02, and native typed producers remain accepted under
 `formats.native-typed-context-producers` (`native`, accepted).
 
 The resumed 2026-08-29 rerank first corrected the stale config parser-abort item. Existing parser

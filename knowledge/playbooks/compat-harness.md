@@ -131,9 +131,9 @@ hook order is accepted as a permanent divergence under `hooks.shutdown-window-un
 the final index-ordered map. The alias group itself reuses protocol v84's `CommandInvocation` shape.
 Closure review advanced v85 for typed callback provenance and daemon-authoritative `Attached`
 reconnect state; no alias child-vector field or snapshot field is added.
-The persisted aggregate now covers 212 scenarios and 2,601 steps with attached-client `PASS`,
+The persisted aggregate now covers 215 scenarios and 2,636 steps with attached-client `PASS`,
 three registered known rows carrying GEO differences, every other channel clean, and SHA-256
-`19504bd7e10af6b4e3157637d4d6be25b20ef3edd327ae6138c0ecc6e21821fa`.
+`fdb38caafb85b65b4649b88198231371815c3738741511862bff9a50cb49bcec`.
 
 The 2026-08-31 Source Replay V3 close keeps each syntax or command diagnostic on its physical
 source path and line. Command stderr, Control flags, command-error hooks, later siblings, and
@@ -149,9 +149,9 @@ same-side ties choose the lower `PaneId`. The focused `pane-border-span-owner` r
 steps with zero TOPO, GEO, FMT, OUT, or WARN differences. Protocol, snapshots, and GPUI retain their
 prior contracts, and GPUI continues to take pane colors from its theme. Mutable tiled order after
 `join-pane`, `swap-pane`, or serialized `select-layout` remains under `F-PANE-BORDER-ZORDER`. The
-live registry has 48 active groups holding 435 items, with 6 groups open, none blocked, 42 accepted,
-and 167 closed records; only 8 of those items sit in an open group. Six groups remain unresolved;
-closed records plus accepted active groups resolve 209 of 215 known groups (97.2%).
+live registry has 45 active groups holding 435 items, with 3 groups open, none blocked, 42 accepted,
+and 170 closed records; only 3 of those items sit in an open group. Three groups remain unresolved;
+closed records plus accepted active groups resolve 212 of 215 known groups (98.6%).
 
 The remaining `w` modifier needs a wider proof than the earlier forecast recorded. Pinned
 `format_width` handles leading hashes, `#[...]` style spans, malformed markup, controls,
@@ -338,8 +338,8 @@ its separate owners. Slice 10v closes `tracker.format-vocabulary-registration` w
 source inventory and disjoint, exhaustive production-owned partitions. New or stale literal,
 derived, propagation, or modifier entries fail `just compat-check`.
 
-Runtime and context-value fidelity remain under `formats.context-producer-fidelity` (`adopt`, open);
-`formats.modifier-fidelity` closed on 2026-09-02. Native typed producers remain accepted under
+`formats.context-producer-fidelity` closed on 2026-09-04 with the `set-hook -B` monitor subsystem,
+and `formats.modifier-fidelity` closed on 2026-09-02. Native typed producers remain accepted under
 `formats.native-typed-context-producers` (`native`, accepted). Slice 10v changes no protocol,
 snapshot, differential scenario, or accepted artifact. The resumed rerank corrected the stale
 parser-abort ledger item because first-diagnostic whole-file abort was already implemented and
@@ -475,11 +475,11 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted acceptance artifact. It records 212 scenarios and 2,601
+`compat/results/summary.md` is the persisted acceptance artifact. It records 215 scenarios and 2,636
 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean, the attached-client
 fixture is `PASS`, and exactly three registered `known/` rows carry GEO differences, one of them an
 approved OUT difference as well. Its SHA-256 is
-`19504bd7e10af6b4e3157637d4d6be25b20ef3edd327ae6138c0ecc6e21821fa`.
+`fdb38caafb85b65b4649b88198231371815c3738741511862bff9a50cb49bcec`.
 
 Slice 10ag extends `compat/startup-diagnostics.sh` to eight cases. Its startup-client-cwd case builds
 distinct initial-client, top-level-config, containing-directory, runtime-client, and glob-decoy
@@ -741,7 +741,7 @@ contains 10. `smoke/config-alias-parse-unit` and `smoke/config-chain-parse-abort
 `smoke/jobs-command-environment` contains 3, `aliases-multi-body` contains 8, and
 `option-name-formats` contains 60.
 The summary SHA-256 is
-`19504bd7e10af6b4e3157637d4d6be25b20ef3edd327ae6138c0ecc6e21821fa`.
+`fdb38caafb85b65b4649b88198231371815c3738741511862bff9a50cb49bcec`.
 The historical 10r and 10s checkpoints remain 98 scenarios and 1,517 steps at SHA-256
 `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 The combined chooser row contributes three harness steps and 26 internal checks with zero TOPO,

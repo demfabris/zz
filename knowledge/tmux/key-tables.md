@@ -252,12 +252,13 @@ stored command and nonrepeat metadata.
 No stock action key is left open. The emacs table binds `M-1` through `M-9` to zz's own numeric
 capture and `g` to the goto-line prompt vi `:` opens, and both `r` keys now send `refresh-toggle`,
 which unfreezes the copy backing rather than switching off a live pane: measured on the pin,
-`#{scroll_position}` holds at 0 after entry, climbs while `refresh-on` re-clones the backing on its
-50ms timer, and freezes again after `refresh-toggle`. That re-sync rides the daemon's copy
-revisions, and `keys.copy-mode-unsupported-default-actions` closed on 2026-09-02. What is left of
-the action vocabulary sits under `copy-mode.action-fidelity`, whose source audit classifies all 95
-pinned actions across seven behavior categories; the default-key group does not own those missing
-actions. Pointer pseudo-bindings stay in the direct mouse route.
+`#{scroll_position}` holds at 0 after entry, climbs while `refresh-on` re-clones the backing on
+its 50ms timer, and freezes again after `refresh-toggle`. That re-sync rides the daemon's copy
+revisions, and `keys.copy-mode-unsupported-default-actions` closed on 2026-09-02. The action
+vocabulary sat under `copy-mode.action-fidelity`, whose source audit classifies all 95 pinned
+actions across seven behavior categories; that group closed on 2026-09-04, leaving
+`scroll-to-mouse` as the one unmapped name, accepted because zz hands the daemon no scrollbar
+slider position. Pointer pseudo-bindings stay in the direct mouse route.
 
 Copy-mode movement, jump capture, and numeric repetition do not read the binding repeat field;
 `copy-mode-repeat`, `repeat_count`, and the copy action's runtime repeat policy own them. The nine vi

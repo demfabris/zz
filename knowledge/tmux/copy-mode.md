@@ -120,7 +120,8 @@ bit, while support is derived from the `send-keys -X` parser rather than stored.
 the `copy-mode.action-fidelity` items: vocabulary, cursor geometry, logical-line and mode-key
 behavior, goto-line, selection lifecycle, jump/page/prompt actions, and copy formatting and
 destination effects. Cursor geometry, goto-line, selection lifecycle, the jump, page, and prompt
-family, and copy formatting are settled; only logical-line and mode-key behavior stays open. Its
+family, copy formatting, and logical-line and mode-key behavior are all settled, and the group
+closed on 2026-09-04. Its
 tests pin the mapped count, assert every mapped name reproduces the pin's read-only classification,
 and list the missing names per category, so mapping one action shrinks that list instead of
 drifting from the code. The table above describes the mapped surface only.

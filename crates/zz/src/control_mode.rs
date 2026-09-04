@@ -1737,7 +1737,7 @@ impl<W: Write> ControlWriter<W> {
                 DeferredOutput::ControlSourceFile(event) => {
                     self.write_control_source_file(event)?;
                 }
-                DeferredOutput::ControlCommandOutput(output) => self.payload(&output)?,
+                DeferredOutput::ControlCommandOutput(output) => self.payload(output.as_bytes())?,
             }
         }
         if let Some(reason) = exit {
@@ -1816,7 +1816,7 @@ impl<W: Write> ControlWriter<W> {
     ) -> io::Result<()> {
         let frame = self.allocate_frame(time, flags);
         self.write_frame_begin(&frame)?;
-        self.payload(output)?;
+        self.payload(output.as_bytes())?;
         self.write_frame_end(&frame, error)?;
         self.command_guard_frames = self.command_guard_frames.saturating_add(1);
         Ok(())
@@ -1848,7 +1848,7 @@ impl<W: Write> ControlWriter<W> {
                 .push_back(DeferredOutput::ControlCommandOutput(output.to_owned()));
             return Ok(());
         }
-        self.payload(output)?;
+        self.payload(output.as_bytes())?;
         self.output.flush()
     }
 
@@ -1896,12 +1896,12 @@ impl<W: Write> ControlWriter<W> {
             CommandResponse::Success {
                 output, exit_code, ..
             } => {
-                self.payload(&output)?;
+                self.payload(output.as_bytes())?;
                 self.end(frame, false)?;
                 Ok(exit_code)
             }
             CommandResponse::Error { error, output, .. } => {
-                self.payload(&output)?;
+                self.payload(output.as_bytes())?;
                 self.write_line(&error.tmux_message())?;
                 self.end(frame, true)?;
                 Ok(1)
@@ -1920,10 +1920,10 @@ impl<W: Write> ControlWriter<W> {
         self.end(frame, true)
     }
 
-    fn payload(&mut self, output: &str) -> io::Result<()> {
+    fn payload(&mut self, output: &[u8]) -> io::Result<()> {
         if !output.is_empty() {
-            self.output.write_all(output.as_bytes())?;
-            if !output.ends_with('\n') {
+            self.output.write_all(output)?;
+            if output.last() != Some(&b'\n') {
                 self.output.write_all(b"\n")?;
             }
         }
@@ -2367,6 +2367,38 @@ mod tests {
               %begin 21 5 0\nNo such file or directory: partial.conf\n%end 21 5 0\n\
               %begin 22 6 1\ncan't find session: missing-runtime\n%error 22 6 1\n\
               %begin 23 7 1\nfresh\n%end 23 7 1\n"
+        );
+    }
+
+    /// A control client's command block carries the daemon's output bytes, the
+    /// way the plain CLI does. Measured against the pin on 2026-09-04 with
+    /// `set-environment -g ZZBYTES a<0xff>b`:
+    /// `printf 'show-environment -g ZZBYTES\\n' | <bin> -C` puts
+    /// `5a5a42595445533d61ff620a` inside the block on both binaries, where a
+    /// lossy `&str` sink put `5a5a42595445533d61efbfbd620a` there instead.
+    #[test]
+    fn a_command_block_carries_the_output_bytes_it_was_given() {
+        let needle: &[u8] = b"ZZBYTES=a\xffb";
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let frame = writer.begin(1).unwrap();
+        writer
+            .response(
+                &frame,
+                CommandResponse::Success {
+                    request_id: 9,
+                    output: RawText::from_bytes(b"ZZBYTES=a\xffb\n".to_vec()),
+                    stderr: String::new(),
+                    exit_code: 0,
+                },
+            )
+            .unwrap();
+        assert!(
+            writer
+                .output
+                .windows(needle.len())
+                .any(|window| window == needle),
+            "control payload dropped the byte: {:?}",
+            writer.output
         );
     }
 

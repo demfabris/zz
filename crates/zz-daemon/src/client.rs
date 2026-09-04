@@ -1605,6 +1605,7 @@ mod tests {
                 OsString::from("value"),
             ),
             (OsString::from(""), OsString::from("value")),
+            (OsString::from("ZZ=EQ"), OsString::from("value")),
             (OsString::from("ZZ_VALID"), OsString::from("kept")),
         ]);
         assert_eq!(

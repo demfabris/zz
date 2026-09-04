@@ -61,6 +61,14 @@ while [ "$attempt" -lt 80 ]; do
     sleep 0.25
 done
 
+# The control client's own command block: server_client_print writes the bytes
+# straight to the client, so a control client sees what the plain CLI sees. The
+# command rides argv rather than stdin so the control client runs it instead of
+# the default new-session and leaves no session behind.
+# shellcheck disable=SC2086
+"$binary" $prefix_args -C show-environment -g ZZBYTES </dev/null 2>/dev/null \
+    | LC_ALL=C sed -n '/^ZZBYTES=/p' >"$root/control" || :
+
 # The attach shape: a real client on a pty whose own environment holds the byte,
 # with update-environment naming it beside a plain neighbour.
 main_client set-option -g update-environment "ZZBYTES ZZPLAIN"
@@ -75,8 +83,9 @@ if [ "$(hex "$root/global")" = 5a5a42595445533d61ff620a ] &&
     [ "$(hex "$root/session")" = 5a5a534553533d78ff790a ] &&
     [ "$(hex "$root/inherit")" = 5a5a494e48455249543d61ff620a ] &&
     [ "$(hex "$root/attach-bytes")" = 5a5a42595445533d61ff620a ] &&
-    [ "$(hex "$root/attach-plain")" = 5a5a504c41494e3d6e65696768626f75720a ]; then
-    result=clean:7
+    [ "$(hex "$root/attach-plain")" = 5a5a504c41494e3d6e65696768626f75720a ] &&
+    [ "$(hex "$root/control")" = 5a5a42595445533d61ff620a ]; then
+    result=clean:8
 fi
 
 main_client set-environment -g ZZ_ENVBYTES_RESULT "$result"

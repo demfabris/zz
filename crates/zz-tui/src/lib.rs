@@ -308,7 +308,7 @@ fn execute_new_session(
                     exit_code,
                     ..
                 }) if response_id == request_id => {
-                    print_command_output(&output)?;
+                    print_command_output(output.as_bytes())?;
                     if exit_code != 0 {
                         return Err(Error::message(format!(
                             "command exited with status {exit_code}"
@@ -321,7 +321,7 @@ fn execute_new_session(
                     error,
                     output,
                 }) if response_id == request_id => {
-                    print_command_output(&output)?;
+                    print_command_output(output.as_bytes())?;
                     if attached_session.is_none() {
                         return Err(Error::message(error.tmux_message()));
                     }
@@ -346,16 +346,21 @@ fn execute_new_session(
     })
 }
 
-fn print_command_output(output: &str) -> Result<(), Error> {
+fn print_command_output(output: &[u8]) -> Result<(), Error> {
     if output.is_empty() {
         return Ok(());
     }
     let mut stdout = io::stdout().lock();
-    stdout.write_all(output.as_bytes())?;
-    if !output.ends_with('\n') {
-        stdout.write_all(b"\n")?;
-    }
+    write_command_output(&mut stdout, output)?;
     stdout.flush()?;
+    Ok(())
+}
+
+fn write_command_output(sink: &mut impl io::Write, output: &[u8]) -> io::Result<()> {
+    sink.write_all(output)?;
+    if output.last() != Some(&b'\n') {
+        sink.write_all(b"\n")?;
+    }
     Ok(())
 }
 
@@ -621,6 +626,23 @@ fn resolve_endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The raw-terminal client writes a `CommandResponse` output as the bytes
+    /// the daemon sent, the way the plain CLI does. Measured against the pin
+    /// on 2026-09-04: `show-environment -g ZZBYTES` after
+    /// `set-environment -g ZZBYTES a<0xff>b` answers
+    /// `5a5a42595445533d61ff620a`, and a lossy `&str` sink answered
+    /// `5a5a42595445533d61efbfbd620a` instead.
+    #[test]
+    fn command_output_reaches_the_terminal_as_bytes() {
+        let mut sink = Vec::new();
+        write_command_output(&mut sink, b"ZZBYTES=a\xffb\n").unwrap();
+        assert_eq!(sink, b"ZZBYTES=a\xffb\n");
+
+        let mut unterminated = Vec::new();
+        write_command_output(&mut unterminated, b"a\xffb").unwrap();
+        assert_eq!(unterminated, b"a\xffb\n");
+    }
 
     #[test]
     fn cli_accepts_local_and_named_host_attach_forms() {

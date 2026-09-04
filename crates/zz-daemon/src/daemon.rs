@@ -8486,8 +8486,7 @@ impl Shared {
                         snapshot_changed |= inner.engine.state.generation() != generation;
                         let windows = BTreeSet::from([*window]);
                         let panes = panes_for_windows(&inner, &windows);
-                        snapshot_changed |=
-                            write_back_terminal_geometries(&mut inner, &panes);
+                        snapshot_changed |= write_back_terminal_geometries(&mut inner, &panes);
                         for (terminal, geometry) in terminal_resizes_for_panes(&inner, &panes) {
                             deferred_terminal_commands
                                 .push(DeferredTerminalCommand::Resize { terminal, geometry });
@@ -8500,8 +8499,7 @@ impl Shared {
                             |window| BTreeSet::from([window]),
                         );
                         let panes = panes_for_windows(&inner, &windows);
-                        snapshot_changed |=
-                            write_back_terminal_geometries(&mut inner, &panes);
+                        snapshot_changed |= write_back_terminal_geometries(&mut inner, &panes);
                         for (terminal, geometry) in terminal_resizes_for_panes(&inner, &panes) {
                             deferred_terminal_commands
                                 .push(DeferredTerminalCommand::Resize { terminal, geometry });
@@ -76297,7 +76295,6 @@ bind - split-window -v -c "#{pane_current_path}"
             Some((200, 50))
         );
     }
-
 
     /// On pinned tmux d77c9dc6 a pane's pty is its layout cell: a 199x49
     /// window split `-h` reports 99x49 for both panes, `pane_left` plus

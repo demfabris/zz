@@ -43,6 +43,28 @@ main_client show-environment -g "$name" >"$root/name" 2>&1 || :
 main_client set-environment ZZSESS "$session_value"
 main_client show-environment ZZSESS >"$root/session" 2>&1 || :
 
+# format.c is char * end to end, so a format that expands the byte value
+# answers the bytes, and so does every sink that prints an expansion. The
+# modifier family the value rides through counts it the way format-draw.c
+# does: format_width gives an invalid byte no column at all, format_trim_left
+# rebuilds the value out of what it counted and so drops the byte even when
+# the value was short enough to keep whole, format_trim_right hands back the
+# whole string in that case and keeps it, n: is strlen over the bytes, and a
+# conditional only asks whether the value is non-empty.
+fmt() {
+    main_client display-message -p "$1" >"$root/fmt-$2" 2>&1 || :
+}
+fmt '#{ZZBYTES}' plain
+fmt '#{b:#{ZZBYTES}}' basename
+fmt '#{=1:#{ZZBYTES}}' trim-left
+fmt '#{=2:#{ZZBYTES}}' trim-left-wide
+fmt '#{=-2:#{ZZBYTES}}' trim-right
+fmt '#{?ZZBYTES,yes,no}' conditional
+fmt '#{n:ZZBYTES}|#{w:#{ZZBYTES}}' measures
+fmt '#{p5:#{ZZBYTES}}' padded
+fmt '#{q:#{ZZBYTES}}' quoted
+main_client list-panes -a -F '#{ZZBYTES}' >"$root/fmt-list" 2>&1 || :
+
 # The spawn environment a later pane inherits: the pane's own shell reads the
 # variable back out of its process environment and reports it.
 cat >"$root/inherit.sh" <<INHERIT
@@ -84,8 +106,18 @@ if [ "$(hex "$root/global")" = 5a5a42595445533d61ff620a ] &&
     [ "$(hex "$root/inherit")" = 5a5a494e48455249543d61ff620a ] &&
     [ "$(hex "$root/attach-bytes")" = 5a5a42595445533d61ff620a ] &&
     [ "$(hex "$root/attach-plain")" = 5a5a504c41494e3d6e65696768626f75720a ] &&
-    [ "$(hex "$root/control")" = 5a5a42595445533d61ff620a ]; then
-    result=clean:8
+    [ "$(hex "$root/control")" = 5a5a42595445533d61ff620a ] &&
+    [ "$(hex "$root/fmt-plain")" = 61ff620a ] &&
+    [ "$(hex "$root/fmt-basename")" = 61ff620a ] &&
+    [ "$(hex "$root/fmt-trim-left")" = 610a ] &&
+    [ "$(hex "$root/fmt-trim-left-wide")" = 61620a ] &&
+    [ "$(hex "$root/fmt-trim-right")" = 61ff620a ] &&
+    [ "$(hex "$root/fmt-conditional")" = 7965730a ] &&
+    [ "$(hex "$root/fmt-measures")" = 337c320a ] &&
+    [ "$(hex "$root/fmt-padded")" = 61ff622020200a ] &&
+    [ "$(hex "$root/fmt-quoted")" = 61ff620a ] &&
+    [ "$(hex "$root/fmt-list")" = 61ff620a ]; then
+    result=clean:18
 fi
 
 main_client set-environment -g ZZ_ENVBYTES_RESULT "$result"

@@ -5,7 +5,9 @@ corpus: none
 # non-UTF-8 name, a session-scoped store, the environment a later pane
 # inherits, the control client's own command block, and the attach shape where
 # update-environment copies a real pty client's own non-UTF-8 entry into the
-# session beside a plain neighbour.
+# session beside a plain neighbour. Then the format side: display-message and
+# list-panes expand the byte value, and b, =, ?, n, w, p and q count it the way
+# format-draw.c counts a byte no UTF-8 sequence opens.
 stage: fixtures/environment-bytes.sh ~/environment-bytes.sh
 stage: fixtures/environment-bytes-attach.py ~/environment-bytes-attach.py
 run-shell 'sh ~/environment-bytes.sh'

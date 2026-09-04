@@ -5,7 +5,7 @@ use glob::{MatchOptions, Pattern};
 use regex::{Captures, RegexBuilder};
 use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
-    CommandSpec, MAX_STATUS_TEXT_BYTES, PaneBorderStatus, PaneId, SessionId, WindowId,
+    CommandSpec, MAX_STATUS_TEXT_BYTES, PaneBorderStatus, PaneId, RawText, SessionId, WindowId,
 };
 pub use zz_protocol::{TmuxColour, parse_tmux_colour};
 
@@ -293,7 +293,7 @@ pub struct FormatClientRow {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FormatEnvironRow {
     pub name: String,
-    pub value: String,
+    pub value: RawText,
     pub hidden: bool,
     pub removed: bool,
 }
@@ -1253,7 +1253,7 @@ impl MuxEngine {
                 .join(" ");
             context.pane_start_command_list = command
                 .iter()
-                .map(|argument| quote_single(argument))
+                .map(|argument| quote_single(argument.as_bytes()).to_string())
                 .collect::<Vec<_>>()
                 .join(" ");
         }
@@ -1544,6 +1544,25 @@ pub fn expand_status(
         client_row: None,
         trace: None,
     };
+    expander.expand(format, 0).into()
+}
+
+/// The byte-clean twin of [`expand_format_values`], for the sinks that print an
+/// expansion straight to a client: a value the environment store keeps as bytes
+/// reaches the client as those bytes, the way `format_expand` hands `char *` to
+/// `server_client_print`.
+pub fn expand_format_bytes(
+    format: &str,
+    context: &StatusContext,
+    hooks: &mut impl StatusHooks,
+) -> RawText {
+    let mut expander = Expander {
+        context,
+        hooks,
+        time: false,
+        client_row: None,
+        trace: None,
+    };
     expander.expand(format, 0)
 }
 
@@ -1559,7 +1578,7 @@ pub fn expand_format_values(
         client_row: None,
         trace: None,
     };
-    expander.expand(format, 0)
+    expander.expand(format, 0).into()
 }
 
 pub(crate) struct CommandHooks {
@@ -1589,7 +1608,7 @@ impl StatusHooks for CommandHooks {
 #[cfg(test)]
 pub(crate) fn expand_format(format: &str, engine: &MuxEngine, context: FormatContext) -> String {
     let mut hooks = CommandHooks::new(engine.format_now());
-    expand_format_with_hooks(format, engine, context, &mut hooks)
+    expand_format_with_hooks(format, engine, context, &mut hooks).into()
 }
 
 /// The names whose pin callback answers NULL for a reason the value alone
@@ -1729,7 +1748,7 @@ pub(crate) fn expand_format_with_hooks(
     engine: &MuxEngine,
     context: FormatContext,
     hooks: &mut impl StatusHooks,
-) -> String {
+) -> RawText {
     expand_format_inner(format, engine, context, hooks, false, false).0
 }
 
@@ -1742,7 +1761,7 @@ pub(crate) fn expand_format_time_with_hooks(
     engine: &MuxEngine,
     context: FormatContext,
     hooks: &mut impl StatusHooks,
-) -> String {
+) -> RawText {
     expand_format_inner(format, engine, context, hooks, true, false).0
 }
 
@@ -1754,7 +1773,7 @@ pub(crate) fn expand_format_time_traced(
     engine: &MuxEngine,
     context: FormatContext,
     hooks: &mut impl StatusHooks,
-) -> (String, Vec<String>) {
+) -> (RawText, Vec<String>) {
     expand_format_inner(format, engine, context, hooks, true, true)
 }
 
@@ -1765,7 +1784,7 @@ fn expand_format_inner(
     hooks: &mut impl StatusHooks,
     time: bool,
     trace: bool,
-) -> (String, Vec<String>) {
+) -> (RawText, Vec<String>) {
     let option_fallback =
         (context.session.is_none() && context.window.is_none() && context.pane.is_none())
             .then(|| context.format_client.attached_session())
@@ -1889,15 +1908,15 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         }
     }
 
-    fn expand(&mut self, format: &str, depth: usize) -> String {
+    fn expand(&mut self, format: &str, depth: usize) -> RawText {
         if format.is_empty() {
-            return String::new();
+            return RawText::default();
         }
         if depth == FORMAT_LOOP_LIMIT {
             if self.tracing() {
                 self.log(depth, &format!("reached loop limit ({FORMAT_LOOP_LIMIT})"));
             }
-            return String::new();
+            return RawText::default();
         }
         if self.tracing() {
             self.log(depth + 1, &format!("expanding format: {format}"));
@@ -1912,7 +1931,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         } else {
             format
         };
-        let mut output = String::with_capacity(format.len());
+        let mut output = Vec::with_capacity(format.len());
         let mut literal = String::new();
         let mut index = 0usize;
         while index < format.len() {
@@ -1936,9 +1955,10 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     self.log(depth + 1, &format!("found #*{}[", hashes_end - index));
                 }
                 self.flush(&mut output, &mut literal);
-                output.push_str(&format[index..=hashes_end]);
-                output.push_str(&self.expand_style_body(&format[hashes_end + 1..end], depth));
-                output.push(']');
+                output.extend_from_slice(&format.as_bytes()[index..=hashes_end]);
+                let style = self.expand_style_body(&format[hashes_end + 1..end], depth);
+                output.extend_from_slice(style.as_bytes());
+                output.push(b']');
                 index = end + 1;
                 continue;
             }
@@ -1971,7 +1991,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     if self.tracing() {
                         self.log(depth + 1, &format!("#() result: {out}"));
                     }
-                    output.push_str(&out);
+                    output.extend_from_slice(out.as_bytes());
                     index = end + 1;
                 }
                 '{' => {
@@ -1986,7 +2006,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                         );
                     }
                     match self.expand_replacement(&format[after_next..end], depth + 1) {
-                        Ok(value) => output.push_str(&value),
+                        Ok(value) => output.extend_from_slice(value.as_bytes()),
                         Err(()) => break,
                     }
                     index = end + 1;
@@ -2006,7 +2026,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                             let value = found.clone().unwrap_or_default();
                             self.log(depth + 1, &format!("replaced '{name}' with '{value}'"));
                         }
-                        output.push_str(&found.unwrap_or_default());
+                        output.extend_from_slice(found.unwrap_or_default().as_bytes());
                     } else {
                         literal.push('#');
                         literal.push(next);
@@ -2016,6 +2036,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             }
         }
         self.flush(&mut output, &mut literal);
+        let output = RawText::from_bytes(output);
         if self.tracing() {
             self.log(depth + 1, &format!("result is: {output}"));
         }
@@ -2076,15 +2097,28 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         output
     }
 
-    fn flush(&mut self, output: &mut String, literal: &mut String) {
+    fn flush(&mut self, output: &mut Vec<u8>, literal: &mut String) {
         if literal.is_empty() {
             return;
         }
-        output.push_str(literal);
+        output.extend_from_slice(literal.as_bytes());
         literal.clear();
     }
 
-    fn expand_replacement(&mut self, body: &str, depth: usize) -> Result<String, ()> {
+    /// `E:` and `T:` run the value back through `format_expand`, which is the
+    /// identity when the value holds no format token. The expander walks text,
+    /// so a value that is not UTF-8 goes in lossy; when the walk changed
+    /// nothing the original bytes are the answer the pin gives.
+    fn reexpand(&mut self, value: RawText, depth: usize) -> RawText {
+        let expanded = self.expand(&value, depth);
+        if expanded.as_str() == value.as_str() {
+            value
+        } else {
+            expanded
+        }
+    }
+
+    fn expand_replacement(&mut self, body: &str, depth: usize) -> Result<RawText, ()> {
         let value = self.expand_replacement_inner(body, depth);
         if self.tracing() {
             match value.as_deref() {
@@ -2095,7 +2129,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         value
     }
 
-    fn expand_replacement_inner(&mut self, body: &str, depth: usize) -> Result<String, ()> {
+    fn expand_replacement_inner(&mut self, body: &str, depth: usize) -> Result<RawText, ()> {
         let (modifiers, copy) = self.build_modifiers(body, depth).map_or_else(
             || (Vec::new(), body),
             |(modifiers, offset)| (modifiers, &body[offset..]),
@@ -2120,43 +2154,43 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             if self.tracing() {
                 self.log(depth, &format!("literal string is '{copy}'"));
             }
-            unescape(copy)
+            RawText::from(unescape(copy))
         } else if flags.character {
-            self.expand_character(copy, depth)
+            RawText::from(self.expand_character(copy, depth))
         } else if let Some(colour_flags) = flags.colour {
-            self.expand_colour(copy, depth, colour_flags)
+            RawText::from(self.expand_colour(copy, depth, colour_flags))
         } else if flags.loop_sessions {
-            self.expand_loop(copy, depth, LoopTarget::Sessions, &flags)?
+            RawText::from(self.expand_loop(copy, depth, LoopTarget::Sessions, &flags)?)
         } else if flags.loop_windows {
-            self.expand_loop(copy, depth, LoopTarget::Windows, &flags)?
+            RawText::from(self.expand_loop(copy, depth, LoopTarget::Windows, &flags)?)
         } else if flags.loop_panes {
-            self.expand_loop(copy, depth, LoopTarget::Panes, &flags)?
+            RawText::from(self.expand_loop(copy, depth, LoopTarget::Panes, &flags)?)
         } else if flags.loop_clients {
-            self.expand_client_loop(copy, depth, &flags)
+            RawText::from(self.expand_client_loop(copy, depth, &flags))
         } else if let Some(loop_flags) = flags.loop_options {
-            self.expand_option_loop(copy, depth, loop_flags)
+            RawText::from(self.expand_option_loop(copy, depth, loop_flags))
         } else if let Some(loop_flags) = flags.loop_environment {
-            self.expand_environment_loop(copy, depth, loop_flags)
+            RawText::from(self.expand_environment_loop(copy, depth, loop_flags))
         } else if flags.name_window {
-            self.expand_name_exists(copy, depth, true)?
+            RawText::from(self.expand_name_exists(copy, depth, true)?)
         } else if flags.name_session {
-            self.expand_name_exists(copy, depth, false)?
+            RawText::from(self.expand_name_exists(copy, depth, false)?)
         } else if let Some(search_flags) = flags.content_search {
-            self.expand_content_search(copy, depth, search_flags)
+            RawText::from(self.expand_content_search(copy, depth, search_flags))
         } else if flags.repeat {
-            self.expand_repeat(copy, depth)?
+            RawText::from(self.expand_repeat(copy, depth)?)
         } else if flags.not {
-            bool_string(!format_true(&self.expand(copy, depth))).to_owned()
+            RawText::from(bool_string(!format_true(&self.expand(copy, depth))))
         } else if flags.not_not {
-            bool_string(format_true(&self.expand(copy, depth))).to_owned()
+            RawText::from(bool_string(format_true(&self.expand(copy, depth))))
         } else if let Some(and) = flags.bool_op {
-            self.expand_boolean(copy, depth, and)
+            RawText::from(self.expand_boolean(copy, depth, and))
         } else if let Some(comparison) = flags.comparison {
-            self.expand_comparison(copy, depth, comparison)?
+            RawText::from(self.expand_comparison(copy, depth, comparison)?)
         } else if let Some(conditional) = copy.strip_prefix('?') {
             self.expand_conditional(conditional, depth, &flags)
         } else if let Some(expression) = flags.expression {
-            self.expand_expression(copy, depth, expression)
+            RawText::from(self.expand_expression(copy, depth, expression))
         } else if copy.contains("#{") {
             if self.tracing() {
                 self.log(depth, &format!("expanding inner format '{copy}'"));
@@ -2174,16 +2208,16 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         };
 
         if flags.expand {
-            value = self.expand(&value, depth);
+            value = self.reexpand(value, depth);
         } else if flags.expand_time {
             let previous = std::mem::replace(&mut self.time, true);
-            value = self.expand(&value, depth);
+            value = self.reexpand(value, depth);
             self.time = previous;
         }
         for substitution in flags.substitutions {
             let pattern = self.expand(&substitution.args[0], depth);
             let replacement = self.expand(&substitution.args[1], depth);
-            value = substitute(
+            value = RawText::from(substitute(
                 &value,
                 &pattern,
                 &replacement,
@@ -2191,7 +2225,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     .args
                     .get(2)
                     .is_some_and(|flags| flags.contains('i')),
-            );
+            ));
             if self.tracing() {
                 self.log(
                     depth,
@@ -2213,13 +2247,13 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             }
         }
         if flags.length {
-            value = value.len().to_string();
+            value = RawText::from(value.byte_len().to_string());
             if self.tracing() {
                 self.log(depth, &format!("replacing with length: {value}"));
             }
         }
         if flags.width {
-            value = styled_display_width(&value).to_string();
+            value = RawText::from(styled_display_width(value.as_bytes()).to_string());
             if self.tracing() {
                 self.log(depth, &format!("replacing with width: {value}"));
             }
@@ -2309,7 +2343,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     let start = position + 1;
                     let end = find_modifier_argument(body, start, wrapper)?;
                     let value = unescape(&body[start..end]);
-                    args.push(self.expand(&value, depth));
+                    args.push(self.expand(&value, depth).to_string());
                     position = end;
                     if is_modifier_end(body.as_bytes()[position]) {
                         break;
@@ -2318,7 +2352,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             } else {
                 let end = find_modifier_argument(body, position, 0)?;
                 let value = unescape(&body[position..end]);
-                args.push(self.expand(&value, depth));
+                args.push(self.expand(&value, depth).to_string());
                 position = end;
             }
             modifiers.push(Modifier { kind, text, args });
@@ -2343,16 +2377,16 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
     /// The body is a literal name, never expanded, and the three checks run in
     /// the fixed source order c, f, e with each overwriting the last, so a flag
     /// word naming several of them answers the last one that ran.
-    fn expand_interrogate(&mut self, copy: &str, word: &str) -> String {
+    fn expand_interrogate(&mut self, copy: &str, word: &str) -> RawText {
         let Some(terminal) = self.hooks.client_tty_term() else {
-            return String::new();
+            return RawText::default();
         };
-        let mut value = String::new();
+        let mut value = RawText::default();
         if word.contains('c') {
-            bool_string(terminal.has_capability(copy)).clone_into(&mut value);
+            value = RawText::from(bool_string(terminal.has_capability(copy)));
         }
         if word.contains('f') {
-            bool_string(terminal.has_feature(copy)).clone_into(&mut value);
+            value = RawText::from(bool_string(terminal.has_feature(copy)));
         }
         if word.contains('e') {
             value = self
@@ -2799,7 +2833,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         copy: &str,
         depth: usize,
         flags: &ModifierFlags<'_>,
-    ) -> String {
+    ) -> RawText {
         let parts = split_top(copy, ',');
         let paired = parts.len() / 2 * 2;
         for pair in parts[..paired].chunks_exact(2) {
@@ -2821,7 +2855,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                             &format!("condition '{condition}' not found; assuming false"),
                         );
                     }
-                    String::new()
+                    RawText::default()
                 } else {
                     expanded
                 }
@@ -2850,7 +2884,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     &format!("no condition matched in '{copy}'; using empty string"),
                 );
             }
-            String::new()
+            RawText::default()
         }
     }
 
@@ -2858,7 +2892,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
     /// and tree lookup misses, the session store answers first and the global
     /// one second, and a name the session store keeps with no value masks the
     /// global entry instead of falling through to it.
-    fn environment_value(&mut self, key: &str) -> Option<String> {
+    fn environment_value(&mut self, key: &str) -> Option<RawText> {
         let values = self.context.values();
         let universe = Arc::clone(&values.format_universe);
         let session = universe.environments.sessions.get(&values.session_id);
@@ -2877,7 +2911,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         Some(row.value.clone())
     }
 
-    fn lookup(&mut self, key: &str, flags: &ModifierFlags<'_>) -> Option<String> {
+    fn lookup(&mut self, key: &str, flags: &ModifierFlags<'_>) -> Option<RawText> {
         let hooked = match self.client_row {
             Some(row) if client_loop_scoped(key) => {
                 Some(row.variables.get(key).cloned().unwrap_or_default())
@@ -2885,38 +2919,38 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             _ => self.hooks.variable(key, self.context.values()),
         };
         let mut value = if let Some(hooked) = hooked {
-            hooked
+            RawText::from(hooked)
         } else if self.context.variable_kind(key).is_some() {
-            self.context.variable(key).map(Cow::into_owned)?
+            RawText::from(self.context.variable(key).map(Cow::into_owned)?)
         } else if flags.time.enabled {
             return None;
         } else {
             self.environment_value(key)?
         };
         if flags.time.enabled {
-            return Some(format_time_value(
+            return Some(RawText::from(format_time_value(
                 &value,
                 &flags.time,
                 self.context.values().format_now,
-            ));
+            )));
         }
         if flags.basename {
-            value = basename(&value);
+            value = basename(value.as_bytes());
         }
         if flags.dirname {
-            value = dirname(&value);
+            value = dirname(value.as_bytes());
         }
         if flags.quote_shell {
-            value = quote_shell(&value);
+            value = quote_shell(value.as_bytes());
         }
         if flags.quote_single {
-            value = quote_single(&value);
+            value = quote_single(value.as_bytes());
         }
         if flags.quote_style {
-            value = value.replace('#', "##");
+            value = quote_style(value.as_bytes());
         }
         if flags.quote_arguments {
-            value = quote_argument(&value);
+            value = RawText::from(quote_argument(&value));
         }
         Some(value)
     }
@@ -3446,18 +3480,22 @@ fn parse_expression_number(value: &str) -> Option<f64> {
     value.parse::<f64>().ok()
 }
 
-fn pad_value(value: &str, width: isize) -> String {
+fn pad_value(value: &RawText, width: isize) -> RawText {
     let target = width.unsigned_abs();
-    let current = display_width(value);
+    let current = format_byte_width(value.as_bytes());
     if current >= target {
-        return value.to_owned();
+        return value.clone();
     }
     let padding = " ".repeat(target - current);
+    let mut output = Vec::with_capacity(value.byte_len() + padding.len());
     if width < 0 {
-        format!("{padding}{value}")
+        output.extend_from_slice(padding.as_bytes());
+        output.extend_from_slice(value.as_bytes());
     } else {
-        format!("{value}{padding}")
+        output.extend_from_slice(value.as_bytes());
+        output.extend_from_slice(padding.as_bytes());
     }
+    RawText::from_bytes(output)
 }
 
 fn format_colour(value: &str, flags: &str) -> String {
@@ -3675,7 +3713,7 @@ fn environment_loop_variables(
         ),
         (
             ENVIRONMENT_LOOP_CONTEXT_FORMATS[3].to_owned(),
-            row.value.clone(),
+            row.value.to_string(),
         ),
         (
             ENVIRONMENT_LOOP_CONTEXT_FORMATS[4].to_owned(),
@@ -3739,8 +3777,7 @@ fn option_loop_variables(
     ])
 }
 
-fn styled_display_width(value: &str) -> usize {
-    let bytes = value.as_bytes();
+fn styled_display_width(bytes: &[u8]) -> usize {
     let mut width = 0usize;
     let mut position = 0usize;
     while position < bytes.len() {
@@ -3756,9 +3793,9 @@ fn styled_display_width(value: &str) -> usize {
             }
             continue;
         }
-        let character = value[position..].chars().next().unwrap_or_default();
-        width += character.width().unwrap_or_default();
-        position += character.len_utf8();
+        let (length, unit, _) = next_format_unit(bytes, position);
+        width += unit;
+        position += length;
     }
     width
 }
@@ -3920,59 +3957,82 @@ pub fn format_true(value: &str) -> bool {
     !value.is_empty() && value != "0"
 }
 
-fn basename(value: &str) -> String {
-    if value.is_empty() {
-        return ".".to_owned();
-    }
-    let trimmed = value.trim_end_matches('/');
-    if trimmed.is_empty() {
-        return "/".to_owned();
-    }
-    trimmed.rsplit('/').next().unwrap_or(trimmed).to_owned()
+fn trim_end_slashes(value: &[u8]) -> &[u8] {
+    let end = value
+        .iter()
+        .rposition(|byte| *byte != b'/')
+        .map_or(0, |index| index + 1);
+    &value[..end]
 }
 
-fn dirname(value: &str) -> String {
+fn basename(value: &[u8]) -> RawText {
     if value.is_empty() {
-        return ".".to_owned();
+        return RawText::from(".");
     }
-    let trimmed = value.trim_end_matches('/');
+    let trimmed = trim_end_slashes(value);
     if trimmed.is_empty() {
-        return "/".to_owned();
+        return RawText::from("/");
     }
-    let Some(index) = trimmed.rfind('/') else {
-        return ".".to_owned();
+    let start = trimmed
+        .iter()
+        .rposition(|byte| *byte == b'/')
+        .map_or(0, |index| index + 1);
+    RawText::from_bytes(&trimmed[start..])
+}
+
+fn dirname(value: &[u8]) -> RawText {
+    if value.is_empty() {
+        return RawText::from(".");
+    }
+    let trimmed = trim_end_slashes(value);
+    if trimmed.is_empty() {
+        return RawText::from("/");
+    }
+    let Some(index) = trimmed.iter().rposition(|byte| *byte == b'/') else {
+        return RawText::from(".");
     };
-    let parent = trimmed[..index].trim_end_matches('/');
+    let parent = trim_end_slashes(&trimmed[..index]);
     if parent.is_empty() {
-        "/".to_owned()
+        RawText::from("/")
     } else {
-        parent.to_owned()
+        RawText::from_bytes(parent)
     }
 }
 
-fn quote_shell(value: &str) -> String {
-    let mut output = String::with_capacity(value.len() * 2);
-    for character in value.chars() {
-        if "|&;<>()$`\\\"'*?[# =%".contains(character) {
-            output.push('\\');
+fn quote_shell(value: &[u8]) -> RawText {
+    let mut output = Vec::with_capacity(value.len() * 2);
+    for byte in value {
+        if b"|&;<>()$`\\\"'*?[# =%".contains(byte) {
+            output.push(b'\\');
         }
-        output.push(character);
+        output.push(*byte);
     }
-    output
+    RawText::from_bytes(output)
 }
 
-fn quote_single(value: &str) -> String {
-    let mut output = String::with_capacity(value.len() + 2);
-    output.push('\'');
-    for character in value.chars() {
-        if character == '\'' {
-            output.push_str("'\\''");
+fn quote_single(value: &[u8]) -> RawText {
+    let mut output = Vec::with_capacity(value.len() + 2);
+    output.push(b'\'');
+    for byte in value {
+        if *byte == b'\'' {
+            output.extend_from_slice(b"'\\''");
         } else {
-            output.push(character);
+            output.push(*byte);
         }
     }
-    output.push('\'');
-    output
+    output.push(b'\'');
+    RawText::from_bytes(output)
+}
+
+fn quote_style(value: &[u8]) -> RawText {
+    let mut output = Vec::with_capacity(value.len());
+    for byte in value {
+        if *byte == b'#' {
+            output.push(b'#');
+        }
+        output.push(*byte);
+    }
+    RawText::from_bytes(output)
 }
 
 fn quote_argument(value: &str) -> String {
@@ -4419,51 +4479,101 @@ fn expand_substitution(replacement: &str, captures: &Captures<'_>) -> String {
     output
 }
 
-fn truncate_value(value: &str, limit: isize, marker: Option<&str>) -> String {
+/// One unit of format-draw.c `format_width`'s walk, which need not be UTF-8:
+/// its byte length, the columns it occupies, and whether `format_trim_left`
+/// keeps it. A byte that opens no complete sequence and is not printable ASCII
+/// is skipped there, so it is zero columns wide and the trim drops it.
+fn next_format_unit(value: &[u8], index: usize) -> (usize, usize, bool) {
+    let byte = value[index];
+    let size = match byte {
+        0xc2..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf4 => 4,
+        _ => 0,
+    };
+    if size != 0
+        && let Some(slice) = value.get(index..index + size)
+        && let Ok(text) = std::str::from_utf8(slice)
+        && let Some(character) = text.chars().next()
+        && character.len_utf8() == size
+    {
+        return (size, character.width().unwrap_or_default(), true);
+    }
+    if (0x20..0x7f).contains(&byte) {
+        (1, 1, true)
+    } else {
+        (1, 0, false)
+    }
+}
+
+fn format_units(value: &[u8]) -> Vec<(usize, usize, bool)> {
+    let mut units = Vec::new();
+    let mut index = 0usize;
+    while index < value.len() {
+        let unit = next_format_unit(value, index);
+        index += unit.0;
+        units.push(unit);
+    }
+    units
+}
+
+fn format_byte_width(value: &[u8]) -> usize {
+    format_units(value)
+        .into_iter()
+        .map(|(_, width, _)| width)
+        .sum()
+}
+
+/// format-draw.c `format_trim_left` and `format_trim_right`. Both rebuild the
+/// value out of the units they walked, so a byte neither of them counts is gone
+/// from a left trim even when the value was short enough to keep whole; a right
+/// trim hands back the original string in that case and keeps the byte.
+fn truncate_value(value: &RawText, limit: isize, marker: Option<&str>) -> RawText {
     if limit == 0 {
-        return value.to_owned();
+        return value.clone();
     }
     let keep = limit.unsigned_abs();
-    let trimmed = if limit > 0 {
-        let mut width = 0usize;
-        value
-            .chars()
-            .take_while(|character| {
-                let next = character.width().unwrap_or_default();
-                if width.saturating_add(next) > keep {
-                    false
-                } else {
-                    width += next;
-                    true
-                }
-            })
-            .collect::<String>()
-    } else {
-        let mut width = 0usize;
-        let mut characters = value
-            .chars()
-            .rev()
-            .take_while(|character| {
-                let next = character.width().unwrap_or_default();
-                if width.saturating_add(next) > keep {
-                    false
-                } else {
-                    width += next;
-                    true
-                }
-            })
-            .collect::<Vec<_>>();
-        characters.reverse();
-        characters.into_iter().collect()
-    };
-    if trimmed == value {
-        return trimmed;
+    let bytes = value.as_bytes();
+    let units = format_units(bytes);
+    let total: usize = units.iter().map(|(_, width, _)| width).sum();
+    if limit < 0 && total <= keep {
+        return value.clone();
     }
+    let skip = total.saturating_sub(keep);
+    let mut trimmed = Vec::with_capacity(bytes.len());
+    let mut width = 0usize;
+    let mut offset = 0usize;
+    for (length, unit, kept) in &units {
+        let wanted = if limit > 0 {
+            if width >= keep {
+                break;
+            }
+            *kept && width + unit <= keep
+        } else {
+            *kept && width >= skip
+        };
+        if wanted {
+            trimmed.extend_from_slice(&bytes[offset..offset + length]);
+        }
+        width += unit;
+        offset += length;
+    }
+    if trimmed == bytes {
+        return value.clone();
+    }
+    let mut output = Vec::with_capacity(trimmed.len() + marker.map_or(0, str::len));
     match (limit > 0, marker) {
-        (true, Some(marker)) => format!("{trimmed}{marker}"),
-        (false, Some(marker)) => format!("{marker}{trimmed}"),
-        _ => trimmed,
+        (true, Some(marker)) => {
+            output.extend_from_slice(&trimmed);
+            output.extend_from_slice(marker.as_bytes());
+        }
+        (false, Some(marker)) => {
+            output.extend_from_slice(marker.as_bytes());
+            output.extend_from_slice(&trimmed);
+        }
+        _ => output = trimmed,
     }
+    RawText::from_bytes(output)
 }
 
 fn format_time_value(value: &str, flags: &TimeFlags<'_>, now: Option<i64>) -> String {
@@ -4648,6 +4758,49 @@ mod tests {
 
     fn expand(format: &str) -> String {
         expand_status(format, &context(), &mut Stub)
+    }
+
+    /// A byte no UTF-8 sequence opens rides `format_expand` in the pin, which
+    /// is `char *` end to end, and format-draw.c is what counts it: it opens no
+    /// sequence and is not printable ASCII, so `format_width` gives it no
+    /// column, `format_trim_left` rebuilds the value out of what it counted and
+    /// drops it, `format_trim_right` returns the whole string untouched when it
+    /// already fits, `utf8_padcstr` pads against the same width, and the length
+    /// modifier is `strlen` over the raw bytes. Measured on tmux d77c9dc6 with
+    /// `set-environment -g ZZBYTES $(printf 'a\377b')`.
+    #[test]
+    fn an_environment_value_no_utf8_holds_is_counted_the_way_format_draw_counts_it() {
+        let value = RawText::from_bytes(b"a\xffb".to_vec());
+        let mut context = context();
+        let mut universe = FormatUniverse::default();
+        universe.environments.global = vec![FormatEnvironRow {
+            name: "ZZBYTES".to_owned(),
+            value: value.clone(),
+            hidden: false,
+            removed: false,
+        }];
+        context.format_universe = Arc::new(universe);
+        let expand = |format: &str| expand_format_bytes(format, &context, &mut Stub).into_bytes();
+
+        assert_eq!(expand("#{ZZBYTES}"), b"a\xffb".to_vec());
+        assert_eq!(expand("#{b:#{ZZBYTES}}"), b"a\xffb".to_vec());
+        assert_eq!(expand("#{d:#{ZZBYTES}}"), b"a\xffb".to_vec());
+        assert_eq!(expand("#{q:#{ZZBYTES}}"), b"a\xffb".to_vec());
+        assert_eq!(expand("#{E:ZZBYTES}"), b"a\xffb".to_vec());
+        assert_eq!(expand("#{=1:#{ZZBYTES}}"), b"a".to_vec());
+        assert_eq!(expand("#{=2:#{ZZBYTES}}"), b"ab".to_vec());
+        assert_eq!(expand("#{=9:#{ZZBYTES}}"), b"ab".to_vec());
+        assert_eq!(expand("#{=-1:#{ZZBYTES}}"), b"b".to_vec());
+        assert_eq!(expand("#{=-2:#{ZZBYTES}}"), b"a\xffb".to_vec());
+        assert_eq!(expand("#{?ZZBYTES,yes,no}"), b"yes".to_vec());
+        assert_eq!(expand("#{n:ZZBYTES}|#{w:#{ZZBYTES}}"), b"3|2".to_vec());
+        assert_eq!(expand("#{p5:#{ZZBYTES}}"), b"a\xffb   ".to_vec());
+        assert_eq!(expand("#{p-5:#{ZZBYTES}}"), b"   a\xffb".to_vec());
+        assert_eq!(
+            basename(b"/tmp/a\xffb"),
+            RawText::from_bytes(b"a\xffb".to_vec())
+        );
+        assert_eq!(format_byte_width(b"a\xffb"), 2);
     }
 
     fn expand_session_path(engine: &MuxEngine, session: Option<SessionId>) -> String {

@@ -1000,6 +1000,19 @@ impl RawText {
         *self = Self::from_bytes(current);
     }
 
+    /// Joins `parts` with `separator`, keeping every byte of every part.
+    #[must_use]
+    pub fn join(parts: &[Self], separator: &[u8]) -> Self {
+        let mut bytes = Vec::new();
+        for (index, part) in parts.iter().enumerate() {
+            if index != 0 {
+                bytes.extend_from_slice(separator);
+            }
+            bytes.extend_from_slice(part.as_bytes());
+        }
+        Self::from_bytes(bytes)
+    }
+
     /// Splits on the first `separator` byte, keeping both halves as bytes.
     #[must_use]
     pub fn split_once_byte(&self, separator: u8) -> Option<(Self, Self)> {

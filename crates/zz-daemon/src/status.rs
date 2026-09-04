@@ -388,7 +388,7 @@ pub(crate) fn client_environment_rows(
             .iter()
             .map(|(name, value)| FormatEnvironRow {
                 name: name.to_string(),
-                value: value.to_string(),
+                value: value.clone(),
                 hidden: false,
                 removed: false,
             })

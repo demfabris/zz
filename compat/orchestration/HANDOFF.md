@@ -1,8 +1,15 @@
-# Handoff for the tmux-compat campaign (cycle 12 is the last one)
+# Handoff for the tmux-compat campaign (registry closed; next work is in CAMPAIGN-REVIEW.md)
 
-Written 2026-09-03 ~00:40Z on the ubuntu box and rewritten 2026-09-04 after cycle 11 integrated.
-Cycles 10 and 11 are both fully integrated. Meter 99.0%, THREE items left, all three in their own
-group. One more cycle closes the registry.
+Written 2026-09-03 ~00:40Z on the ubuntu box and rewritten 2026-09-04 after cycle 13 integrated.
+THE REGISTRY IS EMPTY: meter 100.0% (304/304), 65/65 groups, 0 open, 0 blocked, 174 closed records,
+42 accepted groups. The implementation phase of the campaign as scoped on 2026-08-31 is done.
+
+It is not the end of the work, and the tracker's own headline says why: the persisted attached-client
+row reads PASS but the fixture does not complete on this box, so the practical exit gate is not met.
+A retrospective run the same day (`CAMPAIGN-REVIEW.md`, eight Fable reviewers and a critic) found
+fifteen ranked gaps the registry could never see because its list was drawn after argv parsing and
+below the screen. THE NEXT ORCHESTRATOR STARTS THERE: the instrument pass in that report comes
+before any cycle 14.
 
 THE CYCLE SHAPE CHANGED ON 2026-09-03 and this overrides every older script. Fabrico's instruction
 is TWO work lanes per cycle, not three, and every agent is Opus 5 at `effort: 'xhigh'`: workers,
@@ -57,13 +64,13 @@ read. The desktop GPUI app keeps its own look entirely.
 
 | Fact | Value |
 | --- | --- |
-| `origin/main` | `3eda6ed` (cycle-11 choosers merge; formats lane `89f36ac`) plus the ledger recompute |
-| Agreed-scope meter | 99.0% (301/304 items), 62/65 groups done, 3 partially burned; `python3 compat/progress.py` |
-| Live registry | 3 open groups, 0 blocked, 3 items; 170 closed records, 42 accepted groups |
-| Corpus | 215 scenarios / 2,636 steps, attached-client PASS (recorded on this box) |
-| `PROTOCOL_VERSION` | 97 (hex hello frame 0x61, test `..._ninety_seven`); the next wire change bumps to 98 (0x62) |
-| Unmerged work | None. `campaign/batch-choosers-copy-tail-opus-gated` (`3eda6ed`) is the tip that landed, pushed before the by-hand finish as insurance; it is history now |
-| Board (issue #7) | MAIN and TRIAGE free. Every cycle-10 and cycle-11 lock front is INTEGRATED and released; the `F-SPLIT-MUX-*-V5` chain untouched |
+| `origin/main` | `0092abf` (cycle-13 ledger recompute; lanes `fd2e790` geometry, `37e8df0` consumers) |
+| Agreed-scope meter | 100.0% (304/304 items), 65/65 groups done, 0 partially burned; `python3 compat/progress.py`. Beside it publish the honest denominator the retrospective asks for: 304 of 757 identified items, because the 42 accepted groups hold 453 more |
+| Live registry | 0 open groups, 0 blocked, 0 items; 174 closed records, 42 accepted groups |
+| Corpus | 220 scenarios / 2,648 steps; the stored attached-client row reads PASS but the fixture does NOT complete on this box (see the retrospective's finding 11 and the instrument pass) |
+| `PROTOCOL_VERSION` | 98 (hex hello frame 0x62, test `..._ninety_eight`); the next wire change bumps to 99 (0x63) |
+| Unmerged work | None |
+| Board (issue #7) | MAIN and TRIAGE free. Every lock front from cycles 10 to 13 is INTEGRATED and released; the `F-SPLIT-MUX-*-V5` chain untouched and never part of this campaign |
 | Remotes | SSH (`git@github.com:demfabris/zz.git`) works on the ubuntu box; the macbook was switched to HTTPS through gh's credential helper in cycle 7 |
 
 ## The client lane landed (2026-09-03)
@@ -82,58 +89,62 @@ Three corpus rows fail on this box and are NOT any lane's: `smoke/format-modifie
 alone and again in a baseline worktree at `origin/main`, where they fail identically, two of them
 on the pin side only. Treat them as this box's terminfo and signal-name environment.
 
-## What is left: three items, one cycle
+## What is left: nothing in the registry, fifteen things outside it
 
-Cycle 11 integrated on 2026-09-04. The formats lane (`89f36ac`) closed
-`formats.context-producer-fidelity` and `display-message.verbose-trace`; the choosers lane
-(`3eda6ed`) closed `copy-mode.action-fidelity` and `flag:choose-tree:-y`, bumped the protocol to 97,
-and landed the first five chooser keys on a real overlay-owned prompt. Both lanes finished inside
-their hard budgets, which is the rule to keep.
+Cycle 12 (`595616b`, `12b4776`) closed `clients.path-encoding` in full and the chooser vocabulary,
+and measured the geometry residue rather than closing it; cycle 13 (`fd2e790`, `37e8df0`) closed
+that residue in the direction the measurement pointed and the three byte consumers cycle 12's
+reviewer found. `CAMPAIGN-LOG.md` has both entries. Every frozen-scope item is closed.
 
-| Group | Items | Standing |
-| --- | --- | --- |
-| `choosers.command-flags` | 1 | `semantic:chooser-key-vocabulary`. The prerequisite is DONE: the overlay-owned prompt exists and `t`, `T`, `C-t`, `x` and `X` are proved against the pin. What is left is the rest of `mode_tree_key`, sized in the group reason by the worker that stopped at its budget: `K`/`J`/`S-Up`/`S-Down` (`mode_tree_swap`), `O` and `r` (the per-mode order sequences and `sort_next_order`'s wrap), `F1`/`C-h` (the help screen the next key of any kind closes), `M--` and `M-+` (collapse or expand every top-level item, not the current one), the `m` mark, the `:` prompt (`(%u tagged) ` or `(current) `, which `-y` never answers because it does not pass `PROMPT_SINGLE`), and `window_buffer_key`'s `e`, `d`, `D` and `P`. Mechanical rather than exploratory now |
-| `clients.path-encoding` | 1 | `semantic:client-environment-non-utf8`. Untouched and deliberately so: the reason prices the byte across four channels (the hello entry, `CommandInvocation.args` read as `&str` in 99 places behind 65 signatures in the mux alone, the environment store, `CommandResponse::Success.output`), and half-landing was refused twice because channels (i) and (iii) alone change nothing observable. One lane on its own. The probes in the reason are the acceptance test |
-| `rendering.geometry-residue` | 1 | `semantic:attached-gui-pane-width`. Narrowed by the orchestrator on 2026-09-03 rather than closed blind, see below |
+`CAMPAIGN-REVIEW.md` is the census now. Its ranked findings, in the order a switcher meets them: the
+desktop app discards the tmux status line entirely; `~/.tmux.conf` is never read at boot and the
+harness never measured discovery because it injects every config with `-C source-file`; pane
+processes have no `tmux` on PATH, so the plugin corpus was proven under a wrapper the product does
+not ship; the default prefix table kills without `confirm-before`; `S-Left` and its siblings can
+never fire; `#{history_size}` answers 0 so tmux-resurrect silently loses scrollback; `save-buffer -`
+is refused though oh-my-tmux in the corpus uses it; mouse-key bindings never fire; status `#()` is
+synchronous with a 2 s cap; a custom key table is never left; the attached fixture is red under a
+stored PASS; control-mode notifications were never diffed; `refresh-client -S` errors; the raw TUI
+keeps a 29-column sidebar at 80 columns; the CLI output writer changes bytes.
 
-### The geometry decision, narrowed
+### The instrument pass comes first
 
-The parked question was "which extent do the window formats report for a client that draws chrome".
-Two of the three options are refuted by measurement already recorded in the group reason: carving
-the PTY from the client's whole extent oversizes and clips the pane, and carving the window extent
-from the drawn grid changes what `window_width` reports and breaks fixture rows derived from the
-pin, which would be re-scoping a contract to match an implementation. So `window_width` and
-`window_height` STAY the client's whole window, the way tmux's own `window_width` is the client's
-tty.
+Not a cycle: one owner, hours each, no reviewers. Until it is done every attached-only close is
+unverified on this box and no status-rendering or entrypoint claim can be proved at all.
 
-What was never measured is the third option, and it reframes the item. The divergence is that an
-Interactive client under latest, largest or smallest has its own per-pane report reach the PTY while
-the format reports the engine's allocation. The question is therefore not which WINDOW extent to
-report but which of the two PANE numbers is observable truth. tmux has no such split, because
-`window_pane_resize` moves the screen and the PTY together, which argues the format should follow
-the PTY. The probe: drive `TerminalView::update_geometry` in the `#[gpui::test]` harness that
-already exists in `crates/zz/src/workspace/view.rs`, with a pixel box that is not a whole number of
-cells, and compare `#{pane_width}` against the columns the PTY actually got. The pure measurement
-`terminal_grid_size` in `crates/zz/src/terminal/element.rs` is already on main with unit tests.
-Schedule that; do not decide it from prose.
+1. Fix the attached-client fixture here (`probe_command_output_navigation`, `probe_command_prompt`)
+   and make `compat/run.sh --check-summary` refuse a `PASS` footer that carries no commit stamp or
+   predates the tip. `run.sh:311` only re-reads the footer today.
+2. A launcher mode in `compat/diff-scenario.sh`: the zz side runs the installed layout, no
+   `--socket`, `ZZ_SOCKET` unset, a scrubbed PATH with the pin tmux first.
+3. A row-level TUI differential: zz-tui below 50 columns or with the sidebar off, `status off` on
+   the recorder, diff the last row's `capture-pane -p -e` bytes over a small format corpus.
 
-### Cycle 12 shape
+### Then three two-lane cycles
 
-Two lanes, Opus 5 at xhigh, hard budgets, exactly one lane owning any protocol bump (97 to 98,
-0x61 to 0x62, `..._ninety_eight`):
+The review lays them out with branch names, zones, budgets and what each closes: cycle 14 (the
+keys contract: prefix table split, shift modifier, table lifecycle; buffers and VT facts:
+`save-buffer -`, the four terminal formats, CLI bytes, `refresh-client -S`), cycle 15 (config
+discovery and the pane PATH decision; background status jobs and the control-notify fixture), cycle
+16 (the desktop status row and drag-to-CLIPBOARD; the proof debt: per-plugin runtime fixtures, the
+census scenarios, the harness holes, slugs for the prose-only divergences). Read the report's
+"Next cycles" section before writing `opus-compat-run-14.js`; copy `opus-compat-run-13.js` for the
+shape. Same rules: two lanes, Opus 5 at xhigh throughout, hard budgets in minutes, the FOREGROUND
+rule, exactly one lane owning any protocol bump unless both must, in which case say so and let the
+gate reconcile as cycles 10 and 12 did.
 
-- Lane A: `clients.path-encoding` alone, the whole cycle if it needs it.
-- Lane B: the chooser vocabulary tail plus the geometry probe above. Both are bounded and named.
+### Two things the closing cycles taught
 
-That closes the registry. When it does, the campaign's exit is the meter at 304/304 with the three
-accepted-native decisions standing, and the `F-SPLIT-MUX-*-V5` chain is the only board work left.
+A measurement beats a narrowing. The orchestrator narrowed the geometry item from prose on
+2026-09-03 and got the direction wrong; the probe scheduled instead of a decision found `pane_width`
+is one of a tiled family, so the PTY follows the layout, not the format the PTY. When an item
+resists a decision, write the probe into the prompt and say "measure first".
 
-Launch shape: copy `opus-compat-run-11.js` (its `M` block carries the `boxNote`/`gitNote`
-defaults), write the new lane batches and lock names, mint the lock fronts under TRIAGE with
-pairwise-disjoint zones, commit the records under MAIN, claim the fronts (`--lease 6h`), and launch
-with the machine facts as `args` (omit them on the ubuntu box). A 6h lease covers a two-lane cycle,
-so no renewer process is needed; renew by hand at a check-in instead, which also removes the
-`pkill -f` hazard that killed the orchestrator's own tool shell twice.
+A gate may spend meter points to stay honest. Cycle 12's gate moved an item out of an accepted
+group because its own cycle had falsified the acceptance clause, and said so in its report rather
+than banking 99.7%. Keep telling gates that a falsified premise under an accepted group is a
+finding, and keep the reviewer rule that a divergence disclosed only in a worker's notes is a
+must-fix until it has a slug.
 
 ### If the gate dies mid-cycle
 

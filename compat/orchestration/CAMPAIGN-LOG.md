@@ -353,3 +353,49 @@ hand. The recovery order is written into `HANDOFF.md` under "If the gate dies mi
 that has now bitten twice: a lane touching `crates/zz-ui` must also fix `examples/ui-showcase`,
 which is workspace-excluded, so `cargo test --workspace` cannot see it; the choosers lane got it
 right and it was confirmed with a `cargo check` in that crate.
+
+Cycle 12, 2026-09-04 on the ubuntu box (two Opus 5 lanes at xhigh, about 4h end to end): meter
+99.0% to 99.3% (302/304), protocol 97 to 98. Bytes lane `595616b` closed `clients.path-encoding`
+in full, the item priced across four channels and refused twice for half-landing: the ClientHello
+entry, `CommandInvocation.args` as `RawText`, the byte-clean environment store, and
+`CommandResponse::Success` output as bytes. Tail lane `12b4776` closed the chooser vocabulary and
+MEASURED `rendering.geometry-residue` instead of closing it: the two pane numbers diverge by
+exactly one cell, both halves committed as tests. That measurement refuted the orchestrator's own
+narrowing from the day before, which had argued the format should follow the PTY; `pane_width` is
+one of a tiled family (`pane_left`, `pane_right`, `pane_at_*`, `window_layout`), so the coherent
+direction is the PTY following the settled layout, the pin's own order. Reviews: six defects on
+bytes, two on tail, all applied at the gate. The gate then did something worth keeping: it moved
+`semantic:config-tilde-home-non-utf8` OUT of an accepted group into open work because v98 had
+falsified its acceptance clause (zz no longer refuses a byte-only path, it opens a mangled one),
+which cost 0.4 meter points it could have kept, and it opened `clients.byte-clean-consumers` to
+carry two divergences the bytes reviewer found living only as prose inside a closed record. Same
+pattern the reviewer caught on `protocol.binary-streams`, whose premise the branch also falsified.
+
+Cycle 13, 2026-09-04 on the ubuntu box (two Opus 5 lanes at xhigh, about 4h30m): meter 99.3% to
+100.0% (304/304), 65/65 groups, ZERO open, 174 closed records, 220 scenarios / 2,648 steps. The
+registry is empty; the campaign's implementation phase is done. Geometry lane `fd2e790` closed the
+last frozen-scope item the way cycle 12's probe said to (an attached pane's PTY now follows the cell
+the layout settled on, with the one-cell guard kept for split windows because `implied_window_extent`
+amplifies drift). Consumers lane `37e8df0` closed all three byte consumers: format expansion, the
+client-encoding sanitizer zz never had (gated on the pin's `CLIENT_UTF8` inputs, and only on the
+output the pin routes through `server_client_print`), and byte-only path arguments. Reviews: two
+and one defects, applied at the gate. The first geometry reviewer was interrupted mid-run and the
+pipeline replaced it cleanly from the same branch tip. The gate's own tracker headline says the
+part that matters: the persisted attached-client row still reads PASS but the fixture does not
+complete on this box, so the PRACTICAL exit gate is not met even though the meter is.
+
+Retrospective, 2026-09-04, while the cycle-13 gate ran: eight Fable reviewers at xhigh, one per
+lens (oracle coverage, the 42 accepted groups, the ecosystem beyond the eight-plugin corpus, harness
+blind spots, proof quality over 57 sampled closes, the entrypoint, control-mode tools, prose with no
+slug), then one critic to dedupe and rank by who breaks. 79 raw findings became 15 ranked ones and
+a plan; `CAMPAIGN-REVIEW.md` beside this file is the report. The short version: the list was drawn
+after argv parsing and below the screen, and that is where a switcher breaks. The desktop app
+discards the tmux status line (`client.rs:3841`, `CoreEvent::StatusChanged` in a no-op arm) so every
+theme plugin does nothing in the app; `~/.tmux.conf` is never read at boot and the harness injected
+every config with `-C source-file` so discovery was never measured; pane processes have no `tmux` on
+PATH so the plugin corpus was proven under a wrapper the product does not ship; the default prefix
+table kills without `confirm-before`. Two accepted reasons name a reopen condition the corpus itself
+meets (resurrect reads `#{history_size}`, oh-my-tmux runs `save-buffer -`). The biggest gaps are not
+lane-shaped: an instrument pass first (fix the attached fixture and make `--check-summary` refuse a
+stale footer, a launcher mode that runs the installed layout, a row-level TUI differential), then
+three two-lane cycles. What held up is named in the report so the next campaign keeps it.

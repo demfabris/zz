@@ -1,0 +1,11 @@
+corpus: none
+# tmux.c raises CLIENT_UTF8 in the client process, from $TMUX being set at all
+# or from the first of LC_ALL, LC_CTYPE and LANG that is set and non-empty
+# naming UTF-8, and server_client_print runs utf8_sanitize over a message bound
+# for a client that raised none of them: a complete sequence becomes one
+# underscore per column it would have taken, printable ASCII passes, and every
+# other byte becomes one underscore. A listing is one message per row, so the
+# separators between rows are not on that path.
+stage: fixtures/client-utf8-sanitizer.sh ~/client-utf8-sanitizer.sh
+run-shell 'sh ~/client-utf8-sanitizer.sh'
+out: show-environment -g ZZ_SANITIZE_RESULT

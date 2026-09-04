@@ -28,8 +28,8 @@ use zz_mux::{
     RetainedJobEnvironment, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
     canonical_command, command_block_body, copy_mode_action_is_read_only_safe, expand_format_bytes,
     expand_format_values, expand_status, format_command, format_true, hook_format_variables,
-    if_shell_truthy, parse_tmux_colour, send_keys_is_read_only_safe, send_keys_target_client,
-    validate_static_command_chain,
+    if_shell_truthy, parse_tmux_colour, sanitize_client_output, send_keys_is_read_only_safe,
+    send_keys_target_client, validate_static_command_chain,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
@@ -5240,6 +5240,7 @@ impl Shared {
             inner.client_instances.remove(&client);
             inner.client_kinds.remove(&client);
             inner.client_terminals.remove(&client);
+            inner.utf8_clients.remove(&client);
             inner.nested_clients.remove(&client);
             inner.client_ttys.remove(&client);
             inner.client_sizes.remove(&client);
@@ -5462,10 +5463,20 @@ impl Shared {
                 }
             }
         };
-        let response = match self.inner.lock().command_streams.remove(&client) {
+        let mut response = match self.inner.lock().command_streams.remove(&client) {
             Some(streams) if !streams.is_empty() => merge_command_streams(response, &streams),
             _ => response,
         };
+        if self.sanitizes_output_for(client, kind) {
+            let output = match &mut response {
+                CommandResponse::Success { output, .. } | CommandResponse::Error { output, .. } => {
+                    output
+                }
+            };
+            if !output.is_empty() {
+                *output = sanitize_client_output(output);
+            }
+        }
         let output = match &response {
             CommandResponse::Success { output, .. } | CommandResponse::Error { output, .. } => {
                 output
@@ -5487,6 +5498,16 @@ impl Shared {
             );
         }
         response
+    }
+
+    /// `server_client_print` runs `utf8_sanitize` over a message bound for a
+    /// client with no session of its own or for a control client, which is
+    /// every shape but an attached one: an attached client is shown the message
+    /// in a pane instead. The gate is tmux's `CLIENT_UTF8`, which the client
+    /// raised for itself out of `$TMUX` and the locale before it dialled.
+    fn sanitizes_output_for(&self, client: ClientId, kind: ClientKind) -> bool {
+        matches!(kind, ClientKind::Command | ClientKind::Control)
+            && !self.inner.lock().utf8_clients.contains(&client)
     }
 
     fn execute_command_request_with_prepared_into(
@@ -26160,6 +26181,9 @@ struct ServerState {
     client_instances: BTreeMap<ClientId, ClientInstanceId>,
     client_kinds: BTreeMap<ClientId, ClientKind>,
     client_terminals: BTreeSet<ClientId>,
+    /// The clients that raised tmux's `CLIENT_UTF8`. A client not in here is
+    /// one `server_client_print` sanitizes its output for.
+    utf8_clients: BTreeSet<ClientId>,
     nested_clients: BTreeSet<ClientId>,
     client_ttys: BTreeMap<ClientId, String>,
     client_sizes: BTreeMap<ClientId, (u16, u16)>,
@@ -29813,6 +29837,12 @@ fn client_nested_fact(capabilities: &[String]) -> bool {
     capabilities
         .iter()
         .any(|capability| capability == ClientHello::CLIENT_NESTED_CAPABILITY)
+}
+
+fn client_utf8_fact(capabilities: &[String]) -> bool {
+    capabilities
+        .iter()
+        .any(|capability| capability == ClientHello::CLIENT_UTF8_CAPABILITY)
 }
 
 fn client_size_fact(capabilities: &[String]) -> Option<(u16, u16)> {
@@ -36730,6 +36760,9 @@ fn handle_connection<S: TransportStream>(
         }
         if client_nested_fact(&hello.capabilities) {
             inner.nested_clients.insert(client);
+        }
+        if client_utf8_fact(&hello.capabilities) {
+            inner.utf8_clients.insert(client);
         }
         if let Some(tty) = client_tty_fact(&hello.capabilities) {
             inner.client_ttys.insert(client, tty);

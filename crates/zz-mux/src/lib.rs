@@ -42,7 +42,8 @@ pub use copy_actions::{
 };
 pub use formats::{
     FormatClient, FormatClientRow, FormatEnvironRow, TmuxColour, delegated_format_variable_names,
-    display_width, format_true, indexed_colour_rgb, parse_tmux_colour,
+    display_width, format_true, indexed_colour_rgb, parse_tmux_colour, sanitize_client_output,
+    utf8_sanitize,
 };
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
 pub use layout::{CellLayout, SplitSize};

@@ -4,8 +4,9 @@ corpus: none
 # and r reverses it, M-- and M-+ collapse or expand every top-level item, F1 and
 # C-h raise the help screen the next key closes, m and M are server_set_marked
 # and server_clear_marked, and ':' raises the mode's own command prompt, which
-# runs its line once per tagged row and which -y never answers because it does
-# not pass PROMPT_SINGLE.
+# runs its line once per tagged row against that row's own cmd_find_state and
+# which -y never answers because it does not pass PROMPT_SINGLE. K and J also
+# pin session_set_current's last-window move.
 stage: fixtures/chooser-tree-vocabulary.sh ~/chooser-tree-vocabulary.sh
 stage: fixtures/chooser-drive.py ~/chooser-drive.py
 out: set-environment -gu CHOOSER_TREE_VOCABULARY

@@ -17287,13 +17287,13 @@ impl Shared {
                 }
                 _ => None,
             };
-            let runs: Vec<(String, String)> = match &result {
+            let runs: Vec<(String, String, Option<ExecutionContext>)> = match &result {
                 ChooseTreeResult::Kill(targets) => targets
                     .iter()
                     .filter_map(|target| {
                         choose_tree_command_target(&inner.engine, *target)
                             .ok()
-                            .map(|name| (choose_tree_kill_command(*target).to_owned(), name))
+                            .map(|name| (choose_tree_kill_command(*target).to_owned(), name, None))
                     })
                     .collect(),
                 ChooseTreeResult::Command { template, targets } => targets
@@ -17301,7 +17301,13 @@ impl Shared {
                     .filter_map(|target| {
                         choose_tree_command_target(&inner.engine, *target)
                             .ok()
-                            .map(|name| (template.clone(), name))
+                            .map(|name| {
+                                (
+                                    template.clone(),
+                                    name,
+                                    choose_tree_target_context(&inner.engine, *target),
+                                )
+                            })
                     })
                     .collect(),
                 _ => Vec::new(),
@@ -17339,9 +17345,13 @@ impl Shared {
                         chooser.pending_row = Some(chooser.rendered.selected);
                     }
                 }
-                for (template, name) in runs {
+                let client_target =
+                    ExecutionContext::new(context.session, context.window, context.pane);
+                for (template, name, row_target) in runs {
+                    context.retarget(row_target.as_ref().unwrap_or(&client_target));
                     self.execute_chooser_command(client, context, &template, &name, "choose-tree");
                 }
+                context.retarget(&client_target);
                 self.refresh_choose_trees();
             }
             ChooseTreeResult::Swap {
@@ -27111,6 +27121,37 @@ fn choose_tree_kill_command(target: ChooseTreeTarget) -> &'static str {
         ChooseTreeTarget::Window(_) => "kill-window -t %%",
         ChooseTreeTarget::Pane(_) => "kill-pane -t %%",
     }
+}
+
+/// `window_tree_get_target` hands `mode_tree_run_command` the row's own
+/// `cmd_find_state`, so a line typed at the `:` prompt with no `-t` resolves
+/// against the row the cursor sits on and not against the client's current
+/// window. A session row carries that session's current window and its active
+/// pane, a window row the window's active pane.
+fn choose_tree_target_context(
+    engine: &MuxEngine,
+    target: ChooseTreeTarget,
+) -> Option<ExecutionContext> {
+    let state = &engine.state;
+    let (session, window, pane) = match target {
+        ChooseTreeTarget::Session(session) => {
+            let window = state.sessions.get(&session)?.active_window;
+            (session, window, state.windows.get(&window)?.active_pane)
+        }
+        ChooseTreeTarget::Window(window) => {
+            let window_state = state.windows.get(&window)?;
+            (window_state.session, window, window_state.active_pane)
+        }
+        ChooseTreeTarget::Pane(pane) => {
+            let window = state.window_for_pane(pane)?;
+            (state.windows.get(&window)?.session, window, pane)
+        }
+    };
+    Some(ExecutionContext::new(
+        Some(session),
+        Some(window),
+        Some(pane),
+    ))
 }
 
 fn choose_tree_command_target(

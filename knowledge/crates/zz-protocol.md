@@ -21,7 +21,7 @@ The crate is small and dependency-light: six dependencies, `postcard`, `serde`, 
 `thiserror`, `unicode-width`, and `zz-terminal` (for `TerminalViewport`, `TerminalAppearance`,
 `PackedCell`, and friends that ride the terminal lane). It has no cargo features at all since v43
 retired `compress` and its optional `zstd`. Because it encodes the wire format, **any
-encoding-affecting change requires bumping `PROTOCOL_VERSION`**, currently 96. See
+encoding-affecting change requires bumping `PROTOCOL_VERSION`**, currently 98. See
 [the wire protocol](/protocol/wire-protocol.md).
 
 # What it exports

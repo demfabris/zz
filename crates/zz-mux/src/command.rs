@@ -41864,6 +41864,64 @@ mod tests {
         assert!(engine.state.validate().is_ok());
     }
 
+    /// `window_tree_swap` moves `curw` through `session_set_current`, which
+    /// drops the destination slot off the last stack and pushes the slot the
+    /// current window vacated. Measured on the pin (`d77c9dc6`) with an
+    /// attached client, windows `1:w0 2:w1 3:w2`, `select-window 2` then
+    /// `select-window 1`, and `C-o g j j K`:
+    /// `#{?window_active,*,}#{?window_last_flag,-,}` reads
+    /// `1:w1- 2:w0* 3:w2`, so the swapped-away window is last and never the
+    /// current one.
+    #[test]
+    fn chooser_swap_leaves_the_other_window_of_the_pair_as_last() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-s", "alpha", "-n", "w0"]),
+            )
+            .unwrap();
+        let alpha = context.session.unwrap();
+        let w0 = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "w1"]))
+            .unwrap();
+        let w1 = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "w2"]))
+            .unwrap();
+        let w2 = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("select-window", &["-t", "alpha:w1"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("select-window", &["-t", "alpha:w0"]))
+            .unwrap();
+        assert_eq!(engine.state.sessions[&alpha].active_window, w0);
+        assert_eq!(engine.state.sessions[&alpha].last_window(), Some(w1));
+        let (slot0, slot1, slot2) = (
+            engine.state.windows[&w0].index,
+            engine.state.windows[&w1].index,
+            engine.state.windows[&w2].index,
+        );
+
+        engine.state.swap_windows_keeping_current(w1, w0).unwrap();
+
+        assert_eq!(engine.state.windows[&w1].index, slot0);
+        assert_eq!(engine.state.windows[&w0].index, slot1);
+        assert_eq!(engine.state.sessions[&alpha].active_window, w0);
+        assert_eq!(engine.state.sessions[&alpha].last_window(), Some(w1));
+
+        engine.state.swap_windows_keeping_current(w0, w2).unwrap();
+
+        assert_eq!(engine.state.windows[&w0].index, slot2);
+        assert_eq!(engine.state.windows[&w2].index, slot1);
+        assert_eq!(engine.state.sessions[&alpha].active_window, w0);
+        assert_eq!(engine.state.sessions[&alpha].last_window(), Some(w2));
+        assert!(engine.state.validate().is_ok());
+    }
+
     #[test]
     fn gap_queries_are_silent_sorted_and_catalog_backed() {
         let mut engine = MuxEngine::default();

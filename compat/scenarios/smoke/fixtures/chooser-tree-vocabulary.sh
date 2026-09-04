@@ -91,6 +91,12 @@ marks() {
         -F '#{window_index}#{?pane_marked,!,-}' 2>/dev/null | tr '\n' ' '
 }
 
+last_window() {
+    main_client list-windows -t "=$session" \
+        -F '#{?window_last_flag,#{window_index}:#{window_name},}' 2>/dev/null \
+        | sed '/^$/d' | tr '\n' ' '
+}
+
 open_chooser() {
     main_client set-environment -g CHOOSER_ROW pending
     drive "keys 0f"
@@ -164,9 +170,11 @@ press 6a
 press 4b
 sleep 0.5
 check_equal K-swaps-the-window-above '0:c *1:d 2:e 3:a 4:b ' "$(windows)"
+check_equal K-leaves-the-swapped-away-window-last '0:c ' "$(last_window)"
 press 4a
 sleep 0.5
 check_equal J-swaps-it-back '*0:d 1:c 2:e 3:a 4:b ' "$(windows)"
+check_equal J-leaves-the-swapped-away-window-last '1:c ' "$(last_window)"
 press 0d
 settle
 check_equal swap-keeps-the-row-on-the-moved-window "=$session:1." "$(chosen_row)"
@@ -315,6 +323,22 @@ check_equal colon-runs-on-every-tagged-row "=$session:2." "$(chosen_row)"
 press 71
 sleep 0.3
 
+# window_tree_command_each hands mode_tree_run_command the row's own
+# cmd_find_state, so a line with no -t moves the window the cursor sits on and
+# never the window the client is looking at.
+open_chooser
+press 67
+press 6a
+press 6a
+press 3a
+type_text 'rename-window colonrow'
+press 0d
+sleep 0.6
+check_equal colon-runs-against-the-rows-target '*0:d 1:colonrow 2:e 3:a 4:b ' "$(windows)"
+press 71
+sleep 0.3
+main_client rename-window -t "=$session:1" c >/dev/null 2>&1 || true
+
 # mode_tree_set_prompt only queues the PROMPT_ACCEPT answer when PROMPT_SINGLE
 # is set beside it, which ':' does not pass: -y leaves this prompt to be typed,
 # and the x that follows is text in the line rather than a kill.
@@ -334,8 +358,8 @@ check_equal dash-y-command-prompt-killed-nothing '*0:d 1:c 2:e 3:a 4:b ' "$(wind
 press 71
 sleep 0.3
 
-if [ "$check_count" -ne 21 ]; then
-    record_failure "total-checks" 21 "$check_count"
+if [ "$check_count" -ne 24 ]; then
+    record_failure "total-checks" 24 "$check_count"
 fi
 if [ "$failed" -eq 0 ]; then
     main_client set-environment -g CHOOSER_TREE_VOCABULARY "clean:$check_count"

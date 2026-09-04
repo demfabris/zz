@@ -1019,7 +1019,11 @@ impl MuxState {
     /// `window_tree_swap`: the chooser trades two windows' slots the way
     /// `swap-window` does and then moves `curw` so the same window stays
     /// current, where `cmd_swap_window_exec` leaves the current slot alone and
-    /// lets the window under it change.
+    /// lets the window under it change. The move runs through
+    /// `session_set_current`, which drops the slot it moves into off the last
+    /// stack and pushes the slot the current window vacated, so the session's
+    /// last window becomes the other member of the swapped pair rather than
+    /// the current window itself.
     pub fn swap_windows_keeping_current(
         &mut self,
         current: WindowId,
@@ -1041,6 +1045,11 @@ impl MuxState {
         for (session, active) in held {
             if let Some(state) = self.sessions.get_mut(&session) {
                 state.active_window = active;
+                if active == current {
+                    state.last_window = Some(other);
+                } else if active == other {
+                    state.last_window = Some(current);
+                }
             }
         }
         Ok(())

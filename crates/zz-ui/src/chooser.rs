@@ -193,7 +193,7 @@ impl RenderOnce for ChooserModal {
                         .font_family(self.font_family.clone())
                         .text_size(crate::rems_from_px(11.0))
                         .text_color(cx.theme().foreground)
-                        .child("Help — the next key closes this and does nothing else"),
+                        .child("Help: the next key closes this and does nothing else"),
                 )
             })
             .children(self.prompt.map(|prompt| {

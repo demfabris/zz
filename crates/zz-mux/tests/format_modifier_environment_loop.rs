@@ -9,11 +9,12 @@
 use std::collections::BTreeMap;
 
 use zz_mux::{FormatClientRow, FormatEnvironRow, StatusContext, StatusHooks, expand_status};
+use zz_protocol::RawText;
 
 fn row(name: &str, value: &str) -> FormatEnvironRow {
     FormatEnvironRow {
         name: name.to_owned(),
-        value: value.to_owned(),
+        value: value.into(),
         hidden: false,
         removed: false,
     }
@@ -98,13 +99,13 @@ fn the_row_formats_answer_only_inside_the_loop() {
         selected: vec![
             FormatEnvironRow {
                 name: "GONE".to_owned(),
-                value: String::new(),
+                value: RawText::default(),
                 hidden: false,
                 removed: true,
             },
             FormatEnvironRow {
                 name: "SECRET".to_owned(),
-                value: "s".to_owned(),
+                value: RawText::from("s"),
                 hidden: true,
                 removed: false,
             },

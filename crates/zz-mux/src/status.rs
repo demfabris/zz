@@ -3,7 +3,8 @@ use std::time::Duration;
 use crate::{parse_style, parse_tmux_colour};
 
 pub use crate::formats::{
-    FormatUniverse, StatusContext, StatusHooks, expand_format_values, expand_status,
+    FormatUniverse, StatusContext, StatusHooks, expand_format_bytes, expand_format_values,
+    expand_status,
 };
 pub use zz_protocol::StatusPosition;
 

@@ -26,7 +26,7 @@ use zz_mux::{
     FormatClient, FormatMonitorScope, FormatMonitorTarget, KeyDecision, KeyEngine, KeyTables,
     MuxEffect, MuxEngine, PaneKind, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes,
     RetainedJobEnvironment, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
-    canonical_command, command_block_body, copy_mode_action_is_read_only_safe,
+    canonical_command, command_block_body, copy_mode_action_is_read_only_safe, expand_format_bytes,
     expand_format_values, expand_status, format_command, format_true, hook_format_variables,
     if_shell_truthy, parse_tmux_colour, send_keys_is_read_only_safe, send_keys_target_client,
     validate_static_command_chain,
@@ -12570,10 +12570,10 @@ impl Shared {
                 DaemonFormatHooks::command_with_optional_variables(&facts, Some(&variables))
                     .with_option_engine(&inner.engine)
                     .with_command_item(name);
-            output.push(expand_format_values(format, &format_context, &mut hooks));
+            output.push(expand_format_bytes(format, &format_context, &mut hooks));
         }
         Ok(Execution {
-            output: output.join("\n").into(),
+            output: RawText::join(&output, b"\n"),
             effects: Vec::new(),
         })
     }
@@ -14333,10 +14333,10 @@ impl Shared {
                     )
                     .with_option_engine(&inner.engine)
                     .with_command_item(name);
-                    output.push(expand_format_values(format, &format_context, &mut hooks));
+                    output.push(expand_format_bytes(format, &format_context, &mut hooks));
                 }
                 Ok(Execution {
-                    output: output.join("\n").into(),
+                    output: RawText::join(&output, b"\n"),
                     effects: Vec::new(),
                 })
             }

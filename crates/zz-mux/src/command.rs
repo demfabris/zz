@@ -3390,6 +3390,7 @@ impl MuxEngine {
             },
             hooks,
         )
+        .into()
     }
 
     pub fn expand_pane_format(
@@ -3413,6 +3414,7 @@ impl MuxEngine {
             },
             hooks,
         )
+        .into()
     }
 
     pub fn set_format_server_identity(
@@ -4713,7 +4715,7 @@ impl MuxEngine {
                 hooks,
             )
         } else {
-            String::new()
+            RawText::default()
         };
         let mut effects = vec![MuxEffect::PaneCreated {
             pane,
@@ -4735,7 +4737,7 @@ impl MuxEngine {
             });
         }
         Ok(Execution {
-            output: output.into(),
+            output,
             effects,
         })
     }
@@ -4841,7 +4843,7 @@ impl MuxEngine {
                 &mut row_hooks,
             ));
         }
-        Ok(Execution::output(output.join("\n")))
+        Ok(Execution::output(RawText::join(&output, b"\n")))
     }
 
     fn rename_session(
@@ -5235,7 +5237,7 @@ impl MuxEngine {
             hooks,
         );
         Ok(Execution {
-            output: output.into(),
+            output,
             effects,
         })
     }
@@ -5325,7 +5327,7 @@ impl MuxEngine {
                 &mut row_hooks,
             ));
         }
-        Ok(Execution::output(output.join("\n")))
+        Ok(Execution::output(RawText::join(&output, b"\n")))
     }
 
     fn rename_window(
@@ -6034,8 +6036,7 @@ impl MuxEngine {
                 original_context.session,
                 original_context.target_format_client(),
                 hooks,
-            )
-            .into();
+            );
         Ok(execution)
     }
 
@@ -6474,8 +6475,7 @@ impl MuxEngine {
                     active_session,
                     target_format_client,
                     hooks,
-                )
-                .into(),
+                ),
             effects,
         })
     }
@@ -6489,9 +6489,9 @@ impl MuxEngine {
         active_session: Option<SessionId>,
         format_client: FormatClient,
         hooks: &mut impl StatusHooks,
-    ) -> String {
+    ) -> RawText {
         if !options.has("-P") {
-            return String::new();
+            return RawText::default();
         }
         let mut output = expand_format_with_hooks(
             options.value("-F").unwrap_or(DEFAULT_PANE_CREATION_FORMAT),
@@ -6506,7 +6506,7 @@ impl MuxEngine {
             },
             hooks,
         );
-        output.push('\n');
+        output.push_bytes(b"\n");
         output
     }
 
@@ -6876,7 +6876,7 @@ impl MuxEngine {
                 ));
             }
         }
-        let output = output.join("\n");
+        let output = RawText::join(&output, b"\n");
         Ok(Execution::output(output))
     }
 
@@ -8084,7 +8084,7 @@ impl MuxEngine {
         // that would have written it.
         let mut trace = Vec::new();
         let text = if options.has("-l") {
-            format
+            RawText::from(format)
         } else if options.has("-v") {
             let (text, lines) = expand_format_time_traced(&format, self, format_context, hooks);
             trace = lines;
@@ -8096,15 +8096,17 @@ impl MuxEngine {
             if trace.is_empty() {
                 return Ok(Execution::output(text));
             }
-            trace.push(text);
-            return Ok(Execution::output(trace.join("\n")));
+            let mut output = RawText::from(trace.join("\n"));
+            output.push_bytes(b"\n");
+            output.push_bytes(text.as_bytes());
+            return Ok(Execution::output(output));
         }
         if !trace.is_empty() {
             let mut execution = Execution::output(trace.join("\n"));
             execution.effects.push(MuxEffect::DisplayMessage {
                 pane,
                 target_client: options.value("-c").map(str::to_owned),
-                text,
+                text: text.to_string(),
                 duration_ms: delay
                     .map(|delay| u32::try_from(delay).expect("delay was bounded to u32")),
                 freeze: !options.has("-C"),
@@ -8116,7 +8118,7 @@ impl MuxEngine {
             Ok(Execution::effect(MuxEffect::DisplayMessage {
                 pane,
                 target_client: options.value("-c").map(str::to_owned),
-                text,
+                text: text.to_string(),
                 duration_ms: delay
                     .map(|delay| u32::try_from(delay).expect("delay was bounded to u32")),
                 freeze: !options.has("-C"),
@@ -8527,7 +8529,7 @@ impl MuxEngine {
                 &mut item_hooks,
             ));
         }
-        Ok(Execution::output(output.join("\n")))
+        Ok(Execution::output(RawText::join(&output, b"\n")))
     }
 
     fn set_hook(
@@ -9633,7 +9635,7 @@ impl MuxEngine {
             },
             hooks,
         );
-        Ok((argument, target))
+        Ok((argument.to_string(), target))
     }
 
     fn hook_target_context(
@@ -9732,7 +9734,7 @@ impl MuxEngine {
                     value.to_string()
                 };
                 Ok(if options.has("-F") {
-                    expand_format_with_hooks(&value, self, format_context, hooks)
+                    expand_format_with_hooks(&value, self, format_context, hooks).to_string()
                 } else {
                     value
                 })
@@ -10268,8 +10270,7 @@ impl MuxEngine {
                         context.target_format_client(),
                     ),
                     hooks,
-                )
-                .into(),
+                ),
             );
         }
         if (options.has("-r") || options.has("-u")) && value.is_some() {
@@ -13236,11 +13237,7 @@ fn format_environment_rows(environment: &Environment) -> Vec<FormatEnvironRow> {
         .iter()
         .map(|(name, entry)| FormatEnvironRow {
             name: name.to_string(),
-            value: entry
-                .value
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_default(),
+            value: entry.value.clone().unwrap_or_default(),
             hidden: entry.hidden,
             removed: entry.value.is_none(),
         })
@@ -15263,7 +15260,7 @@ fn spawn_cwd_source(
                 format_type: FormatType::Pane,
             });
         let expanded = expand_format_with_hooks(value, engine, format_context, hooks);
-        (!expanded.is_empty()).then_some(expanded)
+        (!expanded.is_empty()).then(|| expanded.to_string())
     });
     (inherit_cwd_from, cwd)
 }
@@ -16816,7 +16813,7 @@ mod tests {
         name: &str,
         hooks: &mut impl StatusHooks,
     ) -> String {
-        expand_format_with_hooks(&format!("#{{{name}}}"), engine, context, hooks)
+        expand_format_with_hooks(&format!("#{{{name}}}"), engine, context, hooks).to_string()
     }
 
     #[test]

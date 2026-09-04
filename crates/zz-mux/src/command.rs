@@ -1094,7 +1094,7 @@ pub enum MuxEffect {
     },
     Detach(DetachRequest),
     SourceFile {
-        path: String,
+        path: RawText,
         quiet: bool,
         parse_only: bool,
         verbose: bool,
@@ -3401,6 +3401,21 @@ impl MuxEngine {
         format_client: FormatClient,
         hooks: &mut impl StatusHooks,
     ) -> String {
+        self.expand_pane_format_bytes(format, target, active_session, format_client, hooks)
+            .into()
+    }
+
+    /// [`Self::expand_pane_format`] for a consumer that opens what it gets: a
+    /// path is bytes on Unix, and `#{...}` can hand it a value the environment
+    /// store keeps as bytes.
+    pub fn expand_pane_format_bytes(
+        &self,
+        format: &str,
+        target: &ExecutionContext,
+        active_session: Option<SessionId>,
+        format_client: FormatClient,
+        hooks: &mut impl StatusHooks,
+    ) -> RawText {
         expand_format_with_hooks(
             format,
             self,
@@ -3414,7 +3429,6 @@ impl MuxEngine {
             },
             hooks,
         )
-        .into()
     }
 
     pub fn set_format_server_identity(
@@ -13011,7 +13025,7 @@ impl MuxEngine {
                 .into_iter()
                 .map(|path| MuxEffect::SourceFile {
                     path: if expand_paths {
-                        self.expand_pane_format(
+                        self.expand_pane_format_bytes(
                             &path,
                             &source_context,
                             context.session,
@@ -13019,7 +13033,7 @@ impl MuxEngine {
                             hooks,
                         )
                     } else {
-                        path.to_string()
+                        path.clone()
                     },
                     quiet,
                     parse_only,

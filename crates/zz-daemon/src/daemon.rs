@@ -9140,7 +9140,7 @@ impl Shared {
                 }
                 continue;
             }
-            let declared_path = PathBuf::from(&path);
+            let declared_path = PathBuf::from(path.to_os_string());
             let pattern = resolve_source_path(&path, source_working_directory.as_deref());
             let matches = source_glob_matches(&pattern);
             source_path_error |= !matches.errors.is_empty();
@@ -24038,7 +24038,7 @@ impl Shared {
                         source_parse_error = true;
                         continue;
                     }
-                    let declared_path = PathBuf::from(&source_request.path);
+                    let declared_path = PathBuf::from(source_request.path.to_os_string());
                     let pattern = source_client_base.map_or_else(
                         || expand_relative(path, &source_request.path),
                         |base| resolve_source_path(&source_request.path, Some(base)),
@@ -25198,7 +25198,7 @@ enum SourceInvocationAccounting {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SourceFileRequest {
-    path: String,
+    path: RawText,
     quiet: bool,
     parse_only: bool,
     verbose: bool,
@@ -37425,8 +37425,8 @@ fn source_working_directory_glob_prefix(path: &Path) -> PathBuf {
     PathBuf::from(glob::Pattern::escape(path.to_string_lossy().as_ref()))
 }
 
-fn resolve_source_path(path: &str, working_directory: Option<&Path>) -> PathBuf {
-    let path = PathBuf::from(path);
+fn resolve_source_path(path: &RawText, working_directory: Option<&Path>) -> PathBuf {
+    let path = PathBuf::from(path.to_os_string());
     if path.is_absolute() {
         path
     } else {
@@ -37587,8 +37587,8 @@ fn source_glob_matches(path: &Path) -> SourceGlobMatches {
     }
 }
 
-fn expand_relative(source: &Path, nested: &str) -> PathBuf {
-    let nested = PathBuf::from(nested);
+fn expand_relative(source: &Path, nested: &RawText) -> PathBuf {
+    let nested = PathBuf::from(nested.to_os_string());
     if nested.is_absolute() {
         nested
     } else {
@@ -49268,11 +49268,17 @@ mod tests {
             b"/tmp/client\\ \\[literal\\]\\*\\?\\\\\\ cwd"
         );
         assert_eq!(
-            resolve_source_path("~/literal.conf", Some(Path::new("/tmp/client cwd"))),
+            resolve_source_path(
+                &RawText::from("~/literal.conf"),
+                Some(Path::new("/tmp/client cwd"))
+            ),
             PathBuf::from("/tmp/client\\ cwd/~/literal.conf")
         );
         assert_eq!(
-            expand_relative(Path::new("/tmp/nested source/entry.conf"), "~/literal.conf"),
+            expand_relative(
+                Path::new("/tmp/nested source/entry.conf"),
+                &RawText::from("~/literal.conf")
+            ),
             PathBuf::from("/tmp/nested\\ source/~/literal.conf")
         );
 
@@ -49282,7 +49288,10 @@ mod tests {
         let literal_star = escaped.join("literal*.conf");
         fs::write(&literal_star, "").expect("literal-star file");
         fs::write(escaped.join("literalX.conf"), "").expect("wildcard peer");
-        let matches = source_glob_matches(&resolve_source_path("literal\\*.conf", Some(&escaped)));
+        let matches = source_glob_matches(&resolve_source_path(
+            &RawText::from("literal\\*.conf"),
+            Some(&escaped),
+        ));
         assert_eq!(matches.paths, [literal_star]);
         assert!(matches.errors.is_empty());
 
@@ -49296,7 +49305,8 @@ mod tests {
         fs::write(&nested_literal_leaf, "").expect("literal nested-source leaf");
         fs::write(nested_pattern_peer.join("leaf.conf"), "")
             .expect("misleading nested-source peer");
-        let matches = source_glob_matches(&expand_relative(&nested_entry, "leaf.conf"));
+        let matches =
+            source_glob_matches(&expand_relative(&nested_entry, &RawText::from("leaf.conf")));
         assert_eq!(matches.paths, [nested_literal_leaf]);
         assert!(matches.errors.is_empty());
 
@@ -49305,7 +49315,10 @@ mod tests {
         let visible = hidden.join("visible.conf");
         fs::write(&visible, "").expect("visible file");
         fs::write(hidden.join(".hidden.conf"), "").expect("hidden file");
-        let matches = source_glob_matches(&resolve_source_path("*.conf", Some(&hidden)));
+        let matches = source_glob_matches(&resolve_source_path(
+            &RawText::from("*.conf"),
+            Some(&hidden),
+        ));
         assert_eq!(matches.paths, [visible]);
         assert!(matches.errors.is_empty());
 
@@ -49317,7 +49330,10 @@ mod tests {
         let one_file = one.join("one.conf");
         fs::write(&one_file, "").expect("one-component file");
         fs::write(deep.join("deep.conf"), "").expect("deep file");
-        let matches = source_glob_matches(&resolve_source_path("**/*.conf", Some(&double_star)));
+        let matches = source_glob_matches(&resolve_source_path(
+            &RawText::from("**/*.conf"),
+            Some(&double_star),
+        ));
         assert_eq!(matches.paths, [one_file]);
         assert!(matches.errors.is_empty());
 
@@ -49326,7 +49342,10 @@ mod tests {
         let alpha = triple_star.join("alpha.conf");
         fs::write(&alpha, "").expect("triple-star match");
         fs::write(triple_star.join("alpha.txt"), "").expect("triple-star miss");
-        let matches = source_glob_matches(&resolve_source_path("***.conf", Some(&triple_star)));
+        let matches = source_glob_matches(&resolve_source_path(
+            &RawText::from("***.conf"),
+            Some(&triple_star),
+        ));
         assert_eq!(matches.paths, [alpha]);
         assert!(matches.errors.is_empty());
 
@@ -49350,10 +49369,16 @@ mod tests {
         fs::create_dir(&bracket).expect("bracket directory");
         let literal_bracket = bracket.join("literal[.conf");
         fs::write(&literal_bracket, "").expect("literal-bracket file");
-        let matches = source_glob_matches(&resolve_source_path("literal[.conf", Some(&bracket)));
+        let matches = source_glob_matches(&resolve_source_path(
+            &RawText::from("literal[.conf"),
+            Some(&bracket),
+        ));
         assert_eq!(matches.paths, [literal_bracket]);
         assert!(matches.errors.is_empty());
-        let matches = source_glob_matches(&resolve_source_path("missing[.conf", Some(&bracket)));
+        let matches = source_glob_matches(&resolve_source_path(
+            &RawText::from("missing[.conf"),
+            Some(&bracket),
+        ));
         assert!(matches.paths.is_empty());
         assert!(matches.errors.is_empty());
 
@@ -61553,6 +61578,44 @@ set-option -g @alias-mixed-next yes
         assert!(beta_positions.is_empty(), "{beta_positions:?}");
     }
 
+    /// `cmd_source_file` hands its argument to `glob()` as it stood in argv, so
+    /// a path no UTF-8 string can spell reaches the file system whole. Measured
+    /// on tmux d77c9dc6 against a real file whose name carries 0xff:
+    /// `source-file` runs it, where zz used to answer No such file or directory
+    /// for the U+FFFD spelling.
+    #[cfg(unix)]
+    #[test]
+    fn a_source_path_no_utf8_string_can_spell_reaches_the_file_system_whole() {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        let byte_path = RawText::from_bytes(
+            [b"/tmp/zz-".as_slice(), &[0xff], b"-real.conf".as_slice()].concat(),
+        );
+        assert_eq!(byte_path.to_utf8(), None);
+        assert_eq!(
+            resolve_source_path(&byte_path, Some(Path::new("/tmp/cwd")))
+                .as_os_str()
+                .as_bytes(),
+            byte_path.as_bytes()
+        );
+
+        let byte_leaf =
+            RawText::from_bytes([b"lea".as_slice(), &[0xff], b".conf".as_slice()].concat());
+        let joined = [b"/tmp/cwd/lea".as_slice(), &[0xff], b".conf".as_slice()].concat();
+        assert_eq!(
+            resolve_source_path(&byte_leaf, Some(Path::new("/tmp/cwd")))
+                .as_os_str()
+                .as_bytes(),
+            joined
+        );
+        assert_eq!(
+            expand_relative(Path::new("/tmp/cwd/entry.conf"), &byte_leaf)
+                .as_os_str()
+                .as_bytes(),
+            joined
+        );
+    }
+
     #[test]
     fn client_terminal_facts_are_parsed_and_stored() {
         assert_eq!(
@@ -61603,22 +61666,31 @@ set-option -g @alias-mixed-next yes
         }
         #[cfg(unix)]
         assert_eq!(
-            resolve_source_path("configs/*.conf", Some(Path::new("/tmp/client cwd"))),
+            resolve_source_path(
+                &RawText::from("configs/*.conf"),
+                Some(Path::new("/tmp/client cwd"))
+            ),
             PathBuf::from("/tmp/client\\ cwd/configs/*.conf")
         );
         #[cfg(not(unix))]
         assert_eq!(
-            resolve_source_path("configs/*.conf", Some(Path::new("/tmp/client cwd"))),
+            resolve_source_path(
+                &RawText::from("configs/*.conf"),
+                Some(Path::new("/tmp/client cwd"))
+            ),
             PathBuf::from("/tmp/client cwd/configs/*.conf")
         );
         assert_eq!(
-            resolve_source_path("/tmp/absolute.conf", Some(Path::new("/ignored"))),
+            resolve_source_path(
+                &RawText::from("/tmp/absolute.conf"),
+                Some(Path::new("/ignored"))
+            ),
             PathBuf::from("/tmp/absolute.conf")
         );
         #[cfg(unix)]
         assert_eq!(
             resolve_source_path(
-                "configs/*.conf",
+                &RawText::from("configs/*.conf"),
                 Some(Path::new("/tmp/client [literal]*? cwd"))
             ),
             PathBuf::from("/tmp/client\\ \\[literal\\]\\*\\?\\ cwd/configs/*.conf")
@@ -61626,7 +61698,7 @@ set-option -g @alias-mixed-next yes
         #[cfg(not(unix))]
         assert_eq!(
             resolve_source_path(
-                "configs/*.conf",
+                &RawText::from("configs/*.conf"),
                 Some(Path::new("/tmp/client [literal]*? cwd"))
             ),
             PathBuf::from("/tmp/client [[]literal[]][*][?] cwd/configs/*.conf")

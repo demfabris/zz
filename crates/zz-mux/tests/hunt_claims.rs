@@ -1943,14 +1943,14 @@ fn source_file_keeps_every_path_in_order() {
         sourced.effects,
         [
             MuxEffect::SourceFile {
-                path: "first".to_owned(),
+                path: "first".into(),
                 quiet: false,
                 parse_only: false,
                 verbose: false,
                 context: context.clone(),
             },
             MuxEffect::SourceFile {
-                path: "second".to_owned(),
+                path: "second".into(),
                 quiet: false,
                 parse_only: false,
                 verbose: false,
@@ -1964,7 +1964,7 @@ fn source_file_keeps_every_path_in_order() {
     assert_eq!(
         quiet.effects,
         [MuxEffect::SourceFile {
-            path: "maybe".to_owned(),
+            path: "maybe".into(),
             quiet: true,
             parse_only: false,
             verbose: false,
@@ -1988,14 +1988,14 @@ fn source_file_keeps_every_path_in_order() {
         formatted.effects,
         [
             MuxEffect::SourceFile {
-                path: "work-0-0-first.conf".to_owned(),
+                path: "work-0-0-first.conf".into(),
                 quiet: false,
                 parse_only: false,
                 verbose: false,
                 context: context.clone(),
             },
             MuxEffect::SourceFile {
-                path: "work-0-0-second.conf".to_owned(),
+                path: "work-0-0-second.conf".into(),
                 quiet: false,
                 parse_only: false,
                 verbose: false,
@@ -2009,7 +2009,7 @@ fn source_file_keeps_every_path_in_order() {
     assert_eq!(
         stdin.effects,
         [MuxEffect::SourceFile {
-            path: "-".to_owned(),
+            path: "-".into(),
             quiet: false,
             parse_only: false,
             verbose: false,
@@ -2025,7 +2025,7 @@ fn source_file_keeps_every_path_in_order() {
     assert_eq!(
         flags.effects,
         [MuxEffect::SourceFile {
-            path: "flags.conf".to_owned(),
+            path: "flags.conf".into(),
             quiet: true,
             parse_only: true,
             verbose: true,
@@ -2060,7 +2060,7 @@ fn source_file_keeps_every_path_in_order() {
     assert_eq!(
         targeted.effects,
         [MuxEffect::SourceFile {
-            path: "work-0-0.conf".to_owned(),
+            path: "work-0-0.conf".into(),
             quiet: false,
             parse_only: false,
             verbose: true,

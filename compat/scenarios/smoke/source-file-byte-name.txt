@@ -1,0 +1,10 @@
+corpus: none
+# A Unix path is bytes, and cmd_source_file hands the argument to glob() as it
+# stood in argv, so a config file whose name carries a byte no UTF-8 string can
+# hold is sourced and its commands run: as a literal name, through a glob whose
+# byte sits in the directory component, and through -F, where the byte arrives
+# out of the environment store rather than out of argv. A -q on a byte path
+# that is not there stays silent.
+stage: fixtures/source-file-byte-name.sh ~/source-file-byte-name.sh
+run-shell 'sh ~/source-file-byte-name.sh'
+out: show-environment -g ZZ_SOURCE_BYTE_RESULT

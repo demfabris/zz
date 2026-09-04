@@ -4242,6 +4242,90 @@ mod tests {
         assert!(workspace.read_with(cx, |workspace, _| workspace.split_drag.is_none()));
     }
 
+    /// `rendering.geometry-residue`'s probe. The desktop client measures its
+    /// pane in pixels and `terminal_grid_size` floors, so a box that is not a
+    /// whole number of cells reaches the PTY one column and one row short of
+    /// the box the engine laid out. The daemon's `set_pane_geometry` swallows a
+    /// difference of one cell rather than re-solving the window extent from it,
+    /// so `#{pane_width}` keeps answering the laid-out number while the PTY has
+    /// the floored one.
+    #[gpui::test]
+    fn attached_pane_measurement_floors_below_the_laid_out_box(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            captured_mux.replace(Some(mux.clone()));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), two_pane_snapshot(PaneId(2)), cx);
+        });
+        cx.run_until_parked();
+
+        let cell_width = px(8.0);
+        let line_height = px(16.0);
+        let laid_out = crate::terminal::element::terminal_grid_size(
+            gpui::size(px(960.0), px(384.0)),
+            cell_width,
+            line_height,
+            1.0,
+        );
+        assert_eq!((laid_out.columns, laid_out.rows), (120, 24));
+
+        let drawn = crate::terminal::element::terminal_grid_size(
+            gpui::size(px(959.5), px(383.5)),
+            cell_width,
+            line_height,
+            1.0,
+        );
+        assert_eq!((drawn.columns, drawn.rows), (119, 23));
+
+        let terminal =
+            workspace.read_with(cx, |workspace, _| workspace.terminals[&PaneId(0)].clone());
+        let sent = mux.update(cx, |mux, _| mux.record_input_for_test());
+        terminal.update(cx, |terminal, cx| {
+            terminal.update_geometry(
+                drawn,
+                Bounds::new(point(px(0.0), px(0.0)), gpui::size(px(959.5), px(383.5))),
+                Bounds::new(point(px(0.0), px(0.0)), gpui::size(px(959.5), px(383.5))),
+                cell_width,
+                line_height,
+                None,
+                None,
+                None,
+                cx,
+            );
+        });
+
+        let sent = sent.borrow();
+        assert_eq!(sent.len(), 1);
+        assert!(matches!(
+            &sent[0],
+            InputMessage::ResizeTerminal {
+                pane,
+                columns,
+                rows,
+                ..
+            } if *pane == PaneId(0) && *columns == 119 && *rows == 23
+        ));
+    }
+
     #[gpui::test]
     fn split_drag_defers_terminal_resize_until_override_release(cx: &mut TestAppContext) {
         cx.update(zz_ui::init);

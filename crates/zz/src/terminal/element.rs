@@ -2947,7 +2947,7 @@ fn last_visible_row_has_content(viewport: &TerminalViewport, visible_rows: u16) 
 /// client writes back as the pane's PTY size. Pure so the writeback contract can
 /// be pinned without a window: pixel extent and cell metrics in, cells and the
 /// physical cell size out.
-fn terminal_grid_size(
+pub(crate) fn terminal_grid_size(
     available: gpui::Size<Pixels>,
     cell_width: Pixels,
     line_height: Pixels,

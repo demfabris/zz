@@ -55,8 +55,8 @@ pub use message::{
     MenuState, MuxOptionKey, MuxOptionSource, MuxOptionValue, MuxOptions,
     NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneIndicator, PasteUploadPurpose,
     PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer, PopupPointerButton, PopupState,
-    PreparedCommand, PreparedCommandResult, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError,
-    ServerHello, SourceSpan, StatusLine, StatusPosition, TerminalUiCommand,
+    PreparedCommand, PreparedCommandResult, ProtocolMessage, RawText, SPLIT_RATIO_BASIS,
+    ServerError, ServerHello, SourceSpan, StatusLine, StatusPosition, TerminalUiCommand,
     agent_update_batch_bytes, paste_upload_extension_is_valid, split_command_words,
 };
 pub use message::{

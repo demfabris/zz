@@ -331,7 +331,7 @@ fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
 fn command_success_round_trips_output_and_exit_code() {
     let message = ProtocolMessage::CommandResponse(CommandResponse::Success {
         request_id: 7,
-        output: "job output".to_owned(),
+        output: "job output".into(),
         exit_code: 3,
         stderr: "job error".to_owned(),
     });
@@ -347,7 +347,7 @@ fn command_error_round_trips_output_after_the_error() {
     let message = ProtocolMessage::CommandResponse(CommandResponse::Error {
         request_id: 8,
         error: ServerError::WindowNotFound("missing".to_owned()),
-        output: "hook output".to_owned(),
+        output: "hook output".into(),
     });
     let frame = encode_protocol_message(&message).expect("encode command response");
     assert_eq!(

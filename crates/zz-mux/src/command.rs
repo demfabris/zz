@@ -15,7 +15,7 @@ use zz_protocol::{
     DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
     MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES,
     PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
-    PopupBorderLines, ServerError, SessionId, SourceSpan, TerminalUiCommand, WindowId,
+    PopupBorderLines, RawText, ServerError, SessionId, SourceSpan, TerminalUiCommand, WindowId,
     catalog_command_spec, command_specs, normalize_browser_profile_name,
     parse_tmux_command_options, parse_tmux_options, resolve_command,
     unimplemented_tmux_command_spec,
@@ -584,7 +584,7 @@ pub struct ExecutionContext {
     client_terminal: ClientTerminal,
     client_size: Option<(u16, u16)>,
     client_working_directory: Option<PathBuf>,
-    client_environment: Option<Arc<BTreeMap<String, String>>>,
+    client_environment: Option<Arc<BTreeMap<RawText, RawText>>>,
     client_attached: bool,
     client_attached_context: Option<(SessionId, WindowId, PaneId)>,
     target_format_client_override: Option<FormatClient>,
@@ -788,11 +788,11 @@ impl ExecutionContext {
     }
 
     #[must_use]
-    pub fn client_environment(&self) -> Option<&BTreeMap<String, String>> {
+    pub fn client_environment(&self) -> Option<&BTreeMap<RawText, RawText>> {
         self.client_environment.as_deref()
     }
 
-    pub fn set_client_environment(&mut self, environment: Option<Arc<BTreeMap<String, String>>>) {
+    pub fn set_client_environment(&mut self, environment: Option<Arc<BTreeMap<RawText, RawText>>>) {
         self.client_environment = environment;
     }
 
@@ -1140,7 +1140,7 @@ pub enum DetachScope {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Execution {
-    pub output: String,
+    pub output: RawText,
     pub effects: Vec<MuxEffect>,
 }
 
@@ -1226,7 +1226,7 @@ impl StatusHooks for ConfigConditionHooks<'_> {
                 self.engine
                     .global_environment
                     .get(name)
-                    .and_then(|entry| entry.value.clone())
+                    .and_then(|entry| entry.value.as_ref().map(ToString::to_string))
             })?
         })
     }
@@ -1411,16 +1411,16 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
 }
 
 impl Execution {
-    fn output(output: String) -> Self {
+    fn output(output: impl Into<RawText>) -> Self {
         Self {
-            output,
+            output: output.into(),
             effects: Vec::new(),
         }
     }
 
     fn effect(effect: MuxEffect) -> Self {
         Self {
-            output: String::new(),
+            output: RawText::default(),
             effects: vec![effect],
         }
     }
@@ -1782,11 +1782,11 @@ impl Default for StoredArrays {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct EnvironmentEntry {
-    value: Option<String>,
+    value: Option<RawText>,
     hidden: bool,
 }
 
-type Environment = BTreeMap<String, EnvironmentEntry>;
+type Environment = BTreeMap<RawText, EnvironmentEntry>;
 
 #[derive(Clone, Debug, Default)]
 pub struct RetainedJobEnvironment {
@@ -3566,8 +3566,8 @@ impl MuxEngine {
     pub fn seed_global_environment<I, K, V>(&mut self, entries: I)
     where
         I: IntoIterator<Item = (K, V)>,
-        K: Into<String>,
-        V: Into<String>,
+        K: Into<RawText>,
+        V: Into<RawText>,
     {
         self.global_environment = entries
             .into_iter()
@@ -3587,14 +3587,14 @@ impl MuxEngine {
     pub fn global_environment_variable(&self, name: &str) -> Option<String> {
         self.global_environment
             .get(name)
-            .and_then(|entry| entry.value.clone())
+            .and_then(|entry| entry.value.as_ref().map(ToString::to_string))
     }
 
     pub fn set_config_environment(&mut self, name: String, value: String, hidden: bool) {
         self.global_environment.insert(
-            name,
+            name.into(),
             EnvironmentEntry {
-                value: Some(value),
+                value: Some(value.into()),
                 hidden,
             },
         );
@@ -4045,7 +4045,7 @@ impl MuxEngine {
     pub fn environment_for_session(
         &self,
         session: SessionId,
-    ) -> Result<Vec<(String, Option<String>)>, ServerError> {
+    ) -> Result<Vec<(RawText, Option<RawText>)>, ServerError> {
         if !self.state.sessions.contains_key(&session) {
             return Err(ServerError::MissingTarget(session.to_string()));
         }
@@ -4055,7 +4055,7 @@ impl MuxEngine {
     pub fn update_session_environment_from_client(
         &mut self,
         session: SessionId,
-        client_environment: &BTreeMap<String, String>,
+        client_environment: &BTreeMap<RawText, RawText>,
     ) -> Result<(), ServerError> {
         if !self.state.sessions.contains_key(&session) {
             return Err(ServerError::MissingTarget(session.to_string()));
@@ -4081,7 +4081,7 @@ impl MuxEngine {
     pub fn job_environment_with_retained_session(
         &self,
         retained: Option<&RetainedJobEnvironment>,
-    ) -> Vec<(String, Option<String>)> {
+    ) -> Vec<(RawText, Option<RawText>)> {
         let mut environment = BTreeMap::new();
         extend_job_environment(&mut environment, &self.global_environment);
         if let Some(retained) = retained {
@@ -4093,7 +4093,7 @@ impl MuxEngine {
     /// The environment a shell job inherits: the global overlay, then the
     /// session overlay when the job has one. Hidden entries and child-unset
     /// markers come through as `None` so the spawner removes them.
-    pub fn job_environment(&self, session: Option<SessionId>) -> Vec<(String, Option<String>)> {
+    pub fn job_environment(&self, session: Option<SessionId>) -> Vec<(RawText, Option<RawText>)> {
         let retained = session.and_then(|session| self.session_environments.get(&session));
         self.job_environment_with_retained_session(retained)
     }
@@ -4123,7 +4123,7 @@ impl MuxEngine {
         self.state.pane_input_off(pane)
     }
 
-    pub fn new_session_attaches(args: &[String]) -> Result<bool, ServerError> {
+    pub fn new_session_attaches(args: &[RawText]) -> Result<bool, ServerError> {
         let (options, _) = parse_new_session_attach_options(args)?;
         Ok(options.has("-A") || !options.has("-d"))
     }
@@ -4131,7 +4131,7 @@ impl MuxEngine {
     pub fn new_session_needs_attach_preflight(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<bool, ServerError> {
         let (options, positional) = parse_new_session_attach_options(args)?;
@@ -4314,9 +4314,9 @@ impl MuxEngine {
                 )?;
                 if !execution.output.is_empty() {
                     if !combined.output.is_empty() && !combined.output.ends_with('\n') {
-                        combined.output.push('\n');
+                        combined.output.push_bytes(b"\n");
                     }
-                    combined.output.push_str(&execution.output);
+                    combined.output.push_bytes(execution.output.as_bytes());
                 }
                 combined.effects.extend(execution.effects);
             }
@@ -4567,7 +4567,7 @@ impl MuxEngine {
     fn new_session(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("new-session", args)?;
@@ -4734,7 +4734,10 @@ impl MuxEngine {
                 update_environment: false,
             });
         }
-        Ok(Execution { output, effects })
+        Ok(Execution {
+            output: output.into(),
+            effects,
+        })
     }
 
     fn prepare_new_session_cwd(
@@ -4787,7 +4790,7 @@ impl MuxEngine {
     fn list_sessions(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-sessions", args)?;
@@ -4844,7 +4847,7 @@ impl MuxEngine {
     fn rename_session(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("rename-session", args)?;
@@ -4873,7 +4876,7 @@ impl MuxEngine {
     fn kill_session(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-session", args)?;
@@ -4939,7 +4942,7 @@ impl MuxEngine {
     fn attach_session(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("attach-session", args)?;
@@ -5021,7 +5024,7 @@ impl MuxEngine {
     fn detach_client(
         &self,
         _context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("detach-client", args)?;
         reject_positionals("detach-client", &positional)?;
@@ -5041,7 +5044,7 @@ impl MuxEngine {
     fn has_session(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("has-session", args)?;
         reject_positionals("has-session", &positional)?;
@@ -5053,7 +5056,7 @@ impl MuxEngine {
     fn new_window(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         kind: PaneKind,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
@@ -5231,13 +5234,16 @@ impl MuxEngine {
             target_format_client,
             hooks,
         );
-        Ok(Execution { output, effects })
+        Ok(Execution {
+            output: output.into(),
+            effects,
+        })
     }
 
     fn list_windows(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-windows", args)?;
@@ -5325,7 +5331,7 @@ impl MuxEngine {
     fn rename_window(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("rename-window", args)?;
@@ -5355,7 +5361,7 @@ impl MuxEngine {
     fn select_window(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("select-window", args)?;
         reject_positionals("select-window", &positional)?;
@@ -5405,7 +5411,7 @@ impl MuxEngine {
     fn last_window(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, _) = parse_command_options("last-window", args)?;
         let session = self
@@ -5430,7 +5436,7 @@ impl MuxEngine {
     fn step_window(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         direction: isize,
     ) -> Result<Execution, ServerError> {
         let command = if direction > 0 {
@@ -5522,7 +5528,7 @@ impl MuxEngine {
     fn kill_window(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-window", args)?;
@@ -5604,7 +5610,7 @@ impl MuxEngine {
     fn move_window(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("move-window", args)?;
         reject_positionals("move-window", &positional)?;
@@ -5703,7 +5709,7 @@ impl MuxEngine {
             );
         }
         Ok(Execution {
-            output: String::new(),
+            output: RawText::default(),
             effects,
         })
     }
@@ -5711,7 +5717,7 @@ impl MuxEngine {
     fn swap_window(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("swap-window", args)?;
         reject_positionals("swap-window", &positional)?;
@@ -5755,7 +5761,7 @@ impl MuxEngine {
             );
         }
         Ok(Execution {
-            output: String::new(),
+            output: RawText::default(),
             effects,
         })
     }
@@ -5763,7 +5769,7 @@ impl MuxEngine {
     fn find_window(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("find-window", args)?;
         if positional.len() != 1 {
@@ -5778,7 +5784,7 @@ impl MuxEngine {
     fn split_window(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         kind: Option<PaneKind>,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
@@ -5798,7 +5804,7 @@ impl MuxEngine {
     fn split_picker(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-picker", args)?;
@@ -5830,7 +5836,7 @@ impl MuxEngine {
     fn split_browser(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-browser", args)?;
@@ -5849,7 +5855,7 @@ impl MuxEngine {
     fn select_pane_kind(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("select-pane-kind", args)?;
         let [selection] = positional.as_slice() else {
@@ -5925,7 +5931,7 @@ impl MuxEngine {
     fn break_pane(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("break-pane", args)?;
@@ -6019,22 +6025,24 @@ impl MuxEngine {
             });
         }
         debug_assert_eq!(self.state.window_for_pane(source), Some(window));
-        execution.output = self.pane_creation_output(
-            &options,
-            destination_session,
-            window,
-            source,
-            original_context.session,
-            original_context.target_format_client(),
-            hooks,
-        );
+        execution.output = self
+            .pane_creation_output(
+                &options,
+                destination_session,
+                window,
+                source,
+                original_context.session,
+                original_context.target_format_client(),
+                hooks,
+            )
+            .into();
         Ok(execution)
     }
 
     fn join_pane(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         command: &str,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
@@ -6213,21 +6221,21 @@ impl MuxEngine {
     fn set_browser_url(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-browser-url", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let url = positional
             .first()
             .ok_or_else(|| ServerError::CommandParse("set-browser-url needs a URL".to_owned()))?;
-        self.state.update_browser_url(pane, url.clone())?;
+        self.state.update_browser_url(pane, url.to_string())?;
         Ok(Execution::default())
     }
 
     fn set_browser_tabs(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-browser-tabs", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -6240,15 +6248,18 @@ impl MuxEngine {
                 "set-browser-tabs needs at least one URL".to_owned(),
             ));
         }
-        self.state
-            .update_browser_tabs(pane, positional, active_tab)?;
+        self.state.update_browser_tabs(
+            pane,
+            positional.iter().map(ToString::to_string).collect(),
+            active_tab,
+        )?;
         Ok(Execution::default())
     }
 
     fn set_browser_profile(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-browser-profile", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -6264,7 +6275,7 @@ impl MuxEngine {
     fn set_agent_session(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-agent-session", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -6275,14 +6286,14 @@ impl MuxEngine {
         };
         let cwd = options.value("-c").map(PathBuf::from);
         self.state
-            .update_agent_session(pane, session_id.clone(), cwd)?;
+            .update_agent_session(pane, session_id.to_string(), cwd)?;
         Ok(Execution::default())
     }
 
     fn set_agent_provider(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-agent-provider", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -6302,7 +6313,7 @@ impl MuxEngine {
     fn restart_agent_pane(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("restart-agent-pane", args)?;
         if !positional.is_empty() {
@@ -6325,7 +6336,7 @@ impl MuxEngine {
     fn set_editor_path(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-editor-path", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -6338,7 +6349,8 @@ impl MuxEngine {
                 ));
             }
         };
-        self.state.update_editor_path(pane, path)?;
+        self.state
+            .update_editor_path(pane, path.map(|path| path.to_string()))?;
         Ok(Execution::default())
     }
 
@@ -6453,15 +6465,17 @@ impl MuxEngine {
             effects.push(MuxEffect::PaneWaitForExit { pane });
         }
         Ok(Execution {
-            output: self.pane_creation_output(
-                options,
-                session,
-                window,
-                pane,
-                active_session,
-                target_format_client,
-                hooks,
-            ),
+            output: self
+                .pane_creation_output(
+                    options,
+                    session,
+                    window,
+                    pane,
+                    active_session,
+                    target_format_client,
+                    hooks,
+                )
+                .into(),
             effects,
         })
     }
@@ -6529,7 +6543,7 @@ impl MuxEngine {
     fn select_pane(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, _) = parse_command_options("select-pane", args)?;
@@ -6596,9 +6610,10 @@ impl MuxEngine {
             });
         }
         if options.has("-g") {
-            self.scalar_option_effective(TmuxOptionTarget::Pane(start), "window-style")
+            execution.output = self
+                .scalar_option_effective(TmuxOptionTarget::Pane(start), "window-style")
                 .unwrap_or_default()
-                .clone_into(&mut execution.output);
+                .into();
             return Ok(execution);
         }
         let pane = if let Some(direction) = direction {
@@ -6664,7 +6679,7 @@ impl MuxEngine {
     fn last_pane(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("last-pane", args)?;
@@ -6690,7 +6705,7 @@ impl MuxEngine {
     fn swap_pane(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("swap-pane", args)?;
         if !positional.is_empty() {
@@ -6761,7 +6776,7 @@ impl MuxEngine {
     fn list_panes(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-panes", args)?;
@@ -6868,7 +6883,7 @@ impl MuxEngine {
     fn resize_pane(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("resize-pane", args)?;
         if positional.len() > 1 {
@@ -6954,7 +6969,7 @@ impl MuxEngine {
     fn resize_window(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("resize-window", args)?;
         if positional.len() > 1 {
@@ -7190,7 +7205,7 @@ impl MuxEngine {
     fn select_layout(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         command: &str,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options(command, args)?;
@@ -7256,7 +7271,7 @@ impl MuxEngine {
     fn rotate_window(
         &mut self,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("rotate-window", args)?;
         if !positional.is_empty() {
@@ -7277,7 +7292,7 @@ impl MuxEngine {
     fn kill_pane(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-pane", args)?;
@@ -7345,7 +7360,7 @@ impl MuxEngine {
     fn respawn_pane(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("respawn-pane", args)?;
@@ -7393,7 +7408,7 @@ impl MuxEngine {
     fn respawn_window(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("respawn-window", args)?;
@@ -7461,7 +7476,7 @@ impl MuxEngine {
             empty,
         });
         Ok(Execution {
-            output: String::new(),
+            output: RawText::default(),
             effects,
         })
     }
@@ -7495,7 +7510,7 @@ impl MuxEngine {
     fn send_keys(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("send-keys", args)?;
@@ -7548,13 +7563,15 @@ impl MuxEngine {
             {
                 let target = ExecutionContext::for_pane(&self.state, pane)
                     .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-                *argument = self.expand_pane_format(
-                    argument,
-                    &target,
-                    context.session,
-                    context.target_format_client(),
-                    hooks,
-                );
+                *argument = self
+                    .expand_pane_format(
+                        argument,
+                        &target,
+                        context.session,
+                        context.target_format_client(),
+                        hooks,
+                    )
+                    .into();
                 if argument.is_empty() {
                     return Ok(Execution::effect(MuxEffect::CopyModeRepeat {
                         pane,
@@ -7668,7 +7685,7 @@ impl MuxEngine {
     fn send_prefix(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, _) = parse_command_options("send-prefix", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -7695,7 +7712,7 @@ impl MuxEngine {
     fn copy_mode(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("copy-mode", args)?;
         reject_positionals("copy-mode", &positional)?;
@@ -7757,7 +7774,7 @@ impl MuxEngine {
             });
         }
         Ok(Execution {
-            output: String::new(),
+            output: RawText::default(),
             effects,
         })
     }
@@ -7765,7 +7782,7 @@ impl MuxEngine {
     fn copy_mode_search_prompt(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, _) = parse_command_options("copy-mode-search-prompt", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -7814,7 +7831,7 @@ impl MuxEngine {
                     self.prepare_frozen_callback_commands(body, true, "command-prompt")
                         .map(CommandPromptTemplate::Commands)
                 } else {
-                    Ok(CommandPromptTemplate::String(template.clone()))
+                    Ok(CommandPromptTemplate::String(template.to_string()))
                 }
             })
             .transpose()?;
@@ -7929,7 +7946,7 @@ impl MuxEngine {
     fn clear_history(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, _) = parse_command_options("clear-history", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -7981,7 +7998,7 @@ impl MuxEngine {
     fn focus_sidebar(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("focus-sidebar", args)?;
         if !positional.is_empty() {
@@ -8025,7 +8042,7 @@ impl MuxEngine {
     fn display_message(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("display-message", args)?;
@@ -8116,7 +8133,7 @@ impl MuxEngine {
     pub fn display_message_format_target(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<(Option<ExecutionContext>, Option<String>), ServerError> {
         let (options, _) = parse_command_options("display-message", args)?;
         Ok((
@@ -8221,7 +8238,7 @@ impl MuxEngine {
                     self.prepare_frozen_callback_commands(body, true, "display-panes")
                         .map(CommandPromptTemplate::Commands)
                 } else {
-                    Ok(CommandPromptTemplate::String(template.clone()))
+                    Ok(CommandPromptTemplate::String(template.to_string()))
                 }
             })
             .transpose()?;
@@ -8291,7 +8308,7 @@ impl MuxEngine {
         Ok(Execution::default())
     }
 
-    fn unbind_key(&mut self, args: &[String]) -> Result<Execution, ServerError> {
+    fn unbind_key(&mut self, args: &[RawText]) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("unbind-key", args)?;
         let table = key_table(&options);
         let quiet = options.has("-q");
@@ -8329,7 +8346,7 @@ impl MuxEngine {
     fn list_keys(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-keys", args)?;
@@ -8459,7 +8476,7 @@ impl MuxEngine {
     fn list_commands(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-commands", args)?;
@@ -8546,7 +8563,7 @@ impl MuxEngine {
                             crate::parser::command_block_body(value).unwrap_or(value),
                         )
                     } else {
-                        Ok(value.clone())
+                        Ok(value.to_string())
                     }
                 })
                 .transpose()?;
@@ -8571,7 +8588,7 @@ impl MuxEngine {
                         crate::parser::command_block_body(value).unwrap_or(value),
                     )
                 } else {
-                    Ok(value.clone())
+                    Ok(value.to_string())
                 }
             })
             .transpose()?;
@@ -8719,7 +8736,7 @@ impl MuxEngine {
         &self,
         context: &ExecutionContext,
         options: &Options,
-        argument: Option<&String>,
+        argument: Option<&str>,
     ) -> Result<Execution, ServerError> {
         let target = self.hook_listing_target(context, options)?;
         let mut monitors = self
@@ -9500,7 +9517,7 @@ impl MuxEngine {
     fn show_hooks(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("show-hooks", args)?;
@@ -9508,7 +9525,11 @@ impl MuxEngine {
             if positional.len() > 1 {
                 return Err(ServerError::CommandParse("too many arguments".to_owned()));
             }
-            return self.show_hooks_monitor(context, &options, positional.first());
+            return self.show_hooks_monitor(
+                context,
+                &options,
+                positional.first().map(RawText::as_str),
+            );
         }
         if positional.len() > 1 {
             return Err(ServerError::CommandParse("too many arguments".to_owned()));
@@ -9534,16 +9555,16 @@ impl MuxEngine {
                     "not an array: {argument}"
                 )));
             }
-            let mut forwarded = Vec::new();
+            let mut forwarded: Vec<RawText> = Vec::new();
             for flag in ["-g", "-p", "-w"] {
                 if options.has(flag) {
-                    forwarded.push(flag.to_owned());
+                    forwarded.push(flag.into());
                 }
             }
             if let Some(target) = options.value("-t") {
-                forwarded.extend(["-t".to_owned(), target.to_owned()]);
+                forwarded.extend(["-t".into(), target.into()]);
             }
-            forwarded.extend(["--".to_owned(), argument]);
+            forwarded.extend(["--".into(), argument.into()]);
             return self.show_options(
                 context,
                 &forwarded,
@@ -9566,16 +9587,16 @@ impl MuxEngine {
             }
         };
         if !tmux_option_is_hook(table_option.name) {
-            let mut forwarded = Vec::new();
+            let mut forwarded: Vec<RawText> = Vec::new();
             for flag in ["-g", "-p", "-w"] {
                 if options.has(flag) {
-                    forwarded.push(flag.to_owned());
+                    forwarded.push(flag.into());
                 }
             }
             if let Some(target) = options.value("-t") {
-                forwarded.extend(["-t".to_owned(), target.to_owned()]);
+                forwarded.extend(["-t".into(), target.into()]);
             }
-            forwarded.extend(["--".to_owned(), argument]);
+            forwarded.extend(["--".into(), argument.into()]);
             return self.show_options(
                 context,
                 &forwarded,
@@ -9713,7 +9734,7 @@ impl MuxEngine {
                         crate::parser::command_block_body(value).unwrap_or(value),
                     )?
                 } else {
-                    value.clone()
+                    value.to_string()
                 };
                 Ok(if options.has("-F") {
                     expand_format_with_hooks(&value, self, format_context, hooks)
@@ -9978,7 +9999,7 @@ impl MuxEngine {
             }
         }
         Execution {
-            output: String::new(),
+            output: RawText::default(),
             effects,
         }
     }
@@ -9986,7 +10007,7 @@ impl MuxEngine {
     fn show_options(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         force_window: bool,
         argument_expansion: ShowOptionArgument,
         hooks: &mut impl StatusHooks,
@@ -10088,7 +10109,7 @@ impl MuxEngine {
                 };
                 self.expand_pane_format(argument, &target.0, context.session, target.1, hooks)
             }
-            ShowOptionArgument::AlreadyExpanded => argument.clone(),
+            ShowOptionArgument::AlreadyExpanded => argument.to_string(),
         };
         let parsed = match parse_tmux_option(&argument) {
             Ok(parsed) => parsed,
@@ -10217,7 +10238,7 @@ impl MuxEngine {
     fn set_environment(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-environment", args)?;
@@ -10242,16 +10263,19 @@ impl MuxEngine {
         if options.has("-F")
             && let Some(raw) = value.as_deref()
         {
-            value = Some(expand_format_with_hooks(
-                raw,
-                self,
-                self.environment_format_context(
-                    target_session,
-                    context.session,
-                    context.target_format_client(),
-                ),
-                hooks,
-            ));
+            value = Some(
+                expand_format_with_hooks(
+                    raw,
+                    self,
+                    self.environment_format_context(
+                        target_session,
+                        context.session,
+                        context.target_format_client(),
+                    ),
+                    hooks,
+                )
+                .into(),
+            );
         }
         if (options.has("-r") || options.has("-u")) && value.is_some() {
             let flag = if options.has("-u") { "-u" } else { "-r" };
@@ -10295,7 +10319,7 @@ impl MuxEngine {
     fn show_environment(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("show-environment", args)?;
         if positional.len() > 1 {
@@ -11139,7 +11163,7 @@ impl MuxEngine {
         &mut self,
         session: SessionId,
         include_update_environment: bool,
-        client_environment: Option<&BTreeMap<String, String>>,
+        client_environment: Option<&BTreeMap<RawText, RawText>>,
         overlays: Vec<(String, String)>,
     ) {
         let mut environment = Environment::new();
@@ -11149,9 +11173,9 @@ impl MuxEngine {
         }
         for (name, value) in overlays {
             environment.insert(
-                name,
+                name.into(),
                 EnvironmentEntry {
-                    value: Some(value),
+                    value: Some(value.into()),
                     hidden: false,
                 },
             );
@@ -11440,7 +11464,7 @@ impl MuxEngine {
         };
         self.buffer_limit = limit;
         Ok(Execution {
-            output: String::new(),
+            output: RawText::default(),
             effects: vec![
                 MuxEffect::BufferLimitChanged(limit),
                 MuxEffect::MuxOptionChanged {
@@ -12285,7 +12309,7 @@ impl MuxEngine {
             validate_word_separators(&next)?;
             self.global_word_separators = next;
             return Ok(Execution {
-                output: String::new(),
+                output: RawText::default(),
                 effects: vec![
                     MuxEffect::WordSeparatorsChanged { session: None },
                     MuxEffect::MuxOptionChanged {
@@ -12346,7 +12370,7 @@ impl MuxEngine {
             };
             self.global_mode_keys = next;
             return Ok(Execution {
-                output: String::new(),
+                output: RawText::default(),
                 effects: vec![
                     MuxEffect::ModeKeysChanged { window: None },
                     MuxEffect::MuxOptionChanged {
@@ -12971,7 +12995,7 @@ impl MuxEngine {
     fn source_file(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("source-file", args)?;
@@ -12996,7 +13020,7 @@ impl MuxEngine {
             }
         }
         Ok(Execution {
-            output: String::new(),
+            output: RawText::default(),
             effects: positional
                 .into_iter()
                 .map(|path| MuxEffect::SourceFile {
@@ -13009,7 +13033,7 @@ impl MuxEngine {
                             hooks,
                         )
                     } else {
-                        path
+                        path.to_string()
                     },
                     quiet,
                     parse_only,
@@ -13155,7 +13179,7 @@ fn stored_scalar_execution(name: &str, target: TmuxOptionTarget) -> Execution {
     }
     if name == "pane-border-status" {
         return Execution {
-            output: String::new(),
+            output: RawText::default(),
             effects: vec![
                 MuxEffect::WindowSizeChanged {
                     window: match target {
@@ -13216,8 +13240,12 @@ fn format_environment_rows(environment: &Environment) -> Vec<FormatEnvironRow> {
     environment
         .iter()
         .map(|(name, entry)| FormatEnvironRow {
-            name: name.clone(),
-            value: entry.value.clone().unwrap_or_default(),
+            name: name.to_string(),
+            value: entry
+                .value
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
             hidden: entry.hidden,
             removed: entry.value.is_none(),
         })
@@ -13488,13 +13516,14 @@ fn tmux_flag(value: bool) -> &'static str {
     if value { "on" } else { "off" }
 }
 
-fn validate_environment_name(name: &str) -> Result<(), ServerError> {
+fn validate_environment_name(name: &RawText) -> Result<(), ServerError> {
+    let name = name.as_bytes();
     if name.is_empty() {
         return Err(ServerError::InvalidCommand(
             "empty variable name".to_owned(),
         ));
     }
-    if name.contains('=') {
+    if name.contains(&b'=') {
         return Err(ServerError::InvalidCommand(
             "variable name contains =".to_owned(),
         ));
@@ -13502,7 +13531,7 @@ fn validate_environment_name(name: &str) -> Result<(), ServerError> {
     Ok(())
 }
 
-fn extend_job_environment(target: &mut BTreeMap<String, Option<String>>, source: &Environment) {
+fn extend_job_environment(target: &mut BTreeMap<RawText, Option<RawText>>, source: &Environment) {
     for (name, entry) in source {
         let value = if entry.hidden {
             None
@@ -13513,28 +13542,48 @@ fn extend_job_environment(target: &mut BTreeMap<String, Option<String>>, source:
     }
 }
 
-fn environment_line(name: &str, entry: &EnvironmentEntry, options: &Options) -> Option<String> {
+/// `environ_print`'s two spellings, written as bytes: tmux stores an
+/// environment name and value as a C string, so a byte past ASCII reaches
+/// `show-environment` unchanged and the `-s` form quotes around it.
+fn environment_line(
+    name: &RawText,
+    entry: &EnvironmentEntry,
+    options: &Options,
+) -> Option<RawText> {
     if options.has("-h") != entry.hidden {
         return None;
     }
+    let name = name.as_bytes();
+    let mut line = Vec::new();
     if !options.has("-s") {
-        return Some(match &entry.value {
-            Some(value) => format!("{name}={value}"),
-            None => format!("-{name}"),
-        });
+        if let Some(value) = &entry.value {
+            line.extend_from_slice(name);
+            line.push(b'=');
+            line.extend_from_slice(value.as_bytes());
+        } else {
+            line.push(b'-');
+            line.extend_from_slice(name);
+        }
+        return Some(RawText::from_bytes(line));
     }
-    Some(match &entry.value {
-        Some(value) => format!(
-            "{name}=\"{}\"; export {name};",
-            shell_environment_escape(value)
-        ),
-        None => format!("unset {name};"),
-    })
+    if let Some(value) = &entry.value {
+        line.extend_from_slice(name);
+        line.extend_from_slice(b"=\"");
+        line.extend_from_slice(&shell_environment_escape(value.as_bytes()));
+        line.extend_from_slice(b"\"; export ");
+        line.extend_from_slice(name);
+        line.push(b';');
+    } else {
+        line.extend_from_slice(b"unset ");
+        line.extend_from_slice(name);
+        line.push(b';');
+    }
+    Some(RawText::from_bytes(line))
 }
 
 fn show_environment_entries(
     environment: &Environment,
-    positional: &[String],
+    positional: &[RawText],
     options: &Options,
 ) -> Result<Execution, ServerError> {
     if let Some(name) = positional.first() {
@@ -13545,21 +13594,26 @@ fn show_environment_entries(
             environment_line(name, entry, options).unwrap_or_default(),
         ));
     }
-    let output = environment
+    let mut output = Vec::new();
+    for line in environment
         .iter()
         .filter_map(|(name, entry)| environment_line(name, entry, options))
-        .collect::<Vec<_>>()
-        .join("\n");
-    Ok(Execution::output(output))
+    {
+        if !output.is_empty() {
+            output.push(b'\n');
+        }
+        output.extend_from_slice(line.as_bytes());
+    }
+    Ok(Execution::output(RawText::from_bytes(output)))
 }
 
-fn shell_environment_escape(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        if matches!(character, '$' | '`' | '"' | '\\') {
-            escaped.push('\\');
+fn shell_environment_escape(value: &[u8]) -> Vec<u8> {
+    let mut escaped = Vec::with_capacity(value.len());
+    for byte in value {
+        if matches!(byte, b'$' | b'`' | b'"' | b'\\') {
+            escaped.push(b'\\');
         }
-        escaped.push(character);
+        escaped.push(*byte);
     }
     escaped
 }
@@ -14675,7 +14729,7 @@ fn session_creation_environment(options: &Options) -> Vec<(String, String)> {
 fn apply_client_environment_update(
     environment: &mut Environment,
     patterns: &[String],
-    client_environment: &BTreeMap<String, String>,
+    client_environment: &BTreeMap<RawText, RawText>,
 ) {
     for pattern in patterns {
         let matches = client_environment
@@ -14685,7 +14739,7 @@ fn apply_client_environment_update(
             .collect::<Vec<_>>();
         if matches.is_empty() {
             environment
-                .entry(pattern.clone())
+                .entry(pattern.clone().into())
                 .and_modify(|entry| entry.value = None)
                 .or_insert(EnvironmentEntry {
                     value: None,
@@ -14741,8 +14795,8 @@ fn command_prompt_mode(options: &Options) -> CommandPromptMode {
 
 fn parse_command_options(
     command: &str,
-    args: &[String],
-) -> Result<(Options, Vec<String>), ServerError> {
+    args: &[RawText],
+) -> Result<(Options, Vec<RawText>), ServerError> {
     let spec = command_spec(command).expect("executable command has catalog metadata");
     let (options, positional) = parse_options_for_spec(args, spec)?;
     spec.validate_positional_minimum(positional.len())?;
@@ -14754,8 +14808,8 @@ fn parse_command_options(
 }
 
 fn parse_new_session_attach_options(
-    args: &[String],
-) -> Result<(Options, Vec<String>), ServerError> {
+    args: &[RawText],
+) -> Result<(Options, Vec<RawText>), ServerError> {
     let spec = command_spec("new-session").expect("new-session has catalog metadata");
     let (options, positional) = parse_options_for_spec(args, spec)?;
     validate_options_allowing_unsupported("new-session", spec, &options, Some("-t"))?;
@@ -14765,9 +14819,9 @@ fn parse_new_session_attach_options(
 }
 
 fn parse_options_for_spec(
-    args: &[String],
+    args: &[RawText],
     spec: &zz_protocol::CommandSpec,
-) -> Result<(Options, Vec<String>), ServerError> {
+) -> Result<(Options, Vec<RawText>), ServerError> {
     if spec.uses_tmux_option_grammar() {
         let parsed = parse_tmux_options(spec, args)?;
         let mut options = Options::default();
@@ -14827,10 +14881,10 @@ fn validate_options_allowing_unsupported(
 }
 
 fn parse_options(
-    args: &[String],
+    args: &[RawText],
     value_options: &[&str],
     attached_options: &[&str],
-) -> Result<(Options, Vec<String>), ServerError> {
+) -> Result<(Options, Vec<RawText>), ServerError> {
     let mut options = Options::default();
     let mut index = 0;
     while let Some(argument) = args.get(index) {
@@ -14850,7 +14904,7 @@ fn parse_options(
                 let value = match attached {
                     Some(value) if !value.is_empty() => value.to_owned(),
                     Some(_) => {
-                        options.flags.push(argument.clone());
+                        options.flags.push(argument.to_string());
                         continue;
                     }
                     None => {
@@ -14861,7 +14915,7 @@ fn parse_options(
                 };
                 options.values.push((name, value));
             } else {
-                options.flags.push(argument.clone());
+                options.flags.push(argument.to_string());
             }
             continue;
         }
@@ -14897,12 +14951,12 @@ fn parse_options(
 }
 
 fn required_arg<'a>(
-    args: &'a [String],
+    args: &'a [RawText],
     index: usize,
     option: &str,
 ) -> Result<&'a str, ServerError> {
     args.get(index)
-        .map(String::as_str)
+        .map(RawText::as_str)
         .ok_or_else(|| ServerError::CommandParse(format!("{option} requires an argument")))
 }
 
@@ -14920,7 +14974,7 @@ fn reject_large_preview(command: &str, options: &Options) -> Result<(), ServerEr
 fn chooser_command_template(
     invocation: &CommandInvocation,
     positional_start: usize,
-    positional: &[String],
+    positional: &[RawText],
 ) -> Option<String> {
     positional.first().map(|template| {
         if invocation.argument_is_command_block(positional_start) {
@@ -14929,12 +14983,12 @@ fn chooser_command_template(
                 .trim()
                 .replace('\n', " ;; ")
         } else {
-            template.clone()
+            template.to_string()
         }
     })
 }
 
-fn reject_positionals(command: &str, positional: &[String]) -> Result<(), ServerError> {
+fn reject_positionals(command: &str, positional: &[RawText]) -> Result<(), ServerError> {
     if let Some(argument) = positional.first() {
         Err(ServerError::CommandParse(format!(
             "{command} does not take positional arguments: {argument}"
@@ -15020,7 +15074,7 @@ fn parse_resize_size(value: &str, extent: u16, dimension: &str) -> Result<u16, S
 
 fn exactly_one_argument<'a>(
     command: &str,
-    positional: &'a [String],
+    positional: &'a [RawText],
 ) -> Result<&'a str, ServerError> {
     if positional.len() == 1 {
         Ok(positional[0].as_str())
@@ -15150,8 +15204,8 @@ fn window_active_pane(state: &MuxState, window: WindowId) -> Result<PaneId, Serv
         .ok_or_else(|| ServerError::MissingTarget(window.to_string()))
 }
 
-fn shell_command_positional(positional: &[String]) -> Option<Vec<String>> {
-    (!positional.is_empty()).then(|| positional.to_vec())
+fn shell_command_positional(positional: &[RawText]) -> Option<Vec<String>> {
+    (!positional.is_empty()).then(|| positional.iter().map(ToString::to_string).collect())
 }
 
 fn spawn_cwd_source(
@@ -15185,15 +15239,14 @@ fn spawn_cwd_source(
 
 fn browser_from_args(
     options: &Options,
-    positional: &[String],
+    positional: &[RawText],
 ) -> Result<BrowserDescriptor, ServerError> {
     let profile = normalize_browser_profile_name(options.value("-p").unwrap_or("default"))
         .map_err(|error| ServerError::InvalidCommand(error.to_string()))?;
     Ok(BrowserDescriptor::single(
         positional
             .first()
-            .cloned()
-            .unwrap_or_else(|| "about:blank".to_owned()),
+            .map_or_else(|| "about:blank".to_owned(), ToString::to_string),
         profile,
     ))
 }
@@ -15349,7 +15402,7 @@ pub fn copy_mode_action_is_read_only_safe(action: &CopyModeAction) -> bool {
     )
 }
 
-pub fn send_keys_is_read_only_safe(args: &[String]) -> Result<bool, ServerError> {
+pub fn send_keys_is_read_only_safe(args: &[RawText]) -> Result<bool, ServerError> {
     let spec = command_spec("send-keys").expect("send-keys has catalog metadata");
     let (unvalidated_options, _) = parse_options_for_spec(args, spec)?;
     if !unvalidated_options.has("-X") {
@@ -15377,7 +15430,7 @@ pub fn send_keys_is_read_only_safe(args: &[String]) -> Result<bool, ServerError>
 /// `CMD_CLIENT_CFLAG|CMD_CLIENT_CANFAIL`, so the read-only guard follows this
 /// client rather than the invoker, and a target that matches nothing leaves the
 /// guard with no client at all.
-pub fn send_keys_target_client(args: &[String]) -> Result<Option<String>, ServerError> {
+pub fn send_keys_target_client(args: &[RawText]) -> Result<Option<String>, ServerError> {
     let spec = command_spec("send-keys").expect("send-keys has catalog metadata");
     let (options, _) = parse_options_for_spec(args, spec)?;
     Ok(options.value("-c").map(str::to_owned))
@@ -15386,12 +15439,12 @@ pub fn send_keys_target_client(args: &[String]) -> Result<Option<String>, Server
 /// The action a bare `-X <command>` maps to, with the one mandatory argument
 /// supplied for the names that require one.
 pub(crate) fn copy_mode_probe_action(command: &str) -> Option<CopyModeAction> {
-    let arguments = match command {
-        "goto-line" => vec!["1".to_owned()],
+    let arguments: Vec<RawText> = match command {
+        "goto-line" => vec!["1".into()],
         "jump-forward" | "jump-backward" | "jump-to-forward" | "jump-to-backward" => {
-            vec!["x".to_owned()]
+            vec!["x".into()]
         }
-        "search-forward-incremental" | "search-backward-incremental" => vec!["=x".to_owned()],
+        "search-forward-incremental" | "search-backward-incremental" => vec!["=x".into()],
         _ => Vec::new(),
     };
     copy_mode_action(command, &arguments, SetClipboard::Off, "")
@@ -15401,7 +15454,7 @@ pub(crate) fn copy_mode_probe_action(command: &str) -> Option<CopyModeAction> {
 
 fn copy_mode_action(
     command: &str,
-    arguments: &[String],
+    arguments: &[RawText],
     set_clipboard: SetClipboard,
     copy_command: &str,
 ) -> Result<Option<CopyModeAction>, ServerError> {
@@ -15475,7 +15528,7 @@ fn copy_mode_action(
         "begin-selection" => Some(CopyModeAction::StartSelection),
         "select-word" => Some(CopyModeAction::SelectWord),
         "select-line" => Some(CopyModeAction::SelectLine),
-        "selection-mode" => copy_selection_mode(arguments.first().map(String::as_str))
+        "selection-mode" => copy_selection_mode(arguments.first().map(RawText::as_str))
             .map(CopyModeAction::SelectionMode),
         "clear-selection" => Some(CopyModeAction::ClearSelection),
         "stop-selection" => Some(CopyModeAction::StopSelection),
@@ -15582,7 +15635,7 @@ fn copy_mode_action(
 /// Where the search string sits among an action's own arguments. The pin
 /// reads it as `args_string(cs->wargs, 0)`, after the action's flags and the
 /// `--` its stock bindings carry, so the expansion has to skip both.
-fn send_keys_search_string_index(arguments: &[String]) -> Option<usize> {
+fn send_keys_search_string_index(arguments: &[RawText]) -> Option<usize> {
     let mut index = 0;
     while let Some(argument) = arguments.get(index) {
         if argument == "--" {
@@ -15613,9 +15666,9 @@ const SEND_KEYS_FORMAT_EXPANDED_ACTIONS: &[&str] = &[
 /// the one optional argument, the `-text` spellings clear `data->searchregex`,
 /// and a missing or empty string is `window_copy_expand_search_string`
 /// answering zero, which leaves the mode alone.
-fn copy_search_action(command: &str, argument: Option<&String>) -> CopyModeAction {
+fn copy_search_action(command: &str, argument: Option<&RawText>) -> CopyModeAction {
     CopyModeAction::Search(Box::new(CopyModeSearch {
-        text: argument.cloned().unwrap_or_default(),
+        text: argument.map(ToString::to_string).unwrap_or_default(),
         direction: if command.starts_with("search-forward") {
             SearchDirection::Forward
         } else {
@@ -15634,7 +15687,7 @@ fn copy_search_action(command: &str, argument: Option<&String>) -> CopyModeActio
 /// string, which may be empty.
 fn copy_incremental_search_action(
     command: &str,
-    argument: Option<&String>,
+    argument: Option<&RawText>,
 ) -> Option<CopyModeAction> {
     let argument = argument?;
     let mut characters = argument.chars();
@@ -15660,7 +15713,10 @@ fn copy_incremental_search_action(
     })))
 }
 
-fn copy_mode_action_options(command: &str, arguments: &[String]) -> Option<(Options, Vec<String>)> {
+fn copy_mode_action_options(
+    command: &str,
+    arguments: &[RawText],
+) -> Option<(Options, Vec<RawText>)> {
     let (options, positional) = parse_options(arguments, &[], &[]).ok()?;
     let allowed = match command {
         "copy-selection"
@@ -15757,7 +15813,7 @@ fn copy_selection_mode(argument: Option<&str>) -> Option<CopySelectionMode> {
     }
 }
 
-fn copy_goto_line_action(arguments: &[String]) -> Option<CopyModeAction> {
+fn copy_goto_line_action(arguments: &[RawText]) -> Option<CopyModeAction> {
     let [line] = arguments else { return None };
     let target = pinned_strtonum(line, -1, i64::from(i32::MAX)).map_or(u32::MAX, |parsed| {
         u32::try_from(parsed).unwrap_or(i32::MAX.unsigned_abs())
@@ -15793,20 +15849,20 @@ fn pinned_strtonum(value: &str, minimum: i64, maximum: i64) -> Option<i64> {
 
 fn copy_pipe_action(
     command_name: &str,
-    arguments: &[String],
+    arguments: &[RawText],
     options: &Options,
     set_clipboard: SetClipboard,
     copy_command: &str,
     copy: bool,
 ) -> Result<CopyModeAction, ServerError> {
-    let pipe = arguments.first().map_or(copy_command, String::as_str);
+    let pipe = arguments.first().map_or(copy_command, RawText::as_str);
     if pipe.len() > MAX_COPY_COMMAND_BYTES {
         return Err(ServerError::InvalidCommand(format!(
             "copy pipe command exceeds {MAX_COPY_COMMAND_BYTES} bytes"
         )));
     }
     let prefix = if copy {
-        arguments.get(1).cloned()
+        arguments.get(1).map(ToString::to_string)
     } else {
         None
     };
@@ -15821,7 +15877,7 @@ fn copy_pipe_action(
 }
 
 fn copy_jump_action(
-    arguments: &[String],
+    arguments: &[RawText],
     direction: CopyJumpDirection,
     to: bool,
 ) -> Option<CopyModeAction> {
@@ -15829,14 +15885,14 @@ fn copy_jump_action(
         return None;
     }
     Some(CopyModeAction::Jump(CopyJump {
-        target: arguments[0].clone(),
+        target: arguments[0].to_string(),
         direction,
         to,
     }))
 }
 
 fn copy_selection_action(
-    arguments: &[String],
+    arguments: &[RawText],
     options: &Options,
     set_clipboard: SetClipboard,
     clear_selection: bool,
@@ -15846,7 +15902,7 @@ fn copy_selection_action(
         request_id: 0,
         clipboard: !options.has("-C") && set_clipboard != SetClipboard::Off,
         buffer: (!options.has("-P")).then(|| PasteBufferAction::Create {
-            prefix: arguments.first().cloned(),
+            prefix: arguments.first().map(ToString::to_string),
         }),
         pipe: None,
         clear_selection,
@@ -15992,7 +16048,8 @@ fn prepare_expanded_callback_invocation(
     if let Some(body) = command_alias_group_body(command) {
         let commands =
             prepare_callback_commands_with_aliases(engine, body, true, owner, false, false)?;
-        command.args[0] = format!("{{ {} }}", format_callback_commands_round_trip(&commands));
+        command.args[0] =
+            format!("{{ {} }}", format_callback_commands_round_trip(&commands)).into();
         return validate_static_command_chain(&commands);
     }
     for index in 0..command.args.len() {
@@ -16010,7 +16067,7 @@ fn prepare_expanded_callback_invocation(
             aliases_available,
         )?;
         let body = format_callback_commands_round_trip(&commands);
-        command.args[index] = format!("{{ {body} }}");
+        command.args[index] = format!("{{ {body} }}").into();
     }
     validate_bound_command(command, owner)
 }
@@ -16023,7 +16080,8 @@ fn substitute_command_prompt_invocations<S: AsRef<str>>(
         for index in 0..command.args.len() {
             if !command.argument_is_command_block(index) {
                 command.args[index] =
-                    MuxEngine::substitute_command_prompt_template(&command.args[index], inputs);
+                    MuxEngine::substitute_command_prompt_template(&command.args[index], inputs)
+                        .into();
                 continue;
             }
             let body = crate::parser::command_block_body(&command.args[index])
@@ -16035,7 +16093,8 @@ fn substitute_command_prompt_invocations<S: AsRef<str>>(
             }
             let mut nested = parsed.commands;
             substitute_command_prompt_invocations(&mut nested, inputs)?;
-            command.args[index] = format!("{{ {} }}", format_callback_commands_round_trip(&nested));
+            command.args[index] =
+                format!("{{ {} }}", format_callback_commands_round_trip(&nested)).into();
         }
     }
     Ok(())
@@ -16352,7 +16411,7 @@ fn command_round_trip_print(command: &CommandInvocation) -> String {
                 .enumerate()
                 .map(|(index, argument)| {
                     if command.argument_is_command_block(index) {
-                        argument.clone()
+                        argument.to_string()
                     } else {
                         tmux_args_escape(argument)
                     }
@@ -16413,7 +16472,7 @@ fn tmux_command_print(command: &CommandInvocation) -> String {
     let spec = catalog_command_spec(name);
     let Some(spec) = spec else {
         return std::iter::once(name)
-            .chain(command.args.iter().map(String::as_str))
+            .chain(command.args.iter().map(RawText::as_str))
             .map(tmux_args_escape)
             .collect::<Vec<_>>()
             .join(" ");
@@ -16691,7 +16750,7 @@ pub fn hook_format_variables(command: &CommandInvocation, hook: &str) -> BTreeMa
     for (index, argument) in positional.iter().enumerate() {
         variables.insert(
             format!("{HOOK_ARGUMENT_CONTEXT_PREFIX}{index}"),
-            argument.clone(),
+            argument.to_string(),
         );
     }
     for flag in &options.flags {
@@ -16851,10 +16910,10 @@ mod tests {
         assert!(engine.set_pane_geometry(source, 120, 40));
         let mut join = command(command_name, args);
         join.args.extend([
-            "-s".to_owned(),
-            source.to_string(),
-            "-t".to_owned(),
-            target.to_string(),
+            RawText::from("-s"),
+            source.to_string().into(),
+            "-t".into(),
+            target.to_string().into(),
         ]);
         engine.execute(&mut context, &join).unwrap();
         (
@@ -16869,13 +16928,13 @@ mod tests {
         name: &str,
         args: &[&str],
         format: &str,
-    ) -> String {
+    ) -> RawText {
         let bare = engine
             .execute(context, &command(name, args))
             .unwrap()
             .output;
         let mut explicit = command(name, args);
-        explicit.args.extend(["-F".to_owned(), format.to_owned()]);
+        explicit.args.extend([RawText::from("-F"), format.into()]);
         let formatted = engine.execute(context, &explicit).unwrap().output;
         assert_eq!(bare, formatted);
         bare
@@ -18807,14 +18866,126 @@ mod tests {
         ));
     }
 
+    /// `environ_set` stores a name and a value as C strings and `environ_print`
+    /// writes them back byte for byte. Measured on 2026-09-04 against pinned
+    /// tmux d77c9dc6 on a throwaway server: `set-environment -g ZZBYTES` with
+    /// `a<0xff>b` then `show-environment -g ZZBYTES` answers
+    /// `5a 5a 42 59 54 45 53 3d 61 ff 62 0a`, the `-s` form answers
+    /// `ZZBYTES="a\xffb"; export ZZBYTES;` with the byte raw inside the quotes,
+    /// a non-UTF-8 name round-trips as `N\xff=plain`, and a session-scoped store
+    /// behaves the same. The trailing newline in those readings is the client's,
+    /// not the line's, so the expectations below stop at the line.
+    #[test]
+    fn environment_stores_and_prints_non_utf8_names_and_values_as_bytes() {
+        let mut engine = MuxEngine::default();
+        let (session, _, _) = engine.state.create_session("bytes").unwrap();
+        let mut context = ExecutionContext::new(Some(session), None, None);
+
+        let value = RawText::from_bytes(b"a\xffb".as_slice());
+        let name = RawText::from_bytes(b"N\xff".as_slice());
+        let session_value = RawText::from_bytes(b"x\xffy".as_slice());
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    [RawText::from("-g"), "ZZBYTES".into(), value.clone()],
+                ),
+            )
+            .expect("global set-environment");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-environment", &["-g", "ZZBYTES"]),
+                )
+                .expect("global show-environment")
+                .output
+                .as_bytes(),
+            b"ZZBYTES=a\xffb"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-environment", &["-gs", "ZZBYTES"]),
+                )
+                .expect("shell show-environment")
+                .output
+                .as_bytes(),
+            b"ZZBYTES=\"a\xffb\"; export ZZBYTES;"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    [RawText::from("-g"), name.clone(), "plain".into()],
+                ),
+            )
+            .expect("non-utf8 name set-environment");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new(
+                        "show-environment",
+                        [RawText::from("-g"), name.clone()],
+                    ),
+                )
+                .expect("non-utf8 name show-environment")
+                .output
+                .as_bytes(),
+            b"N\xff=plain"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    [RawText::from("ZZSESS"), session_value.clone()],
+                ),
+            )
+            .expect("session set-environment");
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-environment", &["ZZSESS"]))
+                .expect("session show-environment")
+                .output
+                .as_bytes(),
+            b"ZZSESS=x\xffy"
+        );
+
+        let spawn = engine.environment_for_session(session).expect("spawn env");
+        assert_eq!(
+            spawn
+                .iter()
+                .find(|(spawn_name, _)| spawn_name == "ZZBYTES")
+                .and_then(|(_, spawn_value)| spawn_value.as_ref())
+                .map(RawText::as_bytes),
+            Some(b"a\xffb".as_slice())
+        );
+        assert_eq!(
+            spawn
+                .iter()
+                .find(|(spawn_name, _)| *spawn_name == name)
+                .and_then(|(_, spawn_value)| spawn_value.as_ref())
+                .map(RawText::as_bytes),
+            Some(b"plain".as_slice())
+        );
+    }
+
     #[test]
     fn new_session_environment_options_apply_only_on_creation() {
         let mut engine = MuxEngine::default();
         engine.seed_global_environment([("DISPLAY", "daemon")]);
         let mut context = ExecutionContext::default();
         context.set_client_environment(Some(Arc::new(BTreeMap::from([(
-            "DISPLAY".to_owned(),
-            "client".to_owned(),
+            "DISPLAY".into(),
+            "client".into(),
         )]))));
 
         engine
@@ -18978,9 +19149,9 @@ mod tests {
             )
             .expect("global update patterns");
         let snapshot = Arc::new(BTreeMap::from([
-            ("APP_ONE".to_owned(), "one".to_owned()),
-            ("APP_TWO".to_owned(), String::new()),
-            ("UNSELECTED".to_owned(), "client".to_owned()),
+            ("APP_ONE".into(), "one".into()),
+            ("APP_TWO".into(), RawText::default()),
+            ("UNSELECTED".into(), "client".into()),
         ]));
         context.set_client_environment(Some(Arc::clone(&snapshot)));
         let cloned = context.clone();
@@ -19068,11 +19239,11 @@ mod tests {
                 .unwrap();
         }
         let client_environment = BTreeMap::from([
-            ("EMPTY_ONE".to_owned(), String::new()),
-            ("EXACT".to_owned(), "new".to_owned()),
-            ("HIDDEN".to_owned(), "visible".to_owned()),
-            ("WILD_ONE".to_owned(), "one".to_owned()),
-            ("WILD_TWO".to_owned(), "two".to_owned()),
+            ("EMPTY_ONE".into(), RawText::default()),
+            ("EXACT".into(), "new".into()),
+            ("HIDDEN".into(), "visible".into()),
+            ("WILD_ONE".into(), "one".into()),
+            ("WILD_TWO".into(), "two".into()),
         ]);
 
         engine
@@ -21898,7 +22069,7 @@ mod tests {
         let (first, first_window, first_pane) = engine.state.create_session("first").unwrap();
         let (second, _, second_pane) = engine.state.create_session("second").unwrap();
         let active =
-            |engine: &mut MuxEngine, context: &mut ExecutionContext, pane: PaneId| -> String {
+            |engine: &mut MuxEngine, context: &mut ExecutionContext, pane: PaneId| -> RawText {
                 engine
                     .execute(
                         context,
@@ -23946,7 +24117,12 @@ mod tests {
 
     #[test]
     fn read_only_send_keys_accepts_only_typed_safe_copy_actions() {
-        let args = |values: &[&str]| values.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let args = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| RawText::from(*value))
+                .collect::<Vec<_>>()
+        };
 
         assert!(!send_keys_is_read_only_safe(&args(&["literal", "Enter"])).unwrap());
         assert_eq!(
@@ -24873,7 +25049,10 @@ mod tests {
     #[test]
     fn option_parsing_follows_getopt_word_semantics() {
         let parse = |args: &[&str], value_options: &[&str]| {
-            let args = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+            let args = args
+                .iter()
+                .map(|arg| RawText::from(*arg))
+                .collect::<Vec<_>>();
             parse_options(&args, value_options, &[]).expect("parsed options")
         };
 
@@ -24910,12 +25089,12 @@ mod tests {
         assert_eq!(positional, ["-", "-t", "1"]);
 
         assert!(matches!(
-            parse_options(&["-t".to_owned()], &["-t"], &[]),
+            parse_options(&[RawText::from("-t")], &["-t"], &[]),
             Err(ServerError::CommandParse(message)) if message == "-t requires an argument"
         ));
 
         let (options, positional) = parse_options(
-            &["-R10".to_owned(), "-U5".to_owned(), "-R".to_owned()],
+            &[RawText::from("-R10"), "-U5".into(), "-R".into()],
             &[],
             &["-R", "-U"],
         )
@@ -25257,8 +25436,11 @@ mod tests {
 
     #[test]
     fn new_session_attach_routing_uses_the_command_option_parser() {
-        let arguments =
-            |args: &[&str]| args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+        let arguments = |args: &[&str]| {
+            args.iter()
+                .map(|arg| RawText::from(*arg))
+                .collect::<Vec<_>>()
+        };
         let attaches = |args: &[&str]| {
             MuxEngine::new_session_attaches(&arguments(args)).expect("valid new-session arguments")
         };
@@ -25278,7 +25460,7 @@ mod tests {
     fn new_session_attach_preflight_defers_every_detached_attach_or_create() {
         let args = |args: &[&str]| {
             args.iter()
-                .map(|argument| (*argument).to_owned())
+                .map(|argument| RawText::from(*argument))
                 .collect::<Vec<_>>()
         };
         let mut engine = MuxEngine::default();
@@ -25373,7 +25555,7 @@ mod tests {
         let args = |arguments: &[&str]| {
             arguments
                 .iter()
-                .map(|argument| (*argument).to_owned())
+                .map(|argument| RawText::from(*argument))
                 .collect::<Vec<_>>()
         };
         let preflight = |engine: &MuxEngine, context: &ExecutionContext, arguments: &[&str]| {
@@ -25496,7 +25678,7 @@ mod tests {
             "-c",
             "/tmp/#{order}-#{command}",
         ]
-        .map(str::to_owned);
+        .map(RawText::from);
         assert!(
             engine
                 .new_session_needs_attach_preflight(&context, &arguments, &mut hooks,)
@@ -25519,7 +25701,7 @@ mod tests {
             engine
                 .new_session_needs_attach_preflight(
                     &context,
-                    &["-s".to_owned(), "#{command}".to_owned()],
+                    &[RawText::from("-s"), "#{command}".into()],
                     &mut hooks,
                 )
                 .unwrap_err(),
@@ -35350,8 +35532,8 @@ mod tests {
         ]);
         let mut context = ExecutionContext::default();
         context.set_client_environment(Some(Arc::new(BTreeMap::from([
-            ("DISPLAY".to_owned(), ":7".to_owned()),
-            ("SSH_AUTH_SOCK".to_owned(), "/tmp/agent.sock".to_owned()),
+            ("DISPLAY".into(), ":7".into()),
+            ("SSH_AUTH_SOCK".into(), "/tmp/agent.sock".into()),
         ]))));
         engine
             .execute(&mut context, &command("new-session", &["-s", "work"]))
@@ -37290,8 +37472,8 @@ mod tests {
         engine.seed_global_environment([("DISPLAY", ":7"), ("PHASE_C7", "seeded")]);
         let mut context = ExecutionContext::default();
         context.set_client_environment(Some(Arc::new(BTreeMap::from([(
-            "PHASE_C7".to_owned(),
-            "seeded".to_owned(),
+            "PHASE_C7".into(),
+            "seeded".into(),
         )]))));
         engine
             .execute(
@@ -38823,7 +39005,7 @@ mod tests {
         context: &mut ExecutionContext,
         target: &str,
         format: &str,
-    ) -> String {
+    ) -> RawText {
         engine
             .execute(
                 context,
@@ -38866,12 +39048,12 @@ mod tests {
         assert_eq!(
             marks(&mut engine, &mut context),
             (
-                "0".to_owned(),
-                "0".to_owned(),
-                "0".to_owned(),
-                "0".to_owned(),
-                "0".to_owned(),
-                "*".to_owned()
+                "0".into(),
+                "0".into(),
+                "0".into(),
+                "0".into(),
+                "0".into(),
+                "*".into()
             )
         );
 
@@ -38885,12 +39067,12 @@ mod tests {
         assert_eq!(
             marks(&mut engine, &mut context),
             (
-                "1".to_owned(),
-                "0".to_owned(),
-                "1".to_owned(),
-                "1".to_owned(),
-                "1".to_owned(),
-                "*M".to_owned()
+                "1".into(),
+                "0".into(),
+                "1".into(),
+                "1".into(),
+                "1".into(),
+                "*M".into()
             )
         );
         assert_eq!(engine.state.windows[&window].active_pane, first);

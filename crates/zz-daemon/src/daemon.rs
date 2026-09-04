@@ -3,7 +3,7 @@ use std::{
     cell::{Cell, RefCell},
     cmp::Reverse,
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fmt::Write as _,
     fs,
     io::{ErrorKind, Read, Seek, SeekFrom, Write},
@@ -48,7 +48,7 @@ use zz_protocol::{
     MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
     PaneId, PaneIndicator, PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction,
     PopupBorderLines, PopupPointer, PopupPointerButton, PopupState, PreparedCommand,
-    PreparedCommandResult, ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError,
+    PreparedCommandResult, ProtocolError, ProtocolMessage, RawText, SPLIT_RATIO_BASIS, ServerError,
     ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, WindowId,
     canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
     layout_menu_row, menu_row_cells, menu_row_width, read_protocol_message_into, resolve_command,
@@ -346,16 +346,19 @@ fn daemon_environment() -> Vec<(String, String)> {
 fn terminal_environment_for_session(
     engine: &MuxEngine,
     session: SessionId,
-) -> Result<Vec<(String, Option<String>)>, ServerError> {
+) -> Result<Vec<(OsString, Option<OsString>)>, ServerError> {
     let mut environment = engine.environment_for_session(session)?;
     environment.retain(|(name, _)| {
-        !name.is_empty()
+        !name.as_bytes().is_empty()
             && !matches!(
                 name.as_str(),
                 "TERM" | "TERM_PROGRAM" | "TERM_PROGRAM_VERSION" | "COLORTERM"
             )
     });
-    Ok(environment)
+    Ok(environment
+        .into_iter()
+        .map(|(name, value)| (name.to_os_string(), value.map(|value| value.to_os_string())))
+        .collect())
 }
 
 /// What a job the pin runs on the server reports itself as. `environ_for_session`
@@ -5374,7 +5377,7 @@ impl Shared {
                 return CommandResponse::Error {
                     request_id,
                     error,
-                    output: String::new(),
+                    output: RawText::default(),
                 };
             }
         };
@@ -5382,7 +5385,7 @@ impl Shared {
             return CommandResponse::Error {
                 request_id,
                 error: ServerError::InvalidCommand("client is read-only".to_owned()),
-                output: String::new(),
+                output: RawText::default(),
             };
         }
         let client_name = {
@@ -5455,7 +5458,7 @@ impl Shared {
                 CommandResponse::Error {
                     request_id,
                     error,
-                    output: String::new(),
+                    output: RawText::default(),
                 }
             }
         };
@@ -6047,7 +6050,7 @@ impl Shared {
             }
             Err(error) if hook_output.is_empty() => Err(error),
             Err(error) => Err(DaemonError::CommandFailed {
-                output: hook_output,
+                output: hook_output.into(),
                 error: Box::new(error),
             }),
         }
@@ -6451,7 +6454,7 @@ impl Shared {
                 false,
             );
             let mut routed = command.clone();
-            routed.args[positional_start] = expanded;
+            routed.args[positional_start] = expanded.into();
             routed
         } else {
             command.clone()
@@ -6643,7 +6646,7 @@ impl Shared {
         parent_queue: Option<&CommandQueueExecution>,
         initial_draining: bool,
     ) -> (String, bool) {
-        let mut output = String::new();
+        let mut output = RawText::default();
         let mut yielded_any = false;
         for commands in commands {
             let detached = parent_queue.is_some_and(|execution| execution.detached);
@@ -6857,7 +6860,7 @@ impl Shared {
                 break;
             }
         }
-        (output, yielded_any)
+        (output.to_string(), yielded_any)
     }
 
     fn run_event_hooks(self: &Arc<Self>, events: Vec<PendingHookEvent>) {
@@ -7286,25 +7289,25 @@ impl Shared {
                         let mut env =
                             terminal_environment_for_session(&inner.engine, pane_session)?;
                         env.push((
-                            "TMUX".to_owned(),
-                            Some(tmux_environment(&self.socket_path, Some(pane_session))),
+                            "TMUX".into(),
+                            Some(tmux_environment(&self.socket_path, Some(pane_session)).into()),
                         ));
                         env.extend(
                             pane_environment
                                 .iter()
-                                .map(|(name, value)| (name.clone(), Some(value.clone()))),
+                                .map(|(name, value)| (name.into(), Some(value.into()))),
                         );
                         env.extend([
-                            ("ZZ_PANE".to_owned(), Some(pane.to_string())),
+                            (OsString::from("ZZ_PANE"), Some(pane.to_string().into())),
                             (
-                                "ZZ_SOCKET".to_owned(),
-                                Some(self.socket_path.display().to_string()),
+                                "ZZ_SOCKET".into(),
+                                Some(self.socket_path.as_os_str().to_owned()),
                             ),
-                            ("ZZ_SESSION".to_owned(), Some(pane_session.to_string())),
-                            ("TMUX_PANE".to_owned(), Some(pane.to_string())),
+                            ("ZZ_SESSION".into(), Some(pane_session.to_string().into())),
+                            ("TMUX_PANE".into(), Some(pane.to_string().into())),
                         ]);
                         if let Some(path) = &working_directory {
-                            env.push(("PWD".to_owned(), Some(path.to_string_lossy().into_owned())));
+                            env.push(("PWD".into(), Some(path.as_os_str().to_owned())));
                         }
                         let spawn = TerminalSpawn {
                             knobs: terminal_options.knobs,
@@ -7440,25 +7443,27 @@ impl Shared {
                         let mut env =
                             terminal_environment_for_session(&inner.engine, pane_session)?;
                         env.extend([
-                            ("ZZ_PANE".to_owned(), Some(pane.to_string())),
+                            (OsString::from("ZZ_PANE"), Some(pane.to_string().into())),
                             (
-                                "ZZ_SOCKET".to_owned(),
-                                Some(self.socket_path.display().to_string()),
+                                "ZZ_SOCKET".into(),
+                                Some(self.socket_path.as_os_str().to_owned()),
                             ),
-                            ("ZZ_SESSION".to_owned(), Some(pane_session.to_string())),
+                            ("ZZ_SESSION".into(), Some(pane_session.to_string().into())),
                             (
-                                "TMUX".to_owned(),
-                                Some(tmux_environment(&self.socket_path, Some(pane_session))),
+                                "TMUX".into(),
+                                Some(
+                                    tmux_environment(&self.socket_path, Some(pane_session)).into(),
+                                ),
                             ),
                         ]);
                         env.extend(
                             environment
                                 .iter()
-                                .map(|(name, value)| (name.clone(), Some(value.clone()))),
+                                .map(|(name, value)| (name.into(), Some(value.into()))),
                         );
-                        env.push(("TMUX_PANE".to_owned(), Some(pane.to_string())));
+                        env.push(("TMUX_PANE".into(), Some(pane.to_string().into())));
                         if let Some(path) = &working_directory {
-                            env.push(("PWD".to_owned(), Some(path.to_string_lossy().into_owned())));
+                            env.push(("PWD".into(), Some(path.as_os_str().to_owned())));
                         }
                         let spawn = TerminalSpawn {
                             knobs: terminal_options.knobs,
@@ -8670,7 +8675,7 @@ impl Shared {
                     &mut hooks,
                 );
                 output.push('\n');
-                execution.output = output;
+                execution.output = output.into();
             }
             let recheck_shutdown_requested = self.should_shutdown_if_empty(&inner);
             if snapshot_changed {
@@ -9080,9 +9085,9 @@ impl Shared {
         let mut source_path_matched = false;
         let mut control_source_errors = Vec::new();
         let mut control_source_matched = false;
-        let mut source_verbose_output = String::new();
-        let mut source_replay_output = String::new();
-        let mut source_diagnostics_output = String::new();
+        let mut source_verbose_output = RawText::default();
+        let mut source_replay_output = RawText::default();
+        let mut source_diagnostics_output = RawText::default();
         let mut source_invocations = SourceInvocationAccounting::default();
         let mut pending_source_files = Vec::new();
         let source_invocation = !source_files.is_empty();
@@ -9183,7 +9188,7 @@ impl Shared {
             }
             self.publish_control_command_guard(
                 control_target,
-                control_source_errors.join("\n"),
+                control_source_errors.join("\n").into(),
                 source_command_error && !control_source_matched,
                 source_command_error,
             );
@@ -9549,7 +9554,7 @@ impl Shared {
         self: &Arc<Self>,
         context: &ExecutionContext,
         command_name: &str,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let mut parsed = parse_capture_pane_args(args)?;
         let (pane, terminal, mut start, mut end) = {
@@ -9641,7 +9646,7 @@ impl Shared {
         };
         if parsed.print {
             return Ok(Execution {
-                output,
+                output: output.into(),
                 effects: Vec::new(),
             });
         }
@@ -9691,7 +9696,7 @@ impl Shared {
         &self,
         client: ClientId,
         kind: ClientKind,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_buffer_command_args("wait-for", args, &[], &['L', 'S', 'U'])?;
         let [name] = parsed.positional.as_slice() else {
@@ -9797,7 +9802,7 @@ impl Shared {
         self: &Arc<Self>,
         context: &ExecutionContext,
         command_name: &str,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_buffer_command_args("pipe-pane", args, &['t'], &['I', 'O', 'o'])?;
         let _serial = self.pipe_effects.lock();
@@ -11762,7 +11767,7 @@ impl Shared {
         } else if !direct_command_prepare_error && callback_parse_depth > 1 {
             self.publish_control_command_guard_tree(
                 Some(target),
-                String::new(),
+                RawText::default(),
                 false,
                 false,
                 captured_events,
@@ -11777,7 +11782,7 @@ impl Shared {
                 .expect("callback parse failure exists");
             self.publish_callback_parse_control_command_guard(
                 Some(target),
-                failure.message.clone(),
+                failure.message.clone().into(),
                 true,
                 false,
                 Arc::clone(
@@ -11798,7 +11803,7 @@ impl Shared {
                 .expect("callback parse failure exists");
             self.publish_control_command_guard_tree(
                 Some(target),
-                String::new(),
+                RawText::default(),
                 false,
                 false,
                 captured_events,
@@ -11857,10 +11862,13 @@ impl Shared {
             && route.client != ClientId(u64::MAX)
             && exit_code != 0
         {
-            Err(DaemonError::CommandExit { output, exit_code })
+            Err(DaemonError::CommandExit {
+                output: output.into(),
+                exit_code,
+            })
         } else {
             Ok(Execution {
-                output,
+                output: output.into(),
                 effects: Vec::new(),
             })
         }
@@ -11877,7 +11885,7 @@ impl Shared {
             route.client,
             route.kind,
             InsertedCommandResult {
-                output,
+                output: output.into(),
                 exit_code: result.exit_code,
                 yielded: result.yielded,
             },
@@ -12054,7 +12062,7 @@ impl Shared {
         command: String,
         cwd: PathBuf,
         tmux: String,
-        environment: Vec<(String, Option<String>)>,
+        environment: Vec<(RawText, Option<RawText>)>,
         default_terminal: String,
         environment_timing: ShellJobEnvironmentTiming,
         show_stderr: bool,
@@ -12164,7 +12172,7 @@ impl Shared {
         client: ClientId,
         kind: ClientKind,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_agent_send_args(args)?;
         let payload = parsed.payload()?;
@@ -12183,7 +12191,7 @@ impl Shared {
         }
         let mut execution = self.deliver_to_agent(pane, payload, parsed.submit)?;
         if parsed.submit && kind != ClientKind::Interactive {
-            execution.output = pane.to_string();
+            execution.output = pane.to_string().into();
         }
         Ok(execution)
     }
@@ -12191,7 +12199,7 @@ impl Shared {
     fn send_last_output(
         self: &Arc<Self>,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let (pane, capture) = self.capture_last_command_for("send-last-output", context, args)?;
         let agent = self
@@ -12205,7 +12213,7 @@ impl Shared {
             })?;
         self.deliver_to_agent(agent, last_command_block(pane, &capture), false)?;
         Ok(Execution {
-            output: format!("sent the last command from {pane} to {agent}"),
+            output: format!("sent the last command from {pane} to {agent}").into(),
             effects: Vec::new(),
         })
     }
@@ -12215,11 +12223,11 @@ impl Shared {
     fn show_last_output(
         self: &Arc<Self>,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let (pane, capture) = self.capture_last_command_for("show-last-output", context, args)?;
         Ok(Execution {
-            output: last_command_block(pane, &capture),
+            output: last_command_block(pane, &capture).into(),
             effects: Vec::new(),
         })
     }
@@ -12231,7 +12239,7 @@ impl Shared {
     fn send_text(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_send_text_args(args)?;
         let text = parsed.payload()?;
@@ -12313,7 +12321,7 @@ impl Shared {
         &self,
         verb: &str,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<(PaneId, LastCommandCapture), DaemonError> {
         let target = parse_target_only_args(verb, args)?;
         let (pane, terminal) = {
@@ -12367,7 +12375,7 @@ impl Shared {
     fn capture_browser(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_capture_browser_args(args)?;
         let output = parsed.output.ok_or_else(|| {
@@ -12410,7 +12418,7 @@ impl Shared {
             command: BrowserCommand::Screenshot { request_id, path },
         })?;
         Ok(Execution {
-            output,
+            output: output.into(),
             effects: Vec::new(),
         })
     }
@@ -12460,7 +12468,7 @@ impl Shared {
             command,
         })?;
         Ok(Execution {
-            output,
+            output: output.into(),
             effects: Vec::new(),
         })
     }
@@ -12469,7 +12477,7 @@ impl Shared {
         &self,
         context: &ExecutionContext,
         name: &str,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_buffer_command_args(name, args, &['F', 'f', 'O', 't'], &['r'])?;
         require_no_positionals(name, &parsed)?;
@@ -12567,7 +12575,7 @@ impl Shared {
             output.push(expand_format_values(format, &format_context, &mut hooks));
         }
         Ok(Execution {
-            output: output.join("\n"),
+            output: output.join("\n").into(),
             effects: Vec::new(),
         })
     }
@@ -12577,7 +12585,7 @@ impl Shared {
         invoking_client: ClientId,
         kind: ClientKind,
         context: &mut ExecutionContext,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_buffer_command_args(
             "switch-client",
@@ -12770,7 +12778,7 @@ impl Shared {
         Ok(Execution::default())
     }
 
-    fn show_messages(&self, name: &str, args: &[String]) -> Result<Execution, DaemonError> {
+    fn show_messages(&self, name: &str, args: &[RawText]) -> Result<Execution, DaemonError> {
         let parsed = parse_buffer_command_args(name, args, &[], &[])?;
         require_no_positionals(name, &parsed)?;
         let mut inner = self.inner.lock();
@@ -12796,7 +12804,7 @@ impl Shared {
             .collect::<Vec<_>>()
             .join("\n");
         Ok(Execution {
-            output,
+            output: output.into(),
             effects: Vec::new(),
         })
     }
@@ -12804,7 +12812,7 @@ impl Shared {
     fn prompt_history_command(
         &self,
         name: &str,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_buffer_command_args(name, args, &['T'], &[])?;
         require_no_positionals(name, &parsed)?;
@@ -12839,7 +12847,7 @@ impl Shared {
             }
         }
         Ok(Execution {
-            output,
+            output: output.into(),
             effects: Vec::new(),
         })
     }
@@ -13016,7 +13024,7 @@ impl Shared {
         client: ClientId,
         _kind: ClientKind,
         name: &str,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_buffer_command_args(
             name,
@@ -13098,7 +13106,7 @@ impl Shared {
         kind: ClientKind,
         context: &ExecutionContext,
         command_name: &str,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_display_popup_args(args)?;
         if kind == ClientKind::Control {
@@ -13337,21 +13345,21 @@ impl Shared {
             let command = popup_command_shape(default_command, &parsed.command);
             let mut env = terminal_environment_for_session(&inner.engine, session)?;
             env.extend([
-                ("TERM_PROGRAM".to_owned(), Some("tmux".to_owned())),
+                (OsString::from("TERM_PROGRAM"), Some("tmux".into())),
                 (
-                    "TERM_PROGRAM_VERSION".to_owned(),
-                    Some(job_terminal_program_version().to_owned()),
+                    "TERM_PROGRAM_VERSION".into(),
+                    Some(job_terminal_program_version().into()),
                 ),
-                ("COLORTERM".to_owned(), Some("truecolor".to_owned())),
-                ("ZZ_PANE".to_owned(), Some(pane.to_string())),
+                ("COLORTERM".into(), Some("truecolor".into())),
+                ("ZZ_PANE".into(), Some(pane.to_string().into())),
                 (
-                    "ZZ_SOCKET".to_owned(),
-                    Some(self.socket_path.display().to_string()),
+                    "ZZ_SOCKET".into(),
+                    Some(self.socket_path.as_os_str().to_owned()),
                 ),
-                ("ZZ_SESSION".to_owned(), Some(session.to_string())),
+                ("ZZ_SESSION".into(), Some(session.to_string().into())),
                 (
-                    "TMUX".to_owned(),
-                    Some(tmux_environment(&self.socket_path, Some(session))),
+                    "TMUX".into(),
+                    Some(tmux_environment(&self.socket_path, Some(session)).into()),
                 ),
             ]);
             for assignment in &parsed.environment {
@@ -13362,13 +13370,10 @@ impl Shared {
                     continue;
                 }
                 env.retain(|(existing, _)| existing != name);
-                env.push((name.to_owned(), Some(value.to_owned())));
+                env.push((name.into(), Some(value.into())));
             }
             env.retain(|(name, _)| name != "PWD");
-            env.push((
-                "PWD".to_owned(),
-                Some(working_directory.to_string_lossy().into_owned()),
-            ));
+            env.push(("PWD".into(), Some(working_directory.as_os_str().to_owned())));
             let style = overlay_style(&defaults.style, parsed.style.as_deref());
             let border_style =
                 overlay_style(&defaults.border_style, parsed.border_style.as_deref());
@@ -13486,7 +13491,7 @@ impl Shared {
             Ok(Execution::default())
         } else {
             Err(DaemonError::CommandExit {
-                output: String::new(),
+                output: RawText::default(),
                 exit_code,
             })
         }
@@ -14112,7 +14117,7 @@ impl Shared {
         let accepted = wait.recv().unwrap_or(false);
         if !accepted {
             return Err(DaemonError::CommandExit {
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
             });
         }
@@ -14155,7 +14160,7 @@ impl Shared {
         client: ClientId,
         context: &ExecutionContext,
         name: &str,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let value_options = if name == "lock-server" {
             &[][..]
@@ -14186,7 +14191,7 @@ impl Shared {
         self: &Arc<Self>,
         context: &ExecutionContext,
         name: &str,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         self.buffer_command_for_client(None, context, canonical_command(name), args)
     }
@@ -14196,7 +14201,7 @@ impl Shared {
         invoking_client: Option<ClientId>,
         context: &ExecutionContext,
         name: &str,
-        args: &[String],
+        args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         match name {
             "set-buffer" | "setb" => {
@@ -14281,7 +14286,7 @@ impl Shared {
                 let output = String::from_utf8(data.as_ref().to_vec())
                     .expect("paste-buffer UTF-8 validity is cached at insertion");
                 Ok(Execution {
-                    output,
+                    output: output.into(),
                     effects: Vec::new(),
                 })
             }
@@ -14333,7 +14338,7 @@ impl Shared {
                     output.push(expand_format_values(format, &format_context, &mut hooks));
                 }
                 Ok(Execution {
-                    output: output.join("\n"),
+                    output: output.join("\n").into(),
                     effects: Vec::new(),
                 })
             }
@@ -16346,7 +16351,7 @@ impl Shared {
             }
             return result;
         }
-        let mut output = String::new();
+        let mut output = RawText::default();
         let mut first_error = None;
         let mut reported_error = None;
         let mut failed_group = None;
@@ -21762,7 +21767,7 @@ impl Shared {
     fn publish_control_command_guard_tree(
         &self,
         target: Option<(ClientId, u8)>,
-        output: String,
+        output: RawText,
         error: bool,
         sticky_failure: bool,
         captured: CapturedControlCommandEvents,
@@ -21776,7 +21781,7 @@ impl Shared {
     fn publish_control_command_guard(
         &self,
         target: Option<(ClientId, u8)>,
-        output: String,
+        output: RawText,
         error: bool,
         sticky_failure: bool,
     ) {
@@ -21792,7 +21797,7 @@ impl Shared {
     fn publish_callback_parse_control_command_guard(
         &self,
         target: Option<(ClientId, u8)>,
-        output: String,
+        output: RawText,
         error: bool,
         sticky_failure: bool,
         callback_parse_event: Arc<()>,
@@ -21809,14 +21814,14 @@ impl Shared {
     fn publish_control_command_guard_with_callback_parse_event(
         &self,
         target: Option<(ClientId, u8)>,
-        output: String,
+        output: RawText,
         error: bool,
         sticky_failure: bool,
         callback_parse_event: Option<Arc<()>>,
     ) {
         if let Some((client, flags)) = target {
             let payload = EventPayload::ControlCommandGuard {
-                output,
+                output: String::from(output),
                 error,
                 sticky_failure,
                 flags,
@@ -23890,7 +23895,7 @@ impl Shared {
                 );
                 self.publish_control_command_guard(
                     options.control_target,
-                    String::new(),
+                    RawText::default(),
                     false,
                     false,
                 );
@@ -23930,7 +23935,7 @@ impl Shared {
                         report.note_skip_command(&command, &unsupported);
                         self.publish_control_command_guard(
                             options.control_target,
-                            String::new(),
+                            RawText::default(),
                             false,
                             false,
                         );
@@ -23944,7 +23949,7 @@ impl Shared {
                         report.note_unlocated_command_error(&message);
                         self.publish_control_command_guard(
                             options.control_target,
-                            message,
+                            message.into(),
                             true,
                             false,
                         );
@@ -23957,7 +23962,7 @@ impl Shared {
                         report.note_command_error(&command, &message);
                         self.publish_control_command_guard(
                             options.control_target,
-                            message,
+                            message.into(),
                             true,
                             true,
                         );
@@ -23974,7 +23979,12 @@ impl Shared {
                     };
                     log::warn!("{error}");
                     report.note_source_error(&mut None, &error);
-                    self.publish_control_command_guard(options.control_target, error, true, false);
+                    self.publish_control_command_guard(
+                        options.control_target,
+                        error.into(),
+                        true,
+                        false,
+                    );
                     failed_group = group;
                     continue;
                 }
@@ -23986,7 +23996,7 @@ impl Shared {
                 let mut source_has_file = false;
                 let mut source_command_error = false;
                 let mut source_parse_error = false;
-                let mut source_diagnostics = String::new();
+                let mut source_diagnostics = RawText::default();
                 let mut prepared_sources = Vec::new();
                 for source_request in source_effects {
                     if source_request.path == "-" {
@@ -23995,7 +24005,7 @@ impl Shared {
                         report.note_invalid_command(&command, STANDARD_INPUT_SOURCE_WARNING);
                         append_inserted_output(
                             &mut source_diagnostics,
-                            &config_command_error(&command, STANDARD_INPUT_SOURCE_WARNING),
+                            config_command_error(&command, STANDARD_INPUT_SOURCE_WARNING),
                         );
                         source_parse_error = true;
                         continue;
@@ -24277,7 +24287,7 @@ impl Shared {
                 ControlCommandEventCapture::finish,
             );
             let mut captured_output = result.as_ref().map_or_else(
-                |error| daemon_error_output(error).unwrap_or_default().to_owned(),
+                |error| daemon_error_output(error).cloned().unwrap_or_default(),
                 |execution| execution.output.clone(),
             );
             if canonical_command(&routed.name) == "display-message"
@@ -24287,7 +24297,7 @@ impl Shared {
             }
             report.note_stdout(&captured_output);
             let publish_guard =
-                |output: String, error: bool, sticky_failure: bool, captured_events| {
+                |output: RawText, error: bool, sticky_failure: bool, captured_events| {
                     if alias_group {
                         if let Some((client, _)) = options.control_target {
                             self.publish_captured_control_command_events(client, captured_events);
@@ -24405,7 +24415,7 @@ impl Shared {
                 }
                 Err(error) => {
                     report.note_startup_command_cause(&command, &daemon_error_text(&error));
-                    append_inserted_output(&mut captured_output, &daemon_error_text(&error));
+                    append_inserted_output(&mut captured_output, daemon_error_text(&error));
                     publish_guard(captured_output, true, true, captured_events);
                     let _ = report.note_callback_failures(
                         path,
@@ -24824,7 +24834,7 @@ impl Shared {
             Err(AgentTurnFailure::Closed) => return Err(ServerError::PaneExited(pane).into()),
         };
         Ok(Execution {
-            output,
+            output: output.into(),
             effects: Vec::new(),
         })
     }
@@ -25369,9 +25379,9 @@ struct ConfigLoadReport {
 
 #[derive(Default)]
 struct ConfigStdoutTranscript {
-    top_level_verbose: String,
-    replay: String,
-    diagnostics: String,
+    top_level_verbose: RawText,
+    replay: RawText,
+    diagnostics: RawText,
 }
 
 impl ConfigLoadReport {
@@ -25425,8 +25435,8 @@ impl ConfigLoadReport {
         self.note_startup_cause(&message);
     }
 
-    fn note_startup_display(&mut self, command: &CommandInvocation, output: &str) {
-        if !output.is_empty() {
+    fn note_startup_display(&mut self, command: &CommandInvocation, output: &RawText) {
+        if !output.as_bytes().is_empty() {
             self.note_startup_command_cause(command, output);
         }
     }
@@ -25442,7 +25452,7 @@ impl ConfigLoadReport {
         }
     }
 
-    fn note_stdout(&mut self, output: &str) {
+    fn note_stdout(&mut self, output: &RawText) {
         if let Some(transcript) = self
             .stdout_transcript
             .as_mut()
@@ -25464,7 +25474,7 @@ impl ConfigLoadReport {
                 &mut transcript.replay
             };
             append_inserted_output(output, line);
-            output.push('\n');
+            output.push_bytes(b"\n");
         }
     }
 
@@ -25523,7 +25533,7 @@ impl ConfigLoadReport {
                     .and_then(|transcripts| transcripts.last_mut())
                     .expect("stdout transcript has a current frame");
                 append_inserted_output(&mut transcript.diagnostics, &diagnostic);
-                transcript.diagnostics.push('\n');
+                transcript.diagnostics.push_bytes(b"\n");
             } else {
                 let transcript = self
                     .stdout_transcript
@@ -25531,7 +25541,7 @@ impl ConfigLoadReport {
                     .and_then(|transcripts| transcripts.last_mut())
                     .expect("stdout transcript has a current frame");
                 append_inserted_output(&mut transcript.replay, &diagnostic);
-                transcript.replay.push('\n');
+                transcript.replay.push_bytes(b"\n");
             }
         }
     }
@@ -25551,7 +25561,7 @@ impl ConfigLoadReport {
         {
             self.replayed_diagnostics.insert(index);
             append_inserted_output(&mut transcript.diagnostics, &diagnostic);
-            transcript.diagnostics.push('\n');
+            transcript.diagnostics.push_bytes(b"\n");
         }
     }
 
@@ -25595,7 +25605,7 @@ impl ConfigLoadReport {
             return;
         }
         let transcript = transcripts.pop().expect("nested stdout frame exists");
-        let mut output = String::new();
+        let mut output = RawText::default();
         append_inserted_output(&mut output, &transcript.top_level_verbose);
         append_inserted_output(&mut output, &transcript.replay);
         append_inserted_output(&mut output, &transcript.diagnostics);
@@ -26154,7 +26164,7 @@ struct ServerState {
     client_ttys: BTreeMap<ClientId, String>,
     client_sizes: BTreeMap<ClientId, (u16, u16)>,
     client_working_directories: BTreeMap<ClientId, PathBuf>,
-    client_environments: BTreeMap<ClientId, Arc<BTreeMap<String, String>>>,
+    client_environments: BTreeMap<ClientId, Arc<BTreeMap<RawText, RawText>>>,
     client_origins: BTreeMap<ClientId, PaneId>,
     last_sessions: BTreeMap<ClientId, SessionId>,
     client_flags: ClientFlags,
@@ -28387,11 +28397,11 @@ struct ClientAliasRoute {
 /// (`-t@`) or as the next argument, and answer `None` when the option is not
 /// there to rewrite.
 fn replace_short_option_value(
-    args: &[String],
+    args: &[RawText],
     value_options: &[char],
     option: char,
     replacement: &str,
-) -> Option<Vec<String>> {
+) -> Option<Vec<RawText>> {
     let mut rewritten = args.to_vec();
     let mut index = 0;
     while let Some(argument) = args.get(index) {
@@ -28407,9 +28417,9 @@ fn replace_short_option_value(
             let attached = value_start < argument.len();
             if candidate == option {
                 if attached {
-                    rewritten[index] = format!("{}{replacement}", &argument[..value_start]);
+                    rewritten[index] = format!("{}{replacement}", &argument[..value_start]).into();
                 } else {
-                    replacement.clone_into(rewritten.get_mut(index + 1)?);
+                    *rewritten.get_mut(index + 1)? = replacement.into();
                 }
                 return Some(rewritten);
             }
@@ -29821,12 +29831,11 @@ fn client_working_directory_fact(working_directory: Option<&ClientPath>) -> Opti
         .filter(|working_directory| working_directory.is_absolute())
 }
 
-fn client_environment_fact(entries: &[String]) -> Arc<BTreeMap<String, String>> {
+fn client_environment_fact(entries: &[RawText]) -> Arc<BTreeMap<RawText, RawText>> {
     Arc::new(
         entries
             .iter()
-            .filter_map(|entry| entry.split_once('='))
-            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .filter_map(|entry| entry.split_once_byte(b'='))
             .collect(),
     )
 }
@@ -30158,7 +30167,7 @@ fn client_environment_value<'a>(
         .client_environments
         .get(&client)?
         .get(name)
-        .map(String::as_str)
+        .map(RawText::as_str)
 }
 
 fn client_uses_utf8(inner: &ServerState, client: ClientId) -> bool {
@@ -32193,7 +32202,7 @@ fn run_shell_job(
     command: &str,
     cwd: &Path,
     tmux: &str,
-    environment: &[(String, Option<String>)],
+    environment: &[(RawText, Option<RawText>)],
     default_terminal: &str,
     zz_socket: &Path,
     startup_reentry: Option<&str>,
@@ -32439,8 +32448,8 @@ fn wait_shell_job_process(process: &Mutex<Option<Child>>) -> Result<ExitStatus, 
     }
 }
 
-fn shell_job_output(command: &str, result: &ShellJobResult) -> (String, u8) {
-    let mut output = String::from_utf8_lossy(&result.output).into_owned();
+fn shell_job_output(command: &str, result: &ShellJobResult) -> (RawText, u8) {
+    let mut output = RawText::from_bytes(result.output.clone());
     let (exit_code, message) = shell_exit(result.status).map_or_else(
         || {
             let exit_code = result
@@ -32489,7 +32498,7 @@ impl Drop for CopyPipePermit {
 }
 
 struct CopyPipeEnvironment {
-    variables: Vec<(String, Option<String>)>,
+    variables: Vec<(RawText, Option<RawText>)>,
     default_terminal: String,
     tmux: String,
     zz_socket: PathBuf,
@@ -34432,7 +34441,7 @@ impl<'a> InsertedCommandMode<'a> {
 
 #[derive(Default)]
 struct InsertedCommandResult {
-    output: String,
+    output: RawText,
     exit_code: u8,
     yielded: bool,
 }
@@ -34488,7 +34497,7 @@ fn run_shell_position_context_name(position: usize) -> String {
     position.to_string()
 }
 
-fn parse_run_shell_args(args: &[String]) -> Result<ParsedRunShellArgs, ServerError> {
+fn parse_run_shell_args(args: &[RawText]) -> Result<ParsedRunShellArgs, ServerError> {
     let parsed =
         parse_buffer_command_args("run-shell", args, &['c', 'd', 's', 't'], &['b', 'C', 'E'])?;
     let delay_value = parsed.value('d');
@@ -34510,7 +34519,7 @@ fn parse_run_shell_args(args: &[String]) -> Result<ParsedRunShellArgs, ServerErr
     })
 }
 
-fn parse_if_shell_args(args: &[String]) -> Result<ParsedIfShellArgs, ServerError> {
+fn parse_if_shell_args(args: &[RawText]) -> Result<ParsedIfShellArgs, ServerError> {
     let parsed = parse_buffer_command_args("if-shell", args, &['t'], &['b', 'F'])?;
     let positional_start = args.len().saturating_sub(parsed.positional.len());
     Ok(ParsedIfShellArgs {
@@ -34616,18 +34625,19 @@ fn merge_command_streams(response: CommandResponse, streams: &CommandStreams) ->
     }
 }
 
-fn append_inserted_output(output: &mut String, addition: &str) {
+fn append_inserted_output(output: &mut RawText, addition: impl AsRef<[u8]>) {
+    let addition = addition.as_ref();
     if addition.is_empty() {
         return;
     }
-    if !output.is_empty() && !output.ends_with('\n') {
-        output.push('\n');
+    if !output.as_bytes().is_empty() && !output.as_bytes().ends_with(b"\n") {
+        output.push_bytes(b"\n");
     }
-    output.push_str(addition);
+    output.push_bytes(addition);
 }
 
-fn prepend_command_output(mut output: String, error: DaemonError) -> DaemonError {
-    if output.is_empty() {
+fn prepend_command_output(mut output: RawText, error: DaemonError) -> DaemonError {
+    if output.as_bytes().is_empty() {
         return error;
     }
     match error {
@@ -34662,11 +34672,11 @@ fn prepend_command_output(mut output: String, error: DaemonError) -> DaemonError
 fn discard_all_command_output(error: DaemonError) -> DaemonError {
     match error {
         DaemonError::CommandExit { exit_code, .. } => DaemonError::CommandExit {
-            output: String::new(),
+            output: RawText::default(),
             exit_code,
         },
         DaemonError::ReportedCommandExit { exit_code, .. } => DaemonError::ReportedCommandExit {
-            output: String::new(),
+            output: RawText::default(),
             exit_code,
         },
         DaemonError::CommandFailed { error, .. } => discard_all_command_output(*error),
@@ -34788,12 +34798,12 @@ fn discard_command_output(error: DaemonError) -> DaemonError {
     }
 }
 
-fn daemon_error_output(error: &DaemonError) -> Option<&str> {
+fn daemon_error_output(error: &DaemonError) -> Option<&RawText> {
     match error {
         DaemonError::CommandExit { output, .. }
         | DaemonError::ReportedCommandExit { output, .. }
         | DaemonError::CommandFailed { output, .. }
-            if !output.is_empty() =>
+            if !output.as_bytes().is_empty() =>
         {
             Some(output)
         }
@@ -34804,7 +34814,7 @@ fn daemon_error_output(error: &DaemonError) -> Option<&str> {
 fn control_command_guard_for_execution(
     result: &Result<Execution, DaemonError>,
     mode: InsertedCommandMode,
-) -> (String, bool, bool) {
+) -> (RawText, bool, bool) {
     match result {
         Ok(execution) => (execution.output.clone(), false, false),
         Err(DaemonError::CommandExit { output, .. })
@@ -34813,7 +34823,7 @@ fn control_command_guard_for_execution(
             (output.clone(), false, false)
         }
         Err(error) => {
-            let mut output = daemon_error_output(error).unwrap_or_default().to_owned();
+            let mut output = daemon_error_output(error).cloned().unwrap_or_default();
             let (error, sticky_failure, message) = control_command_guard_error(error);
             append_inserted_output(&mut output, &message);
             (output, error, sticky_failure)
@@ -35170,7 +35180,7 @@ fn parse_pause_after_milliseconds(value: &str) -> Option<u64> {
 
 fn parse_buffer_command_args(
     command: &str,
-    args: &[String],
+    args: &[RawText],
     value_options: &[char],
     flags: &[char],
 ) -> Result<ParsedBufferCommandArgs, ServerError> {
@@ -35178,11 +35188,15 @@ fn parse_buffer_command_args(
     let mut index = 0;
     while let Some(argument) = args.get(index) {
         if argument == "--" {
-            parsed.positional.extend(args[index + 1..].iter().cloned());
+            parsed
+                .positional
+                .extend(args[index + 1..].iter().map(ToString::to_string));
             break;
         }
         if !argument.starts_with('-') || argument == "-" {
-            parsed.positional.extend(args[index..].iter().cloned());
+            parsed
+                .positional
+                .extend(args[index..].iter().map(ToString::to_string));
             break;
         }
 
@@ -35194,9 +35208,13 @@ fn parse_buffer_command_args(
                     argument[value_start..].to_owned()
                 } else {
                     consumed_next = true;
-                    args.get(index + 1).cloned().ok_or_else(|| {
-                        ServerError::CommandParse(format!("{command} -{option} requires a value"))
-                    })?
+                    args.get(index + 1)
+                        .map(ToString::to_string)
+                        .ok_or_else(|| {
+                            ServerError::CommandParse(format!(
+                                "{command} -{option} requires a value"
+                            ))
+                        })?
                 };
                 parsed.values.insert(option, value.clone());
                 parsed
@@ -35509,7 +35527,7 @@ struct ParsedCapturePane {
     quiet: bool,
 }
 
-fn parse_capture_pane_args(args: &[String]) -> Result<ParsedCapturePane, ServerError> {
+fn parse_capture_pane_args(args: &[RawText]) -> Result<ParsedCapturePane, ServerError> {
     let args = parse_buffer_command_args(
         "capture-pane",
         args,
@@ -35689,19 +35707,23 @@ struct ParsedConfirmBefore {
     positional_start: usize,
 }
 
-fn parse_display_popup_args(args: &[String]) -> Result<ParsedDisplayPopup, ServerError> {
+fn parse_display_popup_args(args: &[RawText]) -> Result<ParsedDisplayPopup, ServerError> {
     let mut parsed = ParsedDisplayPopup::default();
     let mut index = 0;
     while index < args.len() {
         let argument = &args[index];
         if argument == "--" {
-            parsed
-                .command
-                .extend(args[index.saturating_add(1)..].iter().cloned());
+            parsed.command.extend(
+                args[index.saturating_add(1)..]
+                    .iter()
+                    .map(ToString::to_string),
+            );
             break;
         }
         if !argument.starts_with('-') || argument == "-" {
-            parsed.command.extend(args[index..].iter().cloned());
+            parsed
+                .command
+                .extend(args[index..].iter().map(ToString::to_string));
             break;
         }
         for (offset, flag) in argument[1..].char_indices() {
@@ -35721,7 +35743,7 @@ fn parse_display_popup_args(args: &[String]) -> Result<ParsedDisplayPopup, Serve
                         argument[value_start..].to_owned()
                     } else {
                         index = index.saturating_add(1);
-                        args.get(index).cloned().ok_or_else(|| {
+                        args.get(index).map(ToString::to_string).ok_or_else(|| {
                             ServerError::CommandParse(format!(
                                 "display-popup -{flag} requires a value"
                             ))
@@ -35756,19 +35778,23 @@ fn parse_display_popup_args(args: &[String]) -> Result<ParsedDisplayPopup, Serve
     Ok(parsed)
 }
 
-fn parse_display_menu_args(args: &[String]) -> Result<ParsedDisplayMenu, ServerError> {
+fn parse_display_menu_args(args: &[RawText]) -> Result<ParsedDisplayMenu, ServerError> {
     let mut parsed = ParsedDisplayMenu::default();
     let mut index = 0;
     while index < args.len() {
         let argument = &args[index];
         if argument == "--" {
-            parsed
-                .items
-                .extend(args[index.saturating_add(1)..].iter().cloned());
+            parsed.items.extend(
+                args[index.saturating_add(1)..]
+                    .iter()
+                    .map(ToString::to_string),
+            );
             break;
         }
         if !argument.starts_with('-') || argument == "-" {
-            parsed.items.extend(args[index..].iter().cloned());
+            parsed
+                .items
+                .extend(args[index..].iter().map(ToString::to_string));
             break;
         }
         for (offset, flag) in argument[1..].char_indices() {
@@ -35783,7 +35809,7 @@ fn parse_display_menu_args(args: &[String]) -> Result<ParsedDisplayMenu, ServerE
                         argument[value_start..].to_owned()
                     } else {
                         index = index.saturating_add(1);
-                        args.get(index).cloned().ok_or_else(|| {
+                        args.get(index).map(ToString::to_string).ok_or_else(|| {
                             ServerError::CommandParse(format!(
                                 "display-menu -{flag} requires a value"
                             ))
@@ -35838,7 +35864,7 @@ fn validate_display_menu_items(items: &[String]) -> Result<(), ServerError> {
     Ok(())
 }
 
-fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, ServerError> {
+fn parse_confirm_before_args(args: &[RawText]) -> Result<ParsedConfirmBefore, ServerError> {
     let parsed = parse_buffer_command_args("confirm-before", args, &['c', 'p', 't'], &['b', 'y'])?;
     let positional_start = args.len().saturating_sub(parsed.positional.len());
     let [command] = parsed.positional.as_slice() else {
@@ -36231,11 +36257,11 @@ impl ParsedSendText {
 
 /// Whether `zz send-text` must read its payload from standard input.
 #[must_use]
-pub fn send_text_reads_stdin(args: &[String]) -> bool {
+pub fn send_text_reads_stdin(args: &[RawText]) -> bool {
     parse_send_text_args(args).is_ok_and(|parsed| parsed.text.is_empty())
 }
 
-fn parse_send_text_args(args: &[String]) -> Result<ParsedSendText, ServerError> {
+fn parse_send_text_args(args: &[RawText]) -> Result<ParsedSendText, ServerError> {
     let mut parsed = ParsedSendText {
         target: None,
         no_enter: false,
@@ -36245,9 +36271,11 @@ fn parse_send_text_args(args: &[String]) -> Result<ParsedSendText, ServerError> 
     let mut index = 0;
     while let Some(argument) = args.get(index) {
         if argument == "--" {
-            parsed
-                .text
-                .extend(args[index.saturating_add(1)..].iter().cloned());
+            parsed.text.extend(
+                args[index.saturating_add(1)..]
+                    .iter()
+                    .map(ToString::to_string),
+            );
             break;
         }
         if argument == "--no-enter" {
@@ -36278,7 +36306,7 @@ fn parse_send_text_args(args: &[String]) -> Result<ParsedSendText, ServerError> 
                 "unsupported command: send-text {argument}"
             )));
         }
-        parsed.text.push(argument.clone());
+        parsed.text.push(argument.to_string());
         index += 1;
     }
     Ok(parsed)
@@ -36340,18 +36368,20 @@ fn last_command_block(pane: PaneId, capture: &LastCommandCapture) -> String {
 ///
 /// Malformed arguments answer `false` and let the daemon report the real error.
 #[must_use]
-pub fn agent_send_reads_stdin(args: &[String]) -> bool {
+pub fn agent_send_reads_stdin(args: &[RawText]) -> bool {
     parse_agent_send_args(args).is_ok_and(|parsed| parsed.text.is_empty())
 }
 
-fn parse_agent_send_args(args: &[String]) -> Result<ParsedAgentSend, ServerError> {
+fn parse_agent_send_args(args: &[RawText]) -> Result<ParsedAgentSend, ServerError> {
     let mut parsed = ParsedAgentSend::default();
     let mut index = 0;
     while let Some(argument) = args.get(index) {
         if argument == "--" {
-            parsed
-                .text
-                .extend(args[index.saturating_add(1)..].iter().cloned());
+            parsed.text.extend(
+                args[index.saturating_add(1)..]
+                    .iter()
+                    .map(ToString::to_string),
+            );
             break;
         }
         if argument == "--submit" {
@@ -36390,7 +36420,7 @@ fn parse_agent_send_args(args: &[String]) -> Result<ParsedAgentSend, ServerError
                 "unsupported command: agent-send {argument}"
             )));
         }
-        parsed.text.push(argument.clone());
+        parsed.text.push(argument.to_string());
         index += 1;
     }
     if parsed.timeout.is_some() && !parsed.wait {
@@ -36407,7 +36437,7 @@ struct ParsedCaptureBrowser {
     output: Option<String>,
 }
 
-fn parse_capture_browser_args(args: &[String]) -> Result<ParsedCaptureBrowser, ServerError> {
+fn parse_capture_browser_args(args: &[RawText]) -> Result<ParsedCaptureBrowser, ServerError> {
     let mut parsed = ParsedCaptureBrowser::default();
     let mut index = 0;
     while let Some(argument) = args.get(index) {
@@ -36436,7 +36466,7 @@ fn parse_capture_browser_args(args: &[String]) -> Result<ParsedCaptureBrowser, S
     Ok(parsed)
 }
 
-fn parse_target_only_args(command: &str, args: &[String]) -> Result<Option<String>, ServerError> {
+fn parse_target_only_args(command: &str, args: &[RawText]) -> Result<Option<String>, ServerError> {
     let mut target = None;
     let mut index = 0;
     while let Some(argument) = args.get(index) {
@@ -36467,7 +36497,7 @@ struct OptionValue {
 
 fn option_value(
     command: &str,
-    args: &[String],
+    args: &[RawText],
     index: usize,
     names: &[&str],
 ) -> Result<Option<OptionValue>, ServerError> {
@@ -36478,7 +36508,7 @@ fn option_value(
                 ServerError::CommandParse(format!("{command} {name} requires a value"))
             })?;
             return Ok(Some(OptionValue {
-                value: value.clone(),
+                value: value.to_string(),
                 consumed: 2,
             }));
         }
@@ -36501,7 +36531,7 @@ fn option_value(
     Ok(None)
 }
 
-fn debug_marker(client: ClientId, context: &ExecutionContext, args: &[String]) -> Execution {
+fn debug_marker(client: ClientId, context: &ExecutionContext, args: &[RawText]) -> Execution {
     log::info!(
         target: "zz_daemon::diagnostics::marker",
         "user_marker client={client} session={:?} window={:?} pane={:?} note={:?}",
@@ -36516,7 +36546,7 @@ fn debug_marker(client: ClientId, context: &ExecutionContext, args: &[String]) -
 
 fn workspace_tools_catalog() -> Execution {
     Execution {
-        output: WORKSPACE_TOOLS.to_owned(),
+        output: WORKSPACE_TOOLS.into(),
         effects: Vec::new(),
     }
 }
@@ -36912,7 +36942,7 @@ fn handle_connection<S: TransportStream>(
                             error: ServerError::InvalidCommand(
                                 "command client cannot attach".to_owned(),
                             ),
-                            output: String::new(),
+                            output: RawText::default(),
                         },
                     ));
                     continue;
@@ -36928,7 +36958,7 @@ fn handle_connection<S: TransportStream>(
                             CommandResponse::Error {
                                 request_id: 0,
                                 error,
-                                output: String::new(),
+                                output: RawText::default(),
                             },
                         ));
                     }
@@ -36975,7 +37005,7 @@ fn handle_connection<S: TransportStream>(
                             error: ServerError::InvalidCommand(
                                 "command client cannot send input".to_owned(),
                             ),
-                            output: String::new(),
+                            output: RawText::default(),
                         },
                     ));
                     continue;
@@ -36987,7 +37017,7 @@ fn handle_connection<S: TransportStream>(
                             error: ServerError::InvalidCommand(
                                 "command client cannot send input".to_owned(),
                             ),
-                            output: String::new(),
+                            output: RawText::default(),
                         },
                     ));
                     continue;
@@ -36997,7 +37027,7 @@ fn handle_connection<S: TransportStream>(
                         CommandResponse::Error {
                             request_id: 0,
                             error: daemon_server_error(error),
-                            output: String::new(),
+                            output: RawText::default(),
                         },
                     ));
                 }
@@ -37057,7 +37087,7 @@ fn handle_connection<S: TransportStream>(
                         CommandResponse::Error {
                             request_id: 0,
                             error: ServerError::InvalidCommand("client is read-only".to_owned()),
-                            output: String::new(),
+                            output: RawText::default(),
                         },
                     ));
                 } else if let Err(error) = handle_agent_message(shared, client, message) {
@@ -37065,7 +37095,7 @@ fn handle_connection<S: TransportStream>(
                         CommandResponse::Error {
                             request_id: 0,
                             error,
-                            output: String::new(),
+                            output: RawText::default(),
                         },
                     ));
                 }
@@ -37136,7 +37166,7 @@ fn best_effort_protocol_mismatch_reply(stream: &mut impl Write, client: u16) {
             client,
             server: PROTOCOL_VERSION,
         },
-        output: String::new(),
+        output: RawText::default(),
     });
     let mut frame = Vec::new();
     if encode_protocol_message_into(&message, &mut frame).is_ok() {
@@ -37148,7 +37178,7 @@ fn best_effort_server_stopping_reply(stream: &mut impl Write) {
     let message = ProtocolMessage::CommandResponse(CommandResponse::Error {
         request_id: 0,
         error: ServerError::InvalidCommand("server exited unexpectedly".to_owned()),
-        output: String::new(),
+        output: RawText::default(),
     });
     let mut frame = Vec::new();
     if encode_protocol_message_into(&message, &mut frame).is_ok() {
@@ -37872,7 +37902,7 @@ mod tests {
         );
     }
 
-    fn read_global_option(shared: &Arc<Shared>, name: &str) -> String {
+    fn read_global_option(shared: &Arc<Shared>, name: &str) -> RawText {
         shared
             .execute(
                 ClientId(u64::MAX),
@@ -37886,7 +37916,7 @@ mod tests {
 
     fn control_stdin_command(
         name: impl Into<String>,
-        args: impl IntoIterator<Item = impl Into<String>>,
+        args: impl IntoIterator<Item = impl Into<zz_protocol::RawText>>,
     ) -> CommandInvocation {
         CommandInvocation::new(name, args).with_source(SourceSpan {
             source: "<control>".to_owned(),
@@ -38016,12 +38046,9 @@ mod tests {
             )
         };
 
-        assert_eq!(boot(None), ("emacs".to_owned(), "emacs".to_owned()));
-        assert_eq!(boot(Some("vi")), ("vi".to_owned(), "vi".to_owned()));
-        assert_eq!(
-            boot(Some("emacs")),
-            ("emacs".to_owned(), "emacs".to_owned())
-        );
+        assert_eq!(boot(None), ("emacs".into(), "emacs".into()));
+        assert_eq!(boot(Some("vi")), ("vi".into(), "vi".into()));
+        assert_eq!(boot(Some("emacs")), ("emacs".into(), "emacs".into()));
     }
 
     #[test]
@@ -38085,17 +38112,17 @@ mod tests {
     fn display_popup_parser_keeps_repeated_values_and_command_shape() {
         assert_eq!(
             parse_display_popup_args(&[
-                "-BEEkN".to_owned(),
-                "-w20".to_owned(),
-                "-w".to_owned(),
-                "75%".to_owned(),
-                "-e".to_owned(),
-                "A=1".to_owned(),
-                "-eB=2".to_owned(),
-                "--".to_owned(),
-                "printf".to_owned(),
-                "%s".to_owned(),
-                "-x".to_owned(),
+                "-BEEkN".into(),
+                "-w20".into(),
+                "-w".into(),
+                "75%".into(),
+                "-e".into(),
+                "A=1".into(),
+                "-eB=2".into(),
+                "--".into(),
+                "printf".into(),
+                "%s".into(),
+                "-x".into(),
             ])
             .unwrap(),
             ParsedDisplayPopup {
@@ -38111,12 +38138,12 @@ mod tests {
             }
         );
         assert!(matches!(
-            parse_display_popup_args(&["-T".to_owned()]),
+            parse_display_popup_args(&["-T".into()]),
             Err(ServerError::CommandParse(message))
                 if message == "display-popup -T requires a value"
         ));
         assert!(matches!(
-            parse_display_popup_args(&["-Z".to_owned()]),
+            parse_display_popup_args(&["-Z".into()]),
             Err(ServerError::CommandParse(message))
                 if message == "unsupported command: display-popup -Z"
         ));
@@ -38181,8 +38208,13 @@ mod tests {
     #[test]
     fn popup_close_flag_matrix_distinguishes_e_ee_k_and_reset() {
         let parsed = |args: &[&str]| {
-            parse_display_popup_args(&args.iter().map(ToString::to_string).collect::<Vec<_>>())
-                .unwrap()
+            parse_display_popup_args(
+                &args
+                    .iter()
+                    .map(|arg| RawText::from(*arg))
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap()
         };
         assert_eq!(
             popup_close_flags(&parsed(&[]), false),
@@ -39431,7 +39463,7 @@ mod tests {
                 CommandResponse::Error {
                     request_id,
                     error: unknown.clone(),
-                    output: String::new(),
+                    output: RawText::default(),
                 }
             );
         }
@@ -39449,7 +39481,8 @@ mod tests {
                 output: format!(
                     "{}:2: unknown command: __zz-command-alias-group\n",
                     config.display()
-                ),
+                )
+                .into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -39568,7 +39601,7 @@ mod tests {
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: format!("{}:6: unknown command: wibble\n", root.display()),
+                output: format!("{}:6: unknown command: wibble\n", root.display()).into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -39599,7 +39632,7 @@ mod tests {
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: format!("{}:4: unknown command: wibble\n", parse_only.display()),
+                output: format!("{}:4: unknown command: wibble\n", parse_only.display()).into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -39767,7 +39800,8 @@ mod tests {
                     source.display(),
                     source.display(),
                     source.display(),
-                ),
+                )
+                .into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -40076,7 +40110,7 @@ mod tests {
             )
             .expect("show reloaded config file")
             .output;
-        assert_eq!(selected, reloaded.to_string_lossy());
+        assert_eq!(selected.as_str(), reloaded.to_string_lossy());
 
         shared
             .reload_user_config_with_mux_file(ClientId(7), &mut context, None)
@@ -40107,7 +40141,7 @@ mod tests {
             .expect("default-shell readback")
             .output;
         assert!(readback.starts_with('/'));
-        assert!(shell_is_valid(Path::new(&readback)));
+        assert!(shell_is_valid(Path::new(readback.as_str())));
         assert_eq!(readback, inner.engine.global_default_shell());
     }
 
@@ -44499,7 +44533,7 @@ mod tests {
                     client: stale,
                     server: PROTOCOL_VERSION,
                 },
-                output: String::new(),
+                output: RawText::default(),
             })
         );
         assert!(matches!(
@@ -44543,7 +44577,7 @@ mod tests {
                     client: stale,
                     server: PROTOCOL_VERSION,
                 },
-                output: String::new(),
+                output: RawText::default(),
             })
         );
         assert!(matches!(
@@ -46879,21 +46913,21 @@ mod tests {
             .buffer_command(
                 &context,
                 "set-buffer",
-                &["-b", "named", "payload"].map(str::to_owned),
+                &["-b", "named", "payload"].map(RawText::from),
             )
             .expect("set buffer");
         shared
             .buffer_command(
                 &context,
                 "set-buffer",
-                &["-a", "-b", "named", "more"].map(str::to_owned),
+                &["-a", "-b", "named", "more"].map(RawText::from),
             )
             .expect("append buffer");
         shared
             .buffer_command(
                 &context,
                 "delete-buffer",
-                &["-b", "named"].map(str::to_owned),
+                &["-b", "named"].map(RawText::from),
             )
             .expect("delete buffer");
 
@@ -46947,7 +46981,7 @@ mod tests {
             .buffer_command(
                 &context,
                 "set-buffer",
-                &["-b", "outer", "outer"].map(str::to_owned),
+                &["-b", "outer", "outer"].map(RawText::from),
             )
             .expect("outer paste buffer");
 
@@ -47890,7 +47924,7 @@ mod tests {
             .list_clients(
                 &context,
                 "list-clients",
-                &["-F".to_owned(), "#{client_name}:#{client_flags}".to_owned()],
+                &["-F".into(), "#{client_name}:#{client_flags}".into()],
             )
             .expect("list client flags")
             .output;
@@ -48082,8 +48116,8 @@ mod tests {
                 &context,
                 "list-clients",
                 &[
-                    "-F".to_owned(),
-                    "#{client_name}:#{client_width}x#{client_height}".to_owned(),
+                    "-F".into(),
+                    "#{client_name}:#{client_width}x#{client_height}".into(),
                 ],
             )
             .unwrap();
@@ -49043,7 +49077,7 @@ mod tests {
             response,
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -49545,7 +49579,7 @@ mod tests {
             invalid,
             CommandResponse::Success {
                 request_id: 1,
-                output: format!("{bad}:1: unknown command: wibble\n"),
+                output: format!("{bad}:1: unknown command: wibble\n").into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -49562,7 +49596,7 @@ mod tests {
             quiet,
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -49579,7 +49613,7 @@ mod tests {
             loud,
             CommandResponse::Success {
                 request_id: 3,
-                output: format!("{bad}:1: unknown command: wibble\n"),
+                output: format!("{bad}:1: unknown command: wibble\n").into(),
                 exit_code: 1,
                 stderr: format!("No such file or directory: {missing}\n"),
             }
@@ -49599,7 +49633,8 @@ mod tests {
                 output: format!(
                     "{}:1: set-option -g @verbose-source loaded\n",
                     verbose_leaf.display()
-                ),
+                )
+                .into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -49618,7 +49653,7 @@ mod tests {
             CommandResponse::Error {
                 request_id: 5,
                 error: ServerError::InvalidCommand(format!("No such file or directory: {missing}")),
-                output: String::new(),
+                output: RawText::default(),
             }
         );
         let control_partial = shared.execute_command_request(
@@ -49632,7 +49667,7 @@ mod tests {
             control_partial,
             CommandResponse::Success {
                 request_id: 6,
-                output: format!("No such file or directory: {missing}\n"),
+                output: format!("No such file or directory: {missing}\n").into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -49653,7 +49688,7 @@ mod tests {
             attended,
             CommandResponse::Success {
                 request_id: 7,
-                output: format!("{bad}:1: unknown command: wibble\n"),
+                output: format!("{bad}:1: unknown command: wibble\n").into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -49721,7 +49756,7 @@ mod tests {
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: format!("{path}:1: syntax error\n"),
                 }
@@ -49751,7 +49786,7 @@ mod tests {
             ),
             CommandResponse::Success {
                 request_id: 5,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{inner}:1: syntax error\n"),
             }
@@ -49824,7 +49859,7 @@ mod tests {
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: format!("{path}:1: syntax error\n"),
                 }
@@ -49859,7 +49894,7 @@ set-option -g @quoted-next yes
             ),
             CommandResponse::Success {
                 request_id: 5,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{quoted}:1: syntax error\n"),
             }
@@ -49905,7 +49940,7 @@ set-option -g @alias-next yes
             ),
             CommandResponse::Success {
                 request_id: 6,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{aliased}:1: syntax error\n"),
             }
@@ -49970,7 +50005,7 @@ set-option -g @alias-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: format!("{path}:1: syntax error\n"),
                 }
@@ -50001,7 +50036,7 @@ set-option -g @alias-next yes
             ),
             CommandResponse::Success {
                 request_id: 9,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{alias_if_group}:1: syntax error\n"),
             }
@@ -50032,7 +50067,7 @@ set-option -g @alias-run-caller-next yes
             ),
             CommandResponse::Success {
                 request_id: 10,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{alias_run_string}:1: syntax error\n"),
             }
@@ -50081,7 +50116,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 11,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n{diagnostic}\n"),
             }
@@ -50141,7 +50176,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n{diagnostic}\n"),
             }
@@ -50197,7 +50232,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -50263,7 +50298,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{command_path}:1: syntax error\n"),
             }
@@ -50317,7 +50352,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -50582,7 +50617,7 @@ set-option -g @alias-mixed-next yes
                     ),
                     CommandResponse::Success {
                         request_id,
-                        output: String::new(),
+                        output: RawText::default(),
                         exit_code: 1,
                         stderr: String::new(),
                     }
@@ -50683,7 +50718,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -50727,7 +50762,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -50774,7 +50809,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -50815,7 +50850,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -50845,7 +50880,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 3,
-                output: "AFTER_CALLBACK_ERROR".to_owned(),
+                output: "AFTER_CALLBACK_ERROR".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -50958,7 +50993,7 @@ set-option -g @alias-mixed-next yes
                     ),
                     CommandResponse::Success {
                         request_id,
-                        output: String::new(),
+                        output: RawText::default(),
                         exit_code: 1,
                         stderr: String::new(),
                     }
@@ -51091,7 +51126,7 @@ set-option -g @alias-mixed-next yes
                         ),
                         CommandResponse::Success {
                             request_id,
-                            output: String::new(),
+                            output: RawText::default(),
                             exit_code: 1,
                             stderr: String::new(),
                         },
@@ -51128,7 +51163,7 @@ set-option -g @alias-mixed-next yes
                         ),
                         CommandResponse::Success {
                             request_id,
-                            output: marker.to_owned(),
+                            output: marker.to_owned().into(),
                             exit_code: 1,
                             stderr: format!("{diagnostic}\n"),
                         },
@@ -51201,7 +51236,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: marker.to_owned(),
+                    output: marker.to_owned().into(),
                     exit_code: 1,
                     stderr: format!("{diagnostic}\n"),
                 }
@@ -51293,7 +51328,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: "LATER".to_owned(),
+                output: "LATER".into(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n"),
             }
@@ -51335,7 +51370,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -51377,7 +51412,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 4,
-                output: "LATER".to_owned(),
+                output: "LATER".into(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n{diagnostic}\n"),
             }
@@ -51405,7 +51440,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -51458,7 +51493,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -51531,7 +51566,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -51585,7 +51620,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n{diagnostic}\n"),
             }
@@ -51610,7 +51645,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -51717,7 +51752,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: "TRIGGER".to_owned(),
+                output: "TRIGGER".into(),
                 exit_code: 1,
                 stderr: format!("syntax error\n{}:1: syntax error\n", combined.display()),
             }
@@ -51732,7 +51767,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: "TRIGGER\nAFTER".to_owned(),
+                output: "TRIGGER\nAFTER".into(),
                 exit_code: 1,
                 stderr: "syntax error\nsyntax error\n".to_owned(),
             }
@@ -51763,7 +51798,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -51799,7 +51834,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -51856,7 +51891,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 7,
-                output: "SOURCE_HOOK_TRIGGER".to_owned(),
+                output: "SOURCE_HOOK_TRIGGER".into(),
                 exit_code: 1,
                 stderr: format!("{}:1: syntax error\n", hook_source_child.display()),
             }
@@ -51879,7 +51914,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -51926,7 +51961,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 10,
-                output: "HOOK_GROUP_TRIGGER".to_owned(),
+                output: "HOOK_GROUP_TRIGGER".into(),
                 exit_code: 1,
                 stderr: "syntax error\n".to_owned(),
             }
@@ -51958,7 +51993,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -52014,7 +52049,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 15,
-                output: "HOOK_CONTINUATION_CHILD".to_owned(),
+                output: "HOOK_CONTINUATION_CHILD".into(),
                 exit_code: 1,
                 stderr: "syntax error\n".to_owned(),
             }
@@ -52067,7 +52102,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 13,
-                output: "AFTER_RUNTIME_ERROR".to_owned(),
+                output: "AFTER_RUNTIME_ERROR".into(),
                 exit_code: 1,
                 stderr: "can't find session: missing-indirect\nsyntax error\n".to_owned(),
             }
@@ -52089,7 +52124,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 14,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!(
                     "{}:1: syntax error\nsyntax error\n",
@@ -52135,7 +52170,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 16,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!(
                     "{}:1: syntax error\n{}:1: syntax error\n",
@@ -52192,7 +52227,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr,
                 }
@@ -52326,7 +52361,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -52359,7 +52394,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 20,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -52441,7 +52476,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -52473,7 +52508,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 7,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -52556,7 +52591,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -52608,7 +52643,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -52685,7 +52720,7 @@ set-option -g @alias-mixed-next yes
             command_response,
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: "can't find session: missing-runtime\n\
                          invalid option: nonexistent-option\n\
@@ -52706,7 +52741,7 @@ set-option -g @alias-mixed-next yes
             outer_response,
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: "can't find session: missing-inner\n".to_owned(),
             }
@@ -52742,7 +52777,7 @@ set-option -g @alias-mixed-next yes
             interactive_response,
             CommandResponse::Success {
                 request_id: 3,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -52799,7 +52834,7 @@ set-option -g @alias-mixed-next yes
             control_response,
             CommandResponse::Success {
                 request_id: 4,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -52841,7 +52876,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 5,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: "can't find session: missing\n".to_owned(),
             }
@@ -52900,7 +52935,8 @@ set-option -g @alias-mixed-next yes
                 output: format!(
                     "{}:1: command set-environment: too few arguments (need at least 1)\n",
                     source.display()
-                ),
+                )
+                .into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -52922,7 +52958,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -53008,7 +53044,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -53083,7 +53119,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -53153,7 +53189,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -53226,7 +53262,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: "HOOK_PARSE_TRIGGER".to_owned(),
+                output: "HOOK_PARSE_TRIGGER".into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -53288,7 +53324,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -53342,7 +53378,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -53422,7 +53458,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -53507,7 +53543,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -53594,7 +53630,8 @@ set-option -g @alias-mixed-next yes
                      {}:3: set-environment -g PARSE_COMMAND changed\n",
                     parse_only.display(),
                     parse_only.display()
-                ),
+                )
+                .into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -53623,7 +53660,7 @@ set-option -g @alias-mixed-next yes
             invalid_response,
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -53660,7 +53697,8 @@ set-option -g @alias-mixed-next yes
                      {}:1: set-option -g @verbose-order alpha\n",
                     beta.display(),
                     alpha.display()
-                ),
+                )
+                .into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -53805,7 +53843,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 7,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -53877,7 +53915,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: expected.clone(),
+                output: expected.clone().into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -53899,7 +53937,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: aggregate_expected.clone(),
+                output: aggregate_expected.clone().into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -53920,7 +53958,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 3,
-                output: aggregate_expected,
+                output: aggregate_expected.into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -53956,7 +53994,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 4,
-                output: expected.clone(),
+                output: expected.clone().into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54035,7 +54073,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 5,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54173,7 +54211,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: format!("ALIAS_BEFORE\n{child_output}\nALIAS_AFTER"),
+                output: format!("ALIAS_BEFORE\n{child_output}\nALIAS_AFTER").into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54188,7 +54226,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: format!("CONDITIONAL_BEFORE\n{child_output}\nCONDITIONAL_AFTER"),
+                output: format!("CONDITIONAL_BEFORE\n{child_output}\nCONDITIONAL_AFTER").into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54218,7 +54256,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 3,
-                output: "HOOK_TRIGGER\nHOOK_CHILD\nHOOK_LATER".to_owned(),
+                output: "HOOK_TRIGGER\nHOOK_CHILD\nHOOK_LATER".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54241,7 +54279,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 4,
-                output: "ROOT_BEFORE\nBEFORE_CHILD\nAFTER_CHILD\nROOT_AFTER".to_owned(),
+                output: "ROOT_BEFORE\nBEFORE_CHILD\nAFTER_CHILD\nROOT_AFTER".into(),
                 exit_code: 1,
                 stderr: "can't find session: missing-indirect\n".to_owned(),
             }
@@ -54256,7 +54294,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 5,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: "can't find session: missing-A\n\
                          can't find session: missing-B\n\
@@ -54289,7 +54327,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 6,
-                output: "TERMINAL_HOOK_TRIGGER".to_owned(),
+                output: "TERMINAL_HOOK_TRIGGER".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54440,7 +54478,7 @@ set-option -g @alias-mixed-next yes
         let capture = shared.begin_control_command_event_capture(control);
         shared.publish_control_command_guard(
             Some((control, CONTROL_COMMAND_FRAME_FLAGS_CONTROL)),
-            "LOCAL_BEFORE".to_owned(),
+            "LOCAL_BEFORE".into(),
             false,
             false,
         );
@@ -54472,7 +54510,7 @@ set-option -g @alias-mixed-next yes
 
         shared.publish_control_command_guard(
             Some((control, CONTROL_COMMAND_FRAME_FLAGS_CONTROL)),
-            "LOCAL_AFTER".to_owned(),
+            "LOCAL_AFTER".into(),
             false,
             false,
         );
@@ -54545,7 +54583,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: "MIXED_TRIGGER".to_owned(),
+                output: "MIXED_TRIGGER".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54698,7 +54736,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54777,7 +54815,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code,
                     stderr: String::new(),
                 }
@@ -54843,7 +54881,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 0,
                     stderr: String::new(),
                 }
@@ -54867,7 +54905,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -54895,7 +54933,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -54937,7 +54975,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 4,
-                output: "OUTSIDE_REPLAY".to_owned(),
+                output: "OUTSIDE_REPLAY".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54976,7 +55014,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 5,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -55102,7 +55140,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -55192,7 +55230,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -55229,7 +55267,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 3,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -55344,7 +55382,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: format!("{direct_verbose}\nROOT_BEFORE\n{diagnostic}\nROOT_AFTER"),
+                output: format!("{direct_verbose}\nROOT_BEFORE\n{diagnostic}\nROOT_AFTER").into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -55359,7 +55397,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: format!("ROOT_BEFORE\n{diagnostic}\nROOT_AFTER"),
+                output: format!("ROOT_BEFORE\n{diagnostic}\nROOT_AFTER").into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -55388,7 +55426,8 @@ set-option -g @alias-mixed-next yes
                      GOOD_OUTPUT\nLATER_OUTPUT\n{diagnostic}\n",
                     good.display(),
                     later.display(),
-                ),
+                )
+                .into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -55422,7 +55461,8 @@ set-option -g @alias-mixed-next yes
                     nested_multi.display(),
                     good.display(),
                     later.display(),
-                ),
+                )
+                .into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -55450,7 +55490,8 @@ set-option -g @alias-mixed-next yes
                     unknown.display(),
                     nested_unknown.display(),
                     unknown.display(),
-                ),
+                )
+                .into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -55538,7 +55579,8 @@ set-option -g @alias-mixed-next yes
                     assignment_branch.display(),
                     replay.display(),
                     replay_branch.display(),
-                ),
+                )
+                .into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -55563,7 +55605,8 @@ set-option -g @alias-mixed-next yes
                 output: format!(
                     "{}:4: display-message -p PARSE_ONLY_NOT_VISIBLE\n",
                     parse_only_branch.display()
-                ),
+                )
+                .into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -55647,7 +55690,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: "one\nnested-new\ntwo".to_owned(),
+                output: "one\nnested-new\ntwo".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -55705,7 +55748,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: "BEFORE\nHOOK\nAFTER\nLIST_s".to_owned(),
+                output: "BEFORE\nHOOK\nAFTER\nLIST_s".into(),
                 exit_code: 1,
                 stderr: "can't find session: missing-runtime\n".to_owned(),
             }
@@ -55777,7 +55820,7 @@ set-option -g @alias-mixed-next yes
             loud,
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{expected}\n"),
             }
@@ -55794,7 +55837,7 @@ set-option -g @alias-mixed-next yes
             quiet,
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -55833,7 +55876,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 3,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -55866,7 +55909,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 4,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -55921,7 +55964,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 5,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -55941,7 +55984,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 6,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -55961,7 +56004,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 7,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -56045,7 +56088,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{missing_a}\n{missing_b}\n"),
             }
@@ -56071,7 +56114,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -56092,7 +56135,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 3,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -56116,7 +56159,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 4,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -56168,7 +56211,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 41,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -56216,7 +56259,7 @@ set-option -g @alias-mixed-next yes
                 response,
                 CommandResponse::Success {
                     request_id: 40,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 }
@@ -56281,7 +56324,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 5,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -56364,7 +56407,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -56436,7 +56479,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -56551,7 +56594,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -56596,7 +56639,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: "TRIGGER".to_owned(),
+                output: "TRIGGER".into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -56671,7 +56714,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{expected}\n"),
             }
@@ -56692,7 +56735,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -56735,7 +56778,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -56756,7 +56799,7 @@ set-option -g @alias-mixed-next yes
                 response,
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 0,
                     stderr: String::new(),
                 }
@@ -56797,7 +56840,7 @@ set-option -g @alias-mixed-next yes
             directory.join("f1.conf")
         }
 
-        fn read_global(shared: &Arc<Shared>, name: &str) -> String {
+        fn read_global(shared: &Arc<Shared>, name: &str) -> RawText {
             shared
                 .execute(
                     ClientId(u64::from(u16::MAX)),
@@ -56842,7 +56885,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -56866,7 +56909,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{NESTED_SOURCE_LIMIT_ERROR}\n{NESTED_SOURCE_LIMIT_ERROR}\n"),
             }
@@ -56899,7 +56942,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 3,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -56928,7 +56971,7 @@ set-option -g @alias-mixed-next yes
             response,
             CommandResponse::Success {
                 request_id: 4,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -57705,7 +57748,7 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn capture_pane_parser_supports_history_mode_and_wrapped_output() {
-        let args = ["-pJS", "-", "-ME4", "-t%7", "-bcaptured"].map(str::to_owned);
+        let args = ["-pJS", "-", "-ME4", "-t%7", "-bcaptured"].map(RawText::from);
         let parsed = parse_capture_pane_args(&args).expect("capture args");
         assert_eq!(parsed.target.as_deref(), Some("%7"));
         assert_eq!(parsed.buffer_name.as_deref(), Some("captured"));
@@ -57716,18 +57759,18 @@ set-option -g @alias-mixed-next yes
         assert!(parsed.options.preserve_trailing);
         assert!(parsed.print);
 
-        let compact = ["-pS0", "-pE5", "-pb", "named"].map(str::to_owned);
+        let compact = ["-pS0", "-pE5", "-pb", "named"].map(RawText::from);
         let parsed = parse_capture_pane_args(&compact).expect("compact capture args");
         assert_eq!(parsed.start.as_deref(), Some("0"));
         assert_eq!(parsed.end.as_deref(), Some("5"));
         assert_eq!(parsed.buffer_name.as_deref(), Some("named"));
         assert!(parsed.print);
 
-        let value_wins = parse_capture_pane_args(&["-pSx".to_owned()])
+        let value_wins = parse_capture_pane_args(&["-pSx".into()])
             .expect("a value option consumes the cluster remainder");
         assert_eq!(value_wins.start.as_deref(), Some("x"));
 
-        let error = parse_capture_pane_args(&["-pS".to_owned()])
+        let error = parse_capture_pane_args(&["-pS".into()])
             .expect_err("a clustered value option still requires a value");
         assert!(matches!(
             error,
@@ -57775,7 +57818,7 @@ set-option -g @alias-mixed-next yes
                 .expect("capture the screen")
                 .output;
             if accept(&screen) {
-                return screen;
+                return screen.to_string();
             }
             assert!(
                 Instant::now() < deadline,
@@ -57874,7 +57917,12 @@ set-option -g @alias-mixed-next yes
             &["-x", "hi"],
         ] {
             assert!(matches!(
-                parse_send_text_args(&args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>()),
+                parse_send_text_args(
+                    &args
+                        .iter()
+                        .map(|arg| RawText::from(*arg))
+                        .collect::<Vec<_>>()
+                ),
                 Err(ServerError::CommandParse(_))
             ));
         }
@@ -57884,7 +57932,7 @@ set-option -g @alias-mixed-next yes
             Err(ServerError::InvalidCommand(_))
         ));
         let parsed = parse_send_text_args(
-            &["--no-enter", "--timeout=50", "-t%3", "a", "b"].map(str::to_owned),
+            &["--no-enter", "--timeout=50", "-t%3", "a", "b"].map(RawText::from),
         )
         .expect("flags");
         assert!(parsed.no_enter);
@@ -57895,15 +57943,9 @@ set-option -g @alias-mixed-next yes
             echo_tail("first line\n  second   line  \n\n"),
             "second line"
         );
-        assert!(send_text_reads_stdin(&["-t%3".to_owned()]));
-        assert!(!send_text_reads_stdin(&[
-            "-t%3".to_owned(),
-            "typed".to_owned()
-        ]));
-        assert!(!send_text_reads_stdin(&[
-            "--timeout".to_owned(),
-            "x".to_owned()
-        ]));
+        assert!(send_text_reads_stdin(&["-t%3".into()]));
+        assert!(!send_text_reads_stdin(&["-t%3".into(), "typed".into()]));
+        assert!(!send_text_reads_stdin(&["--timeout".into(), "x".into()]));
     }
 
     #[test]
@@ -61542,15 +61584,15 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn client_environment_entries_become_an_immutable_name_value_map() {
         let environment = client_environment_fact(&[
-            "EMPTY=".to_owned(),
-            "EXACT=first".to_owned(),
-            "EXACT=last".to_owned(),
-            "VALUE=contains=equals".to_owned(),
+            "EMPTY=".into(),
+            "EXACT=first".into(),
+            "EXACT=last".into(),
+            "VALUE=contains=equals".into(),
         ]);
-        assert_eq!(environment.get("EMPTY").map(String::as_str), Some(""));
-        assert_eq!(environment.get("EXACT").map(String::as_str), Some("last"));
+        assert_eq!(environment.get("EMPTY").map(RawText::as_str), Some(""));
+        assert_eq!(environment.get("EXACT").map(RawText::as_str), Some("last"));
         assert_eq!(
-            environment.get("VALUE").map(String::as_str),
+            environment.get("VALUE").map(RawText::as_str),
             Some("contains=equals")
         );
     }
@@ -61565,7 +61607,7 @@ set-option -g @alias-mixed-next yes
             "--",
             "--- a/src/lib.rs",
         ]
-        .map(str::to_owned);
+        .map(RawText::from);
         let parsed = parse_agent_send_args(&args).expect("agent-send args");
         assert_eq!(parsed.target.as_deref(), Some("%4"));
         assert!(parsed.submit);
@@ -61579,7 +61621,7 @@ set-option -g @alias-mixed-next yes
         );
         assert_eq!(parsed.text, ["--- a/src/lib.rs"]);
 
-        let attached = ["--context=notes.md", "-t", "%9", "hello", "world"].map(str::to_owned);
+        let attached = ["--context=notes.md", "-t", "%9", "hello", "world"].map(RawText::from);
         let parsed = parse_agent_send_args(&attached).expect("attached options");
         assert_eq!(parsed.target.as_deref(), Some("%9"));
         assert!(!parsed.submit);
@@ -61647,49 +61689,46 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn agent_send_parser_reads_wait_and_timeout() {
-        let parsed = parse_agent_send_args(&["--wait", "-t", "%1", "hi"].map(str::to_owned))
+        let parsed = parse_agent_send_args(&["--wait", "-t", "%1", "hi"].map(RawText::from))
             .expect("wait args");
         assert!(parsed.submit && parsed.wait);
         assert_eq!(parsed.wait_timeout(), Some(AGENT_SEND_WAIT_TIMEOUT));
 
-        let parsed = parse_agent_send_args(&["--wait", "--timeout=30", "hi"].map(str::to_owned))
+        let parsed = parse_agent_send_args(&["--wait", "--timeout=30", "hi"].map(RawText::from))
             .expect("attached timeout");
         assert_eq!(parsed.wait_timeout(), Some(Duration::from_secs(30)));
 
-        let parsed = parse_agent_send_args(&["--wait", "--timeout", "0", "hi"].map(str::to_owned))
+        let parsed = parse_agent_send_args(&["--wait", "--timeout", "0", "hi"].map(RawText::from))
             .expect("zero waits forever");
         assert_eq!(parsed.wait_timeout(), None);
 
         assert!(matches!(
-            parse_agent_send_args(&["--wait", "--timeout", "soon"].map(str::to_owned)),
+            parse_agent_send_args(&["--wait", "--timeout", "soon"].map(RawText::from)),
             Err(ServerError::CommandParse(_))
         ));
         assert!(matches!(
-            parse_agent_send_args(&["--timeout", "5", "hi"].map(str::to_owned)),
+            parse_agent_send_args(&["--timeout", "5", "hi"].map(RawText::from)),
             Err(ServerError::CommandParse(_))
         ));
         assert!(agent_send_reads_stdin(
-            &["--wait", "-t", "%1"].map(str::to_owned)
+            &["--wait", "-t", "%1"].map(RawText::from)
         ));
     }
 
     #[test]
     fn agent_send_reads_stdin_only_when_argv_carries_no_text() {
-        assert!(agent_send_reads_stdin(&["-t".to_owned(), "%1".to_owned()]));
-        assert!(agent_send_reads_stdin(&[
-            "-t%1".to_owned(),
-            "--submit".to_owned()
+        assert!(agent_send_reads_stdin(&["-t".into(), "%1".into()]));
+        assert!(agent_send_reads_stdin(&["-t%1".into(), "--submit".into()]));
+        assert!(!agent_send_reads_stdin(&[
+            "-t%1".into(),
+            "look at this".into()
         ]));
         assert!(!agent_send_reads_stdin(&[
-            "-t%1".to_owned(),
-            "look at this".to_owned()
+            "-t%1".into(),
+            "--".into(),
+            "-piped-".into()
         ]));
-        assert!(!agent_send_reads_stdin(&[
-            "-t%1".to_owned(),
-            "--".to_owned(),
-            "-piped-".to_owned()
-        ]));
-        assert!(!agent_send_reads_stdin(&["-Z".to_owned()]));
+        assert!(!agent_send_reads_stdin(&["-Z".into()]));
     }
 
     #[test]
@@ -61758,21 +61797,21 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn capture_browser_and_send_last_output_parsers_reject_stray_positionals() {
-        let args = ["-t", "%2", "-o", "/tmp/frame.png"].map(str::to_owned);
+        let args = ["-t", "%2", "-o", "/tmp/frame.png"].map(RawText::from);
         let parsed = parse_capture_browser_args(&args).expect("capture-browser args");
         assert_eq!(parsed.target.as_deref(), Some("%2"));
         assert_eq!(parsed.output.as_deref(), Some("/tmp/frame.png"));
-        assert!(parse_capture_browser_args(&["frame.png".to_owned()]).is_err());
+        assert!(parse_capture_browser_args(&["frame.png".into()]).is_err());
         assert!(
-            parse_capture_browser_args(&["-o".to_owned()]).is_err(),
+            parse_capture_browser_args(&["-o".into()]).is_err(),
             "-o without a value is rejected"
         );
 
         assert_eq!(
-            parse_target_only_args("send-last-output", &["-t%5".to_owned()]).expect("target"),
+            parse_target_only_args("send-last-output", &["-t%5".into()]).expect("target"),
             Some("%5".to_owned())
         );
-        assert!(parse_target_only_args("send-last-output", &["%5".to_owned()]).is_err());
+        assert!(parse_target_only_args("send-last-output", &["%5".into()]).is_err());
     }
 
     #[test]
@@ -62041,7 +62080,7 @@ set-option -g @alias-mixed-next yes
             .buffer_command(
                 &ExecutionContext::default(),
                 "set-buffer",
-                &["-b", "source", "alpha"].map(str::to_owned),
+                &["-b", "source", "alpha"].map(RawText::from),
             )
             .expect("source buffer");
 
@@ -62378,7 +62417,7 @@ set-option -g @alias-mixed-next yes
             .wait_for(
                 ClientId(u64::MAX),
                 ClientKind::Command,
-                &["-S".to_owned(), "wake-all".to_owned()],
+                &["-S".into(), "wake-all".into()],
             )
             .expect("signal waiters");
         first.join().expect("first waiter").expect("first wait");
@@ -62388,7 +62427,7 @@ set-option -g @alias-mixed-next yes
             .wait_for(
                 ClientId(3),
                 ClientKind::Command,
-                &["-L".to_owned(), "lock".to_owned()],
+                &["-L".into(), "lock".into()],
             )
             .expect("first lock");
         let locker = wait(4, Some("-L"), "lock");
@@ -62401,7 +62440,7 @@ set-option -g @alias-mixed-next yes
             .wait_for(
                 ClientId(u64::MAX),
                 ClientKind::Command,
-                &["-U".to_owned(), "lock".to_owned()],
+                &["-U".into(), "lock".into()],
             )
             .expect("handoff lock");
         locker.join().expect("locker").expect("lock handoff");
@@ -62410,7 +62449,7 @@ set-option -g @alias-mixed-next yes
             .wait_for(
                 ClientId(u64::MAX),
                 ClientKind::Command,
-                &["-U".to_owned(), "lock".to_owned()],
+                &["-U".into(), "lock".into()],
             )
             .expect("free lock");
         assert!(!shared.inner.lock().wait_channels["lock"].locked);
@@ -62424,9 +62463,9 @@ set-option -g @alias-mixed-next yes
             (ClientId(u64::MAX), ClientKind::Command),
         ] {
             for (args, expected) in [
-                (vec!["channel".to_owned()], "not able to wait"),
+                (vec![RawText::from("channel")], "not able to wait"),
                 (
-                    vec!["-L".to_owned(), "channel".to_owned()],
+                    vec![RawText::from("-L"), "channel".into()],
                     "not able to lock",
                 ),
             ] {
@@ -62442,7 +62481,7 @@ set-option -g @alias-mixed-next yes
         register_wait_clients(&shared, [9]);
         let waiter_shared = Arc::clone(&shared);
         let waiter = thread::spawn(move || {
-            waiter_shared.wait_for(ClientId(9), ClientKind::Command, &["drop".to_owned()])
+            waiter_shared.wait_for(ClientId(9), ClientKind::Command, &["drop".into()])
         });
         let deadline = Instant::now() + Duration::from_secs(2);
         while shared
@@ -62467,7 +62506,7 @@ set-option -g @alias-mixed-next yes
                 .is_none_or(|channel| channel.waiters.is_empty())
         );
         shared
-            .wait_for(ClientId(9), ClientKind::Command, &["late".to_owned()])
+            .wait_for(ClientId(9), ClientKind::Command, &["late".into()])
             .expect("disconnected wait does not park");
         assert!(!shared.inner.lock().wait_channels.contains_key("late"));
     }
@@ -62478,7 +62517,7 @@ set-option -g @alias-mixed-next yes
         register_wait_clients(&shared, [5]);
         let waiter_shared = Arc::clone(&shared);
         let waiter = thread::spawn(move || {
-            waiter_shared.wait_for(ClientId(5), ClientKind::Command, &["shutdown".to_owned()])
+            waiter_shared.wait_for(ClientId(5), ClientKind::Command, &["shutdown".into()])
         });
         let deadline = Instant::now() + Duration::from_secs(2);
         while !shared.inner.lock().wait_channels.contains_key("shutdown") {
@@ -62504,7 +62543,7 @@ set-option -g @alias-mixed-next yes
             .pipe_pane(
                 &ExecutionContext::default(),
                 "pipe-pane",
-                &["one".to_owned(), "two".to_owned()],
+                &["one".into(), "two".into()],
             )
             .expect_err("extra shell command");
         assert!(matches!(
@@ -62516,7 +62555,7 @@ set-option -g @alias-mixed-next yes
             .pipe_pane(
                 &ExecutionContext::default(),
                 "pipe-pane",
-                &["-t".to_owned(), "%999".to_owned()],
+                &["-t".into(), "%999".into()],
             )
             .expect_err("missing hard target");
         assert!(matches!(
@@ -62544,7 +62583,7 @@ set-option -g @alias-mixed-next yes
             .pipe_pane(
                 &context,
                 "pipe-pane",
-                &["-t".to_owned(), target.clone(), "sleep 60".to_owned()],
+                &["-t".into(), target.clone().into(), "sleep 60".into()],
             )
             .expect("open pipe");
         shared
@@ -62556,7 +62595,7 @@ set-option -g @alias-mixed-next yes
             .expect("pane state")
             .dead = true;
         let error = shared
-            .pipe_pane(&context, "pipe-pane", &["-t".to_owned(), target])
+            .pipe_pane(&context, "pipe-pane", &["-t".into(), target.into()])
             .expect_err("dead target");
         assert!(matches!(
             error,
@@ -63294,31 +63333,31 @@ set-option -g @alias-mixed-next yes
             ));
         }
 
-        let parsed = parse_run_shell_args(&["-s", "ignored", "printf ok"].map(str::to_owned))
+        let parsed = parse_run_shell_args(&["-s", "ignored", "printf ok"].map(RawText::from))
             .expect("hidden -s option");
         assert_eq!(parsed.positional, ["printf ok"]);
         assert!(!parsed.positive_delay);
         for value in ["", "0", "-0", "+0", "0x0"] {
             let parsed =
-                parse_run_shell_args(&["-d".to_owned(), value.to_owned(), "printf ok".to_owned()])
+                parse_run_shell_args(&["-d".into(), value.to_owned().into(), "printf ok".into()])
                     .expect("zero delay");
             assert!(!parsed.positive_delay, "{value}");
         }
         for value in [".001", "+.001", "0x2"] {
             let parsed =
-                parse_run_shell_args(&["-d".to_owned(), value.to_owned(), "printf ok".to_owned()])
+                parse_run_shell_args(&["-d".into(), value.to_owned().into(), "printf ok".into()])
                     .expect("positive delay");
             assert!(parsed.positive_delay, "{value}");
         }
 
         assert!(matches!(
-            parse_if_shell_args(&["condition".to_owned()]),
+            parse_if_shell_args(&["condition".into()]),
             Err(ServerError::CommandParse(message))
                 if message == "command if-shell: too few arguments (need at least 2)"
         ));
         assert!(matches!(
             parse_if_shell_args(
-                &["condition", "yes", "no", "extra"].map(str::to_owned)
+                &["condition", "yes", "no", "extra"].map(RawText::from)
             ),
             Err(ServerError::CommandParse(message))
                 if message == "command if-shell: too many arguments (need at most 3)"
@@ -66108,7 +66147,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 0,
                     stderr: String::new(),
                 }
@@ -66598,7 +66637,7 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn capture_pane_parser_rejects_unimplemented_flags() {
-        let error = parse_capture_pane_args(&["-C".to_owned()]).expect_err("unsupported flag");
+        let error = parse_capture_pane_args(&["-C".into()]).expect_err("unsupported flag");
         assert!(matches!(error, ServerError::CommandParse(_)));
     }
 
@@ -66637,7 +66676,7 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn daemon_argument_parser_handles_compact_options_and_explicit_boundaries() {
-        let args = ["-bCE", "-c/tmp", "-s::", "--", "-literal"].map(str::to_owned);
+        let args = ["-bCE", "-c/tmp", "-s::", "--", "-literal"].map(RawText::from);
         let parsed =
             parse_buffer_command_args("run-shell", &args, &['c', 'd', 's', 't'], &['b', 'C', 'E'])
                 .expect("daemon arguments");
@@ -66650,7 +66689,7 @@ set-option -g @alias-mixed-next yes
 
         let parsed = parse_buffer_command_args(
             "load-buffer",
-            &["path", "-b", "late"].map(str::to_owned),
+            &["path", "-b", "late"].map(RawText::from),
             &['b', 't'],
             &[],
         )
@@ -66663,7 +66702,7 @@ set-option -g @alias-mixed-next yes
         );
 
         let error =
-            parse_buffer_command_args("paste-buffer", &["-x".to_owned()], &['b', 't'], &['d', 'p'])
+            parse_buffer_command_args("paste-buffer", &["-x".into()], &['b', 't'], &['d', 'p'])
                 .expect_err("unsupported option");
         assert!(matches!(
             error,
@@ -66686,7 +66725,10 @@ set-option -g @alias-mixed-next yes
             .buffer_command(
                 &context,
                 "load-buffer",
-                &["-bbinary".to_owned(), input.to_string_lossy().into_owned()],
+                &[
+                    "-bbinary".into(),
+                    input.to_string_lossy().into_owned().into(),
+                ],
             )
             .expect("load binary buffer");
         {
@@ -66700,7 +66742,7 @@ set-option -g @alias-mixed-next yes
             .buffer_command(
                 &context,
                 "show-buffer",
-                &["-b", "binary"].map(str::to_owned),
+                &["-b", "binary"].map(RawText::from),
             )
             .expect_err("binary output cannot cross the text command response");
         assert!(matches!(
@@ -66713,7 +66755,7 @@ set-option -g @alias-mixed-next yes
             .buffer_command(
                 &context,
                 "save-buffer",
-                &["-b", "binary", output.to_string_lossy().as_ref()].map(str::to_owned),
+                &["-b", "binary", output.to_string_lossy().as_ref()].map(RawText::from),
             )
             .expect("save binary buffer");
         assert_eq!(fs::read(&output).expect("saved bytes"), bytes);
@@ -66723,7 +66765,7 @@ set-option -g @alias-mixed-next yes
             .buffer_command(
                 &context,
                 "save-buffer",
-                &["-a", "-bbinary", output.to_string_lossy().as_ref()].map(str::to_owned),
+                &["-a", "-bbinary", output.to_string_lossy().as_ref()].map(RawText::from),
             )
             .expect("append binary buffer");
         let mut expected = b"prefix:".to_vec();
@@ -67221,7 +67263,7 @@ set-option -g @alias-mixed-next yes
             empty_shared.buffer_command(
                 &ExecutionContext::default(),
                 "save-buffer",
-                &["-".to_owned()],
+                &["-".into()],
             ),
             Err(DaemonError::Server(ServerError::MissingTarget(target)))
                 if target == "paste buffer"
@@ -67238,7 +67280,7 @@ set-option -g @alias-mixed-next yes
             vec!["-abnamed", "--", "-omega"],
             vec!["-a", "new automatic"],
         ] {
-            let arguments = arguments.into_iter().map(str::to_owned).collect::<Vec<_>>();
+            let arguments = arguments.into_iter().map(RawText::from).collect::<Vec<_>>();
             shared
                 .buffer_command(&context, "set-buffer", &arguments)
                 .expect("set buffer");
@@ -67266,7 +67308,7 @@ set-option -g @alias-mixed-next yes
                 .buffer_command(
                     &context,
                     "set-buffer",
-                    &arguments.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                    &arguments.into_iter().map(RawText::from).collect::<Vec<_>>(),
                 )
                 .expect("seed buffer");
         }
@@ -67282,7 +67324,7 @@ set-option -g @alias-mixed-next yes
                     "destination",
                     "ignored replacement data",
                 ]
-                .map(str::to_owned),
+                .map(RawText::from),
             )
             .expect("rename over destination");
         {
@@ -67297,7 +67339,7 @@ set-option -g @alias-mixed-next yes
             .buffer_command(
                 &context,
                 "set-buffer",
-                &["-an", "named-top", "ignored"].map(str::to_owned),
+                &["-an", "named-top", "ignored"].map(RawText::from),
             )
             .expect("rename top automatic");
         {
@@ -67312,7 +67354,7 @@ set-option -g @alias-mixed-next yes
             shared.buffer_command(
                 &context,
                 "set-buffer",
-                &["-n", "nowhere", "ignored"].map(str::to_owned),
+                &["-n", "nowhere", "ignored"].map(RawText::from),
             ),
             Err(DaemonError::Server(ServerError::InvalidCommand(message)))
                 if message == "no buffer"
@@ -67321,7 +67363,7 @@ set-option -g @alias-mixed-next yes
             shared.buffer_command(
                 &context,
                 "set-buffer",
-                &["-b", "missing", "-n", "", "ignored"].map(str::to_owned),
+                &["-b", "missing", "-n", "", "ignored"].map(RawText::from),
             ),
             Err(DaemonError::Server(ServerError::InvalidCommand(message)))
                 if message == "unknown buffer: missing"
@@ -67344,7 +67386,7 @@ set-option -g @alias-mixed-next yes
             .buffer_command(
                 &context,
                 "set-buffer",
-                &["-b", "named", "alpha"].map(str::to_owned),
+                &["-b", "named", "alpha"].map(RawText::from),
             )
             .expect("set named buffer");
         let named = shared
@@ -67352,16 +67394,16 @@ set-option -g @alias-mixed-next yes
                 &context,
                 "list-buffers",
                 &[
-                    "-F".to_owned(),
+                    "-F".into(),
                     "#{command}|#{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}"
-                        .to_owned(),
+                        .into(),
                 ],
             )
             .expect("format named buffer");
         assert_eq!(named.output, "list-buffers|named|5|alpha|1");
 
         shared
-            .buffer_command(&context, "set-buffer", &["bravo".to_owned()])
+            .buffer_command(&context, "set-buffer", &["bravo".into()])
             .expect("set automatic buffer");
         let displayed = shared
             .execute(
@@ -67400,7 +67442,7 @@ set-option -g @alias-mixed-next yes
                 .buffer_command(
                     &context,
                     "list-buffers",
-                    &arguments.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                    &arguments.into_iter().map(RawText::from).collect::<Vec<_>>(),
                 )
                 .expect("sort and filter buffers");
             assert_eq!(listed.output, expected);
@@ -67439,7 +67481,7 @@ set-option -g @alias-mixed-next yes
                 .buffer_command(
                     &context,
                     "set-buffer",
-                    &arguments.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                    &arguments.into_iter().map(RawText::from).collect::<Vec<_>>(),
                 )
                 .expect("set buffer");
         }
@@ -67578,8 +67620,8 @@ set-option -g @alias-mixed-next yes
         {
             let inner = shared.inner.lock();
             let environment = &inner.terminal_spawns[&pane].env;
-            assert!(environment.contains(&("TMUX".to_owned(), Some(expected_tmux.clone()))));
-            assert!(environment.contains(&("TMUX_PANE".to_owned(), Some(pane.to_string()))));
+            assert!(environment.contains(&("TMUX".into(), Some(expected_tmux.clone().into()))));
+            assert!(environment.contains(&("TMUX_PANE".into(), Some(pane.to_string().into()))));
         }
         shared
             .execute(
@@ -67637,8 +67679,8 @@ set-option -g @alias-mixed-next yes
             .expect("respawn terminal pane");
         let inner = shared.inner.lock();
         let environment = &inner.terminal_spawns[&pane].env;
-        assert!(environment.contains(&("TMUX".to_owned(), Some(expected_tmux))));
-        assert!(environment.contains(&("TMUX_PANE".to_owned(), Some(pane.to_string()))));
+        assert!(environment.contains(&("TMUX".into(), Some(expected_tmux.into()))));
+        assert!(environment.contains(&("TMUX_PANE".into(), Some(pane.to_string().into()))));
     }
 
     #[cfg(unix)]
@@ -67687,7 +67729,10 @@ set-option -g @alias-mixed-next yes
             )
             .expect("session environment");
         let pane = context.pane.expect("first pane");
-        assert_eq!(spawned_value(pane, "DISPLAY").as_deref(), Some("last"));
+        assert_eq!(
+            spawned_value(pane, "DISPLAY").as_deref(),
+            Some(OsStr::new("last"))
+        );
         assert!(
             !shared.inner.lock().terminal_spawns[&pane]
                 .env
@@ -67737,7 +67782,10 @@ set-option -g @alias-mixed-next yes
             )
             .expect("unseeded session");
         let pane = context.pane.expect("unseeded first pane");
-        assert_eq!(spawned_value(pane, "DISPLAY").as_deref(), Some("client"));
+        assert_eq!(
+            spawned_value(pane, "DISPLAY").as_deref(),
+            Some(OsStr::new("client"))
+        );
         assert!(
             shared
                 .execute(
@@ -67773,7 +67821,10 @@ set-option -g @alias-mixed-next yes
             )
             .expect("explicit unseeded session");
         let pane = context.pane.expect("explicit first pane");
-        assert_eq!(spawned_value(pane, "DISPLAY").as_deref(), Some("explicit"));
+        assert_eq!(
+            spawned_value(pane, "DISPLAY").as_deref(),
+            Some(OsStr::new("explicit"))
+        );
     }
 
     #[cfg(unix)]
@@ -67846,12 +67897,12 @@ set-option -g @alias-mixed-next yes
                     .find_map(|(candidate, value)| (candidate == name).then_some(value.as_deref()))
                     .flatten()
             };
-            assert_eq!(value("PANE_ONLY"), Some("last"));
-            assert_eq!(value("TMUX"), Some("overlay"));
-            assert_eq!(value("TMUX_PANE"), Some(expected_pane.as_str()));
+            assert_eq!(value("PANE_ONLY"), Some(OsStr::new("last")));
+            assert_eq!(value("TMUX"), Some(OsStr::new("overlay")));
+            assert_eq!(value("TMUX_PANE"), Some(OsStr::new(expected_pane.as_str())));
             assert_eq!(
                 value("PWD"),
-                spawn.working_directory.as_deref().and_then(Path::to_str)
+                spawn.working_directory.as_deref().map(Path::as_os_str)
             );
             assert!(!spawn.env.iter().any(|(name, _)| name.is_empty()));
             assert!(!spawn.env.iter().any(|(name, _)| name == "MALFORMED"));
@@ -67894,7 +67945,7 @@ set-option -g @alias-mixed-next yes
                 environment.iter().rev().find_map(|(name, value)| {
                     (name == "SPLIT_ONLY").then_some(value.as_deref())
                 }),
-                Some(Some("last"))
+                Some(Some(OsStr::new("last")))
             );
         }
         assert!(matches!(
@@ -68296,7 +68347,7 @@ set-option -g @alias-mixed-next yes
             .buffer_command(
                 &context,
                 "load-buffer",
-                &[empty.to_string_lossy().into_owned()],
+                &[empty.to_string_lossy().into_owned().into()],
             )
             .expect("empty load is a no-op");
         assert!(shared.inner.lock().paste_buffers.is_empty());
@@ -68305,7 +68356,7 @@ set-option -g @alias-mixed-next yes
             .buffer_command(
                 &context,
                 "load-buffer",
-                &[oversized.to_string_lossy().into_owned()],
+                &[oversized.to_string_lossy().into_owned().into()],
             )
             .expect_err("oversized buffer");
         assert!(matches!(
@@ -68319,7 +68370,7 @@ set-option -g @alias-mixed-next yes
             .buffer_command(
                 &context,
                 "set-buffer",
-                &["-t", "missing", "set through inert target"].map(str::to_owned),
+                &["-t", "missing", "set through inert target"].map(RawText::from),
             )
             .expect("set-buffer target is inert without clipboard output");
         shared
@@ -68327,11 +68378,11 @@ set-option -g @alias-mixed-next yes
                 &context,
                 "load-buffer",
                 &[
-                    "-b".to_owned(),
-                    "targeted".to_owned(),
-                    "-t".to_owned(),
-                    "missing".to_owned(),
-                    targeted.to_string_lossy().into_owned(),
+                    "-b".into(),
+                    "targeted".into(),
+                    "-t".into(),
+                    "missing".into(),
+                    targeted.to_string_lossy().into_owned().into(),
                 ],
             )
             .expect("load-buffer target is inert without clipboard output");
@@ -68365,7 +68416,7 @@ set-option -g @alias-mixed-next yes
                 .buffer_command(
                     &context,
                     command,
-                    &arguments.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                    &arguments.into_iter().map(RawText::from).collect::<Vec<_>>(),
                 )
                 .expect_err("unsupported buffer mode");
             let DaemonError::Server(error) = error else {
@@ -68442,7 +68493,7 @@ set-option -g @alias-mixed-next yes
 
         for data in ["zero", "one", "two"] {
             shared
-                .buffer_command(&context, "set-buffer", &[data.to_owned()])
+                .buffer_command(&context, "set-buffer", &[data.to_owned().into()])
                 .expect("automatic buffer");
         }
         let inner = shared.inner.lock();
@@ -68768,7 +68819,8 @@ bind - split-window -v -c "#{pane_current_path}"
                     &CommandInvocation::new("display-message", ["-p", "#{pane_start_path}"],),
                 )
                 .expect("literal pane start path")
-                .output,
+                .output
+                .to_string(),
             donor_literal.to_string_lossy()
         );
         donor_terminal.send_text("printf 'ZZ_LITERAL_PWD=[%s]\\n' \"$PWD\"\n");
@@ -69822,7 +69874,7 @@ bind - split-window -v -c "#{pane_current_path}"
     fn test_copy_pipe_environment() -> CopyPipeEnvironment {
         CopyPipeEnvironment {
             variables: std::env::vars()
-                .map(|(name, value)| (name, Some(value)))
+                .map(|(name, value)| (RawText::from(name), Some(RawText::from(value))))
                 .collect(),
             default_terminal: "screen-256color".to_owned(),
             tmux: tmux_environment(Path::new("/tmp/zz-copy-pipe.sock"), None),
@@ -79288,7 +79340,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .expect("direct confirm response"),
             CommandResponse::Success {
                 request_id: 1,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -80441,9 +80493,9 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_environments.insert(
                 client,
                 Arc::new(BTreeMap::from([
-                    ("COLORTERM".to_owned(), "truecolor".to_owned()),
-                    ("LANG".to_owned(), "en_US.UTF-8".to_owned()),
-                    ("TERM".to_owned(), "xterm-256color".to_owned()),
+                    ("COLORTERM".into(), "truecolor".into()),
+                    ("LANG".into(), "en_US.UTF-8".into()),
+                    ("TERM".into(), "xterm-256color".into()),
                 ])),
             );
             inner.client_activity_times.insert(client, 222);
@@ -80636,8 +80688,8 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_environments.insert(
                 control,
                 Arc::new(BTreeMap::from([
-                    ("LANG".to_owned(), "C.UTF-8".to_owned()),
-                    ("TERM".to_owned(), "xterm-256color".to_owned()),
+                    ("LANG".into(), "C.UTF-8".into()),
+                    ("TERM".into(), "xterm-256color".into()),
                 ])),
             );
             client_format_facts(&inner, control, session)
@@ -81076,7 +81128,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("register headless client");
         shared.inner.lock().client_environments.insert(
             headless,
-            client_environment_fact(&["ATTACHED_ENV=headless".to_owned()]),
+            client_environment_fact(&["ATTACHED_ENV=headless".into()]),
         );
 
         assert!(matches!(
@@ -81098,7 +81150,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .unwrap()
                 .into_iter()
                 .find(|(name, _)| name == "ATTACHED_ENV"),
-            Some(("ATTACHED_ENV".to_owned(), Some("before".to_owned())))
+            Some(("ATTACHED_ENV".into(), Some("before".into())))
         );
 
         let (control, _) = shared.register_subscribed(
@@ -81109,7 +81161,7 @@ bind - split-window -v -c "#{pane_current_path}"
         );
         shared.inner.lock().client_environments.insert(
             control,
-            client_environment_fact(&["ATTACHED_ENV=control".to_owned()]),
+            client_environment_fact(&["ATTACHED_ENV=control".into()]),
         );
         let mut control_context = ExecutionContext::default();
         shared
@@ -81129,12 +81181,12 @@ bind - split-window -v -c "#{pane_current_path}"
                 .unwrap()
                 .into_iter()
                 .find(|(name, _)| name == "ATTACHED_ENV"),
-            Some(("ATTACHED_ENV".to_owned(), Some("control".to_owned())))
+            Some(("ATTACHED_ENV".into(), Some("control".into())))
         );
         assert!(
             shared.inner.lock().terminal_spawns[&original_pane]
                 .env
-                .contains(&("ATTACHED_ENV".to_owned(), Some("before".to_owned())))
+                .contains(&("ATTACHED_ENV".into(), Some("before".into())))
         );
         let future = shared
             .execute(
@@ -81155,7 +81207,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(
             shared.inner.lock().terminal_spawns[&future_pane]
                 .env
-                .contains(&("ATTACHED_ENV".to_owned(), Some("control".to_owned())))
+                .contains(&("ATTACHED_ENV".into(), Some("control".into())))
         );
         shared
             .execute(
@@ -81185,12 +81237,12 @@ bind - split-window -v -c "#{pane_current_path}"
                 .unwrap()
                 .into_iter()
                 .find(|(name, _)| name == "ATTACHED_ENV"),
-            Some(("ATTACHED_ENV".to_owned(), Some("preserved".to_owned())))
+            Some(("ATTACHED_ENV".into(), Some("preserved".into())))
         );
 
         shared.inner.lock().client_environments.insert(
             control,
-            client_environment_fact(&["ATTACHED_ENV=native".to_owned()]),
+            client_environment_fact(&["ATTACHED_ENV=native".into()]),
         );
         shared
             .attach_target(control, ClientKind::Control, &mut control_context, "target")
@@ -81204,7 +81256,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .unwrap()
                 .into_iter()
                 .find(|(name, _)| name == "ATTACHED_ENV"),
-            Some(("ATTACHED_ENV".to_owned(), Some("native".to_owned())))
+            Some(("ATTACHED_ENV".into(), Some("native".into())))
         );
     }
 
@@ -81233,11 +81285,11 @@ bind - split-window -v -c "#{pane_current_path}"
             let mut inner = shared.inner.lock();
             inner.client_environments.insert(
                 target,
-                client_environment_fact(&["SWITCH_ENV=target".to_owned()]),
+                client_environment_fact(&["SWITCH_ENV=target".into()]),
             );
             inner.client_environments.insert(
                 caller,
-                client_environment_fact(&["SWITCH_ENV=caller".to_owned()]),
+                client_environment_fact(&["SWITCH_ENV=caller".into()]),
             );
         }
         shared.attach(target, a).expect("target attachment");
@@ -81274,7 +81326,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .unwrap()
                 .into_iter()
                 .find(|(name, _)| name == "SWITCH_ENV"),
-            Some(("SWITCH_ENV".to_owned(), Some("target".to_owned())))
+            Some(("SWITCH_ENV".into(), Some("target".into())))
         );
 
         shared
@@ -81305,7 +81357,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .unwrap()
                 .into_iter()
                 .find(|(name, _)| name == "SWITCH_ENV"),
-            Some(("SWITCH_ENV".to_owned(), Some("preserved".to_owned())))
+            Some(("SWITCH_ENV".into(), Some("preserved".into())))
         );
     }
 
@@ -83020,7 +83072,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ),
             CommandResponse::Success {
                 request_id: 48,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -83131,7 +83183,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ),
             CommandResponse::Success {
                 request_id: 62,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -83195,7 +83247,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ),
             CommandResponse::Success {
                 request_id: 49,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -83634,7 +83686,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ),
             CommandResponse::Success {
                 request_id: 56,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -87649,7 +87701,7 @@ bind - split-window -v -c "#{pane_current_path}"
             success,
             CommandResponse::Success {
                 request_id: 1,
-                output: "FIRED-SW".to_owned(),
+                output: "FIRED-SW".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -87667,7 +87719,7 @@ bind - split-window -v -c "#{pane_current_path}"
             CommandResponse::Error {
                 request_id: 2,
                 error: ServerError::WindowNotFound("missing".to_owned()),
-                output: "CMD-ERR".to_owned(),
+                output: "CMD-ERR".into(),
             }
         );
 
@@ -87703,7 +87755,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ordered,
             CommandResponse::Success {
                 request_id: 3,
-                output: "OWN-buffer0\nIDX-A\nIDX-B".to_owned(),
+                output: "OWN-buffer0\nIDX-A\nIDX-B".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -87733,7 +87785,7 @@ bind - split-window -v -c "#{pane_current_path}"
             no_hooks,
             CommandResponse::Success {
                 request_id: 4,
-                output: "SETOPT-FIRED".to_owned(),
+                output: "SETOPT-FIRED".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -87761,7 +87813,7 @@ bind - split-window -v -c "#{pane_current_path}"
             run_now,
             CommandResponse::Success {
                 request_id: 5,
-                output: "R-FIRED".to_owned(),
+                output: "R-FIRED".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -88509,7 +88561,7 @@ bind - split-window -v -c "#{pane_current_path}"
             CommandResponse::Error {
                 request_id: 6,
                 error: ServerError::WindowNotFound("missing".to_owned()),
-                output: "CMD-ERR".to_owned(),
+                output: "CMD-ERR".into(),
             }
         );
 
@@ -88574,7 +88626,7 @@ bind - split-window -v -c "#{pane_current_path}"
             response,
             CommandResponse::Success {
                 request_id: 1,
-                output: "NW-FIRST=hooked\nNW-SECOND=hooked".to_owned(),
+                output: "NW-FIRST=hooked\nNW-SECOND=hooked".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -88594,7 +88646,7 @@ bind - split-window -v -c "#{pane_current_path}"
             reused,
             CommandResponse::Success {
                 request_id: 2,
-                output: String::new(),
+                output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -88854,7 +88906,7 @@ bind - split-window -v -c "#{pane_current_path}"
             response,
             CommandResponse::Success {
                 request_id: 44,
-                output: "before\n'printf before; exit 3' returned 3".to_owned(),
+                output: "before\n'printf before; exit 3' returned 3".into(),
                 exit_code: 3,
                 stderr: String::new(),
             }

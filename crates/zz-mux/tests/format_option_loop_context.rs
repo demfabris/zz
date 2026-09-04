@@ -49,6 +49,7 @@ impl Probe {
             )
             .expect("display-message")
             .output
+            .to_string()
     }
 }
 

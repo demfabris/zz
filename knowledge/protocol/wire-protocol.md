@@ -635,6 +635,22 @@ now validate on both encode and decode.
   `InputMessage::ChooseBuffer` and `ChooseBufferState` through `EventPayload::ChooseBuffer`.
   Nothing is inserted and nothing is removed; a v97 peer cannot decode the appended variants or
   the appended fields.
+- v98 carries the client's bytes. Four fields change type from UTF-8 text to `RawText`, a new
+  `crates/zz-protocol/src/message.rs` type that is a byte string on the wire (serialized and
+  deserialized exactly like `ClientPath`, as a `Vec<u8>`) and derefs to a lossy `&str` for every
+  reader that wants text. `ClientHello.environment` changes from `Vec<String>` to `Vec<RawText>`,
+  keeping its `NAME=VALUE` guard, its per-entry and total byte ceilings and its entry count, now
+  measured on bytes, so a Unix client's non-UTF-8 environment name or value reaches the daemon
+  instead of being dropped by `into_string`. `CommandInvocation.args` changes from `Vec<String>` to
+  `Vec<RawText>`, so a byte past ASCII in argv survives the CLI, `split_command_words`'s `;`
+  grammar and `parse_tmux_options`' flag grammar. `CommandResponse::Success.output` and
+  `CommandResponse::Error.output` change from `String` to `RawText`, so `show-environment` answers
+  the bytes it stored and the CLI writes them to stdout unchanged. `stderr` on `Success` and every
+  other field on all four messages are untouched. Nothing is inserted, appended or removed; four
+  existing fields change encoding from postcard's string form to its byte-sequence form. postcard
+  writes both the same way, a varint length then the bytes, so a v97 peer handed a v98 frame reads a
+  UTF-8 value back intact and fails only on a non-UTF-8 one; the envelope version gate refuses the
+  pairing before either happens.
 - v97 carries the chooser's own kill vocabulary. `ChooseTreeAction` gains five variants appended
   after `Key`: `Tag`, `TagNone`, `TagAll`, `KillCurrent` and `KillTagged`, the actions the daemon
   resolves `t`, `T`, `C-t`, `x` and `X` to through the `choose-tree` key table. `ChooseTreeState`

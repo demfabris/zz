@@ -1289,8 +1289,10 @@ pub struct TerminalSpawn {
     pub terminal_type: Option<String>,
     pub initial_size: Option<TerminalSize>,
     pub non_login_shell: bool,
-    /// Extra environment (`ZZ_PANE` etc.) layered over the defaults.
-    pub env: Vec<(String, Option<String>)>,
+    /// Extra environment (`ZZ_PANE` etc.) layered over the defaults. A Unix
+    /// environment name and value are byte strings, so this carries `OsString`
+    /// rather than text and a non-UTF-8 entry reaches the child verbatim.
+    pub env: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>,
 }
 
 pub struct TerminalSession {
@@ -20150,12 +20152,12 @@ mod tests {
                         .to_owned(),
                 ]),
                 env: vec![
-                    ("ZZ_PHASE4D_SET".to_owned(), Some("session".to_owned())),
+                    ("ZZ_PHASE4D_SET".into(), Some("session".into())),
                     (
-                        "ZZ_PHASE4D_REMOVE".to_owned(),
-                        Some("daemon".to_owned()),
+                        "ZZ_PHASE4D_REMOVE".into(),
+                        Some("daemon".into()),
                     ),
-                    ("ZZ_PHASE4D_REMOVE".to_owned(), None),
+                    ("ZZ_PHASE4D_REMOVE".into(), None),
                 ],
                 ..TerminalSpawn::default()
             },
@@ -20185,7 +20187,9 @@ mod tests {
     #[test]
     fn terminal_type_seeds_term_and_spawn_environment_can_override_it() {
         let capture =
-            |view: u64, terminal_type: Option<&str>, env: Vec<(String, Option<String>)>| {
+            |view: u64,
+             terminal_type: Option<&str>,
+             env: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>| {
                 let session = TerminalSession::spawn(
                     DEFAULT_HISTORY_LIMIT,
                     Arc::new(TerminalAppearance::default()),
@@ -20217,7 +20221,7 @@ mod tests {
             capture(
                 49,
                 Some("zz-term"),
-                vec![("TERM".to_owned(), Some("override".to_owned()))]
+                vec![("TERM".into(), Some("override".into()))]
             )
             .contains("ZZ_TERM:override")
         );

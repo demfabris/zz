@@ -777,7 +777,7 @@ impl KeyEngine {
         }
         for command in &mut commands {
             if copy_jump_needs_target(command) {
-                command.args.push(key.to_owned());
+                command.args.push(key.into());
             }
         }
         Some((KeyDecision::Commands(commands), repeat))
@@ -802,8 +802,8 @@ impl KeyEngine {
                 && !has_repeat
             {
                 let count = prefix.count();
-                command.args.insert(mode_index, count.to_string());
-                command.args.insert(mode_index, "-N".to_owned());
+                command.args.insert(mode_index, count.to_string().into());
+                command.args.insert(mode_index, "-N".into());
             }
         } else if commands.iter().any(copy_mode_prefix_consuming_prompt) {
             self.repeat_count = None;

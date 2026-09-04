@@ -1,82 +1,47 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
-    <title>zz UI showcase</title>
-    <style>
-      * {
-        box-sizing: border-box;
-      }
-
-      html,
-      body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        overflow: hidden;
-        background: #09090b;
-      }
-
-      body > canvas {
-        width: 100%;
-        height: 100%;
-        display: block;
-        outline: none;
-      }
-
-      [data-loading] {
-        position: fixed;
-        inset: 0;
-        z-index: 10;
-        display: grid;
-        place-content: center;
-        gap: 10px;
-        padding: 24px;
-        color: #a1a1aa;
-        background: #09090b;
-        font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
-        text-align: center;
-      }
-
-      [data-loading]::before {
-        width: 28px;
-        height: 28px;
-        margin: 0 auto 6px;
-        content: "";
-        border: 2px solid #27272a;
-        border-top-color: #fafafa;
-        border-radius: 999px;
-        animation: spin 0.75s linear infinite;
-      }
-
-      [data-loading][data-failed="true"] {
-        color: #fca5a5;
-      }
-
-      [data-loading][data-failed="true"]::before {
-        display: none;
-      }
-
-      [data-loading] strong {
-        color: #fafafa;
-        font-size: 16px;
-      }
-
-      [data-loading] small {
-        color: #71717a;
-      }
-
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <div data-loading>Compiling the GPUI canvas…</div>
-    <script type="module" src="/src/main.js"></script>
-  </body>
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>zz UI preview</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; background: #191919; color: #ddd; font: 12px system-ui, sans-serif; }
+header { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; min-height: 48px; padding: 10px 16px; background: #242424; border-bottom: 1px solid #383838; }
+label { display: flex; align-items: center; gap: 6px; }
+select, input, button { font: inherit; color: inherit; background: #303030; border: 1px solid #555; border-radius: 4px; padding: 3px 6px; }
+input[type=number] { width: 66px; }
+button { cursor: pointer; }
+main { position: relative; z-index: 1; padding: 24px; width: max-content; min-width: 100%; }
+iframe { position: relative; display: block; border: 0; background: transparent; box-shadow: 0 0 0 1px #414141; }
+#stage { position: relative; width: max-content; }
+#stage[data-blur="true"]::before { content: ""; position: absolute; inset: 0; backdrop-filter: blur(160px); -webkit-backdrop-filter: blur(160px); pointer-events: none; }
+#reference-image { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+#point-surface { position: absolute; inset: 0; cursor: crosshair; }
+#pin { position: absolute; width: 17px; height: 17px; border: 2px solid #ff5555; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 0 0 1px white; }
+#opacity { width: 64px; padding: 0; }
+output { color: #aaa; margin-left: auto; }
+</style>
+</head>
+<body>
+<img id="reference-image" alt="Desktop background" hidden>
+<header>
+<strong>zz preview</strong>
+<label>Scene <select id="scene"><option value="workspace">Workspace</option><option value="browser">Browser</option><option value="agent">Agent</option><option value="settings">Settings</option><option value="catalog">Components</option></select></label>
+<label>Width <input id="width" type="number" min="360" max="3840" step="10" value="1200"></label>
+<label>Height <input id="height" type="number" min="300" max="2160" step="10" value="760"></label>
+<label>Zoom <select id="zoom"><option value="0.75">75%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option></select></label>
+<label><input id="dark" type="checkbox" checked>Dark</label>
+<label><input id="sidebar" type="checkbox" checked>Sidebar</label>
+<label><input id="gaps" type="checkbox">Gaps</label>
+<button id="reset">Reset</button><button id="copy">Copy link</button>
+<button id="point" aria-pressed="false">Point</button>
+<label>Background <input id="reference-file" type="file" accept="image/*" hidden><button id="reference-load">Load image</button></label>
+<label>Background opacity <input id="opacity" type="range" min="0" max="100" value="100" disabled></label>
+<button id="reference-clear" disabled>Clear background</button>
+<output id="status">Loading…</output>
+</header>
+<main><div id="stage"><iframe title="zz interface" id="preview" allow="clipboard-read; clipboard-write"></iframe><div id="point-surface" hidden></div><span id="pin" hidden></span></div></main>
+<script type="module" src="/src/host.js"></script>
+</body>
 </html>

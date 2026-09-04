@@ -18,6 +18,10 @@ if [[ ! -x "$WEB/node_modules/.bin/vite" ]]; then
     npm --prefix "$WEB" install
 fi
 
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    python3 "$ROOT/scripts/prepare-showcase-fonts.py"
+fi
+
 "$ROOT/scripts/build-showcase-wasm.sh"
 
 cleanup() {
@@ -41,5 +45,7 @@ cargo watch \
     --watch examples/ui-showcase/assets \
     --watch crates/zz-ui/Cargo.toml \
     --watch crates/zz-ui/src \
+    --watch crates/zz-ui/assets \
+    --watch assets \
     --watch scripts/build-showcase-wasm.sh \
     --shell "$ROOT/scripts/build-showcase-wasm.sh"

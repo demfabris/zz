@@ -6,11 +6,11 @@ use gpui::{
 use zz_ui::ActiveTheme as _;
 use zz_ui::kbd::Kbd;
 use zz_ui::pane::{
-    PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis, pane_drag_chip,
-    pane_drag_overlay, pane_drop_preview, pane_indicator_card, pane_indicator_overlay,
-    pane_overlay_stack, pane_split_hit_target, pane_split_surface, pane_surface, pane_sync_badge,
-    pane_unzoom_control, pane_waiting_state, terminal_link_popup, terminal_mode_indicator,
-    terminal_search_prompt, terminal_status_popup,
+    PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis, pane_border_color,
+    pane_drag_chip, pane_drag_overlay, pane_drop_preview, pane_indicator_card,
+    pane_indicator_overlay, pane_overlay_stack, pane_split_hit_target, pane_split_surface,
+    pane_surface, pane_sync_badge, pane_unzoom_control, pane_waiting_state, terminal_link_popup,
+    terminal_mode_indicator, terminal_search_prompt, terminal_status_popup,
 };
 use zz_ui::shell::app_connection_state;
 
@@ -24,7 +24,7 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
         .child(
             gallery(
                 "Pane chrome",
-                "The real pane surface in flush and gapped states. Chrome is neutral everywhere: the active pane is the one at full strength, and every other pane fades behind a scrim.",
+                "The real pane surface in flush and gapped states. Gapped panes share the control edge and soft shadow. The active pane has a stronger outline; inactive panes fade behind a scrim.",
                 cx,
             )
             .child(
@@ -418,7 +418,7 @@ fn pane_leaf(
         PaneChrome::new(
             uniform_radii(radius),
             px(border_width),
-            cx.theme().border,
+            pane_border_color(active, cx),
             cx.theme().background,
             shadow,
         )

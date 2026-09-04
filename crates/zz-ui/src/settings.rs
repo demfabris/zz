@@ -1,10 +1,12 @@
+pub mod appearance;
+
 use crate::Colorize as _;
 use crate::{
     ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
+    control_shadow,
     scroll::ScrollableElement as _,
     select::SelectItem,
-    stacked_ring,
     tag::Tag,
     widget::icon::Icon,
 };
@@ -126,7 +128,7 @@ impl SettingsSection {
 /// A settings-section navigation button. The caller attaches behavior. Its
 /// fills are [`crate::navigation::workspace_tree_row`]'s, so the two sidebars
 /// highlight identically.
-pub fn settings_navigation_button(section: SettingsSection, selected: bool, cx: &App) -> Button {
+pub fn settings_navigation_button(section: SettingsSection, selected: bool, _: &App) -> Button {
     Button::new(section.title())
         .w_full()
         .px(px(8.0))
@@ -136,13 +138,7 @@ pub fn settings_navigation_button(section: SettingsSection, selected: bool, cx: 
         .selected(selected)
         .label(section.title())
         .child(div().flex_1())
-        .hover_bg(cx.theme().background.hover())
-        .when(selected, |this| {
-            crate::StyledExt::font_medium(
-                this.bg(cx.theme().background.raised(2))
-                    .text_color(cx.theme().foreground),
-            )
-        })
+        .when(selected, crate::StyledExt::font_medium)
 }
 
 /// Label above a settings navigation group.
@@ -793,22 +789,19 @@ impl RenderOnce for SettingEntry {
             )
             .children(self.children);
 
-        div()
+        let surface = div()
             .flex()
             .flex_col()
             .w_full()
-            .bg(cx.theme().background.raised(1))
-            .border_color(cx.theme().border)
-            .border_l_1()
-            .border_r_1()
-            .when(cx.theme().shadow, |this| {
-                this.shadow(stacked_ring(position.rounds_top(), cx))
-            })
+            .bg(cx.theme().background.raised(1).opaque())
+            .border_color(cx.theme().foreground.opacity(0.1))
+            .border_l(px(0.5))
+            .border_r(px(0.5))
             .when(position.rounds_top(), |this| {
-                this.border_t_1().rounded_t(cx.theme().radius)
+                this.border_t(px(0.5)).rounded_t(cx.theme().radius)
             })
             .when(position.rounds_bottom(), |this| {
-                this.border_b_1().rounded_b(cx.theme().radius)
+                this.border_b(px(0.5)).rounded_b(cx.theme().radius)
             })
             .when(position.rules_above(), |this| {
                 this.child(
@@ -819,7 +812,57 @@ impl RenderOnce for SettingEntry {
                         .bg(cx.theme().border),
                 )
             })
-            .child(body)
+            .child(body);
+
+        div()
+            .relative()
+            .flex()
+            .flex_col()
+            .w_full()
+            .when(cx.theme().shadow, |this| {
+                let extent = px(8.0);
+                this.child(
+                    div()
+                        .absolute()
+                        .left(-extent)
+                        .right(-extent)
+                        .top(if position.rounds_top() {
+                            -extent
+                        } else {
+                            px(0.0)
+                        })
+                        .bottom(if position.rounds_bottom() {
+                            -extent
+                        } else {
+                            px(0.0)
+                        })
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .absolute()
+                                .left(extent)
+                                .right(extent)
+                                .top(if position.rounds_top() {
+                                    extent
+                                } else {
+                                    -extent
+                                })
+                                .bottom(if position.rounds_bottom() {
+                                    extent
+                                } else {
+                                    -extent
+                                })
+                                .when(position.rounds_top(), |this| {
+                                    this.rounded_t(cx.theme().radius)
+                                })
+                                .when(position.rounds_bottom(), |this| {
+                                    this.rounded_b(cx.theme().radius)
+                                })
+                                .shadow(control_shadow(cx)),
+                        ),
+                )
+            })
+            .child(surface)
     }
 }
 
@@ -906,6 +949,7 @@ pub fn settings_reset_button(
         .xsmall()
         .compact()
         .ghost()
+        .flat()
         .icon(crate::IconName::Undo2)
         .tooltip(tooltip)
         .disabled(!enabled)
@@ -936,4 +980,25 @@ impl SelectItem for SettingsSelectItem {
     fn value(&self) -> &Self::Value {
         &self.value
     }
+}
+
+pub fn panes_page(
+    gaps: SettingEntry,
+    opacity: SettingEntry,
+    margin: SettingEntry,
+    radius: SettingEntry,
+    border: SettingEntry,
+    cx: &App,
+) -> SettingsScrollColumn {
+    settings_scroll_column("settings-panes")
+        .child(settings_page_description(SettingsSection::Panes, cx))
+        .child(SettingsStack::titled("Layout").child(gaps))
+        .child(SettingsStack::titled("Focus").child(opacity))
+        .child(
+            SettingsStack::titled("Frame")
+                .description("Applies only while pane gaps are enabled.")
+                .child(margin)
+                .child(radius)
+                .child(border),
+        )
 }

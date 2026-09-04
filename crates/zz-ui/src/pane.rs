@@ -1,4 +1,4 @@
-use crate::{ActiveTheme as _, Colorize as _, surface_ring, tag::Tag};
+use crate::{ActiveTheme as _, Colorize as _, control_shadow, surface_ring, tag::Tag};
 use gpui::{
     AnyElement, App, BoxShadow, Corners, CursorStyle, ElementId, FontWeight, Hsla, IntoElement,
     ParentElement as _, Pixels, SharedString, Stateful, Styled as _, div, point, prelude::*, px,
@@ -43,6 +43,15 @@ impl PaneChrome {
     }
 }
 
+#[must_use]
+pub fn pane_border_color(active: bool, cx: &App) -> Hsla {
+    if active {
+        cx.theme().foreground.wash()
+    } else {
+        cx.theme().foreground.opacity(0.1)
+    }
+}
+
 /// A pane leaf, filling the box the layout gives it. Rounded corners leave four
 /// wedges of that box bare, which this fills with the gap plane before the
 /// surface paints its border.
@@ -72,6 +81,7 @@ pub fn pane_surface(
                 .bg(cx.theme().background.opaque())
                 .border(chrome.border_width)
                 .border_color(chrome.border_color)
+                .shadow(pane_surface_shadow_style(chrome.shadow, cx))
                 .child(content)
                 .when(chrome.inactive_opacity < 1.0, |surface| {
                     surface.child(pane_inactive_scrim(
@@ -82,28 +92,14 @@ pub fn pane_surface(
                 })
                 .children(overlays),
         )
-        .children(pane_surface_shadow(chrome, cx))
-}
-
-fn pane_surface_shadow(chrome: PaneChrome, cx: &App) -> Option<gpui::Div> {
-    let shadows = pane_surface_shadow_style(chrome.shadow, cx);
-    if !cx.theme().shadow || shadows.is_empty() {
-        return None;
-    }
-    Some(
-        div()
-            .absolute()
-            .inset_0()
-            .rounded_tl(chrome.radii.top_left)
-            .rounded_tr(chrome.radii.top_right)
-            .rounded_bl(chrome.radii.bottom_left)
-            .rounded_br(chrome.radii.bottom_right)
-            .shadow(shadows),
-    )
 }
 
 fn pane_surface_shadow_style(shadow: bool, cx: &App) -> Vec<BoxShadow> {
-    if shadow { surface_ring(cx) } else { Vec::new() }
+    if shadow && cx.theme().shadow {
+        control_shadow(cx)
+    } else {
+        Vec::new()
+    }
 }
 
 fn pane_corner_notches(chrome: PaneChrome) -> Option<gpui::Div> {
@@ -656,7 +652,7 @@ pub fn pane_indicator_card(
     let hover_background = if active {
         cx.theme().danger.fill().hover()
     } else {
-        cx.theme().background.hover()
+        cx.theme().background.washed(2)
     };
     let index_color = if active {
         cx.theme().danger
@@ -779,14 +775,17 @@ mod tests {
     }
 
     #[gpui::test]
-    fn pane_surface_shadow_stays_inside_the_pane_curve(cx: &mut gpui::TestAppContext) {
+    fn gapped_panes_use_soft_outer_shadows(cx: &mut gpui::TestAppContext) {
         cx.update(crate::init);
         cx.update(|cx| {
             assert!(pane_surface_shadow_style(false, cx).is_empty());
 
-            let expected = surface_ring(cx);
+            let expected = control_shadow(cx);
             assert_eq!(pane_surface_shadow_style(true, cx), expected);
-            assert!(expected[0].inset);
+            assert!(!expected[0].inset);
+
+            crate::Theme::global_mut(cx).shadow = false;
+            assert!(pane_surface_shadow_style(true, cx).is_empty());
         });
     }
 }

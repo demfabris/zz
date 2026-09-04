@@ -4,14 +4,13 @@ use std::sync::Arc;
 
 use gpui::{
     AnyElement, App, Context, Div, Entity, IntoElement, ListAlignment, ListState,
-    ParentElement as _, Pixels, Render, Styled as _, Subscription, Window, div, prelude::*, px,
-    relative,
+    ParentElement as _, Render, Styled as _, Subscription, Window, div, prelude::*, px, relative,
 };
 use zz_ui::agent::{AgentTimelineStore, TimelineRow, fold_timeline_rows};
 use zz_ui::settings::SettingsSelectItem;
 use zz_ui::{
-    ActiveTheme as _, BASE_UI_FONT_SIZE, Disableable as _, Icon, IconName, IndexPath, Root,
-    Sizable as _, StyledExt as _, Theme, ThemeMode,
+    ActiveTheme as _, Disableable as _, Icon, IconName, IndexPath, Root, Sizable as _,
+    StyledExt as _, Theme, ThemeMode, UiZoom,
     button::{Button, ButtonVariants as _},
     code_editor::CodeEditorState,
     color_picker::ColorPickerState,
@@ -27,9 +26,9 @@ use zz_ui::Colorize as _;
 
 const GROUPS: [&str; 3] = ["Start", "Primitives", "Compositions"];
 
-const MIN_UI_FONT_SIZE: f32 = 11.0;
-const MAX_UI_FONT_SIZE: f32 = 22.0;
-const UI_FONT_SIZE_STEP: f32 = 1.0;
+const MIN_UI_ZOOM: f32 = 0.5;
+const MAX_UI_ZOOM: f32 = 3.0;
+const UI_ZOOM_STEP: f32 = 0.1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum StoryId {
@@ -640,6 +639,7 @@ impl ShowcaseShell {
 impl Render for ShowcaseShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_rem_size(cx.theme().font_size);
+        window.set_zoom(cx.global::<UiZoom>().0);
 
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let notification_layer = Root::render_notification_layer(window, cx);
@@ -655,8 +655,8 @@ impl Render for ShowcaseShell {
 }
 
 fn ui_scale_control(cx: &App) -> Div {
-    let font_size = cx.theme().font_size;
-    let percent = (font_size.as_f32() / BASE_UI_FONT_SIZE * 100.0).round();
+    let zoom = cx.global::<UiZoom>().0;
+    let percent = (zoom * 100.0).round();
     div()
         .flex()
         .items_center()
@@ -666,8 +666,8 @@ fn ui_scale_control(cx: &App) -> Div {
                 .small()
                 .icon(IconName::Minus)
                 .tooltip("Smaller UI")
-                .disabled(font_size <= px(MIN_UI_FONT_SIZE))
-                .on_click(|_, _, cx| adjust_ui_font_size(-UI_FONT_SIZE_STEP, cx)),
+                .disabled(zoom <= MIN_UI_ZOOM)
+                .on_click(|_, _, cx| adjust_ui_zoom(-UI_ZOOM_STEP, cx)),
         )
         .child(
             Button::new("showcase-ui-reset")
@@ -675,9 +675,9 @@ fn ui_scale_control(cx: &App) -> Div {
                 .small()
                 .label(format!("{percent:.0}%"))
                 .tooltip("Reset UI size")
-                .disabled(font_size == px(BASE_UI_FONT_SIZE))
+                .disabled((zoom - 1.0).abs() < f32::EPSILON)
                 .on_click(|_, _, cx| {
-                    set_ui_font_size(px(BASE_UI_FONT_SIZE), cx);
+                    set_ui_zoom(1.0, cx);
                 }),
         )
         .child(
@@ -686,21 +686,23 @@ fn ui_scale_control(cx: &App) -> Div {
                 .small()
                 .icon(IconName::Plus)
                 .tooltip("Larger UI")
-                .disabled(font_size >= px(MAX_UI_FONT_SIZE))
-                .on_click(|_, _, cx| adjust_ui_font_size(UI_FONT_SIZE_STEP, cx)),
+                .disabled(zoom >= MAX_UI_ZOOM)
+                .on_click(|_, _, cx| adjust_ui_zoom(UI_ZOOM_STEP, cx)),
         )
 }
 
-fn adjust_ui_font_size(delta: f32, cx: &mut App) {
-    let next = (cx.theme().font_size.as_f32() + delta).clamp(MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE);
-    set_ui_font_size(px(next), cx);
+fn adjust_ui_zoom(delta: f32, cx: &mut App) {
+    set_ui_zoom(
+        (cx.global::<UiZoom>().0 + delta).clamp(MIN_UI_ZOOM, MAX_UI_ZOOM),
+        cx,
+    );
 }
 
-fn set_ui_font_size(font_size: Pixels, cx: &mut App) {
-    if Theme::global(cx).font_size == font_size {
-        return;
-    }
-    Theme::global_mut(cx).font_size = font_size;
+fn set_ui_zoom(zoom: f32, cx: &mut App) {
+    cx.set_global(UiZoom(zoom));
+    let options = cx.global_mut::<crate::preview::PreviewOptions>();
+    options.zoom = zoom;
+    options.remember();
     cx.refresh_windows();
 }
 

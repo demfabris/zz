@@ -9,7 +9,7 @@ use gpui::{
 use crate::{
     ActiveTheme as _, Disableable, Sizable, Size, StyledExt as _,
     button::{Button, ButtonVariants as _},
-    control_shadow, h_flex,
+    h_flex,
     icon::{Icon, IconName},
     spinner::Spinner,
 };
@@ -174,6 +174,7 @@ impl Input {
         Button::new("zz-input-clear")
             .icon(Icon::new(IconName::CircleX))
             .ghost()
+            .flat()
             .xsmall()
             .tab_stop(false)
             .text_color(cx.theme().foreground.muted())
@@ -239,12 +240,6 @@ impl RenderOnce for Input {
             Size::Medium | Size::Size(_) => px(6.),
         };
         let (background, foreground) = Self::colors(self.disabled, cx);
-        let border_color = if self.disabled {
-            cx.theme().border.opacity(0.5)
-        } else {
-            cx.theme().border
-        };
-
         let show_clear = self.cleanable && !self.disabled && !loading && !empty && !multi_line;
         let clear_button = show_clear.then(|| Self::clear_button(&self.state, cx));
         let editable = !self.disabled;
@@ -278,11 +273,13 @@ impl RenderOnce for Input {
                 this.bg(background)
                     .rounded(cx.theme().radius)
                     .when(self.bordered, |this| {
-                        this.border_1()
-                            .border_color(border_color)
-                            .when(cx.theme().shadow, |this| this.shadow(control_shadow(cx)))
+                        this.control_surface(cx)
+                            .when(self.disabled, |this| {
+                                this.border_color(cx.theme().foreground.opacity(0.05))
+                                    .shadow_none()
+                            })
                             .when(focused && self.focus_bordered, |this| {
-                                this.focused_border(cx)
+                                this.border_color(cx.theme().foreground)
                             })
                     })
             })

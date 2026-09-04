@@ -1,6 +1,8 @@
+pub mod tree;
+
 use crate::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, MACOS_TRAFFIC_LIGHT_INSET,
-    MACOS_TRAFFIC_LIGHT_SPAN, TITLE_BAR_HEIGHT, UiZoom,
+    MACOS_TRAFFIC_LIGHT_SPAN, StyledExt as _, TITLE_BAR_HEIGHT, UiZoom,
     button::{Button, COMPACT_ICON_BUTTON_SIZE},
     rems_from_px,
     tooltip::Tooltip,
@@ -160,13 +162,25 @@ pub fn workspace_status_window(
         .px(px(9.0))
         .rounded(cx.theme().radius)
         .overflow_hidden()
-        .when(state.active, |item| item.bg(highlight))
+        .when(cx.theme().shadow, |item| {
+            item.border(px(0.5)).border_color(gpui::transparent_white())
+        })
+        .when(state.active, |item| {
+            item.bg(highlight)
+                .when(cx.theme().shadow, |item| item.control_highlight(cx))
+        })
         .text_color(text_color)
         .text_size(rems_from_px(13.0))
         .line_height(WORKSPACE_STATUS_LINE_HEIGHT)
         .when(state.connected, |item| {
-            item.cursor_pointer()
-                .hover(move |item| item.bg(highlight).text_color(foreground))
+            item.cursor_pointer().hover(move |item| {
+                let item = item.bg(highlight).text_color(foreground);
+                if cx.theme().shadow {
+                    item.control_highlight(cx)
+                } else {
+                    item
+                }
+            })
         })
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
         .child(
@@ -226,6 +240,14 @@ pub fn workspace_sidebar_titlebar(
     controls: impl IntoElement,
     cx: &App,
 ) -> Stateful<gpui::Div> {
+    workspace_sidebar_titlebar_with_inset(id, controls, workspace_controls_leading_inset(cx))
+}
+
+pub fn workspace_sidebar_titlebar_with_inset(
+    id: impl Into<ElementId>,
+    controls: impl IntoElement,
+    leading_inset: Pixels,
+) -> Stateful<gpui::Div> {
     div()
         .id(id)
         .flex()
@@ -233,7 +255,7 @@ pub fn workspace_sidebar_titlebar(
         .w_full()
         .h(TITLE_BAR_HEIGHT)
         .items_center()
-        .pl(workspace_controls_leading_inset(cx))
+        .pl(leading_inset)
         .child(controls)
 }
 
@@ -318,8 +340,21 @@ pub fn workspace_tree_row(
         .left(fill_inset)
         .right(fill_inset)
         .rounded(radius)
-        .group_hover(row_group.clone(), |this| this.bg(fill_color))
-        .when(selected || active && focused, |this| this.bg(fill_color));
+        .when(cx.theme().shadow, |this| {
+            this.border(px(0.5)).border_color(gpui::transparent_white())
+        })
+        .group_hover(row_group.clone(), |this| {
+            let this = this.bg(fill_color);
+            if cx.theme().shadow {
+                this.control_highlight(cx)
+            } else {
+                this
+            }
+        })
+        .when(selected || active && focused, |this| {
+            this.bg(fill_color)
+                .when(cx.theme().shadow, |this| this.control_highlight(cx))
+        });
     let trailing = div()
         .h_full()
         .flex()
@@ -376,6 +411,7 @@ pub fn workspace_tree_action_button(
     cx: &App,
 ) -> Button {
     Button::compact_icon(id, icon)
+        .flat()
         .when(!disabled, |button| {
             button.text_color(cx.theme().foreground.muted())
         })

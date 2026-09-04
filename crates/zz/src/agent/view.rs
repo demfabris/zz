@@ -6,6 +6,9 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use zz_ui::agent::composer::{COMPOSER_FOOTER_HEIGHT, composer_tail_clearance};
+#[cfg(test)]
+use zz_ui::agent::composer::{COMPOSER_OUTER_PADDING, composer_total_height};
 
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
 use gpui::{
@@ -59,13 +62,6 @@ const COMPLETION_ROW_HEIGHT: f32 = 52.0;
 const MAX_VISIBLE_COMPLETION_ROWS: u8 = 6;
 const MAX_COMPLETION_RESULTS: usize = 64;
 const HISTORY_ROW_HEIGHT: f32 = 52.0;
-const COMPOSER_MIN_HEIGHT: f32 = 86.0;
-const COMPOSER_FOOTER_HEIGHT: f32 = 28.0;
-const COMPOSER_OUTER_PADDING: f32 = 12.0;
-const COMPOSER_SECTION_GAP: f32 = 8.0;
-const COMPOSER_INPUT_PADDING_TOP: f32 = 12.0;
-const COMPOSER_INPUT_PADDING_X: f32 = 14.0;
-const COMPOSER_MAX_WIDTH: f32 = AGENT_CONTENT_MAX_WIDTH + 2.0;
 /// Labelled chrome pills sit a step under the square icon buttons: the
 /// label carries them, so the box does not have to.
 const CHROME_PILL_HEIGHT: f32 = 24.0;
@@ -73,17 +69,6 @@ const CONTEXT_USAGE_RING_SIZE: f32 = 16.0;
 const CONTEXT_USAGE_STROKE_WIDTH: f32 = 2.0;
 const SPINNER_PERIOD: Duration = Duration::from_millis(800);
 const MAX_RENDERED_ERROR_BYTES: usize = 1024;
-
-const fn composer_total_height() -> f32 {
-    COMPOSER_MIN_HEIGHT
-        + 2.0 * COMPOSER_OUTER_PADDING
-        + COMPOSER_SECTION_GAP
-        + COMPOSER_FOOTER_HEIGHT
-}
-
-const fn composer_tail_clearance() -> f32 {
-    composer_total_height() + COMPOSER_OUTER_PADDING
-}
 
 fn agent_spinner(size: Size, color: Hsla, view: EntityId, cx: &mut gpui::App) -> AnyElement {
     let phase = ease_in_out(pulse_phase(SPINNER_PERIOD, view, cx));
@@ -2749,132 +2734,34 @@ impl AgentView {
         let completions = self.render_completions(view, cx);
         let pane_radii = pane_content_radii(cx, self.window_corners);
 
-        v_flex()
-            .absolute()
-            .left(px(0.0))
-            .right(px(0.0))
-            .bottom(px(0.0))
-            .w_full()
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .h(
-                        px(COMPOSER_FOOTER_HEIGHT + COMPOSER_OUTER_PADDING + COMPOSER_SECTION_GAP)
-                            + cx.theme().radius,
-                    )
-                    .bg(crate::theme::app_pane_background(cx))
-                    .rounded_bl(pane_radii.bottom_left)
-                    .rounded_br(pane_radii.bottom_right),
-            )
-            .child(
-                v_flex()
-                    .w_full()
-                    .px(px(COMPOSER_OUTER_PADDING))
-                    .pt(px(COMPOSER_OUTER_PADDING))
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .max_w(px(COMPOSER_MAX_WIDTH))
-                            .mx_auto()
-                            .gap(px(COMPOSER_SECTION_GAP))
-                            .when_some(
-                                self.render_permission_wizard(state, view, cx),
-                                |this, wizard| this.child(wizard),
-                            )
-                            .when_some(self.render_queue_chip(state, cx), |this, chip| {
-                                this.child(chip)
-                            })
-                            .when_some(self.render_error(state, cx), |this, error| {
-                                this.child(error)
-                            })
-                            .when_some(completions, |this, completions| this.child(completions))
-                            .child(
-                                v_flex()
-                                    .w_full()
-                                    .min_h(px(COMPOSER_MIN_HEIGHT))
-                                    .rounded(cx.theme().radius)
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().background.raised(1))
-                                    .when(cx.theme().shadow, |this| this.shadow_xs())
-                                    .children(self.render_attachments(view, cx))
-                                    .child(
-                                        Input::new(&self.input)
-                                            .w_full()
-                                            .min_w_0()
-                                            .pt(px(COMPOSER_INPUT_PADDING_TOP))
-                                            .px(px(COMPOSER_INPUT_PADDING_X))
-                                            .text_size(zz_ui::rems_from_px(13.0))
-                                            .appearance(false)
-                                            .bordered(false)
-                                            .focus_bordered(false),
-                                    )
-                                    .when_some(command_hint, |this, hint| {
-                                        this.child(
-                                            div()
-                                                .px_3()
-                                                .pb_1()
-                                                .text_size(zz_ui::rems_from_px(10.0))
-                                                .text_color(cx.theme().foreground.muted())
-                                                .child(hint),
-                                        )
-                                    })
-                                    .child(
-                                        h_flex()
-                                            .w_full()
-                                            .min_h(px(40.0))
-                                            .items_end()
-                                            .justify_between()
-                                            .gap(px(CHROME_GAP))
-                                            .p(px(CHROME_GAP))
-                                            .child(
-                                                h_flex()
-                                                    .min_w_0()
-                                                    .flex_wrap()
-                                                    .gap(px(CHROME_GAP))
-                                                    .children(settings),
-                                            )
-                                            .child(
-                                                h_flex()
-                                                    .flex_none()
-                                                    .gap(px(CHROME_GAP))
-                                                    .child(action),
-                                            ),
-                                    ),
-                            ),
-                    ),
-            )
-            .child(
-                v_flex()
-                    .w_full()
-                    .bg(crate::theme::app_pane_background(cx))
-                    .rounded_bl(pane_radii.bottom_left)
-                    .rounded_br(pane_radii.bottom_right)
-                    .px(px(COMPOSER_OUTER_PADDING))
-                    .pt(px(COMPOSER_SECTION_GAP))
-                    .pb(px(COMPOSER_OUTER_PADDING))
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .max_w(px(COMPOSER_MAX_WIDTH))
-                            .mx_auto()
-                            .h(px(COMPOSER_FOOTER_HEIGHT))
-                            .items_center()
-                            .justify_between()
-                            .px_1()
-                            .child(h_flex().min_w_0().flex_1().children(git))
-                            .child(
-                                h_flex()
-                                    .flex_none()
-                                    .gap(px(CHROME_GAP))
-                                    .children(usage)
-                                    .child(directory),
-                            ),
-                    ),
-            )
+        zz_ui::agent::composer::AgentComposer {
+            input: self.input.clone(),
+            action: action.into_any_element(),
+            settings,
+            usage: usage.map(IntoElement::into_any_element),
+            git: git.map(IntoElement::into_any_element),
+            directory: directory.into_any_element(),
+            command_hint: command_hint.map(Into::into),
+            prefix: self
+                .render_permission_wizard(state, view, cx)
+                .into_iter()
+                .map(IntoElement::into_any_element)
+                .chain(
+                    self.render_queue_chip(state, cx)
+                        .map(IntoElement::into_any_element),
+                )
+                .chain(
+                    self.render_error(state, cx)
+                        .map(IntoElement::into_any_element),
+                )
+                .chain(completions)
+                .collect(),
+            attachments: self
+                .render_attachments(view, cx)
+                .map(IntoElement::into_any_element),
+            radii: pane_radii,
+            background: crate::theme::app_pane_background(cx),
+        }
     }
 }
 

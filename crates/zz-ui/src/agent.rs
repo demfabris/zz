@@ -1,3 +1,5 @@
+pub mod composer;
+
 use std::{
     cell::Cell,
     collections::{HashMap, VecDeque},
@@ -10,10 +12,10 @@ use std::{
 use instant::{Duration, Instant};
 
 use crate::{
-    ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _,
+    ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _, StyledExt as _,
     attachment::{open_attachment_preview, open_render_image_preview},
     button::{Button, ButtonVariants as _},
-    control_shadow, h_flex,
+    h_flex,
     mend::{PENDING_LINK_URL, mend},
     scroll::ScrollableElement as _,
     text::{
@@ -1129,15 +1131,11 @@ impl StickSpring {
 /// layout, or appearing would resize the scroll viewport and move the very
 /// content it is offering to reveal.
 pub fn agent_jump_to_bottom_button(id: impl Into<ElementId>, cx: &App) -> Button {
-    let disc = Button::compact_icon(id, IconName::ArrowDown)
+    Button::compact_icon(id, IconName::ArrowDown)
         .secondary()
         .rounded_full()
-        .tooltip("Jump to latest");
-    if cx.theme().shadow {
-        disc.shadow(control_shadow(cx))
-    } else {
-        disc
-    }
+        .control_surface(cx)
+        .tooltip("Jump to latest")
 }
 
 /// The timeline's tail pin: a spring that chases the end of the transcript
@@ -2156,7 +2154,7 @@ fn render_tool_content_row(id: u64, index: usize, row: ToolContentRow, cx: &App)
             .text_color(cx.theme().foreground.muted())
             .child(label)
             .when_some(copy, |this, copy| {
-                let hover_background = cx.theme().background.hover();
+                let hover_background = cx.theme().background.washed(2);
                 this.child(
                     div()
                         .id(format!("agent-tool-copy-{id}-{index}"))

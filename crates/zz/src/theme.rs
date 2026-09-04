@@ -498,8 +498,6 @@ pub(crate) fn terminal_appearance(cx: &App) -> Option<Arc<TerminalAppearance>> {
         .map(|appearance| Arc::clone(&appearance.0))
 }
 
-const BLURRED_CHROME_ALPHA: f32 = 0.93;
-
 pub(crate) fn chrome_blur(cx: &App) -> bool {
     config::resolved_config(cx).window_background_blur.value
         && crate::window::background::compositor_supports_blur(cx)
@@ -507,12 +505,7 @@ pub(crate) fn chrome_blur(cx: &App) -> bool {
 
 /// The chrome planes' fill: translucent while the blur is on, the base plane otherwise.
 pub fn chrome_background(cx: &App) -> Hsla {
-    let background = Theme::global(cx).background;
-    if chrome_blur(cx) {
-        background.opacity(BLURRED_CHROME_ALPHA)
-    } else {
-        background
-    }
+    zz_ui::shell::chrome_background(Theme::global(cx).background, chrome_blur(cx))
 }
 
 pub fn app_pane_background(cx: &App) -> Hsla {
@@ -760,7 +753,7 @@ mod tests {
         cx.update(|cx| {
             assert!(chrome_blur(cx));
             assert_alpha(Theme::global(cx).background, 1.0);
-            assert_alpha(chrome_background(cx), BLURRED_CHROME_ALPHA);
+            assert_alpha(chrome_background(cx), 0.93);
             assert_alpha(app_pane_background(cx), 1.0);
         });
     }

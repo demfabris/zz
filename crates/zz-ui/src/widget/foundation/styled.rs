@@ -77,6 +77,19 @@ pub trait StyledExt: Styled + Sized {
         self.border_1().border_color(cx.theme().foreground)
     }
 
+    fn control_highlight(self, cx: &App) -> Self {
+        let this = self.border_color(cx.theme().foreground.opacity(0.1));
+        if cx.theme().shadow {
+            this.shadow(control_shadow(cx))
+        } else {
+            this
+        }
+    }
+
+    fn control_surface(self, cx: &App) -> Self {
+        self.border(px(0.5)).control_highlight(cx)
+    }
+
     font_weight!(font_thin, THIN);
     font_weight!(font_extralight, EXTRA_LIGHT);
     font_weight!(font_light, LIGHT);
@@ -92,9 +105,7 @@ pub trait StyledExt: Styled + Sized {
     fn popover_style(self, cx: &App) -> Self {
         self.bg(cx.theme().background.raised(1).opaque())
             .text_color(cx.theme().foreground)
-            .border_1()
-            .border_color(cx.theme().border)
-            .shadow_lg()
+            .control_surface(cx)
             .rounded(cx.theme().radius)
     }
 
@@ -126,20 +137,14 @@ fn ring(sink: Pixels, cx: &App) -> BoxShadow {
     }
 }
 
-/// The edge of an input-shaped control: a hairline ring hugging the border, plus
-/// the small soft shadow that lifts it off the page. Gate the call on
-/// `cx.theme().shadow`.
 pub fn control_shadow(cx: &App) -> Vec<BoxShadow> {
-    vec![
-        ring(px(0.), cx),
-        BoxShadow {
-            color: cx.theme().scrim.subtle(),
-            offset: point(px(0.), px(1.)),
-            blur_radius: px(2.),
-            spread_radius: px(0.),
-            inset: false,
-        },
-    ]
+    vec![BoxShadow {
+        color: cx.theme().scrim.alpha(0.2),
+        offset: point(px(0.), px(1.)),
+        blur_radius: px(2.),
+        spread_radius: px(0.),
+        inset: false,
+    }]
 }
 
 /// The control hairline without the soft falloff. Apply it to a box expanded by

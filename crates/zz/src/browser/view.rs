@@ -45,7 +45,7 @@ use zz_ui::browser::{
     BrowserActionMenuState, BrowserEmptyHint, BrowserErrorPanel, BrowserMenuActions,
     BrowserMenuProfile, BrowserPickStatus, BrowserProfileDiscoveryState, BrowserTabInfo,
     BrowserTabStrip, BrowserToolbar, browser_action_menu, browser_omnibox_panel,
-    browser_omnibox_row, browser_recent_row, browser_toolbar_button,
+    browser_omnibox_row, browser_recent_row, browser_start_surface, browser_toolbar_button,
 };
 use zz_ui::feedback::browser_clear_site_data_alert;
 use zz_ui::pane::frame_rate_badge;
@@ -2895,20 +2895,13 @@ impl BrowserView {
                 .into_any_element()
         };
         round_div_radii(
-            div()
-                .absolute()
-                .inset_0()
-                .occlude()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .px(px(12.0))
-                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            browser_start_surface(content).on_mouse_down(
+                MouseButton::Left,
+                move |_, window, cx| {
                     empty_state_view.update(cx, |view, cx| view.select_pane(cx));
                     address_focus_handle.focus(window, cx);
-                })
-                .child(content),
+                },
+            ),
             radii,
         )
     }

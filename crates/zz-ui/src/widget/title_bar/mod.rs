@@ -214,7 +214,7 @@ impl ControlIcon {
         if self.is_close() {
             cx.theme().danger
         } else {
-            cx.theme().background.raised(2).hover()
+            cx.theme().background.washed(2)
         }
     }
 
@@ -222,7 +222,7 @@ impl ControlIcon {
         if self.is_close() {
             cx.theme().danger.active()
         } else {
-            cx.theme().background.raised(2).active()
+            cx.theme().background.washed(2)
         }
     }
 }

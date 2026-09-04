@@ -161,6 +161,7 @@ pub struct Button {
     hover_bg: Option<Hsla>,
     rounded: ButtonRounded,
     outline: bool,
+    flat: bool,
     dropdown_caret: bool,
     size: Size,
     compact: bool,
@@ -201,6 +202,7 @@ impl Button {
             loading: false,
             compact: false,
             outline: false,
+            flat: false,
             children: Vec::new(),
             dropdown_caret: false,
             tab_index: 0,
@@ -219,6 +221,11 @@ impl Button {
 
     pub fn outline(mut self) -> Self {
         self.outline = true;
+        self
+    }
+
+    pub fn flat(mut self) -> Self {
+        self.flat = true;
         self
     }
 
@@ -454,6 +461,13 @@ impl RenderOnce for Button {
         let is_disabled = self.disabled;
         let hoverable = self.hoverable();
         let normal_style = style.normal(self.outline, cx);
+        let neutral_surface = !self.flat
+            && matches!(
+                style,
+                ButtonVariant::Default | ButtonVariant::Secondary | ButtonVariant::Ghost
+            );
+        let resting_surface = neutral_surface && normal_style.shadow;
+        let highlight_ring = cx.theme().shadow && neutral_surface && !normal_style.shadow;
         let icon_size = match self.size {
             Size::Size(v) => Size::Size(v * 0.75),
             _ => self.size,
@@ -495,9 +509,10 @@ impl RenderOnce for Button {
             .justify_center()
             .cursor_default()
             .when(self.variant.is_link(), |this| this.cursor_pointer())
-            .when(cx.theme().shadow && normal_style.shadow, |this| {
-                this.shadow(control_shadow(cx))
-            })
+            .when(
+                cx.theme().shadow && normal_style.shadow && !self.flat && !resting_surface,
+                |this| this.shadow(control_shadow(cx)),
+            )
             .when(!style.no_padding(), |this| {
                 let height = self.size.control_h();
                 if self.label.is_none() && self.children.is_empty() {
@@ -517,38 +532,64 @@ impl RenderOnce for Button {
                 }
             })
             .rounded(rounding)
-            .when(self.variant.is_default() || self.outline, |this| {
-                this.border_1()
-            })
+            .when(
+                !self.flat && (self.variant.is_default() || self.outline),
+                |this| this.border_1(),
+            )
+            .when(highlight_ring, |this| this.border(px(0.5)))
             .text_color(normal_style.fg)
             .when(self.selected, |this| {
                 let selected_style = style.selected(self.outline, cx);
                 this.bg(selected_style.bg)
                     .border_color(selected_style.border)
                     .text_color(selected_style.fg)
+                    .when(highlight_ring || resting_surface, |this| {
+                        this.control_highlight(cx)
+                    })
             })
             .when(!self.disabled && !self.selected, |this| {
-                this.border_color(normal_style.border)
-                    .bg(normal_style.bg)
-                    .when(normal_style.underline, |this| this.text_decoration_1())
-                    .hover(|this| {
-                        let hover_style = style.hovered(self.outline, cx);
-                        this.bg(self.hover_bg.unwrap_or(hover_style.bg))
-                            .border_color(hover_style.border)
-                            .text_color(hover_style.fg)
-                    })
-                    .active(|this| {
-                        let active_style = style.active(self.outline, cx);
-                        this.bg(active_style.bg)
-                            .border_color(active_style.border)
-                            .text_color(active_style.fg)
-                    })
+                this.border_color(if highlight_ring {
+                    transparent_white()
+                } else {
+                    normal_style.border
+                })
+                .bg(normal_style.bg)
+                .when(normal_style.underline, |this| this.text_decoration_1())
+                .hover(|this| {
+                    let hover_style = style.hovered(self.outline, cx);
+                    let this = this
+                        .bg(self.hover_bg.unwrap_or(hover_style.bg))
+                        .border_color(hover_style.border)
+                        .text_color(hover_style.fg);
+                    if highlight_ring || resting_surface {
+                        this.control_highlight(cx)
+                    } else {
+                        this
+                    }
+                })
+                .active(|this| {
+                    let active_style = style.active(self.outline, cx);
+                    let this = this
+                        .bg(active_style.bg)
+                        .border_color(active_style.border)
+                        .text_color(active_style.fg);
+                    if highlight_ring || resting_surface {
+                        this.control_highlight(cx)
+                    } else {
+                        this
+                    }
+                })
             })
+            .when(resting_surface, |this| this.control_surface(cx))
             .when(self.disabled, |this| {
                 let disabled_style = style.disabled(self.outline, cx);
                 this.bg(disabled_style.bg)
                     .text_color(disabled_style.fg)
-                    .border_color(disabled_style.border)
+                    .border_color(if highlight_ring {
+                        transparent_white()
+                    } else {
+                        disabled_style.border
+                    })
                     .shadow_none()
             })
             .refine_style(&self.style)
@@ -813,25 +854,12 @@ impl ButtonVariant {
 
     fn hovered(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
         let bg: Hsla = match self {
-            Self::Default => {
-                if outline {
-                    self.outline_background(ButtonStyleState::Hovered, cx)
-                } else {
-                    cx.theme().background.raised(1).hover().into()
-                }
-            }
+            Self::Default | Self::Secondary | Self::Ghost => cx.theme().background.washed(2),
             Self::Primary => {
                 if outline {
                     self.outline_background(ButtonStyleState::Hovered, cx)
                 } else {
                     cx.theme().foreground.hover().into()
-                }
-            }
-            Self::Secondary => {
-                if outline {
-                    self.outline_background(ButtonStyleState::Hovered, cx)
-                } else {
-                    cx.theme().background.raised(2).hover().into()
                 }
             }
             Self::Danger => {
@@ -861,12 +889,6 @@ impl ButtonVariant {
                 colors.color.mix_oklab(cx.theme().transparent, 0.3)
             }
             .into(),
-            Self::Ghost => if cx.theme().mode.is_dark() {
-                cx.theme().background.raised(2).lighten(0.1).opacity(0.8)
-            } else {
-                cx.theme().background.raised(2).darken(0.1).opacity(0.8)
-            }
-            .into(),
             Self::Link => cx.theme().transparent.into(),
             Self::Text => cx.theme().transparent.into(),
         };
@@ -891,13 +913,7 @@ impl ButtonVariant {
 
     fn active(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
         let bg = match self {
-            Self::Default => {
-                if outline {
-                    self.outline_background(ButtonStyleState::Active, cx)
-                } else {
-                    cx.theme().background.raised(1).active().into()
-                }
-            }
+            Self::Default | Self::Secondary | Self::Ghost => cx.theme().background.washed(2),
             Self::Primary => {
                 if outline {
                     self.outline_background(ButtonStyleState::Active, cx)
@@ -905,19 +921,6 @@ impl ButtonVariant {
                     cx.theme().foreground.active().into()
                 }
             }
-            Self::Secondary => {
-                if outline {
-                    self.outline_background(ButtonStyleState::Active, cx)
-                } else {
-                    cx.theme().background.raised(2).active().into()
-                }
-            }
-            Self::Ghost => if cx.theme().mode.is_dark() {
-                cx.theme().background.raised(2).lighten(0.2).opacity(0.8)
-            } else {
-                cx.theme().background.raised(2).darken(0.2).opacity(0.8)
-            }
-            .into(),
             Self::Danger => {
                 if outline {
                     self.outline_background(ButtonStyleState::Active, cx)
@@ -972,15 +975,8 @@ impl ButtonVariant {
         }
 
         let bg = match self {
-            Self::Default => cx.theme().background.raised(1).active().into(),
+            Self::Default | Self::Secondary | Self::Ghost => cx.theme().background.washed(2),
             Self::Primary => cx.theme().foreground.active().into(),
-            Self::Secondary => cx.theme().background.raised(2).active().into(),
-            Self::Ghost => if cx.theme().mode.is_dark() {
-                cx.theme().background.raised(2).lighten(0.2).opacity(0.8)
-            } else {
-                cx.theme().background.raised(2).darken(0.2).opacity(0.8)
-            }
-            .into(),
             Self::Danger => cx.theme().danger.fill().active().into(),
             Self::Warning => cx.theme().warning.fill().active().into(),
             Self::Success => cx.theme().success.fill().active().into(),

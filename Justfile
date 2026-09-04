@@ -195,6 +195,12 @@ site:
 showcase:
     @scripts/showcase-dev.sh
 
+showcase-capture path:
+    ZZ_PREVIEW_CAPTURE="{{path}}" cargo run --locked --features native-capture --manifest-path examples/ui-showcase/Cargo.toml --target-dir target/ui-showcase-native
+
+showcase-native:
+    cargo run --locked --manifest-path examples/ui-showcase/Cargo.toml --target-dir target/ui-showcase-native
+
 # Install the toolchain used by the browser showcase.
 showcase-setup:
     rustup toolchain install nightly --profile minimal --component rustfmt --component clippy
@@ -202,6 +208,7 @@ showcase-setup:
     command -v cargo-watch >/dev/null 2>&1 || cargo install cargo-watch --locked
     cargo install wasm-bindgen-cli --version 0.2.126 --locked
     npm --prefix examples/ui-showcase/web install
+    python3 scripts/prepare-showcase-fonts.py
 
 # Build browser-ready debug assets into examples/ui-showcase/web/src/wasm.
 showcase-build:

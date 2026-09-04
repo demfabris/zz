@@ -9,7 +9,7 @@ use gpui::{
 use crate::{
     ActiveTheme as _, Disableable, Sizable, Size, StyledExt as _,
     button::{Button, ButtonVariants as _},
-    control_shadow, h_flex,
+    h_flex,
     icon::IconName,
 };
 
@@ -144,6 +144,7 @@ impl NumberInput {
         let state = state.clone();
         Button::new(id)
             .ghost()
+            .flat()
             .with_size(size)
             .icon(icon)
             .compact()
@@ -195,10 +196,8 @@ impl RenderOnce for NumberInput {
             .when(self.appearance, |this| {
                 this.bg(cx.theme().background.raised(1))
                     .rounded(cx.theme().radius)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .when(cx.theme().shadow, |this| this.shadow(control_shadow(cx)))
-                    .when(focused, |this| this.focused_border(cx))
+                    .control_surface(cx)
+                    .when(focused, |this| this.border_color(cx.theme().foreground))
             })
             .when(self.disabled, |this| this.opacity(0.5))
             .refine_style(&self.style)

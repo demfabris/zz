@@ -4,7 +4,6 @@ use std::{
     collections::BTreeMap,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 use gpui::{
@@ -50,11 +49,12 @@ use zz_client::{ChromeAction, UI_TABLE};
 use zz_protocol::ConfigOverrideEntry;
 use zz_terminal::{TerminalColorScheme, discover_ghostty_config};
 use zz_ui::feedback::import_configuration_file_alert;
+use zz_ui::settings::appearance::picker_tile;
 use zz_ui::settings::{
     SettingEntry, SettingsScrollColumn, SettingsSection, SettingsSelectItem, SettingsStack,
     StackPosition, settings_control_fill, settings_list_group_header, settings_page_content,
     settings_page_description, settings_provenance_badge, settings_reset_button,
-    settings_scroll_column, settings_virtual_column,
+    settings_scroll_column,
 };
 
 gpui::actions!(zz, [OpenSettings]);
@@ -68,9 +68,6 @@ pub(crate) const KEYBIND: &str = "ctrl-,";
 const CONTROL_WIDTH: f32 = 120.0;
 const CONFIG_EDITOR_FONT_SIZE: f32 = 12.0;
 const CONFIG_EDITOR_PADDING: f32 = 2.0;
-const THEME_PREVIEW_WIDTH: f32 = 84.0;
-const THEME_PREVIEW_HEIGHT: f32 = 56.0;
-const THEME_PREVIEW_SIDEBAR_WIDTH: f32 = 20.0;
 const APP_ICON_PREVIEW_SIZE: f32 = 48.0;
 const ABOUT_LOGO_SIZE: f32 = 88.0;
 const REPOSITORY_URL: &str = "https://github.com/demfabris/zz";
@@ -116,115 +113,14 @@ struct HostsSectionState {
     error: Option<SharedString>,
 }
 
-const PAGE_ROW_GAP: f32 = 8.0;
-
-fn run_position<T: Copy>(items: &[T], index: usize, is_entry: impl Fn(T) -> bool) -> StackPosition {
-    let bounded = |neighbour: Option<usize>| {
-        neighbour.is_none_or(|at| items.get(at).copied().is_none_or(|it| !is_entry(it)))
-    };
-    StackPosition::new(bounded(index.checked_sub(1)), bounded(Some(index + 1)))
-}
-
-fn page_row(element: AnyElement, ends_run: bool) -> AnyElement {
-    div()
-        .w_full()
-        .pb(px(if ends_run { PAGE_ROW_GAP } else { 0.0 }))
-        .child(element)
-        .into_any_element()
-}
-
-#[derive(Clone, Copy)]
-enum AppearancePageItem {
-    Description,
-    Group {
-        title: &'static str,
-        description: Option<&'static str>,
-    },
-    ThemeMode,
-    UiZoom,
-    AppIcon,
-    Preset,
-    ChromeColor(ChromeColor),
-    StatusShowSession,
-    StatusBadges,
-    StatusAlignment,
-    StatusAgents,
-    StatusHost,
-    StatusUpdate,
-    StatusClock,
-    Animations,
-    WidgetCornerRadius,
-    WindowBackgroundBlur,
-    #[cfg(target_os = "linux")]
-    WindowCornerRadius,
-    #[cfg(target_os = "linux")]
-    UseSystemTitlebar,
-}
-
-impl AppearancePageItem {
-    const fn is_entry(self) -> bool {
-        !matches!(self, Self::Description | Self::Group { .. })
-    }
-}
+type AppearancePageItem = zz_ui::settings::appearance::AppearancePageItem<ChromeColor>;
 
 fn appearance_page_items(has_window_blur: bool) -> Vec<AppearancePageItem> {
-    let mut items = vec![
-        AppearancePageItem::Description,
-        AppearancePageItem::Group {
-            title: "Theme",
-            description: None,
-        },
-        AppearancePageItem::ThemeMode,
-        AppearancePageItem::UiZoom,
-    ];
-    if cfg!(target_os = "macos") {
-        items.push(AppearancePageItem::AppIcon);
-    }
-    items.extend([
-        AppearancePageItem::Group {
-            title: "Chroma Colors",
-            description: Some(
-                "Recolors the application chrome. Every panel, hover state, muted label and focus \
-                 ring is derived from these six, so nothing else needs setting.",
-            ),
-        },
-        AppearancePageItem::Preset,
-    ]);
-    items.extend(
-        ChromeColor::ALL
-            .into_iter()
-            .map(AppearancePageItem::ChromeColor),
-    );
-    items.extend([
-        AppearancePageItem::Group {
-            title: "Status bar",
-            description: None,
-        },
-        AppearancePageItem::StatusShowSession,
-        AppearancePageItem::StatusBadges,
-        AppearancePageItem::StatusAlignment,
-        AppearancePageItem::StatusAgents,
-        AppearancePageItem::StatusHost,
-        AppearancePageItem::StatusUpdate,
-        AppearancePageItem::StatusClock,
-    ]);
-    items.extend([
-        AppearancePageItem::Group {
-            title: "Tweaks",
-            description: None,
-        },
-        AppearancePageItem::Animations,
-        AppearancePageItem::WidgetCornerRadius,
-    ]);
-    if has_window_blur {
-        items.push(AppearancePageItem::WindowBackgroundBlur);
-    }
-    #[cfg(target_os = "linux")]
-    items.extend([
-        AppearancePageItem::WindowCornerRadius,
-        AppearancePageItem::UseSystemTitlebar,
-    ]);
-    items
+    zz_ui::settings::appearance::appearance_page_items(
+        ChromeColor::ALL,
+        cfg!(target_os = "macos"),
+        has_window_blur,
+    )
 }
 
 pub(crate) struct SettingsView {
@@ -764,20 +660,13 @@ impl SettingsView {
     }
 
     fn appearance_section(&self, resolved: AppConfig, cx: &Context<Self>) -> AnyElement {
-        let items: Arc<[AppearancePageItem]> =
-            appearance_page_items(crate::profile::profile(cx).has_window_blur).into();
-        let item_count = items.len();
+        let items = appearance_page_items(crate::profile::profile(cx).has_window_blur);
         let inherited = inherited_chrome_colors(resolved.chrome_preset.value, cx.theme().mode);
         let view = cx.entity();
-        settings_virtual_column("settings-appearance", item_count, move |index, _, cx| {
-            let Some(item) = items.get(index).copied() else {
-                return div().into_any_element();
-            };
-            let position = run_position(&items, index, AppearancePageItem::is_entry);
-            let row = view.update(cx, |this, cx| {
+        zz_ui::settings::appearance::appearance_page(items, move |item, position, _, cx| {
+            view.update(cx, |this, cx| {
                 this.appearance_item(item, resolved, &inherited, position, cx)
-            });
-            page_row(row, !item.is_entry() || position.ends_run())
+            })
         })
         .into_any_element()
     }
@@ -1578,50 +1467,39 @@ impl SettingsView {
 
     fn panes_section(&self, resolved: AppConfig, cx: &Context<Self>) -> AnyElement {
         let gaps = resolved.pane_gaps.value;
-        Self::scroll_column("settings-panes")
-            .child(settings_page_description(SettingsSection::Panes, cx))
-            .child(SettingsStack::titled("Layout").child(Self::boolean_setting(
+        zz_ui::settings::panes_page(
+Self::boolean_setting(
                 ConfigKey::PaneGaps,
                 "Pane gaps",
                 "Separate panes with card-like spacing and chrome.",
                 resolved.pane_gaps,
                 cx,
-            )))
-            .child(SettingsStack::titled("Focus").child(Self::numeric_setting(
+            ),
+Self::numeric_setting(
                 ConfigKey::PaneInactiveOpacity,
                 "Inactive pane opacity",
                 "Visible strength of inactive pane content and chrome (0–1). Set to 1 to disable dimming.",
                 resolved.pane_inactive_opacity,
                 &self.pane_inactive_opacity,
                 cx,
-            )))
-            .child(
-                SettingsStack::titled("Frame")
-                    .description("Applies only while pane gaps are enabled.")
-                    .child(
-                        Self::numeric_setting(
+            ),
+Self::numeric_setting(
                             ConfigKey::PaneMargin,
                             "Pane margin",
                             "Space around each pane on all platforms, in logical pixels (0–32).",
                             resolved.pane_margin,
                             &self.pane_margin,
                             cx,
-                        )
-                        .disabled(!gaps),
-                    )
-                    .child(
-                        Self::numeric_setting(
+                        ).disabled(!gaps),
+Self::numeric_setting(
                             ConfigKey::PaneCornerRadius,
                             "Pane corner radius",
                             "Rounds every pane corner on all platforms, in logical pixels (0–32).",
                             resolved.pane_corner_radius,
                             &self.pane_corner_radius,
                             cx,
-                        )
-                        .disabled(!gaps),
-                    )
-                    .child(
-                        Self::numeric_setting(
+                        ).disabled(!gaps),
+Self::numeric_setting(
                             ConfigKey::PaneBorderWidth,
                             "Pane border width",
                             "Border width for gapped panes, in logical pixels (0–8). Set to 0 to \
@@ -1629,11 +1507,7 @@ impl SettingsView {
                             resolved.pane_border_width,
                             &self.pane_border_width,
                             cx,
-                        )
-                        .disabled(!gaps),
-                    ),
-            )
-            .into_any_element()
+                        ).disabled(!gaps), cx).into_any_element()
     }
 
     fn editor_section(&self, resolved: AppConfig, cx: &Context<Self>) -> AnyElement {
@@ -2436,144 +2310,16 @@ fn preset_swatches(preset: &'static ChromePreset, cx: &App) -> gpui::Div {
     )
 }
 
-fn picker_tile(
-    id: SharedString,
-    label: &'static str,
-    preview: impl IntoElement,
-    selected: bool,
-    cx: &App,
-) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(gpui::ElementId::Name(id))
-        .flex()
-        .flex_col()
-        .flex_none()
-        .items_center()
-        .gap(px(6.0))
-        .cursor_pointer()
-        .child(
-            div()
-                .p(px(3.0))
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(if selected {
-                    cx.theme().foreground
-                } else {
-                    gpui::transparent_black()
-                })
-                .child(preview),
-        )
-        .child(
-            div()
-                .text_size(zz_ui::rems_from_px(11.0))
-                .text_color(if selected {
-                    cx.theme().foreground
-                } else {
-                    cx.theme().foreground.muted()
-                })
-                .child(label),
-        )
-}
-
 fn theme_preview(mode: ThemeModeSetting, preset: Option<ChromePresetId>, cx: &App) -> gpui::Div {
-    match mode {
-        ThemeModeSetting::Light => theme_preview_window(ThemeMode::Light, preset, cx),
-        ThemeModeSetting::Dark => theme_preview_window(ThemeMode::Dark, preset, cx),
-        ThemeModeSetting::System => {
-            let light = inherited_chrome_colors(preset, ThemeMode::Light);
-            let dark = inherited_chrome_colors(preset, ThemeMode::Dark);
-            let split = THEME_PREVIEW_WIDTH / 2.0;
-            div()
-                .relative()
-                .w(px(THEME_PREVIEW_WIDTH))
-                .h(px(THEME_PREVIEW_HEIGHT))
-                .rounded(cx.theme().radius)
-                .bg(theme_preview_split_background(
-                    light.background.raised(2),
-                    dark.background,
-                    0.5,
-                ))
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left(px(THEME_PREVIEW_SIDEBAR_WIDTH))
-                        .h_full()
-                        .w(px(split - THEME_PREVIEW_SIDEBAR_WIDTH))
-                        .bg(light.background),
-                )
-                .child(theme_preview_contents(&light))
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .right_0()
-                        .h_full()
-                        .w(px(split))
-                        .overflow_hidden()
-                        .child(theme_preview_contents(&dark).absolute().top_0().right_0()),
-                )
-        }
-    }
-}
-
-fn theme_preview_window(mode: ThemeMode, preset: Option<ChromePresetId>, cx: &App) -> gpui::Div {
-    let colors = inherited_chrome_colors(preset, mode);
-    let sidebar_fraction = THEME_PREVIEW_SIDEBAR_WIDTH / THEME_PREVIEW_WIDTH;
-    div()
-        .w(px(THEME_PREVIEW_WIDTH))
-        .h(px(THEME_PREVIEW_HEIGHT))
-        .rounded(cx.theme().radius)
-        .bg(theme_preview_split_background(
-            colors.background.raised(2),
-            colors.background,
-            sidebar_fraction,
-        ))
-        .child(theme_preview_contents(&colors))
-}
-
-fn theme_preview_contents(colors: &ThemeColor) -> gpui::Div {
-    let text = colors.foreground.muted();
-    let text_bar = move |width: f32| div().w(px(width)).h(px(3.0)).rounded_full().bg(text);
-    div()
-        .flex()
-        .w(px(THEME_PREVIEW_WIDTH))
-        .h(px(THEME_PREVIEW_HEIGHT))
-        .child(
-            div()
-                .w(px(THEME_PREVIEW_SIDEBAR_WIDTH))
-                .flex_none()
-                .border_r_1()
-                .border_color(colors.border),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_w_0()
-                .gap(px(6.0))
-                .p(px(7.0))
-                .child(
-                    div().flex().items_center().gap(px(3.0)).children(
-                        [colors.danger, colors.warning, colors.success]
-                            .map(|light| div().size(px(4.0)).rounded_full().bg(light)),
-                    ),
-                )
-                .child(text_bar(36.0))
-                .child(text_bar(22.0)),
-        )
-}
-
-fn theme_preview_split_background(
-    left: gpui::Hsla,
-    right: gpui::Hsla,
-    split: f32,
-) -> gpui::Background {
-    gpui::linear_gradient(
-        90.0,
-        gpui::linear_color_stop(left, split),
-        gpui::linear_color_stop(right, split),
+    zz_ui::settings::appearance::theme_preview(
+        match mode {
+            ThemeModeSetting::System => None,
+            ThemeModeSetting::Light => Some(ThemeMode::Light),
+            ThemeModeSetting::Dark => Some(ThemeMode::Dark),
+        },
+        &inherited_chrome_colors(preset, ThemeMode::Light),
+        &inherited_chrome_colors(preset, ThemeMode::Dark),
+        cx,
     )
 }
 

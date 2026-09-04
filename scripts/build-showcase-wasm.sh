@@ -39,12 +39,12 @@ fi
 
 cd "$ROOT"
 if [[ "$RELEASE" == true ]]; then
-    rustup run "$TOOLCHAIN" cargo build --locked --release \
+    rustup run "$TOOLCHAIN" cargo build --locked --lib --release \
         --manifest-path "$MANIFEST" \
         --target-dir "$TARGET_DIR" \
         --target wasm32-unknown-unknown
 else
-    rustup run "$TOOLCHAIN" cargo build --locked \
+    rustup run "$TOOLCHAIN" cargo build --locked --lib \
         --manifest-path "$MANIFEST" \
         --target-dir "$TARGET_DIR" \
         --target wasm32-unknown-unknown

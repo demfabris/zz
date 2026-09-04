@@ -31,10 +31,10 @@ use zz_ui::{
 use zz_ui::{
     pane::{
         FloatingSurface, PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis,
-        PaneSplitHighlight, PaneSplitSide, pane_drag_chip, pane_drag_overlay, pane_drop_preview,
-        pane_indicator_card, pane_indicator_overlay, pane_overlay_stack, pane_split_hit_target,
-        pane_split_slot, pane_split_surface, pane_surface, pane_sync_badge, pane_unzoom_control,
-        pane_waiting_state,
+        PaneSplitHighlight, PaneSplitSide, pane_border_color, pane_drag_chip, pane_drag_overlay,
+        pane_drop_preview, pane_indicator_card, pane_indicator_overlay, pane_overlay_stack,
+        pane_split_hit_target, pane_split_slot, pane_split_surface, pane_surface, pane_sync_badge,
+        pane_unzoom_control, pane_waiting_state,
     },
     shell::{app_connection_state, app_workspace_surface},
 };
@@ -2218,11 +2218,7 @@ impl AppView {
                     && pane_content
                         .as_ref()
                         .is_none_or(|content| content.inactive_style == PaneInactiveStyle::Surface);
-                let border_color = if active {
-                    cx.theme().foreground.wash()
-                } else {
-                    cx.theme().border
-                };
+                let border_color = pane_border_color(active, cx);
                 let follows_pointer = inactive && self.mux.read(cx).focus_follows_mouse();
                 let hovered_pane = *pane;
                 pane_surface(

@@ -13,7 +13,7 @@ use gpui::{
 
 use crate::{
     ActiveTheme as _, Colorize as _, Icon, IconName, IndexPath, Sizable as _, Size, StyledExt as _,
-    control_shadow, h_flex, scroll::ScrollableElement as _, v_flex,
+    h_flex, scroll::ScrollableElement as _, v_flex,
 };
 
 use super::{
@@ -307,17 +307,13 @@ impl<D: SelectDelegate> SelectState<D> {
             .overflow_hidden()
             .bg(background)
             .text_color(foreground)
-            .border_1()
-            .border_color(cx.theme().border)
+            .control_surface(cx)
             .rounded(cx.theme().radius)
-            .when(cx.theme().shadow && !disabled, |this| {
-                this.shadow(control_shadow(cx))
-            })
-            .when(disabled, |this| this.opacity(0.5))
+            .when(disabled, |this| this.opacity(0.5).shadow_none())
             .input_size(self.options.size)
             .input_text_size(self.options.size)
             .refine_style(&self.options.style)
-            .when(outlined, |this| this.focused_border(cx))
+            .when(outlined, |this| this.border_color(cx.theme().foreground))
             .when(!self.open && !disabled, |this| {
                 this.on_click(cx.listener(Self::on_trigger_click))
             })

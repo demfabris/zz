@@ -211,6 +211,7 @@ impl RenderOnce for ColorPicker {
 
         let trigger = Button::new(("zz-color-picker", self.state.entity_id()))
             .ghost()
+            .flat()
             .with_size(size)
             .compact()
             .disabled(self.disabled)
@@ -245,6 +246,7 @@ impl RenderOnce for ColorPicker {
                             .child(
                                 Button::new("zz-color-picker-clear")
                                     .ghost()
+                                    .flat()
                                     .small()
                                     .compact()
                                     .icon(crate::IconName::Undo2)

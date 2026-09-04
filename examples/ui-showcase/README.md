@@ -1,95 +1,142 @@
-# zz UI showcase
+# zz UI preview
 
-A browser-based, WASM inventory of the UI that zz owns and renders today. Each
-page renders one kind of piece at a time, in the states that occur in the app
-(no assembled screens), so a piece can be evaluated on its own.
+A browser workspace for iterating on zz's Rust interface. It renders GPUI through
+WASM/WebGPU and imports `crates/zz-ui`, using the same patched GPUI revision as
+the desktop app. JavaScript hosts the canvas and preview controls; the app UI is
+Rust.
 
-The visual definitions live in the shared `crates/zz-ui` (`zz-ui`) crate and are
-imported by both `crates/zz` and this WASM catalog, never copied into the
-showcase. Desktop-only controllers remain in `crates/zz`; stories replace their
-CEF, PTY, daemon, and filesystem inputs with deterministic state and then render
-the same components.
-
-## First run
+## Run
 
 ```bash
-just showcase-setup
-just showcase
+just showcase-setup   # first run
+just showcase         # build, open http://127.0.0.1:3131, watch for changes
 ```
 
-`just showcase` performs an initial debug build, starts Vite at
-<http://localhost:3131>, and keeps `cargo watch` running. Editing Rust under
-`crates/zz-ui/src/` or `examples/ui-showcase/src/` rebuilds the WASM bindings; Vite
-then reloads the page.
-Only the browser build uses nightly, matching the pinned GPUI web gallery; the
-rest of the workspace continues to use the repository's stable toolchain. Set
-`SHOWCASE_TOOLCHAIN` to override it when testing another nightly.
+On macOS, setup also uses Python 3 to prepare local SF text faces. FontTools is
+installed in an isolated environment under `target/ui-showcase-fonts`; the
+generated faces are cached there. This runs once, or when the system fonts or
+preparation script change, and adds no work to normal Rust edits.
 
-The showcase is a small, isolated Cargo workspace. Its lockfile pins a
-web-tested GPUI revision, while the desktop workspace keeps its native renderer
-patch stack. Both targets compile the same `zz-ui` source; a small backend-only
-pixel difference is still possible between the native and web renderers.
+Choose Workspace, Browser, Agent, Settings, or Components. The workspace combines
+a sidebar, split terminal/browser/agent panes, and status bar. Settings currently
+provides Interface and Panes fixtures; the other settings sections are disabled.
+Components opens the existing catalog, including editor, chooser, menu, dialog,
+notification, and agent timeline states.
 
-## Other commands
+The controls outside the app set its viewport width/height in logical pixels,
+window zoom, theme, sidebar, and pane gaps. The viewport is not CSS-scaled. Zoom
+uses GPUI's `Window::set_zoom`, just like desktop. Scene and appearance choices
+survive rebuilds. Copy link includes those choices and the viewport size.
+
+Use **Point** to mark a location; Copy link includes its coordinates. **Background**
+loads a local image as the webpage's fixed, full-size wallpaper, behind the app.
+Background opacity controls only that image. The image and opacity are saved
+locally in the browser and survive rebuilds; Clear background removes the saved
+image. Images are not uploaded or included in copied links.
+
+Interface → Window blur makes the chrome translucent and blurs the wallpaper
+behind the app. The preview and desktop share the 93% chrome-opacity rule;
+workspace pane content stays opaque, while Settings uses translucent chrome
+throughout. The browser uses a 160px CSS backdrop blur to simulate macOS's
+background blur. CSS and the native compositor use different filters, so the
+blur kernel is an approximation. The blur setting persists and is included in
+copied links. A background image is needed to see the effect on a flat page.
+
+## Shared source
+
+The desktop and preview both call these implementations:
+
+| Interface | Source |
+| --- | --- |
+| App shell and status rail | `crates/zz-ui/src/shell.rs` |
+| Sidebar, tree rows, controls | `crates/zz-ui/src/navigation.rs` |
+| Tree indentation guides | `crates/zz-ui/src/navigation/tree.rs` |
+| Pane frames and splits | `crates/zz-ui/src/pane.rs` |
+| Browser toolbar and tabs | `crates/zz-ui/src/browser.rs` |
+| Agent header and timeline | `crates/zz-ui/src/agent.rs` |
+| Agent composer layout | `crates/zz-ui/src/agent/composer.rs` |
+| Settings rows, page layout, theme tiles | `crates/zz-ui/src/settings.rs`, `settings/appearance.rs` |
+
+`src/preview.rs` supplies deterministic workspace data. `src/preview/settings.rs`
+supplies settings values and local callbacks. Desktop adapters still own daemon,
+CEF, PTY, filesystem, and agent behavior. The preview does not connect to those
+services or write the user's zz configuration. Tab selection/closing, tree
+navigation, input editing, theme/zoom, pane controls, and widget interactions can
+be exercised locally. Fixture choices are not a live copy of an attached session.
+
+Edit shared Rust to change both surfaces. If a needed composition still lives in
+`crates/zz`, move its rendering into `zz-ui`, retain the desktop's state/actions in
+its adapter, and supply fixture state here. Avoid maintaining a second visual
+implementation of a desktop component.
+
+## Dev loop
+
+Changes under `crates/zz-ui/src`, `examples/ui-showcase/src`, their manifests, and
+shared/fixture assets rebuild WASM and bindings. Vite reloads the canvas. This is
+still a Rust rebuild, not code hot replacement; it avoids compiling the daemon,
+CEF integration, and desktop application, and avoids repackaging/relaunching zz.
+A changed shared UI rebuild measured about 8 seconds on the development Mac,
+including bindings. Cold builds take longer; timings depend on the machine.
+
+Only the browser build uses nightly. `SHOWCASE_TOOLCHAIN` can select another
+installed nightly. The standalone workspace has its own lockfile; keep its GPUI
+patch revision aligned with the root workspace. The watcher includes shared
+icons, so it no longer depends on separately copied catalog icons.
 
 ```bash
-just showcase-build          # debug WASM + JS bindings
-just showcase-build-release  # optimized WASM + JS bindings
+just showcase-build          # debug WASM + bindings
+just showcase-build-release  # optimized WASM + bindings
+just showcase-native         # the same fixture in a native GPUI window
+just showcase-capture /tmp/zz-preview.png  # save native GPUI pixels, then exit
 ```
 
-The generated bindings live under `web/src/wasm/` and are ignored. The checked-in
-icons and Inter v4.1 variable fonts are embedded into both debug and release WASM
-binaries so the showcase works without an asset CDN and remains visually stable
-during `cargo watch` rebuilds. Inter is registered and selected only by the
-showcase; it does not change the desktop application's UI or terminal fonts.
+The native window defaults to 1200×760. For example:
 
-## Catalog scope
+```bash
+ZZ_PREVIEW_OPTIONS='{"scene":"agent","dark":true,"zoom":1,"gaps":true}' just showcase-native
+ZZ_PREVIEW_OPTIONS='{"width":1200,"height":600}' just showcase-capture /tmp/zz-preview.png
+```
 
-`StoryId::ALL` in `src/showcase.rs` is the page list: an overview, then one page
-per bundle of pieces, grouped by which layer owns them.
+The native preview is also isolated from the daemon and normal app configuration.
+`showcase-capture` enables GPUI's capture support only for that native build and
+saves a PNG at the display's pixel density. It captures the GPUI scene, excluding
+OS decorations. Compare it with the browser at a matching viewport and zoom;
+native captures do not include the desktop behind the window.
 
-Primitives (the `zz-ui` widget layer):
+## Fidelity boundaries
 
-- buttons: every variant, size, state, and the icon-only form;
-- tags & badges: tag variants and the status badges built on them;
-- inputs & selects: the text field (including the masked one), the bounded
-  number input, and dropdowns;
-- toggles, keys & feedback: switches, Kbd pills, spinners, separators.
+The browser uses the same layout and painting code for the shared components.
+It is a useful visual development surface, but native rendering remains the final
+check for pixel-sensitive changes:
 
-Compositions (the pieces `crates/zz` assembles from them):
+- On macOS, the preview prepares static SF faces from `/System/Library/Fonts`
+  at optical size 17, matching CoreText's selection for the current small chrome
+  text. Regular, medium, semibold, bold, and italic faces use the corresponding
+  CoreText weight coordinates. The local Vite server only serves these fixed
+  cached files and Menlo. System fonts are never committed or bundled for
+  distribution. The axes and preparation live in `scripts/prepare-showcase-fonts.py`,
+  using [FontTools' instancer](https://fonttools.readthedocs.io/en/latest/varLib/instancer.html).
+- Where local fonts are unavailable, the preview explicitly reports its Inter
+  fallback. Inter and the bundled monospace fallback keep it usable elsewhere.
+- Web and native GPUI use different text shaping/rasterization backends. Matching
+  the current chrome's font instances does not guarantee identical text pixels
+  or wrapping. Larger text and different font choices still need native checks.
+  The current Cosmic/Harfrust path uses 12pt when reading SF's size-dependent
+  tracking table; a long 13px line can consequently be about 5px wider in the
+  browser. The generated font's advances matched CoreText in direct comparisons.
+  Keep shared spacing unchanged for this difference and check native captures.
+- Native-only tree-sitter highlighting is not compiled into the WASM fixture.
+- Native window decorations, the exact compositor blur filter, CEF page pixels,
+  and terminal frames are outside this preview. macOS's native control area is
+  reserved in the layout.
+- Settings fixtures cover Interface and Panes, with local values rather than the
+  complete native configuration model. Runtime-specific controls and unimplemented
+  actions are specimens; they do not perform desktop operations.
 
-- navigation: host-tree rows and their disclosure, the titlebar strip that
-  stands in for the sidebar, the sidebar's tmux status section, and the
-  titlebar status label;
-- panes & terminal: display-panes labels, pane status tags, the mode, search,
-  status, and link overlays, and the workspace's connection states;
-- commands & choosers: palette input, completion rows, tree and paste-buffer
-  rows, and the chooser footers;
-- browser: toolbar controls, the address bar, start page, and recovery states;
-- code editor: the rope-backed buffer with syntax highlighting;
-- agent: the pane header, and the thread timeline's entry, tool-call,
-  tool-payload, subagent, and notification rows;
-- settings: navigation buttons, setting cards, mux rows, provenance and reset;
-- dialogs & notifications: the shared confirmations, the prompt dialogs, and
-  the four toast tones.
+Use `just showcase-native` at the same size/zoom to check a suspected renderer
+difference before changing shared spacing to compensate for it.
 
-The toolbar carries the two window-wide knobs a specimen is read against: the
-theme, and the root rem the app's `cmd-=`/`cmd--`/`cmd-0` actions drive. Named
-metrics are declared with `rems_from_px`, so scaling the rem is how a piece is
-checked at a size other than the default one.
-
-Each page's toolbar tags its group and the source it renders from
-(`crates/zz-ui/src/pane.rs`, `zz_ui::button`).
-
-A page is a stack of galleries; a gallery is a row of labeled specimens; and a
-specimen calls the same `zz_ui` constructor `crates/zz` calls, at the size the
-app gives it and against the live `Theme` . `specimen("gapped · inactive ·
-dimmed", pane_chrome_fixture(…))` in `stories/panes.rs`. Native-only inputs (PTY
-pixels, CEF frames, and daemon snapshots) use deterministic fixture data so the
-UI stays interactive and repeatable in WASM.
-
-When the app adds or removes a rendered surface, put its visual composition in
-`crates/zz-ui`, consume it from `crates/zz`, then add or remove the fixture-backed
-story in `StoryId::ALL`. Do not reproduce app markup under `stories/`; story
-modules should only assemble shared components and provide state, callbacks, or
-native-data fixtures.
+The web package also builds both the host and canvas with `npm run build` from
+`web/`. Use release WASM for a distributable build; debug WASM is intentionally
+large. Static builds use the fallback fonts because the local-font endpoint only
+exists in the development server.

@@ -93,7 +93,6 @@ pub fn browser_address(address: &Entity<InputState>, cx: &App) -> gpui::Div {
         .px_2()
         .rounded(cx.theme().radius)
         .bg(cx.theme().background.washed(1))
-        .bordered(false)
         .focus_bordered(false)
         .content_type(InputContentType::Url);
 
@@ -217,6 +216,7 @@ impl RenderOnce for BrowserTabStrip {
             .flex_1()
             .min_w_0()
             .overflow_hidden()
+            .px(px(2.0))
             .items_center()
             .gap_1();
         for (index, tab) in tabs.into_iter().enumerate() {
@@ -311,6 +311,7 @@ fn browser_tab_shell(
     cx: &App,
 ) -> gpui::Stateful<gpui::Div> {
     let rest = cx.theme().background.washed(1);
+    let hover_background = cx.theme().background.washed(2);
     div()
         .id(("browser-tab", id))
         .debug_selector(move || format!("browser-tab-{id}"))
@@ -324,8 +325,9 @@ fn browser_tab_shell(
         .pr(px(4.0))
         .min_w(px(40.0))
         .rounded(cx.theme().radius)
+        .control_surface(cx)
         .bg(rest)
-        .hover(move |style| style.bg(rest.hover()))
+        .hover(move |style| style.bg(hover_background))
         .child(content)
         .when(closable, |this| {
             this.child(browser_tab_close_button(id, on_close))
@@ -344,6 +346,7 @@ fn browser_tab_close_button(id: u64, on_close: &BrowserTabAction) -> impl IntoEl
         .group_hover(browser_tab_group(id), gpui::Styled::visible)
         .child(
             Button::compact_icon(("browser-tab-close", id), IconName::Xmark)
+                .flat()
                 .debug_selector(move || format!("browser-tab-close-{id}"))
                 .on_click(move |_, window, cx| {
                     cx.stop_propagation();
@@ -369,6 +372,19 @@ pub fn browser_toolbar_button(
         .disabled(disabled)
         .selected(selected)
         .tooltip(tooltip)
+}
+
+pub fn browser_start_surface(content: impl IntoElement) -> gpui::Div {
+    div()
+        .absolute()
+        .inset_0()
+        .occlude()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .px(px(12.0))
+        .child(content)
 }
 
 /// Blank-browser hint shown before any recent pages exist.

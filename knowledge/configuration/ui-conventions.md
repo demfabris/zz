@@ -4,7 +4,7 @@ title: UI design conventions
 description: The component, palette, and styling rules that keep zz application chrome consistent and theme-aware.
 resource: crates/zz/src/command/palette.rs
 tags: [ui, gpui, zz-ui, theme, chrome, clippy]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-09-04T00:00:00Z
 ---
 
 # Overview
@@ -21,7 +21,10 @@ is rendered.
 
 The house-style reference is `crates/zz/src/command/palette.rs`. It demonstrates `cx.theme()`
 derivations alongside the `Input`/`InputState`, `ListItem`, `Kbd`, and `Tag` widgets.
-`examples/ui-showcase` renders the same widgets as a browsable gallery.
+`examples/ui-showcase` renders a fixture workspace and component catalog from the same shared
+GPUI components. Run `just showcase` for the WASM/WebGPU preview or `just showcase-native`
+for the same fixtures in a native window. The preview README describes scene coverage,
+page backgrounds, simulated window blur, and the font/renderer differences that still need native checks.
 
 # Rules
 
@@ -49,10 +52,24 @@ derivations alongside the `Input`/`InputState`, `ListItem`, `Kbd`, and `Tag` wid
    lists only: `select` builds its own rows rather than reusing `ListItem`, because reusing it is
    what made dropdown rows read as outlined boxes.
 6. Use one translucent signal instead of competing fills. Sidebar pointer hover, keyboard selection,
-   mux focus, and clickable native status windows use `workspace_row_highlight`, a
-   `background.washed(2)` tint that preserves the desktop blur. Tree fills keep a 1px vertical inset,
+   mux focus, Settings navigation, and clickable native status windows use `workspace_row_highlight`, a
+   `background.washed(2)` tint that preserves the desktop blur. Neutral buttons (Default, Secondary,
+   and Ghost) use the same tint for hover, pressed, and selected states through the shared Button
+   style. This covers toolbar icons, Back, and agent footer controls without per-button fills.
+   Tree fills keep a 1px vertical inset,
    so adjacent rounded rows never merge into one slab. The final Add host action is the exception:
    its row stays unpainted and only its label moves from muted to foreground on hover.
+7. The shared control edge is a 0.5px border at 10% foreground opacity with a small soft shadow.
+   `StyledExt::control_surface` applies it to inputs, number fields, select triggers, dropdown
+   surfaces, and browser address bars. Settings stacks draw it around the whole group, with flat
+   separators between entries. Reserve border width before hover or focus; change only its color
+   between states. Use `Button::flat()` for actions embedded in another control, including tree-row
+   close buttons, browser tab close buttons, input clear buttons, number steppers, and settings
+   reset buttons. These keep their wash and keyboard focus indicator without another raised edge.
+   Gapped panes use the same soft shadow and foreground edge, retaining their configured border
+   width and a stronger active-pane outline. The opaque pane paints over its shadow so content
+   stays clear; gutter fills paint first so they cannot cover the shadow. Flush panes have no
+   outer shadow.
 
 # Control density
 

@@ -2,18 +2,17 @@ use std::ops::Range;
 
 use chrono::Local;
 use gpui::{
-    AnyElement, App, Entity, IntoElement, MouseButton, Pixels, SharedString, Stateful, Window,
-    WindowControlArea, div, prelude::*, px,
+    AnyElement, App, Entity, IntoElement, MouseButton, Pixels, SharedString, Stateful, Window, div,
+    prelude::*, px,
 };
 use zz_client::{StatusBarAlignment, StatusBarClock, StatusBarModel, StatusBarWindow};
 use zz_ui::{
-    ActiveTheme as _, Disableable as _, IconName, Sizable as _, TITLE_BAR_HEIGHT,
+    ActiveTheme as _, Disableable as _, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     navigation::{
-        WORKSPACE_STATUS_CONTENT_HEIGHT, WorkspaceStatusWindowState,
-        workspace_controls_leading_inset, workspace_row_highlight, workspace_status_item,
-        workspace_status_window,
+        WorkspaceStatusWindowState, workspace_controls_leading_inset, workspace_row_highlight,
+        workspace_status_item, workspace_status_window,
     },
     tooltip::Tooltip,
 };
@@ -31,15 +30,10 @@ use crate::{
     workspace::sidebar::WorkspaceSidebar,
 };
 
-const TITLEBAR_CONTROLS_GAP: Pixels = px(6.0);
-const STATUS_GAP: Pixels = px(2.0);
 const MAX_VISIBLE_WINDOWS: usize = 5;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum GuiStatusPlacement {
-    Bottom,
-    Titlebar,
-}
+pub(crate) use zz_ui::shell::WorkspaceStatusPlacement as GuiStatusPlacement;
+use zz_ui::shell::{WorkspaceStatusSlots, workspace_status_bar};
 
 pub(crate) fn render_gui_status_bar(
     placement: GuiStatusPlacement,
@@ -51,7 +45,6 @@ pub(crate) fn render_gui_status_bar(
     cx: &mut App,
 ) -> Stateful<gpui::Div> {
     let background = chrome_background(cx);
-    let foreground = cx.theme().foreground;
     let (snapshot, attached_host, attached, connected) = {
         let mux = mux.read(cx);
         (
@@ -93,81 +86,21 @@ pub(crate) fn render_gui_status_bar(
         .as_deref()
         .map(|name| render_session(name, sidebar, cx));
     let right = render_right_items(&model, cx);
-    let window_strip = div()
-        .flex()
-        .flex_1()
-        .min_w_0()
-        .h(WORKSPACE_STATUS_CONTENT_HEIGHT)
-        .items_center()
-        .gap(STATUS_GAP)
-        .overflow_hidden()
-        .when(model.alignment == StatusBarAlignment::Center, |strip| {
-            strip.justify_center()
-        })
-        .children(visible_windows)
-        .children(overflow);
-    let content = div()
-        .flex()
-        .flex_1()
-        .min_w_0()
-        .h(TITLE_BAR_HEIGHT)
-        .items_center()
-        .gap(px(6.0))
-        .px(px(6.0))
-        .when(placement == GuiStatusPlacement::Titlebar, |content| {
-            content.window_control_area(WindowControlArea::Drag)
-        })
-        .children(session)
-        .child(window_strip)
-        .children(right);
-    let leading = (placement == GuiStatusPlacement::Titlebar).then(|| {
-        div()
-            .flex_none()
-            .w(workspace_controls_leading_inset(cx))
-            .h(TITLE_BAR_HEIGHT)
-            .window_control_area(WindowControlArea::Drag)
-    });
-    let titlebar_controls = titlebar_controls.map(|(controls, width)| {
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .w(width + TITLEBAR_CONTROLS_GAP)
-            .h(TITLE_BAR_HEIGHT)
-            .pr(TITLEBAR_CONTROLS_GAP)
-            .child(controls)
-            .into_any_element()
-    });
-    let window_controls = window_controls.map(|controls| {
-        div()
-            .flex_none()
-            .h(TITLE_BAR_HEIGHT)
-            .child(controls)
-            .into_any_element()
-    });
-
-    div()
-        .id(match placement {
-            GuiStatusPlacement::Bottom => "gui-status-bottom",
-            GuiStatusPlacement::Titlebar => "gui-status-titlebar",
-        })
-        .relative()
-        .flex()
-        .flex_none()
-        .items_center()
-        .w_full()
-        .h(TITLE_BAR_HEIGHT)
-        .overflow_hidden()
-        .bg(background)
-        .text_color(foreground)
-        .when(!crate::config::pane_gaps(cx), |bar| match placement {
-            GuiStatusPlacement::Bottom => bar.border_t_1().border_color(cx.theme().border),
-            GuiStatusPlacement::Titlebar => bar.border_b_1().border_color(cx.theme().border),
-        })
-        .children(leading)
-        .children(titlebar_controls)
-        .child(content)
-        .children(window_controls)
+    workspace_status_bar(
+        placement,
+        model.alignment == StatusBarAlignment::Center,
+        crate::config::pane_gaps(cx),
+        background,
+        workspace_controls_leading_inset(cx),
+        WorkspaceStatusSlots {
+            session,
+            windows: visible_windows.into_iter().chain(overflow).collect(),
+            right,
+            titlebar_controls,
+            window_controls,
+        },
+        cx,
+    )
 }
 
 fn render_session(name: &str, sidebar: &Entity<WorkspaceSidebar>, cx: &App) -> AnyElement {
@@ -184,6 +117,9 @@ fn render_session(name: &str, sidebar: &Entity<WorkspaceSidebar>, cx: &App) -> A
     .px(px(8.0))
     .rounded(cx.theme().radius)
     .bg(highlight)
+    .when(cx.theme().shadow, |item| {
+        item.border(px(0.5)).control_highlight(cx)
+    })
     .text_color(foreground)
     .cursor_pointer()
     .hover(move |item| item.bg(highlight).text_color(foreground))
@@ -249,8 +185,18 @@ fn render_update(show: bool, cx: &App) -> Option<AnyElement> {
         .flex_none()
         .px(px(6.0))
         .rounded(cx.theme().radius)
+        .when(cx.theme().shadow, |item| {
+            item.border(px(0.5)).border_color(gpui::transparent_white())
+        })
         .cursor_pointer()
-        .hover(move |item| item.bg(highlight).text_color(foreground))
+        .hover(move |item| {
+            let item = item.bg(highlight).text_color(foreground);
+            if cx.theme().shadow {
+                item.control_highlight(cx)
+            } else {
+                item
+            }
+        })
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
         .child(
             div()

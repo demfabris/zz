@@ -311,7 +311,7 @@ impl Render for NewSessionView {
                         .px(px(12.0))
                         .cursor_pointer()
                         .rounded(cx.theme().radius)
-                        .hover(|style| style.bg(cx.theme().background.hover()))
+                        .hover(|style| style.bg(cx.theme().background.washed(2)))
                         .on_mouse_down(
                             MouseButton::Left,
                             move |_, _, cx| {
@@ -333,7 +333,7 @@ impl Render for NewSessionView {
                         .px(px(12.0))
                         .cursor_pointer()
                         .rounded(cx.theme().radius)
-                        .hover(|style| style.bg(cx.theme().background.hover()))
+                        .hover(|style| style.bg(cx.theme().background.washed(2)))
                         .on_click(|_, window, cx| {
                             window.dispatch_action(Box::new(OpenSettings), cx);
                         }),

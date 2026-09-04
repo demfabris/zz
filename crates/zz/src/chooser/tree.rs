@@ -84,6 +84,10 @@ impl ChooserSpec for TreeChooser {
         (!state.prompt.is_empty()).then_some(state.prompt.as_str())
     }
 
+    fn help(state: &Self::State) -> bool {
+        state.help
+    }
+
     fn title(state: &Self::State) -> &'static str {
         match state.kind {
             ChooseTreeKind::Windows => "Choose window",

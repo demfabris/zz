@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 97;
+pub const PROTOCOL_VERSION: u16 = 98;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -2044,6 +2044,11 @@ pub struct ChooseTreeState {
     /// own vocabulary does.
     #[serde(default, deserialize_with = "deserialize_choose_item_text")]
     pub prompt: String,
+    /// `mtd->help`: the help screen `F1` and `C-h` raise, which swallows the
+    /// next key of any kind and closes. A client that draws neither the screen
+    /// nor a marker eats a key its viewer meant for a row.
+    #[serde(default)]
+    pub help: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2084,6 +2089,29 @@ pub enum ChooseTreeAction {
     KillCurrent,
     /// `X`: the same for every tagged row, inert when nothing is tagged.
     KillTagged,
+    /// `K`: `mode_tree_swap(-1)`, which trades the current window row with the
+    /// sibling above it.
+    SwapUp,
+    /// `J`: `mode_tree_swap(1)`, the same downwards.
+    SwapDown,
+    /// `O`: `sort_next_order` over `window_tree_order_seq`.
+    SortNext,
+    /// `r`: flip `sort_crit.reversed` and rebuild.
+    SortReverse,
+    /// `F1` and `C-h`: `mode_tree_display_help`.
+    Help,
+    /// `M--`: collapse every top-level item, not the current one.
+    CollapseAll,
+    /// `M-+`: expand every top-level item.
+    ExpandAll,
+    /// `m`: `server_set_marked` on the pane the row resolves to.
+    Mark,
+    /// `M`: `server_clear_marked`.
+    MarkClear,
+    /// `:`: the chooser's own command prompt, headed `(%u tagged) ` or
+    /// `(current) `, whose text runs against every tagged row or the current
+    /// one.
+    CommandPrompt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2099,6 +2127,10 @@ pub struct ChooseBufferItem {
     /// and the client draws its own row from `name`, size, and `preview`.
     #[serde(deserialize_with = "deserialize_choose_item_text")]
     pub text: String,
+    /// `mode_tree_item.tagged`: the row `t` marked, which `D` deletes and `P`
+    /// pastes as a set.
+    #[serde(default)]
+    pub tagged: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2113,6 +2145,11 @@ pub struct ChooseBufferState {
     pub search: Option<ChooseBufferSearchState>,
     pub selected: u32,
     pub filter_no_matches: bool,
+    /// `mtd->help`, the same screen `F1` and `C-h` raise over the tree. Buffer
+    /// mode raises no prompt of its own: `window_buffer_do_delete` deletes
+    /// outright, which is why `choose-tree -y` has no counterpart here.
+    #[serde(default)]
+    pub help: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2141,6 +2178,28 @@ pub enum ChooseBufferAction {
     /// A raw key press the daemon resolves through the `choose-buffer` key
     /// table, so bindings stay rebindable and identical for every client.
     Key(KeyInput),
+    /// `t`: tag the current row. The buffer tree is flat, so no row has a
+    /// parent or a child to untag first.
+    Tag,
+    /// `T`: untag every row.
+    TagNone,
+    /// `C-t`: tag every row, every one of which has an absent parent here.
+    TagAll,
+    /// `O`: `sort_next_order` over `window_buffer_order_seq`.
+    SortNext,
+    /// `r`: flip `sort_crit.reversed` and rebuild.
+    SortReverse,
+    /// `F1` and `C-h`: `mode_tree_display_help`.
+    Help,
+    /// `M--`: `mode_tree_build` over a flat tree, which changes nothing.
+    CollapseAll,
+    /// `M-+`: the same.
+    ExpandAll,
+    /// `D`: `window_buffer_do_delete` over every tagged row.
+    DeleteTagged,
+    /// `P`: `window_buffer_do_paste` over every tagged row, which closes the
+    /// chooser the way a single paste does.
+    PasteTagged,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -3884,6 +3943,7 @@ mod tests {
             created_unix_seconds: 42,
             key: "0".to_owned(),
             text: String::new(),
+            tagged: false,
         };
         let bytes = postcard::to_stdvec(&buffer).expect("buffer item");
         assert_eq!(
@@ -4252,7 +4312,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 97);
+        assert_eq!(super::PROTOCOL_VERSION, 98);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

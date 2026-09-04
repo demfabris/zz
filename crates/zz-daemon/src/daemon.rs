@@ -81,8 +81,8 @@ use crate::agent::{
 use crate::{
     DaemonError, configure_shell_job_environment, diagnostic_elapsed_us, diagnostic_timer,
     keys::{
-        choose_buffer_key_action, choose_tree_key_action, chooser_prompt_answer, client_key_inputs,
-        input_key_name, send_tokens,
+        ChooserPromptEdit, choose_buffer_key_action, choose_tree_key_action, chooser_prompt_answer,
+        chooser_prompt_edit, client_key_inputs, input_key_name, send_tokens,
     },
     lifecycle::DaemonIdentityGuard,
     paths::{
@@ -17211,25 +17211,42 @@ impl Shared {
         if read_only {
             return Ok(());
         }
-        let (result, state, delta, command, kills) = {
+        let (result, state, delta, command, runs) = {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner.choose_trees.remove(&client) else {
                 return Ok(());
             };
-            let prompt_answer = match &action {
-                ChooseTreeAction::Key(input) if chooser.prompt.is_some() => {
+            let prompt_step = match (&action, chooser.prompt.as_ref().map(|prompt| prompt.kind)) {
+                (ChooseTreeAction::Key(input), Some(ChooserPromptKind::Kill)) => {
                     let Some(answer) = chooser_prompt_answer(input) else {
                         inner.choose_trees.insert(client, chooser);
                         return Ok(());
                     };
-                    Some(answer)
+                    Some(ChooserPromptStep::Single(answer))
+                }
+                (ChooseTreeAction::Key(input), Some(ChooserPromptKind::Command)) => {
+                    let Some(edit) = chooser_prompt_edit(input) else {
+                        inner.choose_trees.insert(client, chooser);
+                        return Ok(());
+                    };
+                    Some(ChooserPromptStep::Edit(edit))
                 }
                 _ => None,
             };
+            let dismissed_help = chooser.help && prompt_step.is_none();
+            if dismissed_help {
+                chooser.help = false;
+                chooser.rendered.help = false;
+            }
             let attached_session = client_attached_session(&inner, client);
             let facts = format_hook_facts(&inner);
-            let result = if let Some(answer) = prompt_answer {
-                chooser.answer_kill_prompt(answer)
+            let result = if let Some(step) = prompt_step {
+                match step {
+                    ChooserPromptStep::Single(answer) => chooser.answer_kill_prompt(answer),
+                    ChooserPromptStep::Edit(edit) => chooser.edit_command_prompt(edit),
+                }
+            } else if dismissed_help && matches!(action, ChooseTreeAction::Key(_)) {
+                ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
             } else {
                 let action = match action {
                     ChooseTreeAction::Key(input) => {
@@ -17270,26 +17287,38 @@ impl Shared {
                 }
                 _ => None,
             };
-            let kills = match &result {
+            let runs: Vec<(String, String)> = match &result {
                 ChooseTreeResult::Kill(targets) => targets
                     .iter()
                     .filter_map(|target| {
                         choose_tree_command_target(&inner.engine, *target)
                             .ok()
-                            .map(|name| (choose_tree_kill_command(*target), name))
+                            .map(|name| (choose_tree_kill_command(*target).to_owned(), name))
+                    })
+                    .collect(),
+                ChooseTreeResult::Command { template, targets } => targets
+                    .iter()
+                    .filter_map(|target| {
+                        choose_tree_command_target(&inner.engine, *target)
+                            .ok()
+                            .map(|name| (template.clone(), name))
                     })
                     .collect(),
                 _ => Vec::new(),
             };
             if matches!(
                 result,
-                ChooseTreeResult::Updated(_) | ChooseTreeResult::Kill(_)
+                ChooseTreeResult::Updated(_)
+                    | ChooseTreeResult::Kill(_)
+                    | ChooseTreeResult::Command { .. }
+                    | ChooseTreeResult::Swap { .. }
+                    | ChooseTreeResult::Mark(_)
             ) {
                 inner.choose_trees.insert(client, chooser);
             } else if chooser.kill_source {
                 inner.chooser_kill_panes.push(chooser.source_pane);
             }
-            (result, state, delta, command, kills)
+            (result, state, delta, command, runs)
         };
 
         match result {
@@ -17303,17 +17332,45 @@ impl Shared {
             ChooseTreeResult::Close => {
                 self.publish_to_client(client, EventPayload::ChooseTree { state: None });
             }
-            ChooseTreeResult::Kill(_) => {
+            ChooseTreeResult::Kill(_) | ChooseTreeResult::Command { .. } => {
                 {
                     let mut inner = self.inner.lock();
                     if let Some(chooser) = inner.choose_trees.get_mut(&client) {
                         chooser.pending_row = Some(chooser.rendered.selected);
                     }
                 }
-                let kills: Vec<(&'static str, String)> = kills;
-                for (template, name) in kills {
-                    self.execute_chooser_command(client, context, template, &name, "choose-tree");
+                for (template, name) in runs {
+                    self.execute_chooser_command(client, context, &template, &name, "choose-tree");
                 }
+                self.refresh_choose_trees();
+            }
+            ChooseTreeResult::Swap {
+                current,
+                other,
+                row,
+            } => {
+                {
+                    let mut inner = self.inner.lock();
+                    inner
+                        .engine
+                        .state
+                        .swap_windows_keeping_current(current, other)?;
+                    if let Some(chooser) = inner.choose_trees.get_mut(&client) {
+                        chooser.pending_row = Some(row);
+                    }
+                }
+                self.publish_snapshot();
+                self.refresh_choose_trees();
+            }
+            ChooseTreeResult::Mark(pane) => {
+                {
+                    let mut inner = self.inner.lock();
+                    match pane {
+                        Some(pane) => inner.engine.state.set_marked_pane(pane)?,
+                        None => inner.engine.state.clear_marked_pane(),
+                    }
+                }
+                self.publish_snapshot();
                 self.refresh_choose_trees();
             }
             ChooseTreeResult::Activate(target) => {
@@ -17380,7 +17437,12 @@ impl Shared {
             let Some(mut chooser) = inner.choose_buffers.remove(&client) else {
                 return Ok(());
             };
+            let swallowed_help = chooser.help && matches!(action, ChooseBufferAction::Key(_));
+            if chooser.help {
+                chooser.help = false;
+            }
             let action = match action {
+                _ if swallowed_help => ChooseBufferAction::Close,
                 ChooseBufferAction::Key(input) => {
                     let searching = chooser.search.is_some();
                     if let Some(row) =
@@ -17409,16 +17471,20 @@ impl Shared {
             if attached_session != Some(chooser.source_session)
                 || source_session != Some(chooser.source_session)
             {
-                (ChooseBufferInputOutcome::Close, None)
+                (ChooseBufferInputOutcome::Close, Vec::new())
             } else {
-                let result = match chooser.apply(action, &inner.paste_buffers) {
-                    Ok(result) => result,
-                    Err(error) => {
-                        inner.choose_buffers.insert(client, chooser);
-                        return Err(error.into());
+                let result = if swallowed_help {
+                    ChooseBufferResult::Rebuild
+                } else {
+                    match chooser.apply(action, &inner.paste_buffers) {
+                        Ok(result) => result,
+                        Err(error) => {
+                            inner.choose_buffers.insert(client, chooser);
+                            return Err(error.into());
+                        }
                     }
                 };
-                let mut deleted = None;
+                let mut deleted = Vec::new();
                 let kill_source = chooser.kill_source.then_some(chooser.source_pane);
                 let outcome = match result {
                     ChooseBufferResult::Updated => {
@@ -17427,9 +17493,23 @@ impl Shared {
                         inner.choose_buffers.insert(client, chooser);
                         ChooseBufferInputOutcome::Delta { search, selected }
                     }
-                    ChooseBufferResult::Delete(name) => {
-                        inner.paste_buffers.retain(|buffer| buffer.name != name);
-                        deleted = Some(name);
+                    ChooseBufferResult::Rebuild => {
+                        let facts = format_hook_facts(&inner);
+                        chooser.rebuild(
+                            &inner.engine,
+                            &inner.paste_buffers,
+                            attached_session,
+                            &facts,
+                        );
+                        let state = chooser.rendered.clone();
+                        inner.choose_buffers.insert(client, chooser);
+                        ChooseBufferInputOutcome::Full(Some(state))
+                    }
+                    ChooseBufferResult::Delete(names) => {
+                        inner
+                            .paste_buffers
+                            .retain(|buffer| !names.contains(&buffer.name));
+                        deleted = names;
                         chooser.selected = None;
                         let facts = format_hook_facts(&inner);
                         chooser.rebuild(
@@ -17446,18 +17526,27 @@ impl Shared {
                             ChooseBufferInputOutcome::Full(Some(state))
                         }
                     }
-                    ChooseBufferResult::Paste(name)
-                        if inner.paste_buffers.iter().any(|buffer| buffer.name == name) =>
-                    {
-                        ChooseBufferInputOutcome::Select {
-                            pane: chooser.source_pane,
-                            name,
-                            template: chooser.template.clone(),
+                    ChooseBufferResult::Paste(names) => {
+                        let names = names
+                            .into_iter()
+                            .filter(|name| {
+                                inner
+                                    .paste_buffers
+                                    .iter()
+                                    .any(|buffer| buffer.name == *name)
+                            })
+                            .collect::<Vec<_>>();
+                        if names.is_empty() {
+                            ChooseBufferInputOutcome::Close
+                        } else {
+                            ChooseBufferInputOutcome::Select {
+                                pane: chooser.source_pane,
+                                names,
+                                template: chooser.template.clone(),
+                            }
                         }
                     }
-                    ChooseBufferResult::Paste(_) | ChooseBufferResult::Close => {
-                        ChooseBufferInputOutcome::Close
-                    }
+                    ChooseBufferResult::Close => ChooseBufferInputOutcome::Close,
                 };
                 if let Some(pane) = kill_source
                     && !inner.choose_buffers.contains_key(&client)
@@ -17468,11 +17557,13 @@ impl Shared {
             }
         };
 
-        if let Some(name) = deleted {
-            self.run_event_hooks(vec![PendingHookEvent::paste_buffer(
-                "paste-buffer-deleted",
-                name,
-            )]);
+        if !deleted.is_empty() {
+            self.run_event_hooks(
+                deleted
+                    .into_iter()
+                    .map(|name| PendingHookEvent::paste_buffer("paste-buffer-deleted", name))
+                    .collect(),
+            );
         }
 
         match outcome {
@@ -17488,7 +17579,7 @@ impl Shared {
             }
             ChooseBufferInputOutcome::Select {
                 pane,
-                name,
+                names,
                 template,
             } => {
                 self.publish_to_client(client, EventPayload::ChooseBuffer { state: None });
@@ -17501,27 +17592,29 @@ impl Shared {
                         context.pane.unwrap_or(pane)
                     }
                 };
-                if let Some(template) = template {
-                    self.execute_chooser_command(
-                        client,
-                        context,
-                        &template,
-                        &name,
-                        "choose-buffer",
-                    );
-                } else {
-                    self.paste_buffer_to_pane(
-                        pane,
-                        PasteBufferPaste {
-                            requested_name: Some(&name),
-                            delete: false,
-                            bracketed: true,
-                            separator: b"\r",
-                            literal: false,
-                            expected_client: Some(client),
-                            event_hooks_enabled: true,
-                        },
-                    )?;
+                for name in names {
+                    if let Some(template) = template.as_deref() {
+                        self.execute_chooser_command(
+                            client,
+                            context,
+                            template,
+                            &name,
+                            "choose-buffer",
+                        );
+                    } else {
+                        self.paste_buffer_to_pane(
+                            pane,
+                            PasteBufferPaste {
+                                requested_name: Some(&name),
+                                delete: false,
+                                bracketed: true,
+                                separator: b"\r",
+                                literal: false,
+                                expected_client: Some(client),
+                                event_hooks_enabled: true,
+                            },
+                        )?;
+                    }
                 }
             }
             ChooseBufferInputOutcome::Close => {
@@ -26487,8 +26580,15 @@ fn display_panes_escape_key() -> zz_terminal::KeyInput {
 enum ChooseBufferResult {
     Updated,
     Close,
-    Paste(String),
-    Delete(String),
+    /// `window_buffer_do_paste` over the current row or, for `P`, over every
+    /// tagged one. `P` closes the mode even when it pasted nothing.
+    Paste(Vec<String>),
+    /// `window_buffer_do_delete` over the current row or, for `D`, over every
+    /// tagged one, which deletes nothing at all when nothing is tagged.
+    Delete(Vec<String>),
+    /// `mode_tree_build`: the tags, the sort order and the help screen all
+    /// redraw the whole mode.
+    Rebuild,
 }
 
 enum ChooseBufferInputOutcome {
@@ -26499,7 +26599,7 @@ enum ChooseBufferInputOutcome {
     Full(Option<ChooseBufferState>),
     Select {
         pane: PaneId,
-        name: String,
+        names: Vec<String>,
         template: Option<String>,
     },
     Close,
@@ -26512,6 +26612,11 @@ struct ChooseBufferSession {
     filter: Option<String>,
     format: Option<String>,
     kill_source: bool,
+    /// `mode_tree_item.tagged`, kept by buffer name so a rebuild carries the
+    /// tags the way the tree chooser keeps them by target.
+    tagged: BTreeSet<String>,
+    /// `mtd->help`: the screen `F1` and `C-h` raise, closed by the next key.
+    help: bool,
     sort: TmuxSort,
     key_format: Option<String>,
     template: Option<String>,
@@ -26549,6 +26654,8 @@ impl ChooseBufferSession {
             filter,
             format,
             kill_source,
+            tagged: BTreeSet::new(),
+            help: false,
             sort,
             key_format,
             template: None,
@@ -26561,6 +26668,7 @@ impl ChooseBufferSession {
                 search: None,
                 selected: 0,
                 filter_no_matches: false,
+                help: false,
             },
         };
         chooser.rebuild(engine, buffers, attached_session, facts);
@@ -26674,6 +26782,7 @@ impl ChooseBufferSession {
                     .as_secs(),
                 key,
                 text,
+                tagged: self.tagged.contains(&buffer.name),
             });
         }
         let previous_index = usize::try_from(self.rendered.selected).unwrap_or(usize::MAX);
@@ -26684,11 +26793,13 @@ impl ChooseBufferSession {
             .unwrap_or(previous_index)
             .min(items.len().saturating_sub(1));
         self.selected = self.names.get(selected).cloned();
+        self.tagged.retain(|name| self.names.contains(name));
         self.rendered = ChooseBufferState {
             items,
             search: self.search.clone(),
             selected: u32::try_from(selected).unwrap_or(u32::MAX),
             filter_no_matches,
+            help: self.help,
         };
     }
 
@@ -26723,19 +26834,25 @@ impl ChooseBufferSession {
                 return Ok(self
                     .selected
                     .clone()
-                    .map_or(ChooseBufferResult::Updated, ChooseBufferResult::Paste));
+                    .map_or(ChooseBufferResult::Updated, |name| {
+                        ChooseBufferResult::Paste(vec![name])
+                    }));
             }
             ChooseBufferAction::Paste => {
                 return Ok(self
                     .selected
                     .clone()
-                    .map_or(ChooseBufferResult::Updated, ChooseBufferResult::Paste));
+                    .map_or(ChooseBufferResult::Updated, |name| {
+                        ChooseBufferResult::Paste(vec![name])
+                    }));
             }
             ChooseBufferAction::Delete => {
                 return Ok(self
                     .selected
                     .clone()
-                    .map_or(ChooseBufferResult::Updated, ChooseBufferResult::Delete));
+                    .map_or(ChooseBufferResult::Updated, |name| {
+                        ChooseBufferResult::Delete(vec![name])
+                    }));
             }
             ChooseBufferAction::SearchStart { reverse } => {
                 self.search = Some(ChooseBufferSearchState {
@@ -26790,9 +26907,57 @@ impl ChooseBufferSession {
                 }
             }
             ChooseBufferAction::Close => return Ok(ChooseBufferResult::Close),
+            ChooseBufferAction::Tag => {
+                if let Some(name) = self.names.get(current).cloned()
+                    && !self.tagged.remove(&name)
+                {
+                    self.tagged.insert(name);
+                }
+                self.select_index((current + 1).min(len - 1));
+                return Ok(ChooseBufferResult::Rebuild);
+            }
+            ChooseBufferAction::TagNone => {
+                self.tagged.clear();
+                return Ok(ChooseBufferResult::Rebuild);
+            }
+            ChooseBufferAction::TagAll => {
+                self.tagged = self.names.iter().cloned().collect();
+                return Ok(ChooseBufferResult::Rebuild);
+            }
+            ChooseBufferAction::SortNext => {
+                self.sort.next_order(&zz_mux::WINDOW_BUFFER_ORDER_SEQ);
+                return Ok(ChooseBufferResult::Rebuild);
+            }
+            ChooseBufferAction::SortReverse => {
+                self.sort.reverse();
+                return Ok(ChooseBufferResult::Rebuild);
+            }
+            ChooseBufferAction::Help => {
+                self.help = true;
+                return Ok(ChooseBufferResult::Rebuild);
+            }
+            ChooseBufferAction::CollapseAll | ChooseBufferAction::ExpandAll => {
+                return Ok(ChooseBufferResult::Rebuild);
+            }
+            ChooseBufferAction::DeleteTagged => {
+                return Ok(ChooseBufferResult::Delete(self.tagged_names()));
+            }
+            ChooseBufferAction::PasteTagged => {
+                return Ok(ChooseBufferResult::Paste(self.tagged_names()));
+            }
             ChooseBufferAction::Key(_) => {}
         }
         Ok(ChooseBufferResult::Updated)
+    }
+
+    /// `mode_tree_each_tagged` with no fallback to the current row, which is
+    /// what `D` and `P` pass, so an empty tag set means an empty run.
+    fn tagged_names(&self) -> Vec<String> {
+        self.names
+            .iter()
+            .filter(|name| self.tagged.contains(*name))
+            .cloned()
+            .collect()
     }
 
     fn select_index(&mut self, index: usize) {
@@ -26927,6 +27092,19 @@ fn choose_tree_kill_prompt(engine: &MuxEngine, target: ChooseTreeTarget) -> Opti
     }
 }
 
+/// `window_tree_pull_item`: a session row resolves to its current window's
+/// active pane and a window row to its own active pane, which is the pane
+/// `server_set_marked` takes.
+fn choose_tree_row_pane(engine: &MuxEngine, target: ChooseTreeTarget) -> Option<PaneId> {
+    let state = &engine.state;
+    let window = match target {
+        ChooseTreeTarget::Pane(pane) => return state.window_for_pane(pane).map(|_| pane),
+        ChooseTreeTarget::Window(window) => window,
+        ChooseTreeTarget::Session(session) => state.sessions.get(&session)?.active_window,
+    };
+    Some(state.windows.get(&window)?.active_pane)
+}
+
 fn choose_tree_kill_command(target: ChooseTreeTarget) -> &'static str {
     match target {
         ChooseTreeTarget::Session(_) => "kill-session -t %%",
@@ -26989,15 +27167,56 @@ enum ChooseTreeResult {
     /// `window_tree_kill_each` over the current row or over every tagged one,
     /// which leaves the mode open and rebuilds it.
     Kill(Vec<ChooseTreeTarget>),
+    /// `window_tree_command_each`: the line the `:` prompt took, run once per
+    /// tagged row or once for the current row when none is tagged.
+    Command {
+        template: String,
+        targets: Vec<ChooseTreeTarget>,
+    },
+    /// `window_tree_swap` through `mode_tree_swap`: two window rows trade
+    /// slots and the mode rebuilds on the row the current one moved to.
+    Swap {
+        current: zz_protocol::WindowId,
+        other: zz_protocol::WindowId,
+        row: u32,
+    },
+    /// `server_set_marked` on the pane a row resolves to, or
+    /// `server_clear_marked` for `M`.
+    Mark(Option<PaneId>),
 }
 
-/// `mode_tree_set_prompt`'s state for the two kill keys: the string the pin
-/// builds from the row it is about, and whether the answer kills the tagged
-/// set or the current row.
+/// `mtd->prompt`. `PROMPT_SINGLE` takes one character as the whole answer and
+/// is what the two kill keys raise; the `:` prompt is an edited line instead,
+/// which is also why `PROMPT_ACCEPT` never answers it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChooserPromptKind {
+    Kill,
+    Command,
+}
+
+/// `mode_tree_set_prompt`'s state: the string the pin builds from the rows it
+/// is about, the line typed into it so far, and the rows the answer acts on.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ChooserKillPrompt {
+struct ChooserPrompt {
+    kind: ChooserPromptKind,
     text: String,
+    input: String,
     targets: Vec<ChooseTreeTarget>,
+}
+
+impl ChooserPrompt {
+    /// What the mode's screen shows: the prompt string with the line typed so
+    /// far after it, which is empty for a `PROMPT_SINGLE` answer.
+    fn line(&self) -> String {
+        format!("{}{}", self.text, self.input)
+    }
+}
+
+/// What a key press means to an open chooser prompt, which `prompt_key` decides
+/// from the prompt's own flags rather than from the chooser's key table.
+enum ChooserPromptStep {
+    Single(char),
+    Edit(ChooserPromptEdit),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27023,9 +27242,12 @@ struct ChooseTreeSession {
     /// `mode_tree_item.tagged`, kept by target rather than by row so a rebuild
     /// carries the tags.
     tagged: BTreeSet<ChooseTreeTarget>,
-    /// `mtd->prompt`: the chooser's own confirm prompt, which answers a key
-    /// before the chooser's vocabulary sees it and dies with the chooser.
-    prompt: Option<ChooserKillPrompt>,
+    /// `mtd->prompt`: the chooser's own prompt, which answers a key before the
+    /// chooser's vocabulary sees it and dies with the chooser.
+    prompt: Option<ChooserPrompt>,
+    /// `mtd->help`: the help screen `F1` and `C-h` raise, which the next key of
+    /// any kind closes without doing anything else.
+    help: bool,
     /// `mtd->current` is a line index, so the row a kill emptied keeps its
     /// place in the rebuilt tree instead of falling back to the source pane.
     pending_row: Option<u32>,
@@ -27095,6 +27317,7 @@ impl ChooseTreeSession {
             prompt_accept,
             tagged: BTreeSet::new(),
             prompt: None,
+            help: false,
             pending_row: None,
             sort,
             key_format,
@@ -27111,6 +27334,7 @@ impl ChooseTreeSession {
                 kind,
                 filter_no_matches: false,
                 prompt: String::new(),
+                help: false,
             },
         };
         chooser.rebuild(engine, attached_session, facts);
@@ -27155,36 +27379,7 @@ impl ChooseTreeSession {
                 .filter(|window| state.windows.contains_key(window))
                 .collect::<Vec<_>>();
             self.sort.apply(&mut windows, |left, right| {
-                let left = &state.windows[left];
-                let right = &state.windows[right];
-                let ordering = match self.sort.order() {
-                    Some(TmuxSortOrder::Activity) => right.activity.cmp(&left.activity),
-                    Some(TmuxSortOrder::Creation) => left.created.cmp(&right.created),
-                    Some(TmuxSortOrder::Index) => left.index.cmp(&right.index),
-                    Some(TmuxSortOrder::Name) => left.name.cmp(&right.name),
-                    Some(TmuxSortOrder::Size) => {
-                        let left_extent = (
-                            engine
-                                .window_extent(left.id, zz_protocol::Axis::Horizontal)
-                                .unwrap_or_default(),
-                            engine
-                                .window_extent(left.id, zz_protocol::Axis::Vertical)
-                                .unwrap_or_default(),
-                        );
-                        let right_extent = (
-                            engine
-                                .window_extent(right.id, zz_protocol::Axis::Horizontal)
-                                .unwrap_or_default(),
-                            engine
-                                .window_extent(right.id, zz_protocol::Axis::Vertical)
-                                .unwrap_or_default(),
-                        );
-                        (u32::from(left_extent.0) * u32::from(left_extent.1))
-                            .cmp(&(u32::from(right_extent.0) * u32::from(right_extent.1)))
-                    }
-                    _ => std::cmp::Ordering::Equal,
-                };
-                ordering.then_with(|| left.name.cmp(&right.name))
+                self.window_sort_ordering(engine, *left, *right)
             });
 
             let mut visible_windows = Vec::new();
@@ -27254,6 +27449,39 @@ impl ChooseTreeSession {
             }
         }
         branches
+    }
+
+    /// `sort_winlink_cmp` for two window rows: the criterion first, then the
+    /// window name, and never the reversal, which the caller applies.
+    fn window_sort_ordering(
+        &self,
+        engine: &MuxEngine,
+        left: WindowId,
+        right: WindowId,
+    ) -> std::cmp::Ordering {
+        let state = &engine.state;
+        let (Some(left), Some(right)) = (state.windows.get(&left), state.windows.get(&right))
+        else {
+            return std::cmp::Ordering::Equal;
+        };
+        let area = |window: WindowId| {
+            let columns = engine
+                .window_extent(window, zz_protocol::Axis::Horizontal)
+                .unwrap_or_default();
+            let rows = engine
+                .window_extent(window, zz_protocol::Axis::Vertical)
+                .unwrap_or_default();
+            u32::from(columns) * u32::from(rows)
+        };
+        let ordering = match self.sort.order() {
+            Some(TmuxSortOrder::Activity) => right.activity.cmp(&left.activity),
+            Some(TmuxSortOrder::Creation) => left.created.cmp(&right.created),
+            Some(TmuxSortOrder::Index) => left.index.cmp(&right.index),
+            Some(TmuxSortOrder::Name) => left.name.cmp(&right.name),
+            Some(TmuxSortOrder::Size) => area(left.id).cmp(&area(right.id)),
+            _ => std::cmp::Ordering::Equal,
+        };
+        ordering.then_with(|| left.name.cmp(&right.name))
     }
 
     /// A `-K` format expands in the row's own context, the way
@@ -27485,8 +27713,8 @@ impl ChooseTreeSession {
             prompt: self
                 .prompt
                 .as_ref()
-                .map(|prompt| prompt.text.clone())
-                .unwrap_or_default(),
+                .map_or_else(String::new, ChooserPrompt::line),
+            help: self.help,
         };
         self.tagged.retain(|target| {
             self.rendered
@@ -27677,9 +27905,142 @@ impl ChooseTreeSession {
                 let text = format!("Kill {} tagged? ", targets.len());
                 return Ok(self.raise_kill_prompt(text, targets));
             }
+            ChooseTreeAction::SwapUp => return Ok(self.swap(engine, current, false)),
+            ChooseTreeAction::SwapDown => return Ok(self.swap(engine, current, true)),
+            ChooseTreeAction::SortNext => {
+                self.sort.next_order(&zz_mux::WINDOW_TREE_ORDER_SEQ);
+                self.rebuild(engine, attached_session, facts);
+                update = ChooseTreeUpdateKind::Full;
+            }
+            ChooseTreeAction::SortReverse => {
+                self.sort.reverse();
+                self.rebuild(engine, attached_session, facts);
+                update = ChooseTreeUpdateKind::Full;
+            }
+            ChooseTreeAction::Help => {
+                self.help = true;
+                self.rendered.help = true;
+                update = ChooseTreeUpdateKind::Full;
+            }
+            ChooseTreeAction::CollapseAll | ChooseTreeAction::ExpandAll => {
+                let expanded = matches!(action, ChooseTreeAction::ExpandAll);
+                let roots = self
+                    .rendered
+                    .items
+                    .iter()
+                    .filter(|item| item.depth == 0)
+                    .map(|item| item.target)
+                    .collect::<Vec<_>>();
+                for root in roots {
+                    self.set_expanded(root, expanded);
+                }
+                self.rebuild(engine, attached_session, facts);
+                update = ChooseTreeUpdateKind::Full;
+            }
+            ChooseTreeAction::Mark => {
+                let Some(target) = self.rendered.items.get(current).map(|item| item.target) else {
+                    return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
+                };
+                return Ok(ChooseTreeResult::Mark(choose_tree_row_pane(engine, target)));
+            }
+            ChooseTreeAction::MarkClear => return Ok(ChooseTreeResult::Mark(None)),
+            ChooseTreeAction::CommandPrompt => {
+                let tagged = self
+                    .rendered
+                    .items
+                    .iter()
+                    .filter(|item| self.tagged.contains(&item.target))
+                    .map(|item| item.target)
+                    .collect::<Vec<_>>();
+                let text = if tagged.is_empty() {
+                    "(current) ".to_owned()
+                } else {
+                    format!("({} tagged) ", tagged.len())
+                };
+                let targets = if tagged.is_empty() {
+                    self.rendered
+                        .items
+                        .get(current)
+                        .map(|item| item.target)
+                        .into_iter()
+                        .collect()
+                } else {
+                    tagged
+                };
+                self.prompt = Some(ChooserPrompt {
+                    kind: ChooserPromptKind::Command,
+                    text,
+                    input: String::new(),
+                    targets,
+                });
+                self.rendered.prompt = self
+                    .prompt
+                    .as_ref()
+                    .map_or_else(String::new, ChooserPrompt::line);
+                update = ChooseTreeUpdateKind::Full;
+            }
             ChooseTreeAction::Key(_) => {}
         }
         Ok(ChooseTreeResult::Updated(update))
+    }
+
+    /// `mode_tree_swap`: walk to the next line at the same depth, skipping the
+    /// deeper rows under the current one, and hand the pair to
+    /// `window_tree_swap`, which trades only two window rows of one session and
+    /// refuses a trade the sort order would undo.
+    fn swap(&mut self, engine: &MuxEngine, current: usize, down: bool) -> ChooseTreeResult {
+        let stay = ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta);
+        let Some(row) = self.rendered.items.get(current) else {
+            return stay;
+        };
+        let depth = row.depth;
+        let mut candidate = current;
+        let other = loop {
+            candidate = if down {
+                match candidate.checked_add(1) {
+                    Some(next) if next < self.rendered.items.len() => next,
+                    _ => return stay,
+                }
+            } else {
+                match candidate.checked_sub(1) {
+                    Some(previous) => previous,
+                    None => return stay,
+                }
+            };
+            let entry = &self.rendered.items[candidate];
+            if entry.depth < depth {
+                return stay;
+            }
+            if entry.depth == depth {
+                break entry;
+            }
+        };
+        let (ChooseTreeTarget::Window(current_window), ChooseTreeTarget::Window(other_window)) =
+            (row.target, other.target)
+        else {
+            return stay;
+        };
+        let state = &engine.state;
+        let (Some(left), Some(right)) = (
+            state.windows.get(&current_window),
+            state.windows.get(&other_window),
+        ) else {
+            return stay;
+        };
+        if left.session != right.session {
+            return stay;
+        }
+        if self.sort.order() != Some(TmuxSortOrder::Index)
+            && self.window_sort_ordering(engine, current_window, other_window)
+                != std::cmp::Ordering::Equal
+        {
+            return stay;
+        }
+        ChooseTreeResult::Swap {
+            current: current_window,
+            other: other_window,
+            row: u32::try_from(candidate).unwrap_or(u32::MAX),
+        }
     }
 
     /// `mode_tree_key`'s `t`: every parent and every child of the current row
@@ -27720,7 +28081,52 @@ impl ChooseTreeSession {
             return ChooseTreeResult::Kill(targets);
         }
         self.rendered.prompt.clone_from(&text);
-        self.prompt = Some(ChooserKillPrompt { text, targets });
+        self.prompt = Some(ChooserPrompt {
+            kind: ChooserPromptKind::Kill,
+            text,
+            input: String::new(),
+            targets,
+        });
+        ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
+    }
+
+    /// `prompt_key` on the `:` prompt, which is an ordinary edited line:
+    /// `window_tree_command_callback` runs it once per tagged row and an empty
+    /// line runs nothing at all.
+    fn edit_command_prompt(&mut self, edit: ChooserPromptEdit) -> ChooseTreeResult {
+        let Some(prompt) = self.prompt.as_mut() else {
+            return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta);
+        };
+        match edit {
+            ChooserPromptEdit::Append(text) => {
+                if prompt.input.len().saturating_add(text.len()) <= MAX_CHOOSE_TREE_QUERY_BYTES {
+                    prompt.input.push_str(&text);
+                }
+            }
+            ChooserPromptEdit::Backspace => {
+                prompt.input.pop();
+            }
+            ChooserPromptEdit::Cancel => {
+                self.prompt = None;
+                self.rendered.prompt.clear();
+                return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full);
+            }
+            ChooserPromptEdit::Accept => {
+                let prompt = self.prompt.take().expect("the prompt was just borrowed");
+                self.rendered.prompt.clear();
+                if prompt.input.is_empty() {
+                    return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full);
+                }
+                return ChooseTreeResult::Command {
+                    template: prompt.input,
+                    targets: prompt.targets,
+                };
+            }
+        }
+        self.rendered.prompt = self
+            .prompt
+            .as_ref()
+            .map_or_else(String::new, ChooserPrompt::line);
         ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
     }
 
@@ -72584,7 +72990,7 @@ bind - split-window -v -c "#{pane_current_path}"
             chooser
                 .apply(ChooseBufferAction::Paste, &buffers)
                 .expect("paste selected"),
-            ChooseBufferResult::Paste(name) if name == "older"
+            ChooseBufferResult::Paste(names) if names == ["older"]
         ));
     }
 

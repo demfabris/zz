@@ -55,7 +55,7 @@ pub use parser::{
     ParsedConfigBytes, command_block_body, config_home_directory_names, parse_config,
     parse_config_with_home_directories, user_home,
 };
-pub use sort::{TmuxSort, TmuxSortOrder};
+pub use sort::{TmuxSort, TmuxSortOrder, WINDOW_BUFFER_ORDER_SEQ, WINDOW_TREE_ORDER_SEQ};
 pub use status::{
     DEFAULT_STATUS_INTERVAL, DEFAULT_STATUS_LEFT, DEFAULT_STATUS_RIGHT, DEFAULT_STATUS_STYLE,
     DEFAULT_WINDOW_STATUS_FORMAT, FormatUniverse, StatusContext, StatusFormats, StatusHooks,

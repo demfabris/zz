@@ -14,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_ninety_seven() {
-    assert_eq!(PROTOCOL_VERSION, 97);
+fn protocol_version_on_this_commit_is_ninety_eight() {
+    assert_eq!(PROTOCOL_VERSION, 98);
 }
 
 #[test]
@@ -45,13 +45,14 @@ fn chooser_states_append_the_v72_filter_fallback_flag() {
         kind: zz_protocol::ChooseTreeKind::Panes,
         filter_no_matches: true,
         prompt: String::new(),
+        help: false,
     };
     assert_eq!(
         postcard::to_stdvec(&tree).expect("encode tree chooser state"),
-        [0, 0, 2, 1, 1, 0]
+        [0, 0, 2, 1, 1, 0, 0]
     );
     assert_eq!(
-        postcard::from_bytes::<zz_protocol::ChooseTreeState>(&[0, 0, 2, 1, 1, 0])
+        postcard::from_bytes::<zz_protocol::ChooseTreeState>(&[0, 0, 2, 1, 1, 0, 0])
             .expect("decode tree chooser state"),
         tree
     );
@@ -61,13 +62,14 @@ fn chooser_states_append_the_v72_filter_fallback_flag() {
         search: None,
         selected: 3,
         filter_no_matches: true,
+        help: false,
     };
     assert_eq!(
         postcard::to_stdvec(&buffer).expect("encode buffer chooser state"),
-        [0, 0, 3, 1]
+        [0, 0, 3, 1, 0]
     );
     assert_eq!(
-        postcard::from_bytes::<zz_protocol::ChooseBufferState>(&[0, 0, 3, 1])
+        postcard::from_bytes::<zz_protocol::ChooseBufferState>(&[0, 0, 3, 1, 0])
             .expect("decode buffer chooser state"),
         buffer
     );
@@ -319,7 +321,7 @@ fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x61, 0x00, 0x00, 0x61, 0x00, 0x00, 0x00, 0x00,
+            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x62, 0x00, 0x00, 0x62, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00, 0x00, 0x07,
         ]
     );

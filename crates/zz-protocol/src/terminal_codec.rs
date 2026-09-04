@@ -4565,6 +4565,7 @@ mod tests {
                     kind: crate::ChooseTreeKind::Windows,
                     filter_no_matches: true,
                     prompt: String::new(),
+                    help: false,
                 }),
             },
         });
@@ -4603,10 +4604,12 @@ mod tests {
                         created_unix_seconds: 42,
                         key: String::new(),
                         text: String::new(),
+                        tagged: false,
                     }],
                     search: None,
                     selected: 0,
                     filter_no_matches: true,
+                    help: false,
                 }),
             },
         });

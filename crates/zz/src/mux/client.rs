@@ -4578,6 +4578,7 @@ mod tests {
                 kind: zz_protocol::ChooseTreeKind::Windows,
                 filter_no_matches: false,
                 prompt: String::new(),
+                help: false,
             }),
         });
     }

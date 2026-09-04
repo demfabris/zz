@@ -78,6 +78,10 @@ impl ChooserSpec for BufferChooser {
         })
     }
 
+    fn help(state: &Self::State) -> bool {
+        state.help
+    }
+
     fn title(_: &Self::State) -> &'static str {
         "Paste buffer"
     }
@@ -135,6 +139,7 @@ fn buffer_row(
         preview,
         size,
         age,
+        item.tagged,
         selected,
         theme,
         TERMINAL_FONT,
@@ -224,6 +229,7 @@ mod tests {
             created_unix_seconds: 0,
             key: "0".to_owned(),
             text: String::new(),
+            tagged: false,
         };
         let (name, preview, size, _) = buffer_row_text(&item);
         assert_eq!(

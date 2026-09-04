@@ -73,6 +73,12 @@ pub(crate) trait ChooserSpec: Default + 'static {
     fn prompt(_: &Self::State) -> Option<&str> {
         None
     }
+    /// `mtd->help`: the help screen the mode raises, which swallows the next
+    /// key of any kind. A client that draws nothing here eats that key
+    /// silently.
+    fn help(_: &Self::State) -> bool {
+        false
+    }
     fn title(state: &Self::State) -> &'static str;
     fn subtitle(state: &Self::State, count: usize) -> String;
     fn row(
@@ -347,6 +353,7 @@ impl<S: ChooserSpec> Render for Chooser<S> {
             TERMINAL_FONT,
         )
         .prompt(S::prompt(&state).map(|prompt| prompt.to_owned().into()))
+        .help(S::help(&state))
         .search(search)
         .hints(S::HINTS);
 

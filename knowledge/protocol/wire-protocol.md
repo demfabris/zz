@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v97)
+title: zz wire protocol (v98)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 97`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 98`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (97) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (98) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -614,9 +614,27 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 97`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 98`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v98 carries the rest of `mode_tree_key`'s vocabulary over both choosers. `ChooseTreeAction`
+  gains ten variants appended after `KillTagged`: `SwapUp`, `SwapDown`, `SortNext`, `SortReverse`,
+  `Help`, `CollapseAll`, `ExpandAll`, `Mark`, `MarkClear` and `CommandPrompt`, the actions the
+  daemon resolves `K`, `J`, `O`, `r`, `F1`/`C-h`, `M--`, `M-+`, `m`, `M` and `:` to through the
+  `choose-tree` key table. `ChooseBufferAction` gains ten appended after `Key`: `Tag`, `TagNone`,
+  `TagAll`, `SortNext`, `SortReverse`, `Help`, `CollapseAll`, `ExpandAll`, `DeleteTagged` and
+  `PasteTagged`, for `t`, `T`, `C-t`, `O`, `r`, `F1`/`C-h`, `M--`, `M-+`, `D` and `P`.
+  `ChooseTreeState` gains `help: bool` appended after `prompt`, and `ChooseBufferState` gains the
+  same `help: bool` appended after `filter_no_matches`: `mtd->help` is the help screen the mode
+  draws over its rows, and the next key of any kind closes it and does nothing else, so a client
+  that draws neither the screen nor a marker eats a key its viewer meant for a row.
+  `ChooseBufferItem` gains `tagged: bool` appended after `text`, the buffer chooser's half of the
+  `TAGGED` bit the tree rows already carry. `ChooseTreeState.prompt` is unchanged in type but now
+  also carries the `:` command prompt with the line typed into it so far, where before it only
+  carried the single-key kill confirmation. `ChooseBufferAction` reaches the wire through
+  `InputMessage::ChooseBuffer` and `ChooseBufferState` through `EventPayload::ChooseBuffer`.
+  Nothing is inserted and nothing is removed; a v97 peer cannot decode the appended variants or
+  the appended fields.
 - v97 carries the chooser's own kill vocabulary. `ChooseTreeAction` gains five variants appended
   after `Key`: `Tag`, `TagNone`, `TagAll`, `KillCurrent` and `KillTagged`, the actions the daemon
   resolves `t`, `T`, `C-t`, `x` and `X` to through the `choose-tree` key table. `ChooseTreeState`

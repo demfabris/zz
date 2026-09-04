@@ -1527,6 +1527,7 @@ mod tests {
                 kind: zz_protocol::ChooseTreeKind::Windows,
                 filter_no_matches: true,
                 prompt: String::new(),
+                help: false,
             }),
         }));
         core.handle_message(event(EventPayload::ChooseTreeUpdate {
@@ -1549,6 +1550,7 @@ mod tests {
                 search: None,
                 selected: 0,
                 filter_no_matches: true,
+                help: false,
             }),
         }));
         core.handle_message(event(EventPayload::ChooseBufferUpdate {
@@ -1703,12 +1705,14 @@ mod tests {
             kind: zz_protocol::ChooseTreeKind::Windows,
             filter_no_matches: false,
             prompt: String::new(),
+            help: false,
         });
         core.choose_buffer = Some(ChooseBufferState {
             items: Vec::new(),
             search: None,
             selected: 0,
             filter_no_matches: false,
+            help: false,
         });
         core.display_panes = Some(DisplayPanesState {
             window: zz_protocol::WindowId(2),

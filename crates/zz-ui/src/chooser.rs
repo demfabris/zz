@@ -67,6 +67,7 @@ pub struct ChooserModal {
     rows: AnyElement,
     close: AnyElement,
     prompt: Option<SharedString>,
+    help: bool,
     search: Option<ChooserSearch>,
     hints: &'static [ChooserHint],
     font_family: SharedString,
@@ -90,6 +91,7 @@ impl ChooserModal {
             rows: rows.into_any_element(),
             close: close.into_any_element(),
             prompt: None,
+            help: false,
             search: None,
             hints: &[],
             font_family: font_family.into(),
@@ -102,6 +104,15 @@ impl ChooserModal {
     #[must_use]
     pub fn prompt(mut self, prompt: Option<SharedString>) -> Self {
         self.prompt = prompt;
+        self
+    }
+
+    /// `mtd->help`: the mode's help screen stands until the next key of any
+    /// kind, and that key does nothing else. A client that draws nothing here
+    /// eats a key its viewer meant for a row.
+    #[must_use]
+    pub const fn help(mut self, help: bool) -> Self {
+        self.help = help;
         self
     }
 
@@ -170,6 +181,21 @@ impl RenderOnce for ChooserModal {
                     .child(div().flex_1())
                     .child(self.close),
             )
+            .when(self.help, |modal| {
+                modal.child(
+                    div()
+                        .flex_none()
+                        .px(px(16.0))
+                        .py(px(9.0))
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .bg(cx.theme().background.raised(2))
+                        .font_family(self.font_family.clone())
+                        .text_size(crate::rems_from_px(11.0))
+                        .text_color(cx.theme().foreground)
+                        .child("Help — the next key closes this and does nothing else"),
+                )
+            })
             .children(self.prompt.map(|prompt| {
                 div()
                     .flex_none()
@@ -441,6 +467,7 @@ pub fn tree_chooser_row(
         )
 }
 
+#[allow(clippy::fn_params_excessive_bools)]
 pub fn buffer_chooser_row(
     id: &'static str,
     index: usize,
@@ -450,6 +477,7 @@ pub fn buffer_chooser_row(
     preview: impl Into<SharedString>,
     size: impl Into<SharedString>,
     age: impl Into<SharedString>,
+    tagged: bool,
     selected: bool,
     theme: ChooserRowTheme,
     font_family: impl Into<SharedString>,
@@ -506,11 +534,21 @@ pub fn buffer_chooser_row(
                         .w(px(54.0))
                         .flex_none()
                         .text_right()
-                        .font_family(font_family)
+                        .font_family(font_family.clone())
                         .text_size(crate::rems_from_px(9.0))
                         .text_color(theme.foreground.muted())
                         .child(age.into()),
-                ),
+                )
+                .when(tagged, |row| {
+                    row.child(
+                        Tag::primary()
+                            .small()
+                            .ml(px(8.0))
+                            .font_family(font_family)
+                            .text_size(crate::rems_from_px(9.0))
+                            .child("TAGGED"),
+                    )
+                }),
         )
 }
 

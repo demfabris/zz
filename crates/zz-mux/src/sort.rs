@@ -14,6 +14,21 @@ pub enum TmuxSortOrder {
     Z,
 }
 
+/// `window_tree_order_seq`, the sequence `O` steps in `choose-tree`.
+pub const WINDOW_TREE_ORDER_SEQ: [TmuxSortOrder; 4] = [
+    TmuxSortOrder::Index,
+    TmuxSortOrder::Name,
+    TmuxSortOrder::Activity,
+    TmuxSortOrder::Z,
+];
+
+/// `window_buffer_order_seq`, the sequence `O` steps in `choose-buffer`.
+pub const WINDOW_BUFFER_ORDER_SEQ: [TmuxSortOrder; 3] = [
+    TmuxSortOrder::Creation,
+    TmuxSortOrder::Name,
+    TmuxSortOrder::Size,
+];
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TmuxSort {
     order: Option<TmuxSortOrder>,
@@ -55,6 +70,27 @@ impl TmuxSort {
         self.reversed
     }
 
+    /// `sort_next_order`: step the mode's own `order_seq`, wrapping from the
+    /// end and from an order the sequence does not carry at all, which is how
+    /// `choose-tree -O size` lands on `index` at the first `O`.
+    pub fn next_order(&mut self, sequence: &[TmuxSortOrder]) {
+        if sequence.is_empty() {
+            return;
+        }
+        let position = self
+            .order
+            .and_then(|order| sequence.iter().position(|entry| *entry == order));
+        self.order = Some(match position {
+            Some(position) if position + 1 < sequence.len() => sequence[position + 1],
+            _ => sequence[0],
+        });
+    }
+
+    /// `r`: `sort_crit.reversed = !sort_crit.reversed`.
+    pub const fn reverse(&mut self) {
+        self.reversed = !self.reversed;
+    }
+
     pub fn apply<T>(self, values: &mut [T], compare: impl Fn(&T, &T) -> Ordering) {
         match self.order {
             None => {}
@@ -78,6 +114,30 @@ impl TmuxSort {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stepping_an_order_wraps_from_the_end_and_from_outside_the_sequence() {
+        let mut sort = TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap();
+        for expected in [
+            TmuxSortOrder::Name,
+            TmuxSortOrder::Activity,
+            TmuxSortOrder::Z,
+            TmuxSortOrder::Index,
+        ] {
+            sort.next_order(&WINDOW_TREE_ORDER_SEQ);
+            assert_eq!(sort.order(), Some(expected));
+        }
+
+        let mut outside = TmuxSort::parse(Some("size"), false, None).unwrap();
+        outside.next_order(&WINDOW_TREE_ORDER_SEQ);
+        assert_eq!(outside.order(), Some(TmuxSortOrder::Index));
+
+        let mut unset = TmuxSort::parse(None, false, None).unwrap();
+        unset.next_order(&WINDOW_BUFFER_ORDER_SEQ);
+        assert_eq!(unset.order(), Some(TmuxSortOrder::Creation));
+        unset.next_order(&WINDOW_BUFFER_ORDER_SEQ);
+        assert_eq!(unset.order(), Some(TmuxSortOrder::Name));
+    }
 
     #[test]
     fn aliases_are_case_insensitive_and_invalid_orders_match_tmux() {

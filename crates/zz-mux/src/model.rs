@@ -1016,6 +1016,36 @@ impl MuxState {
         Ok(())
     }
 
+    /// `window_tree_swap`: the chooser trades two windows' slots the way
+    /// `swap-window` does and then moves `curw` so the same window stays
+    /// current, where `cmd_swap_window_exec` leaves the current slot alone and
+    /// lets the window under it change.
+    pub fn swap_windows_keeping_current(
+        &mut self,
+        current: WindowId,
+        other: WindowId,
+    ) -> Result<(), ServerError> {
+        let sessions = [current, other]
+            .into_iter()
+            .filter_map(|window| self.windows.get(&window).map(|window| window.session))
+            .collect::<Vec<_>>();
+        let held = sessions
+            .iter()
+            .filter_map(|session| {
+                self.sessions
+                    .get(session)
+                    .map(|state| (*session, state.active_window))
+            })
+            .collect::<Vec<_>>();
+        self.swap_windows(current, other, false)?;
+        for (session, active) in held {
+            if let Some(state) = self.sessions.get_mut(&session) {
+                state.active_window = active;
+            }
+        }
+        Ok(())
+    }
+
     pub fn renumber_windows(
         &mut self,
         session: SessionId,
@@ -3541,8 +3571,28 @@ impl MuxState {
         Ok(())
     }
 
+    /// `server_set_marked`: a plain set, where the `-m` flag's
+    /// `toggle_marked_pane` reads a second request on the same pane as a
+    /// clear. `window_tree_key`'s `m` takes this path.
+    pub fn set_marked_pane(&mut self, pane: PaneId) -> Result<(), ServerError> {
+        let window = self
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let session = self
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?
+            .session;
+        let next = Some((session, window, pane));
+        if self.marked_pane != next {
+            self.marked_pane = next;
+            self.bump_generation();
+        }
+        Ok(())
+    }
+
     /// The pin's `-M`: `server_clear_marked` whatever the target was.
-    pub(crate) fn clear_marked_pane(&mut self) {
+    pub fn clear_marked_pane(&mut self) {
         if self.marked_pane.is_some() {
             self.marked_pane = None;
             self.bump_generation();

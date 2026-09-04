@@ -54,8 +54,38 @@ pub(crate) fn choose_tree_key_action(
         "tag-all" => Some(ChooseTreeAction::TagAll),
         "kill" => Some(ChooseTreeAction::KillCurrent),
         "kill-tagged" => Some(ChooseTreeAction::KillTagged),
+        "swap-up" => Some(ChooseTreeAction::SwapUp),
+        "swap-down" => Some(ChooseTreeAction::SwapDown),
+        "sort-next" => Some(ChooseTreeAction::SortNext),
+        "sort-reverse" => Some(ChooseTreeAction::SortReverse),
+        "help" => Some(ChooseTreeAction::Help),
+        "collapse-all" => Some(ChooseTreeAction::CollapseAll),
+        "expand-all" => Some(ChooseTreeAction::ExpandAll),
+        "mark" => Some(ChooseTreeAction::Mark),
+        "mark-clear" => Some(ChooseTreeAction::MarkClear),
+        "command-prompt" => Some(ChooseTreeAction::CommandPrompt),
         _ => None,
     }
+}
+
+/// `prompt_key` under `PROMPT_TYPE_COMMAND` without `PROMPT_SINGLE`: the line
+/// is edited until an explicit close, so a key is either a character to append,
+/// one of the two closers, or nothing at all.
+pub(crate) enum ChooserPromptEdit {
+    Append(String),
+    Backspace,
+    Accept,
+    Cancel,
+}
+
+pub(crate) fn chooser_prompt_edit(input: &KeyInput) -> Option<ChooserPromptEdit> {
+    match input_key_name(input).as_str() {
+        "Escape" | "C-g" | "C-c" | "C-[" => return Some(ChooserPromptEdit::Cancel),
+        "Enter" => return Some(ChooserPromptEdit::Accept),
+        "BSpace" => return Some(ChooserPromptEdit::Backspace),
+        _ => {}
+    }
+    input_typed_text(input).map(|text| ChooserPromptEdit::Append(text.to_owned()))
 }
 
 /// `prompt_key` under `PROMPT_SINGLE` takes one character as the whole answer;
@@ -103,6 +133,16 @@ pub(crate) fn choose_buffer_key_action(
         "search-backward" => Some(ChooseBufferAction::SearchStart { reverse: true }),
         "search-again" => Some(ChooseBufferAction::SearchNext { reverse: false }),
         "search-reverse" => Some(ChooseBufferAction::SearchNext { reverse: true }),
+        "tag" => Some(ChooseBufferAction::Tag),
+        "tag-none" => Some(ChooseBufferAction::TagNone),
+        "tag-all" => Some(ChooseBufferAction::TagAll),
+        "sort-next" => Some(ChooseBufferAction::SortNext),
+        "sort-reverse" => Some(ChooseBufferAction::SortReverse),
+        "help" => Some(ChooseBufferAction::Help),
+        "collapse-all" => Some(ChooseBufferAction::CollapseAll),
+        "expand-all" => Some(ChooseBufferAction::ExpandAll),
+        "delete-tagged" => Some(ChooseBufferAction::DeleteTagged),
+        "paste-tagged" => Some(ChooseBufferAction::PasteTagged),
         _ => None,
     }
 }

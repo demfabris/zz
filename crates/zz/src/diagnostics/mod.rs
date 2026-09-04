@@ -1042,18 +1042,32 @@ mod tests {
         );
     }
 
+    /// `--bootstrap-client-cwd` hands a daemon zz spawns the working directory
+    /// the invoking client was in. Before protocol v98 the argument list was
+    /// `Vec<String>` and `into_string` dropped a directory that only exists as
+    /// bytes to an empty string, which
+    /// `validated_bootstrap_client_working_directory` then refused, so the
+    /// daemon started with no client cwd at all. The list is `RawText` now, so
+    /// the bytes survive argv and `PathBuf::from(cwd.to_os_string())` rebuilds
+    /// the same directory, matching `ClientHello.working_directory`, byte
+    /// preserving since v92.
     #[cfg(all(unix, not(target_os = "ios")))]
     #[test]
-    fn non_utf8_bootstrap_client_cwd_is_not_lossily_substituted() {
+    fn non_utf8_bootstrap_client_cwd_reaches_the_daemon_as_bytes() {
         use std::os::unix::ffi::OsStringExt as _;
 
+        let arguments = application_args_from([
+            OsString::from("daemon"),
+            OsString::from(crate::DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT),
+            OsString::from_vec(b"/tmp/client-\xff".to_vec()),
+        ]);
         assert_eq!(
-            application_args_from([
-                OsString::from("daemon"),
-                OsString::from(crate::DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT),
-                OsString::from_vec(b"/tmp/client-\xff".to_vec()),
-            ]),
-            ["daemon", crate::DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT, ""]
+            arguments.iter().map(RawText::as_bytes).collect::<Vec<_>>(),
+            [
+                b"daemon".as_slice(),
+                crate::DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT.as_bytes(),
+                b"/tmp/client-\xff".as_slice(),
+            ]
         );
     }
 

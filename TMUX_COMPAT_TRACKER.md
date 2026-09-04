@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 12 FULLY INTEGRATED (CHOOSER-TAIL + ENVIRONMENT-BYTES LANES; THE REST OF MODE_TREE_KEY'S VOCABULARY OVER BOTH CHOOSERS WITH THE ':' COMMAND PROMPT RUNNING AGAINST ITS OWN ROW + THE CLIENT'S ENVIRONMENT, ARGV AND COMMAND OUTPUT CARRIED AS BYTES END TO END ON RAWTEXT; PROTOCOL V98); CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **CYCLE 13 FULLY INTEGRATED (PANE-GEOMETRY + BYTE-CLEAN-CONSUMERS LANES; AN ATTACHED PANE'S PTY NOW FOLLOWS THE CELL THE LAYOUT SETTLED ON + FORMAT EXPANSION, THE CLIENT-ENCODING SANITIZER AND A BYTE-ONLY PATH ARGUMENT ALL CARRY THE CLIENT'S BYTES; PROTOCOL STAYS V98); THE AGREED-SCOPE REGISTRY IS CLOSED**
 >
-> Live work: **2 UNRESOLVED GROUPS (2 OPEN + 0 BLOCKED = 2)**
+> Live work: **0 UNRESOLVED GROUPS (0 OPEN + 0 BLOCKED = 0)**
 >
-> Ledger settlement: **99.1% (214 of 216 known groups: 100 x (172 CLOSED + 42 ACCEPTED) / (172 CLOSED + 44 LIVE)); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **100.0% (216 of 216 known groups: 100 x (174 CLOSED + 42 ACCEPTED) / (174 CLOSED + 42 LIVE)); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **218 SCENARIOS, 2,644 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
+> Exit evidence: **220 SCENARIOS, 2,648 STEPS, 3 REGISTERED KNOWN ROWS; THE PERSISTED ATTACHED-CLIENT ROW STILL READS PASS BUT THE FIXTURE DOES NOT COMPLETE ON THE UBUNTU BOX, SO THE PRACTICAL EXIT GATE IS NOT MET**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 12 INTEGRATED 2026-09-04 ON THE UBUNTU BOX (TWO OPUS 5 LANES AT XHIGH, TAIL THEN BYTES, ONE GATE ALONE ON THE BOX). THE REGISTRY IS NOT CLOSED: THE AGREED-SCOPE METER READS 99.3% (302/304), BECAUSE THE GEOMETRY ITEM WAS MEASURED RATHER THAN CLOSED AND `semantic:config-tilde-home-non-utf8` CAME BACK OUT OF AN ACCEPTED GROUP WHOSE PREMISE V98 FALSIFIED; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **CYCLE 13 INTEGRATED 2026-09-04 ON THE UBUNTU BOX (TWO OPUS 5 LANES AT XHIGH, GEOMETRY THEN CONSUMERS, ONE GATE ALONE ON THE BOX). THE AGREED-SCOPE METER REACHED 304/304 AND THE CAMPAIGN'S IMPLEMENTATION PHASE IS DONE: EVERY LIVE GROUP THAT REMAINS CARRIES AN ACCEPTED `native` OR `never` DISPOSITION. WHAT IS LEFT IS NOT IMPLEMENTATION: `compat/attached-client.sh` IS UNRELIABLE ON THIS BOX AND NEEDS AN OWNER BEFORE THE EXIT GATE CAN BE CALLED; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,23 +76,23 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | `origin/main` at `595616b` (cycle-12 bytes merge; the tail lane landed first at `12b4776`) plus this ledger recompute |
+| Published branch | `origin/main` at `37e8df0` (cycle-13 consumers merge; the geometry lane landed first at `fd2e790`) plus this ledger recompute |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Cycle 12 of the orchestrated Opus 5 loop, 2 of 2 lanes integrated on the ubuntu box: the rest of `mode_tree_key`'s vocabulary over both choosers, `K`/`J` on `mode_tree_swap`, `O` and `r` on the per-mode order sequences, `F1`/`C-h`'s help screen that the next key of any kind closes, `M--`/`M-+` over every top-level item, `m`/`M` on `server_set_marked`, the `:` command prompt running its line once per tagged row against that row's own `cmd_find_state`, and `window_buffer_key`'s `D` and `P` with no current-row fallback (`12b4776`); and the client's bytes carried end to end on a new `RawText` wire type, so a non-UTF-8 environment name or value, argv word and command output survive registration, the store, a later pane's spawn environment, and every client sink including control mode and the raw TUI (`595616b`). Protocol v97 to v98: both lanes bumped and the gate reconciled them to one constant with both changelog bullets kept. Two closes, `semantic:chooser-key-vocabulary` and `semantic:client-environment-non-utf8`; the geometry item was measured, not closed |
-| Orchestration | Cycle 12 launched 2026-09-04 on the ubuntu box through `opus-compat-run-12.js`: two Opus 5 lanes at xhigh, one Opus 5 reviewer per lane, one gate running alone on the box. Tail integrated first because it carries the smaller wire and daemon footprint; bytes rebased onto it, conflicting only in the two protocol mirror pages and the generated `knowledge/tmux/gaps.md`. Both reviewers returned approve-with-fixes and every must-fix was applied at the gate with the reviewer's probe re-run; the gate also found two defects neither worker nor reviewer had seen, a stale `cargo test -p zz --lib` expectation and an `E0061` in the workspace-excluded `examples/ui-showcase`. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; F-CHOOSER-TAIL-GEOMETRY and F-ENVIRONMENT-BYTES are both INTEGRATED and released READY on the board, each naming what stays open |
+| Delivery | Cycle 13 of the orchestrated Opus 5 loop, 2 of 2 lanes integrated on the ubuntu box: an attached pane's pty now follows the cell the layout settled on, which is the pin's order, so a GUI client's floored measurement no longer reaches the pty while `#{pane_width}` keeps the layout's cell, with the window-extent back-solve rewritten per axis (exact on an axis a pane spans in full, guarded ratio on an axis it shares) and every write-back including the focus-change and detach passes now running (`fd2e790`); and the three byte-clean consumers, format expansion on `RawText` with the trim, pad and width modifiers rewritten onto `format-draw.c`'s counting rule, the first client-encoding sanitizer gated on tmux's `CLIENT_UTF8` and on the pin's sink rather than the client's kind, and `source-file` opening a path only bytes can spell (`37e8df0`). Protocol stays v98: neither lane owed a bump and neither took one. Four closes, `semantic:attached-gui-pane-width`, `semantic:format-expansion-non-utf8`, `semantic:client-utf8-output-sanitizer` and `semantic:config-tilde-home-non-utf8`, which empties the last two live groups |
+| Orchestration | Cycle 13 launched 2026-09-04 on the ubuntu box through `opus-compat-run-13.js`: two Opus 5 lanes at xhigh, one Opus 5 reviewer per lane, one gate running alone on the box. Geometry integrated first because its daemon resize-path diff was the one most likely to conflict; consumers rebased onto it and conflicted only in the generated `knowledge/tmux/gaps.md`, which was regenerated with `tmux-tracker.py write-report` rather than hand-merged, while `compat/tmux-gaps.json` auto-merged because the lanes closed different groups. Both reviewers returned approve-with-fixes; every defect was applied at the gate with the reviewer's own probe re-run as proof, including one blocker in the sanitizer's reach. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; F-PANE-GEOMETRY-RESIDUE and F-BYTE-CLEAN-CONSUMERS are both INTEGRATED and released with nothing left open on either front |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
-| Agreed-scope meter | 99.3% (302 of 304 items frozen on 2026-08-31), 63 of 65 groups done, 1 partially burned; 2 items discovered after the freeze are tracked outside it; `python3 compat/progress.py` |
-| Completed fixed cohort | Cycle 12: 2 of 2 lanes integrated, agreed-scope meter 99.0% to 99.3%, unresolved groups 3 to 2 |
-| Previous completed cohort | Cycle 11: 2 of 2 lanes integrated, agreed-scope meter 97.4% to 99.0% |
-| Campaign point | Both choosers now answer the pin's whole key vocabulary, and a line typed at the `:` prompt resolves against the row the cursor sits on rather than the client's current window. A client's bytes survive the whole round trip: `ClientHello.environment`, `CommandInvocation.args` and both `CommandResponse` output fields are `RawText`, so `set-environment -g ZZBYTES a<0xff>b` comes back byte for byte from the plain CLI, a control client and the raw TUI. What is left is two groups. `rendering.geometry-residue` holds the one measured but undecided question, which of an attached GUI client's two pane widths the formats should report, with the prescribed fix refuted by measurement and the coherent fix costed. `clients.byte-clean-consumers` is new: the format expander is still `String` end to end, zz has no `CLIENT_UTF8` output sanitizer, and a command argument naming a byte-only path is still opened lossily, which is why `semantic:config-tilde-home-non-utf8` came back out of `protocol.binary-streams` when v98 removed the blocker that record had named |
-| Live registry | 44 active groups, 457 active items, 172 closed records |
-| Active status | 2 open, 0 blocked, 42 accepted |
+| Agreed-scope meter | 100.0% (304 of 304 items frozen on 2026-08-31), 65 of 65 groups done, 0 partially burned; park dispositions 15 of 15; `python3 compat/progress.py` |
+| Completed fixed cohort | Cycle 13: 2 of 2 lanes integrated, agreed-scope meter 99.3% to 100.0%, unresolved groups 2 to 0 |
+| Previous completed cohort | Cycle 12: 2 of 2 lanes integrated, agreed-scope meter 99.0% to 99.3% |
+| Campaign point | The registry's agreed scope is empty. `rendering.geometry-residue` closed by putting zz's resize loop in the pin's order rather than by choosing between an attached GUI client's two pane widths: the pty follows the settled layout, so `#{pane_width}`, `#{window_layout}` and `stty size` agree the way `window_pane_resize` makes them agree on the pin. `clients.byte-clean-consumers` closed with all three consumers carrying bytes, and the sanitizer it added is gated on the pin's sink, so `capture-pane -p` and `save-buffer` keep their bytes for every client shape while `display-message` and the listings are sanitized. What remains live is 42 groups that all carry an accepted `native` or `never` disposition, so no group is waiting on implementation. The open work is elsewhere: `compat/attached-client.sh` does not complete on this box, and `compat/results/summary.md` still records it as `PASS` |
+| Live registry | 42 active groups, 453 active items, 174 closed records |
+| Active status | 0 open, 0 blocked, 42 accepted |
 | Known differentials | 3 registered cases: two geometry, one geometry plus output |
 
-Cycles 2 through 12 reached `origin/main` through the board's MAIN lock; cycle 12 ends at the
-ledger recompute that follows `595616b`. Resolve the commit containing the latest tracker update with
+Cycles 2 through 13 reached `origin/main` through the board's MAIN lock; cycle 13 ends at the
+ledger recompute that follows `37e8df0`. Resolve the commit containing the latest tracker update with
 `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -106,15 +106,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 12: 2 of 2 lanes integrated (tail then bytes, one gate, no interruption) |
-| Previous completed cohort | Cycle 11: 2 of 2 lanes integrated (the choosers lane finished by the orchestrator after the gate agent timed out) |
-| New residual groups | Since the 2026-08-31 freeze: 2 items across 1 group (`clients.byte-clean-consumers`), tracked outside the agreed-scope meter |
-| Unresolved movement | Cycle 12: 3 at launch, 2 at close |
-| Live unresolved | 2 open + 0 blocked = 2 |
-| Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 218 scenarios, 2,644 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
-| Differential SHA-256 | `c72aa5e1cd782cf8d2cae4c2d0c6ed62c1e3a7bd4637c0c362439170ba6b13b2` |
-| Ledger settlement | 214 of 216 known groups = 99.1% |
+| Completed fixed cohort | Cycle 13: 2 of 2 lanes integrated (geometry then consumers, one gate, no interruption) |
+| Previous completed cohort | Cycle 12: 2 of 2 lanes integrated (tail then bytes, one gate, no interruption) |
+| New residual groups | Since the 2026-08-31 freeze: none still live. The 2 items cycle 12 opened as `clients.byte-clean-consumers` closed in cycle 13 along with the group |
+| Unresolved movement | Cycle 13: 2 at launch, 0 at close |
+| Live unresolved | 0 open + 0 blocked = 0 |
+| Practical exit gate | Open on one clause only: the attached-client fixture does not pass at full counts on this box. Every other clause is met |
+| Latest differential | 220 scenarios, 2,648 steps, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean; the persisted attached-client row still reads `PASS` and is stale |
+| Differential SHA-256 | `5bef958b6945d2d07d39ab0409e47589e486e43695a458392fbae2957bfb4c1c` |
+| Ledger settlement | 216 of 216 known groups = 100.0% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -128,7 +128,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(172 + 42) / (172 + 44) = 214 / 216 = 99.1%
+(174 + 42) / (174 + 42) = 216 / 216 = 100.0%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -174,6 +174,21 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-04 cycle-13 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `fd2e790` (an attached pane's pty follows the cell the layout settled on: `terminal_geometry_for_mode` gained a `GeometrySource`, the write-back that back-solves the window extent keeps the owner client's report because a GUI client reports only per-pane grids, and the pty is re-derived from `engine.pane_geometry` once that extent settles. The one-cell anti-amplification guard was not removed but made per axis, exact on an axis a pane spans in full and guarded ratio on an axis it shares with siblings; the focus-change and detach write-backs stopped being `aggressive_only`, and `refresh_terminal_visibility` writes back and publishes through a new non-recursive `publish_mux_snapshots`. No wire change). `37e8df0` (the three byte-clean consumers: format expansion carries `RawText` from the environment tail to every sink, with `truncate_value`, `pad_value` and the width modifiers rewritten onto one walk that reproduces `format-draw.c`'s counting rule; the first client-encoding sanitizer, the client raising tmux's `CLIENT_UTF8` for itself out of `$TMUX` and the locale and declaring it as a hello capability so no wire type moved; and `source-file` opening a path only bytes can spell. No wire change, protocol stays v98) |
+| Review stage | One Opus 5 reviewer per lane at xhigh, both approve-with-fixes. Geometry, two must-fixes: `cargo fmt --all -- --check` failed at the tip with three diffs inside the worker's own edited lines, which the worker's proof list did not cover because it ran clippy but never fmt; and the closed record claimed "the attached-client fixture passes with its 141x31, 101x21 and 73x19 rows intact" when the fixture does not pass at all. Consumers, one blocker: the sanitizer was gated on client KIND, so it mangled three sinks the pin never routes through `server_client_print`. Every defect was fixed on its branch and re-probed |
+| Blocker detail | Reproduced first on the unfixed tip, `env -u TMUX -u LANG -u LC_CTYPE LC_ALL=C` with a pane holding `x<U+6F22>y`: `capture-pane -p` answered `78 e6 bc a2 79 0a` on the pin and `78 5f 5f 79 0a` on zz, for a command client and a `-C` control client alike. The pin's rule was re-derived from source rather than from the review prose: `cmd-capture-pane.c` writes `control_write` or `file_print_buffer`, `cmd-save-buffer.c` writes `file_write` for a real path and for `-` and reaches `cmdq_print_data` only when `c->session != NULL \|\| CLIENT_CONTROL`, and `server_client_print` sanitizes only when `(c->session == NULL \|\| CLIENT_CONTROL) && !CLIENT_UTF8`. `sanitizes_output_for` is now gated on that sink, so `capture-pane` and `save-buffer` are never sanitized, `show-buffer` is sanitized for a control client but not for a session-less command client, and everything else keeps the kind gate. Both client shapes answer the pin's bytes now, which is what `main` answered before the sanitizer existed, and `list-buffers -F` stays sanitized |
+| Gate-found detail | The corpus could not see that blocker, because every harness client inherits `LANG=en_US.UTF-8`, so `smoke/client-utf8-sanitizer` grew a row that captures a pane through a C-locale client and pins `78 e6 bc a2 79 0a`: clean:10 to clean:11 on both binaries, scenario still 2 steps. Building `main` `fd2e790` beside the fixed tip also separated what the fix does not restore: `show-buffer` answers `78 e6 bc a2 79 ef bf bd 7a 0a` and `save-buffer -` answers nothing at all on BOTH, so the buffer store's U+FFFD, the trailing newline `file_write` never writes and the empty `save-buffer` are pre-existing, now recorded with their hex in `knowledge/tmux/divergences.md` |
+| Workspace gates | Full workspace tests and clippy with warnings denied, green on both lanes. Geometry tip: `cargo test --workspace --all-features` exited 0 with 3,468 passed and zero failures, no flake retry needed. Consumers tip: 3,472 passed with one red row, `daemon::tests::client_focus_closes_display_panes_and_preserves_chooser_modes`, the documented flake that also fails about one solo run in three and did exactly that here, 1 red and 2 green in three exact-solo runs, with the new unit test filtered out of those runs so it is not the cause. `cargo fmt --all -- --check` clean on both after the geometry fix |
+| Differential | Geometry delta: 158 scenarios listed twice and reconciled against `git diff --name-only`, run as four disjoint shards with `smoke/source-replay-diagnostics` held back and clean solo. Consumers delta: 207 scenarios, with all eight `smoke/control-*` and `smoke/client-*` already inside the selection, sharded the same way after interleaving smoke and non-smoke so each batch carried a comparable mix. Every channel clean under `--strict-geometry` except the three rows that are this box's own environment and fail identically for both lanes: `smoke/format-modifier-interrogate` (BOTH binaries print the same `absent-smxx want=[0] got=[1]` and `no-feature-strikethrough want=[0] got=[1]`, so zz agrees with the pin and this box's terminfo carries smxx), `smoke/pane-engine-knobs-input` (the pin's own fixture returns 1, zz at clean:24) and `smoke/remain-on-exit-format` (the pin answers signal 15 where the fixture wants `term`, zz at clean:13). `smoke/format-modifier-client-loop` and `smoke/copy-mode-prompt-bindings` each hiccuped once under shard load and are clean solo |
+| Records gate | Tracker check, board fold tests, and the stored summary check pass: 220 scenarios, 2,648 steps |
+| Summary SHA-256 | `5bef958b6945d2d07d39ab0409e47589e486e43695a458392fbae2957bfb4c1c` |
+| Closed | The registry closed. `rendering.geometry-residue` and `clients.byte-clean-consumers` both emptied, taking the last four agreed-scope items, so `compat/progress.py` reads 100.0% (304 of 304) with 65 of 65 groups done and the 42 groups that remain live all carry an accepted `native` or `never` disposition. The campaign's implementation phase is done |
+| Not done | `compat/attached-client.sh` is unreliable on this box and nobody owns it. It was run twice at the geometry tip and failed at a different probe each time, `probe_side` then `probe_command_output_navigation`, the second being the worker's exact message, which the worker and the reviewer each reproduced at `origin/main` `559fd8a` with a clean build; the reviewer separately saw `probe_command_prompt` fail on the pin side. The 141x31, 101x21 and 73x19 sizing rows are real and were proved by running `probe_attached_client_sizing` alone. `compat/results/summary.md` still ends with an `Attached-client fixture Status: PASS` footer that nothing regenerates, and `compat/run.sh --check-summary` passes on that stale line, so no gate currently notices |
 
 ### 2026-09-04 cycle-12 integration checkpoint
 

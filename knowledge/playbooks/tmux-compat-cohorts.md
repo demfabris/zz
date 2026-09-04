@@ -810,6 +810,7 @@ gate ledgers every front it moots at integration time.
 | 10, 2026-09-02 | Control command worker and `split-window -W`, copy-mode search and prompt bindings, the popup pointer route (protocol v96) | `fd19cce1`, `cd03bb8d`, `9ddeae0f` | 90.5% to 97.4% |
 | 11, 2026-09-04 | the `set-hook -B` monitor subsystem and `display-message -v`, the copy-mode mode-keys tail and the first five chooser keys (protocol v97) | `89f36ac`, `3eda6ed` | 97.4% to 99.0% |
 | 12, 2026-09-04 | the rest of `mode_tree_key`'s chooser vocabulary, the client's environment and command bytes on `RawText` (protocol v98) | `12b4776`, `595616b` | 99.0% to 99.3% |
+| 13, 2026-09-04 | an attached pane's pty following the layout cell it reports, the three byte-clean consumers with the first `CLIENT_UTF8` output sanitizer (no bump, protocol stays v98) | `fd2e790`, `37e8df0` | 99.3% to 100.0% |
 
 Cycles 5 through 9 are omitted here rather than reconstructed; their merges and meter moves live in
 `compat/orchestration/CAMPAIGN-LOG.md`. The lane count dropped from three to two on 2026-09-03 when
@@ -817,7 +818,9 @@ every agent in the loop became Opus 5 at `xhigh`.
 
 The reviewer stage earned its cost every cycle: it caught a menu width rule that ignored the
 pin's title seed, four test expectations orphaned by a lane's final commit, a Control-client
-divergence disclosed only in a throwaway report, and a misattributed pin-derivation comment.
+divergence disclosed only in a throwaway report, a misattributed pin-derivation comment, and, in
+cycle 13, an output sanitizer gated on the client's kind instead of on the sink the pin prints
+through, which silently mangled `capture-pane -p` for every client shape.
 Worker prompts now carry the protocol bump recipe, the relocation grammar for explicit native
 decisions, the load-flake list, and the rule that proofs count only when re-run at the tip.
 

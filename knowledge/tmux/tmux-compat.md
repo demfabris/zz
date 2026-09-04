@@ -351,12 +351,13 @@ relative sources and literal metacharacter paths, then clears it before runtime 
 isolated differential passes exactly on both engines without a public protocol change. The full
 eight-case diagnostic then exposed queued pane output during Control exit, which slice 10ai closes.
 
-The live registry has 44 active groups, 457 items, and 172 closed records. The active groups divide
-into 2 open, none blocked, and 42 accepted, so only those 2 remain unresolved. Closed records plus
-accepted active groups resolve 214 of 216 known groups (99.1%). The persisted accepted artifact
-covers 218 scenarios and 2,644 steps, with attached-client `PASS`, three registered known GEO rows,
-every other channel clean, and SHA-256
-`c72aa5e1cd782cf8d2cae4c2d0c6ed62c1e3a7bd4637c0c362439170ba6b13b2`. Slice 10ai starts Control
+The live registry has 42 active groups, 453 items, and 174 closed records. Every active group is
+accepted, none open and none blocked, so nothing is waiting on implementation. Closed records plus
+accepted active groups resolve 216 of 216 known groups (100.0%). The persisted accepted artifact
+covers 220 scenarios and 2,648 steps, with three registered known GEO rows, every other channel
+clean, and SHA-256
+`5bef958b6945d2d07d39ab0409e47589e486e43695a458392fbae2957bfb4c1c`. Its attached-client footer still reads `PASS` and is
+stale: the fixture does not complete on the ubuntu box and needs an owner. Slice 10ai starts Control
 stdin observation before initial preparation, discards queued and future pane-byte records after
 EOF or blank Return, and retains all non-pane Control records plus one final exit. Shell-job cwd and
 literal DEL identity are closed with their focused and aggregate proof.

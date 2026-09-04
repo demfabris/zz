@@ -1,0 +1,11 @@
+corpus: none
+# A tmux environment name and value are C strings, so a byte past ASCII rides
+# argv into the store and comes back out of show-environment unchanged: the
+# plain form, the -s shell form with the byte raw inside the quotes, a
+# non-UTF-8 name, a session-scoped store, the environment a later pane
+# inherits, and the attach shape where update-environment copies a real pty
+# client's own non-UTF-8 entry into the session beside a plain neighbour.
+stage: fixtures/environment-bytes.sh ~/environment-bytes.sh
+stage: fixtures/environment-bytes-attach.py ~/environment-bytes-attach.py
+run-shell 'sh ~/environment-bytes.sh'
+out: show-environment -g ZZ_ENVBYTES_RESULT

@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v97)
+title: zz wire protocol (v98)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 97`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 98`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -614,9 +614,23 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 97`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 98`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v98 carries the client's bytes. Four fields change type from UTF-8 text to `RawText`, a new
+  `crates/zz-protocol/src/message.rs` type that is a byte string on the wire (serialized and
+  deserialized exactly like `ClientPath`, as a `Vec<u8>`) and derefs to a lossy `&str` for every
+  reader that wants text. `ClientHello.environment` changes from `Vec<String>` to `Vec<RawText>`,
+  keeping its `NAME=VALUE` guard, its per-entry and total byte ceilings and its entry count, now
+  measured on bytes, so a Unix client's non-UTF-8 environment name or value reaches the daemon
+  instead of being dropped by `into_string`. `CommandInvocation.args` changes from `Vec<String>` to
+  `Vec<RawText>`, so a byte past ASCII in argv survives the CLI, `split_command_words`'s `;`
+  grammar and `parse_tmux_options`' flag grammar. `CommandResponse::Success.output` and
+  `CommandResponse::Error.output` change from `String` to `RawText`, so `show-environment` answers
+  the bytes it stored and the CLI writes them to stdout unchanged. `stderr` on `Success` and every
+  other field on all four messages are untouched. Nothing is inserted, appended or removed; four
+  existing fields change encoding from postcard's string form to its byte-sequence form, so a v97
+  peer decodes them as garbage.
 - v97 carries the chooser's own kill vocabulary. `ChooseTreeAction` gains five variants appended
   after `Key`: `Tag`, `TagNone`, `TagAll`, `KillCurrent` and `KillTagged`, the actions the daemon
   resolves `t`, `T`, `C-t`, `x` and `X` to through the `choose-tree` key table. `ChooseTreeState`

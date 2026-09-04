@@ -67,7 +67,7 @@ use zz_mux::{MuxEngine, format_command};
 #[cfg(not(target_os = "ios"))]
 use zz_protocol::{
     CommandInvocation, MAX_AGENT_SEND_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES, PROTOCOL_VERSION,
-    PreparedCommand, PreparedCommandResult, ServerError, ServerHello, canonical_command,
+    PreparedCommand, PreparedCommandResult, RawText, ServerError, ServerHello, canonical_command,
     catalog_command_spec,
 };
 use zz_terminal::TerminalColorScheme;
@@ -168,7 +168,7 @@ fn validated_bootstrap_client_working_directory(path: PathBuf) -> Option<PathBuf
 
 #[cfg(not(target_os = "ios"))]
 fn parse_daemon_bootstrap_arguments(
-    arguments: &[String],
+    arguments: &[RawText],
 ) -> Result<DaemonBootstrapArguments, DaemonBootstrapArgumentError> {
     if arguments.is_empty() {
         return Ok(DaemonBootstrapArguments::default());
@@ -185,7 +185,7 @@ fn parse_daemon_bootstrap_arguments(
     let client_working_directory = match remaining {
         [] => None,
         [cwd_flag, cwd] if cwd_flag == DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT => Some(
-            validated_bootstrap_client_working_directory(PathBuf::from(cwd))
+            validated_bootstrap_client_working_directory(PathBuf::from(cwd.to_os_string()))
                 .ok_or(DaemonBootstrapArgumentError::ClientWorkingDirectory)?,
         ),
         _ => return Err(DaemonBootstrapArgumentError::ClientWorkingDirectory),
@@ -478,7 +478,7 @@ struct ApplicationArguments {
     socket_path: PathBuf,
     socket_source: SocketSelectionSource,
     host: Option<String>,
-    remaining: Vec<String>,
+    remaining: Vec<RawText>,
     mux_config_files: Vec<PathBuf>,
     no_start_server: bool,
     control_mode: u8,
@@ -519,7 +519,7 @@ impl SocketSelectionSource {
 
 #[cfg(not(target_os = "ios"))]
 fn application_arguments(
-    arguments: impl IntoIterator<Item = String>,
+    arguments: impl IntoIterator<Item = RawText>,
     default_path: PathBuf,
 ) -> Result<ApplicationArguments, ApplicationArgumentError> {
     let mut socket_selection = None;
@@ -546,7 +546,7 @@ fn application_arguments(
                     "--socket requires a non-empty path".to_owned(),
                 ));
             }
-            socket_selection = Some(SocketSelection::Path(PathBuf::from(path)));
+            socket_selection = Some(SocketSelection::Path(PathBuf::from(path.to_os_string())));
         } else if let Some(path) = argument
             .strip_prefix(diagnostics::SOCKET_ARGUMENT)
             .and_then(|argument| argument.strip_prefix('='))
@@ -566,14 +566,14 @@ fn application_arguments(
                     "--host requires a non-empty name".to_owned(),
                 ));
             }
-            host = Some(name);
+            host = Some(name.to_string());
         } else if let Some(name) = argument.strip_prefix("--host=") {
             if name.is_empty() {
                 return Err(ApplicationArgumentError::Message(
                     "--host requires a non-empty name".to_owned(),
                 ));
             }
-            host = Some(name.to_owned());
+            host = Some(name.into());
         } else if parsing_tmux_options && argument == "--" {
             parsing_tmux_options = false;
         } else if parsing_tmux_options && matches!(argument.as_str(), "--version" | "--kill-server")
@@ -585,10 +585,10 @@ fn application_arguments(
         } else if parsing_tmux_options && argument.starts_with('-') && argument != "-" {
             let options = &argument[1..];
             for (index, option) in options.char_indices() {
-                let value = |arguments: &mut std::vec::IntoIter<String>| {
+                let value = |arguments: &mut std::vec::IntoIter<RawText>| {
                     let value_index = index + option.len_utf8();
                     if value_index < options.len() {
-                        Ok(options[value_index..].to_owned())
+                        Ok(RawText::from(&options[value_index..]))
                     } else {
                         arguments.next().ok_or_else(|| {
                             ApplicationArgumentError::Raw(format!(
@@ -600,13 +600,13 @@ fn application_arguments(
                 match option {
                     '2' | 'q' | 'u' | 'v' => {}
                     'c' => {
-                        shell_command = Some(value(&mut arguments)?);
+                        shell_command = Some(value(&mut arguments)?.to_string());
                         break;
                     }
                     'C' => control_mode = control_mode.saturating_add(1),
                     'D' => foreground_server = true,
                     'f' => {
-                        mux_config_files.push(PathBuf::from(value(&mut arguments)?));
+                        mux_config_files.push(PathBuf::from(value(&mut arguments)?.to_os_string()));
                         break;
                     }
                     'h' => {
@@ -626,13 +626,15 @@ fn application_arguments(
                     }
                     'l' => login_shell = true,
                     'L' => {
-                        socket_selection = Some(SocketSelection::Label(value(&mut arguments)?));
+                        socket_selection =
+                            Some(SocketSelection::Label(value(&mut arguments)?.to_string()));
                         break;
                     }
                     'N' => no_start_server = true,
                     'S' => {
-                        socket_selection =
-                            Some(SocketSelection::Path(PathBuf::from(value(&mut arguments)?)));
+                        socket_selection = Some(SocketSelection::Path(PathBuf::from(
+                            value(&mut arguments)?.to_os_string(),
+                        )));
                         break;
                     }
                     'T' => {
@@ -783,7 +785,7 @@ fn tmux_label_socket_path(
 
 #[cfg(not(target_os = "ios"))]
 fn run_command_mode(
-    arguments: &[String],
+    arguments: &[RawText],
     socket_path: &Path,
     socket_source: SocketSelectionSource,
     host: Option<&str>,
@@ -836,7 +838,7 @@ fn run_command_mode(
     if command == "protocol-version" {
         return Some(
             match protocol_version_output(
-                invocation.args.clone().into_iter(),
+                invocation.args.iter().map(ToString::to_string),
                 host,
                 socket_source.is_overridden(),
             ) {
@@ -893,18 +895,26 @@ fn run_command_mode(
     }
 
     if command == "fleet" {
-        return Some(match fleet::run(invocation.args.clone()) {
-            Ok(output) => {
-                if !output.is_empty() {
-                    println!("{output}");
+        return Some(
+            match fleet::run(
+                invocation
+                    .args
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<String>>(),
+            ) {
+                Ok(output) => {
+                    if !output.is_empty() {
+                        println!("{output}");
+                    }
+                    ExitCode::SUCCESS
                 }
-                ExitCode::SUCCESS
-            }
-            Err(error) => {
-                eprintln!("zz: {error}");
-                ExitCode::FAILURE
-            }
-        });
+                Err(error) => {
+                    eprintln!("zz: {error}");
+                    ExitCode::FAILURE
+                }
+            },
+        );
     }
 
     if implicit_tmux_conflict && host.is_none() {
@@ -1332,7 +1342,7 @@ fn prepared_command_reads_stdin(command: &PreparedCommand) -> bool {
 }
 
 #[cfg(not(target_os = "ios"))]
-fn stdin_payload_has_argument_boundary(canonical_name: &str, arguments: &[String]) -> bool {
+fn stdin_payload_has_argument_boundary(canonical_name: &str, arguments: &[RawText]) -> bool {
     let Some(spec) = catalog_command_spec(canonical_name) else {
         return false;
     };
@@ -1353,11 +1363,11 @@ fn stdin_payload_has_argument_boundary(canonical_name: &str, arguments: &[String
 }
 
 #[cfg(not(target_os = "ios"))]
-fn append_stdin_payload(canonical_name: &str, arguments: &mut Vec<String>, payload: String) {
+fn append_stdin_payload(canonical_name: &str, arguments: &mut Vec<RawText>, payload: String) {
     if !stdin_payload_has_argument_boundary(canonical_name, arguments) {
-        arguments.push("--".to_owned());
+        arguments.push("--".into());
     }
-    arguments.push(payload);
+    arguments.push(payload.into());
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1381,7 +1391,7 @@ fn append_prepared_command_stdin_payload(command: &mut PreparedCommand, payload:
     let suffix = suffix
         .strip_prefix(marker)
         .expect("stdin payload formatter must preserve an unknown command name");
-    command.invocation.args[0] = format!("{{ {body}{suffix} }}");
+    command.invocation.args[0] = format!("{{ {body}{suffix} }}").into();
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1474,7 +1484,7 @@ fn command_chain_uses_tui(invocations: &[CommandInvocation]) -> bool {
 }
 
 #[cfg(not(target_os = "ios"))]
-fn split_command_chain(arguments: &[String]) -> Vec<CommandInvocation> {
+fn split_command_chain(arguments: &[RawText]) -> Vec<CommandInvocation> {
     zz_protocol::split_command_words(arguments.iter().cloned())
         .into_iter()
         .filter_map(|words| {
@@ -1609,7 +1619,7 @@ fn tmux_command_starts_server(command: &str) -> bool {
 
 #[cfg(not(target_os = "ios"))]
 fn parse_native_attach_arguments(
-    arguments: impl IntoIterator<Item = String>,
+    arguments: impl IntoIterator<Item = RawText>,
 ) -> Result<NativeAttachArguments, NativeAttachArgumentError> {
     let spec = catalog_command_spec("attach-session").expect("attach-session catalog");
     let mut restart_daemon = false;
@@ -1677,11 +1687,14 @@ fn parse_native_attach_arguments(
                     let value = if value_index < options.len() {
                         options[value_index..].to_owned()
                     } else {
-                        arguments.next().ok_or_else(|| {
-                            NativeAttachArgumentError::Command(ServerError::CommandParse(format!(
-                                "command attach-session: {name} expects an argument"
-                            )))
-                        })?
+                        arguments
+                            .next()
+                            .ok_or_else(|| {
+                                NativeAttachArgumentError::Command(ServerError::CommandParse(
+                                    format!("command attach-session: {name} expects an argument"),
+                                ))
+                            })?
+                            .to_string()
                     };
                     match option {
                         't' => target = Some(value),
@@ -1713,7 +1726,7 @@ fn parse_native_attach_arguments(
         read_only,
         client_flags,
         working_directory,
-        session: target.or(positional),
+        session: target.or(positional.map(|value| value.to_string())),
     })
 }
 
@@ -1835,13 +1848,16 @@ fn format_local_command_error(path: &Path, error: DaemonError) -> String {
 }
 
 #[cfg(not(target_os = "ios"))]
-fn print_command_output(output: &str) {
+/// Command output is a byte string, so it reaches stdout exactly as the daemon
+/// stored it, `show-environment`'s non-UTF-8 values included.
+fn print_command_output(output: &RawText) {
+    let output = output.as_bytes();
     if output.is_empty() {
         return;
     }
     let mut stdout = io::stdout().lock();
-    let _ = stdout.write_all(output.as_bytes());
-    if !output.ends_with('\n') {
+    let _ = stdout.write_all(output);
+    if !output.ends_with(b"\n") {
         let _ = stdout.write_all(b"\n");
     }
     let _ = stdout.flush();
@@ -1877,7 +1893,7 @@ fn server_error_message(error: &ServerError) -> String {
 #[cfg(not(target_os = "ios"))]
 fn run_kill_server(
     path: &Path,
-    args: impl IntoIterator<Item = String>,
+    args: impl IntoIterator<Item = RawText>,
     prepared: bool,
 ) -> ExitCode {
     let invocation = CommandInvocation::new("kill-server", args);
@@ -1915,7 +1931,7 @@ fn run_kill_server(
 }
 
 #[cfg(not(target_os = "ios"))]
-fn run_host_kill_server(host: &str, args: impl IntoIterator<Item = String>) -> ExitCode {
+fn run_host_kill_server(host: &str, args: impl IntoIterator<Item = RawText>) -> ExitCode {
     let mut client = match connect_host_command_client(host) {
         Ok(client) => client,
         Err(error) => {
@@ -2695,6 +2711,7 @@ mod tests {
     };
 
     use gpui::WindowAppearance;
+    use zz_protocol::RawText;
     use zz_terminal::TerminalColorScheme;
 
     use super::{
@@ -2726,11 +2743,8 @@ mod tests {
             DaemonBootstrapArguments::default()
         );
         assert_eq!(
-            parse_daemon_bootstrap_arguments(&[
-                "--bootstrap-server-id".to_owned(),
-                "42".to_owned(),
-            ])
-            .unwrap(),
+            parse_daemon_bootstrap_arguments(&["--bootstrap-server-id".into(), "42".into(),])
+                .unwrap(),
             DaemonBootstrapArguments {
                 server_id: Some(42),
                 client_working_directory: None,
@@ -2738,10 +2752,10 @@ mod tests {
         );
         assert_eq!(
             parse_daemon_bootstrap_arguments(&[
-                "--bootstrap-server-id".to_owned(),
-                "42".to_owned(),
-                "--bootstrap-client-cwd".to_owned(),
-                path_string.clone(),
+                "--bootstrap-server-id".into(),
+                "42".into(),
+                "--bootstrap-client-cwd".into(),
+                path_string.clone().into(),
             ])
             .unwrap(),
             DaemonBootstrapArguments {
@@ -2751,11 +2765,15 @@ mod tests {
         );
 
         for arguments in [
-            vec!["extra".to_owned()],
-            vec!["--bootstrap-server-id".to_owned()],
-            vec!["--bootstrap-server-id".to_owned(), "nope".to_owned()],
-            vec!["--bootstrap-client-cwd".to_owned(), path_string.clone()],
-        ] {
+            vec![RawText::from("extra")],
+            vec![RawText::from("--bootstrap-server-id")],
+            vec![RawText::from("--bootstrap-server-id"), "nope".into()],
+            vec![
+                RawText::from("--bootstrap-client-cwd"),
+                RawText::from(path_string.clone()),
+            ],
+        ] as [Vec<RawText>; 4]
+        {
             assert_eq!(
                 parse_daemon_bootstrap_arguments(&arguments),
                 Err(DaemonBootstrapArgumentError::ServerId),
@@ -2764,30 +2782,31 @@ mod tests {
         }
         for arguments in [
             vec![
-                "--bootstrap-server-id".to_owned(),
-                "42".to_owned(),
-                "--bootstrap-client-cwd".to_owned(),
+                "--bootstrap-server-id".into(),
+                "42".into(),
+                "--bootstrap-client-cwd".into(),
             ],
             vec![
-                "--bootstrap-server-id".to_owned(),
-                "42".to_owned(),
-                "--other".to_owned(),
-                path_string.clone(),
+                "--bootstrap-server-id".into(),
+                "42".into(),
+                "--other".into(),
+                path_string.clone().into(),
             ],
             vec![
-                "--bootstrap-server-id".to_owned(),
-                "42".to_owned(),
-                "--bootstrap-client-cwd".to_owned(),
-                "relative".to_owned(),
+                "--bootstrap-server-id".into(),
+                "42".into(),
+                "--bootstrap-client-cwd".into(),
+                "relative".into(),
             ],
             vec![
-                "--bootstrap-server-id".to_owned(),
-                "42".to_owned(),
-                "--bootstrap-client-cwd".to_owned(),
-                path_string.clone(),
-                "extra".to_owned(),
+                "--bootstrap-server-id".into(),
+                "42".into(),
+                "--bootstrap-client-cwd".into(),
+                path_string.clone().into(),
+                "extra".into(),
             ],
-        ] {
+        ] as [Vec<RawText>; 4]
+        {
             assert_eq!(
                 parse_daemon_bootstrap_arguments(&arguments),
                 Err(DaemonBootstrapArgumentError::ClientWorkingDirectory),
@@ -2845,7 +2864,7 @@ mod tests {
     fn app_is_an_exact_native_gui_verb_even_inside_tmux() {
         assert!(
             run_command_mode(
-                &["app".to_owned()],
+                &["app".into()],
                 std::path::Path::new("/tmp/zz.sock"),
                 super::SocketSelectionSource::Default,
                 None,
@@ -2988,15 +3007,15 @@ mod tests {
 
     #[test]
     fn stdin_payload_boundary_distinguishes_terminators_from_option_values() {
-        let mut send_text = ["-t", "--"].map(str::to_owned).to_vec();
+        let mut send_text = ["-t", "--"].map(RawText::from).to_vec();
         append_stdin_payload("send-text", &mut send_text, "--no-enter".to_owned());
         assert_eq!(send_text, ["-t", "--", "--", "--no-enter"]);
 
-        let mut agent_send = ["--context", "--"].map(str::to_owned).to_vec();
+        let mut agent_send = ["--context", "--"].map(RawText::from).to_vec();
         append_stdin_payload("agent-send", &mut agent_send, "--submit".to_owned());
         assert_eq!(agent_send, ["--context", "--", "--", "--submit"]);
 
-        let mut bounded = ["-t", "%1", "--"].map(str::to_owned).to_vec();
+        let mut bounded = ["-t", "%1", "--"].map(RawText::from).to_vec();
         append_stdin_payload("send-text", &mut bounded, "--no-enter".to_owned());
         assert_eq!(bounded, ["-t", "%1", "--", "--no-enter"]);
     }
@@ -3180,11 +3199,11 @@ mod tests {
             ServerError::InvalidCommand("no".to_owned())
         )));
         assert!(!daemon_transport_failure(&DaemonError::CommandExit {
-            output: String::new(),
+            output: RawText::default(),
             exit_code: 7,
         }));
         assert!(daemon_transport_failure(&DaemonError::CommandFailed {
-            output: String::new(),
+            output: RawText::default(),
             error: Box::new(DaemonError::IncompatibleDaemon {
                 daemon: Some(73),
                 client: 74,
@@ -3205,7 +3224,7 @@ mod tests {
                 "-s",
                 "later",
             ]
-            .map(str::to_owned),
+            .map(RawText::from),
         );
         assert!(command_chain_uses_tui(&attaching_later));
 
@@ -3225,12 +3244,12 @@ mod tests {
                 "-s",
                 "never",
             ]
-            .map(str::to_owned),
+            .map(RawText::from),
         );
         assert!(command_chain_uses_tui(&target_later));
 
         let detached_only = split_command_chain(
-            &["new-session", "-d", "-s", "first", ";", "list-sessions"].map(str::to_owned),
+            &["new-session", "-d", "-s", "first", ";", "list-sessions"].map(RawText::from),
         );
         assert!(!command_chain_uses_tui(&detached_only));
     }
@@ -3238,7 +3257,7 @@ mod tests {
     #[test]
     fn native_attach_parser_keeps_the_zz_superset_and_tmux_target() {
         let target = parse_native_attach_arguments(
-            ["-d", "-t", "work", "--restart-daemon"].map(str::to_owned),
+            ["-d", "-t", "work", "--restart-daemon"].map(RawText::from),
         )
         .unwrap();
         assert!(target.detach_others);
@@ -3250,24 +3269,24 @@ mod tests {
         assert_eq!(native_attach_command(&target).args, ["-d", "-t", "work"]);
 
         let positional =
-            parse_native_attach_arguments(["work", "--restart-daemon"].map(str::to_owned)).unwrap();
+            parse_native_attach_arguments(["work", "--restart-daemon"].map(RawText::from)).unwrap();
         assert!(!positional.detach_others);
         assert!(positional.restart_daemon);
         assert_eq!(positional.session.as_deref(), Some("work"));
         assert_eq!(
-            parse_native_attach_arguments(["work", "-@"].map(str::to_owned)),
+            parse_native_attach_arguments(["work", "-@"].map(RawText::from)),
             Err(NativeAttachArgumentError::Usage)
         );
 
         let read_only =
-            parse_native_attach_arguments(["-dr", "-t", "work"].map(str::to_owned)).unwrap();
+            parse_native_attach_arguments(["-dr", "-t", "work"].map(RawText::from)).unwrap();
         assert!(read_only.detach_others);
         assert!(read_only.read_only);
         assert_eq!(read_only.client_flags, None);
         assert_eq!(read_only.session.as_deref(), Some("work"));
 
         let no_update =
-            parse_native_attach_arguments(["-E", "-t", "work"].map(str::to_owned)).unwrap();
+            parse_native_attach_arguments(["-E", "-t", "work"].map(RawText::from)).unwrap();
         assert!(no_update.no_update_environment);
         assert_eq!(no_update.session.as_deref(), Some("work"));
         assert_eq!(native_attach_command(&no_update).args, ["-E", "-t", "work"]);
@@ -3279,7 +3298,7 @@ mod tests {
                 "-factive-pane,no-detach-on-destroy",
                 "work",
             ]
-            .map(str::to_owned),
+            .map(RawText::from),
         )
         .unwrap();
         assert_eq!(
@@ -3287,7 +3306,7 @@ mod tests {
             Some("active-pane,no-detach-on-destroy")
         );
 
-        let cwd = parse_native_attach_arguments(["-dc/tmp/work", "-t", "work"].map(str::to_owned))
+        let cwd = parse_native_attach_arguments(["-dc/tmp/work", "-t", "work"].map(RawText::from))
             .unwrap();
         assert!(cwd.detach_others);
         assert_eq!(cwd.working_directory.as_deref(), Some("/tmp/work"));
@@ -3298,7 +3317,7 @@ mod tests {
         );
 
         let bundled = parse_native_attach_arguments(
-            ["-dEr", "-fignore-size", "-c/tmp/work", "-twork"].map(str::to_owned),
+            ["-dEr", "-fignore-size", "-c/tmp/work", "-twork"].map(RawText::from),
         )
         .unwrap();
         assert!(bundled.detach_others);
@@ -3327,7 +3346,7 @@ mod tests {
         );
 
         assert!(matches!(
-            parse_native_attach_arguments(["-t", "one", "two"].map(str::to_owned)),
+            parse_native_attach_arguments(["-t", "one", "two"].map(RawText::from)),
             Err(super::NativeAttachArgumentError::Usage)
         ));
 
@@ -3371,33 +3390,33 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                parse_native_attach_arguments(arguments.into_iter().map(str::to_owned)),
+                parse_native_attach_arguments(arguments.into_iter().map(RawText::from)),
                 Err(NativeAttachArgumentError::Command(expected))
             );
         }
         // -x is -d with the parent-hangup exit action, so the native parser
         // forwards it the way it forwards -d.
-        let hangup = parse_native_attach_arguments(["-x"].map(str::to_owned))
+        let hangup = parse_native_attach_arguments(["-x"].map(RawText::from))
             .expect("attach-session -x parses");
         assert!(hangup.detach_others_hangup);
         assert!(!hangup.detach_others);
         assert_eq!(native_attach_command(&hangup).args, ["-x".to_owned()]);
         assert_eq!(
-            parse_native_attach_arguments(["-t", "-?"].map(str::to_owned))
+            parse_native_attach_arguments(["-t", "-?"].map(RawText::from))
                 .unwrap()
                 .session
                 .as_deref(),
             Some("-?")
         );
         assert_eq!(
-            parse_native_attach_arguments(["--", "work"].map(str::to_owned))
+            parse_native_attach_arguments(["--", "work"].map(RawText::from))
                 .unwrap()
                 .session
                 .as_deref(),
             Some("work")
         );
         let literal_restart =
-            parse_native_attach_arguments(["--", "--restart-daemon"].map(str::to_owned)).unwrap();
+            parse_native_attach_arguments(["--", "--restart-daemon"].map(RawText::from)).unwrap();
         assert!(!literal_restart.restart_daemon);
         assert_eq!(literal_restart.session.as_deref(), Some("--restart-daemon"));
     }
@@ -3415,7 +3434,7 @@ mod tests {
                 r"a\;",
                 r"\;",
             ]
-            .map(str::to_owned),
+            .map(RawText::from),
         );
         assert_eq!(
             commands,
@@ -3433,7 +3452,7 @@ mod tests {
     #[test]
     fn command_chains_preserve_output_and_abort_on_the_first_error() {
         let commands =
-            split_command_chain(&["first", ";", "fail", ";", "never"].map(str::to_owned));
+            split_command_chain(&["first", ";", "fail", ";", "never"].map(RawText::from));
         let mut seen = Vec::new();
         let mut output = Vec::new();
         let result = execute_command_chain(
@@ -3442,7 +3461,7 @@ mod tests {
                 seen.push(command.name.clone());
                 match command.name.as_str() {
                     "first" => Ok(CommandOutcome {
-                        stdout: "first output\n".to_owned(),
+                        stdout: "first output\n".into(),
                         ..CommandOutcome::default()
                     }),
                     "fail" => Err(17_u8),
@@ -3461,7 +3480,7 @@ mod tests {
     /// `CMD_RETURN_ERROR`, while `c->retval` is simply overwritten.
     #[test]
     fn command_chains_continue_past_a_nonzero_exit_and_keep_the_last_status() {
-        let commands = split_command_chain(&["three", ";", "zero", ";", "five"].map(str::to_owned));
+        let commands = split_command_chain(&["three", ";", "zero", ";", "five"].map(RawText::from));
         let mut seen = Vec::new();
         let mut streams = Vec::new();
         let result: Result<u8, u8> = execute_command_chain(
@@ -3470,12 +3489,12 @@ mod tests {
                 seen.push(command.name.clone());
                 Ok(match command.name.as_str() {
                     "three" => CommandOutcome {
-                        stdout: "three out\n".to_owned(),
+                        stdout: "three out\n".into(),
                         stderr: "three err\n".to_owned(),
                         exit_code: 3,
                     },
                     "zero" => CommandOutcome {
-                        stdout: "zero out\n".to_owned(),
+                        stdout: "zero out\n".into(),
                         ..CommandOutcome::default()
                     },
                     _ => CommandOutcome {
@@ -3491,9 +3510,9 @@ mod tests {
         assert_eq!(
             streams,
             [
-                ("three out\n".to_owned(), "three err\n".to_owned()),
-                ("zero out\n".to_owned(), String::new()),
-                (String::new(), String::new()),
+                (RawText::from("three out\n"), "three err\n".to_owned()),
+                ("zero out\n".into(), String::new()),
+                (RawText::default(), String::new()),
             ]
         );
     }
@@ -3571,9 +3590,9 @@ mod tests {
     fn socket_flag_overrides_the_environment_resolved_path() {
         let parsed = application_arguments(
             [
-                "--socket".to_owned(),
-                "/tmp/forwarded.sock".to_owned(),
-                "list-sessions".to_owned(),
+                "--socket".into(),
+                "/tmp/forwarded.sock".into(),
+                "list-sessions".into(),
             ],
             PathBuf::from("/tmp/zz-env.sock"),
         )
@@ -3583,7 +3602,7 @@ mod tests {
         assert_eq!(parsed.remaining, ["list-sessions"]);
 
         let parsed = application_arguments(
-            ["daemon".to_owned(), "--socket=/tmp/daemon.sock".to_owned()],
+            ["daemon".into(), "--socket=/tmp/daemon.sock".into()],
             PathBuf::from("/tmp/default.sock"),
         )
         .unwrap();
@@ -3620,14 +3639,14 @@ mod tests {
     #[test]
     fn tmux_version_and_help_are_exact_early_outputs() {
         let version = application_arguments(
-            ["-2uV".to_owned(), "ignored".to_owned()],
+            ["-2uV".into(), "ignored".into()],
             PathBuf::from("/tmp/default.sock"),
         )
         .unwrap();
         assert_eq!(version.early_output, Some(TMUX_VERSION_OUTPUT));
 
         let help = application_arguments(
-            ["-vh".to_owned(), "ignored".to_owned()],
+            ["-vh".into(), "ignored".into()],
             PathBuf::from("/tmp/default.sock"),
         )
         .unwrap();
@@ -3638,16 +3657,16 @@ mod tests {
     fn tmux_flags_compose_before_the_command_word() {
         let parsed = application_arguments(
             [
-                "-2u".to_owned(),
-                "-lN".to_owned(),
-                "-f".to_owned(),
-                "/tmp/first.conf".to_owned(),
-                "-f/tmp/second.conf".to_owned(),
-                "-S/tmp/tmux.sock".to_owned(),
-                "new-session".to_owned(),
-                "-d".to_owned(),
-                "-f".to_owned(),
-                "pane-command".to_owned(),
+                "-2u".into(),
+                "-lN".into(),
+                "-f".into(),
+                "/tmp/first.conf".into(),
+                "-f/tmp/second.conf".into(),
+                "-S/tmp/tmux.sock".into(),
+                "new-session".into(),
+                "-d".into(),
+                "-f".into(),
+                "pane-command".into(),
             ],
             PathBuf::from("/tmp/default.sock"),
         )
@@ -3673,10 +3692,10 @@ mod tests {
     fn the_last_zz_or_tmux_socket_selector_wins() {
         let parsed = application_arguments(
             [
-                "-S".to_owned(),
-                "/tmp/tmux.sock".to_owned(),
-                "--socket=/tmp/zz.sock".to_owned(),
-                "list-sessions".to_owned(),
+                "-S".into(),
+                "/tmp/tmux.sock".into(),
+                "--socket=/tmp/zz.sock".into(),
+                "list-sessions".into(),
             ],
             PathBuf::from("/tmp/default.sock"),
         )
@@ -3685,10 +3704,10 @@ mod tests {
 
         let parsed = application_arguments(
             [
-                "--socket".to_owned(),
-                "/tmp/zz.sock".to_owned(),
-                "-S/tmp/tmux.sock".to_owned(),
-                "list-sessions".to_owned(),
+                "--socket".into(),
+                "/tmp/zz.sock".into(),
+                "-S/tmp/tmux.sock".into(),
+                "list-sessions".into(),
             ],
             PathBuf::from("/tmp/default.sock"),
         )
@@ -3699,7 +3718,7 @@ mod tests {
     #[test]
     fn tmux_shell_command_is_exclusive_and_preserves_login_mode() {
         let parsed = application_arguments(
-            ["-lc".to_owned(), "printf ok".to_owned()],
+            ["-lc".into(), "printf ok".into()],
             PathBuf::from("/tmp/default.sock"),
         )
         .unwrap();
@@ -3709,7 +3728,7 @@ mod tests {
 
         assert_eq!(
             application_arguments(
-                ["-cprintf ok".to_owned(), "list-sessions".to_owned()],
+                ["-cprintf ok".into(), "list-sessions".into()],
                 PathBuf::from("/tmp/default.sock")
             ),
             Err(ApplicationArgumentError::Usage)
@@ -3722,29 +3741,29 @@ mod tests {
             let expected = format!("zz: unknown option -- {}\n{TMUX_USAGE}", &flag[1..2]);
             assert!(
                 matches!(
-                    application_arguments([flag.to_owned()], PathBuf::from("/tmp/default.sock")),
+                    application_arguments([RawText::from(flag)], PathBuf::from("/tmp/default.sock")),
                     Err(ApplicationArgumentError::Raw(message)) if message == expected
                 ),
                 "{flag}"
             );
         }
         assert_eq!(
-            application_arguments(["--unknown".to_owned()], PathBuf::from("/tmp/default.sock")),
+            application_arguments(["--unknown".into()], PathBuf::from("/tmp/default.sock")),
             Err(ApplicationArgumentError::Usage)
         );
         assert!(matches!(
-            application_arguments(["-L".to_owned()], PathBuf::from("/tmp/default.sock")),
+            application_arguments(["-L".into()], PathBuf::from("/tmp/default.sock")),
             Err(ApplicationArgumentError::Raw(message))
                 if message == format!("zz: option requires an argument -- L\n{TMUX_USAGE}")
         ));
         assert!(matches!(
-            application_arguments(["-D".to_owned()], PathBuf::from("/tmp/default.sock")),
+            application_arguments(["-D".into()], PathBuf::from("/tmp/default.sock")),
             Err(ApplicationArgumentError::Message(message))
                 if message == "-D foreground server mode is not supported; use `zz daemon`"
         ));
         assert_eq!(
             application_arguments(
-                ["-D".to_owned(), "list-sessions".to_owned()],
+                ["-D".into(), "list-sessions".into()],
                 PathBuf::from("/tmp/default.sock")
             ),
             Err(ApplicationArgumentError::Usage)
@@ -3755,7 +3774,7 @@ mod tests {
     fn control_flags_count_and_compose_with_tmux_options() {
         for (flag, expected) in [("-C", 1), ("-CC", 2), ("-CCC", 3)] {
             let parsed = application_arguments(
-                [flag.to_owned(), "list-sessions".to_owned()],
+                [RawText::from(flag), "list-sessions".into()],
                 PathBuf::from("/tmp/default.sock"),
             )
             .unwrap();
@@ -3764,10 +3783,10 @@ mod tests {
         }
         let parsed = application_arguments(
             [
-                "-2CulN".to_owned(),
-                "-f/tmp/control.conf".to_owned(),
-                "-S/tmp/control.sock".to_owned(),
-                "new-session".to_owned(),
+                "-2CulN".into(),
+                "-f/tmp/control.conf".into(),
+                "-S/tmp/control.sock".into(),
+                "new-session".into(),
             ],
             PathBuf::from("/tmp/default.sock"),
         )
@@ -3782,7 +3801,7 @@ mod tests {
         assert_eq!(parsed.socket_path, PathBuf::from("/tmp/control.sock"));
         assert_eq!(parsed.remaining, ["new-session"]);
         let shell = application_arguments(
-            ["-Cc".to_owned(), "printf ok".to_owned()],
+            ["-Cc".into(), "printf ok".into()],
             PathBuf::from("/tmp/default.sock"),
         )
         .unwrap();
@@ -3818,11 +3837,7 @@ mod tests {
     #[test]
     fn host_flag_accepts_both_spellings_and_conflicts_with_socket() {
         let parsed = application_arguments(
-            [
-                "--host".to_owned(),
-                "desktop".to_owned(),
-                "list-sessions".to_owned(),
-            ],
+            ["--host".into(), "desktop".into(), "list-sessions".into()],
             PathBuf::from("/tmp/default.sock"),
         )
         .unwrap();
@@ -3831,7 +3846,7 @@ mod tests {
         assert_eq!(parsed.remaining, ["list-sessions"]);
 
         let parsed = application_arguments(
-            ["list-panes".to_owned(), "--host=gpu".to_owned()],
+            ["list-panes".into(), "--host=gpu".into()],
             PathBuf::from("/tmp/default.sock"),
         )
         .unwrap();
@@ -3840,18 +3855,19 @@ mod tests {
 
         for arguments in [
             vec![
-                "--host".to_owned(),
-                "desktop".to_owned(),
-                "--socket=/tmp/daemon.sock".to_owned(),
-                "list-sessions".to_owned(),
+                "--host".into(),
+                "desktop".into(),
+                "--socket=/tmp/daemon.sock".into(),
+                "list-sessions".into(),
             ],
             vec![
-                "--socket".to_owned(),
-                "/tmp/daemon.sock".to_owned(),
-                "--host=desktop".to_owned(),
-                "list-sessions".to_owned(),
+                "--socket".into(),
+                "/tmp/daemon.sock".into(),
+                "--host=desktop".into(),
+                "list-sessions".into(),
             ],
-        ] {
+        ] as [Vec<RawText>; 2]
+        {
             assert!(application_arguments(arguments, PathBuf::from("/tmp/default.sock")).is_err());
         }
     }
@@ -3859,7 +3875,7 @@ mod tests {
     #[test]
     fn a_prompt_would_reach_the_command_dispatcher_if_askpass_mode_did_not_come_first() {
         let parsed = application_arguments(
-            ["demfabris@xps's password: ".to_owned()],
+            ["demfabris@xps's password: ".into()],
             PathBuf::from("/tmp/default.sock"),
         )
         .unwrap();
@@ -3869,20 +3885,17 @@ mod tests {
     #[test]
     fn socket_flag_requires_a_non_empty_path() {
         assert!(
-            application_arguments(["--socket".to_owned()], PathBuf::from("/tmp/default.sock"))
+            application_arguments(["--socket".into()], PathBuf::from("/tmp/default.sock")).is_err()
+        );
+        assert!(
+            application_arguments(["--socket=".into()], PathBuf::from("/tmp/default.sock"))
                 .is_err()
         );
         assert!(
-            application_arguments(["--socket=".to_owned()], PathBuf::from("/tmp/default.sock"))
-                .is_err()
+            application_arguments(["--host".into()], PathBuf::from("/tmp/default.sock")).is_err()
         );
         assert!(
-            application_arguments(["--host".to_owned()], PathBuf::from("/tmp/default.sock"))
-                .is_err()
-        );
-        assert!(
-            application_arguments(["--host=".to_owned()], PathBuf::from("/tmp/default.sock"))
-                .is_err()
+            application_arguments(["--host=".into()], PathBuf::from("/tmp/default.sock")).is_err()
         );
     }
 }

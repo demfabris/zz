@@ -291,7 +291,7 @@ fn execute_new_session(
                 messages.push(ProtocolMessage::CommandResponse(CommandResponse::Error {
                     request_id: u64::MAX,
                     error,
-                    output: String::new(),
+                    output: zz_protocol::RawText::default(),
                 }));
                 break 'commands;
             }

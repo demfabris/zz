@@ -9,7 +9,7 @@ use std::{
 };
 
 use thiserror::Error;
-use zz_protocol::{ProtocolError, ServerError};
+use zz_protocol::{ProtocolError, RawText, ServerError};
 
 const STARTUP_REENTRY_CAPABILITY_PREFIX: &str = "zz-startup-reentry=";
 const STARTUP_REENTRY_ENVIRONMENT_VARIABLE: &str = "ZZ_STARTUP_REENTRY";
@@ -87,14 +87,14 @@ pub enum DaemonError {
     #[error("failed to start daemon thread: {0}")]
     Thread(String),
     #[error("command exited with status {exit_code}")]
-    CommandExit { output: String, exit_code: u8 },
+    CommandExit { output: RawText, exit_code: u8 },
     #[error("command reported status {exit_code}")]
-    ReportedCommandExit { output: String, exit_code: u8 },
+    ReportedCommandExit { output: RawText, exit_code: u8 },
     #[error("{0}")]
     InsertedCommandParse(String),
     #[error("{error}")]
     CommandFailed {
-        output: String,
+        output: RawText,
         #[source]
         error: Box<DaemonError>,
     },
@@ -132,7 +132,7 @@ fn configure_tmux_shim(
 #[cfg(feature = "daemon")]
 fn configure_shell_job_environment(
     process: &mut Command,
-    environment: &[(String, Option<String>)],
+    environment: &[(RawText, Option<RawText>)],
     default_terminal: &str,
     startup: bool,
     tmux: &str,
@@ -143,8 +143,9 @@ fn configure_shell_job_environment(
     let path = environment
         .iter()
         .rev()
-        .find_map(|(name, value)| (name == "PATH").then_some(value.as_deref()))
-        .flatten();
+        .find_map(|(name, value)| (name == "PATH").then_some(value.as_ref()))
+        .flatten()
+        .map(RawText::to_os_string);
     process.env_clear();
     for (name, value) in environment {
         if matches!(
@@ -155,10 +156,10 @@ fn configure_shell_job_environment(
         }
         match value {
             Some(value) => {
-                process.env(name, value);
+                process.env(name.to_os_string(), value.to_os_string());
             }
             None => {
-                process.env_remove(name);
+                process.env_remove(name.to_os_string());
             }
         }
     }
@@ -173,7 +174,7 @@ fn configure_shell_job_environment(
             .env("COLORTERM", "truecolor");
     }
     process.env("TMUX", tmux).env("ZZ_SOCKET", zz_socket);
-    configure_tmux_shim(process, tmux_shim, zz_executable, path.map(OsStr::new));
+    configure_tmux_shim(process, tmux_shim, zz_executable, path.as_deref());
 }
 
 /// The text `strerror` would give for an IO failure. Rust appends its own

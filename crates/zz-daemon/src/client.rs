@@ -17,7 +17,7 @@ use zz_protocol::{
     CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage, MAX_CLIENT_ENVIRONMENT_BYTES,
     MAX_CLIENT_ENVIRONMENT_ENTRIES, MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_FILE_BYTES,
     MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId,
-    PasteUploadPurpose, PreparedCommand, ProtocolMessage, ServerError, ServerHello,
+    PasteUploadPurpose, PreparedCommand, ProtocolMessage, RawText, ServerError, ServerHello,
     encode_protocol_message_into, read_protocol_message_into,
 };
 
@@ -103,7 +103,7 @@ static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 /// Both output streams and the exit status of one completed command.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CommandOutcome {
-    pub stdout: String,
+    pub stdout: RawText,
     pub stderr: String,
     pub exit_code: u8,
 }
@@ -230,7 +230,7 @@ impl CommandClient {
     pub fn execute(&mut self, command: CommandInvocation) -> Result<String, DaemonError> {
         let outcome = self.execute_streams(command)?;
         if outcome.exit_code == 0 {
-            Ok(outcome.stdout)
+            Ok(outcome.stdout.to_string())
         } else {
             Err(DaemonError::CommandExit {
                 output: outcome.stdout,
@@ -1170,11 +1170,14 @@ fn logical_current_dir() -> Option<PathBuf> {
     }
 }
 
-fn client_environment() -> Vec<String> {
+fn client_environment() -> Vec<RawText> {
     client_environment_with(std::env::vars_os())
 }
 
-fn client_environment_with<I, K, V>(environment: I) -> Vec<String>
+/// The caller's environment as the bytes the OS gave it. A Unix name and value
+/// are byte strings, so an entry holding a byte past ASCII rides the hello
+/// verbatim instead of being dropped for failing `into_string`.
+fn client_environment_with<I, K, V>(environment: I) -> Vec<RawText>
 where
     I: IntoIterator<Item = (K, V)>,
     K: Into<OsString>,
@@ -1182,19 +1185,20 @@ where
 {
     let environment = environment
         .into_iter()
-        .filter_map(|(name, value)| {
-            let name = name.into().into_string().ok()?;
-            let value = value.into().into_string().ok()?;
-            Some((name, value))
+        .map(|(name, value)| {
+            (
+                RawText::from_os_str(&name.into()).into_bytes(),
+                RawText::from_os_str(&value.into()).into_bytes(),
+            )
         })
-        .collect::<BTreeMap<_, _>>();
+        .collect::<BTreeMap<Vec<u8>, Vec<u8>>>();
     let mut snapshot = Vec::new();
     let mut total_bytes = 0usize;
     for (name, value) in environment {
         if snapshot.len() == MAX_CLIENT_ENVIRONMENT_ENTRIES {
             break;
         }
-        if name.is_empty() || name.contains(['=', '\0']) || value.contains('\0') {
+        if name.is_empty() || name.contains(&b'=') || name.contains(&0) || value.contains(&0) {
             continue;
         }
         let Some(entry_bytes) = name
@@ -1213,7 +1217,10 @@ where
         if next_total_bytes > MAX_CLIENT_ENVIRONMENT_BYTES {
             continue;
         }
-        snapshot.push(format!("{name}={value}"));
+        let mut entry = name;
+        entry.push(b'=');
+        entry.extend_from_slice(&value);
+        snapshot.push(RawText::from_bytes(entry));
         total_bytes = next_total_bytes;
     }
     snapshot
@@ -1496,10 +1503,13 @@ mod tests {
         let snapshot = client_environment_with(environment);
         assert_eq!(snapshot.len(), MAX_CLIENT_ENVIRONMENT_ENTRIES);
         assert_eq!(
-            snapshot.first().map(String::as_str),
+            snapshot.first().map(crate::RawText::as_str),
             Some("ZZ_0000=replacement")
         );
-        assert_eq!(snapshot.last().map(String::as_str), Some("ZZ_4095=4095"));
+        assert_eq!(
+            snapshot.last().map(crate::RawText::as_str),
+            Some("ZZ_4095=4095")
+        );
         assert!(snapshot.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
@@ -1524,7 +1534,13 @@ mod tests {
             forward.len(),
             MAX_CLIENT_ENVIRONMENT_BYTES / MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES
         );
-        assert!(forward.iter().map(String::len).sum::<usize>() <= MAX_CLIENT_ENVIRONMENT_BYTES);
+        assert!(
+            forward
+                .iter()
+                .map(zz_protocol::RawText::byte_len)
+                .sum::<usize>()
+                <= MAX_CLIENT_ENVIRONMENT_BYTES
+        );
         assert!(
             forward
                 .iter()
@@ -1537,9 +1553,15 @@ mod tests {
         );
     }
 
+    /// The pin keeps an environment name and value as a C string, so a byte past
+    /// ASCII reaches the session it attaches to. Measured on 2026-09-04 against
+    /// tmux d77c9dc6 with `update-environment ZZBYTES` and a pty client launched
+    /// with `ZZBYTES=a<0xff>b`: `show-environment -t <session> ZZBYTES` answers
+    /// the bytes `5a 5a 42 59 54 45 53 3d 61 ff 62 0a`. The hello therefore has
+    /// to carry the entry rather than drop it for failing `into_string`.
     #[cfg(unix)]
     #[test]
-    fn client_environment_skips_non_utf8_os_strings() {
+    fn client_environment_carries_non_utf8_os_strings_as_bytes() {
         use std::os::unix::ffi::OsStringExt;
 
         let snapshot = client_environment_with([
@@ -1549,11 +1571,49 @@ mod tests {
             ),
             (
                 OsString::from("ZZ_VALUE"),
-                OsString::from_vec(vec![b'v', 0xff]),
+                OsString::from_vec(vec![b'a', 0xff, b'b']),
             ),
             (OsString::from("ZZ_VALID"), OsString::from("kept")),
         ]);
-        assert_eq!(snapshot, ["ZZ_VALID=kept"]);
+        assert_eq!(
+            snapshot
+                .iter()
+                .map(crate::RawText::as_bytes)
+                .collect::<Vec<_>>(),
+            [
+                b"ZZ_VALID=kept".as_slice(),
+                b"ZZ_VALUE=a\xffb".as_slice(),
+                b"ZZ_\xff=value".as_slice(),
+            ]
+        );
+    }
+
+    /// A NUL anywhere and an empty or `=`-bearing name are still refused, on
+    /// bytes now rather than on text.
+    #[cfg(unix)]
+    #[test]
+    fn client_environment_still_rejects_nul_and_malformed_names() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let snapshot = client_environment_with([
+            (
+                OsString::from("ZZ_NUL"),
+                OsString::from_vec(vec![b'v', 0, b'x']),
+            ),
+            (
+                OsString::from_vec(vec![b'Z', 0, b'Z']),
+                OsString::from("value"),
+            ),
+            (OsString::from(""), OsString::from("value")),
+            (OsString::from("ZZ_VALID"), OsString::from("kept")),
+        ]);
+        assert_eq!(
+            snapshot
+                .iter()
+                .map(crate::RawText::as_bytes)
+                .collect::<Vec<_>>(),
+            [b"ZZ_VALID=kept".as_slice()]
+        );
     }
 
     #[test]

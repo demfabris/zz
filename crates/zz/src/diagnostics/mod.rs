@@ -29,7 +29,7 @@ use gpui::{
     profiler::{self, FrameTiming, FrameTimingCollector},
 };
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind, get_current_pid};
-use zz_protocol::{ClientMessageKind, CommandInvocation};
+use zz_protocol::{ClientMessageKind, CommandInvocation, RawText};
 use zz_ui::ROOT_KEY_CONTEXT;
 
 use crate::{browser::controller::BrowserController, mux::client::MuxClient};
@@ -213,12 +213,12 @@ pub(crate) fn elapsed_us(started: Option<Instant>) -> u128 {
 }
 
 #[cfg(not(target_os = "ios"))]
-pub(crate) fn application_args() -> Vec<String> {
+pub(crate) fn application_args() -> Vec<RawText> {
     application_args_from(std::env::args_os().skip(1))
 }
 
 #[cfg(not(target_os = "ios"))]
-fn application_args_from(arguments: impl IntoIterator<Item = OsString>) -> Vec<String> {
+fn application_args_from(arguments: impl IntoIterator<Item = OsString>) -> Vec<RawText> {
     let mut output = Vec::new();
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
@@ -236,13 +236,13 @@ fn application_args_from(arguments: impl IntoIterator<Item = OsString>) -> Vec<S
             continue;
         }
         if argument == OsStr::new(crate::DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT) {
-            output.push(crate::DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT.to_owned());
+            output.push(crate::DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT.into());
             if let Some(value) = arguments.next() {
-                output.push(value.into_string().unwrap_or_default());
+                output.push(RawText::from_os_str(&value));
             }
             continue;
         }
-        output.push(argument.to_string_lossy().into_owned());
+        output.push(RawText::from_os_str(&argument));
     }
     output
 }

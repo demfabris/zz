@@ -175,7 +175,7 @@ fn ascii_byte_input_agrees_with_the_string_adapters() {
                 string_command
                     .args
                     .iter()
-                    .map(String::as_bytes)
+                    .map(zz_protocol::RawText::as_bytes)
                     .collect::<Vec<_>>()
             );
         }

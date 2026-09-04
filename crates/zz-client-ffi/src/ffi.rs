@@ -311,7 +311,7 @@ impl ZzCommandReply {
                 request_id: *request_id,
                 ok: true,
                 exit_code: *exit_code,
-                output: output.clone(),
+                output: output.to_string(),
                 error: String::new(),
             },
             CommandResponse::Error {
@@ -322,7 +322,7 @@ impl ZzCommandReply {
                 request_id: *request_id,
                 ok: false,
                 exit_code: 1,
-                output: output.clone(),
+                output: output.to_string(),
                 error: error.to_string(),
             },
         }
@@ -3101,7 +3101,7 @@ mod tests {
             &queues,
             &CoreEvent::CommandResponse(CommandResponse::Success {
                 request_id: 3,
-                output: "%1: last output".to_owned(),
+                output: "%1: last output".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }),
@@ -3111,7 +3111,7 @@ mod tests {
             &CoreEvent::CommandResponse(CommandResponse::Error {
                 request_id: 4,
                 error: zz_protocol::ServerError::MissingTarget("current pane".to_owned()),
-                output: String::new(),
+                output: Default::default(),
             }),
         );
 
@@ -3142,7 +3142,7 @@ mod tests {
                 &queues,
                 &CoreEvent::CommandResponse(CommandResponse::Success {
                     request_id,
-                    output: String::new(),
+                    output: Default::default(),
                     exit_code: 0,
                     stderr: String::new(),
                 }),
@@ -3165,7 +3165,7 @@ mod tests {
 
         let reply = Box::into_raw(Box::new(ZzCommandReply::new(&CommandResponse::Success {
             request_id: 11,
-            output: "ok".to_owned(),
+            output: "ok".into(),
             exit_code: 0,
             stderr: String::new(),
         })));

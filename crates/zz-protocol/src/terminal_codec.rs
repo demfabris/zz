@@ -2166,7 +2166,7 @@ mod tests {
     use crate::message::MAX_MUX_OPTION_VALUE_BYTES;
     use crate::{
         MAX_AGENT_PERMISSION_BYTES, MAX_AGENT_STATE_BLOB_BYTES, MuxOptionKey, MuxOptionSource,
-        MuxOptions,
+        MuxOptions, RawText,
     };
     use zz_terminal::{
         AppearanceConfigKey, AppearanceProvenance, AppearanceSource, CellWidth, CursorStyle,
@@ -2735,13 +2735,16 @@ mod tests {
             ));
         };
 
-        rejected(vec!["N=".to_owned(); MAX_CLIENT_ENVIRONMENT_ENTRIES + 1]);
-        rejected(vec![entry(MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES + 1)]);
+        rejected(vec![
+            RawText::from("N=");
+            MAX_CLIENT_ENVIRONMENT_ENTRIES + 1
+        ]);
+        rejected(vec![entry(MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES + 1).into()]);
         for malformed in ["", "NAME", "=value", "NA\0ME=value", "NAME=va\0lue"] {
-            rejected(vec![malformed.to_owned()]);
+            rejected(vec![malformed.into()]);
         }
 
-        let count_boundary = message(vec!["N=".to_owned(); MAX_CLIENT_ENVIRONMENT_ENTRIES]);
+        let count_boundary = message(vec![RawText::from("N="); MAX_CLIENT_ENVIRONMENT_ENTRIES]);
         let frame = encode_protocol_message(&count_boundary).expect("encode count boundary");
         assert_eq!(
             decode_protocol_frame(&frame).expect("decode count boundary"),
@@ -2750,8 +2753,9 @@ mod tests {
 
         let full_entries = MAX_CLIENT_ENVIRONMENT_BYTES / MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES;
         let remainder = MAX_CLIENT_ENVIRONMENT_BYTES % MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES;
-        let mut environment = vec![entry(MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES); full_entries];
-        environment.push(entry(remainder));
+        let mut environment: Vec<RawText> =
+            vec![entry(MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES).into(); full_entries];
+        environment.push(entry(remainder).into());
         let aggregate_boundary = message(environment.clone());
         let frame =
             encode_protocol_message(&aggregate_boundary).expect("encode aggregate boundary");
@@ -2759,10 +2763,10 @@ mod tests {
             decode_protocol_frame(&frame).expect("decode aggregate boundary"),
             aggregate_boundary
         );
-        environment.push("N=x".to_owned());
+        environment.push("N=x".into());
         rejected(environment);
 
-        let equals_in_value = message(vec!["TOKEN=left=right".to_owned()]);
+        let equals_in_value = message(vec!["TOKEN=left=right".into()]);
         let frame = encode_protocol_message(&equals_in_value).expect("encode equals in value");
         assert_eq!(
             decode_protocol_frame(&frame).expect("decode equals in value"),
@@ -2781,7 +2785,7 @@ mod tests {
             color_scheme: None,
             origin: None,
             working_directory: None,
-            environment: vec!["ZZ_SECRET=do-not-print".to_owned()],
+            environment: vec!["ZZ_SECRET=do-not-print".into()],
             process_id: 13,
         };
         let debug = format!("{hello:?}");

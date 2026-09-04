@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 pub(crate) use zz_protocol::input_key_name;
-use zz_protocol::{ChooseBufferAction, ChooseTreeAction, KeyTables, KeyToken, input_typed_text};
+use zz_protocol::{
+    ChooseBufferAction, ChooseTreeAction, KeyTables, KeyToken, RawText, input_typed_text,
+};
 use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers, TerminalSession};
 
 /// The `send-keys -X <action>` name a chooser table resolves a key press to.
@@ -14,7 +16,7 @@ fn overlay_key_action<'a>(keys: &'a KeyTables, table: &str, input: &KeyInput) ->
         return None;
     }
     let mode_index = command.args.iter().position(|argument| argument == "-X")?;
-    command.args.get(mode_index + 1).map(String::as_str)
+    command.args.get(mode_index + 1).map(RawText::as_str)
 }
 
 pub(crate) fn choose_tree_key_action(

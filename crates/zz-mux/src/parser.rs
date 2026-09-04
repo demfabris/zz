@@ -2175,7 +2175,7 @@ mod tests {
         let names: Vec<&str> = parsed
             .commands
             .iter()
-            .filter_map(|command| command.args.first().map(String::as_str))
+            .filter_map(|command| command.args.first().map(zz_protocol::RawText::as_str))
             .collect();
         assert_eq!(names, ["-g", "@first", "@nested", "@elif", "@fallback"]);
         assert!(parsed.diagnostics.is_empty());

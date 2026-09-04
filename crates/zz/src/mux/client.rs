@@ -5353,7 +5353,7 @@ mod tests {
                 CommandResponse::Error {
                     request_id: 0,
                     error: ServerError::SessionNotFound("99".to_owned()),
-                    output: String::new(),
+                    output: zz_protocol::RawText::default(),
                 },
                 cx,
             );
@@ -5452,7 +5452,7 @@ mod tests {
                 CommandResponse::Error {
                     request_id: 0,
                     error: ServerError::InvalidCommand("unrelated input error".to_owned()),
-                    output: String::new(),
+                    output: zz_protocol::RawText::default(),
                 },
                 cx,
             );
@@ -5502,7 +5502,7 @@ mod tests {
                 CommandResponse::Error {
                     request_id: 0,
                     error: ServerError::InvalidCommand("unrelated input error".to_owned()),
-                    output: String::new(),
+                    output: zz_protocol::RawText::default(),
                 },
                 cx,
             );
@@ -5513,7 +5513,7 @@ mod tests {
                 CommandResponse::Error {
                     request_id: 0,
                     error: ServerError::SessionNotFound("99".to_owned()),
-                    output: String::new(),
+                    output: zz_protocol::RawText::default(),
                 },
                 cx,
             );
@@ -5818,7 +5818,7 @@ mod tests {
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id: 0,
                         error: ServerError::SessionNotFound("9".to_owned()),
-                        output: String::new(),
+                        output: zz_protocol::RawText::default(),
                     }),
                     cx,
                 );
@@ -7845,7 +7845,7 @@ mod tests {
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id: 0,
                         error: ServerError::SessionNotFound(String::new()),
-                        output: String::new(),
+                        output: zz_protocol::RawText::default(),
                     }),
                     cx,
                 );
@@ -7892,7 +7892,7 @@ mod tests {
                             ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                                 request_id: 0,
                                 error: late_error.clone(),
-                                output: String::new(),
+                                output: zz_protocol::RawText::default(),
                             })
                         };
                         let empty_snapshot = || {
@@ -8019,7 +8019,7 @@ mod tests {
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id,
                         error: ServerError::PaneNotFound("%2".to_owned()),
-                        output: String::new(),
+                        output: zz_protocol::RawText::default(),
                     }),
                     cx,
                 );
@@ -8059,7 +8059,7 @@ mod tests {
                         ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                             request_id,
                             error: late_error.clone(),
-                            output: String::new(),
+                            output: zz_protocol::RawText::default(),
                         }),
                         cx,
                     );
@@ -8091,7 +8091,7 @@ mod tests {
                     HostId::LOCAL,
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Success {
                         request_id: 1,
-                        output: String::new(),
+                        output: zz_protocol::RawText::default(),
                         exit_code: 0,
                         stderr: String::new(),
                     }),
@@ -8136,7 +8136,7 @@ mod tests {
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id,
                         error: ServerError::SessionNotFound("9".to_owned()),
-                        output: String::new(),
+                        output: zz_protocol::RawText::default(),
                     }),
                     cx,
                 );

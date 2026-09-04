@@ -1,6 +1,6 @@
 //! Shared metadata for tmux-compatible and native `zz` commands.
 
-use crate::message::{CommandInvocation, ServerError};
+use crate::message::{CommandInvocation, RawText, ServerError};
 
 /// The kind of value accepted by an option or positional argument.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,7 +41,7 @@ pub enum TmuxOption<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TmuxOptionParse<'a> {
     pub options: Vec<TmuxOption<'a>>,
-    pub positionals: &'a [String],
+    pub positionals: &'a [RawText],
 }
 
 impl CommandOptionSpec {
@@ -205,7 +205,7 @@ impl CommandSpec {
 
 pub fn parse_tmux_options<'a>(
     spec: &CommandSpec,
-    args: &'a [String],
+    args: &'a [RawText],
 ) -> Result<TmuxOptionParse<'a>, ServerError> {
     parse_tmux_options_with_command(spec, args, None)
 }
@@ -228,7 +228,7 @@ pub fn parse_tmux_command_options<'a>(
 
 fn parse_tmux_options_with_command<'a>(
     spec: &CommandSpec,
-    args: &'a [String],
+    args: &'a [RawText],
     command: Option<&CommandInvocation>,
 ) -> Result<TmuxOptionParse<'a>, ServerError> {
     let mut options = Vec::new();
@@ -2763,10 +2763,10 @@ mod tests {
             .collect()
     }
 
-    fn owned(arguments: &[&str]) -> Vec<String> {
+    fn owned(arguments: &[&str]) -> Vec<RawText> {
         arguments
             .iter()
-            .map(|argument| (*argument).to_owned())
+            .map(|argument| (*argument).into())
             .collect()
     }
 

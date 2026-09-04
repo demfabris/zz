@@ -19,8 +19,8 @@ use zz_mux::{
     StatusRowVariables, TtyTerm, display_width, expand_status,
 };
 use zz_protocol::{
-    ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, SessionId, StatusLine,
-    WindowId,
+    ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, RawText, SessionId,
+    StatusLine, WindowId,
 };
 use zz_terminal::{CellWidth, CopyModeFacts, ProgressBar, TerminalSession, TerminalViewport};
 
@@ -76,7 +76,7 @@ pub(crate) struct StatusRequest {
     pub(crate) message_line: u8,
     pub(crate) customized: bool,
     pub(crate) title_format: Option<String>,
-    pub(crate) environment: Vec<(String, Option<String>)>,
+    pub(crate) environment: Vec<(RawText, Option<RawText>)>,
     pub(crate) default_terminal: String,
     pub(crate) startup: bool,
     pub(crate) context: StatusContext,
@@ -352,7 +352,7 @@ fn decode_terminfo_string(value: &str) -> String {
 /// Read and cache the terminfo entry for `term` without building anything from
 /// it. Reading the database is a subprocess, so registration warms the cache
 /// while the state lock is down and the format path only ever reads it back.
-pub(crate) fn warm_terminfo_entries(environment: &[String]) {
+pub(crate) fn warm_terminfo_entries(environment: &[RawText]) {
     for entry in environment {
         if let Some(term) = entry.strip_prefix("TERM=") {
             let _ = terminfo_entries(term);
@@ -381,14 +381,14 @@ pub(crate) fn client_terminal_facts(
 /// A client's own process environment as `#{Vc:}` rows. A client store has no
 /// hidden or removed entries: the client sends what it has.
 pub(crate) fn client_environment_rows(
-    environment: Option<&Arc<BTreeMap<String, String>>>,
+    environment: Option<&Arc<BTreeMap<RawText, RawText>>>,
 ) -> Vec<FormatEnvironRow> {
     environment.map_or_else(Vec::new, |environment| {
         environment
             .iter()
             .map(|(name, value)| FormatEnvironRow {
-                name: name.clone(),
-                value: value.clone(),
+                name: name.to_string(),
+                value: value.to_string(),
                 hidden: false,
                 removed: false,
             })
@@ -905,7 +905,7 @@ pub(crate) struct DaemonFormatHooks<'a> {
     touched: Option<&'a mut BTreeSet<ShellCacheKey>>,
     refresh: bool,
     now: chrono::DateTime<Local>,
-    environment: Option<&'a [(String, Option<String>)]>,
+    environment: Option<&'a [(RawText, Option<RawText>)]>,
     default_terminal: Option<&'a str>,
     startup: bool,
     tmux_shim: Option<&'a std::path::Path>,
@@ -967,7 +967,7 @@ impl<'a> DaemonFormatHooks<'a> {
         touched: &'a mut BTreeSet<ShellCacheKey>,
         refresh: bool,
         now: chrono::DateTime<Local>,
-        environment: &'a [(String, Option<String>)],
+        environment: &'a [(RawText, Option<RawText>)],
         default_terminal: &'a str,
         startup: bool,
         tmux_shim: Option<&'a std::path::Path>,
@@ -1590,7 +1590,7 @@ fn run_shell(
     command: &str,
     context: &StatusContext,
     cwd: &Path,
-    environment: &[(String, Option<String>)],
+    environment: &[(RawText, Option<RawText>)],
     default_terminal: &str,
     startup: bool,
     tmux_shim: Option<&std::path::Path>,

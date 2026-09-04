@@ -34,6 +34,7 @@ impl Probe {
             )
             .expect("display-message")
             .output
+            .to_string()
     }
 
     fn rows(&mut self, template: &str) -> usize {

@@ -11,7 +11,8 @@ use std::{
 use zz_daemon::InteractiveClient;
 use zz_protocol::{
     CommandInvocation, CommandResponse, ControlSourceFileEvent, EventPayload, MuxSnapshot,
-    PreparedCommand, PreparedCommandResult, ProtocolMessage, ServerError, SessionId, WindowId,
+    PreparedCommand, PreparedCommandResult, ProtocolMessage, RawText, ServerError, SessionId,
+    WindowId,
 };
 
 use super::{
@@ -29,10 +30,12 @@ pub(crate) fn run(
     mux_config_files: &[PathBuf],
     no_start_server: bool,
     level: u8,
-    arguments: Vec<String>,
+    arguments: Vec<zz_protocol::RawText>,
 ) -> ExitCode {
     let mut arguments = arguments.into_iter();
-    let name = arguments.next().unwrap_or_else(|| "new-session".to_owned());
+    let name = arguments
+        .next()
+        .map_or_else(|| "new-session".to_owned(), |name| name.to_string());
     let command = CommandInvocation::new(name, arguments);
     let start_server = !no_start_server && tmux_command_starts_server(&command.name);
     if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
@@ -1347,7 +1350,7 @@ fn close_parked_request<W: Write>(
         command_guard_frames,
         CommandResponse::Success {
             request_id,
-            output: String::new(),
+            output: RawText::default(),
             exit_code: 0,
             stderr: String::new(),
         },
@@ -2244,7 +2247,7 @@ mod tests {
                 &first,
                 CommandResponse::Success {
                     request_id: 1,
-                    output: "one\ntwo\n".to_owned(),
+                    output: "one\ntwo\n".into(),
                     exit_code: 7,
                     stderr: String::new(),
                 },
@@ -2257,7 +2260,7 @@ mod tests {
                 CommandResponse::Error {
                     request_id: 2,
                     error: ServerError::SessionNotFound("gone".to_owned()),
-                    output: "hook\n\n".to_owned(),
+                    output: "hook\n\n".into(),
                 },
             )
             .unwrap();
@@ -2268,7 +2271,7 @@ mod tests {
                 CommandResponse::Error {
                     request_id: 3,
                     error: ServerError::InvalidCommand("unknown command: bogus-command".to_owned()),
-                    output: String::new(),
+                    output: RawText::default(),
                 },
             )
             .unwrap();
@@ -2279,7 +2282,7 @@ mod tests {
                 CommandResponse::Error {
                     request_id: 4,
                     error: ServerError::UnsupportedCommand("new-pane".to_owned()),
-                    output: String::new(),
+                    output: RawText::default(),
                 },
             )
             .unwrap();
@@ -2289,7 +2292,7 @@ mod tests {
                 &fifth,
                 CommandResponse::Success {
                     request_id: 5,
-                    output: "\n".to_owned(),
+                    output: "\n".into(),
                     exit_code: 0,
                     stderr: String::new(),
                 },
@@ -2314,7 +2317,7 @@ mod tests {
                         error: ServerError::InvalidCommand(
                             "No such file or directory: direct.conf".to_owned(),
                         ),
-                        output: String::new(),
+                        output: RawText::default(),
                     },
                 )
                 .unwrap(),
@@ -2335,7 +2338,7 @@ mod tests {
                     &outer,
                     CommandResponse::Success {
                         request_id: 2,
-                        output: String::new(),
+                        output: RawText::default(),
                         exit_code: 3,
                         stderr: String::new(),
                     },
@@ -2349,7 +2352,7 @@ mod tests {
                 &fresh,
                 CommandResponse::Success {
                     request_id: 3,
-                    output: "fresh".to_owned(),
+                    output: "fresh".into(),
                     exit_code: 0,
                     stderr: String::new(),
                 },
@@ -2379,7 +2382,7 @@ mod tests {
                 empty_guard_frames,
                 CommandResponse::Success {
                     request_id: 1,
-                    output: "outer output".to_owned(),
+                    output: "outer output".into(),
                     exit_code: 0,
                     stderr: String::new(),
                 },
@@ -2407,7 +2410,7 @@ mod tests {
                 CommandResponse::Error {
                     request_id: 2,
                     error: ServerError::InvalidCommand("outer failure".to_owned()),
-                    output: "outer output".to_owned(),
+                    output: "outer output".into(),
                 },
             )
             .unwrap(),
@@ -2426,7 +2429,7 @@ mod tests {
                 CommandResponse::Error {
                     request_id: 3,
                     error: ServerError::InvalidCommand("outer failure".to_owned()),
-                    output: String::new(),
+                    output: RawText::default(),
                 },
             )
             .unwrap(),
@@ -2637,7 +2640,7 @@ mod tests {
                 &direct,
                 CommandResponse::Success {
                     request_id: 1,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
                 },
@@ -2683,7 +2686,7 @@ mod tests {
                     &nested,
                     CommandResponse::Success {
                         request_id: 2,
-                        output: String::new(),
+                        output: RawText::default(),
                         exit_code: 0,
                         stderr: String::new(),
                     },
@@ -2701,7 +2704,7 @@ mod tests {
     fn generic_nonzero_success_ends_and_continues() {
         let success = CommandResponse::Success {
             request_id: 1,
-            output: String::new(),
+            output: RawText::default(),
             exit_code: 3,
             stderr: String::new(),
         };
@@ -2713,12 +2716,12 @@ mod tests {
         assert!(response_aborts_line(&CommandResponse::Error {
             request_id: 2,
             error: ServerError::InvalidCommand("failed".to_owned()),
-            output: String::new(),
+            output: RawText::default(),
         }));
         let parse = CommandResponse::Error {
             request_id: 3,
             error: ServerError::CommandParse("unknown flag -Z".to_owned()),
-            output: String::new(),
+            output: RawText::default(),
         };
         assert!(response_aborts_line(&parse));
         assert!(!response_sets_return_code(Some("list-sessions"), &parse));
@@ -2727,13 +2730,13 @@ mod tests {
             &CommandResponse::Error {
                 request_id: 4,
                 error: ServerError::SessionNotFound("missing".to_owned()),
-                output: String::new(),
+                output: RawText::default(),
             }
         ));
         let direct = CommandResponse::Error {
             request_id: 5,
             error: ServerError::InvalidCommand("can't find session: missing".to_owned()),
-            output: String::new(),
+            output: RawText::default(),
         };
         assert!(!response_is_post_admission_callback_failure(&direct));
         let callback = CommandResponse::Error {
@@ -2741,12 +2744,12 @@ mod tests {
             error: ServerError::PostAdmissionCallback(Box::new(ServerError::SessionNotFound(
                 "missing".to_owned(),
             ))),
-            output: String::new(),
+            output: RawText::default(),
         };
         assert!(response_is_post_admission_callback_failure(&callback));
         let nonzero = CommandResponse::Success {
             request_id: 7,
-            output: String::new(),
+            output: RawText::default(),
             exit_code: 3,
             stderr: String::new(),
         };
@@ -2985,7 +2988,7 @@ mod tests {
                 &frame,
                 CommandResponse::Success {
                     request_id: 1,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 0,
                     stderr: String::new(),
                 },
@@ -3125,7 +3128,7 @@ mod tests {
                 &frame,
                 CommandResponse::Success {
                     request_id: 1,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 0,
                     stderr: String::new(),
                 },
@@ -3276,7 +3279,7 @@ mod tests {
                 &frame,
                 CommandResponse::Success {
                     request_id: 5,
-                    output: "body\n".to_owned(),
+                    output: "body\n".into(),
                     exit_code: 0,
                     stderr: String::new(),
                 },
@@ -3382,7 +3385,7 @@ mod tests {
                     &frame,
                     CommandResponse::Success {
                         request_id: 1,
-                        output: "body\n".to_owned(),
+                        output: "body\n".into(),
                         exit_code: 0,
                         stderr: String::new(),
                     },
@@ -3457,7 +3460,7 @@ mod tests {
                 &shell,
                 CommandResponse::Success {
                     request_id: 5,
-                    output: String::new(),
+                    output: RawText::default(),
                     exit_code: 3,
                     stderr: String::new(),
                 },
@@ -3469,7 +3472,7 @@ mod tests {
                 &command_mode,
                 CommandResponse::Success {
                     request_id: 6,
-                    output: "command mode".to_owned(),
+                    output: "command mode".into(),
                     exit_code: 0,
                     stderr: String::new(),
                 },
@@ -3519,7 +3522,7 @@ mod tests {
                 &frame,
                 CommandResponse::Success {
                     request_id: 5,
-                    output: "body\n".to_owned(),
+                    output: "body\n".into(),
                     exit_code: 0,
                     stderr: String::new(),
                 },

@@ -211,6 +211,7 @@
 | smoke/send-keys-control | 3 | yes | 0 | yes | yes | yes |
 | smoke/send-keys-inject | 3 | yes | 0 | yes | yes | yes |
 | smoke/sensible | 6 | yes | 0 | yes | yes | yes |
+| smoke/source-file-byte-name | 2 | yes | 0 | yes | yes | yes |
 | smoke/source-file-control | 12 | yes | 0 | yes | yes | yes |
 | smoke/source-file-depth | 4 | yes | 0 | yes | yes | yes |
 | smoke/source-file-diagnostics | 12 | yes | 0 | yes | yes | yes |

@@ -5,7 +5,7 @@ description: "Dated rationale and source evidence for measured tmux divergences,
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 last_updated_by: Claude
 ---
 
@@ -1518,6 +1518,54 @@ pin answers `#{client_key_table}` `root`, because `window_copy_key_table` is con
 off the mode entry and never written to the client, where zz stores the mode's table on the client
 and answers `copy-mode-vi` or `copy-mode`. The table each key resolves through is the same on both;
 only the readback differs. It is recorded on `copy-mode.action-fidelity` in the registry.
+
+## What the byte-clean consumers still lose (2026-09-04)
+
+`clients.byte-clean-consumers` closed with three surfaces carrying the client's bytes: format
+expansion, the client-encoding sanitizer, and a path argument that names a file only bytes can
+spell. Seven measurements taken beside that work did not close and are recorded here rather than in
+a registry row that no longer exists.
+
+Format expansion counts a byte the way format-draw.c counts it, not the way format.c copies it. A
+byte that opens no complete UTF-8 sequence and is not printable ASCII takes no column, so
+`format_width` answers 2 for `a<0xff>b` and `utf8_padcstr` pads against that; `format_trim_left`
+rebuilds the value out of the units it counted and so DROPS the byte even when the value was short
+enough to keep whole, where `format_trim_right` returns the original string untouched in that case
+and keeps it. On the pin `#{=9:}` over `a<0xff>b` answers `ab` and `#{=-2:}` answers `a<0xff>b`.
+Two modifiers still answer the lossy spelling in zz: `s///`, because `substitute` runs the regex
+crate's UTF-8 engine and a byte-clean twin needs `regex::bytes` with its own unicode-class
+semantics (`#{s/b/Z/:}` is `61 ff 5a` on the pin and `61 ef bf bd 5a` on zz); and the `#{Ve:}`
+environment loop, whose `environ_name` and `environ_value` are published through a `String`
+variables map.
+
+The sanitizer has a twin zz does not run. `cmdq_error` gates on the same `CLIENT_UTF8` and
+sanitizes the DIAGNOSTIC text: under a C locale the pin answers `list-panes -t 'no<U+00E9>pe'` with
+`can't find window: no_pe` where zz answers the raw two bytes. zz's `ServerError` is a typed enum
+whose payload strings would each have to be rewritten. And because the pin prints a listing one
+`cmdq_print` per row while zz answers one command with one output, zz sanitizes per line to keep row
+separators separators; the cost is a newline INSIDE one value, which the pin turns into an
+underscore and zz keeps (`display-message -p '#{ZZNL}'` answers `a_b` on the pin, `a<newline>b` on
+zz).
+
+Three byte-path answers wait on the wire. The MISSING-path diagnostic for `source-file` echoes
+U+FFFD where the pin echoes the raw byte, because the text rides `EventPayload::ClientMessage.text`
+and `CommandResponse.stderr`, both `String`. `load-buffer` and `save-buffer` on a byte path still
+fail where the pin succeeds, because zz routes those through the client and
+`ClientFileRequest.path` is a `String`; `ClientPath` is already the byte-capable path type
+`ClientHello.working_directory` uses, so retyping that one field is the whole change. Both need a
+protocol bump and neither was taken quietly.
+
+The passwd half of the tilde is unproved on this checkout and was deliberately left alone.
+`crates/zz-mux/src/parser.rs` `user_home` still does `into_os_string().into_string().ok()`, so a
+home the passwd database spells with a byte answers `None` and `source-file ~user/x.conf` takes the
+missing-user syntax error path. Changing only that conversion to a lossy one would be a regression:
+the tilde expander builds `String` words, so the mangled home would be opened as a real path instead
+of refused. The honest fix is a byte word type through the config parser, and measuring it needs an
+account whose home is not valid UTF-8.
+
+One divergence found while probing belongs to nobody yet: `display-message -p` with an empty result
+prints one newline on the pin and nothing at all on zz.
+
 
 # Related
 

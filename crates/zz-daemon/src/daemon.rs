@@ -7215,7 +7215,7 @@ impl Shared {
                 .flatten()
                 .collect::<BTreeSet<_>>();
             let resized_panes = panes_for_windows(&inner, &resized_windows);
-            snapshot_changed |= write_back_terminal_geometries(&mut inner, &resized_panes, true);
+            snapshot_changed |= write_back_terminal_geometries(&mut inner, &resized_panes);
             let mut pane_format_output = None;
             for effect in &execution.effects {
                 match effect {
@@ -8487,7 +8487,7 @@ impl Shared {
                         let windows = BTreeSet::from([*window]);
                         let panes = panes_for_windows(&inner, &windows);
                         snapshot_changed |=
-                            write_back_terminal_geometries(&mut inner, &panes, false);
+                            write_back_terminal_geometries(&mut inner, &panes);
                         for (terminal, geometry) in terminal_resizes_for_panes(&inner, &panes) {
                             deferred_terminal_commands
                                 .push(DeferredTerminalCommand::Resize { terminal, geometry });
@@ -8501,7 +8501,7 @@ impl Shared {
                         );
                         let panes = panes_for_windows(&inner, &windows);
                         snapshot_changed |=
-                            write_back_terminal_geometries(&mut inner, &panes, false);
+                            write_back_terminal_geometries(&mut inner, &panes);
                         for (terminal, geometry) in terminal_resizes_for_panes(&inner, &panes) {
                             deferred_terminal_commands
                                 .push(DeferredTerminalCommand::Resize { terminal, geometry });
@@ -12984,7 +12984,7 @@ impl Shared {
                 }
             }
             affected.extend(control_client_sized_panes(&inner, client));
-            let changed = write_back_terminal_geometries(&mut inner, &affected, false);
+            let changed = write_back_terminal_geometries(&mut inner, &affected);
             let resizes = terminal_resizes_for_panes(&inner, &affected);
             (changed, resizes)
         };
@@ -14737,7 +14737,7 @@ impl Shared {
         let terminals = session_terminals(&inner, session);
         let subscriber = inner.subscribers.get(&client).cloned();
         let unfocused_copy_mode_exits = unfocused_copy_sessions(&mut inner);
-        write_back_terminal_geometries(&mut inner, &affected_panes, false);
+        write_back_terminal_geometries(&mut inner, &affected_panes);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
         let mut snapshot = inner.engine.state.snapshot();
         let presence = snapshot_presence(&inner);
@@ -15114,7 +15114,7 @@ impl Shared {
         let popup = take_popup(&mut inner, client);
         let menu = inner.menus.remove(&client);
         let confirm = inner.confirms.remove(&client);
-        write_back_terminal_geometries(&mut inner, &affected_panes, true);
+        write_back_terminal_geometries(&mut inner, &affected_panes);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
         let mut events = Vec::new();
         if let Some((hook_snapshot_before, copy_modes_before)) = hook_state_before.as_ref() {
@@ -15489,13 +15489,14 @@ impl Shared {
                                 cell_height_px,
                             },
                         );
-                        let resize = terminal_resize_for_pane(&inner, pane);
-                        if let Some((_, geometry)) = &resize {
+                        if let Some(reported) =
+                            pane_geometry_from(&inner, pane, GeometrySource::ClientReport)
+                        {
                             inner
                                 .engine
-                                .set_pane_geometry(pane, geometry.columns, geometry.rows);
+                                .set_pane_geometry(pane, reported.columns, reported.rows);
                         }
-                        resize
+                        terminal_resize_for_pane(&inner, pane)
                     };
                     if let Some((terminal, geometry)) = resize {
                         terminal.resize(
@@ -21249,6 +21250,17 @@ impl Shared {
     }
 
     fn publish_snapshot_state(&self) {
+        self.publish_mux_snapshots();
+        self.refresh_status(false);
+        self.refresh_terminal_visibility();
+        #[cfg(feature = "agent")]
+        self.refresh_agent_visibility();
+        self.refresh_choose_trees();
+        self.refresh_choose_buffers();
+        self.refresh_display_panes();
+    }
+
+    fn publish_mux_snapshots(&self) {
         let (snapshots, appearance_updates) = {
             let mut inner = self.inner.lock();
             let ServerState {
@@ -21282,13 +21294,6 @@ impl Shared {
         for (_, subscriber, snapshot) in snapshots {
             Self::send_event(&subscriber, EventPayload::Snapshot(snapshot));
         }
-        self.refresh_status(false);
-        self.refresh_terminal_visibility();
-        #[cfg(feature = "agent")]
-        self.refresh_agent_visibility();
-        self.refresh_choose_trees();
-        self.refresh_choose_buffers();
-        self.refresh_display_panes();
     }
 
     fn refresh_choose_trees(&self) {
@@ -21448,7 +21453,7 @@ impl Shared {
     }
 
     fn refresh_terminal_visibility(&self) {
-        let (changes, resizes) = {
+        let (changes, resizes, layout_changed) = {
             let mut inner = self.inner.lock();
             let attachments = inner
                 .attached
@@ -21513,8 +21518,9 @@ impl Shared {
                 inner.visible_terminals.insert(client, next_visible);
                 inner.streamed_terminals.insert(client, next_streamed);
             }
+            let layout_changed = write_back_terminal_geometries(&mut inner, &affected_panes);
             let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
-            (changes, resizes)
+            (changes, resizes, layout_changed)
         };
 
         for (subscriber, removed, newly_streamed, newly_foreground, foreground_panes) in changes {
@@ -21548,6 +21554,9 @@ impl Shared {
             }
         }
         apply_terminal_resizes(resizes);
+        if layout_changed {
+            self.publish_mux_snapshots();
+        }
     }
 
     fn publish(&self, payload: EventPayload) {
@@ -33234,11 +33243,35 @@ fn aggressive_terminal_geometry(inner: &ServerState, pane: PaneId) -> Option<Ter
     terminal_geometry_for_mode(inner, pane, true, WindowSize::Smallest)
 }
 
+/// Which number the owner client's report contributes. `window_pane_resize`
+/// sizes a pane's screen and its pty from the cell `layout_fix_panes` assigned,
+/// never from a client, so the pty takes `LaidOut`. A client's report is still
+/// what moves the layout in the first place - zz has no tty size for a GUI
+/// client, only its per-pane grid - so the write-back that back-solves the
+/// window extent takes `ClientReport`, and the pty is re-derived after that
+/// extent has settled.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GeometrySource {
+    ClientReport,
+    LaidOut,
+}
+
+#[cfg(test)]
 fn terminal_geometry_for_mode(
     inner: &ServerState,
     pane: PaneId,
     aggressive: bool,
     mode: WindowSize,
+) -> Option<TerminalGeometry> {
+    terminal_geometry_for_mode_from(inner, pane, aggressive, mode, GeometrySource::ClientReport)
+}
+
+fn terminal_geometry_for_mode_from(
+    inner: &ServerState,
+    pane: PaneId,
+    aggressive: bool,
+    mode: WindowSize,
+    source: GeometrySource,
 ) -> Option<TerminalGeometry> {
     let window = inner.engine.state.window_for_pane(pane)?;
     let window_state = inner.engine.state.windows.get(&window)?;
@@ -33282,7 +33315,7 @@ fn terminal_geometry_for_mode(
             client.0,
         )
     })?;
-    let mut geometry = if mode == WindowSize::Manual {
+    let mut geometry = if mode == WindowSize::Manual || source == GeometrySource::LaidOut {
         let (columns, rows) = inner.engine.pane_geometry(pane)?;
         TerminalGeometry {
             columns,
@@ -33334,28 +33367,36 @@ fn terminal_resize_for_pane(
     inner: &ServerState,
     pane: PaneId,
 ) -> Option<(Arc<TerminalSession>, TerminalGeometry)> {
-    let window = inner.engine.state.window_for_pane(pane)?;
-    let aggressive = inner.engine.state.window_aggressive_resize(window).ok()?;
-    let mode = inner.engine.window_size(window);
-    let geometry = terminal_geometry_for_mode(inner, pane, aggressive, mode)?;
+    let geometry = pane_geometry_from(inner, pane, GeometrySource::LaidOut)?;
     let terminal = inner.terminals.get(&pane).cloned()?;
     Some((terminal, geometry))
 }
 
-fn write_back_terminal_geometries(
-    inner: &mut ServerState,
-    panes: &BTreeSet<PaneId>,
-    aggressive_only: bool,
-) -> bool {
+fn pane_geometry_from(
+    inner: &ServerState,
+    pane: PaneId,
+    source: GeometrySource,
+) -> Option<TerminalGeometry> {
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let aggressive = inner.engine.state.window_aggressive_resize(window).ok()?;
+    let mode = inner.engine.window_size(window);
+    terminal_geometry_for_mode_from(inner, pane, aggressive, mode, source)
+}
+
+/// The layout learns what the owner client reported, so the cell the pty is
+/// then sized from is the cell the client draws. Every write-back runs: the
+/// owner set is already what `aggressive-resize` decides, and a pane whose
+/// owner moved without the layout following would report one size and run at
+/// another.
+fn write_back_terminal_geometries(inner: &mut ServerState, panes: &BTreeSet<PaneId>) -> bool {
     let measurements = panes
         .iter()
         .filter_map(|pane| {
-            let window = inner.engine.state.window_for_pane(*pane)?;
-            if aggressive_only && !inner.engine.state.window_aggressive_resize(window).ok()? {
+            if !inner.terminals.contains_key(pane) {
                 return None;
             }
-            terminal_resize_for_pane(inner, *pane)
-                .map(|(_, geometry)| (*pane, geometry.columns, geometry.rows))
+            pane_geometry_from(inner, *pane, GeometrySource::ClientReport)
+                .map(|geometry| (*pane, geometry.columns, geometry.rows))
         })
         .collect::<Vec<_>>();
     measurements
@@ -33458,7 +33499,7 @@ fn terminal_resizes_after_client_sequence(
     if owner_changed_panes.is_empty() {
         return (Vec::new(), false);
     }
-    let layout_changed = write_back_terminal_geometries(inner, &owner_changed_panes, false);
+    let layout_changed = write_back_terminal_geometries(inner, &owner_changed_panes);
     let resizes = visible_panes
         .iter()
         .filter_map(|pane| {
@@ -76254,6 +76295,126 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(
             interactive_client_window_extent(&shared.inner.lock(), outer, session, window),
             Some((200, 50))
+        );
+    }
+
+
+    /// On pinned tmux d77c9dc6 a pane's pty is its layout cell: a 199x49
+    /// window split `-h` reports 99x49 for both panes, `pane_left` plus
+    /// `pane_width` minus one equals `pane_right` on both, `#{window_layout}`
+    /// encodes 99x49 twice, and both shells' `stty size` answers `49 99`;
+    /// `resize-window -x 199` on a 188/10 split moves both shells with the
+    /// cells. So a client's floored measurement has to reach the pty and the
+    /// pane formats as one number, and a report the extent guard swallows
+    /// leaves the pty on the cell rather than a cell below it.
+    #[test]
+    fn a_floored_client_measurement_sizes_the_pty_from_the_pane_it_reports() {
+        let shared = Arc::new(Shared::new(1));
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "residue", QUIET_PANE_COMMAND]),
+            )
+            .expect("create session");
+        let session = context.session.expect("session id");
+        let pane = context.pane.expect("pane id");
+        shared.attach(client, session).expect("attach");
+        let terminal = shared.inner.lock().terminals[&pane].clone();
+        let view = TerminalViewId(client.0);
+
+        let report = |pane: PaneId, columns: u16, rows: u16, context: &mut ExecutionContext| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::ResizeTerminal {
+                        pane,
+                        columns,
+                        rows,
+                        cell_width_px: 8,
+                        cell_height_px: 16,
+                    },
+                )
+                .expect("client measurement");
+        };
+        let family = |context: &mut ExecutionContext| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    &CommandInvocation::new(
+                        "display-message",
+                        [
+                            "-p",
+                            "#{pane_width}x#{pane_height} #{pane_left},#{pane_top} \
+                             #{pane_right},#{pane_bottom} \
+                             #{pane_at_left}#{pane_at_top}#{pane_at_right}#{pane_at_bottom} \
+                             #{window_width}x#{window_height}",
+                        ],
+                    ),
+                )
+                .expect("display-message")
+                .output
+        };
+
+        report(pane, 120, 24, &mut context);
+        wait_for_terminal_dimensions(&terminal, view, 120, 24);
+        report(pane, 119, 23, &mut context);
+        wait_for_terminal_dimensions(&terminal, view, 119, 23);
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(pane),
+            Some((119, 23))
+        );
+        assert_eq!(family(&mut context), "119x23 0,0 118,22 1111 119x23");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-window", ["-h", "-l", "10", QUIET_PANE_COMMAND]),
+            )
+            .expect("split the window");
+        let narrow = context.pane.expect("narrow pane id");
+        let narrow_terminal = shared.inner.lock().terminals[&narrow].clone();
+        assert_eq!(
+            terminal_resize_for_pane(&shared.inner.lock(), pane)
+                .map(|(_, geometry)| (geometry.columns, geometry.rows)),
+            Some((108, 23)),
+            "the split moved the left cell, so its stale 119-column report is not the pty size"
+        );
+
+        report(narrow, 9, 23, &mut context);
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(narrow),
+            Some((10, 23))
+        );
+        assert_eq!(
+            terminal_resize_for_pane(&shared.inner.lock(), narrow)
+                .map(|(_, geometry)| (geometry.columns, geometry.rows)),
+            Some((10, 23))
+        );
+        wait_for_terminal_dimensions(&narrow_terminal, view, 10, 23);
+        assert_eq!(family(&mut context), "10x23 109,0 118,22 0111 119x23");
+        let layout = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-p", "#{window_layout}"]),
+            )
+            .expect("display-message")
+            .output;
+        assert!(
+            layout.contains("119x23,0,0{108x23,0,0,") && layout.contains(",10x23,109,0,"),
+            "{layout}"
         );
     }
 

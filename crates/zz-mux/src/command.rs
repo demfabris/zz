@@ -42,7 +42,7 @@ use crate::{
         AllowPassthrough, PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption,
         SessionOptions, WindowOption, WindowOptions,
     },
-    layout::PANE_MAXIMUM,
+    layout::{CellLayout, PANE_MAXIMUM},
     model::{DEFAULT_WINDOW_EXTENT, NO_MARKED_TARGET, fnmatch, is_marked_target},
     terminfo::TtyTerm,
     tmux_options::{
@@ -7114,21 +7114,16 @@ impl MuxEngine {
             if window.active_pane != pane {
                 break 'probe false;
             }
-            let Some(pane_geometry) = window.layout.pane_geometry_with_border(pane, status) else {
-                debug_assert!(false, "window pane is missing from its layout");
-                break 'probe false;
-            };
-            if pane_geometry.sx.abs_diff(columns) <= 1 && pane_geometry.sy.abs_diff(rows) <= 1 {
-                break 'probe false;
-            }
             if window.last_extent_probe == Some(probe) {
                 break 'probe false;
             }
+            let Some(implied) =
+                back_solved_window_extent(&window.layout, pane, status, columns, rows, true)
+            else {
+                debug_assert!(false, "window pane is missing from its layout");
+                break 'probe false;
+            };
             let current = window.layout.extent();
-            let implied = (
-                implied_window_extent(columns, current.0, pane_geometry.sx),
-                implied_window_extent(rows, current.1, pane_geometry.sy),
-            );
             if implied == current {
                 break 'probe false;
             }
@@ -7183,14 +7178,14 @@ impl MuxEngine {
         if let Some(zoomed) = window.zoomed_pane {
             return (zoomed == pane).then_some((columns, rows));
         }
-        let pane_geometry = window
-            .layout
-            .pane_geometry_with_border(pane, self.pane_border_status(window.id))?;
-        let current = window.layout.extent();
-        Some((
-            implied_window_extent(columns, current.0, pane_geometry.sx),
-            implied_window_extent(rows, current.1, pane_geometry.sy),
-        ))
+        back_solved_window_extent(
+            &window.layout,
+            pane,
+            self.pane_border_status(window.id),
+            columns,
+            rows,
+            false,
+        )
     }
 
     #[must_use]
@@ -13947,6 +13942,42 @@ fn implied_window_extent(measured: u16, window: u16, pane: u16) -> u16 {
     let numerator = u64::from(measured) * u64::from(window);
     let rounded = (numerator + u64::from(pane) / 2) / u64::from(pane);
     u16::try_from(rounded).unwrap_or(u16::MAX)
+}
+
+/// The window extent a client's report of one pane implies. tmux never does
+/// this - a client's tty sizes the window and `layout_fix_panes` hands each
+/// pane its cell - so it is zz's own inverse, and it is only sound axis by
+/// axis. On an axis the pane spans in full the inverse is exact: the pane and
+/// the window differ by the border row `layout_add_horizontal_border` carved
+/// out, so the extent is the report plus that constant. On an axis the pane
+/// shares with siblings the inverse is a ratio, and a report one cell off a
+/// ten-column pane of a two-hundred-column window would move the window by
+/// twenty, so `guard` swallows a single cell of measurement drift there.
+fn back_solved_window_extent(
+    layout: &CellLayout,
+    pane: PaneId,
+    status: PaneBorderStatus,
+    columns: u16,
+    rows: u16,
+    guard: bool,
+) -> Option<(u16, u16)> {
+    let cell = layout.pane_geometry(pane)?;
+    let carved = layout.pane_geometry_with_border(pane, status)?;
+    let window = layout.extent();
+    Some((
+        back_solved_extent_axis(columns, window.0, cell.sx, carved.sx, guard),
+        back_solved_extent_axis(rows, window.1, cell.sy, carved.sy, guard),
+    ))
+}
+
+fn back_solved_extent_axis(measured: u16, window: u16, cell: u16, pane: u16, guard: bool) -> u16 {
+    if cell == window {
+        return measured.saturating_add(window.saturating_sub(pane)).max(1);
+    }
+    if guard && pane.abs_diff(measured) <= 1 {
+        return window;
+    }
+    implied_window_extent(measured, window, pane)
 }
 
 fn parse_pane_percentage(value: &str) -> Result<u8, ServerError> {

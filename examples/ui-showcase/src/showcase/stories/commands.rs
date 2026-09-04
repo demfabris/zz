@@ -125,12 +125,30 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
                     .w_full()
                     .child(specimen_block(
                         "buffer · selected",
-                        buffer_row(0, "buffer0004", "cargo test -p zz --lib", "22 B", "now", true, cx),
+                        buffer_row(
+                            0,
+                            "buffer0004",
+                            "cargo test -p zz --lib",
+                            "22 B",
+                            "now",
+                            false,
+                            true,
+                            cx,
+                        ),
                         cx,
                     ))
                     .child(specimen_block(
                         "buffer",
-                        buffer_row(1, "buffer0003", "https://gpui.rs/docs", "20 B", "2m", false, cx),
+                        buffer_row(
+                            1,
+                            "buffer0003",
+                            "https://gpui.rs/docs",
+                            "20 B",
+                            "2m",
+                            true,
+                            false,
+                            cx,
+                        ),
                         cx,
                     )),
             ),
@@ -234,6 +252,7 @@ fn buffer_row(
     preview: &'static str,
     size: &'static str,
     age: &'static str,
+    tagged: bool,
     selected: bool,
     cx: &App,
 ) -> AnyElement {
@@ -246,6 +265,7 @@ fn buffer_row(
         preview,
         size,
         age,
+        tagged,
         selected,
         ChooserRowTheme::from_theme(cx),
         cx.theme().mono_font_family.clone(),

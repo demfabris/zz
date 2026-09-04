@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 11 FULLY INTEGRATED (FORMATS + CHOOSERS LANES; THE SET-HOOK -B FORMAT MONITOR SUBSYSTEM WITH ITS ONE-SECOND TICK AND NINE NOTIFY_MONITOR_CB NAMES + THE DISPLAY-MESSAGE -V EXPANSION TRACE, THE COPY-MODE MODE-KEYS TAIL WITH THE PER-ACTION SEARCH-MARK CLEAR CLASS AND THE EMACS SELECTION TRIM + CHOOSE-TREE -Y AND THE FIRST FIVE CHOOSER KEYS ON AN OVERLAY-OWNED PROMPT; PROTOCOL V97); CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **CYCLE 12 FULLY INTEGRATED (CHOOSER-TAIL + ENVIRONMENT-BYTES LANES; THE REST OF MODE_TREE_KEY'S VOCABULARY OVER BOTH CHOOSERS WITH THE ':' COMMAND PROMPT RUNNING AGAINST ITS OWN ROW + THE CLIENT'S ENVIRONMENT, ARGV AND COMMAND OUTPUT CARRIED AS BYTES END TO END ON RAWTEXT; PROTOCOL V98); CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **3 UNRESOLVED GROUPS (3 OPEN + 0 BLOCKED = 3)**
+> Live work: **2 UNRESOLVED GROUPS (2 OPEN + 0 BLOCKED = 2)**
 >
-> Ledger settlement: **98.6% (212 of 215 known groups: 100 x (170 CLOSED + 42 ACCEPTED) / (170 CLOSED + 45 LIVE)); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **99.1% (214 of 216 known groups: 100 x (172 CLOSED + 42 ACCEPTED) / (172 CLOSED + 44 LIVE)); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **215 SCENARIOS, 2,636 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
+> Exit evidence: **218 SCENARIOS, 2,644 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 11 FULLY INTEGRATED 2026-09-04 ON THE UBUNTU BOX (TWO OPUS 5 LANES AT XHIGH; THE FORMATS LANE BY THE GATE AGENT, THE CHOOSERS LANE FINISHED BY HAND AFTER THAT AGENT TIMED OUT MID-CORPUS); RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **CYCLE 12 INTEGRATED 2026-09-04 ON THE UBUNTU BOX (TWO OPUS 5 LANES AT XHIGH, TAIL THEN BYTES, ONE GATE ALONE ON THE BOX). THE REGISTRY IS NOT CLOSED: THE AGREED-SCOPE METER READS 99.3% (302/304), BECAUSE THE GEOMETRY ITEM WAS MEASURED RATHER THAN CLOSED AND `semantic:config-tilde-home-non-utf8` CAME BACK OUT OF AN ACCEPTED GROUP WHOSE PREMISE V98 FALSIFIED; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,23 +76,23 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | `origin/main` at `9ddeae0f` (cycle-10 client merge) plus this ledger recompute |
+| Published branch | `origin/main` at `595616b` (cycle-12 bytes merge; the tail lane landed first at `12b4776`) plus this ledger recompute |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Cycle 10 of the orchestrated Opus/Fable loop, 3 of 3 lanes integrated on the ubuntu box: a per-connection command worker for Control clients whose queue is freed the moment the connection's reader leaves, `ProtocolMessage::CommandQueueParked` so a Control client at end of file exits at the first parked command the way `cmdq_next` stops on `CMD_RETURN_WAIT`, and `split-window -W` parking the invoking Command or Control item on the pane it made until the child's status, or 128 plus its signal, comes back (`fd19cce1`); copy-mode text search inside the engine with the pin's search marks, smart case, regex downgrade and the five `search_*` formats, the sixteen stock copy-mode prompt bindings stored the way the pin stores them with `command-prompt -P` accepted as a client-surface hint, the jump family rebuilt on the grid reader, and the format environment tail (`cd03bb8d`); and the popup pointer route the pin keeps in `popup_key_cb`, carried on protocol v96's `PopupAction::Pointer`: button 3 outside the box or on the left or top border raises the popup's own `pd->md` menu, a meta drag or a drag armed on a border moves the box with button 1 and resizes it with button 3, `popup_make_pane` hands the popup's job and screen to a freshly split pane, and a popup's Kitty images reach an attached client because the VT now gets its cell pixel geometry at spawn (`9ddeae0f`). Protocol v95 to v96: one appended message, one appended copy action and one appended popup action, all three lanes bumped and the gate reconciled them to one constant. The client lane landed in a follow-up gate because its reviewer died in the main run |
-| Orchestration | Cycle 10 launched 2026-09-02 on the ubuntu box through `opus-compat-run-10.js`: three Opus lanes, one Fable reviewer per lane, one serialized Fable gate running alone on the box. Queue and copy integrated in that order; every reviewer must-fix was applied at the gate with the reviewer's probe re-run, and one close (`copy-mode.action-fidelity`) was reopened on the reviewer's clear-class, incremental-origin and emacs-trim measurements. The client lane's reviewer died mid-run, so that lane was reviewed and gated separately through `opus-compat-run-10b.js` on 2026-09-03, after `origin/main` had taken 22 non-campaign commits; the rebase conflicted only in the generated `knowledge/tmux/gaps.md`. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; F-PANE-COMMAND-COMPLETION, F-COPY-SEARCH-FORMATS-MONITORS and F-CLIENT-CHOOSERS-POPUPS-V2 are all INTEGRATED and released on the board |
+| Delivery | Cycle 12 of the orchestrated Opus 5 loop, 2 of 2 lanes integrated on the ubuntu box: the rest of `mode_tree_key`'s vocabulary over both choosers, `K`/`J` on `mode_tree_swap`, `O` and `r` on the per-mode order sequences, `F1`/`C-h`'s help screen that the next key of any kind closes, `M--`/`M-+` over every top-level item, `m`/`M` on `server_set_marked`, the `:` command prompt running its line once per tagged row against that row's own `cmd_find_state`, and `window_buffer_key`'s `D` and `P` with no current-row fallback (`12b4776`); and the client's bytes carried end to end on a new `RawText` wire type, so a non-UTF-8 environment name or value, argv word and command output survive registration, the store, a later pane's spawn environment, and every client sink including control mode and the raw TUI (`595616b`). Protocol v97 to v98: both lanes bumped and the gate reconciled them to one constant with both changelog bullets kept. Two closes, `semantic:chooser-key-vocabulary` and `semantic:client-environment-non-utf8`; the geometry item was measured, not closed |
+| Orchestration | Cycle 12 launched 2026-09-04 on the ubuntu box through `opus-compat-run-12.js`: two Opus 5 lanes at xhigh, one Opus 5 reviewer per lane, one gate running alone on the box. Tail integrated first because it carries the smaller wire and daemon footprint; bytes rebased onto it, conflicting only in the two protocol mirror pages and the generated `knowledge/tmux/gaps.md`. Both reviewers returned approve-with-fixes and every must-fix was applied at the gate with the reviewer's probe re-run; the gate also found two defects neither worker nor reviewer had seen, a stale `cargo test -p zz --lib` expectation and an `E0061` in the workspace-excluded `examples/ui-showcase`. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; F-CHOOSER-TAIL-GEOMETRY and F-ENVIRONMENT-BYTES are both INTEGRATED and released READY on the board, each naming what stays open |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
-| Agreed-scope meter | 97.4% (296 of 304 items frozen on 2026-08-31), 59 of 65 groups done; `python3 compat/progress.py` |
-| Completed fixed cohort | Cycle 10: 3 of 3 lanes integrated, agreed-scope meter 90.5% to 97.4%, unresolved groups 10 to 6 |
-| Previous completed cohort | Cycle 9: 3 of 3 lanes integrated, agreed-scope meter 84.2% to 90.5% |
-| Campaign point | A Control client's command queue is its own worker and dies with the connection, `split-window -W` answers the child's status to an unattached client, copy-mode search lives in the daemon's engine with the pin's marks and formats, the stock copy-mode prompt keys carry the pin's exact bindings from a real keyboard, and formats fall back to the session and global environment the way `format_find` does. A popup now carries the pin's whole pointer route on an attached client: its own menu, the border drag, the conversion to a pane, and its Kitty images. The biggest remaining baskets are the copy-mode mode-keys lifecycle (the per-command search-mark clear class, the incremental origin, the emacs selection trim), the chooser key vocabulary and its mode-owned prompts, the popup pointer route on the desktop client, `display-message -v` trace, the set-hook -B monitor subsystem, the non-UTF-8 environment bytes, and the window-format extent decision for a chrome-drawing client |
-| Live registry | 48 active groups, 435 active items, 167 closed records |
-| Active status | 6 open, 0 blocked, 42 accepted |
+| Agreed-scope meter | 99.3% (302 of 304 items frozen on 2026-08-31), 63 of 65 groups done, 1 partially burned; 2 items discovered after the freeze are tracked outside it; `python3 compat/progress.py` |
+| Completed fixed cohort | Cycle 12: 2 of 2 lanes integrated, agreed-scope meter 99.0% to 99.3%, unresolved groups 3 to 2 |
+| Previous completed cohort | Cycle 11: 2 of 2 lanes integrated, agreed-scope meter 97.4% to 99.0% |
+| Campaign point | Both choosers now answer the pin's whole key vocabulary, and a line typed at the `:` prompt resolves against the row the cursor sits on rather than the client's current window. A client's bytes survive the whole round trip: `ClientHello.environment`, `CommandInvocation.args` and both `CommandResponse` output fields are `RawText`, so `set-environment -g ZZBYTES a<0xff>b` comes back byte for byte from the plain CLI, a control client and the raw TUI. What is left is two groups. `rendering.geometry-residue` holds the one measured but undecided question, which of an attached GUI client's two pane widths the formats should report, with the prescribed fix refuted by measurement and the coherent fix costed. `clients.byte-clean-consumers` is new: the format expander is still `String` end to end, zz has no `CLIENT_UTF8` output sanitizer, and a command argument naming a byte-only path is still opened lossily, which is why `semantic:config-tilde-home-non-utf8` came back out of `protocol.binary-streams` when v98 removed the blocker that record had named |
+| Live registry | 44 active groups, 457 active items, 172 closed records |
+| Active status | 2 open, 0 blocked, 42 accepted |
 | Known differentials | 3 registered cases: two geometry, one geometry plus output |
 
-Cycles 2 through 10 reached `origin/main` through the board's MAIN lock; cycle 10 ends at the
-ledger recompute that follows `9ddeae0f`. Resolve the commit containing the latest tracker update with
+Cycles 2 through 12 reached `origin/main` through the board's MAIN lock; cycle 12 ends at the
+ledger recompute that follows `595616b`. Resolve the commit containing the latest tracker update with
 `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -106,15 +106,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 11: 2 of 2 lanes integrated (the choosers lane finished by the orchestrator after the gate agent timed out) |
-| Previous completed cohort | Cycle 10: 3 of 3 lanes integrated (the client lane in a follow-up gate) |
-| New residual groups | Since the 2026-08-31 freeze: 1 item across 1 group, tracked outside the agreed-scope meter |
-| Unresolved movement | Cycle 11: 6 at launch, 3 at close |
-| Live unresolved | 3 open + 0 blocked = 3 |
+| Completed fixed cohort | Cycle 12: 2 of 2 lanes integrated (tail then bytes, one gate, no interruption) |
+| Previous completed cohort | Cycle 11: 2 of 2 lanes integrated (the choosers lane finished by the orchestrator after the gate agent timed out) |
+| New residual groups | Since the 2026-08-31 freeze: 2 items across 1 group (`clients.byte-clean-consumers`), tracked outside the agreed-scope meter |
+| Unresolved movement | Cycle 12: 3 at launch, 2 at close |
+| Live unresolved | 2 open + 0 blocked = 2 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 215 scenarios, 2,636 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
-| Differential SHA-256 | `fdb38caafb85b65b4649b88198231371815c3738741511862bff9a50cb49bcec` |
-| Ledger settlement | 212 of 215 known groups = 98.6% |
+| Latest differential | 218 scenarios, 2,644 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
+| Differential SHA-256 | `c72aa5e1cd782cf8d2cae4c2d0c6ed62c1e3a7bd4637c0c362439170ba6b13b2` |
+| Ledger settlement | 214 of 216 known groups = 99.1% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -128,7 +128,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(170 + 42) / (170 + 45) = 212 / 215 = 98.6%
+(172 + 42) / (172 + 44) = 214 / 216 = 99.1%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -174,6 +174,19 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-04 cycle-12 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `12b4776` (the rest of `mode_tree_key`'s vocabulary over both choosers: `K`/`J` on `mode_tree_swap` with `window_tree_swap`'s refusals, `O` and `r` on `window_tree_order_seq` and `window_buffer_order_seq` with `sort_next_order`'s wrap, `F1`/`C-h`'s help screen that the next key of any kind closes, `M--`/`M-+` over every top-level item rather than the current one, `m`/`M` on `server_set_marked`, the `:` command prompt run once per tagged row, and `window_buffer_key`'s `D` and `P` with no current-row fallback; 22 new zz-only key rows, manifest 273/63 to 295/85; protocol v97 to v98). `595616b` (the client's bytes end to end on a new `RawText` wire type: `ClientHello.environment`, `CommandInvocation.args` and both `CommandResponse` output fields, plus the environment store, `TerminalSpawn.env` as `OsString`, and every client sink; protocol v97 to v98, reconciled with the tail lane to one constant and both changelog bullets) |
+| Review stage | One Opus 5 reviewer per lane at xhigh, both approve-with-fixes, every must-fix applied at the gate and each proved by reverting the fix. Tail, two must-fixes: the `:` prompt ran its line against the client's `ExecutionContext`, so only the `%%` substitution carried the row and `rename-window colonrow` typed over the row for window 1 renamed the client's window 0 where the pin renamed window 1, now resolved through `choose_tree_target_context` the way `window_tree_get_target` builds its `cmd_find_state`; and `swap_windows_keeping_current` left the session's last window pointing at the window that is current, where `session_set_current` leaves the other member of the pair, measured on the pin as `1:w1- 2:w0* 3:w2` against zz's `1:w1 2:w0*-`. Both pinned by three new rows in `smoke/chooser-tree-vocabulary`, clean:21 to clean:24 on both binaries. Bytes, four must-fixes: control mode and the raw TUI took `&str` and swallowed a `RawText` through `Deref`, so both substituted U+FFFD for bytes the plain CLI printed (`<bin> -C show-environment -g ZZBYTES` answered `5a5a42595445533d61efbfbd620a` on zz against the pin's `5a5a42595445533d61ff620a`, and answers the pin's spelling on both now, pinned as the fixture's eighth check); the two divergences that lived only as prose in a closed resolution were opened as `clients.byte-clean-consumers`; `protocol.binary-streams` recorded that its "CommandInvocation carries String arguments by decision" premise died at v98 and gave `semantic:config-tilde-home-non-utf8` back to open work; and `knowledge/tmux/divergences.md`'s two client-environment rows stopped asserting that the entry is dropped |
+| Gate-found defects | Two that neither worker nor reviewer disclosed. `crates/zz/src/diagnostics/mod.rs non_utf8_bootstrap_client_cwd_is_not_lossily_substituted` still asserted the old drop-to-empty behaviour and failed `cargo test -p zz --lib`, which nobody in either lane had run. `buffer_chooser_row`'s new `tagged` parameter broke `examples/ui-showcase` with `E0061`; that crate is workspace-excluded, so `cargo test --workspace` cannot see it, and the tail lane had already reached `main` before the bytes gate caught it |
+| Workspace gates | Full workspace tests and clippy with warnings denied, green on both lanes. Tail tip: one red row, `daemon::tests::client_focus_closes_display_panes_and_preserves_chooser_modes`, a known flake that also fails about one solo run in three and passed 2 of 3 exact-solo here (the bytes reviewer measured it 6 of 6 red solo at `origin/main`). Bytes tip: `cargo test --workspace --all-features` exited 0 with zero failures. `cargo fmt --all -- --check` clean on both, and `cargo check` inside `examples/ui-showcase` clean after its fix |
+| Differential | Tail delta: 172 scenarios listed twice and reconciled against `git diff --name-only`, run as four disjoint shards with `smoke/source-replay-diagnostics` held back and clean solo at 60 steps. Bytes delta: 180 scenarios, with every `smoke/control-*` and `smoke/client-*` already inside the selection, same shard shape. Every channel clean under `--strict-geometry` except the three rows that are this box's own environment and fail identically at `origin/main`: `smoke/format-modifier-interrogate` (both sides answer `absent-smxx want=[0] got=[1]`), `smoke/pane-engine-knobs-input` (the pin's own fixture returns 1, and it was clean in the bytes run) and `smoke/remain-on-exit-format` (Linux `sys_signame` answers 15 where the fixture wants `term`). One extra row is worth recording rather than dismissing: `smoke/config-grammar` diverged once under four-way shard load with the pin answering `show-options -gqv @grammar-escape` in its `utf8_sanitize` spelling, and is clean twice alone, which is a corpus witness for the new `semantic:client-utf8-output-sanitizer` item |
+| Records gate | Tracker check, board fold tests, and the stored summary check pass: 218 scenarios, 2,644 steps, attached-client `PASS` |
+| Summary SHA-256 | `c72aa5e1cd782cf8d2cae4c2d0c6ed62c1e3a7bd4637c0c362439170ba6b13b2` |
+| Not closed | The registry did not close. `rendering.geometry-residue` keeps `semantic:attached-gui-pane-width`, measured on both halves and committed as two tests, with the prescribed fix refuted and the coherent fix costed outside the lane's zones. `clients.byte-clean-consumers` opened with three items. The agreed-scope meter reads 99.3% (302 of 304) rather than 304 of 304 |
 
 ### 2026-09-04 cycle-11 integration checkpoint
 

@@ -131,9 +131,9 @@ hook order is accepted as a permanent divergence under `hooks.shutdown-window-un
 the final index-ordered map. The alias group itself reuses protocol v84's `CommandInvocation` shape.
 Closure review advanced v85 for typed callback provenance and daemon-authoritative `Attached`
 reconnect state; no alias child-vector field or snapshot field is added.
-The persisted aggregate now covers 215 scenarios and 2,636 steps with attached-client `PASS`,
+The persisted aggregate now covers 218 scenarios and 2,644 steps with attached-client `PASS`,
 three registered known rows carrying GEO differences, every other channel clean, and SHA-256
-`fdb38caafb85b65b4649b88198231371815c3738741511862bff9a50cb49bcec`.
+`c72aa5e1cd782cf8d2cae4c2d0c6ed62c1e3a7bd4637c0c362439170ba6b13b2`.
 
 The 2026-08-31 Source Replay V3 close keeps each syntax or command diagnostic on its physical
 source path and line. Command stderr, Control flags, command-error hooks, later siblings, and
@@ -149,9 +149,9 @@ same-side ties choose the lower `PaneId`. The focused `pane-border-span-owner` r
 steps with zero TOPO, GEO, FMT, OUT, or WARN differences. Protocol, snapshots, and GPUI retain their
 prior contracts, and GPUI continues to take pane colors from its theme. Mutable tiled order after
 `join-pane`, `swap-pane`, or serialized `select-layout` remains under `F-PANE-BORDER-ZORDER`. The
-live registry has 45 active groups holding 435 items, with 3 groups open, none blocked, 42 accepted,
-and 170 closed records; only 3 of those items sit in an open group. Three groups remain unresolved;
-closed records plus accepted active groups resolve 212 of 215 known groups (98.6%).
+live registry has 44 active groups holding 457 items, with 2 groups open, none blocked, 42 accepted,
+and 172 closed records; only 4 of those items sit in an open group. Two groups remain unresolved;
+closed records plus accepted active groups resolve 214 of 216 known groups (99.1%).
 
 The remaining `w` modifier needs a wider proof than the earlier forecast recorded. Pinned
 `format_width` handles leading hashes, `#[...]` style spans, malformed markup, controls,
@@ -475,11 +475,11 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted acceptance artifact. It records 215 scenarios and 2,636
+`compat/results/summary.md` is the persisted acceptance artifact. It records 218 scenarios and 2,644
 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean, the attached-client
 fixture is `PASS`, and exactly three registered `known/` rows carry GEO differences, one of them an
 approved OUT difference as well. Its SHA-256 is
-`fdb38caafb85b65b4649b88198231371815c3738741511862bff9a50cb49bcec`.
+`c72aa5e1cd782cf8d2cae4c2d0c6ed62c1e3a7bd4637c0c362439170ba6b13b2`.
 
 Slice 10ag extends `compat/startup-diagnostics.sh` to eight cases. Its startup-client-cwd case builds
 distinct initial-client, top-level-config, containing-directory, runtime-client, and glob-decoy

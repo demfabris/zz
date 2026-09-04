@@ -141,11 +141,11 @@ without leaking literal `R` syntax into either row.
 
 At the 2026-09-02 checkpoint, zz implements all 36 of the pin's format modifiers.
 `formats.modifier-fidelity` closed on 2026-09-02, and no modifier token is still tracked. The live
-registry has 45 active groups, 435 active items, and 170 closed records: 3 open, 0 blocked, and 42
-accepted. Three groups remain unresolved. Closed records plus accepted active groups resolve 212 of
-215 known groups (98.6%). The persisted accepted artifact covers 215 scenarios and 2,636 steps with
+registry has 44 active groups, 457 active items, and 172 closed records: 2 open, 0 blocked, and 42
+accepted. Two groups remain unresolved. Closed records plus accepted active groups resolve 214 of
+216 known groups (99.1%). The persisted accepted artifact covers 218 scenarios and 2,644 steps with
 attached-client `PASS`, three registered known rows carrying GEO differences, every other channel
-clean, and SHA-256 `fdb38caafb85b65b4649b88198231371815c3738741511862bff9a50cb49bcec`. The 45-step
+clean, and SHA-256 `c72aa5e1cd782cf8d2cae4c2d0c6ed62c1e3a7bd4637c0c362439170ba6b13b2`. The 45-step
 `formats-values` row passes as part of that artifact. The source partition contains 99 direct mux
 values, 44 daemon-delegated values, and 55 active gaps.
 

@@ -156,8 +156,10 @@ bindings name the zz-native `split-picker` verb instead, which opens the pane-ki
 
 # Default bindings (seeded in `KeyTables::default`)
 
-The pinned 303 defaults and zz's 268 defaults contain 210 shared keys. The live manifest owns 93
-missing keys, 58 zz-native keys, and 45 shared command-or-repeat divergences. The remaining 165
+The pinned 303 defaults and zz's 295 defaults contain 210 shared keys. The live manifest owns 93
+missing keys, 85 zz-native keys, and 45 shared command-or-repeat divergences. The zz-native count
+grew by 22 on 2026-09-04 when the `choose-tree` and `choose-buffer` tables took the rest of
+`mode_tree_key`'s and `window_buffer_key`'s vocabulary. The remaining 165
 shared entries match structurally: 61 in `copy-mode`, 72 in `copy-mode-vi`, and 32 in `prefix`.
 That structural equality does not claim complete command or action behavior; the existing consumer
 groups retain those runtime contracts.

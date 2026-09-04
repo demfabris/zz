@@ -4736,10 +4736,7 @@ impl MuxEngine {
                 update_environment: false,
             });
         }
-        Ok(Execution {
-            output,
-            effects,
-        })
+        Ok(Execution { output, effects })
     }
 
     fn prepare_new_session_cwd(
@@ -5236,10 +5233,7 @@ impl MuxEngine {
             target_format_client,
             hooks,
         );
-        Ok(Execution {
-            output,
-            effects,
-        })
+        Ok(Execution { output, effects })
     }
 
     fn list_windows(
@@ -6027,16 +6021,15 @@ impl MuxEngine {
             });
         }
         debug_assert_eq!(self.state.window_for_pane(source), Some(window));
-        execution.output = self
-            .pane_creation_output(
-                &options,
-                destination_session,
-                window,
-                source,
-                original_context.session,
-                original_context.target_format_client(),
-                hooks,
-            );
+        execution.output = self.pane_creation_output(
+            &options,
+            destination_session,
+            window,
+            source,
+            original_context.session,
+            original_context.target_format_client(),
+            hooks,
+        );
         Ok(execution)
     }
 
@@ -6466,16 +6459,15 @@ impl MuxEngine {
             effects.push(MuxEffect::PaneWaitForExit { pane });
         }
         Ok(Execution {
-            output: self
-                .pane_creation_output(
-                    options,
-                    session,
-                    window,
-                    pane,
-                    active_session,
-                    target_format_client,
-                    hooks,
-                ),
+            output: self.pane_creation_output(
+                options,
+                session,
+                window,
+                pane,
+                active_session,
+                target_format_client,
+                hooks,
+            ),
             effects,
         })
     }
@@ -10260,18 +10252,16 @@ impl MuxEngine {
         if options.has("-F")
             && let Some(raw) = value.as_deref()
         {
-            value = Some(
-                expand_format_with_hooks(
-                    raw,
-                    self,
-                    self.environment_format_context(
-                        target_session,
-                        context.session,
-                        context.target_format_client(),
-                    ),
-                    hooks,
+            value = Some(expand_format_with_hooks(
+                raw,
+                self,
+                self.environment_format_context(
+                    target_session,
+                    context.session,
+                    context.target_format_client(),
                 ),
-            );
+                hooks,
+            ));
         }
         if (options.has("-r") || options.has("-u")) && value.is_some() {
             let flag = if options.has("-u") { "-u" } else { "-r" };

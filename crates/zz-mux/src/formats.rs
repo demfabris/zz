@@ -4517,6 +4517,48 @@ fn format_units(value: &[u8]) -> Vec<(usize, usize, bool)> {
     units
 }
 
+/// utf8.c `utf8_sanitize`, which `server_client_print` runs over a message
+/// bound for a client that never raised `CLIENT_UTF8`. A complete UTF-8
+/// sequence becomes one underscore per column it would have taken, so a wide
+/// character becomes two and a zero-width one disappears; printable ASCII
+/// passes; every other byte, a control byte and a byte no sequence opens alike,
+/// becomes one underscore.
+#[must_use]
+pub fn utf8_sanitize(value: &[u8]) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut index = 0usize;
+    while index < value.len() {
+        let (length, width, printable) = next_format_unit(value, index);
+        if length > 1 {
+            for _ in 0..width {
+                output.push('_');
+            }
+        } else if printable {
+            output.push(char::from(value[index]));
+        } else {
+            output.push('_');
+        }
+        index += length;
+    }
+    output
+}
+
+/// The pin answers a listing with one `cmdq_print` per row and sanitizes each
+/// message on its own, so a row separator never reaches `utf8_sanitize`. zz
+/// answers one command with one output, so the sanitizer runs per line and the
+/// separators stay separators.
+#[must_use]
+pub fn sanitize_client_output(output: &RawText) -> RawText {
+    let mut sanitized = Vec::with_capacity(output.byte_len());
+    for (index, line) in output.as_bytes().split(|byte| *byte == b'\n').enumerate() {
+        if index != 0 {
+            sanitized.push(b'\n');
+        }
+        sanitized.extend_from_slice(utf8_sanitize(line).as_bytes());
+    }
+    RawText::from_bytes(sanitized)
+}
+
 fn format_byte_width(value: &[u8]) -> usize {
     format_units(value)
         .into_iter()
@@ -4758,6 +4800,30 @@ mod tests {
 
     fn expand(format: &str) -> String {
         expand_status(format, &context(), &mut Stub)
+    }
+
+    /// utf8.c `utf8_sanitize`, measured on tmux d77c9dc6 through a client whose
+    /// `LC_ALL`, `LC_CTYPE` and `LANG` are all C and whose `$TMUX` is unset:
+    /// `a<0xff>b` answers `a_b`, `x<U+6F22>y` answers `x__y` because the wide
+    /// character is two columns, `e<U+0301>z` answers `ez` because a combining
+    /// mark is none, and a tab answers `_`. The pin prints a listing one row per
+    /// `cmdq_print` and sanitizes each on its own, so a row separator survives
+    /// where a newline inside one message would not.
+    #[test]
+    fn the_client_sanitizer_spends_one_underscore_per_column_the_pin_would_have_drawn() {
+        assert_eq!(utf8_sanitize(b"a\xffb"), "a_b");
+        assert_eq!(utf8_sanitize("x\u{6f22}y".as_bytes()), "x__y");
+        assert_eq!(utf8_sanitize("e\u{301}z".as_bytes()), "ez");
+        assert_eq!(utf8_sanitize(b"a\tb"), "a_b");
+        assert_eq!(utf8_sanitize(b"a\x7fb"), "a_b");
+        assert_eq!(utf8_sanitize("no\u{e9}pe".as_bytes()), "no_pe");
+        assert_eq!(utf8_sanitize(b"plain ASCII stays"), "plain ASCII stays");
+        assert_eq!(utf8_sanitize(b"\xc3"), "_");
+        assert_eq!(utf8_sanitize(b"\xc3z"), "_z");
+        assert_eq!(
+            sanitize_client_output(&RawText::from_bytes(b"a\xffb\na\xffb".to_vec())),
+            RawText::from("a_b\na_b")
+        );
     }
 
     /// A byte no UTF-8 sequence opens rides `format_expand` in the pin, which

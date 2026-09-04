@@ -1114,6 +1114,31 @@ fn startup_config_owner_capability(
     }
 }
 
+fn client_utf8_capability(capabilities: &mut Vec<String>) {
+    if client_takes_utf8(|name| std::env::var_os(name)) {
+        capabilities.push(ClientHello::CLIENT_UTF8_CAPABILITY.to_owned());
+    }
+}
+
+/// tmux.c decides this in the client process, before it ever dials the server:
+/// `$TMUX` being set at all means the terminal is tmux's own and takes UTF-8,
+/// and otherwise the first of `LC_ALL`, `LC_CTYPE` and `LANG` that is set and
+/// non-empty decides it, by holding `UTF-8` or `UTF8` in any case. zz has no
+/// `-u` of its own, so that third input has no spelling here.
+fn client_takes_utf8(lookup: impl Fn(&str) -> Option<OsString>) -> bool {
+    if lookup("TMUX").is_some() {
+        return true;
+    }
+    ["LC_ALL", "LC_CTYPE", "LANG"]
+        .into_iter()
+        .filter_map(&lookup)
+        .find(|value| !value.is_empty())
+        .is_some_and(|value| {
+            let value = value.to_string_lossy().to_ascii_uppercase();
+            value.contains("UTF-8") || value.contains("UTF8")
+        })
+}
+
 fn terminal_facts_capabilities_with(
     scope: EndpointFactsScope,
     nested: bool,
@@ -1304,6 +1329,7 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
         Vec::new()
     };
     startup_config_owner_capability(kind, startup_config_owner, &mut capabilities);
+    client_utf8_capability(&mut capabilities);
     if kind == ClientKind::Interactive && client_has_terminal {
         capabilities.push(ClientHello::CLIENT_TERMINAL_CAPABILITY.to_owned());
     }
@@ -1417,8 +1443,8 @@ mod tests {
 
     use super::{
         CallerTtyScope, EndpointFactsScope, attach_session_command, client_environment_with,
-        client_working_directory, startup_config_owner_capability, terminal_facts_capabilities,
-        terminal_facts_capabilities_with,
+        client_takes_utf8, client_working_directory, startup_config_owner_capability,
+        terminal_facts_capabilities, terminal_facts_capabilities_with,
     };
 
     #[test]
@@ -1485,6 +1511,38 @@ mod tests {
             })
             .expect("non-UTF-8 working directory is published");
         assert_eq!(published.to_path_buf(), Some(fixture));
+    }
+
+    /// tmux.c: `$TMUX` set at all wins outright, otherwise the FIRST of
+    /// `LC_ALL`, `LC_CTYPE` and `LANG` that is set and non-empty decides on its own,
+    /// so an `LC_CTYPE=C` masks a UTF-8 `LANG` behind it; the test is `strcasestr`
+    /// for `UTF-8` or `UTF8`, so either spelling in any case answers. Measured
+    /// on tmux d77c9dc6 against show-environment of a byte value.
+    #[test]
+    fn the_client_utf8_flag_reads_the_inputs_tmux_c_reads_in_the_order_it_reads_them() {
+        let takes = |pairs: &[(&str, &str)]| {
+            let pairs = pairs
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), OsString::from(*value)))
+                .collect::<Vec<_>>();
+            client_takes_utf8(|name| {
+                pairs
+                    .iter()
+                    .find(|(candidate, _)| candidate == name)
+                    .map(|(_, value)| value.clone())
+            })
+        };
+
+        assert!(!takes(&[]));
+        assert!(!takes(&[("LC_ALL", "C"), ("LC_CTYPE", "C"), ("LANG", "C")]));
+        assert!(takes(&[("TMUX", "/tmp/zz,1,0")]));
+        assert!(takes(&[("TMUX", ""), ("LC_ALL", "C")]));
+        assert!(takes(&[("LC_ALL", "en_US.UTF-8")]));
+        assert!(takes(&[("LC_ALL", "en_US.utf8")]));
+        assert!(takes(&[("LANG", "C.UTF-8")]));
+        assert!(!takes(&[("LC_CTYPE", "C"), ("LANG", "en_US.UTF-8")]));
+        assert!(takes(&[("LC_CTYPE", ""), ("LANG", "en_US.UTF-8")]));
+        assert!(!takes(&[("LC_ALL", "C"), ("LANG", "en_US.UTF-8")]));
     }
 
     #[test]

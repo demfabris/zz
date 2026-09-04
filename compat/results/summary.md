@@ -129,6 +129,7 @@
 | smoke/client-exit-actions | 3 | yes | 0 | yes | yes | yes |
 | smoke/client-non-utf8-cwd | 4 | yes | 0 | yes | yes | yes |
 | smoke/client-resized-context | 3 | yes | 0 | yes | yes | yes |
+| smoke/client-utf8-sanitizer | 2 | yes | 0 | yes | yes | yes |
 | smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |
 | smoke/command-prompt-chain | 2 | yes | 0 | yes | yes | yes |
 | smoke/command-prompt-editing | 2 | yes | 0 | yes | yes | yes |

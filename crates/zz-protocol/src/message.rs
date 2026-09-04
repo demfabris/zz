@@ -1407,6 +1407,12 @@ impl ClientHello {
     pub const CLIENT_TTY_CAPABILITY_PREFIX: &'static str = CLIENT_TTY_CAPABILITY_PREFIX;
     pub const CLIENT_SIZE_CAPABILITY_PREFIX: &'static str = CLIENT_SIZE_CAPABILITY_PREFIX;
     pub const STARTUP_CONFIG_OWNER_CAPABILITY: &'static str = "startup-config-owner-v1";
+    /// The client's terminal takes UTF-8, so the server hands it bytes
+    /// untouched. tmux.c raises `CLIENT_UTF8` from `-u`, from `$TMUX` being set
+    /// at all, or from the first of `LC_ALL`, `LC_CTYPE` and `LANG` that is set
+    /// and non-empty naming UTF-8; a client that says nothing is one
+    /// `server_client_print` sanitizes for.
+    pub const CLIENT_UTF8_CAPABILITY: &'static str = "client-utf8-v1";
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

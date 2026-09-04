@@ -5467,7 +5467,7 @@ impl Shared {
             Some(streams) if !streams.is_empty() => merge_command_streams(response, &streams),
             _ => response,
         };
-        if self.sanitizes_output_for(client, kind) {
+        if self.sanitizes_output_for(client, kind, &command.name) {
             let output = match &mut response {
                 CommandResponse::Success { output, .. } | CommandResponse::Error { output, .. } => {
                     output
@@ -5505,9 +5505,27 @@ impl Shared {
     /// every shape but an attached one: an attached client is shown the message
     /// in a pane instead. The gate is tmux's `CLIENT_UTF8`, which the client
     /// raised for itself out of `$TMUX` and the locale before it dialled.
-    fn sanitizes_output_for(&self, client: ClientId, kind: ClientKind) -> bool {
-        matches!(kind, ClientKind::Command | ClientKind::Control)
-            && !self.inner.lock().utf8_clients.contains(&client)
+    ///
+    /// Three commands answer their client without passing through
+    /// `server_client_print` at all, so the pin leaves their bytes alone for
+    /// every client shape and every encoding. `capture-pane -p` writes
+    /// `control_write` for a control client and `file_print_buffer` for
+    /// everyone else. `save-buffer` always writes `file_write`, a real path and
+    /// `-` alike. `show-buffer` reaches `cmdq_print_data` only when the client
+    /// has a session of its own or is a control client, so it is sanitized for
+    /// a control client but falls through to the same raw `file_write` for a
+    /// session-less command client, which is the only shape zz's `Command`
+    /// kind has.
+    fn sanitizes_output_for(&self, client: ClientId, kind: ClientKind, command: &str) -> bool {
+        if !matches!(kind, ClientKind::Command | ClientKind::Control) {
+            return false;
+        }
+        match canonical_command(command) {
+            "capture-pane" | "save-buffer" => return false,
+            "show-buffer" if kind == ClientKind::Command => return false,
+            _ => {}
+        }
+        !self.inner.lock().utf8_clients.contains(&client)
     }
 
     fn execute_command_request_with_prepared_into(
@@ -41855,6 +41873,37 @@ mod tests {
                 ..
             })
         )));
+    }
+
+    /// On pinned tmux d77c9dc6 only `cmdq_print` and `cmdq_print_data` reach
+    /// `server_client_print`, so only they are sanitized for a client that
+    /// never raised `CLIENT_UTF8`. `capture-pane -p` answers through
+    /// `control_write` or `file_print_buffer` and `save-buffer` through
+    /// `file_write`, both raw for every client shape; `show-buffer` reaches
+    /// `cmdq_print_data` only for a client with a session or a control client,
+    /// so a session-less command client gets the same raw `file_write`.
+    /// Measured under `env -u TMUX -u LANG -u LC_CTYPE LC_ALL=C` with a pane
+    /// holding `x` U+6F22 `y`: `capture-pane -p` answers `78 e6 bc a2 79 0a` on
+    /// the pin for a command client and for a `-C` control client alike.
+    #[test]
+    fn only_the_commands_that_print_through_the_pin_are_sanitized() {
+        let shared = Arc::new(Shared::new(1));
+        let plain = ClientId(1);
+        let utf8 = ClientId(2);
+        shared.inner.lock().utf8_clients.insert(utf8);
+
+        for kind in [ClientKind::Command, ClientKind::Control] {
+            assert!(shared.sanitizes_output_for(plain, kind, "display-message"));
+            assert!(shared.sanitizes_output_for(plain, kind, "list-buffers"));
+            assert!(!shared.sanitizes_output_for(plain, kind, "capture-pane"));
+            assert!(!shared.sanitizes_output_for(plain, kind, "save-buffer"));
+            assert!(!shared.sanitizes_output_for(utf8, kind, "display-message"));
+        }
+
+        assert!(!shared.sanitizes_output_for(plain, ClientKind::Command, "show-buffer"));
+        assert!(shared.sanitizes_output_for(plain, ClientKind::Control, "show-buffer"));
+
+        assert!(!shared.sanitizes_output_for(plain, ClientKind::Interactive, "display-message"));
     }
 
     #[test]

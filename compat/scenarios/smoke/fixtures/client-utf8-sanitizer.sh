@@ -78,6 +78,21 @@ ascii_client display-message -p 'x#{ZZSAN_WIDE}y' >"$root/ascii-format" 2>&1 || 
 # the separator between them is not.
 ascii_client list-panes -a -F '#{ZZSAN_BYTES}' >"$root/ascii-list" 2>&1 || :
 
+# capture-pane -p answers through file_print_buffer for a command client and
+# control_write for a control client, never through server_client_print, so the
+# pin hands back the pane's bytes whatever the client's encoding says.
+utf8_client new-window -d -n captured 'printf "x\346\274\242y\n"; sleep 30'
+i=0
+while [ "$i" -lt 100 ]; do
+    utf8_client capture-pane -p -t captured 2>/dev/null | head -1 >"$root/settle"
+    case "$(hex "$root/settle")" in
+    78e6bca2790a) break ;;
+    esac
+    i=$((i + 1))
+    sleep 0.1
+done
+ascii_client capture-pane -p -t captured 2>/dev/null | head -1 >"$root/ascii-capture"
+
 # The same command from a client that did raise the flag, four ways: an
 # explicit UTF-8 LC_ALL, a $TMUX that outranks a C locale, a LANG that answers
 # because LC_ALL and LC_CTYPE are unset, and an LC_CTYPE=C that answers first
@@ -97,8 +112,9 @@ if [ "$(hex "$root/ascii-bytes")" = 5a5a53414e5f42595445533d615f620a ] &&
     [ "$(hex "$root/utf8-bytes")" = 5a5a53414e5f42595445533d61ff620a ] &&
     [ "$(hex "$root/tmux-bytes")" = 5a5a53414e5f42595445533d61ff620a ] &&
     [ "$(hex "$root/lang-bytes")" = 5a5a53414e5f42595445533d61ff620a ] &&
-    [ "$(hex "$root/lcctype-bytes")" = 5a5a53414e5f42595445533d615f620a ]; then
-    result=clean:10
+    [ "$(hex "$root/lcctype-bytes")" = 5a5a53414e5f42595445533d615f620a ] &&
+    [ "$(hex "$root/ascii-capture")" = 78e6bca2790a ]; then
+    result=clean:11
 fi
 
 utf8_client set-environment -g ZZ_SANITIZE_RESULT "$result"

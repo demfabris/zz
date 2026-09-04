@@ -1555,6 +1555,17 @@ fail where the pin succeeds, because zz routes those through the client and
 `ClientHello.working_directory` uses, so retyping that one field is the whole change. Both need a
 protocol bump and neither was taken quietly.
 
+Two of those raw sinks lose bytes for reasons that have nothing to do with the client's encoding.
+Measured at the cycle-13 gate against the pin, on this tip and on main `fd2e790` alike, so they are
+neither new nor this group's: with buffer `x<U+6F22>y<0xff>z` under
+`env -u TMUX -u LANG -u LC_CTYPE LC_ALL=C`, the pin's `show-buffer` answers `78 e6 bc a2 79 ff 7a`
+and zz answers `78 e6 bc a2 79 ef bf bd 7a 0a`, losing the byte to U+FFFD in the buffer store and
+adding a trailing newline `file_write` never writes; `save-buffer -` answers those same bytes on
+the pin and nothing at all on zz. `#{buffer_sample}` shows the same loss from the other side: the
+pin runs `paste_make_sample`, which escapes the byte as `\377` before `server_client_print`
+sanitizes what is left, so `list-buffers -F '#{buffer_sample}'` to a C-locale client answers
+`x__y\377z` on the pin and `x__y_z` on zz.
+
 The passwd half of the tilde is unproved on this checkout and was deliberately left alone.
 `crates/zz-mux/src/parser.rs` `user_home` still does `into_os_string().into_string().ok()`, so a
 home the passwd database spells with a byte answers `None` and `source-file ~user/x.conf` takes the

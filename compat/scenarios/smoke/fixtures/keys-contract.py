@@ -296,8 +296,11 @@ try:
         wait_for(lambda: fact("pane_marked") == "0", "clear marked pane")
         print("M pane_marked=0")
         cli("rename-window", "-t", session + ":0", "KEYS_INFO_SENTINEL")
+        def has_window_information():
+            return any(" command: " not in line and "KEYS_INFO_SENTINEL" in line for line in cli("show-messages").splitlines())
+        assert not has_window_information()
         prefix_key(b"i")
-        wait_for(lambda: "KEYS_INFO_SENTINEL" in cli("show-messages"), "window information message")
+        wait_for(has_window_information, "window information message")
         print("i show-messages=KEYS_INFO_SENTINEL")
         send(b"\x1b")
         cli("display-message", "-c", client, "KEYS_MESSAGE_SENTINEL")

@@ -1241,7 +1241,10 @@ fn run_command_mode(
                     .map_err(|error| (*index, error))
             },
             |(_, command), outcome| {
-                let raw = command.canonical_name.as_deref() == Some("save-buffer");
+                let raw = matches!(
+                    command.canonical_name.as_deref(),
+                    Some("save-buffer" | "show-buffer")
+                );
                 print_command_output_with_mode(&outcome.stdout, raw);
                 print_command_error(&outcome.stderr);
             },
@@ -1267,7 +1270,10 @@ fn run_command_mode(
         |command, outcome| {
             print_command_output_with_mode(
                 &outcome.stdout,
-                canonical_command(&command.name) == "save-buffer",
+                matches!(
+                    canonical_command(&command.name),
+                    "save-buffer" | "show-buffer"
+                ),
             );
             print_command_error(&outcome.stderr);
         },
@@ -1896,8 +1902,6 @@ fn format_local_command_error(path: &Path, error: DaemonError) -> String {
 }
 
 #[cfg(not(target_os = "ios"))]
-/// Command output is a byte string, so it reaches stdout exactly as the daemon
-/// stored it, `show-environment`'s non-UTF-8 values included.
 fn print_command_output(output: &RawText) {
     print_command_output_with_mode(output, false);
 }

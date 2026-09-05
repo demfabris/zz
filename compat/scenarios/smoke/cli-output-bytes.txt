@@ -1,0 +1,6 @@
+corpus: none
+# Pinned cmdq_print adds LF even for an empty display result; file_write
+# returns show-buffer bytes without inserting a terminator.
+stage: fixtures/cli-output-bytes.py ~/cli-output-bytes.py
+run-shell 'python3 ~/cli-output-bytes.py'
+out: show-environment -g ZZ_CLI_OUTPUT_BYTES

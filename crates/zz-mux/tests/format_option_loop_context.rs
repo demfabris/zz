@@ -62,10 +62,10 @@ fn stocked() -> Probe {
 }
 
 #[test]
-fn option_loop_context_formats_are_empty_outside_a_loop() {
+fn option_loop_context_formats_print_an_empty_line_outside_a_loop() {
     let mut probe = stocked();
     for name in CONTEXT_FORMATS {
-        assert_eq!(probe.format(&format!("#{{{name}}}")), "", "{name}");
+        assert_eq!(probe.format(&format!("#{{{name}}}")), "\n", "{name}");
     }
     assert_eq!(probe.format("#{?option_is_array,arr,notarr}"), "notarr");
 }

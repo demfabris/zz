@@ -112,7 +112,7 @@ fn option_loop_selects_the_stored_scope_per_flag() {
 }
 
 #[test]
-fn option_loop_is_empty_for_invalid_and_unreachable_scopes() {
+fn option_loop_prints_an_empty_line_for_invalid_and_unreachable_scopes() {
     let mut probe = Probe::new();
     probe.run("set-option", &["-t", "o", "@session", "S"]);
     for template in [
@@ -121,7 +121,7 @@ fn option_loop_is_empty_for_invalid_and_unreachable_scopes() {
         "#{Ow:#{option_name};}",
         "#{Op:#{option_name};}",
     ] {
-        assert_eq!(probe.format(template), "", "{template}");
+        assert_eq!(probe.format(template), "\n", "{template}");
     }
 }
 

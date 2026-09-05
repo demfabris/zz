@@ -29331,7 +29331,7 @@ fn command_prompt_outcome(
 fn append_command_prompt_output(output: &mut String, piece: &str) -> bool {
     let content_limit =
         MAX_COMMAND_PROMPT_OUTPUT_BYTES.saturating_sub(COMMAND_PROMPT_OUTPUT_TRUNCATED.len() + 1);
-    let separator_bytes = usize::from(!output.is_empty());
+    let separator_bytes = usize::from(!output.is_empty() && !output.ends_with('\n'));
     let available = content_limit.saturating_sub(output.len());
     if separator_bytes.saturating_add(piece.len()) <= available {
         if separator_bytes != 0 {
@@ -40203,7 +40203,7 @@ mod tests {
             )
             .expect("show empty startup config files")
             .output;
-        assert!(config_files.is_empty());
+        assert_eq!(config_files, "\n");
     }
 
     #[test]
@@ -40245,7 +40245,7 @@ mod tests {
             )
             .expect("show empty reload selection")
             .output;
-        assert!(selected.is_empty());
+        assert_eq!(selected, "\n");
     }
 
     #[cfg(unix)]
@@ -73490,7 +73490,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 CommandInvocation::new("display-message", ["-p", "-t", &target_pane, "#{@TREE}"],),
             )
             .output,
-            ""
+            "\n"
         );
 
         take_reliable_messages(&mailbox);
@@ -83749,7 +83749,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output,
                 exit_code: 0,
                 ..
-            } if output.is_empty()
+            } if output == "\n"
         ));
         assert_eq!(read_global_option(&shared, "@alias-event"), "visible");
     }

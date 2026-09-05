@@ -228,6 +228,8 @@
 | smoke/vim-tmux-navigator | 8 | yes | 0 | yes | yes | yes |
 | smoke/yank | 3 | yes | 0 | yes | yes | yes |
 
+| smoke/buffer-standard-streams | 2 | yes | 0 | yes | yes | yes |
+
 ## Attached-client fixture
 
 Status: `PASS`

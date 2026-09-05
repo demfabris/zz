@@ -5671,6 +5671,9 @@ impl Shared {
         } else {
             resolve_and_prepare_command(&inner.engine, command)?.0
         };
+        if !prepared && canonical_command(&command.name) == "load-buffer" {
+            parse_buffer_command_args("load-buffer", &command.args, &['b', 't'], &['w'])?;
+        }
         let guarded = read_only_guard_client(&inner, client, &command);
         let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
             && !command_is_read_only_safe(&command);
@@ -6212,8 +6215,12 @@ impl Shared {
             && spec.uses_tmux_option_grammar()
         {
             let parsed = zz_protocol::parse_tmux_command_options(spec, command)?;
-            spec.validate_positional_minimum(parsed.positionals.len())?;
-            spec.validate_positional_maximum(parsed.positionals.len())?;
+            let transported_stdin = kind == ClientKind::Command
+                && canonical == "load-buffer"
+                && load_buffer_stdin_payload(&command.args).is_some();
+            let positionals = parsed.positionals.len() - usize::from(transported_stdin);
+            spec.validate_positional_minimum(positionals)?;
+            spec.validate_positional_maximum(positionals)?;
         }
         let unattached_watch = {
             let inner = self.inner.lock();
@@ -14380,7 +14387,13 @@ impl Shared {
                 })
             }
             "load-buffer" | "loadb" => {
-                let parsed = parse_buffer_command_args(name, args, &['b', 't'], &['w'])?;
+                let stdin = load_buffer_stdin_payload(args);
+                let path_args = if stdin.is_some() {
+                    &args[..args.len() - 1]
+                } else {
+                    args
+                };
+                let parsed = parse_buffer_command_args(name, path_args, &['b', 't'], &['w'])?;
                 let path = require_one_positional(name, &parsed)?;
                 let path = {
                     let mut inner = self.inner.lock();
@@ -14393,24 +14406,31 @@ impl Shared {
                         path,
                     )
                 };
-                if path == "-" {
-                    return Err(ServerError::UnsupportedCommand(
-                        "load-buffer from standard input".to_owned(),
-                    )
-                    .into());
-                }
-                let path = buffer_file_path(&self.inner.lock(), invoking_client, &path);
-                let data = match self.client_file_operation(
-                    invoking_client,
-                    &path,
-                    ClientFileOperation::Read,
-                ) {
-                    Some(result) => {
-                        let data = result?;
-                        validate_paste_buffer_size(data.len())?;
-                        data
+                let data = if path == "-" {
+                    let payload = stdin.ok_or_else(|| ServerError::InvalidCommand(
+                        "load-buffer from standard input requires a command client stdin payload".to_owned(),
+                    ))?;
+                    if payload.as_bytes().len() > MAX_AGENT_SEND_BYTES {
+                        return Err(ServerError::InvalidCommand(format!(
+                            "load-buffer stdin exceeds {MAX_AGENT_SEND_BYTES} bytes"
+                        ))
+                        .into());
                     }
-                    None => read_paste_buffer_file(&path)?,
+                    payload.as_bytes().to_vec()
+                } else {
+                    let path = buffer_file_path(&self.inner.lock(), invoking_client, &path);
+                    match self.client_file_operation(
+                        invoking_client,
+                        &path,
+                        ClientFileOperation::Read,
+                    ) {
+                        Some(result) => {
+                            let data = result?;
+                            validate_paste_buffer_size(data.len())?;
+                            data
+                        }
+                        None => read_paste_buffer_file(&path)?,
+                    }
                 };
                 if data.is_empty() {
                     return Ok(Execution::default());
@@ -14447,10 +14467,10 @@ impl Shared {
                     (data, path)
                 };
                 if path == "-" {
-                    return Err(ServerError::UnsupportedCommand(
-                        "save-buffer to standard output".to_owned(),
-                    )
-                    .into());
+                    return Ok(Execution {
+                        output: RawText::from_bytes(data.to_vec()),
+                        effects: Vec::new(),
+                    });
                 }
                 let path = buffer_file_path(&self.inner.lock(), invoking_client, &path);
                 let append = parsed.has('a');
@@ -35263,6 +35283,17 @@ fn parse_pause_after_milliseconds(value: &str) -> Option<u64> {
         seconds = seconds.wrapping_neg();
     }
     Some(u64::from(seconds.wrapping_mul(1000)))
+}
+
+#[must_use]
+pub fn load_buffer_reads_stdin(args: &[RawText]) -> bool {
+    parse_buffer_command_args("load-buffer", args, &['b', 't'], &['w'])
+        .is_ok_and(|parsed| parsed.positional == ["-"])
+}
+
+fn load_buffer_stdin_payload(args: &[RawText]) -> Option<&RawText> {
+    let (payload, path_args) = args.split_last()?;
+    load_buffer_reads_stdin(path_args).then_some(payload)
 }
 
 fn parse_buffer_command_args(
@@ -66915,6 +66946,47 @@ set-option -g @alias-mixed-next yes
     }
 
     #[test]
+    fn standard_buffer_streams_preserve_bytes_empty_input_and_stdin_bound() {
+        let shared = Arc::new(Shared::new(1));
+        let context = ExecutionContext::default();
+        let payload = b"a\0b\xff";
+        for input in [payload.as_slice(), b""] {
+            shared
+                .buffer_command(
+                    &context,
+                    "load-buffer",
+                    &[
+                        "-b".into(),
+                        "named".into(),
+                        "-".into(),
+                        RawText::from_bytes(input.to_vec()),
+                    ],
+                )
+                .expect("bounded stdin payload");
+            let saved = shared
+                .buffer_command(
+                    &context,
+                    "save-buffer",
+                    &["-a".into(), "-b".into(), "named".into(), "-".into()],
+                )
+                .expect("raw stdout");
+            assert_eq!(saved.output.as_bytes(), payload);
+        }
+        assert!(
+            shared
+                .buffer_command(
+                    &context,
+                    "load-buffer",
+                    &[
+                        "-".into(),
+                        RawText::from_bytes(vec![b'x'; MAX_AGENT_SEND_BYTES + 1]),
+                    ]
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
     fn load_and_save_buffers_preserve_binary_bytes_and_append() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let input = directory.path().join("input.bin");
@@ -67332,8 +67404,8 @@ set-option -g @alias-mixed-next yes
             .expect_err("formatted stdin path");
         assert!(matches!(
             error,
-            DaemonError::Server(ServerError::UnsupportedCommand(message))
-                if message == "load-buffer from standard input"
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "load-buffer from standard input requires a command client stdin payload"
         ));
         command_context.format_variables.remove("path");
 
@@ -67447,19 +67519,15 @@ set-option -g @alias-mixed-next yes
         target_context
             .format_variables
             .insert("path".to_owned(), "-".to_owned());
-        let error = shared
+        let saved = shared
             .execute(
                 target_client,
                 ClientKind::Interactive,
                 &mut target_context,
                 &CommandInvocation::new("save-buffer", ["-b", "saved", "#{path}"]),
             )
-            .expect_err("formatted stdout path");
-        assert!(matches!(
-            error,
-            DaemonError::Server(ServerError::UnsupportedCommand(message))
-                if message == "save-buffer to standard output"
-        ));
+            .expect("formatted stdout path");
+        assert_eq!(saved.output.as_bytes(), b"saved payload");
 
         let empty_shared = Arc::new(Shared::new(1));
         assert!(matches!(
@@ -68601,33 +68669,14 @@ set-option -g @alias-mixed-next yes
         );
         drop(inner);
 
-        for (command, arguments, expected, parse) in [
-            (
-                "save-buffer",
-                vec!["-"],
-                "unsupported command: save-buffer to standard output",
-                false,
-            ),
-            (
-                "paste-buffer",
-                vec!["-x"],
-                "unsupported command: paste-buffer -x",
-                true,
-            ),
-        ] {
-            let error = shared
-                .buffer_command(
-                    &context,
-                    command,
-                    &arguments.into_iter().map(RawText::from).collect::<Vec<_>>(),
-                )
-                .expect_err("unsupported buffer mode");
-            let DaemonError::Server(error) = error else {
-                panic!("unexpected error: {error:?}");
-            };
-            assert_eq!(error.tmux_message(), expected);
-            assert_eq!(error.is_command_parse(), parse);
-        }
+        let error = shared
+            .buffer_command(&context, "paste-buffer", &["-x".into()])
+            .expect_err("unsupported buffer mode");
+        let DaemonError::Server(error) = error else {
+            panic!("unexpected error: {error:?}");
+        };
+        assert_eq!(error.tmux_message(), "unsupported command: paste-buffer -x");
+        assert!(error.is_command_parse());
     }
 
     #[test]

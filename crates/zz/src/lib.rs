@@ -1009,6 +1009,25 @@ fn run_command_mode(
         prepared = Some(PreparedCliCommandChain { client, commands });
     }
 
+    if prepared.is_none()
+        && let Some(host) = host
+        && canonical_command(&command_chain[0].name) == "load-buffer"
+    {
+        let result = connect_host_command_client(host).and_then(|mut client| {
+            let commands = client
+                .prepare_commands(command_chain.clone())
+                .map_err(|error| command_error_message(&error))?;
+            Ok(PreparedCliCommandChain { client, commands })
+        });
+        match result {
+            Ok(commands) => prepared = Some(commands),
+            Err(error) => {
+                eprintln!("{error}");
+                return Some(ExitCode::FAILURE);
+            }
+        }
+    }
+
     if let Some(error) = prepared
         .as_ref()
         .and_then(|prepared| prepared_command_error(&prepared.commands))
@@ -1032,7 +1051,11 @@ fn run_command_mode(
         },
     );
     if reads_stdin {
-        match read_stdin_payload() {
+        let binary_stdin = prepared.as_ref().map_or_else(
+            || canonical_command(&command_chain[0].name) == "load-buffer",
+            |prepared| prepared.commands[0].canonical_name.as_deref() == Some("load-buffer"),
+        );
+        match read_stdin_payload(binary_stdin) {
             Ok(payload) => {
                 if let Some(prepared) = prepared.as_mut() {
                     append_prepared_command_stdin_payload(&mut prepared.commands[0], payload);
@@ -1189,12 +1212,12 @@ fn run_command_mode(
             ExitCode::FAILURE
         });
     }
-    let connected = match host {
-        Some(host) => connect_host_command_client(host)
-            .map(|client| (client, None))
-            .map_err(|error| format!("zz: {error}")),
-        None => match prepared {
-            Some(PreparedCliCommandChain { client, commands }) => Ok((client, Some(commands))),
+    let connected = match prepared {
+        Some(PreparedCliCommandChain { client, commands }) => Ok((client, Some(commands))),
+        None => match host {
+            Some(host) => connect_host_command_client(host)
+                .map(|client| (client, None))
+                .map_err(|error| format!("zz: {error}")),
             None => connect_command_client(socket_path, mux_config_files, start_server)
                 .map(|client| (client, None))
                 .map_err(|error| format_local_command_error(socket_path, error)),
@@ -1214,10 +1237,12 @@ fn run_command_mode(
         return match execute_command_chain(
             prepared_commands.into_iter().enumerate(),
             |(index, command)| {
-                execute_prepared_command(&mut client, command).map_err(|error| (index, error))
+                execute_prepared_command(&mut client, command.clone())
+                    .map_err(|error| (*index, error))
             },
-            |outcome| {
-                print_command_output(&outcome.stdout);
+            |(_, command), outcome| {
+                let raw = command.canonical_name.as_deref() == Some("save-buffer");
+                print_command_output_with_mode(&outcome.stdout, raw);
                 print_command_error(&outcome.stderr);
             },
         ) {
@@ -1238,9 +1263,12 @@ fn run_command_mode(
     }
     match execute_command_chain(
         command_chain,
-        |command| client.execute_streams(command),
-        |outcome| {
-            print_command_output(&outcome.stdout);
+        |command| client.execute_streams(command.clone()),
+        |command, outcome| {
+            print_command_output_with_mode(
+                &outcome.stdout,
+                canonical_command(&command.name) == "save-buffer",
+            );
             print_command_error(&outcome.stderr);
         },
     ) {
@@ -1337,12 +1365,16 @@ fn prepared_command_reads_stdin(command: &PreparedCommand) -> bool {
     match canonical_name {
         "agent-send" => zz_daemon::agent_send_reads_stdin(&tail.args),
         "send-text" => zz_daemon::send_text_reads_stdin(&tail.args),
+        "load-buffer" => zz_daemon::load_buffer_reads_stdin(&tail.args),
         _ => false,
     }
 }
 
 #[cfg(not(target_os = "ios"))]
 fn stdin_payload_has_argument_boundary(canonical_name: &str, arguments: &[RawText]) -> bool {
+    if canonical_name == "load-buffer" {
+        return true;
+    }
     let Some(spec) = catalog_command_spec(canonical_name) else {
         return false;
     };
@@ -1363,7 +1395,11 @@ fn stdin_payload_has_argument_boundary(canonical_name: &str, arguments: &[RawTex
 }
 
 #[cfg(not(target_os = "ios"))]
-fn append_stdin_payload(canonical_name: &str, arguments: &mut Vec<RawText>, payload: String) {
+fn append_stdin_payload(
+    canonical_name: &str,
+    arguments: &mut Vec<RawText>,
+    payload: impl Into<RawText>,
+) {
     if !stdin_payload_has_argument_boundary(canonical_name, arguments) {
         arguments.push("--".into());
     }
@@ -1371,7 +1407,10 @@ fn append_stdin_payload(canonical_name: &str, arguments: &mut Vec<RawText>, payl
 }
 
 #[cfg(not(target_os = "ios"))]
-fn append_prepared_command_stdin_payload(command: &mut PreparedCommand, payload: String) {
+fn append_prepared_command_stdin_payload(
+    command: &mut PreparedCommand,
+    payload: impl Into<RawText>,
+) {
     if let Some(canonical_name) = command.canonical_name.clone() {
         append_stdin_payload(&canonical_name, &mut command.invocation.args, payload);
         return;
@@ -1384,9 +1423,9 @@ fn append_prepared_command_stdin_payload(command: &mut PreparedCommand, payload:
     let marker = "__zz-stdin-payload";
     let mut suffix_arguments = Vec::with_capacity(2);
     if !has_argument_boundary {
-        suffix_arguments.push("--".to_owned());
+        suffix_arguments.push(RawText::from("--"));
     }
-    suffix_arguments.push(payload);
+    suffix_arguments.push(payload.into());
     let suffix = format_command(&CommandInvocation::new(marker, suffix_arguments));
     let suffix = suffix
         .strip_prefix(marker)
@@ -1474,6 +1513,7 @@ fn command_reads_stdin(invocation: &CommandInvocation) -> bool {
     match canonical_command(&invocation.name) {
         "agent-send" => zz_daemon::agent_send_reads_stdin(&invocation.args),
         "send-text" => zz_daemon::send_text_reads_stdin(&invocation.args),
+        "load-buffer" => zz_daemon::load_buffer_reads_stdin(&invocation.args),
         _ => false,
     }
 }
@@ -1502,13 +1542,13 @@ fn split_command_chain(arguments: &[RawText]) -> Vec<CommandInvocation> {
 #[cfg(not(target_os = "ios"))]
 fn execute_command_chain<T, E>(
     commands: impl IntoIterator<Item = T>,
-    mut execute: impl FnMut(T) -> Result<CommandOutcome, E>,
-    mut emit: impl FnMut(&CommandOutcome),
+    mut execute: impl FnMut(&T) -> Result<CommandOutcome, E>,
+    mut emit: impl FnMut(&T, &CommandOutcome),
 ) -> Result<u8, E> {
     let mut exit_code = 0;
     for command in commands {
-        let outcome = execute(command)?;
-        emit(&outcome);
+        let outcome = execute(&command)?;
+        emit(&command, &outcome);
         if outcome.exit_code != 0 {
             exit_code = outcome.exit_code;
         }
@@ -1589,19 +1629,27 @@ fn run_tmux_shell_command(
 }
 
 #[cfg(not(target_os = "ios"))]
-fn read_stdin_payload() -> Result<String, String> {
+fn read_stdin_payload(binary: bool) -> Result<RawText, String> {
     use std::io::Read as _;
 
     let limit = u64::try_from(MAX_AGENT_SEND_BYTES)
         .unwrap_or(u64::MAX)
         .saturating_add(1);
-    let mut payload = String::new();
+    let mut payload = Vec::new();
     std::io::stdin()
         .lock()
         .take(limit)
-        .read_to_string(&mut payload)
+        .read_to_end(&mut payload)
         .map_err(|error| format!("could not read standard input: {error}"))?;
-    Ok(payload)
+    if payload.len() > MAX_AGENT_SEND_BYTES {
+        return Err(format!(
+            "standard input exceeds {MAX_AGENT_SEND_BYTES} bytes"
+        ));
+    }
+    if !binary && std::str::from_utf8(&payload).is_err() {
+        return Err("could not read standard input: stream did not contain valid UTF-8".to_owned());
+    }
+    Ok(RawText::from_bytes(payload))
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1851,13 +1899,18 @@ fn format_local_command_error(path: &Path, error: DaemonError) -> String {
 /// Command output is a byte string, so it reaches stdout exactly as the daemon
 /// stored it, `show-environment`'s non-UTF-8 values included.
 fn print_command_output(output: &RawText) {
+    print_command_output_with_mode(output, false);
+}
+
+#[cfg(not(target_os = "ios"))]
+fn print_command_output_with_mode(output: &RawText, raw: bool) {
     let output = output.as_bytes();
     if output.is_empty() {
         return;
     }
     let mut stdout = io::stdout().lock();
     let _ = stdout.write_all(output);
-    if !output.ends_with(b"\n") {
+    if !raw && !output.ends_with(b"\n") {
         let _ = stdout.write_all(b"\n");
     }
     let _ = stdout.flush();
@@ -3471,7 +3524,7 @@ mod tests {
                     _ => panic!("command after the failure executed"),
                 }
             },
-            |outcome| output.push(outcome.stdout.clone()),
+            |_, outcome| output.push(outcome.stdout.clone()),
         );
         assert_eq!(result, Err(17));
         assert_eq!(seen, ["first", "fail"]);
@@ -3506,7 +3559,7 @@ mod tests {
                     },
                 })
             },
-            |outcome| streams.push((outcome.stdout.clone(), outcome.stderr.clone())),
+            |_, outcome| streams.push((outcome.stdout.clone(), outcome.stderr.clone())),
         );
         assert_eq!(result, Ok(5));
         assert_eq!(seen, ["three", "zero", "five"]);

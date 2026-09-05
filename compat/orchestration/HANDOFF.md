@@ -4,7 +4,8 @@ Updated 2026-09-05 after the Ubuntu cycle-14 gate. Start here; the older instrum
 machine-move sections below describe the cycle-13 pause and no longer define current state.
 
 Instrument landed at `f6348f19`, keys at `533d253c`, then buffers at `c2827417`. One Codex
-gpt-6-astra gate ran alone at high reasoning. This order put the repaired attached fixture on
+gpt-6-astra gate ran alone at medium reasoning on the default tier (the workers started at high
+reasoning on the fast tier; fabrico switched the cycle to medium/default at 14:45, mid-cycle). This order put the repaired attached fixture on
 main before the stamped run and the keys focus-test correction on main before the buffers suite.
 All reviewer must-fixes were applied and their probes re-run. Protocol remains v98.
 
@@ -164,18 +165,45 @@ Order for whoever resumes: (1) the two races (a settle before the rename keys, a
 before `probe_side`'s first key), (2) the Escape question by probe, (3) a full
 `compat/run.sh --attached-client` to stamp the footer, then the gate is green again.
 
-### Then three two-lane cycles
+### The cycle shape on Codex (from cycle 14)
 
-The review lays them out with branch names, zones, budgets and what each closes: cycle 14 (the
-keys contract: prefix table split, shift modifier, table lifecycle; buffers and VT facts:
-`save-buffer -`, the four terminal formats, CLI bytes, `refresh-client -S`), cycle 15 (config
-discovery and the pane PATH decision; background status jobs and the control-notify fixture), cycle
-16 (the desktop status row and drag-to-CLIPBOARD; the proof debt: per-plugin runtime fixtures, the
-census scenarios, the harness holes, slugs for the prose-only divergences). Read the report's
-"Next cycles" section before writing `opus-compat-run-14.js`; copy `opus-compat-run-13.js` for the
-shape. Same rules: two lanes, Opus 5 at xhigh throughout, hard budgets in minutes, the FOREGROUND
-rule, exactly one lane owning any protocol bump unless both must, in which case say so and let the
-gate reconcile as cycles 10 and 12 did.
+Fabrico's instruction on 2026-09-05: every agent is Codex `gpt-6-astra`, reasoning `medium`,
+service tier `default` (cycle 14 launched at high/fast and was switched mid-way; do not go back to
+the fast tier unless told). The orchestrator is `compat/orchestration/codex-compat-run-14.py`: copy
+it for cycle 15, keep the prompts' rules, rewrite the lane batches from the registry census and
+`CAMPAIGN-REVIEW.md`.
+
+- `python3 compat/orchestration/codex-compat-run-14.py --run-dir ~/dev/zz-run-N` runs the workers
+  in parallel (each in its warm worktree, which the script checks out detached at `origin/main`),
+  one reviewer behind each, then the serial gate. `--stage work --lane <key>` and `--stage gate`
+  split it; any `<run-dir>/<label>.json` already present is reused, so a rerun resumes. The script
+  renews the lock fronts and MAIN hourly; mint the lock fronts under TRIAGE and claim them (8 to
+  10 h) before launching.
+- Codex specifics: the prompt goes in on stdin (`-`) with stdin otherwise closed, or `codex exec`
+  hangs on "Reading additional input from stdin"; `--output-schema` makes the JSON report the final
+  message and `-o` writes it; `-C <dir>` sets the workspace. A run's session id is printed at the
+  top of its log, and `codex exec resume <id> [flags] "<prompt>"` continues it with full context:
+  that is how fix passes and re-reviews ran in cycle 14 (worker rejected, resume the worker with
+  the blockers, move the review worktree to the new tip, resume the reviewer). `resume` takes no
+  `-C`, `-s` or `--color`: run it from the worktree and pass `-c 'sandbox_mode="danger-full-access"'`.
+- Reviewers apply the flake rule inconsistently: cycle 14's first two rejections read the known
+  focus-test flake as a red tip. The prompts now spell the rule out; keep them doing so.
+- Killing the orchestrator process leaves its `codex exec` child running and it still writes its
+  `-o` report; a chained `until [ -f <label>.json ]` launcher picks the stage up from there. Never
+  `pkill -f` a pattern that appears in your own shell's command line.
+- The Claude Code harness kills background shell tasks when free memory dips during concurrent
+  links; Monitor tasks survive. Three lanes building at once on the 8-core box is the ceiling.
+
+### Cycle 15
+
+From the review's "Next cycles" plus the four groups cycle 14 left open. Lane A: config discovery
+and the pane PATH decision (findings 2 and 3), plus the remainder of `keys.prefix-stock-commands`
+(`f` needs find-window to be a real mux verb; `M-n` and `M-p` need next-window -a and
+previous-window -a to honour activity, not only bells). Lane B: background status jobs and the
+control-notify fixture (findings 9 and 12), plus the three measured defects
+`clients.cli-output-mixed-queue`, `clients.command-output-pane-prompt` and
+`formats.dead-signal-platform-name`. Read each open group's reason first; they carry the probes.
+Cycle 16 stays as the review lays it out (the desktop status row and the proof debt).
 
 ### Two things the closing cycles taught
 
@@ -275,17 +303,16 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
 
 - **ubuntu box** (8 cores, 30 GB, Ubuntu 26.04, bash 5.3, btrfs): ran cycles 5, 6 (first half)
   and 10. SSH origin works. Worktrees `~/dev/zz-opus-dint`, `~/dev/zz-opus-panes`,
-  `~/dev/zz-opus-termopts` are clean and warm at the cycle-10 lane tips (20-30 GB targets each;
-  reuse with `git checkout --detach origin/main`); `~/dev/zz-review-client`, `~/dev/zz-review-dint`,
-  `~/dev/zz-review-copy` are review scratch; the client gate's `~/dev/zz-gate-client` worktree was
+  `~/dev/zz-opus-termopts` sit on the cycle-14 campaign branches, warm (20-30 GB targets each;
+  reuse with `git checkout --detach origin/main`, which the Codex script does itself);
+  `~/dev/zz-review-client`, `~/dev/zz-review-dint`, `~/dev/zz-review-copy` are review scratch
+  (`-copy` has no build: reviewers of compat-only lanes use the worker's binary); cycle-14 logs,
+  prompts and JSON reports are in `~/dev/zz-run-14`; the client gate's `~/dev/zz-gate-client` worktree was
   removed after the merge, and `~/dev/zz-gate-target` (47 GB) is the shared gate
   build dir with a reflinked ghostty source at `zz-gate-target/ghostty-src` for
-  `GHOSTTY_SOURCE_DIR`; the queue and copy gate worktrees were removed. Three compat rows are red
-  here before any lane and pass `--check-summary` only because the stored summary tolerates them:
-  `smoke/remain-on-exit-format` (the fixture wants `term` where Linux answers signal 15),
-  `smoke/format-modifier-interrogate` (the harness's outer TERM carries `smxx`),
-  `smoke/pane-engine-knobs-input` (pin-side flake under load). The first two need a Linux-aware
-  literal or a TERM-scrubbed harness. The allow rule and the hook (pointing at the checkout's
+  `GHOSTTY_SOURCE_DIR`; the queue and copy gate worktrees were removed. The three compat rows that were red
+  here through cycle 13 (`smoke/remain-on-exit-format`, `smoke/format-modifier-interrogate`,
+  `smoke/pane-engine-knobs-input`) pass since the instrument lane landed at `f6348f19`. The allow rule and the hook (pointing at the checkout's
   `guard-rm-home.py`) are in place. No user tmux server or zz daemon was running during cycle 10.
 - **macbook** (16 cores, 48 GB, macOS 27): ran cycles 6 (second half) to 9. `origin` is HTTPS
   through gh's credential helper (SSH security keys unavailable since cycle 7). `/bin/bash` is 3.2

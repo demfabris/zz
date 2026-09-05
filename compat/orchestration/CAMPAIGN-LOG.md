@@ -444,6 +444,48 @@ once never saw `ATTACHED_ROOT_OK`: the first keys reached the zz client before i
 name, never by `pkill -f`.
 
 
+## 2026-09-05: cycle 14 on the ubuntu box, the first Codex cycle (13:07 to 19:52)
+
+Fabrico's instruction: run cycle 14 on Codex gpt-6-astra instead of Opus 5, first at high
+reasoning on the fast tier, switched at 14:45 to medium reasoning on the default tier.
+`codex-compat-run-14.py` replaced the Workflow script: the same prompts and rules, driven through
+`codex exec` with `--output-schema` enforcing each JSON report. Timings: keys worker 24 min,
+buffers worker 58 min, reviewers 10 to 20 min each, the instrument worker 2h05m (it ran a full
+sweep of its own), the gate 3h04m including the 90-minute stamped sweep.
+
+Both code lanes were REJECTED on first review and fixed by resuming the worker's Codex session
+with the blockers, then resuming the reviewer at the new tip. Keys: 17 of the 20 adopted prefix
+bindings had no attached proof and none carried the pin's `-N` note (fixed; `f`, `M-n` and `M-p`
+were reopened with measured reasons, and the reviewer then caught a tautological `prefix i` proof
+whose patch the gate applied). Buffers: the rewritten 24-name terminal-runtime clause called six
+zero placeholders "pin defaults" (fixed as declared known differences with the pin's values).
+Both rejections also read the `client_focus_closes_display_panes_and_preserves_chooser_modes` flake
+as a red tip; the keys lane's `93f90bea` repaired the racy assertion and the gate carried it under
+buffers by gating keys first.
+
+A third, compat-only lane was added after the pre-cycle full run failed here: the fixture died on
+the vi command-output view (`copy-mode-vi` dropping to `root` during settle) and the three
+environment rows fail a full run outright, so no stamp was possible on this box. The instrument
+lane made the probes wait for observable readiness, fixed the rows, and registered two zz defects
+it uncovered (stock vi search discards command output when the prompt opens; the dead-pane notice
+spells the signal `term` where the Linux pin prints 15). It was gated first so the stamped sweep
+ran on the repaired fixture: 231 scenarios, 2,742 steps, PASS at `c282741787c9`, the first stamp
+this box has produced.
+
+The stamp rule was relaxed at fabrico's instruction while the sweep ran ("we don't need to RERUN
+just because I committed some UI changes"): `75d9ca24` keeps the stamp, the ancestor and dirty
+checks and the fixture-changed refusal, and turns the crates/-changed refusal into a drift
+warning. The gate re-records after every code merge; ordinary pushes to main never force a sweep.
+
+Tooling lessons: `codex exec` needs stdin closed or the prompt on `-`, or it hangs on "Reading
+additional input from stdin"; `codex exec resume <id>` takes no `-C`, `-s` or `--color` (run it
+from the worktree, pass `-c 'sandbox_mode="danger-full-access"'`); the Claude Code harness kills
+background shell tasks when free memory dips during concurrent links, while Monitor tasks survive;
+a `pkill -f` whose pattern appears in the calling shell's command line kills that shell; the
+orchestrator holds lane results in memory, so a mid-cycle re-review means killing the Python
+process (its `codex exec` child keeps running and still writes its report) and rerunning the stage
+from the JSON files.
+
 ### 2026-09-05 cycle-14 integration
 
 One Codex gpt-6-astra gate ran alone on Ubuntu at high reasoning. Instrument landed first at

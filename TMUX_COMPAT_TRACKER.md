@@ -10,7 +10,7 @@
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 14 INTEGRATED 2026-09-05 ON THE UBUNTU BOX, CODEX GPT-6-ASTRA AT HIGH REASONING, ONE GATE ALONE. ACTUAL ORDER: INSTRUMENT, KEYS, BUFFERS; THE KEYS FOCUS-ASSERTION FIX PRECEDED THE BUFFERS DAEMON GATE.**
+> Orchestration: **CYCLE 14 INTEGRATED 2026-09-05 ON THE UBUNTU BOX, CODEX GPT-6-ASTRA (WORKERS AT HIGH REASONING ON THE FAST TIER, THEN MEDIUM ON THE DEFAULT TIER FROM 14:45 INCLUDING THE GATE), ONE GATE ALONE. ACTUAL ORDER: INSTRUMENT, KEYS, BUFFERS; THE KEYS FOCUS-ASSERTION FIX PRECEDED THE BUFFERS DAEMON GATE.**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -79,7 +79,7 @@ percentage is a ledger health metric, not a compatibility claim.
 | Published branch | Cycle-14 merges `f6348f19`, `533d253c`, `c2827417`; owner main advanced to `75d9ca24` during the full run; this records commit rebases onto that tip |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
 | Delivery | Cycle 14: instrument plus both code lanes integrated. Attached fixture/environment corrections; 17 attached prefix proofs, shifted keys and key-table lifecycle; buffer standard streams, four terminal facts, CLI bytes, status refresh and resurrect save. Protocol remains v98. |
-| Orchestration | Ubuntu, Codex gpt-6-astra at high reasoning, one gate alone; instrument then keys then buffers. Reviewer fixes applied before gates. Original campaign branch tips remain unchanged on origin; rebased tips landed on main without force pushes. |
+| Orchestration | Ubuntu, Codex gpt-6-astra (workers at high/fast, reviewers and the gate at medium/default after the 14:45 switch), one gate alone; instrument then keys then buffers. Reviewer fixes applied before gates. Original campaign branch tips remain unchanged on origin; rebased tips landed on main without force pushes. |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |

@@ -194,7 +194,7 @@
 | smoke/jobs-display-popup-environment | 3 | yes | 0 | yes | yes | yes |
 | smoke/jobs-shell-job-cwd | 3 | yes | 0 | yes | yes | yes |
 | smoke/keys-prefix-attached | 3 | yes | 0 | yes | yes | yes |
-| smoke/keys-prefix-stock | 20 | yes | 0 | yes | yes | yes |
+| smoke/keys-prefix-stock | 40 | yes | 0 | yes | yes | yes |
 | smoke/keys-shift-attached | 3 | yes | 0 | yes | yes | yes |
 | smoke/keys-table-lifecycle | 3 | yes | 0 | yes | yes | yes |
 | smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |

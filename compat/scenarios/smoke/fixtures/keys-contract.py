@@ -29,6 +29,7 @@ work = Path(sys.argv[1])
 prefix = sys.argv[2:]
 mode = os.environ.get("KEYS_CONTRACT_MODE", "prefix")
 session = "keyscontract"
+created_sessions = [session]
 master = None
 pid = None
 screen = bytearray()
@@ -61,11 +62,12 @@ def wait_for(predicate, label, timeout=10):
         if predicate():
             return
         time.sleep(0.04)
-    raise AssertionError(label)
+    raise AssertionError(label + ": " + repr(text()[-800:]))
 
 
 def text():
-    return re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", bytes(screen))
+    visible = re.sub(rb"\x1b\].*?(?:\x07|\x1b\\)", b"", bytes(screen), flags=re.S)
+    return re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", visible)
 
 
 def send(data):
@@ -110,7 +112,53 @@ try:
     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
     wait_for(lambda: bool(cli("list-clients", "-t", "=" + session, "-F", "#{client_name}")), "attach")
     time.sleep(0.5)
-    if mode == "lifecycle":
+    if mode == "find-window":
+        client = cli("list-clients", "-t", "=" + session, "-F", "#{client_name}")
+        cli("new-window", "-t", session, "-n", "KEYS_FIND_SENTINEL")
+        cli("select-window", "-t", session + ":0")
+        screen.clear()
+        send(b"\x02f")
+        wait_for(lambda: b"(find-window)" in text(), "find-window prompt")
+        send(b"KEYS_FIND_SENTINEL\r")
+        time.sleep(0.5)
+        print("after-submit table=" + cli("display-message", "-p", "-c", client, "#{client_key_table}"))
+        print("after-submit pane_in_mode=" + cli("display-message", "-p", "-c", client, "#{pane_in_mode}"))
+        send(b"\x1b[B\r")
+        time.sleep(0.5)
+        selected = cli("display-message", "-p", "-c", client, "#{window_index}")
+        print("after-select window_index=" + selected)
+        assert selected == ("0" if "--socket" in prefix else "1"), selected
+        send(b"\x02d")
+        reap()
+    elif mode == "activity":
+        client = cli("list-clients", "-t", "=" + session, "-F", "#{client_name}")
+        def fact(value, target=None):
+            args = ["display-message", "-p", "-c", client]
+            if target is not None:
+                args.extend(["-t", target])
+            return cli(*args, "#{" + value + "}")
+        cli("new-window", "-t", session, "-n", "alerted")
+        cli("select-window", "-t", session + ":0")
+        cli("set-window-option", "-t", session + ":1", "monitor-activity", "on")
+        cli("respawn-pane", "-k", "-t", session + ":1", 'printf "ALERT_READY\\n"; exec cat')
+        wait_for(lambda: fact("window_activity_flag", session + ":1") == "1", "next activity flag")
+        send(b"\x02\x1bn")
+        time.sleep(0.5)
+        selected = fact("window_index")
+        print("M-n activity=1 window_index=" + selected)
+        assert selected == ("0" if "--socket" in prefix else "1"), selected
+        cli("select-window", "-t", session + ":1")
+        cli("set-window-option", "-t", session + ":0", "monitor-activity", "on")
+        cli("respawn-pane", "-k", "-t", victim, 'printf "ALERT_PREVIOUS\\n"; exec cat')
+        wait_for(lambda: fact("window_activity_flag", session + ":0") == "1", "previous activity flag")
+        send(b"\x02\x1bp")
+        time.sleep(0.5)
+        selected = fact("window_index")
+        print("M-p activity=1 window_index=" + selected)
+        assert selected == ("1" if "--socket" in prefix else "0"), selected
+        send(b"\x02d")
+        reap()
+    elif mode == "lifecycle":
         client = cli("list-clients", "-t", "=" + session, "-F", "#{client_name}")
         target = panes()[0]
         cli("select-pane", "-t", target)
@@ -200,6 +248,108 @@ try:
         send(b"\x02d")
         reap()
     else:
+        client = cli("list-clients", "-t", "=" + session, "-F", "#{client_name}")
+        def fact(value, target=None):
+            args = ["display-message", "-p", "-c", client]
+            if target is not None:
+                args.extend(["-t", target])
+            return cli(*args, "#{" + value + "}")
+        def prefix_key(data):
+            drain()
+            screen.clear()
+            send(b"\x02" + data)
+        def in_output():
+            if "--socket" in prefix:
+                return fact("client_key_table") in ("copy-mode", "copy-mode-vi")
+            return fact("pane_in_mode") == "1"
+        def close_output():
+            send(b"q")
+            wait_for(lambda: not in_output(), "output mode closed")
+        def output_key(data, marker):
+            prefix_key(data)
+            wait_for(in_output, "output view " + data.decode())
+            send(b"G")
+            wait_for(lambda: marker in text(), "output content " + repr(marker))
+            close_output()
+        cli("set-window-option", "-t", session + ":0", "mode-keys", "vi")
+        cli("rename-window", "-t", session + ":0", "primary")
+        prefix_key(b"&")
+        wait_for(lambda: b"kill-window primary? (y/n)" in text(), "window confirmation")
+        send(b"n")
+        assert panes() == before, "n killed the window"
+        print("& prompt=kill-window #W? (y/n) n=alive")
+        cli("bind-key", "-n", "-N", "KEYS_NOTE_SENTINEL", "F12", "display-message", "note")
+        output_key(b"?", b"KEYS_NOTE_SENTINEL")
+        print("? output-mode=1 note=KEYS_NOTE_SENTINEL")
+        cli("set-buffer", "-b", "KEYS_BUFFER", "BUFFER_SENTINEL")
+        output_key(b"#", b"KEYS_BUFFER")
+        print("# output-mode=1 buffer=KEYS_BUFFER")
+        cli("set-buffer", "AUTOMATIC_SENTINEL")
+        assert len(cli("list-buffers", "-F", "#{buffer_name}").splitlines()) == 2
+        prefix_key(b"-")
+        wait_for(lambda: cli("list-buffers", "-F", "#{buffer_name}") == "KEYS_BUFFER", "delete newest automatic buffer")
+        print("- buffers=2->1 named=kept")
+        prefix_key(b"m")
+        wait_for(lambda: fact("pane_marked") == "1", "mark pane")
+        print("m pane_marked=1")
+        prefix_key(b"M")
+        wait_for(lambda: fact("pane_marked") == "0", "clear marked pane")
+        print("M pane_marked=0")
+        cli("rename-window", "-t", session + ":0", "KEYS_INFO_SENTINEL")
+        prefix_key(b"i")
+        wait_for(lambda: "KEYS_INFO_SENTINEL" in cli("show-messages"), "window information message")
+        print("i show-messages=KEYS_INFO_SENTINEL")
+        send(b"\x1b")
+        cli("display-message", "-c", client, "KEYS_MESSAGE_SENTINEL")
+        time.sleep(0.2)
+        send(b"\x1b")
+        output_key(b"~", b"KEYS_MESSAGE_SENTINEL")
+        print("~ output-mode=1 message=KEYS_MESSAGE_SENTINEL")
+        cli("rename-window", "-t", session + ":0", "primary")
+        cli("respawn-pane", "-k", "-t", victim, 'seq 1 100; printf "HISTORY_READY\\n"; exec cat')
+        wait_for(lambda: "HISTORY_READY" in cli("capture-pane", "-p", "-t", victim), "history ready")
+        prefix_key(b"\x1b[5~")
+        wait_for(lambda: fact("pane_in_mode") == "1", "PPage copy mode")
+        wait_for(lambda: int(fact("scroll_position") or "0") > 0, "PPage scroll")
+        print("PPage pane_in_mode=1 scroll_position=positive")
+        send(b"q")
+        wait_for(lambda: fact("pane_in_mode") == "0", "copy mode closed")
+        cli("new-window", "-t", session, "-n", "KEYS_FIND_SENTINEL")
+        cli("select-window", "-t", session + ":0")
+        prefix_key(b"f")
+        wait_for(lambda: b"(find-window)" in text(), "find-window prompt")
+        send(b"\x03")
+        print("f prompt=find-window cancelled; execution remains open")
+        cli("select-window", "-t", session + ":0")
+        prefix_key(b"'")
+        wait_for(lambda: b"index" in text(), "select-window prompt")
+        send(b"1\r")
+        wait_for(lambda: fact("window_index") == "1", "select-window result")
+        print("' prompt=index selected=1")
+        cli("select-window", "-t", session + ":0")
+        original_window = fact("window_id")
+        prefix_key(b".")
+        wait_for(lambda: b"(move-window)" in text(), "move-window prompt")
+        send((session + ":7\r").encode())
+        wait_for(lambda: fact("window_index", original_window) == "7", "move-window result")
+        print(". prompt=move-window moved=7")
+        cli("move-window", "-s", original_window, "-t", session + ":0")
+        cli("select-window", "-t", session + ":0")
+        next_session = session + "-next"
+        cli("new-session", "-d", "-s", next_session)
+        created_sessions.append(next_session)
+        prefix_key(b")")
+        wait_for(lambda: fact("session_name") == next_session, "next session")
+        print(") session=next")
+        prefix_key(b"(")
+        wait_for(lambda: fact("session_name") == session, "previous session")
+        print("( session=original")
+        prefix_key(b"L")
+        wait_for(lambda: fact("session_name") == next_session, "last session")
+        print("L session=next")
+        cli("switch-client", "-c", client, "-t", session)
+        cli("select-window", "-t", session + ":0")
+        cli("select-pane", "-t", victim)
         screen.clear()
         send(b"\x02x")
         prompt = f"kill-pane {index}? (y/n)".encode()
@@ -241,4 +391,5 @@ finally:
             time.sleep(0.04)
     if master is not None:
         os.close(master)
-    subprocess.run([*prefix, "kill-session", "-t", "=" + session], capture_output=True, timeout=15)
+    for created in reversed(created_sessions):
+        subprocess.run([*prefix, "kill-session", "-t", "=" + created], capture_output=True, timeout=15)

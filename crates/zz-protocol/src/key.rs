@@ -144,6 +144,30 @@ impl Default for KeyTables {
                 },
             );
         }
+        for (key, note) in [
+            ("x", "Kill the active pane"),
+            ("&", "Kill current window"),
+            ("]", "Paste the most recent paste buffer"),
+            ("?", "List key bindings"),
+            ("d", "Detach the current client"),
+            ("PPage", "Enter copy mode and scroll up"),
+            ("f", "Search for a pane"),
+            (".", "Move the current window"),
+            ("(", "Switch to previous client"),
+            (")", "Switch to next client"),
+            ("L", "Switch to the last client"),
+            ("m", "Toggle the marked pane"),
+            ("M", "Clear the marked pane"),
+            ("i", "Display window information"),
+            ("~", "Show messages"),
+            ("#", "List all paste buffers"),
+            ("-", "Delete the most recent paste buffer"),
+            ("'", "Prompt for window index to select"),
+            ("M-n", "Select the next window with an alert"),
+            ("M-p", "Select the previous window with an alert"),
+        ] {
+            tables.update_binding_metadata("prefix", key, Some(note.to_owned()), false);
+        }
         for (key, input, template, note) in [
             (
                 "$",

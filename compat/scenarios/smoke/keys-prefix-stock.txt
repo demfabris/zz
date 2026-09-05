@@ -1,0 +1,21 @@
+corpus: none
+keys: prefix x
+keys: prefix &
+keys: prefix ]
+keys: prefix ?
+keys: prefix d
+keys: prefix PPage
+keys: prefix f
+keys: prefix .
+keys: prefix (
+keys: prefix )
+keys: prefix L
+keys: prefix m
+keys: prefix M
+keys: prefix i
+keys: prefix ~
+keys: prefix #
+keys: prefix -
+keys: prefix '
+keys: prefix M-n
+keys: prefix M-p

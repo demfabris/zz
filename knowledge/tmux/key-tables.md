@@ -156,11 +156,11 @@ bindings name the zz-native `split-picker` verb instead, which opens the pane-ki
 
 # Default bindings (seeded in `KeyTables::default`)
 
-The pinned 303 defaults and zz's 295 defaults contain 210 shared keys. The live manifest owns 93
-missing keys, 85 zz-native keys, and 45 shared command-or-repeat divergences. The zz-native count
+The pinned 303 defaults and zz's 311 defaults contain 226 shared keys. The live manifest owns 77
+missing keys, 85 zz-native keys, and 41 shared command-or-repeat divergences. The zz-native count
 grew by 22 on 2026-09-04 when the `choose-tree` and `choose-buffer` tables took the rest of
-`mode_tree_key`'s and `window_buffer_key`'s vocabulary. The remaining 165
-shared entries match structurally: 61 in `copy-mode`, 72 in `copy-mode-vi`, and 32 in `prefix`.
+`mode_tree_key`'s and `window_buffer_key`'s vocabulary. The remaining 185
+shared entries match structurally: 61 in `copy-mode`, 72 in `copy-mode-vi`, and 52 in `prefix`.
 That structural equality does not claim complete command or action behavior; the existing consumer
 groups retain those runtime contracts.
 
@@ -170,12 +170,12 @@ Prefix table (partial, the canonical zz set):
 | --- | --- | --- | --- |
 | `c` | `new-window` | `%` | `split-picker -h` |
 | `"` | `split-picker -v` | `!` | `break-pane` |
-| `x` | `kill-pane` | `&` | `kill-window` |
+| `x` | `confirm-before … kill-pane` | `&` | `confirm-before … kill-window` |
 | `<prefix>` | `send-prefix` | | |
 | `n` / `p` | next / previous window | `o` | `select-pane -t:.+` |
 | `C-o` / `M-o` | `rotate-window` / `rotate-window -D` | `Space` | `next-layout` |
 | `E` | `select-layout -E` | `M-1`…`M-7` | select the seven named layouts |
-| `[` | `copy-mode` | `?` | `list-keys` |
+| `[` | `copy-mode` | `?` | `list-keys -N` |
 | `=` | `choose-buffer -Z` | `s` / `w` | `focus-sidebar` |
 | `q` | `display-panes` | `r` | `reload-config` |
 | `e` | `send-last-output` *(zz-native)* | | |
@@ -186,34 +186,23 @@ Prefix table (partial, the canonical zz set):
 
 ## Default-prefix compatibility boundary
 
-The default zz prefix table is intentionally not a copy of the pin. zz has 60 default prefix
-bindings, the pin has 92, and 59 keys overlap. zz adds `e -> send-last-output`. It omits these 33
-stock keys:
+The default zz prefix table keeps native split pickers (`%`, `"`), sidebar focus (`s`, `w`),
+reload (`r`), and last-output sending (`e`). On 2026-09-05, `keys.prefix-stock-commands` adopted the
+pin's commands for `x`, `&`, `]`, `?`, `d`, `PPage`, `f`, `.`, `(`, `)`, `L`, `m`, `M`, `i`, `~`,
+`#`, `-`, `'`, `M-n`, and `M-p`. `x` and `&` now ask for confirmation; `]` requests bracketed paste;
+`?` lists binding notes; `d` detaches the current client. The stored commands are differentially
+checked by `smoke/keys-prefix-stock`; `smoke/keys-prefix-attached` proves confirmation, paste bytes,
+and detach with real clients on both binaries.
 
-`#`, `'`, `(`, `)`, `*`, `-`, `.`, `/`, `<`, `>`, `@`, `BTab`, `C`, `C-z`, `D`, `DC`, `L`,
-`M`, `M-n`, `M-p`, `PPage`, `S-Down`, `S-Left`, `S-Right`, `S-Up`, `Tab`, `d`, `f`, `g`, `i`,
-`m`, `t`, and `~`.
+The table has 76 bindings against the pin's 92, with `e` the one zz-only key. These 17 stock keys
+remain absent: `*`, `/`, `<`, `>`, `@`, `BTab`, `C`, `C-z`, `D`, `DC`, `S-Down`, `S-Left`,
+`S-Right`, `S-Up`, `Tab`, `g`, and `t`. `keys.default-prefix` enumerates the native chrome and
+viewport choices behind these omissions. It also retains the text differences for `$`, `,`,
+`0` through `9`, and the tiled-only resize bindings `C-Up`, `C-Down`, `C-Left`, `C-Right`,
+`M-Up`, and `M-Left`. The numeric commands use `:N` instead of the pin's `:=N`.
 
-Several shared keys also name different commands:
-
-| Keys | Pinned tmux | zz default |
-| --- | --- | --- |
-| `%` | `split-window -h` | `split-picker -h` |
-| `"` | `split-window` (vertical by default) | `split-picker -v` |
-| `&`, `x` | `confirm-before` around kill | immediate kill |
-| `]` | `paste-buffer -p` | `paste-buffer` |
-| `?` | `list-keys -N` | `list-keys` |
-| `r` | `refresh-client` | `reload-config` |
-| `s`, `w` | `choose-tree` | `focus-sidebar` |
-| `M-Up`, `M-Left`, `C-Up`, `C-Left` | floating-aware `if-shell` resize | direct tiled-pane `resize-pane` |
-
-The numeric `0` through `9` bindings select the same windows on both sides, but their stored command
-text differs: zz uses `select-window -t :N`, while the pin uses `select-window -t :=N`.
-
-This is a product choice, not permission to reinterpret tmux syntax. A user's imported binding that
-names `split-window`, `choose-tree`, or `refresh-client` keeps the tmux command. The practical alias
-target promises command/config semantics and documents the default-key delta; it does not erase the
-picker and sidebar behavior that make the native GUI useful.
+This default-key policy does not reinterpret imported bindings: explicit `split-window`,
+`choose-tree`, and `refresh-client` commands retain their own contracts.
 
 The prefix key itself is bound to **`send-prefix`** in the prefix table, matching tmux's stock
 `bind C-b send-prefix`, so `<prefix> <prefix>` delivers one literal prefix keystroke to the pane.

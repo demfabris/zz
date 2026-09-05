@@ -520,6 +520,7 @@ pub(crate) struct TerminalView {
     cursor_blink_active: bool,
     cursor_blink_task: Task<()>,
     cursor_focused: bool,
+    visible: bool,
     selection_dragging: bool,
     force_local_selection: bool,
     selection_anchor: Option<PointerCellEvent>,
@@ -742,10 +743,17 @@ impl TerminalView {
         let focus_handle = cx.focus_handle();
         let entity_id = cx.entity_id();
         let mut subscriptions = Vec::with_capacity(3);
-        subscriptions.push(cx.on_focus_out(&focus_handle, window, |view, _, _, _| {
+        subscriptions.push(cx.on_focus_out(&focus_handle, window, |view, _, _, cx| {
             view.swallowed_overlay_key = None;
             view.forwarded_keys.clear();
+            view.cursor_focused = false;
+            view.ensure_cursor_blink(cx);
         }));
+        cx.observe_window_activation(window, |view, window, cx| {
+            view.cursor_focused = window.is_window_active() && view.focus_handle.is_focused(window);
+            view.ensure_cursor_blink(cx);
+        })
+        .detach();
         if command_output {
             let focused_mux = mux.clone();
             subscriptions.push(window.on_focus_in(&focus_handle, cx, move |_, cx| {
@@ -950,6 +958,7 @@ impl TerminalView {
             cursor_blink_active: false,
             cursor_blink_task: Task::ready(()),
             cursor_focused: false,
+            visible: true,
             selection_dragging: false,
             force_local_selection: false,
             selection_anchor: None,
@@ -2220,11 +2229,19 @@ impl TerminalView {
         }
     }
 
+    pub(crate) fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if self.visible == visible {
+            return;
+        }
+        self.visible = visible;
+        self.ensure_cursor_blink(cx);
+    }
+
     fn cursor_should_blink(&self) -> bool {
         cursor_should_blink(
             self.retained.read().viewport.cursor,
             self.render_appearance.source.cursor_blink_policy,
-            self.cursor_focused,
+            self.visible && self.cursor_focused,
         )
     }
 
@@ -3299,6 +3316,63 @@ mod tests {
             terminal_background(live, 0.5),
             appearance_hsla(AppearanceColor::rgba(0x12, 0x34, 0x56, 128))
         );
+    }
+
+    #[gpui::test]
+    fn hidden_and_blurred_terminals_stop_blinking_without_another_render(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(zz_ui::init);
+        let (terminal, cx) = cx.add_window_view(|window, cx| {
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            TerminalView::new(PaneId(0), mux, Rc::new(Cell::new(false)), window, cx)
+        });
+        cx.update(|window, cx| {
+            window.activate_window();
+            terminal.update(cx, |view, cx| {
+                window.focus(&view.focus_handle, cx);
+                view.retained.write().viewport.cursor = Some(zz_terminal::Cursor::new(
+                    0,
+                    0,
+                    true,
+                    true,
+                    false,
+                    zz_terminal::CursorStyle::Block,
+                    zz_terminal::Color::rgb(1, 2, 3),
+                ));
+                view.cursor_focused = true;
+                view.ensure_cursor_blink(cx);
+                assert!(view.cursor_blink_active);
+                view.set_visible(false, cx);
+                assert!(!view.cursor_blink_active);
+                assert!(view.cursor_blink_visible);
+            });
+        });
+        cx.run_until_parked();
+        terminal.update(cx, |view, cx| {
+            assert!(!view.cursor_blink_active);
+            view.set_visible(true, cx);
+            assert!(view.cursor_blink_active);
+        });
+        cx.deactivate_window();
+        terminal.update(cx, |view, _| assert!(!view.cursor_blink_active));
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        terminal.update(cx, |view, _| assert!(view.cursor_blink_active));
+        cx.update(|window, cx| {
+            let other_focus = cx.focus_handle();
+            window.focus(&other_focus, cx);
+        });
+        terminal.update(cx, |view, _| {
+            assert!(!view.cursor_blink_active);
+            assert!(!view.cursor_focused);
+        });
     }
 
     #[test]

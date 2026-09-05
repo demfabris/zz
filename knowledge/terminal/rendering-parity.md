@@ -4,7 +4,7 @@ title: Zed GPUI terminal rendering parity
 description: The effort to bring zz's terminal painting up to Zed's GPUI standard by mapping immutable renderer-neutral frames and dirty-row patches onto GPUI text, cursor, and overlay painting.
 resource: crates/zz/src/terminal/view.rs
 tags: [rendering, gpui, zed, parity, cursor, ime, contrast, box-drawing, block-elements, local-scroll]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-09-05T00:00:00Z
 ---
 
 # Overview
@@ -114,7 +114,10 @@ Cursor: derived from the visible cell under the cursor (a wide-tail marker resol
 leading cell). Focused: block paints a filled rectangle then repaints the glyph in the background color;
 bar is a 1px vertical stroke; underline a 2px bottom stroke; hollow a 1px outline. Unfocused block/bar/
 underline become hollow. Blinking is GPUI-local (off / on / terminal-controlled) and sends no protocol
-traffic; input activity resets it to visible.
+traffic; input activity resets it to visible. `TerminalView::set_visible` cancels the blink task for
+hidden windows, zoomed-out panes, and panes covered by settings or replacement overlays. Focus loss
+and window deactivation also cancel it without waiting for the terminal to render again. Visible,
+focused terminals resume their configured blink interval.
 
 There is no prediction layer any more. The provisional predicted-cell pass (dimmed glyph, underline,
 cursor pulled one cell past the newest prediction) and its `prediction_overlay` went with

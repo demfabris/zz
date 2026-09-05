@@ -1497,6 +1497,9 @@ impl AppView {
                         && !covered_by_choose_tree
                         && !covered_by_choose_buffer
                         && !covered_by_settings;
+                    if let Some(terminal) = self.terminals.get(pane) {
+                        terminal.update(cx, |terminal, cx| terminal.set_visible(visible, cx));
+                    }
                     if let Some(browser) = self.browsers.get(pane) {
                         browser.update(cx, |browser, cx| {
                             browser.set_visible(visible, window, cx);

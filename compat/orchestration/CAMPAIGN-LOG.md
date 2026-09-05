@@ -442,3 +442,87 @@ once never saw `ATTACHED_ROOT_OK`: the first keys reached the zz client before i
 (3) and (4) are races the fixture must wait out, not behaviour. Every run leaves zz daemons on
 `/tmp/zza-*.sock` when it dies; the cleanup trap does not reach them. Reap by pid from the socket
 name, never by `pkill -f`.
+
+Instrument pass completed locally, 2026-09-05 on the macbook (resumed on 2026-09-04 evening), at
+`f80405390af4` on `codex/attached-client-instrument`, based on published `f39ab1e0`. The machine
+checklist passed: gh authenticated as demfabris on this box, the cached tmux build verified at
+`d77c9dc6`, and the 16-step formats readiness scenario was clean. Work stayed in
+`~/dev/zz-attached-instrument`; the user's running tmux and zz servers were left alone. MAIN
+holder: `macbook/attached-instrument-0904`. No cycle 14 workers were launched.
+
+The remaining fixture races now wait on observed state: `probe_side` calls the terminal readiness
+handshake before sending its first key; `probe_command_prompt` waits for `(rename-window) main`
+after `C-b ,` before the four Backspaces. Both focused probes pass on the pin and zz.
+
+The Escape question was a daemon defect before Escape arrived. Reproduce with the existing
+`probe_command_output_navigation`: open long command output under vi, press `g /`, then inspect
+the output view while the `(search down)` prompt is open, before entering a term or Escape. The
+pin retains the output; zz had already removed it and restored its client table to `root`.
+`dismiss_overlays` discarded command output while raising the command prompt. The fix retains
+that output. The fixture now checks the table immediately after the prompt opens, and continues
+to use `#{client_key_table}` for zz because its output view is client-local and
+`#{pane_in_mode}` stays 0. Escape cancels the search prompt while preserving the vi output view.
+The daemon regression failed before this fix and passed after it.
+
+Once output survived the prompt, the full navigation probe exposed another defect: searching to
+row 35, pressing `n` to reach row 65, then `N` stayed at 65 on zz; the pin returned to 35. The
+output worker had default emacs behavior behind a vi client table. `install_command_output` now
+applies the resolved engine knobs, and live `ModeKeysChanged` updates command-output workers as
+well as pane workers. The existing test
+`daemon::tests::mode_keys_retarget_active_command_output_and_restore_the_previous_table` now
+searches `two` in `one two tail`: initial vi places the cursor at x=4, a live switch to emacs at
+x=7. That live-switch assertion failed until the update path was fixed. The same test opens `/`,
+cancels with Escape, and verifies that the original output ID and vi table survive.
+
+Validation at the final source: 3,474 workspace tests passed, 0 failed, 4 ignored, using
+`cargo test --workspace --all-features --no-fail-fast -- --test-threads=8`; all-target,
+all-feature clippy with warnings denied passed. Formatting, shell syntax, board fold tests,
+registry/report checks, `just compat-check`, and OKF validation passed (one existing research-age
+warning). Focused readiness, rename, and the full output-navigation probe passed on both binaries.
+
+The first full run failed `smoke/chooser-tree-vocabulary` on pinned tmux only:
+`O-steps-to-name-order want=[=ckvocab:4.] got=[=ckvocab:]`; zz completed `clean:24`. An unchanged
+exact scenario rerun passed both sides. A pin probe then ran the failing sequence twice:
+`C-o`, optional `g`, `O`, `j`, `j`, `K`, Enter. With `g`, the pin selected `=ckvocab:4.`;
+omitting it selected `=ckvocab:`, the exact failed result.
+
+The publication probe reproduced a mechanism that can lose that key in `chooser-drive.py` and
+its two sibling readers, `pty-drive.py` and `graphics-drive.py`: create empty `step-1`, wait,
+write `keys 6` without a newline, then complete it as `keys 67` plus newline. Before the fix,
+all three readers acknowledged the empty file and the attached child received no `g`. After the
+fix, none acknowledged the empty or partial command, and all delivered `g` once the newline
+arrived. Each reader now retries the missing or incomplete line until its existing timeout.
+All step-writing callers use newline-terminated printf or echo. The fixed tree-chooser scenario
+passed on both binaries. The first run remained diagnostic; its failed result did not replace
+the summary. The final gate was rerun in full from committed, unchanged inputs.
+
+The launcher row also failed in this longer worktree: its default socket under the checkout's
+results directory exceeded the Unix socket path limit. The daemon reported `local socket name
+length exceeds capacity of sun_path of sockaddr_un`. Launcher mode now allocates its isolated
+runtime under `/tmp/zzcl.XXXXXX` and removes it after shutting down its test servers. It still
+runs the launcher without `--socket` or `ZZ_SOCKET`, so the default socket discovery check stays
+intact. The 7-step launcher scenario passed and left no runtime directory behind. Editing the
+runner during the already-failed diagnostic run also interrupted one in-flight shell parse in
+`smoke/pane-border-status`; its isolated rerun passed. Only the final run from frozen files counts
+as accepted evidence.
+
+The byte-filename fixture failed before either engine could source a file: APFS rejected a
+0xff directory name with EILSEQ (`Illegal byte sequence`). It now follows the existing
+`client-non-utf8-cwd` capability fallback: the three existing-file probes use UTF-8 control names
+when raw-byte names cannot be created, and the raw-byte missing-path `source-file -q` probe stays
+unchanged. Both binaries returned `clean:4/utf8-control` in the focused rerun. A filesystem that
+accepts byte names still runs the original raw-byte paths and returns `clean:4`. The Mac result
+does not prove sourcing existing non-UTF-8 filenames; it records the filesystem limitation and
+exercises the control paths explicitly.
+
+The complete `just compat --strict-geometry --attached-client` retry, using zz built from
+`f80405390af4` and the verified pin, passed 221 scenarios / 2,655 steps with exactly the 3 registered
+known rows and no unexpected skip. It wrote attached-client `Status: PASS` and
+`Recorded at: f80405390af4` to `compat/results/summary.md`; `just compat --check-summary` passes.
+Summary SHA-256: `bea4877d59fae52b416918b4aad8a40d40846515cf27ffb2ee0101e9aa162d5e`. No stamp rule was changed, no registry disposition changed, and
+protocol remains v98.
+
+The fix and proof records are local and await delivery; published main still carries its old
+unstamped summary. Once these commits reach main, the next work is cycle 14 from the retrospective's
+"Next cycles" section, then cycles 15 and 16. A stamped fixture completes the instrument pass;
+the daily-use findings still prevent calling the whole campaign complete.

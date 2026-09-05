@@ -6,11 +6,11 @@
 >
 > Ledger settlement: **100.0% (216 of 216 known groups: 100 x (174 CLOSED + 42 ACCEPTED) / (174 CLOSED + 42 LIVE)); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **220 SCENARIOS, 2,648 STEPS, 3 REGISTERED KNOWN ROWS; THE PERSISTED ATTACHED-CLIENT ROW STILL READS PASS BUT THE FIXTURE DOES NOT COMPLETE ON THE UBUNTU BOX, SO THE PRACTICAL EXIT GATE IS NOT MET**
+> Exit evidence: **221 SCENARIOS, 2,655 STEPS, 3 REGISTERED KNOWN ROWS; ATTACHED-CLIENT PASS STAMPED AT `f80405390af4` ON THE MACBOOK; LOCAL INSTRUMENT BRANCH AWAITS DELIVERY**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 13 INTEGRATED 2026-09-04 ON THE UBUNTU BOX (TWO OPUS 5 LANES AT XHIGH, GEOMETRY THEN CONSUMERS, ONE GATE ALONE ON THE BOX). THE AGREED-SCOPE METER REACHED 304/304 AND THE CAMPAIGN'S IMPLEMENTATION PHASE IS DONE: EVERY LIVE GROUP THAT REMAINS CARRIES AN ACCEPTED `native` OR `never` DISPOSITION. WHAT IS LEFT IS NOT IMPLEMENTATION: `compat/attached-client.sh` IS UNRELIABLE ON THIS BOX AND NEEDS AN OWNER BEFORE THE EXIT GATE CAN BE CALLED; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **CYCLE 13 INTEGRATED; THE AGREED-SCOPE REGISTRY IS CLOSED. THE INSTRUMENT PASS IS COMPLETE ON LOCAL `codex/attached-client-instrument`. DELIVERY AND THE RETROSPECTIVE WORK IN CYCLES 14 TO 16 REMAIN; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,7 +76,7 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | `origin/main` at `37e8df0` (cycle-13 consumers merge; the geometry lane landed first at `fd2e790`) plus this ledger recompute |
+| Published branch | `origin/main` at `f39ab1e0` when the instrument branch started; the local instrument fix and stamped summary await delivery |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
 | Delivery | Cycle 13 of the orchestrated Opus 5 loop, 2 of 2 lanes integrated on the ubuntu box: an attached pane's pty now follows the cell the layout settled on, which is the pin's order, so a GUI client's floored measurement no longer reaches the pty while `#{pane_width}` keeps the layout's cell, with the window-extent back-solve rewritten per axis (exact on an axis a pane spans in full, guarded ratio on an axis it shares) and every write-back including the focus-change and detach passes now running (`fd2e790`); and the three byte-clean consumers, format expansion on `RawText` with the trim, pad and width modifiers rewritten onto `format-draw.c`'s counting rule, the first client-encoding sanitizer gated on tmux's `CLIENT_UTF8` and on the pin's sink rather than the client's kind, and `source-file` opening a path only bytes can spell (`37e8df0`). Protocol stays v98: neither lane owed a bump and neither took one. Four closes, `semantic:attached-gui-pane-width`, `semantic:format-expansion-non-utf8`, `semantic:client-utf8-output-sanitizer` and `semantic:config-tilde-home-non-utf8`, which empties the last two live groups |
 | Orchestration | Cycle 13 launched 2026-09-04 on the ubuntu box through `opus-compat-run-13.js`: two Opus 5 lanes at xhigh, one Opus 5 reviewer per lane, one gate running alone on the box. Geometry integrated first because its daemon resize-path diff was the one most likely to conflict; consumers rebased onto it and conflicted only in the generated `knowledge/tmux/gaps.md`, which was regenerated with `tmux-tracker.py write-report` rather than hand-merged, while `compat/tmux-gaps.json` auto-merged because the lanes closed different groups. Both reviewers returned approve-with-fixes; every defect was applied at the gate with the reviewer's own probe re-run as proof, including one blocker in the sanitizer's reach. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; F-PANE-GEOMETRY-RESIDUE and F-BYTE-CLEAN-CONSUMERS are both INTEGRATED and released with nothing left open on either front |
@@ -86,7 +86,7 @@ percentage is a ledger health metric, not a compatibility claim.
 | Agreed-scope meter | 100.0% (304 of 304 items frozen on 2026-08-31), 65 of 65 groups done, 0 partially burned; park dispositions 15 of 15; `python3 compat/progress.py` |
 | Completed fixed cohort | Cycle 13: 2 of 2 lanes integrated, agreed-scope meter 99.3% to 100.0%, unresolved groups 2 to 0 |
 | Previous completed cohort | Cycle 12: 2 of 2 lanes integrated, agreed-scope meter 99.0% to 99.3% |
-| Campaign point | The registry's agreed scope is empty. `rendering.geometry-residue` closed by putting zz's resize loop in the pin's order rather than by choosing between an attached GUI client's two pane widths: the pty follows the settled layout, so `#{pane_width}`, `#{window_layout}` and `stty size` agree the way `window_pane_resize` makes them agree on the pin. `clients.byte-clean-consumers` closed with all three consumers carrying bytes, and the sanitizer it added is gated on the pin's sink, so `capture-pane -p` and `save-buffer` keep their bytes for every client shape while `display-message` and the listings are sanitized. What remains live is 42 groups that all carry an accepted `native` or `never` disposition, so no group is waiting on implementation. The open work is elsewhere: `compat/attached-client.sh` does not complete on this box, and `compat/results/summary.md` still records it as `PASS` |
+| Campaign point | The registry's agreed scope is empty. `rendering.geometry-residue` closed by putting zz's resize loop in the pin's order rather than by choosing between an attached GUI client's two pane widths: the pty follows the settled layout, so `#{pane_width}`, `#{window_layout}` and `stty size` agree the way `window_pane_resize` makes them agree on the pin. `clients.byte-clean-consumers` closed with all three consumers carrying bytes, and the sanitizer it added is gated on the pin's sink, so `capture-pane -p` and `save-buffer` keep their bytes for every client shape while `display-message` and the listings are sanitized. What remains live is 42 groups that all carry an accepted `native` or `never` disposition, so no group is waiting on implementation. The instrument branch now records a full attached-client PASS at `f80405390af4` on the macbook. Its commits await delivery, and the retrospective daily-use findings in `CAMPAIGN-REVIEW.md` remain for cycles 14 to 16 |
 | Live registry | 42 active groups, 453 active items, 174 closed records |
 | Active status | 0 open, 0 blocked, 42 accepted |
 | Known differentials | 3 registered cases: two geometry, one geometry plus output |
@@ -111,9 +111,9 @@ found during that wave.
 | New residual groups | Since the 2026-08-31 freeze: none still live. The 2 items cycle 12 opened as `clients.byte-clean-consumers` closed in cycle 13 along with the group |
 | Unresolved movement | Cycle 13: 2 at launch, 0 at close |
 | Live unresolved | 0 open + 0 blocked = 0 |
-| Practical exit gate | Open on one clause only: the attached-client fixture does not pass at full counts on this box. Every other clause is met |
-| Latest differential | 220 scenarios, 2,648 steps, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean; the persisted attached-client row still reads `PASS` and is stale |
-| Differential SHA-256 | `5bef958b6945d2d07d39ab0409e47589e486e43695a458392fbae2957bfb4c1c` |
+| Practical exit gate | Current strict corpus and attached-client proof pass on the instrument branch. The retrospective daily-use findings and delivery remain; the whole campaign is not complete |
+| Latest differential | 221 scenarios, 2,655 steps, 3 exact registered known rows (two GEO-only, one GEO plus OUT); all other channels clean; attached-client PASS at `f80405390af4` |
+| Differential SHA-256 | `bea4877d59fae52b416918b4aad8a40d40846515cf27ffb2ee0101e9aa162d5e` |
 | Ledger settlement | 216 of 216 known groups = 100.0% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a

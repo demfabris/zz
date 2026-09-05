@@ -99,7 +99,11 @@ LOG_FILE="$RESULTS_DIR/$scenario_name.log"
 mkdir -p "$RESULTS_DIR" "$(dirname -- "$LOG_FILE")"
 : >"$LOG_FILE"
 
-SCRATCH_DIR="$(mktemp -d "$RESULTS_DIR/.$safe_name.XXXXXX")"
+if [ "$LAUNCHER_MODE" -eq 1 ]; then
+  SCRATCH_DIR="$(mktemp -d /tmp/zzc-launcher.XXXXXX)"
+else
+  SCRATCH_DIR="$(mktemp -d "$RESULTS_DIR/.$safe_name.XXXXXX")"
+fi
 ZZ_HOME="$SCRATCH_DIR/home"
 ZZ_CONFIG_HOME="$SCRATCH_DIR/config"
 ZZ_SOCKET="/tmp/zzc-$$.sock"

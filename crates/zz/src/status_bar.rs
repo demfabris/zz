@@ -12,7 +12,7 @@ use zz_ui::{
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     navigation::{
         WorkspaceStatusWindowState, workspace_controls_leading_inset, workspace_row_highlight,
-        workspace_status_item, workspace_status_window,
+        workspace_status_item, workspace_status_window, workspace_tree_action_button,
     },
     tooltip::Tooltip,
 };
@@ -106,20 +106,26 @@ fn render_session(name: &str, sidebar: &Entity<WorkspaceSidebar>, cx: &App) -> A
     let focus_sidebar = sidebar.clone();
     workspace_status_item(
         "gui-status-session",
-        Some(IconName::SquareTerminal),
+        Some(IconName::Layers),
         name.to_owned().into(),
         cx,
     )
     .flex_none()
     .px(px(8.0))
     .rounded(cx.theme().radius)
-    .bg(highlight)
     .when(cx.theme().shadow, |item| {
-        item.border(px(0.5)).control_highlight(cx)
+        item.border(px(0.5)).border_color(gpui::transparent_white())
     })
     .text_color(foreground)
     .cursor_pointer()
-    .hover(move |item| item.bg(highlight).text_color(foreground))
+    .hover(move |item| {
+        let item = item.bg(highlight).text_color(foreground);
+        if cx.theme().shadow {
+            item.control_highlight(cx)
+        } else {
+            item
+        }
+    })
     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
     .on_click(move |_, window, cx| {
         cx.stop_propagation();
@@ -243,6 +249,8 @@ fn render_status_window(
     );
     let rename_mux = mux.clone();
     let close_mux = mux.clone();
+    let button_mux = mux.clone();
+    let hover_group: SharedString = format!("gui-status-window-{}", id.0).into();
     let item = workspace_status_window(
         ("gui-status-window", id.0),
         window.index.to_string().into(),
@@ -256,6 +264,29 @@ fn render_status_window(
             agent: window.agent,
         },
         cx,
+    )
+    .group(hover_group.clone())
+    .pr(px(0.0))
+    .child(
+        div()
+            .flex_none()
+            .invisible()
+            .group_hover(hover_group, gpui::Styled::visible)
+            .child(
+                workspace_tree_action_button(
+                    ("gui-status-window-close", id.0),
+                    IconName::Xmark,
+                    "Close window",
+                    !connected,
+                    cx,
+                )
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    button_mux
+                        .read(cx)
+                        .execute(kill_target_command(TreeTarget::Window(id)));
+                }),
+            ),
     )
     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
     .on_click(move |_, _, cx| {

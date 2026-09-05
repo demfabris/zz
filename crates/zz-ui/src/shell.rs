@@ -174,10 +174,17 @@ pub fn workspace_status_bar(
             .flex()
             .flex_none()
             .items_center()
-            .w(width + px(6.0))
+            .w(width + px(7.0))
             .h(TITLE_BAR_HEIGHT)
-            .pr(px(6.0))
+            .gap(px(6.0))
             .child(controls)
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(1.0))
+                    .h(px(16.0))
+                    .bg(cx.theme().border),
+            )
             .into_any_element()
     });
     let window_controls = slots.window_controls.map(|controls| {

@@ -513,6 +513,7 @@ impl Preview {
             .into_iter()
             .enumerate()
             .map(|(i, name)| {
+                let hover_group: SharedString = format!("preview-status-window-{i}").into();
                 workspace_status_window(
                     format!("preview-window-{i}"),
                     format!("{i}").into(),
@@ -526,23 +527,45 @@ impl Preview {
                     },
                     cx,
                 )
+                .group(hover_group.clone())
+                .pr(px(0.0))
+                .child(
+                    div()
+                        .flex_none()
+                        .invisible()
+                        .group_hover(hover_group, gpui::Styled::visible)
+                        .child(workspace_tree_action_button(
+                            format!("preview-window-close-{i}"),
+                            IconName::Xmark,
+                            "Close window",
+                            false,
+                            cx,
+                        )),
+                )
                 .into_any_element()
             })
             .collect();
         let session = workspace_status_item(
             "gui-status-session",
-            Some(IconName::SquareTerminal),
+            Some(IconName::Layers),
             "zz".into(),
             cx,
         )
         .flex_none()
         .px(px(8.0))
         .rounded(cx.theme().radius)
-        .bg(zz_ui::navigation::workspace_row_highlight(cx))
         .when(cx.theme().shadow, |item| {
-            item.border(px(0.5)).control_highlight(cx)
+            item.border(px(0.5)).border_color(gpui::transparent_white())
         })
         .text_color(cx.theme().foreground)
+        .hover(|item| {
+            let item = item.bg(zz_ui::navigation::workspace_row_highlight(cx));
+            if cx.theme().shadow {
+                item.control_highlight(cx)
+            } else {
+                item
+            }
+        })
         .into_any_element();
         let controls = Some((
             Self::controls(cx),

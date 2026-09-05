@@ -769,6 +769,7 @@ pub enum KeyDecision {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct KeyEngine {
     table: Option<String>,
+    mode_table: bool,
     pending: Option<(Vec<CommandInvocation>, bool)>,
     repeat_count: Option<CopyModeRepeatPrefix>,
     repeat_deadline: Option<Instant>,
@@ -793,7 +794,14 @@ impl CopyModeRepeatPrefix {
 impl KeyEngine {
     #[must_use]
     pub fn active_table(&self) -> Option<&str> {
-        self.table.as_deref()
+        if self
+            .repeat_deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            None
+        } else {
+            self.table.as_deref()
+        }
     }
 
     /// Consume the copy-mode repeat prefix the way `window_copy_command` reads
@@ -928,15 +936,13 @@ impl KeyEngine {
     ) -> (KeyDecision, bool) {
         let key = canonical_key(key);
         if self.repeat_deadline.is_some_and(|deadline| now >= deadline) {
-            self.table = None;
-            self.repeat_deadline = None;
-            self.prefix_deadline = None;
-            self.last_repeat_key = None;
+            self.clear_explicit_table();
         }
         if let Some(decision) = self.take_pending_jump_target(&key) {
             return decision;
         }
-        if matches!(self.table.as_deref(), Some("copy-mode" | "copy-mode-vi"))
+        if self.mode_table
+            && matches!(self.table.as_deref(), Some("copy-mode" | "copy-mode-vi"))
             && key.len() == 1
             && let Some(digit) = key.as_bytes().first().copied().filter(u8::is_ascii_digit)
             && let Some(CopyModeRepeatPrefix::Capturing(count)) = self.repeat_count
@@ -949,7 +955,7 @@ impl KeyEngine {
             ));
             return (KeyDecision::Ignore, false);
         }
-        if self.table.is_none() && tables.is_prefix(&key) {
+        if !self.mode_table && self.table.as_deref() != Some("prefix") && tables.is_prefix(&key) {
             self.table = Some("prefix".to_owned());
             self.repeat_deadline = None;
             self.prefix_deadline = (!prefix_timeout.is_zero()).then_some(now + prefix_timeout);
@@ -964,8 +970,7 @@ impl KeyEngine {
                 && exact_binding.is_some_and(|binding| binding.repeat));
         // prefix-timeout expires lazily on the next key; there is no timer to clear the client indicator.
         if prefix_expired {
-            self.table = None;
-            self.prefix_deadline = None;
+            self.clear_explicit_table();
             root_table.clone_into(&mut table);
         }
         let (mut binding, mut binding_key) = if let Some(binding) = tables.get(&table, &key) {
@@ -974,10 +979,7 @@ impl KeyEngine {
             (tables.get(&table, "Any"), "Any".to_owned())
         };
         if self.repeat_deadline.is_some() && binding.is_none_or(|binding| !binding.repeat) {
-            self.table = None;
-            self.repeat_deadline = None;
-            self.prefix_deadline = None;
-            self.last_repeat_key = None;
+            self.clear_explicit_table();
             if tables.is_prefix(&key) {
                 self.table = Some("prefix".to_owned());
                 self.prefix_deadline = (!prefix_timeout.is_zero()).then_some(now + prefix_timeout);
@@ -992,20 +994,33 @@ impl KeyEngine {
                 "Any".clone_into(&mut binding_key);
             }
         }
-        let Some(binding) = binding else {
-            if table == "prefix" {
-                self.table = None;
-                self.prefix_deadline = None;
-                self.last_repeat_key = None;
+        if binding.is_none() {
+            if self.mode_table {
                 return (KeyDecision::Ignore, false);
             }
-            return if self.table.is_some() {
-                (KeyDecision::Ignore, false)
+            let retried = table != root_table;
+            self.clear_explicit_table();
+            root_table.clone_into(&mut table);
+            if let Some(root_binding) = tables.get(root_table, &key) {
+                binding = Some(root_binding);
+                binding_key.clone_from(&key);
             } else {
-                (KeyDecision::Pass, false)
-            };
-        };
-        if table == "prefix" && binding.repeat && !repeat_time.is_zero() {
+                binding = tables.get(root_table, "Any");
+                "Any".clone_into(&mut binding_key);
+            }
+            if binding.is_none() {
+                return (
+                    if retried {
+                        KeyDecision::Ignore
+                    } else {
+                        KeyDecision::Pass
+                    },
+                    false,
+                );
+            }
+        }
+        let binding = binding.expect("unbound keys returned above");
+        if !self.mode_table && binding.repeat && !repeat_time.is_zero() {
             let repeat_time = if self.repeat_deadline.is_none()
                 || self.last_repeat_key.as_deref() != Some(binding_key.as_str())
             {
@@ -1020,11 +1035,8 @@ impl KeyEngine {
             self.table = Some(table.clone());
             self.repeat_deadline = Some(now + repeat_time);
             self.last_repeat_key = Some(binding_key);
-        } else if table == "prefix" {
-            self.table = None;
-            self.repeat_deadline = None;
-            self.prefix_deadline = None;
-            self.last_repeat_key = None;
+        } else if !self.mode_table {
+            self.clear_explicit_table();
         }
         let commands = binding.commands.clone();
         self.decide(commands, binding.repeat)
@@ -1098,12 +1110,19 @@ impl KeyEngine {
 
     fn clear_explicit_table(&mut self) {
         self.table = None;
+        self.mode_table = false;
         self.repeat_deadline = None;
         self.prefix_deadline = None;
         self.last_repeat_key = None;
     }
 
+    pub fn switch_client_table(&mut self, table: Option<String>) {
+        self.switch_table(table);
+        self.mode_table = false;
+    }
+
     pub fn switch_table(&mut self, table: Option<String>) {
+        self.mode_table = matches!(table.as_deref(), Some("copy-mode" | "copy-mode-vi"));
         self.table = table;
         self.pending = None;
         self.repeat_count = None;
@@ -1425,6 +1444,110 @@ mod tests {
             text: text.map(|text| text.to_owned().into_boxed_str()),
             unshifted_codepoint: None,
         }
+    }
+
+    fn table_binding(repeat: bool) -> Binding {
+        Binding {
+            commands: vec![CommandInvocation::new("display-message", ["matched"])],
+            repeat,
+            note: None,
+        }
+    }
+
+    #[test]
+    fn switched_tables_reset_before_dispatch_and_retry_unbound_keys_in_root() {
+        let mut tables = KeyTables::default();
+        tables.bind("resize", "Left", table_binding(false));
+        tables.bind("root", "b", table_binding(false));
+        let mut engine = KeyEngine::default();
+        engine.switch_client_table(Some("resize".to_owned()));
+        assert!(matches!(
+            engine.handle(&tables, "Left"),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), None);
+        engine.switch_client_table(Some("resize".to_owned()));
+        assert_eq!(engine.handle(&tables, "a"), KeyDecision::Ignore);
+        assert_eq!(engine.active_table(), None);
+        assert_eq!(engine.handle(&tables, "a"), KeyDecision::Pass);
+        engine.switch_client_table(Some("resize".to_owned()));
+        assert!(matches!(
+            engine.handle(&tables, "b"),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), None);
+        tables.bind("root", "Any", table_binding(false));
+        engine.switch_client_table(Some("resize".to_owned()));
+        assert!(matches!(
+            engine.handle(&tables, "a"),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), None);
+    }
+
+    #[test]
+    fn switched_repeat_tables_keep_only_repeating_bindings_until_the_deadline() {
+        let mut tables = KeyTables::default();
+        tables.bind("resize", "Left", table_binding(true));
+        tables.bind("resize", "a", table_binding(false));
+        let mut engine = KeyEngine::default();
+        let now = Instant::now();
+        let repeat = Duration::from_secs(1);
+        engine.switch_client_table(Some("resize".to_owned()));
+        assert!(matches!(
+            engine.handle_with_repeat_time(&tables, "Left", now, repeat),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), Some("resize"));
+        assert!(matches!(
+            engine.handle_with_repeat_time(&tables, "Left", now + repeat / 2, repeat),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "a", now + repeat / 2, repeat),
+            KeyDecision::Pass
+        );
+        assert_eq!(engine.active_table(), None);
+        engine.switch_client_table(Some("resize".to_owned()));
+        engine.handle_with_repeat_time(&tables, "Left", now, repeat);
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "Left", now + repeat, repeat),
+            KeyDecision::Pass
+        );
+        assert_eq!(engine.active_table(), None);
+        engine.switch_client_table(Some("resize".to_owned()));
+        engine.handle_with_repeat_time(&tables, "Left", now, Duration::ZERO);
+        assert_eq!(engine.active_table(), None);
+    }
+
+    #[test]
+    fn explicit_copy_table_is_one_shot_but_pane_copy_mode_persists() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+        assert!(matches!(
+            engine.handle(&tables, "h"),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), Some("copy-mode-vi"));
+        engine.switch_client_table(Some("copy-mode-vi".to_owned()));
+        assert!(matches!(
+            engine.handle(&tables, "h"),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), None);
+    }
+
+    #[test]
+    fn prefix_interrupts_switched_tables_and_explicit_root_forwards_unbound_keys() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        engine.switch_client_table(Some("resize".to_owned()));
+        assert_eq!(engine.handle(&tables, "C-b"), KeyDecision::Prefix);
+        assert_eq!(engine.active_table(), Some("prefix"));
+        engine.switch_client_table(Some("root".to_owned()));
+        assert_eq!(engine.handle(&tables, "a"), KeyDecision::Pass);
+        assert_eq!(engine.active_table(), None);
     }
 
     #[test]

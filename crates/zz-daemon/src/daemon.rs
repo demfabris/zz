@@ -12695,7 +12695,7 @@ impl Shared {
                 .key_engines
                 .entry(target_client)
                 .or_default()
-                .switch_table(Some(table.to_owned()));
+                .switch_client_table(Some(table.to_owned()));
             drop(inner);
             self.sync_prefix_armed(target_client);
             return Ok(Execution::default());

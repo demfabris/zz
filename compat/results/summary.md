@@ -193,6 +193,10 @@
 | smoke/jobs-command-environment | 3 | yes | 0 | yes | yes | yes |
 | smoke/jobs-display-popup-environment | 3 | yes | 0 | yes | yes | yes |
 | smoke/jobs-shell-job-cwd | 3 | yes | 0 | yes | yes | yes |
+| smoke/keys-prefix-attached | 3 | yes | 0 | yes | yes | yes |
+| smoke/keys-prefix-stock | 20 | yes | 0 | yes | yes | yes |
+| smoke/keys-shift-attached | 3 | yes | 0 | yes | yes | yes |
+| smoke/keys-table-lifecycle | 3 | yes | 0 | yes | yes | yes |
 | smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |
 | smoke/launcher-installed-layout | 7 | yes | 0 | yes | yes | yes |
 | smoke/oh-my-tmux | 15 | yes | 0 | yes | yes | yes |
@@ -223,11 +227,6 @@
 | smoke/tpm-init | 5 | yes | 0 | yes | yes | yes |
 | smoke/vim-tmux-navigator | 8 | yes | 0 | yes | yes | yes |
 | smoke/yank | 3 | yes | 0 | yes | yes | yes |
-
-| smoke/keys-prefix-stock | 20 | yes | 0 | yes | yes | yes |
-| smoke/keys-prefix-attached | 3 | yes | 0 | yes | yes | yes |
-
-| smoke/keys-shift-attached | 3 | yes | 0 | yes | yes | yes |
 
 ## Attached-client fixture
 

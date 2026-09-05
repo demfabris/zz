@@ -90,6 +90,30 @@
       "reason": "zz uses native chooser surfaces and the sidebar instead of tmux mode screens. On 2026-09-05 the attached keys-open-prefix-probe.sh refuted the functional part of the old clause \"Native choosers retain tmux command and keyboard semantics without drawing tmux's preview grid.\" for find-window: submitting a matching name opens the pin window tree and selects window 1, but zz find_window returns an empty Execution and remains in window 0. presentation:find-window-native-chooser reserves the native presentation choice only; it does not accept a missing command implementation. Functional prefix f is reopened in keys.prefix-stock-commands. No presentation item was relocated."
     },
     {
+      "id": "clients.cli-output-mixed-queue",
+      "title": "Match mixed buffer and printed-line command queues",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "now",
+      "ease": "medium",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "client",
+      "items": [
+        "semantic:cli-output-mixed-queue"
+      ],
+      "evidence": [
+        "scenario:compat/scenarios/smoke/cli-output-bytes.txt",
+        "file:compat/scenarios/smoke/fixtures/cli-output-bytes.py"
+      ],
+      "acceptance": [
+        "For a buffer containing hello, show-buffer -b bytes ; display -p an empty string emits exactly hello on pinned d77c9dc6, without the display newline. Match the pinned command-client queue behavior without losing direct empty display output."
+      ],
+      "depends_on": [],
+      "reason": "Discovered during direct byte-output proof on 2026-09-05: the durable cli-output-bytes fixture measures five bytes (hello) on the pin and six (hello plus LF) on zz for this mixed file_write/cmdq_print queue. Its final assertion deliberately records the two measured behaviors and is not a parity claim. Direct show-buffer and direct or sourced empty display are independently covered in clients.cli-output-bytes; this additional queue-lifetime behavior remains open rather than narrowing an unmeasured claim."
+    },
+    {
       "id": "clients.command-output-pane-prompt",
       "title": "Preserve command output beneath stock pane search prompts",
       "decision": "adopt",
@@ -116,30 +140,6 @@
       ],
       "depends_on": [],
       "reason": "Measured 2026-09-05 against pinned tmux d77c9dc6 and zz 6b6171fc on Ubuntu with compat/attached-client.sh --command-output and probe_command_output_prompt_lifecycle. The pin preserves pane_in_mode=1 while opening and closing the stock / prompt. zz changes client_key_table from copy-mode-vi to root as soon as that prompt opens, before Escape: MuxEffect::CommandPrompt calls dismiss_overlays, which takes the client-local command output. Idle Escape and selection Escape still dispatch clear-selection and preserve the view on both binaries. This refutes the old clients.tui-command-output-navigation claim \"Search submission or cancellation closes only that local editor\" for the current stock binding. prompt.pane-rendered accepted client-side placement for -P, but did not authorize losing the retained output. The fixture explicitly asserts the stock lifecycle divergence on both binaries and retains the original search editing, cancellation, submission, next/previous and copy assertions through zz native copy-mode-search-prompt; those native-path passes do not close this stock-binding defect. No product change or new native policy was made. The native editor draws /; the stock prompt still must draw (search down) on both sides. Both prompt spellings have bounded rendered-row checks, and the temporary native binding must restore byte-for-byte to its saved list-keys row."
-    },
-    {
-      "id": "clients.cli-output-mixed-queue",
-      "title": "Match mixed buffer and printed-line command queues",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "now",
-      "ease": "medium",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "client",
-      "items": [
-        "semantic:cli-output-mixed-queue"
-      ],
-      "evidence": [
-        "scenario:compat/scenarios/smoke/cli-output-bytes.txt",
-        "file:compat/scenarios/smoke/fixtures/cli-output-bytes.py"
-      ],
-      "acceptance": [
-        "For a buffer containing hello, show-buffer -b bytes ; display -p an empty string emits exactly hello on pinned d77c9dc6, without the display newline. Match the pinned command-client queue behavior without losing direct empty display output."
-      ],
-      "depends_on": [],
-      "reason": "Discovered during direct byte-output proof on 2026-09-05: the durable cli-output-bytes fixture measures five bytes (hello) on the pin and six (hello plus LF) on zz for this mixed file_write/cmdq_print queue. Its final assertion deliberately records the two measured behaviors and is not a parity claim. Direct show-buffer and direct or sourced empty display are independently covered in clients.cli-output-bytes; this additional queue-lifetime behavior remains open rather than narrowing an unmeasured claim."
     },
     {
       "id": "clients.interactive-refresh",

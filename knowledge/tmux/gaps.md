@@ -17,33 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-<<<<<<< HEAD
-Tracked gap groups: **45**. Classified items: **433**.
-||||||| parent of a051dfff (Preserve empty display lines and raw show-buffer output)
-Tracked gap groups: **42**. Classified items: **448**.
-=======
-Tracked gap groups: **43**. Classified items: **449**.
->>>>>>> a051dfff (Preserve empty display lines and raw show-buffer output)
+Tracked gap groups: **46**. Classified items: **434**.
 
-<<<<<<< HEAD
-- Status: open: 3, accepted: 42.
-- Decision: adopt: 3, native: 32, never: 10.
-- Priority: now: 3, none: 42.
-- Closed history entries: 178.
-- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 44, native-key: 85, semantic: 43, presentation: 6, protocol: 2.
-||||||| parent of a051dfff (Preserve empty display lines and raw show-buffer output)
-- Status: accepted: 42.
-- Decision: native: 32, never: 10.
-- Priority: none: 42.
-- Closed history entries: 176.
-- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 93, binding: 45, native-key: 85, semantic: 41, presentation: 6, protocol: 2.
-=======
-- Status: open: 1, accepted: 42.
-- Decision: adopt: 1, native: 32, never: 10.
-- Priority: now: 1, none: 42.
-- Closed history entries: 178.
-- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 93, binding: 45, native-key: 85, semantic: 42, presentation: 6, protocol: 2.
->>>>>>> a051dfff (Preserve empty display lines and raw show-buffer output)
+- Status: open: 4, accepted: 42.
+- Decision: adopt: 4, native: 32, never: 10.
+- Priority: now: 4, none: 42.
+- Closed history entries: 180.
+- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 44, native-key: 85, semantic: 44, presentation: 6, protocol: 2.
 
 ## Measured surface
 
@@ -71,14 +51,10 @@ structure as proof.
 
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-<<<<<<< HEAD
 | `formats.dead-signal-platform-name` | Match the pinned platform spelling of dead-pane signals | adopt | open | easy | mux | daily, scripts | none |
+| `clients.cli-output-mixed-queue` | Match mixed buffer and printed-line command queues | adopt | open | medium | client | scripts | none |
 | `clients.command-output-pane-prompt` | Preserve command output beneath stock pane search prompts | adopt | open | medium | daemon | daily, scripts | none |
 | `keys.prefix-stock-commands` | Adopt stock prefix commands outside native chrome | adopt | open | medium | mux | daily, gui | none |
-||||||| parent of a051dfff (Preserve empty display lines and raw show-buffer output)
-=======
-| `clients.cli-output-mixed-queue` | Match mixed buffer and printed-line command queues | adopt | open | medium | client | scripts | none |
->>>>>>> a051dfff (Preserve empty display lines and raw show-buffer output)
 
 ## None
 
@@ -184,6 +160,23 @@ zz uses native chooser surfaces and the sidebar instead of tmux mode screens. On
 - Acceptance:
   - `Implemented native choosers retain tmux command and keyboard semantics without drawing tmux's preview grid. The find-window presentation choice does not accept its missing command behavior, which is open in keys.prefix-stock-commands.`
 
+### `clients.cli-output-mixed-queue`: Match mixed buffer and printed-line command queues
+
+Discovered during direct byte-output proof on 2026-09-05: the durable cli-output-bytes fixture measures five bytes (hello) on the pin and six (hello plus LF) on zz for this mixed file_write/cmdq_print queue. Its final assertion deliberately records the two measured behaviors and is not a parity claim. Direct show-buffer and direct or sourced empty display are independently covered in clients.cli-output-bytes; this additional queue-lifetime behavior remains open rather than narrowing an unmeasured claim.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `now` / `medium`
+- Owner: `client`
+- User impact: scripts
+- Items: `semantic:cli-output-mixed-queue`
+- Depends on: none
+- Evidence:
+  - `scenario:compat/scenarios/smoke/cli-output-bytes.txt`
+  - `file:compat/scenarios/smoke/fixtures/cli-output-bytes.py`
+- Acceptance:
+  - `For a buffer containing hello, show-buffer -b bytes ; display -p an empty string emits exactly hello on pinned d77c9dc6, without the display newline. Match the pinned command-client queue behavior without losing direct empty display output.`
+
 ### `clients.command-output-pane-prompt`: Preserve command output beneath stock pane search prompts
 
 Measured 2026-09-05 against pinned tmux d77c9dc6 and zz 6b6171fc on Ubuntu with compat/attached-client.sh --command-output and probe_command_output_prompt_lifecycle. The pin preserves pane_in_mode=1 while opening and closing the stock / prompt. zz changes client_key_table from copy-mode-vi to root as soon as that prompt opens, before Escape: MuxEffect::CommandPrompt calls dismiss_overlays, which takes the client-local command output. Idle Escape and selection Escape still dispatch clear-selection and preserve the view on both binaries. This refutes the old clients.tui-command-output-navigation claim "Search submission or cancellation closes only that local editor" for the current stock binding. prompt.pane-rendered accepted client-side placement for -P, but did not authorize losing the retained output. The fixture explicitly asserts the stock lifecycle divergence on both binaries and retains the original search editing, cancellation, submission, next/previous and copy assertions through zz native copy-mode-search-prompt; those native-path passes do not close this stock-binding defect. No product change or new native policy was made. The native editor draws /; the stock prompt still must draw (search down) on both sides. Both prompt spellings have bounded rendered-row checks, and the temporary native binding must restore byte-for-byte to its saved list-keys row.
@@ -203,23 +196,6 @@ Measured 2026-09-05 against pinned tmux d77c9dc6 and zz 6b6171fc on Ubuntu with 
 - Acceptance:
   - `On an attached client with vi mode keys and a retained source-file output view, the stock / binding opens command-prompt -P without discarding that output view.`
   - `Escape dismisses only the search prompt and preserves the output, its mode and navigation state; submitting ATTACHED_NAV_MATCH searches the retained output and exposes ATTACHED_NAV_35 ATTACHED_NAV_MATCH.`
-
-### `clients.cli-output-mixed-queue`: Match mixed buffer and printed-line command queues
-
-Discovered during direct byte-output proof on 2026-09-05: the durable cli-output-bytes fixture measures five bytes (hello) on the pin and six (hello plus LF) on zz for this mixed file_write/cmdq_print queue. Its final assertion deliberately records the two measured behaviors and is not a parity claim. Direct show-buffer and direct or sourced empty display are independently covered in clients.cli-output-bytes; this additional queue-lifetime behavior remains open rather than narrowing an unmeasured claim.
-
-- Decision: `adopt`
-- Status: `open`
-- Priority and ease: `now` / `medium`
-- Owner: `client`
-- User impact: scripts
-- Items: `semantic:cli-output-mixed-queue`
-- Depends on: none
-- Evidence:
-  - `scenario:compat/scenarios/smoke/cli-output-bytes.txt`
-  - `file:compat/scenarios/smoke/fixtures/cli-output-bytes.py`
-- Acceptance:
-  - `For a buffer containing hello, show-buffer -b bytes ; display -p an empty string emits exactly hello on pinned d77c9dc6, without the display newline. Match the pinned command-client queue behavior without losing direct empty display output.`
 
 ### `clients.interactive-refresh`: Complete interactive client commands
 

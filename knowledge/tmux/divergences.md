@@ -1186,11 +1186,15 @@ nobody intends to drain. `accepted` plus `native` means zz's own surface serves 
   copy, view, and search state is per client, so a pane with two viewers has no single answer.
 - `formats.terminal-cells` (native): the cursor cell, tab stops, and progress state live in the
   terminal worker's VT, and the mux format engine models topology rather than a grid.
-- `formats.terminal-runtime` (native): 24 VT runtime names retain the pin's inactive or default
-  value. `history_size`, `cursor_x`, `cursor_y`, and `alternate_on` moved to
-  `formats.terminal-facts` on 2026-09-05 for tmux-resurrect's scrollback capture. The daemon reads
-  those four from bounded worker metadata; the [status line reference](/tmux/status-line.md)
-  lists the remaining defaults.
+- `formats.terminal-runtime` (native): 24 VT runtime names remain constant-backed placeholders.
+  A fresh 80×24 pin pane differs from zz's zero for `alternate_saved_x` and `alternate_saved_y`
+  (`4294967295`), `cursor_shape` (`default`), `history_all_bytes` (`24,960,0,0,0,0`),
+  `history_bytes` (`960`), and `scroll_region_lower` (`23`). The known differential enumerates all
+  24 names and registers these six differences. `history_size`, `cursor_x`, `cursor_y`, and
+  `alternate_on` moved to `formats.terminal-facts` on 2026-09-05 for tmux-resurrect's scrollback
+  capture. Those four read bounded worker metadata; they do not imply ED3/RIS engine parity.
+  The lifecycle probe records primary-history clearing and alternate-screen reset differences;
+  the [status line reference](/tmux/status-line.md) describes the boundaries.
 - `messages.tty-model` (never): `show-messages -T` dumps the server's per-terminal terminfo
   capability table and `-J` its internal job fds; zz's daemon drives no client terminal through
   terminfo and publishes no job registry, so both reports describe a server zz is not.

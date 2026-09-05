@@ -105,6 +105,7 @@
 | known/known-pane-scrollbar-columns | 4 | yes | 2 | yes | no | yes |
 | known/known-main-preset-two-panes | 2 | yes | 1 | yes | yes | yes |
 | known/known-spread-mixed | 6 | yes | 1 | yes | yes | yes |
+| known/known-terminal-runtime | 28 | yes | 0 | no | yes | yes |
 | smoke/alias-group-forgery | 7 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-bind-key | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-choosers | 3 | yes | 0 | yes | yes | yes |

@@ -1,0 +1,6 @@
+corpus: none
+# Pinned d77c9dc6 reads history and cursor from wp->base, including retained
+# primary history in alternate mode and a cursor one past the final column.
+stage: fixtures/terminal-facts.py ~/terminal-facts.py
+run-shell 'python3 ~/terminal-facts.py'
+out: show-environment -g ZZ_TERMINAL_FACTS

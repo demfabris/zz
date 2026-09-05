@@ -226,6 +226,8 @@
 
 | smoke/buffer-standard-streams | 2 | yes | 0 | yes | yes | yes |
 
+| smoke/terminal-facts | 2 | yes | 0 | yes | yes | yes |
+
 ## Attached-client fixture
 
 Status: `PASS`

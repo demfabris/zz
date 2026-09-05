@@ -1377,6 +1377,21 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 .pane_pipes
                 .get(&context.pane_id.parse().ok()?)
                 .map(u32::to_string),
+            "history_size" | "cursor_x" | "cursor_y" | "alternate_on" => {
+                let pane = context.pane_id.parse().ok()?;
+                let facts = self
+                    .facts
+                    .terminals
+                    .get(&pane)
+                    .map(|terminal| terminal.facts())
+                    .unwrap_or_default();
+                Some(match name {
+                    "history_size" => facts.history_size.to_string(),
+                    "cursor_x" => facts.cursor_x.to_string(),
+                    "cursor_y" => facts.cursor_y.to_string(),
+                    _ => u8::from(facts.alternate_on).to_string(),
+                })
+            }
             "pane_pb_progress" => Some(
                 pane_progress_bar(self.facts, &context.pane_id)?
                     .progress
@@ -1765,7 +1780,7 @@ mod tests {
     #[test]
     fn daemon_delegated_format_consumers_match_mux_inventory() {
         let delegated = zz_mux::delegated_format_variable_names().collect::<Vec<_>>();
-        assert_eq!(delegated.len(), 44);
+        assert_eq!(delegated.len(), 48);
 
         let session = SessionId(1);
         let pane = PaneId(1);

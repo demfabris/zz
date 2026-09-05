@@ -44,7 +44,7 @@ pub use session::{
     CaptureBoundary, CaptureOptions, CopyModeFacts, CopyModeSelectionFacts, EngineKnobs,
     KittyImage, KittyImageRequestError, LastCommandCapture, MAX_LAST_COMMAND_BYTES,
     MAX_LAST_COMMAND_LINES, ProgressBar, ProgressBarState, RawOutputTapError, TerminalCaptureError,
-    TerminalCopyReady, TerminalEvent, TerminalEvents, TerminalProcessExit, TerminalSession,
-    TerminalSessionDiagnostics, TerminalSize, TerminalSpawn,
+    TerminalCopyReady, TerminalEvent, TerminalEvents, TerminalFacts, TerminalProcessExit,
+    TerminalSession, TerminalSessionDiagnostics, TerminalSize, TerminalSpawn,
 };
 pub use word::{DEFAULT_WORD_SEPARATORS, WordSeparators};

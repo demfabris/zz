@@ -1271,11 +1271,23 @@ pub fn input_key_name(input: &KeyInput) -> KeyName {
     if input.modifiers.alt() {
         name.push_str("M-");
     }
+    if input.modifiers.shift()
+        && !matches!(
+            input.key,
+            KeyCode::Character(_) | KeyCode::Tab | KeyCode::Unidentified
+        )
+    {
+        name.push_str("S-");
+    }
     match input.key {
         KeyCode::Character(character) => name.push_char(shifted_character(input, character)),
         KeyCode::Backspace => name.push_str("BSpace"),
         KeyCode::Enter => name.push_str("Enter"),
-        KeyCode::Tab => name.push_str("Tab"),
+        KeyCode::Tab => name.push_str(if input.modifiers.shift() {
+            "BTab"
+        } else {
+            "Tab"
+        }),
         KeyCode::Escape => name.push_str("Escape"),
         KeyCode::Delete => name.push_str("DC"),
         KeyCode::Insert => name.push_str("IC"),
@@ -1314,9 +1326,14 @@ pub fn input_typed_text(input: &KeyInput) -> Option<&str> {
 pub fn is_key_name(value: &str) -> bool {
     let rest = value.strip_prefix("C-").unwrap_or(value);
     let rest = rest.strip_prefix("M-").unwrap_or(rest);
+    let shifted = rest.starts_with("S-");
+    let rest = rest.strip_prefix("S-").unwrap_or(rest);
+    if shifted && matches!(rest, "Tab" | "BTab") {
+        return false;
+    }
     let mut characters = rest.chars();
     if let (Some(character), None) = (characters.next(), characters.next()) {
-        return !character.is_control();
+        return !shifted && !character.is_control();
     }
     if let Some(number) = rest.strip_prefix('F') {
         return matches!(number.parse::<u8>(), Ok(1..=12));
@@ -1326,6 +1343,7 @@ pub fn is_key_name(value: &str) -> bool {
         "BSpace"
             | "Enter"
             | "Tab"
+            | "BTab"
             | "Escape"
             | "DC"
             | "IC"
@@ -1419,6 +1437,40 @@ mod tests {
                 Some(&upper.to_string()),
             );
             assert_eq!(input_key_name(&input).as_str(), upper.to_string());
+        }
+    }
+
+    #[test]
+    fn shifted_special_keys_use_the_pinned_modifier_order_and_backtab_name() {
+        for (key, base) in [
+            (KeyCode::ArrowUp, "Up"),
+            (KeyCode::ArrowDown, "Down"),
+            (KeyCode::ArrowLeft, "Left"),
+            (KeyCode::ArrowRight, "Right"),
+            (KeyCode::Home, "Home"),
+            (KeyCode::End, "End"),
+            (KeyCode::PageUp, "PPage"),
+            (KeyCode::PageDown, "NPage"),
+            (KeyCode::Insert, "IC"),
+            (KeyCode::Delete, "DC"),
+            (KeyCode::Function(1), "F1"),
+            (KeyCode::Function(12), "F12"),
+        ] {
+            for (control, alt, prefix) in [(false, false, "S-"), (true, true, "C-M-S-")] {
+                let input = press(key, Modifiers::new(true, control, alt, false), None);
+                let name = input_key_name(&input);
+                assert_eq!(name.as_str(), format!("{prefix}{base}"));
+                assert!(is_key_name(&name));
+            }
+        }
+        for (control, alt, name) in [(false, false, "BTab"), (true, true, "C-M-BTab")] {
+            let input = press(
+                KeyCode::Tab,
+                Modifiers::new(true, control, alt, false),
+                None,
+            );
+            assert_eq!(input_key_name(&input).as_str(), name);
+            assert!(is_key_name(name));
         }
     }
 

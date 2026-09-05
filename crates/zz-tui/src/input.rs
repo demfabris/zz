@@ -1716,6 +1716,41 @@ const fn modifiers(value: KeyModifiers) -> Modifiers {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn xterm_shift_sequences_reach_the_shared_key_contract() {
+        for (bytes, expected) in [
+            (b"\x1b[1;2A".as_slice(), "S-Up"),
+            (b"\x1b[1;2B".as_slice(), "S-Down"),
+            (b"\x1b[1;2C".as_slice(), "S-Right"),
+            (b"\x1b[1;2D".as_slice(), "S-Left"),
+            (b"\x1b[Z".as_slice(), "BTab"),
+            (b"\x1b[1;2H".as_slice(), "S-Home"),
+            (b"\x1b[1;2F".as_slice(), "S-End"),
+            (b"\x1b[5;2~".as_slice(), "S-PPage"),
+            (b"\x1b[6;2~".as_slice(), "S-NPage"),
+            (b"\x1b[2;2~".as_slice(), "S-IC"),
+            (b"\x1b[3;2~".as_slice(), "S-DC"),
+            (b"\x1b[1;2P".as_slice(), "S-F1"),
+            (b"\x1b[1;2Q".as_slice(), "S-F2"),
+            (b"\x1b[1;2R".as_slice(), "S-F3"),
+            (b"\x1b[1;2S".as_slice(), "S-F4"),
+            (b"\x1b[24;2~".as_slice(), "S-F12"),
+        ] {
+            let mut parser = crate::terminal_event::EventParser::default();
+            let mut events = Vec::new();
+            for byte in bytes {
+                parser.push(&[*byte], &mut events);
+            }
+            let [TerminalEvent::Key(event)] = events.as_slice() else {
+                panic!("{expected}: {events:?}");
+            };
+            assert_eq!(
+                zz_protocol::input_key_name(&key_input(*event)).as_str(),
+                expected
+            );
+        }
+    }
+
     use super::*;
     use zz_protocol::{MenuItem, PopupBorderLines, PopupState};
 

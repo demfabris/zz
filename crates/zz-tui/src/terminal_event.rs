@@ -320,6 +320,7 @@ fn parse_csi(parameters: &str, final_byte: u8) -> Option<Event> {
         b'H' => KeyCode::Home,
         b'F' => KeyCode::End,
         b'Z' => KeyCode::BackTab,
+        b'P'..=b'S' => KeyCode::F(final_byte - b'P' + 1),
         b'~' => tilde_key(first.parse().ok()?)?,
         _ => return None,
     };

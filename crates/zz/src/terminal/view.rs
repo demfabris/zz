@@ -2147,21 +2147,6 @@ impl TerminalView {
                 self.snapshot_clipboard_image(item, cx);
             }
         }
-        if modifiers.shift() && matches!(code, KeyCode::PageUp | KeyCode::PageDown) {
-            let pages = if matches!(code, KeyCode::PageUp) {
-                -1
-            } else {
-                1
-            };
-            if self.should_use_local_scroll() {
-                let rows = i64::from(self.retained.read().viewport.rows);
-                self.scroll_locally_by(i64::from(pages).saturating_mul(rows), cx);
-            } else {
-                self.send_view_action(cx, TerminalViewAction::ScrollPages(pages));
-            }
-            cx.stop_propagation();
-            return;
-        }
         let printable = matches!(code, KeyCode::Character(_));
         let raw_key = self.retained.read().viewport.kitty_keyboard
             || !printable
@@ -2678,6 +2663,53 @@ mod tests {
         assert_eq!(key_code("x"), KeyCode::Character('x'));
         assert_eq!(key_code("space"), KeyCode::Character(' '));
         assert_eq!(key_code("tab"), KeyCode::Tab);
+    }
+
+    #[test]
+    fn platform_shifted_special_keys_keep_their_daemon_names() {
+        for (key, expected) in [
+            ("left", "S-Left"),
+            ("right", "S-Right"),
+            ("up", "S-Up"),
+            ("down", "S-Down"),
+            ("tab", "BTab"),
+            ("home", "S-Home"),
+            ("end", "S-End"),
+            ("pageup", "S-PPage"),
+            ("pagedown", "S-NPage"),
+            ("insert", "S-IC"),
+            ("delete", "S-DC"),
+            ("f1", "S-F1"),
+            ("f12", "S-F12"),
+        ] {
+            let event = KeyDownEvent {
+                keystroke: Keystroke {
+                    key: key.to_owned(),
+                    key_char: None,
+                    modifiers: gpui::Modifiers {
+                        shift: true,
+                        ..Default::default()
+                    },
+                },
+                is_held: false,
+                prefer_character_input: false,
+            };
+            let message = InputMessage::Key {
+                pane: PaneId(7),
+                input: key_input(&event.keystroke, key_code(key), KeyAction::Press),
+                text_follows: false,
+            };
+            let InputMessage::Key { input, .. } = message else {
+                unreachable!()
+            };
+            assert_eq!(zz_protocol::input_key_name(&input).as_str(), expected);
+            let prefix_input =
+                crate::mux::prefix::terminal_key_input(&event.keystroke, KeyAction::Press);
+            assert_eq!(
+                zz_protocol::input_key_name(&prefix_input).as_str(),
+                expected
+            );
+        }
     }
 
     #[test]

@@ -91,9 +91,9 @@ which rows. Only intercept `TerminalViewport`/`TerminalPatch` *before* the core
 - **Client-local chrome belongs to `ChromeKeymap`** (detach, sidebar focus,
   zoom, tabs…). Resolve presses against its tables and switch on the returned
   `ChromeAction`; add new actions/table entries in
-  `crates/zz-client/src/chrome.rs`, never inline chord tests. Chrome extends
-  the wire grammar with `D-` (Cmd/Super) and `S-` (Shift) because a pane can
-  never receive those; the wire grammar itself must not grow them. User
+  `crates/zz-client/src/chrome.rs`, never inline chord tests. Chrome uses `D-` for Cmd/Super and preserves character-key `S-` chords.
+  The shared tmux key grammar carries `S-` on special keys and maps shifted Tab
+  to `BTab`; Cmd/Super remains client-local. User
   overrides ride `chrome-keybind` / `chrome-unbind` in `zz/config`.
 
 ## Testing a new client

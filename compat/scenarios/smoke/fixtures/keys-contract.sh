@@ -13,7 +13,7 @@ work="$HOME/keys-contract-$side"
 mkdir -p "$work"
 if python3 "$HOME/keys-contract.py" "$work" "$binary" "$@" >"$work/observed" 2>"$work/errors"; then
     cat "$work/observed"
-    "$binary" "$@" set-environment -g KEYS_CONTRACT clean:5
+    "$binary" "$@" set-environment -g KEYS_CONTRACT "clean:${KEYS_CONTRACT_MODE:-prefix}"
 else
     echo "keys-contract-$side failed"
     cat "$work/observed" "$work/errors"

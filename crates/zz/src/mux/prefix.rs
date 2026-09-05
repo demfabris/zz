@@ -6,46 +6,12 @@ use gpui::Keystroke;
 use zz_client::ChromeKey;
 use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers as TerminalModifiers};
 
-use crate::keymap::gpui_key_name;
-
 /// Whether a GPUI keystroke spells the given canonical tmux key.
 pub(crate) fn keystroke_is(keystroke: &Keystroke, canonical: &str) -> bool {
-    let mut want_control = false;
-    let mut want_alt = false;
-    let mut rest = canonical;
-    loop {
-        if let Some(tail) = rest.strip_prefix("C-") {
-            want_control = true;
-            rest = tail;
-        } else if let Some(tail) = rest.strip_prefix("M-") {
-            want_alt = true;
-            rest = tail;
-        } else {
-            break;
-        }
-    }
-    let modifiers = keystroke.modifiers;
-    if modifiers.control != want_control
-        || modifiers.alt != want_alt
-        || modifiers.platform
-        || modifiers.function
-    {
-        return false;
-    }
-    if rest == " " {
-        return keystroke.key == "space";
-    }
-    if let Some(gpui_name) = gpui_key_name(rest) {
-        return keystroke.key == gpui_name;
-    }
-    let mut characters = rest.chars();
-    match (characters.next(), characters.next()) {
-        (Some(character), None) if character.is_ascii_uppercase() => {
-            modifiers.shift && keystroke.key == character.to_ascii_lowercase().to_string()
-        }
-        (Some(character), None) => keystroke.key == character.to_string(),
-        _ => false,
-    }
+    !keystroke.modifiers.function
+        && !canonical.is_empty()
+        && zz_protocol::input_key_name(&terminal_key_input(keystroke, KeyAction::Press)).as_str()
+            == canonical
 }
 
 /// The canonical prefix as a GPUI keystroke, so a hint can print it in the
@@ -179,6 +145,22 @@ mod tests {
         assert!(keystroke_is(&keystroke("up", ctrl), "C-Up"));
         assert!(!keystroke_is(&keystroke("a", Modifiers::default()), "C-a"));
         assert!(!keystroke_is(&keystroke("b", ctrl), "C-a"));
+    }
+
+    #[test]
+    fn shifted_special_prefixes_use_the_same_fold_as_daemon_input() {
+        let shift = Modifiers {
+            shift: true,
+            ..Modifiers::default()
+        };
+        for (key, canonical) in [("left", "S-Left"), ("tab", "BTab"), ("f1", "S-F1")] {
+            assert!(keystroke_is(&keystroke(key, shift), canonical));
+            assert!(!keystroke_is(
+                &keystroke(key, Modifiers::default()),
+                canonical
+            ));
+        }
+        assert!(!keystroke_is(&keystroke("left", shift), "Left"));
     }
 
     #[test]

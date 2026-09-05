@@ -74,12 +74,12 @@ name, then `Any`); use them rather than reimplementing lookups.
 
 ## 8. The wire grammar cannot spell desktop chrome chords
 
-`input_key_name` returns an empty name for Command/Super chords and folds
-Shift away next to Control — correct for panes (a PTY can never receive
-Cmd-anything), wrong for chrome. Chrome chords use the extended spelling
-(`D-`, `S-`) that exists only in `zz-client`'s `ChromeKey`. Do not "fix" the
-wire fold to know these modifiers, and do not store chrome chords expecting
-the daemon to resolve them.
+`input_key_name` returns an empty name for Command/Super chords. Chrome
+keeps those chords in `zz-client`'s `ChromeKey` under `D-`; do not store them
+expecting the daemon to resolve them. Since 2026-09-05 the shared fold preserves
+shift on special keys as `S-` and names shifted Tab `BTab`, matching tmux.
+Character-key chrome chords still preserve shift separately from the shared
+character fold.
 
 ## 9. Frame-path costs are the one performance budget
 

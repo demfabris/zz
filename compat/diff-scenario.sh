@@ -113,6 +113,7 @@ TMUX_SHIM_DIR="$SCRATCH_DIR/tmux/bin"
 LAUNCHER_BIN="$SCRATCH_DIR/launcher/bin"
 LAUNCHER_RUNTIME="$SCRATCH_DIR/runtime"
 if [ "$LAUNCHER_MODE" -eq 1 ]; then
+  LAUNCHER_RUNTIME="$(mktemp -d /tmp/zzcl.XXXXXX)"
   ZZ_SOCKET="$LAUNCHER_RUNTIME/zz/default.sock"
 fi
 STAGED_CONF="$ZZ_HOME/.tmux.conf"
@@ -219,6 +220,9 @@ cleanup() {
   if [ -n "$ZZ_PID" ]; then
     kill "$ZZ_PID" >/dev/null 2>&1
     wait "$ZZ_PID" >/dev/null 2>&1
+  fi
+  if [ "$LAUNCHER_MODE" -eq 1 ]; then
+    rm -rf -- "$LAUNCHER_RUNTIME"
   fi
   rm -rf -- "$SCRATCH_DIR"
   exit "$status"

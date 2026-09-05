@@ -1,0 +1,29 @@
+# gap: formats.terminal-runtime
+set-option -g status off
+new-window -n retained "sleep 600"
+resize-window -x 80 -y 24
+fmt: alternate_saved_x=#{alternate_saved_x}
+fmt: alternate_saved_y=#{alternate_saved_y}
+fmt: bracket_paste_flag=#{bracket_paste_flag}
+fmt: cursor_blinking=#{cursor_blinking}
+fmt: cursor_flag=#{cursor_flag}
+fmt: cursor_shape=#{cursor_shape}
+fmt: cursor_very_visible=#{cursor_very_visible}
+fmt: history_all_bytes=#{history_all_bytes}
+fmt: history_bytes=#{history_bytes}
+fmt: insert_flag=#{insert_flag}
+fmt: keypad_cursor_flag=#{keypad_cursor_flag}
+fmt: keypad_flag=#{keypad_flag}
+fmt: mouse_all_flag=#{mouse_all_flag}
+fmt: mouse_any_flag=#{mouse_any_flag}
+fmt: mouse_button_flag=#{mouse_button_flag}
+fmt: mouse_sgr_flag=#{mouse_sgr_flag}
+fmt: mouse_standard_flag=#{mouse_standard_flag}
+fmt: mouse_utf8_flag=#{mouse_utf8_flag}
+fmt: origin_flag=#{origin_flag}
+fmt: scroll_region_lower=#{scroll_region_lower}
+fmt: scroll_region_upper=#{scroll_region_upper}
+fmt: sixel_support=#{sixel_support}
+fmt: synchronized_output_flag=#{synchronized_output_flag}
+fmt: wrap_flag=#{wrap_flag}
+kill-window -t w:retained

@@ -268,8 +268,28 @@ the [divergence matrix](/tmux/divergences.md#format-variables-that-remain-unback
 | Daemon session-attachment hook | `session_last_attached` |
 | Daemon window cell-pixel hook (the format client's reported cell size, falling back to the pin's `DEFAULT_XPIXEL` 16 and `DEFAULT_YPIXEL` 32, null without a window in context) | `window_cell_height`, `window_cell_width` |
 | Pin-null without the missing mouse or group context | `mouse_x`, `mouse_y`, `session_group_attached`, `session_group_many_attached`, `session_group_size`, `window_bigger` |
-| Pinned inactive/default state | `alternate_saved_x`, `alternate_saved_y`, `bracket_paste_flag`, `cursor_blinking`, `cursor_shape`, `cursor_very_visible`, `history_all_bytes`, `history_bytes`, `insert_flag`, `keypad_cursor_flag`, `keypad_flag`, `mouse_all_flag`, `mouse_any_flag`, `mouse_button_flag`, `mouse_sgr_flag`, `mouse_standard_flag`, `mouse_utf8_flag`, `origin_flag`, `pane_floating_flag`, `pane_in_mode`, `pane_unseen_changes`, `scroll_region_lower`, `scroll_region_upper`, `session_grouped`, `sixel_support`, `synchronized_output_flag` |
+| Zero placeholders (not necessarily pin defaults) | `alternate_saved_x`, `alternate_saved_y`, `bracket_paste_flag`, `cursor_blinking`, `cursor_shape`, `cursor_very_visible`, `history_all_bytes`, `history_bytes`, `insert_flag`, `keypad_cursor_flag`, `keypad_flag`, `mouse_all_flag`, `mouse_any_flag`, `mouse_button_flag`, `mouse_sgr_flag`, `mouse_standard_flag`, `mouse_utf8_flag`, `origin_flag`, `pane_floating_flag`, `pane_in_mode`, `pane_unseen_changes`, `scroll_region_lower`, `scroll_region_upper`, `session_grouped`, `sixel_support`, `synchronized_output_flag` |
 | Always unavailable (22) | `buffer_mode_format`, `client_mode_format`, `cursor_character`, `cursor_colour`, `mouse_hyperlink`, `mouse_line`, `mouse_pane`, `mouse_status_line`, `mouse_status_range`, `mouse_word`, `pane_bg`, `pane_fg`, `pane_key_mode`, `pane_mode`, `pane_search_string`, `pane_tabs`, `session_group`, `session_group_attached_list`, `session_group_list`, `tree_mode_format`, `window_offset_x`, `window_offset_y` |
+
+The accepted `formats.terminal-runtime` group retains 24 constant-backed names, not 24 claims of
+pin-default parity. `known/known-terminal-runtime` enumerates every retained name in a fresh,
+prompt-free 80×24 pane. Eighteen baseline answers match; six are registered known differences:
+
+| Format | Pinned tmux d77c9dc6 | zz placeholder |
+| --- | --- | --- |
+| `alternate_saved_x` | `4294967295` (no saved cursor) | `0` |
+| `alternate_saved_y` | `4294967295` (no saved cursor) | `0` |
+| `cursor_shape` | `default` | `0` |
+| `history_all_bytes` | `24,960,0,0,0,0` | `0` |
+| `history_bytes` | `960` | `0` |
+| `scroll_region_lower` | `23` | `0` |
+
+The four live terminal facts reflect worker state, including remaining engine differences.
+`compat/scenarios/smoke/fixtures/terminal-lifecycle.py` measures both backends at 80×24:
+ordinary alternate entry and exit agree, but CSI 3J in alternate mode clears primary history only
+on the pin. RIS leaves the pin in alternate mode and returns zz to primary mode; the following
+alternate exit restores cursor row 23 on the pin while zz stays at row 0. The fixture asserts each
+measured vector separately, and `formats.terminal-runtime` records the full sequence.
 
 `session_path` reads the selected session's retained UTF-8 working directory at expansion time.
 The differential fixture creates two sessions, preserves lexical `/tmp/..`, reads each through a

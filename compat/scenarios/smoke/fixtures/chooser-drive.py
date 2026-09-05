@@ -42,10 +42,9 @@ def main():
     while True:
         step += 1
         path = os.path.join(step_dir, "step-%d" % step)
-        if not wait_for(path):
+        line = read_step(path)
+        if line is None:
             break
-        with open(path, "r") as handle:
-            line = handle.readline().strip()
         action, _, rest = line.partition(" ")
         if action == "size":
             width, height = rest.split()
@@ -88,13 +87,18 @@ def drain(master, drawn, lock):
             drawn += chunk
 
 
-def wait_for(path):
+def read_step(path):
     deadline = time.time() + STEP_TIMEOUT
     while time.time() < deadline:
-        if os.path.exists(path):
-            return True
+        try:
+            with open(path, "r") as handle:
+                line = handle.readline()
+            if line.endswith("\n"):
+                return line.strip()
+        except FileNotFoundError:
+            pass
         time.sleep(0.02)
-    return False
+    return None
 
 
 def acknowledge(step_dir, step):

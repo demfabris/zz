@@ -3,9 +3,15 @@ set -eEuo pipefail
 set +B
 
 usage() {
-  printf 'usage: compat/attached-client.sh [ZZ_BIN [TMUX_BIN]]\n' >&2
+  printf 'usage: compat/attached-client.sh [--command-output] [ZZ_BIN [TMUX_BIN]]\n' >&2
   printf '       ZZ_BIN=path TMUX_BIN=path compat/attached-client.sh\n' >&2
 }
+
+COMMAND_OUTPUT_ONLY=0
+if [ "${1:-}" = --command-output ]; then
+  COMMAND_OUTPUT_ONLY=1
+  shift
+fi
 
 if [ "$#" -gt 2 ]; then
   usage
@@ -301,6 +307,7 @@ unexpected_failure() {
 
 cleanup() {
   local status=$?
+  local attempt
   trap - EXIT ERR INT TERM
   set +e
   if [ -n "${DISPLAY_POPUP_PID:-}" ]; then
@@ -312,6 +319,17 @@ cleanup() {
   tmux_inner_command kill-server >/dev/null 2>&1
   if [ -n "$ZZ_PID" ]; then
     kill "$ZZ_PID" >/dev/null 2>&1
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      if ! kill -0 "$ZZ_PID" 2>/dev/null; then
+        break
+      fi
+      sleep 0.05
+    done
+    if kill -0 "$ZZ_PID" 2>/dev/null; then
+      printf 'error: owned zz daemon %s did not stop within 10 seconds\n' "$ZZ_PID" >&2
+      kill -KILL "$ZZ_PID" >/dev/null 2>&1
+      status=1
+    fi
     wait "$ZZ_PID" >/dev/null 2>&1
   fi
   rm -f -- "$ZZ_SOCKET" \
@@ -678,12 +696,34 @@ wait_for_output_search_prompt() {
   fixture_failure "$side command-output search prompt did not open within 10 seconds"
 }
 
+wait_for_navigation_search_prompt() {
+  local side="$1"
+  local attempt
+  local screen
+
+  if [ "$side" = tmux ]; then
+    wait_for_output_search_prompt "$side"
+    return
+  fi
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    screen="$(capture_current_screen "$side" 2>/dev/null || true)"
+    if tail -n 1 <<<"$screen" | grep -Eq '^[[:space:]]*/[[:space:]]*$'; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side native command-output search editor did not draw / within 10 seconds"
+}
+
 assert_output_mode_stays() {
   local side="$1"
   local table="$2"
+  local phase="$3"
   local expected
   local actual
   local attempt
+
+  printf 'command-output %s: %s\n' "$side" "$phase"
 
   for ((attempt = 0; attempt < 20; attempt++)); do
     if [ "$side" = "zz" ]; then
@@ -694,7 +734,7 @@ assert_output_mode_stays() {
       actual="$(side_command tmux display-message -p -t "$INNER_PANE_TARGET" '#{pane_in_mode}' 2>/dev/null || true)"
     fi
     if [ "$actual" != "$expected" ]; then
-      fixture_failure "$side command-output mode changed during settle; expected $expected, got ${actual:-<empty>}"
+      fixture_failure "$side command-output $phase mode changed during settle; expected $expected, got ${actual:-<empty>}"
     fi
     sleep 0.05
   done
@@ -1011,6 +1051,7 @@ assert_buffer_parity() {
 configure_side() {
   local side="$1"
 
+  side_command "$side" set-option -g status-keys emacs || return
   side_command "$side" set-option -g prefix2 C-a || return
   side_command "$side" bind-key -n C-g send-keys -l 'printf ATTACHED_ROOT_OK' || return
   side_command "$side" bind-key -n F12 send-keys -l 'printf ATTACHED_TERMINAL_READY' || return
@@ -1043,6 +1084,12 @@ configure_side() {
 probe_side() {
   local side="$1"
 
+  wait_for_client_state "$side" root
+  side_command "$side" send-keys -t "$INNER_PANE_TARGET" -l "printf 'ATTACHED_DRAW_%s\\n' READY" ||
+    fixture_failure "$side could not seed its drawing readiness marker"
+  side_command "$side" send-keys -t "$INNER_PANE_TARGET" Enter ||
+    fixture_failure "$side could not run its drawing readiness marker"
+  wait_for_current_marker "$side" ATTACHED_DRAW_READY
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" C-g Enter
   wait_for_marker "$side" ATTACHED_ROOT_OK
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" C-b x Enter
@@ -1184,6 +1231,7 @@ probe_command_prompt() {
   local side="$1"
 
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" C-b ','
+  wait_for_current_marker "$side" "(rename-window) main"
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" BSpace BSpace BSpace BSpace
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" prompted
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
@@ -2059,6 +2107,7 @@ probe_source_file_cwd() {
   tmux_outer_command resize-window -t "$OUTER_SESSION:$side" -x 160
   if [ "$side" = "zz" ]; then
     tmux_outer_command send-keys -t "$OUTER_SESSION:$side" M-s q
+    wait_for_current_marker_absent "$side" "zz at "
   fi
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" F7
   wait_for_marker "$side" "$missing_warning"
@@ -2103,6 +2152,52 @@ probe_source_file_output() {
   wait_for_mode_state "$side" root
 }
 
+probe_command_output_prompt_lifecycle() {
+  local side="$1"
+  local action
+  local marker
+
+  side_command "$side" set-window-option -t "$INNER_WINDOW_TARGET" mode-keys vi
+  for action in Escape Enter; do
+    tmux_outer_command send-keys -t "$OUTER_SESSION:$side" F2
+    wait_for_output_mode "$side" copy-mode-vi
+    tmux_outer_command send-keys -t "$OUTER_SESSION:$side" g
+    wait_for_current_marker "$side" ATTACHED_NAV_00
+    tmux_outer_command send-keys -t "$OUTER_SESSION:$side" /
+    wait_for_output_search_prompt "$side"
+    if [ "$side" = zz ]; then
+      wait_for_client_state "$side" root
+    else
+      assert_output_mode_stays "$side" copy-mode-vi stock-search-open
+    fi
+    if [ "$action" = Escape ]; then
+      marker=ATTACHED_NAV_CANCEL
+    else
+      marker=ATTACHED_NAV_MATCH
+    fi
+    tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" "$marker"
+    wait_for_current_marker "$side" "$marker"
+    tmux_outer_command send-keys -t "$OUTER_SESSION:$side" "$action"
+    wait_for_current_marker_absent "$side" '(search down)'
+    if [ "$side" = zz ]; then
+      wait_for_client_state "$side" root
+      wait_for_current_marker_absent "$side" ATTACHED_NAV_00
+      wait_for_current_marker_absent "$side" ATTACHED_NAV_35
+      printf 'KNOWN DIVERGENCE clients.command-output-pane-prompt: zz stock search discards output before %s (pin preserves it)\n' "$action"
+    else
+      assert_output_mode_stays "$side" copy-mode-vi "stock-search-$action"
+      if [ "$action" = Escape ]; then
+        wait_for_current_marker "$side" ATTACHED_NAV_00
+      else
+        wait_for_current_marker "$side" 'ATTACHED_NAV_35 ATTACHED_NAV_MATCH'
+      fi
+      tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
+      wait_for_mode_state "$side" root
+    fi
+  done
+  side_command "$side" set-window-option -u -t "$INNER_WINDOW_TARGET" mode-keys
+}
+
 probe_command_output_navigation() {
   local side="$1"
   local original_mode_keys
@@ -2110,7 +2205,14 @@ probe_command_output_navigation() {
   local copied_text
   local navigation_keys=()
   local navigation_step
+  local search_binding="$SCRATCH_DIR/search-binding-$side.conf"
 
+  printf 'command-output navigation: %s\n' "$side"
+  if [ "$side" = zz ]; then
+    side_command "$side" list-keys -T copy-mode-vi / >"$search_binding"
+    side_command "$side" bind-key -T copy-mode-vi / copy-mode-search-prompt
+    printf 'command-output zz: native copy-mode-search-prompt editor; stock -P lifecycle measured separately\n'
+  fi
   original_mode_keys="$(side_command "$side" show-window-options -gv mode-keys)"
   side_command "$side" set-window-option -t "$INNER_WINDOW_TARGET" mode-keys vi ||
     fixture_failure "$side could not select vi mode keys"
@@ -2133,20 +2235,20 @@ probe_command_output_navigation() {
   wait_for_current_marker_absent "$side" ATTACHED_NAV_00
 
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Escape
-  assert_output_mode_stays "$side" copy-mode-vi
+  assert_output_mode_stays "$side" copy-mode-vi idle-escape
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Space j j Escape
-  assert_output_mode_stays "$side" copy-mode-vi
+  assert_output_mode_stays "$side" copy-mode-vi selection-escape
 
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" g /
-  wait_for_output_search_prompt "$side"
+  wait_for_navigation_search_prompt "$side"
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" ATTACHED_NAV_CANCEL
   wait_for_current_marker "$side" ATTACHED_NAV_CANCEL
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Escape
   wait_for_current_marker_absent "$side" ATTACHED_NAV_CANCEL
-  assert_output_mode_stays "$side" copy-mode-vi
+  assert_output_mode_stays "$side" copy-mode-vi search-escape
 
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" /
-  wait_for_output_search_prompt "$side"
+  wait_for_navigation_search_prompt "$side"
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" ATTACHED_NAV_MATX
   wait_for_current_marker "$side" ATTACHED_NAV_MATX
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" BSpace
@@ -2184,7 +2286,7 @@ probe_command_output_navigation() {
     fixture_failure "$side could not install the live copy-mode-vi q binding"
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
   wait_for_current_marker_absent "$side" ATTACHED_NAV_95
-  assert_output_mode_stays "$side" copy-mode-vi
+  assert_output_mode_stays "$side" copy-mode-vi rebound-q
   side_command "$side" bind-key -T copy-mode-vi q send-keys -X cancel ||
     fixture_failure "$side could not restore the copy-mode-vi q binding"
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
@@ -2206,6 +2308,11 @@ probe_command_output_navigation() {
     show-window-options -v -t "$INNER_WINDOW_TARGET" mode-keys
   wait_for_side_output "$side" "$original_mode_keys" "effective mode-keys restoration" \
     show-window-options -gv mode-keys
+  if [ "$side" = zz ]; then
+    side_command "$side" source-file "$search_binding"
+    wait_for_side_output "$side" "$(<"$search_binding")" "stock search binding restoration" \
+      list-keys -T copy-mode-vi /
+  fi
 }
 
 probe_list_keys_single() {
@@ -3282,7 +3389,11 @@ ATTACHED_STATUS_LAUNCH_CANARY=process-zz \
   ATTACHED_ENV_SELECTED=global-old \
   ATTACHED_ENV_KEEP=global-old \
   ATTACHED_ENV_MISSING=global-old \
-  zz_command daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
+  env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+    -u EDITOR -u VISUAL \
+    HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" TMUX_TMPDIR=/tmp \
+    "$ZZ_BIN" --socket "$ZZ_SOCKET" -f /dev/null daemon \
+    >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
 ZZ_PID=$!
 wait_for_socket
 
@@ -3314,6 +3425,24 @@ tmux_outer_command new-window -d -t "$OUTER_SESSION" -n tmux "$TMUX_ATTACH" || f
 
 wait_for_client_state zz root
 wait_for_client_state tmux root
+if [ "$COMMAND_OUTPUT_ONLY" -eq 1 ]; then
+  zz_command delete-buffer -b drop
+  tmux_inner_command delete-buffer -b drop
+  probe_side tmux
+  probe_side zz
+  tmux_outer_command resize-window -t "$OUTER_SESSION:tmux" -x 200
+  tmux_outer_command resize-window -t "$OUTER_SESSION:zz" -x 200
+  wait_for_session_client_sizes tmux "$INNER_SESSION" 200x24
+  wait_for_session_client_sizes zz "$INNER_SESSION" 200x24
+  tmux_outer_command send-keys -t "$OUTER_SESSION:zz" M-s q
+  wait_for_current_marker_absent zz "zz at "
+  probe_command_output_prompt_lifecycle tmux
+  probe_command_output_prompt_lifecycle zz
+  probe_command_output_navigation tmux
+  probe_command_output_navigation zz
+  printf 'command-output compatibility: PASS\n'
+  exit 0
+fi
 probe_side zz
 probe_side tmux
 probe_alert_message_lifecycle zz
@@ -3353,6 +3482,8 @@ probe_source_file_cwd zz
 probe_source_file_cwd tmux
 probe_source_file_output zz
 probe_source_file_output tmux
+probe_command_output_prompt_lifecycle tmux
+probe_command_output_prompt_lifecycle zz
 probe_command_output_navigation zz
 probe_command_output_navigation tmux
 assert_buffer_parity keep

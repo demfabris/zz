@@ -49,7 +49,7 @@ use zz_client::{ChromeAction, UI_TABLE};
 use zz_protocol::ConfigOverrideEntry;
 use zz_terminal::{TerminalColorScheme, discover_ghostty_config};
 use zz_ui::feedback::import_configuration_file_alert;
-use zz_ui::settings::appearance::picker_tile;
+use zz_ui::settings::appearance::{picker_tile, ui_font_select};
 use zz_ui::settings::{
     SettingEntry, SettingsScrollColumn, SettingsSection, SettingsSelectItem, SettingsStack,
     StackPosition, settings_control_fill, settings_list_group_header, settings_page_content,
@@ -127,6 +127,8 @@ pub(crate) struct SettingsView {
     mux: Entity<MuxClient>,
     observed: AppConfig,
     observed_browser: BrowserConfig,
+    observed_ui_font: ConfigValue<Option<String>>,
+    ui_font_family: Entity<SelectState<Vec<SettingsSelectItem>>>,
     browser_element_selector_hotkey: Entity<InputState>,
     browser_search_provider: Entity<SelectState<Vec<SettingsSelectItem>>>,
     status_alignment: Entity<SelectState<Vec<SettingsSelectItem>>>,
@@ -157,6 +159,8 @@ impl SettingsView {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
         let observed = config::resolved_config(cx);
         let observed_browser = config::browser_config(cx);
+        let observed_ui_font = config::ui_font_family(cx);
+        let ui_font_family = ui_font_select(observed_ui_font.value.as_deref(), window, cx);
         let browser_element_selector_hotkey =
             text_value_input(&observed_browser.element_selector_hotkey.value, window, cx);
         let browser_search_provider =
@@ -238,6 +242,7 @@ impl SettingsView {
             cx.observe_global::<crate::update::UpdateState>(|_, cx| cx.notify()),
             browser_hotkey_subscription(&browser_element_selector_hotkey, window, cx),
             search_provider_subscription(&browser_search_provider, window, cx),
+            ui_font_subscription(&ui_font_family, window, cx),
             config_select_subscription(&status_alignment, ConfigKey::StatusAlign, window, cx),
             config_select_subscription(&status_clock, ConfigKey::StatusClock, window, cx),
             ui_zoom_subscription(&ui_zoom, window, cx),
@@ -275,6 +280,8 @@ impl SettingsView {
             mux,
             observed,
             observed_browser,
+            observed_ui_font,
+            ui_font_family,
             browser_element_selector_hotkey,
             browser_search_provider,
             status_alignment,
@@ -521,6 +528,17 @@ impl SettingsView {
         resolved
     }
 
+    fn synchronize_ui_font(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let resolved = config::ui_font_family(cx);
+        if resolved == self.observed_ui_font {
+            return;
+        }
+        self.ui_font_family.update(cx, |select, cx| {
+            select.set_selected_value(&resolved.value.clone().unwrap_or_default(), window, cx);
+        });
+        self.observed_ui_font = resolved;
+    }
+
     fn synchronize_ui_zoom_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let percent = crate::ui_scale::percent(cx);
         if percent == self.observed_ui_zoom {
@@ -723,63 +741,13 @@ impl SettingsView {
                 unreachable!("returned above")
             }
             AppearancePageItem::ThemeMode => Self::theme_mode_setting(resolved, cx),
+            AppearancePageItem::UiFontFamily => self.ui_font_setting(cx),
             AppearancePageItem::UiZoom => self.ui_zoom_setting(cx),
             AppearancePageItem::AppIcon => Self::app_icon_setting(resolved, cx),
             AppearancePageItem::Preset => Self::preset_setting(resolved, cx),
             AppearancePageItem::ChromeColor(color) => {
                 self.chrome_color_setting(color, resolved, inherited)
             }
-            AppearancePageItem::StatusShowSession => Self::boolean_setting(
-                ConfigKey::StatusShowSession,
-                "Session name",
-                "Show the current session as a chip.",
-                resolved.status_show_session,
-                cx,
-            ),
-            AppearancePageItem::StatusBadges => Self::boolean_setting(
-                ConfigKey::StatusBadges,
-                "Window badges",
-                "Show bell, activity, and agent markers on window items.",
-                resolved.status_badges,
-                cx,
-            ),
-            AppearancePageItem::StatusAlignment => Self::select_setting(
-                ConfigKey::StatusAlign,
-                "Alignment",
-                "Align the window strip to the left or center.",
-                resolved.status_alignment.provenance,
-                &self.status_alignment,
-                cx,
-            ),
-            AppearancePageItem::StatusAgents => Self::boolean_setting(
-                ConfigKey::StatusAgents,
-                "Agents",
-                "Show the number of running agent panes.",
-                resolved.status_agents,
-                cx,
-            ),
-            AppearancePageItem::StatusHost => Self::boolean_setting(
-                ConfigKey::StatusHost,
-                "Host",
-                "Show the attached host when it is remote.",
-                resolved.status_host,
-                cx,
-            ),
-            AppearancePageItem::StatusUpdate => Self::boolean_setting(
-                ConfigKey::StatusUpdate,
-                "Update",
-                "Show an available version and install it from the bar.",
-                resolved.status_update,
-                cx,
-            ),
-            AppearancePageItem::StatusClock => Self::select_setting(
-                ConfigKey::StatusClock,
-                "Clock",
-                "Choose the clock format, or hide it.",
-                resolved.status_clock.provenance,
-                &self.status_clock,
-                cx,
-            ),
             AppearancePageItem::Animations => Self::boolean_setting(
                 ConfigKey::Animations,
                 "Animations",
@@ -992,6 +960,90 @@ impl SettingsView {
                     .flex_none()
                     .child(Select::new(select).small().bg(settings_control_fill(cx))),
             )
+    }
+
+    fn ui_font_setting(&self, cx: &Context<Self>) -> SettingEntry {
+        SettingEntry::new(
+            "UI font",
+            "Choose a font installed on this computer for the interface.",
+        )
+        .title_actions(key_annotations(
+            ConfigKey::UiFontFamily,
+            self.observed_ui_font.provenance,
+        ))
+        .control(
+            div().w(px(220.0)).flex_none().child(
+                Select::new(&self.ui_font_family)
+                    .small()
+                    .placeholder(
+                        self.observed_ui_font
+                            .value
+                            .clone()
+                            .unwrap_or_else(|| "System default".to_owned()),
+                    )
+                    .bg(settings_control_fill(cx)),
+            ),
+        )
+    }
+
+    fn status_bar_section(&self, resolved: &AppConfig, cx: &Context<Self>) -> AnyElement {
+        Self::scroll_column("settings-status-bar")
+            .child(settings_page_description(SettingsSection::StatusBar, cx))
+            .child(
+                SettingsStack::new()
+                    .child(Self::boolean_setting(
+                        ConfigKey::StatusShowSession,
+                        "Session name",
+                        "Show the current session as a chip.",
+                        resolved.status_show_session,
+                        cx,
+                    ))
+                    .child(Self::boolean_setting(
+                        ConfigKey::StatusBadges,
+                        "Window badges",
+                        "Show bell, activity, and agent markers on window items.",
+                        resolved.status_badges,
+                        cx,
+                    ))
+                    .child(Self::select_setting(
+                        ConfigKey::StatusAlign,
+                        "Alignment",
+                        "Align the window strip to the left or center.",
+                        resolved.status_alignment.provenance,
+                        &self.status_alignment,
+                        cx,
+                    ))
+                    .child(Self::boolean_setting(
+                        ConfigKey::StatusAgents,
+                        "Agents",
+                        "Show the number of running agent panes.",
+                        resolved.status_agents,
+                        cx,
+                    ))
+                    .child(Self::boolean_setting(
+                        ConfigKey::StatusHost,
+                        "Host",
+                        "Show the attached host when it is remote.",
+                        resolved.status_host,
+                        cx,
+                    ))
+                    .child(Self::boolean_setting(
+                        ConfigKey::StatusUpdate,
+                        "Update",
+                        "Show an available version and install it from the bar.",
+                        resolved.status_update,
+                        cx,
+                    ))
+                    .child(Self::select_setting(
+                        ConfigKey::StatusClock,
+                        "Clock",
+                        "Choose the clock format, or hide it.",
+                        resolved.status_clock.provenance,
+                        &self.status_clock,
+                        cx,
+                    )),
+            )
+            .into_any_element()
     }
 
     fn browser_section(
@@ -1839,10 +1891,12 @@ impl Render for SettingsView {
         let resolved = self.synchronize_numeric_inputs(window, cx);
         let browser = self.synchronize_browser_input(window, cx);
         self.synchronize_ui_zoom_input(window, cx);
+        self.synchronize_ui_font(window, cx);
         self.synchronize_terminal_editor(window, cx);
 
         let content = match self.section {
             SettingsSection::Appearance => self.appearance_section(&resolved, cx),
+            SettingsSection::StatusBar => self.status_bar_section(&resolved, cx),
             SettingsSection::Browser => self.browser_section(browser, &resolved, cx),
             SettingsSection::Editor => self.editor_section(&resolved, cx),
             SettingsSection::Panes => self.panes_section(&resolved, cx),
@@ -2111,6 +2165,26 @@ fn search_provider_subscription(
     )
 }
 
+fn ui_font_subscription(
+    select: &Entity<SelectState<Vec<SettingsSelectItem>>>,
+    window: &mut Window,
+    cx: &mut Context<SettingsView>,
+) -> Subscription {
+    cx.subscribe_in(
+        select,
+        window,
+        |_, _, event: &SelectEvent<Vec<SettingsSelectItem>>, _, cx| {
+            let SelectEvent::Confirm(Some(value)) = event else {
+                return;
+            };
+            let family = (!value.is_empty()).then_some(value.as_str());
+            if let Err(error) = config::set_ui_font_family(family) {
+                report_write_error("set", ConfigKey::UiFontFamily.as_str(), &error, cx);
+            }
+        },
+    )
+}
+
 fn config_select_subscription(
     select: &Entity<SelectState<Vec<SettingsSelectItem>>>,
     key: ConfigKey,
@@ -2299,6 +2373,7 @@ fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
         | ConfigKey::BrowserSearchProvider
         | ConfigKey::BrowserEgress
         | ConfigKey::ThemeMode
+        | ConfigKey::UiFontFamily
         | ConfigKey::AppIcon
         | ConfigKey::ChromePreset
         | ConfigKey::Chrome(_) => {
@@ -2620,36 +2695,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn status_bar_group_contains_the_bounded_controls() {
-        let items = appearance_page_items(true);
-        let status_bar = items
-            .iter()
-            .position(|item| {
-                matches!(
-                    item,
-                    AppearancePageItem::Group {
-                        title: "Status bar",
-                        ..
-                    }
-                )
-            })
-            .expect("Status bar group");
-
-        assert!(matches!(
-            &items[status_bar + 1..status_bar + 8],
-            [
-                AppearancePageItem::StatusShowSession,
-                AppearancePageItem::StatusBadges,
-                AppearancePageItem::StatusAlignment,
-                AppearancePageItem::StatusAgents,
-                AppearancePageItem::StatusHost,
-                AppearancePageItem::StatusUpdate,
-                AppearancePageItem::StatusClock,
-            ]
-        ));
-    }
-
     #[gpui::test]
     fn heavy_section_state_is_initialized_on_first_visit(cx: &mut gpui::TestAppContext) {
         use std::{cell::RefCell, rc::Rc};
@@ -2726,7 +2771,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn status_bar_selects_follow_live_config_reloads(cx: &mut gpui::TestAppContext) {
+    fn presentation_selects_follow_live_config_reloads(cx: &mut gpui::TestAppContext) {
         use std::{cell::RefCell, rc::Rc};
         use zz_client::{StatusBarAlignment, StatusBarClock};
 
@@ -2745,18 +2790,40 @@ mod tests {
             SettingsView::new(mux, window, cx)
         });
         let settings = captured.borrow().clone().expect("captured settings view");
+        let family = cx.update(|_, cx| {
+            cx.text_system()
+                .all_font_names()
+                .into_iter()
+                .find(|family| !family.starts_with('.'))
+                .expect("an available UI font")
+        });
         let mut config = AppConfig::default();
         config.status_alignment.value = StatusBarAlignment::Center;
         config.status_clock.value = StatusBarClock::Off;
 
         cx.update(|window, cx| {
             cx.set_global(config);
+            cx.set_global(config::UiFontConfig {
+                family: ConfigValue {
+                    value: Some(family.clone()),
+                    provenance: ConfigProvenance::Override,
+                },
+            });
             settings.update(cx, |settings, cx| {
                 settings.synchronize_numeric_inputs(window, cx);
+                settings.synchronize_ui_font(window, cx);
             });
         });
 
         settings.read_with(cx, |settings, cx| {
+            assert_eq!(
+                settings
+                    .ui_font_family
+                    .read(cx)
+                    .selected_value()
+                    .map(String::as_str),
+                Some(family.as_str()),
+            );
             assert_eq!(
                 settings
                     .status_alignment
@@ -2772,6 +2839,20 @@ mod tests {
                     .selected_value()
                     .map(String::as_str),
                 Some("off")
+            );
+        });
+        cx.update(|window, cx| {
+            cx.set_global(config::UiFontConfig::default());
+            settings.update(cx, |settings, cx| settings.synchronize_ui_font(window, cx));
+        });
+        settings.read_with(cx, |settings, cx| {
+            assert_eq!(
+                settings
+                    .ui_font_family
+                    .read(cx)
+                    .selected_value()
+                    .map(String::as_str),
+                Some(""),
             );
         });
     }

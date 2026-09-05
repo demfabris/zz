@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Selectable as _,
     Sizable as _, StyledExt as _,
-    button::Button,
+    button::{Button, ButtonVariants as _},
     input::{Input, InputContentType, InputState},
     menu::{PopupMenu, PopupMenuItem},
     tag::Tag,
@@ -322,7 +322,6 @@ fn browser_tab_shell(
         .items_center()
         .gap(px(2.0))
         .pl(px(10.0))
-        .pr(px(4.0))
         .min_w(px(40.0))
         .rounded(cx.theme().radius)
         .control_surface(cx)
@@ -330,7 +329,7 @@ fn browser_tab_shell(
         .hover(move |style| style.bg(hover_background))
         .child(content)
         .when(closable, |this| {
-            this.child(browser_tab_close_button(id, on_close))
+            this.child(browser_tab_close_button(id, on_close, cx))
         })
 }
 
@@ -338,7 +337,7 @@ fn browser_tab_group(id: u64) -> SharedString {
     format!("browser-tab-{id}").into()
 }
 
-fn browser_tab_close_button(id: u64, on_close: &BrowserTabAction) -> impl IntoElement {
+fn browser_tab_close_button(id: u64, on_close: &BrowserTabAction, cx: &App) -> impl IntoElement {
     let close = Rc::clone(on_close);
     div()
         .flex_none()
@@ -346,7 +345,9 @@ fn browser_tab_close_button(id: u64, on_close: &BrowserTabAction) -> impl IntoEl
         .group_hover(browser_tab_group(id), gpui::Styled::visible)
         .child(
             Button::compact_icon(("browser-tab-close", id), IconName::Xmark)
+                .text()
                 .flat()
+                .text_color(cx.theme().foreground.muted())
                 .debug_selector(move || format!("browser-tab-close-{id}"))
                 .on_click(move |_, window, cx| {
                     cx.stop_propagation();

@@ -137,7 +137,12 @@ pub fn run_native() {
             std::process::exit(2);
         })
         .unwrap_or_default();
-    gpui_platform::application()
+    let platform = gpui_platform::current_platform(false);
+    let fonts = zz_ui::settings::appearance::AvailableFonts(platform.text_system());
+    gpui::Application::with_platform(platform)
         .with_assets(zz_ui::Assets)
-        .run(move |cx| launch(cx, options, Vec::new()));
+        .run(move |cx| {
+            cx.set_global(fonts);
+            launch(cx, options, Vec::new());
+        });
 }

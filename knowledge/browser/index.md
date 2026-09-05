@@ -1,7 +1,7 @@
 <!-- okf:listing:start (managed by okf.py index — edit prose outside this fence) -->
 # Concepts
 
-* [CEF runtime & subprocess dispatch](cef-runtime.md) - CEF Alloy OSR bootstrap, single-binary subprocess dispatch, frame-rate policy, external BeginFrames, message pumping, and safe foreground command dispatch.
+* [CEF runtime & subprocess dispatch](cef-runtime.md) - CEF Alloy OSR bootstrap with deferred initialization, single-binary subprocess dispatch, frame-rate policy, external BeginFrames, message pumping, and safe foreground command dispatch.
 * [In-page element picker](element-picker.md) - A token-guarded, single-use overlay that lets the user pick a DOM element in the page and returns a bounded, sanitized source-context string plus an optional screenshot of the picked area.
 * [Browser history & omnibox autocomplete](history-autocomplete.md) - Profile-scoped browser history, recent-use ranking, learned selections, and Chrome-like URL-bar autocomplete.
 * [Input translation (GPUI → CEF)](input-translation.md) - Browser-neutral pointer/wheel/keyboard/text/IME input, ordered GPUI-to-CEF dispatch, pane shortcuts, address resolution, and history-backed omnibox interaction.

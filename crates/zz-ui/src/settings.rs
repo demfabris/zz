@@ -21,6 +21,7 @@ use gpui::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsSection {
     Appearance,
+    StatusBar,
     Browser,
     Terminal,
     Editor,
@@ -51,8 +52,9 @@ impl SettingsNavigationGroup {
 }
 
 impl SettingsSection {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Appearance,
+        Self::StatusBar,
         Self::Editor,
         Self::Panes,
         Self::Multiplexer,
@@ -67,6 +69,7 @@ impl SettingsSection {
     pub const fn title(self) -> &'static str {
         match self {
             Self::Appearance => "Interface",
+            Self::StatusBar => "Status bar",
             Self::Browser => "Browser",
             Self::Terminal => "Terminal",
             Self::Editor => "Editor",
@@ -82,6 +85,9 @@ impl SettingsSection {
     pub const fn description(self) -> &'static str {
         match self {
             Self::Appearance => "Customize the app theme, chrome colors, icon, and visual details.",
+            Self::StatusBar => {
+                "Choose what appears in the title bar when the sidebar is retracted."
+            }
             Self::Browser => "Configure browser-specific controls and shortcuts.",
             Self::Terminal => {
                 "Edit the Ghostty-compatible configuration for terminal fonts, colors, cursor, \
@@ -104,6 +110,7 @@ impl SettingsSection {
     pub const fn icon(self) -> crate::IconName {
         match self {
             Self::Appearance => crate::IconName::Palette,
+            Self::StatusBar => crate::IconName::PanelBottom,
             Self::Browser => crate::IconName::Globe,
             Self::Terminal => crate::IconName::SquareTerminal,
             Self::Editor => crate::IconName::File,
@@ -118,7 +125,9 @@ impl SettingsSection {
     #[must_use]
     pub const fn navigation_group(self) -> SettingsNavigationGroup {
         match self {
-            Self::Appearance | Self::Editor | Self::Panes => SettingsNavigationGroup::Appearance,
+            Self::Appearance | Self::StatusBar | Self::Editor | Self::Panes => {
+                SettingsNavigationGroup::Appearance
+            }
             Self::Multiplexer | Self::Browser | Self::Terminal => SettingsNavigationGroup::Tools,
             Self::Hosts | Self::Advanced | Self::About => SettingsNavigationGroup::Advanced,
         }
@@ -262,6 +271,7 @@ mod tests {
             SettingsSection::ALL.map(SettingsSection::title),
             [
                 "Interface",
+                "Status bar",
                 "Editor",
                 "Panes",
                 "Multiplexer",
@@ -280,6 +290,7 @@ mod tests {
             SettingsSection::ALL,
             [
                 SettingsSection::Appearance,
+                SettingsSection::StatusBar,
                 SettingsSection::Editor,
                 SettingsSection::Panes,
                 SettingsSection::Multiplexer,
@@ -293,6 +304,7 @@ mod tests {
         assert_eq!(
             SettingsSection::ALL.map(SettingsSection::navigation_group),
             [
+                SettingsNavigationGroup::Appearance,
                 SettingsNavigationGroup::Appearance,
                 SettingsNavigationGroup::Appearance,
                 SettingsNavigationGroup::Appearance,

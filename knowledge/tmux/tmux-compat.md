@@ -536,8 +536,9 @@ the product.
 tmux draws status rows, prompts, choosers, copy mode, pane indicators, menus, and popups with terminal
 cells. zz publishes daemon-owned state and renders it in its clients:
 
-- `status-format[]` rows render in the TUI and in a top or bottom GUI row when a config customizes
-  status. Native sidebar and titlebar presentation remain at defaults.
+- `status-format[]` rows render in the TUI. The desktop builds native status items from structured
+  state and app settings, shows them in the title bar when the sidebar is retracted, and hides
+  them when the sidebar is expanded.
 - The GPUI client uses native surfaces for prompts, choosers, menus, popups, copy mode, and pane
   indicators.
 - The raw TUI consumes command prompts, confirmations, menus, popups, choose trees, choose buffers,

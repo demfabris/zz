@@ -13,14 +13,11 @@ pub fn chrome_background(background: Hsla, blur: bool) -> Hsla {
     }
 }
 
-/// Main-window composition: a `sidebar` beside `titlebar` over `workspace`,
-/// with an optional full-width bottom strip and `overlays` on top.
 pub fn app_shell_surface(
     id: impl Into<ElementId>,
     sidebar: impl IntoElement,
     titlebar: Option<AnyElement>,
     workspace: impl IntoElement,
-    bottom: Option<AnyElement>,
     overlays: impl IntoIterator<Item = AnyElement>,
 ) -> Stateful<gpui::Div> {
     div()
@@ -59,7 +56,6 @@ pub fn app_shell_surface(
                         ),
                 ),
         )
-        .children(bottom)
         .children(overlays)
 }
 
@@ -127,12 +123,6 @@ pub fn app_connection_state(message: impl IntoElement, cx: &App) -> gpui::Div {
         .child(message)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WorkspaceStatusPlacement {
-    Bottom,
-    Titlebar,
-}
-
 #[derive(Default)]
 pub struct WorkspaceStatusSlots {
     pub session: Option<AnyElement>,
@@ -143,7 +133,6 @@ pub struct WorkspaceStatusSlots {
 }
 
 pub fn workspace_status_bar(
-    placement: WorkspaceStatusPlacement,
     centered: bool,
     gaps: bool,
     background: Hsla,
@@ -171,19 +160,15 @@ pub fn workspace_status_bar(
         .items_center()
         .gap(px(6.0))
         .px(px(6.0))
-        .when(placement == WorkspaceStatusPlacement::Titlebar, |content| {
-            content.window_control_area(WindowControlArea::Drag)
-        })
+        .window_control_area(WindowControlArea::Drag)
         .children(slots.session)
         .child(window_strip)
         .children(slots.right);
-    let leading = (placement == WorkspaceStatusPlacement::Titlebar).then(|| {
-        div()
-            .flex_none()
-            .w(leading_inset)
-            .h(TITLE_BAR_HEIGHT)
-            .window_control_area(WindowControlArea::Drag)
-    });
+    let leading = div()
+        .flex_none()
+        .w(leading_inset)
+        .h(TITLE_BAR_HEIGHT)
+        .window_control_area(WindowControlArea::Drag);
     let titlebar_controls = slots.titlebar_controls.map(|(controls, width)| {
         div()
             .flex()
@@ -204,10 +189,7 @@ pub fn workspace_status_bar(
     });
 
     div()
-        .id(match placement {
-            WorkspaceStatusPlacement::Bottom => "gui-status-bottom",
-            WorkspaceStatusPlacement::Titlebar => "gui-status-titlebar",
-        })
+        .id("gui-status-titlebar")
         .relative()
         .flex()
         .flex_none()
@@ -217,11 +199,10 @@ pub fn workspace_status_bar(
         .overflow_hidden()
         .bg(background)
         .text_color(cx.theme().foreground)
-        .when(!gaps, |bar| match placement {
-            WorkspaceStatusPlacement::Bottom => bar.border_t_1().border_color(cx.theme().border),
-            WorkspaceStatusPlacement::Titlebar => bar.border_b_1().border_color(cx.theme().border),
+        .when(!gaps, |bar| {
+            bar.border_b_1().border_color(cx.theme().border)
         })
-        .children(leading)
+        .child(leading)
         .children(titlebar_controls)
         .child(content)
         .children(window_controls)

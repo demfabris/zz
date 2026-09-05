@@ -18,7 +18,7 @@ The GUI process loads the first existing `zz/config` file from the user's platfo
 roots. `crates/zz/src/config/mod.rs` resolves the candidates when `run_app` enters the GPUI application
 closure, parses named client-local behavior/layout/diagnostic/theme/browser knobs plus
 chrome-color entries into typed
-`AppConfig` and `BrowserConfig` values, parses the one app-owned ACP key into `AgentConfig`,
+`AppConfig`, `BrowserConfig`, and `UiFontConfig` values, parses the one app-owned ACP key into `AgentConfig`,
 collects repeatable `chrome-keybind`/`chrome-unbind` entries for the client-local keymap, and collects the supported
 daemon-owned appearance and mux entries as ordered raw `(key, value)` pairs. Client-reserved
 `host-<name> = <uri>` entries ([fleet attach](/designs/fleet-attach.md)) are matched before any
@@ -79,7 +79,7 @@ candidate exists, edits continue to target the first existing file selected by n
 `chrome-unbind = <table>:<key>` removes one. The allowed tables are `ui`, `sidebar`, `browser`, and
 `terminal`; action names come from `zz_client::ChromeAction`. Keys use the chrome grammar from
 `zz-client`, including `D-` for Command/Super and `S-` for Shift. These directives may appear more
-than once, preserve file order, and stay client-side. They are separate from the 35 named scalar
+than once, preserve file order, and stay client-side. They are separate from the scalar
 knobs below and from the daemon-owned tmux tables in `zz/mux.conf`.
 
 ## Client-local keys
@@ -121,6 +121,7 @@ The client-local schema includes these scalar settings and chrome colors.
 | `browser-element-selector-hotkey` | `cmd-shift-c` on macOS; `ctrl-shift-c` elsewhere | One GPUI keystroke containing Control, Alt, Command/Super, or Function; Shift is optional | Toggle the element selector while a Browser pane owns the Browser key context |
 | `browser-search-provider` | `google` | `google`, `duckduckgo`, `brave` | Where a Browser pane's address bar sends an entry that is not an address |
 | `browser-egress` | `true` | `true` or `false` | Whether a Browser pane opened while attached to a remote ssh host routes its traffic through that host; panes already open keep the route they were created with |
+| `ui-font-family` | System default | Installed font family, or `.SystemUIFont` | Interface text across desktop windows; applies live and stays separate from terminal and editor fonts |
 | `theme-mode` | `system` | `system`, `light`, `dark` | Follow the OS appearance, or pin one mode |
 | `app-icon` | `automatic` | `automatic`, `light`, `dark` | Which render of `assets/zz.icon` the macOS Dock tile wears; `automatic` defers to the bundle's compiled icon when packaged (so tinted/clear dock styles work) and follows the OS appearance in bare builds, independently of `theme-mode` |
 | `chrome-preset` | unset | `tokyo-night`, `catppuccin`, `gruvbox`, `nord`, `breeze`, `adwaita`, `ubuntu`, `rose-pine`, `ayu`, `solarized`, `macos-classic` | Select a paired light/dark chrome family; the active variant follows the effective `theme-mode` |
@@ -152,6 +153,12 @@ status dots, avatars, scrollbar thumbs . stay circular regardless: a pill or a c
 its own right, and smoothing one turns it into a lozenge. The squircle therefore reads on rounded
 rectangles, and the larger `widget-corner-radius` is, the more visible it gets (the corner departs
 from a circular arc by roughly a fifth of the radius, so it is sub-pixel below about 4px).
+
+`ui-font-family` lives in `UiFontConfig`. Interface settings lists font families from GPUI's
+cross-platform text system. Selecting System default writes `.SystemUIFont`; Reset removes the
+current override. The 500 ms config watcher reapplies the family to `Theme.font_family` and redraws
+open windows. Quoted names preserve spaces, Unicode, quotes, and backslashes. Theme changes keep
+the chosen font; terminal, editor, and code-block fonts use their existing monospace settings.
 
 `browser-element-selector-hotkey` lives in a separate `BrowserConfig` GPUI global so `AppConfig`
 can remain `Copy`. The parser canonicalizes GPUI keystroke syntax and rejects keys without a
@@ -504,30 +511,30 @@ connected the file is picked up at the next daemon startup.
 # Settings view
 
 `crates/zz/src/config/settings.rs` renders the `WorkspaceRoute::Settings` route in the main window.
-`Cmd+,` on macOS or `Ctrl+,` elsewhere opens it. `SettingsSection::ALL` is **nine pages**, titled
-Interface, Editor, Panes, Multiplexer, Browser, Terminal, Hosts, System, About. The sidebar labels
+`Cmd+,` on macOS or `Ctrl+,` elsewhere opens it. `SettingsSection::ALL` is **ten pages**, titled
+Interface, Status bar, Editor, Panes, Multiplexer, Browser, Terminal, Hosts, System, About. The sidebar labels
 them as Appearance, Tools, and Advanced groups. There is deliberately no "General": the page that name described
 had accumulated window chrome, a global widget metric, daemon lifecycle and a debug overlay. The
 device/pairing page that sat before Terminal was deleted on 2026-08-01 along with pairing itself;
 fleet hosts live in `zz/config` and can be managed from the sidebar or **Settings › Hosts**.
 
-Each page is a column of `SettingsGroup`s (a titled run of cards) rather than a flat card list.
-The group is also where a *dependency* is expressed: `SettingCard::disabled` dims a card and lays an
-occluding sheet over it, which is how the Frame group shows that `pane-margin`,
+Pages use `SettingsStack` groups of `SettingEntry` rows. `SettingEntry::disabled` dims a row and
+blocks interaction, which is how the Frame group shows that `pane-margin`,
 `pane-corner-radius`, and `pane-border-width` are all inert while `pane-gaps` is off
 (`config` forces them to `0` there). Layout holds the `pane-gaps` switch alone. Focus holds the
 always-live inactive-opacity factor.
 
 | Page | Groups |
 | --- | --- |
-| Interface | **Theme** (`theme-mode` as three drawn window previews, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Status bar** (`status-show-session`, `status-badges`, `status-align`, `status-agents`, `status-host`, `status-update`, `status-clock`) · **Tweaks** (`animations`, `widget-corner-radius`, `shadow-strength`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
+| Interface | **Theme** (`theme-mode` as three drawn window previews, `UI font`, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Tweaks** (`animations`, `widget-corner-radius`, `shadow-strength`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
+| Status bar | Title-bar items shown when the sidebar is retracted (`status-show-session`, `status-badges`, `status-align`, `status-agents`, `status-host`, `status-update`, `status-clock`) |
 | Browser | **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
 | Panes | **Layout** (`pane-gaps`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |
 | System | **Tray** (`tray`, only where the profile has one) · **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`, each row present only with its cargo feature). `auto-restart-stale-daemon` is a file key with no Settings row |
 | Multiplexer | Full-file editor for `zz/mux.conf`, with Save and donor-specific **Import tmux…** |
-| Terminal | **Import Ghostty…** · **Font** · **Colors** · **Cursor** · **Selection & highlights** · **Padding**, covering every settable daemon appearance key except file-only `theme` and `background-opacity` |
+| Terminal | Full-file Ghostty-compatible configuration editor, with Save and **Import Ghostty…** |
 | About | Centered mark (the Dock render at 88pt), name, tagline and version badge · **Updates** (`check-for-updates`, plus a Latest-release row that reads the update state: Check now, or Update / What's new once a newer release is known; desktop only) · **Build** (`CARGO_PKG_VERSION`, OS · arch, the short `ZZ_GPUI_SOURCE` revision, with a copy button on Version that puts all three on one line) · **Project** (repository, releases, new issue, license) |
 
 Every structured row shows its effective client-local or daemon-resolved appearance provenance and

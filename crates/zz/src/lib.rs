@@ -2274,9 +2274,12 @@ fn run_app(
         target: "zz::diagnostics::appearance",
         "gpui_source={GPUI_SOURCE}"
     );
-    gpui_platform::application()
+    let platform = gpui_platform::current_platform(false);
+    let fonts = zz_ui::settings::appearance::AvailableFonts(platform.text_system());
+    gpui::Application::with_platform(platform)
         .with_assets(Assets)
         .run(move |cx: &mut App| {
+            cx.set_global(fonts);
             cx.set_global(profile);
             diagnostics::start_main_thread_watchdog(cx);
             #[cfg(target_os = "macos")]

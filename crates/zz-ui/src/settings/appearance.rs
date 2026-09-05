@@ -1,6 +1,8 @@
-use super::StackPosition;
+use super::{SettingsSelectItem, StackPosition};
+use crate::select::{SelectItem as _, SelectState};
 use crate::{ActiveTheme as _, Colorize as _, ThemeColor, ThemeMode};
-use gpui::{AnyElement, App, IntoElement, SharedString, Window, div, prelude::*, px};
+use gpui::{AnyElement, App, Entity, IntoElement, SharedString, Window, div, prelude::*, px};
+use std::sync::Arc;
 
 const THEME_PREVIEW_WIDTH: f32 = 84.0;
 const THEME_PREVIEW_HEIGHT: f32 = 56.0;
@@ -35,17 +37,11 @@ pub enum AppearancePageItem<C> {
         description: Option<&'static str>,
     },
     ThemeMode,
+    UiFontFamily,
     UiZoom,
     AppIcon,
     Preset,
     ChromeColor(C),
-    StatusShowSession,
-    StatusBadges,
-    StatusAlignment,
-    StatusAgents,
-    StatusHost,
-    StatusUpdate,
-    StatusClock,
     Animations,
     WidgetCornerRadius,
     ShadowStrength,
@@ -74,6 +70,7 @@ pub fn appearance_page_items<C>(
             description: None,
         },
         AppearancePageItem::ThemeMode,
+        AppearancePageItem::UiFontFamily,
         AppearancePageItem::UiZoom,
     ];
     if macos {
@@ -90,19 +87,6 @@ pub fn appearance_page_items<C>(
         AppearancePageItem::Preset,
     ]);
     items.extend(colors.into_iter().map(AppearancePageItem::ChromeColor));
-    items.extend([
-        AppearancePageItem::Group {
-            title: "Status bar",
-            description: None,
-        },
-        AppearancePageItem::StatusShowSession,
-        AppearancePageItem::StatusBadges,
-        AppearancePageItem::StatusAlignment,
-        AppearancePageItem::StatusAgents,
-        AppearancePageItem::StatusHost,
-        AppearancePageItem::StatusUpdate,
-        AppearancePageItem::StatusClock,
-    ]);
     items.extend([
         AppearancePageItem::Group {
             title: "Tweaks",
@@ -149,6 +133,34 @@ pub fn appearance_page<C: Copy + 'static>(
             page_row(row, !item.is_entry() || position.ends_run())
         },
     )
+}
+
+pub struct AvailableFonts(pub Arc<dyn gpui::PlatformTextSystem>);
+
+impl gpui::Global for AvailableFonts {}
+
+pub fn ui_font_select(
+    selected: Option<&str>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<SelectState<Vec<SettingsSelectItem>>> {
+    let mut families = cx.try_global::<AvailableFonts>().map_or_else(
+        || cx.text_system().all_font_names(),
+        |fonts| fonts.0.all_font_names(),
+    );
+    families.retain(|family| !family.starts_with('.') && !family.trim().is_empty());
+    families.sort_by_cached_key(|family| family.to_lowercase());
+    families.dedup();
+    let items: Vec<_> = std::iter::once(SettingsSelectItem::new("System default", ""))
+        .chain(
+            families
+                .into_iter()
+                .map(|family| SettingsSelectItem::new(family.clone(), family)),
+        )
+        .collect();
+    let selected = selected.unwrap_or_default();
+    let index = items.iter().position(|item| item.value() == selected);
+    cx.new(|cx| SelectState::new(items, index.map(crate::IndexPath::new), window, cx))
 }
 
 pub fn picker_tile(

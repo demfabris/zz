@@ -10,7 +10,7 @@ timestamp: 2026-07-30T21:21:06Z
 # Overview
 
 zz has two distinct navigation surfaces. `focus-sidebar` opens the persistent workspace tree. In
-titlebar mode the tree leaves the layout and the native status bar moves to the top; focusing the
+titlebar mode the tree leaves the layout and the native status bar appears in the title bar; focusing the
 sidebar raises the same tree as a slideover. The default `C-b s` and `C-b w` bindings call this
 zz-native command.
 
@@ -91,8 +91,8 @@ Window rows expose one overflow menu with Split right, Split bottom, and Delete;
 use the same Tabler Xmark as the rest of the application.
 
 The settings and sidebar-toggle controls share the leading titlebar cluster. The toggle changes
-between the full-height tree with a bottom status bar and the full-width workspace with a top status
-bar. It opens no action menu.
+between the full-height tree without a status bar and the full-width workspace with a status bar
+in the title bar. It opens no action menu.
 
 Pane labels are live metadata rather than manual window names: terminal OSC titles flow from the
 daemon-owned viewport into `PaneSnapshot.title`, while browser `TitleChanged` events use tmux's

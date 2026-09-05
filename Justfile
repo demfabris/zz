@@ -84,6 +84,10 @@ profile-cpu platform target="gui" duration="20s":
 profile-cpu-summary run:
     @python3 scripts/summarize-macos-cpu.py "{{ run }}"
 
+profile-memory platform duration="60s":
+    @if [[ "{{ platform }}" != "mac" ]]; then echo "Memory capture currently supports macOS only" >&2; exit 2; fi
+    @scripts/profile-macos.sh memory all "{{ duration }}"
+
 # Profile scheduling, waits, wakeups, and IPC in a fresh isolated macOS run.
 profile-system platform duration="20s":
     @if [[ "{{ platform }}" != "mac" ]]; then echo "System Trace capture currently supports macOS only" >&2; exit 2; fi
@@ -177,12 +181,10 @@ release target *flags:
     @scripts/release.sh "{{ target }}" {{ flags }}
 
 # Launch a fresh debug instance; append --verbose for continuous diagnostics.
-# Extra args after `--` pass through to the Cargo build.
 run platform *args:
     @ZZ_ZIG_VERSION="{{ zig_version }}" scripts/run.sh {{ platform }} {{ args }}
 
 # Rebuild and relaunch the development app whenever workspace sources change.
-# Extra args after `--` pass through to the Cargo build.
 watch platform *args:
     @scripts/run-watch.sh {{ platform }} {{ args }}
 

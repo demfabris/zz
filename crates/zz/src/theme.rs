@@ -564,6 +564,9 @@ fn apply_zz_overrides(cx: &mut App) {
         .as_deref()
         .map(crate::terminal::view::terminal_font)
         .map(|font| font.family);
+    let ui_font_family = config::ui_font_family(cx)
+        .value
+        .map_or_else(|| gpui::Font::default().family, SharedString::from);
     let widget_corner_radius = config::widget_corner_radius(cx);
     let shadow_strength = config::shadow_strength(cx);
     let chrome_preset = config::chrome_preset(cx);
@@ -571,6 +574,7 @@ fn apply_zz_overrides(cx: &mut App) {
     let theme = Theme::global_mut(cx);
 
     theme.colors = resolved_chrome_colors(chrome_preset, theme.mode, chrome);
+    theme.font_family = ui_font_family;
     if let Some(font_family) = terminal_mono_font_family {
         theme.mono_font_family = font_family;
     }

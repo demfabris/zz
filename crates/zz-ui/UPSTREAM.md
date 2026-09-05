@@ -47,7 +47,7 @@ so the fork never moved a call site.
 | `kbd` | trimmed | one muted pill: upstream's `appearance(false)` plain-text mode and its outline/primary treatments are dropped, since every hint reads as a caption beside its label. Added `lowercase()` for hints that read as prose (`t`, `b`, `a`) rather than as a keycap legend. |
 | `switch` | trimmed | dropped inline label/`Side`/custom color; kept the animated thumb |
 | `menu` | close-to-source | item text `text_sm` → **`text_xs`** (the change that started the fork); owns its actions (`zz_menu`), key context (`ZzPopupMenu`) and `init()`; upstream's native `AppMenuBar` not carried over |
-| `icon` | trimmed | `IconName` is a **hand-written** enum instead of upstream's build-time proc-macro codegen; SVGs live in `assets/icons` and are embedded by our own `Assets`, replacing `gpui-component-assets` |
+| `icon` | trimmed | `IconName` is a **hand-written** enum instead of upstream's build-time proc-macro codegen; SVGs live in `assets/icons` and are embedded by our own `Assets`, replacing `gpui-component-assets`; `Globe` uses Tabler’s round `world` artwork |
 | `tooltip` | trimmed | hangs off gpui's `.tooltip()` rather than upstream's `Root`-owned overlay; dropped `ComponentTooltip` after nothing adopted it |
 | `popover` | trimmed | owns its `Cancel` action and `ZzPopover` context |
 | `list` | trimmed | `ListItem` only; upstream's virtualized delegate `List` is unused |
@@ -83,6 +83,11 @@ stopped following the terminal palette. The same coupling ran the other way thro
 focused text field. Both are why `input`, `text`, `overlay` and `foundation`
 landed in a single commit.
 
+The shared Interface settings page includes a font picker using the existing virtualized Select.
+Native entrypoints register `AvailableFonts` with their platform text system so the list excludes
+GPUI's hardcoded fallback names. The browser showcase uses GPUI's font list. The picker includes
+System default and filters internal dot-prefixed font aliases.
+
 ## Conventions
 
 - **Close-to-source ports** keep upstream's structure so a future re-sync is a
@@ -98,6 +103,8 @@ landed in a single commit.
   `StyledExt::control_surface`: a half-pixel foreground edge and the shared soft shadow.
   Input and select focus changes only the border color, preserving their layout. Clear buttons,
   steppers, browser tab close actions, and tree-row actions stay flat inside the outer control.
+  Tree actions end at the row highlight edge; browser tab close actions have no extra right padding.
+  Both use the Text button variant for foreground-only hover feedback.
 
 Re-syncing a module against a newer upstream revision means updating the
 revision above, re-applying that module's delta, and re-running the workspace

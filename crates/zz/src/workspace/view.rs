@@ -2732,7 +2732,11 @@ impl Render for AppView {
             diagnostics::elapsed_us(started),
         );
 
-        let pane_margin = config::pane_margin(cx);
+        let pane_margin = if active_window.is_none() && route == WorkspaceRoute::App {
+            px(0.)
+        } else {
+            config::pane_margin(cx)
+        };
         let canvas_top = if chrome_above_panes {
             px(0.)
         } else {

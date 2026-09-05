@@ -46,13 +46,16 @@ desktop view owns those concerns:
 | Update | Available version with a dot; clicking starts the existing installer |
 | Clock | Minute-resolution app clock in 24-hour, 12-hour, time-and-date, or off mode |
 
+The sidebar and status bar are mutually exclusive desktop views: an expanded sidebar hides the
+status bar; retracting it shows the status bar in the title bar. There is no bottom placement.
+
 Chrome comes from the active zz-ui theme. While the bar and clock are visible, the minute-aligned
 app-shell task requests one redraw per minute, never from paint and never once per second.
 
 # Settings
 
-The settings are app-side presentation preferences in `zz/config`. The Interface page under the
-Appearance navigation group exposes them in its **Status bar** group.
+The settings are app-side presentation preferences in `zz/config`. The **Status bar** page under the
+Appearance navigation group exposes them.
 
 | Key | Default | Effect |
 | --- | --- | --- |
@@ -87,7 +90,7 @@ The FFI and mobile-client phase remains separate. There is no faithful-tmux togg
 - `crates/zz-client/src/status_bar.rs`: pure status-bar model and typed settings.
 - `crates/zz/src/status_bar.rs`: GPUI layout, overflow, actions, update item, and clock formatting.
 - `crates/zz/src/config/mod.rs`: app-side values, defaults, parsing, and live projection.
-- `crates/zz/src/config/settings.rs`: Interface-page controls.
+- `crates/zz/src/config/settings.rs`: Status bar page controls.
 - `crates/zz/src/app_shell.rs`: minute-aligned redraw task.
 - `crates/zz-tui/src/main.rs`: terminal client that retains the composed tmux status row.
 

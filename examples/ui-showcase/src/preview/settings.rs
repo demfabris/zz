@@ -13,11 +13,12 @@ use zz_ui::{
     button::Button,
     color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState},
     input::{InputEvent, InputState, NumberInput},
-    select::{Select, SelectState},
+    select::{Select, SelectEvent, SelectState},
     settings::{
         SettingEntry, SettingsSection, SettingsSelectItem,
         appearance::{
             AppearancePageItem, appearance_page, appearance_page_items, picker_tile, theme_preview,
+            ui_font_select,
         },
         settings_control_fill, settings_provenance_badge, settings_reset_button,
     },
@@ -66,6 +67,7 @@ const COLORS: [(&str, &str); 6] = [
 pub(super) struct SettingsFixture {
     numbers: BTreeMap<&'static str, Entity<InputState>>,
     colors: Vec<Entity<ColorPickerState>>,
+    ui_font: Entity<SelectState<Vec<SettingsSelectItem>>>,
     alignment: Entity<SelectState<Vec<SettingsSelectItem>>>,
     clock: Entity<SelectState<Vec<SettingsSelectItem>>>,
     toggles: BTreeMap<&'static str, bool>,
@@ -78,6 +80,23 @@ impl SettingsFixture {
     pub fn new(window: &mut Window, cx: &mut Context<Preview>) -> Self {
         let mut subscriptions = Vec::new();
         let options = cx.global::<super::PreviewOptions>().clone();
+        let ui_font = ui_font_select(Some(&options.ui_font), window, cx);
+        subscriptions.push(cx.subscribe(
+            &ui_font,
+            |this, _, event: &SelectEvent<Vec<SettingsSelectItem>>, cx| {
+                let SelectEvent::Confirm(Some(family)) = event else {
+                    return;
+                };
+                this.options.ui_font.clone_from(family);
+                Theme::global_mut(cx).font_family = if family.is_empty() {
+                    gpui::Font::default().family
+                } else {
+                    family.clone().into()
+                };
+                this.remember(cx);
+                cx.refresh_windows();
+            },
+        ));
         let numbers = [
             ("zoom", options.zoom * 100.0, 50.0, 300.0, 5.0),
             ("radius", options.radius, 0.0, 24.0, 1.0),
@@ -159,6 +178,7 @@ impl SettingsFixture {
             })
             .collect();
         Self {
+            ui_font,
             numbers,
             colors,
             alignment: select(
@@ -252,8 +272,77 @@ impl Preview {
             )
     }
 
+    fn status_bar_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+        zz_ui::settings::settings_scroll_column("settings-status-bar")
+            .child(zz_ui::settings::settings_page_description(
+                SettingsSection::StatusBar,
+                cx,
+            ))
+            .child(
+                zz_ui::settings::SettingsStack::new()
+                    .child(self.toggle(
+                        "session",
+                        "Session name",
+                        "Show the current session as a chip.",
+                        cx,
+                    ))
+                    .child(self.toggle(
+                        "badges",
+                        "Window badges",
+                        "Show bell, activity, and agent markers on window items.",
+                        cx,
+                    ))
+                    .child({
+                        SettingEntry::new(
+                            "Alignment",
+                            "Align the window strip to the left or center.",
+                        )
+                        .title_actions(Self::annotations("alignment"))
+                        .control(
+                            div().w(px(120.0)).flex_none().child(
+                                Select::new(&self.settings_state.alignment)
+                                    .small()
+                                    .bg(settings_control_fill(cx)),
+                            ),
+                        )
+                    })
+                    .child(self.toggle(
+                        "agents",
+                        "Agents",
+                        "Show the number of running agent panes.",
+                        cx,
+                    ))
+                    .child(self.toggle(
+                        "host",
+                        "Host",
+                        "Show the attached host when it is remote.",
+                        cx,
+                    ))
+                    .child(self.toggle(
+                        "update",
+                        "Update",
+                        "Show an available version and install it from the bar.",
+                        cx,
+                    ))
+                    .child({
+                        SettingEntry::new("Clock", "Choose the clock format, or hide it.")
+                            .title_actions(Self::annotations("clock"))
+                            .control(
+                                div().w(px(120.0)).flex_none().child(
+                                    Select::new(&self.settings_state.clock)
+                                        .small()
+                                        .bg(settings_control_fill(cx)),
+                                ),
+                            )
+                    }),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
-        let content = if self.settings == SettingsSection::Panes {
+        let content = if self.settings == SettingsSection::StatusBar {
+            self.status_bar_settings(cx)
+        } else if self.settings == SettingsSection::Panes {
             zz_ui::settings::panes_page(
 self.toggle("gaps", "Pane gaps", "Separate panes with card-like spacing and chrome.", cx),
 self.number("opacity", "Inactive pane opacity", "Visible strength of inactive pane content and chrome (0–1). Set to 1 to disable dimming.", cx),
@@ -334,6 +423,18 @@ self.number("border", "Pane border width", "Border width for gapped panes, in lo
                         ),
                     )
             }
+            AppearancePageItem::UiFontFamily => SettingEntry::new(
+                "UI font",
+                "Choose a font installed on this computer for the interface.",
+            )
+            .control(
+                div().w(px(220.0)).flex_none().child(
+                    Select::new(&self.settings_state.ui_font)
+                        .small()
+                        .placeholder(self.options.ui_font.clone())
+                        .bg(settings_control_fill(cx)),
+                ),
+            ),
             AppearancePageItem::UiZoom => self.number(
                 "zoom",
                 "UI zoom",
@@ -390,58 +491,6 @@ self.number("border", "Pane border width", "Border width for gapped panes, in lo
                     .title_actions(Self::annotations(COLORS[i].0))
                     .control(
                         ColorPicker::new(&self.settings_state.colors[i], color).label(COLORS[i].0),
-                    )
-            }
-            AppearancePageItem::StatusShowSession => self.toggle(
-                "session",
-                "Session name",
-                "Show the current session as a chip.",
-                cx,
-            ),
-            AppearancePageItem::StatusBadges => self.toggle(
-                "badges",
-                "Window badges",
-                "Show bell, activity, and agent markers on window items.",
-                cx,
-            ),
-            AppearancePageItem::StatusAlignment => {
-                SettingEntry::new("Alignment", "Align the window strip to the left or center.")
-                    .title_actions(Self::annotations("alignment"))
-                    .control(
-                        div().w(px(120.0)).flex_none().child(
-                            Select::new(&self.settings_state.alignment)
-                                .small()
-                                .bg(settings_control_fill(cx)),
-                        ),
-                    )
-            }
-            AppearancePageItem::StatusAgents => self.toggle(
-                "agents",
-                "Agents",
-                "Show the number of running agent panes.",
-                cx,
-            ),
-            AppearancePageItem::StatusHost => self.toggle(
-                "host",
-                "Host",
-                "Show the attached host when it is remote.",
-                cx,
-            ),
-            AppearancePageItem::StatusUpdate => self.toggle(
-                "update",
-                "Update",
-                "Show an available version and install it from the bar.",
-                cx,
-            ),
-            AppearancePageItem::StatusClock => {
-                SettingEntry::new("Clock", "Choose the clock format, or hide it.")
-                    .title_actions(Self::annotations("clock"))
-                    .control(
-                        div().w(px(120.0)).flex_none().child(
-                            Select::new(&self.settings_state.clock)
-                                .small()
-                                .bg(settings_control_fill(cx)),
-                        ),
                     )
             }
             AppearancePageItem::Animations => self.toggle(

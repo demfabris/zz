@@ -65,7 +65,9 @@ page backgrounds, simulated window blur, and the font/renderer differences that 
    separators between entries. Reserve border width before hover or focus; change only its color
    between states. Use `Button::flat()` for actions embedded in another control, including tree-row
    close buttons, browser tab close buttons, input clear buttons, number steppers, and settings
-   reset buttons. These keep their wash and keyboard focus indicator without another raised edge.
+   reset buttons. These retain the keyboard focus indicator without another raised edge. Tree-row
+   actions and browser tab close buttons also use `Button::text()` so hover only brightens their
+   foreground, without a button fill. Other embedded actions keep their wash.
    Gapped panes use the same soft shadow and foreground edge, retaining their configured border
    width and a stronger active-pane outline. The opaque pane paints over its shadow so content
    stays clear; gutter fills paint first so they cannot cover the shadow. Flush panes have no
@@ -94,6 +96,15 @@ through it; Settings . config writes, saves, imports, the About page's copy butt
 instead of `window.push_notification`, which is why none of those paths carry a `&mut Window` they
 would otherwise need. Views already inside the workspace window keep calling
 `window.push_notification`: it reaches the same stack.
+
+# UI font
+
+Interface settings offers a UI font picker over GPUI’s system font families on macOS, Linux, and
+Windows. `ui-font-family` in `zz/config` sets `Theme.font_family`; System default uses GPUI’s
+`.SystemUIFont` alias. Config reload and OS appearance changes reapply the choice to open windows.
+The `UiFontConfig` global holds this string separately so `AppConfig` remains `Copy`.
+Native entrypoints register `AvailableFonts` from their GPUI platform text system. The picker queries
+that catalog directly to avoid offering GPUI fallback names that are not installed.
 
 # UI zoom and scalable metrics
 
@@ -135,6 +146,7 @@ detach action, not to color anything). `apply_zz_overrides` layers these values 
 - the active light or dark variant of `chrome-preset`, when selected;
 - the six optional `chrome-*` palette roots from `zz/config`, written over the preset so every
   elevation, hover, and focus ring derived from them at paint time follows the user's roots;
+- `font_family` from `ui-font-family`, with the system UI font as the default;
 - `mono_font_family` from the terminal's resolved primary family, so Agent Markdown and code blocks
   match the terminal typeface;
 - `theme.radius` from `widget-corner-radius`, so one radius reaches every widget and survives a

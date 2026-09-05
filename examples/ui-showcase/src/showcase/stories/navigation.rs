@@ -4,11 +4,11 @@ use gpui::{
     AnyElement, App, Context, ParentElement as _, SharedString, Styled as _, div, prelude::*, px,
 };
 use zz_ui::navigation::{
-    WORKSPACE_STATUS_CONTENT_HEIGHT, WORKSPACE_TREE_ACTION_INSET, WORKSPACE_TREE_NODE_ICON_SIZE,
-    WorkspaceStatusWindowState, workspace_chrome_controls, workspace_layout_button,
-    workspace_settings_button, workspace_status_item, workspace_status_window,
-    workspace_tree_action_button, workspace_tree_action_row, workspace_tree_disclosure,
-    workspace_tree_marker, workspace_tree_row,
+    WORKSPACE_STATUS_CONTENT_HEIGHT, WORKSPACE_TREE_NODE_ICON_SIZE, WorkspaceStatusWindowState,
+    workspace_chrome_controls, workspace_layout_button, workspace_settings_button,
+    workspace_status_item, workspace_status_window, workspace_tree_action_button,
+    workspace_tree_action_row, workspace_tree_disclosure, workspace_tree_marker,
+    workspace_tree_row,
 };
 use zz_ui::{
     ActiveTheme as _, Icon, IconName, Sizable as _,
@@ -574,7 +574,6 @@ fn row_actions(row: &Row, group: &SharedString, cx: &App) -> AnyElement {
         .flex_none()
         .items_center()
         .justify_center()
-        .pr(px(WORKSPACE_TREE_ACTION_INSET))
         .when(row.kind == RowKind::Host, |this| {
             this.invisible()
                 .group_hover(group.clone(), gpui::Styled::visible)

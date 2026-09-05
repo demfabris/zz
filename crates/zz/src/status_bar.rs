@@ -32,11 +32,9 @@ use crate::{
 
 const MAX_VISIBLE_WINDOWS: usize = 5;
 
-pub(crate) use zz_ui::shell::WorkspaceStatusPlacement as GuiStatusPlacement;
 use zz_ui::shell::{WorkspaceStatusSlots, workspace_status_bar};
 
 pub(crate) fn render_gui_status_bar(
-    placement: GuiStatusPlacement,
     mux: &Entity<MuxClient>,
     sidebar: &Entity<WorkspaceSidebar>,
     titlebar_controls: Option<(AnyElement, Pixels)>,
@@ -87,7 +85,6 @@ pub(crate) fn render_gui_status_bar(
         .map(|name| render_session(name, sidebar, cx));
     let right = render_right_items(&model, cx);
     workspace_status_bar(
-        placement,
         model.alignment == StatusBarAlignment::Center,
         crate::config::pane_gaps(cx),
         background,

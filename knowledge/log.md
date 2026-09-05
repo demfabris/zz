@@ -1,5 +1,10 @@
 # Update Log
 
+## 2026-09-05
+* **Update**: Added macOS physical-footprint and RSS sampling for isolated or running desktop processes, documented capture limits, and corrected the CEF runtime page to describe deferred initialization.
+* **Update**: Added a live UI font picker to Interface settings, using native font catalogs on macOS, Linux, and Windows and persisting the choice in ui-font-family.
+* **Update**: Moved desktop status controls into Settings > Status bar, removed the bottom status bar, aligned row actions to their right edge, and replaced the desk globe with the round world icon.
+
 ## 2026-09-02
 * **Update**: Added a native iOS preview release path that compiles the shared Icon Composer document and uploads uniquely numbered builds as TestFlight Internal Only.
 * **Update**: Refined the native iPad toolbar layout and Panorama entrance to prevent clipping and navigation-bar animation.

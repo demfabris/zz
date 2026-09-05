@@ -15,7 +15,6 @@ use zz_protocol::{Axis, CommandInvocation, MuxSnapshot, PaneId, SessionId, Windo
 use zz_ui::menu::DropdownMenu as _;
 use zz_ui::navigation::{
     WORKSPACE_SIDEBAR_DEFAULT_WIDTH as SIDEBAR_DEFAULT_WIDTH,
-    WORKSPACE_TREE_ACTION_INSET as TREE_ACTION_INSET,
     WORKSPACE_TREE_CONTENT_INSET as TREE_CONTENT_INSET,
     WORKSPACE_TREE_INDENT_WIDTH as TREE_INDENT_WIDTH,
     WORKSPACE_TREE_MARKER_SLOT_WIDTH as TREE_MARKER_SLOT_WIDTH,
@@ -1515,7 +1514,6 @@ fn render_node_actions(
         .flex_none()
         .items_center()
         .justify_center()
-        .pr(px(TREE_ACTION_INSET))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(|_, _, cx| cx.stop_propagation())
         .children(actions)

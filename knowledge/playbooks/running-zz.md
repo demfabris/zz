@@ -4,7 +4,7 @@ title: Building and running zz
 description: How to build and run the zz GPUI client and its daemon, what the first build downloads, and how to exercise the browser pane with the loopback fixture.
 resource: crates/zz/src/lib.rs
 tags: [running, cargo, cef-download, daemon, browser-fixture, pacman, profiling, instruments]
-timestamp: 2026-08-19T00:00:00Z
+timestamp: 2026-09-05T00:00:00Z
 ---
 
 # Overview
@@ -241,6 +241,34 @@ call stacks so subsystem entry points are visible without manually exporting the
 Instruments tables into a temporary directory, filters them to the recorded GUI PID, and reports
 command buffers, presents, GPU execution, channel time, and CPU-to-GPU latency using only Python's
 standard library.
+
+Measure memory without Instruments or verbose logging:
+
+```sh
+just profile-memory mac 60s
+ZZ_PROFILE_APP=/Applications/zz.app just profile-memory mac 60s
+python3 scripts/sample-macos-memory.py --pid GUI_PID --daemon-pid DAEMON_PID \
+    --duration 60s --output target/profiles/live-memory
+```
+
+The memory recipe uses the same isolated daemon lifecycle as the other captures.
+It accepts an installed bundle without dSYMs. The standalone sampler attaches to
+existing processes and leaves them running; omit `--daemon-pid` to measure only
+the GUI and its descendants. Both write `memory.csv` and `memory-summary.txt`,
+with 250 ms samples and separate GUI, daemon, and descendant totals.
+
+`proc_pid_rusage` supplies physical footprint and resident size (RSS) separately.
+Use footprint to investigate changes in the app's memory charge, including
+graphics resources that RSS can miss. Compare high and low samples with
+`vmmap -summary PID` to identify changing categories. `vmmap` can pause the
+target, so keep those snapshots separate from clean timing measurements.
+See [Apple's memory profiling explanation](https://developer.apple.com/videos/play/wwdc2022/10106/).
+
+These recipes measure after daemon readiness and warmup, including when warmup
+is zero. Startup profiling needs an Instruments launch recording using the
+complete bundle executable, a private socket, and cleanup of its daemon.
+The first `zz::diagnostics::app_render` log marks render construction, not the
+first frame presented to the display.
 
 `profile-terminal-diagnostics` is deliberately separate from clean CPU/Metal captures. It enables
 only the existing `zz::diagnostics::terminal_render` trace target and records cache hits, misses,

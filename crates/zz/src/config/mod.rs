@@ -158,6 +158,7 @@ pub enum ConfigKey {
     BrowserSearchProvider,
     BrowserEgress,
     ThemeMode,
+    UiFontFamily,
     AppIcon,
     ChromePreset,
     Chrome(ChromeColor),
@@ -200,6 +201,7 @@ impl ConfigKey {
             Self::BrowserSearchProvider => "browser-search-provider",
             Self::BrowserEgress => "browser-egress",
             Self::ThemeMode => "theme-mode",
+            Self::UiFontFamily => "ui-font-family",
             Self::AppIcon => "app-icon",
             Self::ChromePreset => "chrome-preset",
             Self::Chrome(color) => color.as_str(),
@@ -242,6 +244,7 @@ impl ConfigKey {
             "browser-search-provider" => Some(Self::BrowserSearchProvider),
             "browser-egress" => Some(Self::BrowserEgress),
             "theme-mode" => Some(Self::ThemeMode),
+            "ui-font-family" => Some(Self::UiFontFamily),
             "app-icon" => Some(Self::AppIcon),
             "chrome-preset" => Some(Self::ChromePreset),
             _ => ChromeColor::from_str(key).map(Self::Chrome),
@@ -288,6 +291,7 @@ impl ConfigKey {
             | Self::BrowserSearchProvider
             | Self::BrowserEgress
             | Self::ThemeMode
+            | Self::UiFontFamily
             | Self::AppIcon
             | Self::ChromePreset
             | Self::Chrome(_) => None,
@@ -335,6 +339,21 @@ impl Default for BrowserConfig {
 }
 
 impl Global for BrowserConfig {}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct UiFontConfig {
+    pub(crate) family: ConfigValue<Option<String>>,
+}
+
+impl Default for UiFontConfig {
+    fn default() -> Self {
+        Self {
+            family: ConfigValue::from_default(None),
+        }
+    }
+}
+
+impl Global for UiFontConfig {}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AppConfig {
@@ -461,6 +480,7 @@ impl AppConfig {
             | ConfigKey::StatusAlign
             | ConfigKey::StatusClock
             | ConfigKey::ThemeMode
+            | ConfigKey::UiFontFamily
             | ConfigKey::AppIcon
             | ConfigKey::ChromePreset
             | ConfigKey::Chrome(_) => None,
@@ -519,6 +539,7 @@ struct ConfigDiagnostic {
 struct ParsedConfig {
     config: AppConfig,
     browser: BrowserConfig,
+    ui_font: UiFontConfig,
     agent: AgentConfig,
     hosts: Vec<HostEntry>,
     rejected_hosts: Vec<RejectedHost>,
@@ -594,6 +615,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
         log::debug!(target: "zz::config", "configuration not found; using built-in defaults");
         cx.set_global(AppConfig::default());
         cx.set_global(BrowserConfig::default());
+        cx.set_global(UiFontConfig::default());
         apply_animations(cx);
         apply_window_background_appearance(cx);
         apply_window_decorations(cx);
@@ -668,6 +690,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
     );
     cx.set_global(parsed.config);
     cx.set_global(parsed.browser);
+    cx.set_global(parsed.ui_font);
     apply_animations(cx);
     apply_window_background_appearance(cx);
     apply_window_decorations(cx);
@@ -963,6 +986,13 @@ pub(crate) fn status_bar_settings(cx: &App) -> StatusBarSettings {
         show_update: config.status_update.value,
         clock: config.status_clock.value,
     }
+}
+
+pub(crate) fn ui_font_family(cx: &App) -> ConfigValue<Option<String>> {
+    cx.try_global::<UiFontConfig>()
+        .cloned()
+        .unwrap_or_default()
+        .family
 }
 
 pub(crate) fn browser_config(cx: &App) -> BrowserConfig {
@@ -1429,6 +1459,25 @@ fn parse_config(source: &str) -> ParsedConfig {
             continue;
         }
 
+        if key == ConfigKey::UiFontFamily {
+            let target = &mut parsed.ui_font.family;
+            target.provenance = ConfigProvenance::Override;
+            match parse_config_string(value).and_then(|family| {
+                validate_ui_font_family(&family).map_err(str::to_owned)?;
+                Ok(family)
+            }) {
+                Ok(family) => {
+                    target.value =
+                        (family != gpui::Font::default().family.as_ref()).then_some(family);
+                }
+                Err(message) => parsed.diagnostics.push(ConfigDiagnostic {
+                    line: line_number,
+                    message: format!("invalid `{}`: {message}", key.as_str()),
+                }),
+            }
+            continue;
+        }
+
         if key == ConfigKey::BrowserElementSelectorHotkey {
             let target = &mut parsed.browser.element_selector_hotkey;
             target.provenance = ConfigProvenance::Override;
@@ -1537,6 +1586,7 @@ fn parse_config(source: &str) -> ParsedConfig {
             | ConfigKey::StatusUpdate
             | ConfigKey::StatusClock
             | ConfigKey::ThemeMode
+            | ConfigKey::UiFontFamily
             | ConfigKey::AppIcon
             | ConfigKey::ChromePreset
             | ConfigKey::Chrome(_) => {
@@ -2131,6 +2181,31 @@ fn serialize_rgba(color: AppearanceColor) -> String {
 
 fn quote_appearance_value(value: &str) -> String {
     format!("\"{value}\"")
+}
+
+fn validate_ui_font_family(family: &str) -> Result<(), &'static str> {
+    if family.trim().is_empty() || family.chars().any(char::is_control) {
+        return Err("font family must be nonempty text without control characters");
+    }
+    Ok(())
+}
+
+pub(crate) fn set_ui_font_family(family: Option<&str>) -> io::Result<()> {
+    let path = config_path_for_write()?;
+    write_ui_font_family_at(&path, family).map(drop)
+}
+
+fn write_ui_font_family_at(path: &Path, family: Option<&str>) -> io::Result<bool> {
+    let system = gpui::Font::default().family;
+    let family = family.unwrap_or(system.as_ref());
+    validate_ui_font_family(family)
+        .map_err(|message| io::Error::new(ErrorKind::InvalidInput, message))?;
+    let escaped = family.replace('\\', "\\\\").replace('"', "\\\"");
+    write_config_edit_at(
+        path,
+        ConfigKey::UiFontFamily.as_str(),
+        Some(&format!("\"{escaped}\"")),
+    )
 }
 
 pub fn set_config_key(key: ConfigKey, value: &str) -> io::Result<()> {
@@ -3830,6 +3905,94 @@ mod tests {
     }
 
     #[test]
+    fn ui_font_family_round_trips_names_and_preserves_other_settings() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(CONFIG_FILE_NAME);
+        let source = "# keep header\nfont-family = Terminal Font\nui-font-family = Earlier\nui-font-family = Initial # keep comment\n";
+        fs::write(&path, source).expect("write configuration");
+
+        for family in [
+            "Segoe UI",
+            "Noto Sans CJK JP",
+            "日本語",
+            r#"A "Quoted" #Font\Family"#,
+        ] {
+            assert!(write_ui_font_family_at(&path, Some(family)).expect("write UI font"));
+            let written = fs::read_to_string(&path).expect("read UI font");
+            assert!(written.starts_with(
+                "# keep header\nfont-family = Terminal Font\nui-font-family = Earlier\n"
+            ));
+            assert!(written.ends_with(" # keep comment\n"));
+            let parsed = parse_config(&written);
+            assert!(parsed.diagnostics.is_empty(), "{written}");
+            assert_eq!(parsed.ui_font.family.value.as_deref(), Some(family));
+            assert_eq!(parsed.ui_font.family.provenance, ConfigProvenance::Override);
+            assert_eq!(
+                parsed.daemon_entries,
+                [("font-family".to_owned(), "Terminal Font".to_owned())]
+            );
+        }
+
+        let before = fs::read_to_string(&path).expect("read before invalid writes");
+        for family in ["", "  ", "Bad\nFont", "Bad\rFont", "Bad\0Font"] {
+            assert!(write_ui_font_family_at(&path, Some(family)).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), before);
+        }
+        let invalid = parse_config("ui-font-family = Valid\nui-font-family = \"\"\n");
+        assert_eq!(invalid.ui_font.family.value.as_deref(), Some("Valid"));
+        assert_eq!(invalid.diagnostics.len(), 1);
+
+        write_ui_font_family_at(&path, None).expect("select system default over earlier values");
+        assert_eq!(load_config(&path).unwrap().ui_font.family.value, None);
+        assert!(!write_ui_font_family_at(&path, None).expect("unchanged default"));
+    }
+
+    #[gpui::test]
+    fn ui_font_family_reloads_with_the_theme_and_resets(cx: &mut gpui::TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(CONFIG_FILE_NAME);
+        cx.update(zz_ui::init);
+        let mono = cx.update(|cx| zz_ui::Theme::global(cx).mono_font_family.clone());
+
+        for family in [Some("Noto Sans"), Some("Arial"), None] {
+            write_ui_font_family_at(&path, family).expect("write UI font");
+            cx.update(|cx| {
+                install_config(Some(&path), Some(load_config(&path)), cx);
+                crate::theme::refresh_current_theme(cx);
+                let expected =
+                    family.map_or_else(|| gpui::Font::default().family, gpui::SharedString::from);
+                assert_eq!(zz_ui::Theme::global(cx).font_family, expected);
+                assert_eq!(zz_ui::Theme::global(cx).mono_font_family, mono);
+                assert_eq!(ui_font_family(cx).value.as_deref(), family);
+                crate::theme::sync_system_appearance(None, cx);
+                assert_eq!(zz_ui::Theme::global(cx).font_family, expected);
+            });
+        }
+
+        write_ui_font_family_at(&path, Some("Arial")).expect("write another override");
+        write_config_edit_at(&path, ConfigKey::UiFontFamily.as_str(), None)
+            .expect("reset override");
+        cx.update(|cx| {
+            install_config(Some(&path), Some(load_config(&path)), cx);
+            crate::theme::refresh_current_theme(cx);
+            assert_eq!(ui_font_family(cx).provenance, ConfigProvenance::Default);
+            assert_eq!(
+                zz_ui::Theme::global(cx).font_family,
+                gpui::Font::default().family
+            );
+            let parsed = parse_config("ui-font-family = Arial\n");
+            install_config(Some(&path), Some(Ok(parsed)), cx);
+            install_config(None, None, cx);
+            crate::theme::refresh_current_theme(cx);
+            assert_eq!(ui_font_family(cx), UiFontConfig::default().family);
+            assert_eq!(
+                zz_ui::Theme::global(cx).font_family,
+                gpui::Font::default().family
+            );
+        });
+    }
+
+    #[test]
     fn shadow_strength_defaults_to_full_and_validates_finite_factors() {
         let default = parse_config("").config.shadow_strength;
         assert_f32_eq(default.value, 1.0);
@@ -4453,7 +4616,7 @@ mod tests {
     }
 
     #[test]
-    fn config_key_surface_is_thirty_five_named_keys_plus_six_chrome_colors() {
+    fn named_config_keys_and_chrome_colors_round_trip() {
         let named = [
             "use-system-titlebar",
             "window-corner-radius",
@@ -4479,6 +4642,7 @@ mod tests {
             "pane-margin",
             "pane-border-width",
             "widget-corner-radius",
+            "shadow-strength",
             "editor-font-size",
             "editor-line-numbers",
             "editor-relative-line-numbers",
@@ -4488,13 +4652,13 @@ mod tests {
             "browser-search-provider",
             "browser-egress",
             "theme-mode",
+            "ui-font-family",
             "app-icon",
             "chrome-preset",
         ];
-        assert_eq!(named.len(), 35);
         assert_eq!(ChromeColor::ALL.len(), 6);
         for key in named {
-            assert!(ConfigKey::from_str(key).is_some(), "{key}");
+            assert_eq!(ConfigKey::from_str(key).map(ConfigKey::as_str), Some(key));
         }
         for color in ChromeColor::ALL {
             assert!(

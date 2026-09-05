@@ -33,10 +33,7 @@ use zz_ui::{
     pane::{PaneChrome, PaneSplitAxis, pane_border_color, pane_split_surface, pane_surface},
     scroll::ScrollableElement as _,
     settings::{SettingsSection, settings_navigation_button, settings_navigation_group_label},
-    shell::{
-        WorkspaceStatusPlacement, WorkspaceStatusSlots, app_shell_surface, app_workspace_surface,
-        workspace_status_bar,
-    },
+    shell::{WorkspaceStatusSlots, app_shell_surface, app_workspace_surface, workspace_status_bar},
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -213,10 +210,10 @@ impl Preview {
                     .auto_grow(2, 8)
             }),
             timeline: cx.new(|_| AgentTimelineStore::default()),
-            settings: if options.settings_section == "panes" {
-                SettingsSection::Panes
-            } else {
-                SettingsSection::Appearance
+            settings: match options.settings_section.as_str() {
+                "panes" => SettingsSection::Panes,
+                "status-bar" => SettingsSection::StatusBar,
+                _ => SettingsSection::Appearance,
             },
             rows,
             scroll,
@@ -403,24 +400,22 @@ impl Preview {
             2 => &[IconName::LayoutColumns, IconName::Xmark],
             _ => &[IconName::Xmark],
         };
-        let actions =
-            h_flex()
-                .h_full()
-                .flex_none()
-                .pr(px(4.0))
-                .children(actions.iter().enumerate().map(|(i, icon)| {
-                    workspace_tree_action_button(
-                        format!("preview-action-{index}-{i}"),
-                        icon.clone(),
-                        if i == 0 && depth < 3 {
-                            "New pane"
-                        } else {
-                            "Close"
-                        },
-                        false,
-                        cx,
-                    )
-                }));
+        let actions = h_flex()
+            .h_full()
+            .flex_none()
+            .children(actions.iter().enumerate().map(|(i, icon)| {
+                workspace_tree_action_button(
+                    format!("preview-action-{index}-{i}"),
+                    icon.clone(),
+                    if i == 0 && depth < 3 {
+                        "New pane"
+                    } else {
+                        "Close"
+                    },
+                    false,
+                    cx,
+                )
+            }));
         workspace_tree_row(
             format!("preview-node-{index}"),
             depth,
@@ -484,14 +479,16 @@ impl Preview {
                 settings_navigation_button(section, section == self.settings, cx)
                     .disabled(!matches!(
                         section,
-                        SettingsSection::Appearance | SettingsSection::Panes
+                        SettingsSection::Appearance
+                            | SettingsSection::StatusBar
+                            | SettingsSection::Panes
                     ))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.settings = section;
-                        this.options.settings_section = if section == SettingsSection::Panes {
-                            "panes"
-                        } else {
-                            "appearance"
+                        this.options.settings_section = match section {
+                            SettingsSection::Panes => "panes",
+                            SettingsSection::StatusBar => "status-bar",
+                            _ => "appearance",
                         }
                         .into();
                         this.remember(cx);
@@ -511,7 +508,7 @@ impl Preview {
             .into_any_element()
     }
 
-    fn status(&self, top: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    fn status(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let windows = ["workspace", "notes"]
             .into_iter()
             .enumerate()
@@ -547,18 +544,11 @@ impl Preview {
         })
         .text_color(cx.theme().foreground)
         .into_any_element();
-        let controls = top.then(|| {
-            (
-                Self::controls(cx),
-                workspace_chrome_controls_width(true, window),
-            )
-        });
+        let controls = Some((
+            Self::controls(cx),
+            workspace_chrome_controls_width(true, window),
+        ));
         workspace_status_bar(
-            if top {
-                WorkspaceStatusPlacement::Titlebar
-            } else {
-                WorkspaceStatusPlacement::Bottom
-            },
             false,
             self.options.gaps,
             self.chrome_background(cx),
@@ -943,8 +933,7 @@ impl Render for Preview {
         } else {
             div().into_any_element()
         };
-        let titlebar = (!settings && !self.options.sidebar).then(|| self.status(true, window, cx));
-        let bottom = (!settings && self.options.sidebar).then(|| self.status(false, window, cx));
+        let titlebar = (!settings && !self.options.sidebar).then(|| self.status(window, cx));
         let content = if settings {
             self.settings_page(cx)
         } else {
@@ -959,7 +948,7 @@ impl Render for Preview {
                     .map(IntoElement::into_any_element),
             )
             .collect::<Vec<_>>();
-        app_shell_surface("app-shell", sidebar, titlebar, content, bottom, overlays)
+        app_shell_surface("app-shell", sidebar, titlebar, content, overlays)
             .text_color(cx.theme().foreground)
     }
 }

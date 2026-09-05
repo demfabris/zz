@@ -1,10 +1,10 @@
 ---
 type: Subsystem
 title: CEF runtime & subprocess dispatch
-description: CEF Alloy OSR bootstrap, single-binary subprocess dispatch, frame-rate policy, external BeginFrames, message pumping, and safe foreground command dispatch.
+description: CEF Alloy OSR bootstrap with deferred initialization, single-binary subprocess dispatch, frame-rate policy, external BeginFrames, message pumping, and safe foreground command dispatch.
 resource: crates/zz-browser/src/cef_runtime.rs
 tags: [browser, cef, runtime, subprocess, begin-frame, frame-pacing]
-timestamp: 2026-08-12T00:00:00Z
+timestamp: 2026-09-05T00:00:00Z
 ---
 
 # Overview
@@ -30,8 +30,9 @@ plays by calling CEF `execute_process` early:
 
 - `execute_process` returns `>= 0` → this is a **subprocess**; return
   `BrowserBootstrap::SubprocessExit(code)` and never start GPUI.
-- returns exactly `-1` → this is the **main browser process**; resolve the
-  profile, initialize CEF, and return `BrowserBootstrap::Runtime(BrowserRuntime)`.
+- returns exactly `-1` → this is the **main browser process**; prepare the
+  profile directories and return a `BrowserBootstrap::Runtime(BrowserRuntime)`
+  in `RuntimePhase::Uninitialized`.
 - any other negative value → `BrowserError::ExecuteProcess`.
 
 `run_subprocess()` is the dedicated helper entry point (used by the macOS helper
@@ -39,9 +40,31 @@ app, which initializes a `cef::sandbox::Sandbox` and loads the framework via
 `LibraryLoader`). On Windows, `bootstrap_windows(instance, sandbox_info)` routes
 through CEF's sandbox bootstrap executable and the exported `RunWinMain` entry.
 
+# Deferred initialization
+
+On macOS, `bootstrap_args_with_paths` loads the CEF framework before starting
+GPUI. It prepares the runtime and subprocess dispatch without calling
+`cef::initialize`. `BrowserController::new` leaves its message pump stopped
+while the runtime is `Uninitialized`.
+
+When a browser or browser-data operation calls
+`BrowserController::ensure_runtime_started`, the controller schedules
+`start_runtime` on the foreground executor. That task takes the runtime out of
+the controller, calls `BrowserRuntime::start` outside GPUI app borrows, then
+returns it to the controller. `start` calls `cef::initialize` on the main
+thread. The controller then replays deferred callbacks and starts pumping.
+Terminal-only startup therefore still loads the framework, while Chromium
+initialization waits for a browser operation.
+
+The lifecycle log target `zz_browser::diagnostics::lifecycle` records separate
+`cold runtime prepared` and `runtime initialized` durations in microseconds.
+See `crates/zz-browser/src/cef_runtime.rs` `bootstrap_args_with_paths` and
+`BrowserRuntime::start`, and `crates/zz/src/browser/controller.rs`
+`BrowserController::new`, `ensure_runtime_started`, and `start_runtime`.
+
 # Initialization settings
 
-`bootstrap_args` builds the global CEF `Settings`:
+`BrowserRuntime::start` builds the global CEF `Settings`:
 
 | Setting | Value | Purpose |
 | --- | --- | --- |

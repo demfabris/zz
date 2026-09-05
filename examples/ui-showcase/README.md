@@ -18,8 +18,8 @@ generated faces are cached there. This runs once, or when the system fonts or
 preparation script change, and adds no work to normal Rust edits.
 
 Choose Workspace, Browser, Agent, Settings, or Components. The workspace combines
-a sidebar, split terminal/browser/agent panes, and status bar. Settings currently
-provides Interface and Panes fixtures; the other settings sections are disabled.
+split terminal/browser/agent panes with either a sidebar or a title-bar status bar. Settings
+provides Interface, Status bar, and Panes fixtures; the other settings sections are disabled.
 Components opens the existing catalog, including editor, chooser, menu, dialog,
 notification, and agent timeline states.
 
@@ -129,7 +129,7 @@ check for pixel-sensitive changes:
 - Native window decorations, the exact compositor blur filter, CEF page pixels,
   and terminal frames are outside this preview. macOS's native control area is
   reserved in the layout.
-- Settings fixtures cover Interface and Panes, with local values rather than the
+- Settings fixtures cover Interface, Status bar, and Panes, with local values rather than the
   complete native configuration model. Runtime-specific controls and unimplemented
   actions are specimens; they do not perform desktop operations.
 

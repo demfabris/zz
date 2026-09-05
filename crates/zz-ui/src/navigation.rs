@@ -3,7 +3,7 @@ pub mod tree;
 use crate::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, MACOS_TRAFFIC_LIGHT_INSET,
     MACOS_TRAFFIC_LIGHT_SPAN, StyledExt as _, TITLE_BAR_HEIGHT, UiZoom,
-    button::{Button, COMPACT_ICON_BUTTON_SIZE},
+    button::{Button, ButtonVariants as _, COMPACT_ICON_BUTTON_SIZE},
     rems_from_px,
     tooltip::Tooltip,
 };
@@ -15,9 +15,6 @@ use gpui::{
 pub const WORKSPACE_TREE_ROW_HEIGHT: f32 = 32.0;
 pub const WORKSPACE_TREE_INDENT_WIDTH: f32 = 20.0;
 pub const WORKSPACE_TREE_CONTENT_INSET: f32 = 8.0;
-/// Extra right inset the tree-row action strip adds inside the row's content
-/// inset. Anything else against that edge pads by the two combined.
-pub const WORKSPACE_TREE_ACTION_INSET: f32 = 4.0;
 pub const WORKSPACE_TREE_MARKER_SLOT_WIDTH: f32 = 18.0;
 /// Icon size for a tree row's node marker. Matches `Size::Small` in `icon/mod.rs`.
 pub const WORKSPACE_TREE_NODE_ICON_SIZE: f32 = 14.0;
@@ -367,6 +364,7 @@ pub fn workspace_tree_row(
         })
         .child(actions);
     workspace_tree_row_frame(id, depth)
+        .pr(fill_inset)
         .group(row_group)
         .child(fill)
         .text_color(if connected {
@@ -411,6 +409,7 @@ pub fn workspace_tree_action_button(
     cx: &App,
 ) -> Button {
     Button::compact_icon(id, icon)
+        .text()
         .flat()
         .when(!disabled, |button| {
             button.text_color(cx.theme().foreground.muted())

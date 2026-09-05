@@ -184,13 +184,11 @@ steps.
 # Application configuration (`config/mod.rs`)
 
 On GUI startup, the app loads the first bounded [`zz/config`](/configuration/app-config.md) file from
-the platform's user configuration roots into GPUI globals. `ConfigKey` enumerates thirty-four
-client-local knobs: sixteen switches (including `auto-restart-stale-daemon` and
-`check-for-updates`), six lengths, one pane
-opacity factor, four enumerated selectors, the browser element-selector hotkey, and six `chrome-*`
-palette overrides.
+the platform's user configuration roots into GPUI globals. `ConfigKey` identifies client-local
+switches, geometry, theme choices, font family, browser controls, and `chrome-*` palette overrides.
 `AppConfig` stays `Copy`;
-the string-valued browser shortcut is published through a separate `BrowserConfig` global. One
+the string-valued browser shortcut is published through `BrowserConfig`, and the interface font
+through `UiFontConfig`. One
 app-owned Agent key remains . an optional absolute `agent-working-directory` . because the three
 adapter keys (`agent-command`, `agent-claude-code-command`, `agent-auto-approve`) became mux options
 when the ACP runtime moved into the daemon; the parser recognizes them and partitions them into the
@@ -199,18 +197,19 @@ daemon-owned appearance and mux surface. Local knobs carry `Default`/`Override` 
 complete daemon-owned entry vector crosses the wire on connect and every poll change, including an
 empty vector that restores donor/default values.
 
-The settings view is a Root-managed zz-ui dialog opened with `Cmd+,` on macOS or `Ctrl+,`
-elsewhere. `SettingsSection::ALL` is nine pages, titled Interface, Editor, Panes, Multiplexer,
+The settings view is a route in the main window opened with `Cmd+,` on macOS or `Ctrl+,`
+elsewhere. `SettingsSection::ALL` is ten pages, titled Interface, Status bar, Editor, Panes, Multiplexer,
 Browser, Terminal, Hosts, System, About:
 
 | Section | Contents |
 |---------|----------|
-| Interface | Theme (`theme-mode`, transient UI zoom, and macOS app-icon pickers), Chroma Colors (presets and `chrome-*` colors), Tweaks (`animations`, `widget-corner-radius`, window blur, and Linux `use-system-titlebar`) |
+| Interface | Theme (`theme-mode`, system UI font picker, transient UI zoom, and macOS app-icon pickers), Chroma Colors (presets and `chrome-*` colors), Tweaks (`animations`, `widget-corner-radius`, window blur, and Linux `use-system-titlebar`) |
+| Status bar | Session chip, window badges and alignment, Agent count, remote host, update, and clock; visible in the title bar when the sidebar is retracted |
 | Editor | Editor-pane typography and display controls, when compiled in |
 | Panes | Layout (`pane-gaps`), Focus (`pane-inactive-opacity`), Frame (`pane-margin`, `pane-corner-radius`, `pane-border-width`); gapped panes carry subtle inset surface rings |
 | Multiplexer | Full-file `zz/mux.conf` editor without line numbers, 12px text, Save, and tmux import |
 | Browser | Browser-local shortcuts, beginning with the element-selector hotkey |
-| Terminal | Structured terminal appearance controls with effective values, provenance, palette swatches, and Reset |
+| Terminal | Full-file Ghostty-compatible configuration editor with Save and Import Ghostty |
 | Hosts | Configured `host-<name>` machines, live connection state, Remove, and an inline Add host form |
 | System | Daemon (`quit-daemon-on-exit`), Diagnostics (`show-fps`), Experimental pane gates |
 | About | Version, build identity, and project links |
@@ -628,7 +627,8 @@ imports reload the page.
   buttons, and a window folds split-right, split-bottom, and delete into one overflow menu. Row labels
   ellipsis-truncate (`min_w_0` + `overflow_hidden` + `text_ellipsis`) inside a **reserved action
   gutter**: the trailing action strip is `flex_none` and merely `invisible()` until hover, so it
-  always occupies its `WORKSPACE_TREE_ACTION_INSET` width and rows never reflow when actions appear.
+  keeps its width and rows never reflow when actions appear. Actions end at the row highlight edge
+  without an extra right inset.
   Both selection signals are the same fill at two strengths, applied in that order: the **keyboard
   cursor** takes a washed `background.raised(2)`, the **mux-active** row the solid one with
   medium weight. A row that is both reads active. The
@@ -645,19 +645,14 @@ imports reload the page.
   settings and the sidebar toggle keep Small 14px icons with a 0.5px optical drop inside 24px
   controls, the same `Button::compact_icon` geometry used by sidebar row actions and the Agent and
   browser panes. The toggle changes chrome mode and opens no menu.
-  `status_bar.rs` renders the daemon-expanded [tmux status line](/tmux/status-line.md) once around
-  the whole app shell: full-width at the bottom in sidebar mode, or full-width at the top in
-  titlebar mode. It strips tmux styles and Powerline separators from `status-left`/`status-right`,
-  promotes known semantic glyphs to native icons, and renders the remaining values as borderless
-  UI-font chunks rather than drawing `status-format[]` terminal cells. Window controls use snapshot
-  index/name/focus/zoom/bell state, select by stable id, expose rename/close context actions, keep
-  the active window in the five-control viewport, and put the whole list in an overflow menu. Only
-  the active window gets a theme-derived filled surface; tmux colors, attributes, and formatted
-  window labels have zero GUI authority. Settings and the sidebar toggle remain paired in the top chrome in
-  either mode; in titlebar mode that cluster and the platform window controls compete with the
-  rail. The bottom bar contains only tmux status and disappears with `status off`.
-  `MuxClient::status_revision`, snapshot
-  generation, and attachment drive repaint. A
+  `status_bar.rs` renders native session, window, Agent, host, update, and clock items from
+  `zz_client::StatusBarModel` and app settings. The bar appears only in the title bar when the
+  sidebar is retracted; an expanded sidebar has no status bar. Window controls select by stable
+  id, expose rename/close context actions, keep the active window in the five-control viewport,
+  and put the whole list in an overflow menu. The desktop ignores tmux status strings, styling,
+  visibility, and placement settings. Settings and the sidebar toggle share the top chrome in both
+  modes. Snapshot generation, attachment, app settings, update state, and the visible clock's
+  minute timer drive repaint. A
   `FocusSidebar` control event expands a collapsed sidebar, selects/reveals the active pane, and transfers
   focus; arrows plus `hjkl` and `g/G` navigate the visibly selected row, while Enter or `q`/Escape
   returns focus to the active pane. Plain `r` opens the existing native rename prompt for a selected

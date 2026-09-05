@@ -3,13 +3,14 @@ set -euo pipefail
 
 usage() {
     printf '%s\n' \
-        "usage: scripts/profile-macos.sh <cpu|system|metal|diagnostics> [target] [duration]" \
+        "usage: scripts/profile-macos.sh <cpu|system|metal|diagnostics|memory> [target] [duration]" \
         "" \
         "targets:" \
         "  cpu:    gui (default), daemon, or all" \
         "  system: all" \
         "  metal:  gui" \
         "  diagnostics: gui" \
+        "  memory: all" \
         "" \
         "duration uses xctrace syntax (for example 500ms, 20s, or 2m)." \
         "Set ZZ_PROFILE_WARMUP_SECONDS to change the default 5-second warmup."
@@ -49,6 +50,10 @@ case "$PROFILE_MODE" in
         [[ "$PROFILE_TARGET" == "gui" ]] ||
             fail "diagnostic captures require the gui target"
         ;;
+    memory)
+        [[ "$PROFILE_TARGET" == "all" ]] ||
+            fail "memory captures require the all target"
+        ;;
     *)
         usage >&2
         exit 2
@@ -61,8 +66,12 @@ esac
     fail "ZZ_PROFILE_WARMUP_SECONDS must be a non-negative number"
 [[ "$(uname -s)" == "Darwin" ]] || fail "macOS is required"
 
-command -v xcrun >/dev/null || fail "xcrun is required"
-command -v dwarfdump >/dev/null || fail "dwarfdump is required"
+if [[ "$PROFILE_MODE" == "memory" ]]; then
+    command -v python3 >/dev/null || fail "python3 is required"
+else
+    command -v xcrun >/dev/null || fail "xcrun is required"
+    command -v dwarfdump >/dev/null || fail "dwarfdump is required"
+fi
 command -v pgrep >/dev/null || fail "pgrep is required"
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -76,8 +85,10 @@ SYMBOLS_DIR="$(dirname "$PROFILE_APP")/symbols"
     fail "profiling bundle is missing; run 'just profile-build mac' first"
 [[ -x "$HELPER_BINARY" ]] ||
     fail "profiling helper is missing; run 'just profile-build mac' first"
-[[ -d "$SYMBOLS_DIR/zz.dSYM" && -d "$SYMBOLS_DIR/zz_helper.dSYM" ]] ||
-    fail "matching profiling dSYMs are missing; run 'just profile-build mac' first"
+if [[ "$PROFILE_MODE" != "memory" ]]; then
+    [[ -d "$SYMBOLS_DIR/zz.dSYM" && -d "$SYMBOLS_DIR/zz_helper.dSYM" ]] ||
+        fail "matching profiling dSYMs are missing; run 'just profile-build mac' first"
+fi
 
 PROFILE_EXISTING_PIDS=()
 while IFS= read -r candidate_pid; do
@@ -101,8 +112,7 @@ mkdir -p "$PROFILE_OUTPUT_ROOT"
 PROFILE_TIMESTAMP=$(date -u '+%Y%m%dT%H%M%SZ')
 PROFILE_RUN_DIR=$(mktemp -d "$PROFILE_OUTPUT_ROOT/$PROFILE_TIMESTAMP-$PROFILE_MODE-$PROFILE_TARGET.XXXXXX")
 
-PROFILE_TEMP_ROOT=${TMPDIR:-/tmp}
-PROFILE_TEMP_ROOT=${PROFILE_TEMP_ROOT%/}
+PROFILE_TEMP_ROOT=/tmp
 PROFILE_RUNTIME_DIR=$(mktemp -d "$PROFILE_TEMP_ROOT/zz-profile.XXXXXX")
 PROFILE_SOCKET="$PROFILE_RUNTIME_DIR/zz.sock"
 PROFILE_IDENTITY="$PROFILE_SOCKET.identity"
@@ -200,8 +210,10 @@ capture_process_tree() {
     fi
 }
 
-verify_debug_symbols "$APP_BINARY" "$SYMBOLS_DIR/zz.dSYM" app
-verify_debug_symbols "$HELPER_BINARY" "$SYMBOLS_DIR/zz_helper.dSYM" helper
+if [[ "$PROFILE_MODE" != "memory" ]]; then
+    verify_debug_symbols "$APP_BINARY" "$SYMBOLS_DIR/zz.dSYM" app
+    verify_debug_symbols "$HELPER_BINARY" "$SYMBOLS_DIR/zz_helper.dSYM" helper
+fi
 
 mkdir -p "$PROFILE_RUN_DIR/logs"
 export ZZ_LOG_DIR="$PROFILE_RUN_DIR/logs"
@@ -243,12 +255,15 @@ kill -0 "$DAEMON_PID" 2>/dev/null ||
     printf 'duration=%s\n' "$PROFILE_DURATION"
     printf 'warmup_seconds=%s\n' "$PROFILE_WARMUP_SECONDS"
     printf 'app=%s\n' "$PROFILE_APP"
+    printf 'app_sha256=%s\n' "$(shasum -a 256 "$APP_BINARY" | awk '{ print $1 }')"
     printf 'socket=%s\n' "$PROFILE_SOCKET"
     printf 'gui_pid=%s\n' "$GUI_PID"
     printf 'daemon_pid=%s\n' "$DAEMON_PID"
     printf 'host=%s\n' "$(sw_vers -productVersion)"
     printf 'architecture=%s\n' "$(uname -m)"
-    printf 'xctrace=%s\n' "$(xcrun xctrace version)"
+    if [[ "$PROFILE_MODE" != "memory" ]]; then
+        printf 'xctrace=%s\n' "$(xcrun xctrace version)"
+    fi
     if [[ "$PROFILE_MODE" == "diagnostics" ]]; then
         printf 'log_filter=%s\n' "$RUST_LOG"
     fi
@@ -265,8 +280,10 @@ kill -0 "$DAEMON_PID" 2>/dev/null ||
     done
 } >"$PROFILE_RUN_DIR/metadata.txt"
 git -C "$REPO_ROOT" status --short >"$PROFILE_RUN_DIR/git-status.txt"
-uuid_list "$APP_BINARY" >"$PROFILE_RUN_DIR/app-uuids.txt"
-uuid_list "$HELPER_BINARY" >"$PROFILE_RUN_DIR/helper-uuids.txt"
+if [[ "$PROFILE_MODE" != "memory" ]]; then
+    uuid_list "$APP_BINARY" >"$PROFILE_RUN_DIR/app-uuids.txt"
+    uuid_list "$HELPER_BINARY" >"$PROFILE_RUN_DIR/helper-uuids.txt"
+fi
 capture_process_tree "$PROFILE_RUN_DIR/processes-before.txt"
 
 if [[ "$PROFILE_WARMUP_SECONDS" != "0" ]]; then
@@ -300,13 +317,17 @@ case "$PROFILE_MODE" in
         PROFILE_TEMPLATE="Metal System Trace"
         PROFILE_TARGET_ARGUMENTS=(--attach "$GUI_PID")
         ;;
-    diagnostics)
+    diagnostics | memory)
         PROFILE_TEMPLATE=
         PROFILE_TARGET_ARGUMENTS=()
         ;;
 esac
 
-if [[ "$PROFILE_MODE" == "diagnostics" ]]; then
+if [[ "$PROFILE_MODE" == "memory" ]]; then
+    python3 "$SCRIPT_DIR/sample-macos-memory.py" \
+        --pid "$GUI_PID" --daemon-pid "$DAEMON_PID" \
+        --duration "$PROFILE_DURATION" --output "$PROFILE_RUN_DIR"
+elif [[ "$PROFILE_MODE" == "diagnostics" ]]; then
     case "$PROFILE_DURATION" in
         *ms)
             duration_milliseconds=${PROFILE_DURATION%ms}

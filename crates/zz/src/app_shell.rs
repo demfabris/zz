@@ -21,7 +21,7 @@ use crate::{
     diagnostics::fps::app_fps_overlay,
     mux::client::MuxClient,
     request_window_close,
-    status_bar::{GuiStatusPlacement, render_gui_status_bar},
+    status_bar::render_gui_status_bar,
     window::{corners::WindowCorners, drag::window_drag_handle},
     workspace::{
         AppView, ClosePane,
@@ -101,6 +101,7 @@ impl AppShell {
                 if this
                     .update(cx, |this, cx| {
                         if this.sidebar.read(cx).route() == WorkspaceRoute::App
+                            && this.sidebar.read(cx).mode() == ChromeMode::Titlebar
                             && crate::config::status_bar_settings(cx).clock
                                 != zz_client::StatusBarClock::Off
                         {
@@ -164,35 +165,22 @@ impl AppShell {
         })
     }
 
-    fn render_status_bar(
-        &self,
-        placement: GuiStatusPlacement,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> AnyElement {
-        let titlebar_controls = (placement == GuiStatusPlacement::Titlebar).then(|| {
-            let has_layout = !crate::profile::profile(cx).fixed_window;
-            let width = workspace_chrome_controls_width(has_layout, window);
-            let controls = self.sidebar.read(cx).render_controls(&self.sidebar, cx);
-            (controls, width)
-        });
-        let controls = (placement == GuiStatusPlacement::Titlebar)
-            .then(|| self.window_controls().into_any_element());
+    fn render_status_bar(&self, window: &mut Window, cx: &mut App) -> AnyElement {
+        let has_layout = !crate::profile::profile(cx).fixed_window;
+        let width = workspace_chrome_controls_width(has_layout, window);
+        let controls = self.sidebar.read(cx).render_controls(&self.sidebar, cx);
         let bar = render_gui_status_bar(
-            placement,
             &self.mux,
             &self.sidebar,
-            titlebar_controls,
-            controls,
+            Some((controls, width)),
+            Some(self.window_controls().into_any_element()),
             window,
             cx,
         );
-        let corners = match placement {
-            GuiStatusPlacement::Bottom => WindowCorners::for_window(window).bottom(),
-            GuiStatusPlacement::Titlebar => WindowCorners::for_window(window).top(),
-        };
-        let bar = corners.round_div(bar, frame_content_corner_radius(cx));
-        if placement == GuiStatusPlacement::Bottom || crate::profile::profile(cx).fixed_window {
+        let bar = WindowCorners::for_window(window)
+            .top()
+            .round_div(bar, frame_content_corner_radius(cx));
+        if crate::profile::profile(cx).fixed_window {
             return bar.into_any_element();
         }
         window_drag_handle("gui-status-titlebar-drag", bar, window, cx).into_any_element()
@@ -232,24 +220,15 @@ impl Render for AppShell {
             let sidebar = self.sidebar.read(cx);
             (sidebar.route(), sidebar.mode())
         };
-        let (sidebar, titlebar, bottom) = match route {
-            WorkspaceRoute::Settings => (
+        let (sidebar, titlebar) = match (route, mode) {
+            (WorkspaceRoute::Settings, _) | (WorkspaceRoute::App, ChromeMode::Sidebar) => (
                 self.sidebar.clone().into_any_element(),
                 self.render_control_strip(window, cx),
-                None,
             ),
-            WorkspaceRoute::App => match mode {
-                ChromeMode::Sidebar => (
-                    self.sidebar.clone().into_any_element(),
-                    self.render_control_strip(window, cx),
-                    Some(self.render_status_bar(GuiStatusPlacement::Bottom, window, cx)),
-                ),
-                ChromeMode::Titlebar => (
-                    div().into_any_element(),
-                    Some(self.render_status_bar(GuiStatusPlacement::Titlebar, window, cx)),
-                    None,
-                ),
-            },
+            (WorkspaceRoute::App, ChromeMode::Titlebar) => (
+                div().into_any_element(),
+                Some(self.render_status_bar(window, cx)),
+            ),
         };
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let notification_layer = Root::render_notification_layer(window, cx);
@@ -272,7 +251,6 @@ impl Render for AppShell {
             sidebar,
             titlebar,
             self.workspace.clone(),
-            bottom,
             overlays,
         )
         .on_drag_move::<SidebarResizeDrag>(cx.listener(Self::on_sidebar_resize_drag_move))

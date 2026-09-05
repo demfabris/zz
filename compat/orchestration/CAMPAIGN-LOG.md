@@ -399,3 +399,46 @@ meets (resurrect reads `#{history_size}`, oh-my-tmux runs `save-buffer -`). The 
 lane-shaped: an instrument pass first (fix the attached fixture and make `--check-summary` refuse a
 stale footer, a launcher mode that runs the installed layout, a row-level TUI differential), then
 three two-lane cycles. What held up is named in the report so the next campaign keeps it.
+
+Instrument pass, 2026-09-04 on the ubuntu box, stopped mid-way for a machine move (fabrico's call;
+the state below is exact). Three instruments from the retrospective, two landed, one measured:
+
+- `compat/run.sh --check-summary` now REFUSES a `PASS` footer that proves nothing about the tree
+  it is checked on. A full run stamps `Recorded at: <commit>` under the status (`-dirty` when the
+  fixture or `crates/` had uncommitted changes), and the check dies unless the stamp is a commit
+  this checkout has, an ancestor of HEAD, not dirty, and nothing under `compat/attached-client.sh`
+  or `crates/` changed since. CONSEQUENCE: the stored footer has no stamp, so `--check-summary` is
+  RED on main from this commit until someone records a full run with the fixture passing
+  (`compat/run.sh --attached-client`), and every gate that merges code must re-record it. That is
+  the point: the review found the fixture red on this box under a stored PASS. `ZZ_COMPAT_ZZ=path`
+  lets `run.sh` use a prebuilt zz instead of building.
+- `compat/diff-scenario.sh` gained a `launcher:` scenario header: the zz side runs the `zz_cli`
+  launcher from PATH with no `--socket`, no `ZZ_SOCKET`, the default socket under a scratch
+  `XDG_RUNTIME_DIR`, and no harness `tmux` wrapper in front of the panes. Proved by
+  `smoke/launcher-installed-layout` (7 steps clean) and by a probe reading `#{socket_path}` on
+  the zz side as `<scratch>/runtime/zz/default.sock`. Retrospective findings 2 and 3 are provable
+  now; they were not before.
+- `compat/status-row.sh` is the row-level TUI differential: both binaries attached inside an
+  outer pinned tmux at 79x24 (below the sidebar's 80-column auto-hide), the same status options
+  applied to both, the last row's bytes diffed with escapes after each step. First measurement,
+  9 of 9 rows differ, and the differences are the findings: the zz TUI emits truecolor SGR
+  (`38;2;r;g;b`) where the pin emits the named colour (`37`, `44`) for `bg=blue,fg=white`; the
+  default status colours differ (pin `154,205,50` on `13,13,13`, zz `0,205,0` on `0,0,0`); the
+  default `status-right` shows the pane title, which is the hostname on the pin and the shell name
+  on zz; `#{window_height}` answers 23 on the pin and 22 on zz at the same client size; and zz's
+  default row carries a ` Ctrl-\ detach` hint the pin never draws. Recorded, not fixed.
+
+The attached-client fixture is still red here and the reasons are now measured rather than
+guessed. Eight runs at `0092abf`+, each ending on a different probe: (1) `probe_command_output_navigation`
+waited for a bare `/` prompt on zz where the TUI now draws the pin's `(search down)`; FIXED, the
+one fixture change kept, both sides match the same string. (2) The command-output view is a
+CLIENT-LOCAL view: `#{pane_in_mode}` stays 0 and `#{client_key_table}` answers `copy-mode-vi`
+while it is open, and a probe shows Escape under vi keeps it open, which is what `bda6e90` says;
+yet one run saw the table drop to `root` after Escape. Unresolved; do not replace the
+`client_key_table` observable in that probe with `pane_in_mode`, it measures nothing there.
+(3) `probe_command_prompt` on the TMUX side answered `mainprompted`: the four BSpace keys raced
+the prompt opening, a probe with a settle between `C-b ,` and the keys passes. (4) `probe_side`
+once never saw `ATTACHED_ROOT_OK`: the first keys reached the zz client before it was ready.
+(3) and (4) are races the fixture must wait out, not behaviour. Every run leaves zz daemons on
+`/tmp/zza-*.sock` when it dies; the cleanup trap does not reach them. Reap by pid from the socket
+name, never by `pkill -f`.

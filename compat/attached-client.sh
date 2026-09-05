@@ -670,11 +670,7 @@ wait_for_output_search_prompt() {
 
   for ((attempt = 0; attempt < 200; attempt++)); do
     screen="$(capture_current_screen "$side" 2>/dev/null || true)"
-    if [ "$side" = zz ]; then
-      if grep -Eq '^/[[:space:]]*$' <<<"$screen"; then
-        return 0
-      fi
-    elif grep -Fq '(search down)' <<<"$screen"; then
+    if grep -Fq '(search down)' <<<"$screen"; then
       return 0
     fi
     sleep 0.05

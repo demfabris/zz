@@ -194,6 +194,7 @@
 | smoke/jobs-display-popup-environment | 3 | yes | 0 | yes | yes | yes |
 | smoke/jobs-shell-job-cwd | 3 | yes | 0 | yes | yes | yes |
 | smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |
+| smoke/launcher-installed-layout | 7 | yes | 0 | yes | yes | yes |
 | smoke/oh-my-tmux | 15 | yes | 0 | yes | yes | yes |
 | smoke/own-conf | 6 | yes | 0 | yes | yes | yes |
 | smoke/pane-border-indicators | 3 | yes | 0 | yes | yes | yes |

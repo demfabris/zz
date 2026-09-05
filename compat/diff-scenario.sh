@@ -53,6 +53,14 @@ esac
 if grep -Eq '^[[:space:]]*shim:[[:space:]]*$' "$SCENARIO_FILE"; then
   SMOKE_MODE=1
 fi
+# A launcher scenario runs the zz side the way an installed zz runs: the `zz`
+# launcher on PATH with no --socket and no ZZ_SOCKET, the default socket under
+# a scratch XDG_RUNTIME_DIR, and no harness `tmux` shim in front of the panes.
+LAUNCHER_MODE=0
+if grep -Eq '^[[:space:]]*launcher:[[:space:]]*$' "$SCENARIO_FILE"; then
+  SMOKE_MODE=1
+  LAUNCHER_MODE=1
+fi
 CORPUS_MODE="$(awk '
   {
     line = $0
@@ -102,6 +110,11 @@ ZZ_PID=""
 CORPUS_DIR="${ZZ_COMPAT_CORPUS:-$DEFAULT_CORPUS_DIR}"
 ZZ_SHIM_DIR="$SCRATCH_DIR/zz/bin"
 TMUX_SHIM_DIR="$SCRATCH_DIR/tmux/bin"
+LAUNCHER_BIN="$SCRATCH_DIR/launcher/bin"
+LAUNCHER_RUNTIME="$SCRATCH_DIR/runtime"
+if [ "$LAUNCHER_MODE" -eq 1 ]; then
+  ZZ_SOCKET="$LAUNCHER_RUNTIME/zz/default.sock"
+fi
 STAGED_CONF="$ZZ_HOME/.tmux.conf"
 EXPECTED_ZZ_WARNINGS="$SCRATCH_DIR/expected.zz.warnings"
 EXPECTED_TMUX_WARNINGS="$SCRATCH_DIR/expected.tmux.warnings"
@@ -122,7 +135,15 @@ die() {
 # Running the harness from a shell that carries any of those would leak the
 # developer's context into the scratch servers, so both sides run scrubbed.
 zz_command() {
-  if [ "$SMOKE_MODE" -eq 1 ]; then
+  if [ "$LAUNCHER_MODE" -eq 1 ]; then
+    env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+      -u EDITOR -u VISUAL \
+      HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
+      XDG_RUNTIME_DIR="$LAUNCHER_RUNTIME" TMUX_TMPDIR="$LAUNCHER_RUNTIME" \
+      PATH="$LAUNCHER_BIN:$(dirname -- "$TMUX_BIN"):$HARNESS_PATH" \
+      ZZ_SMOKE_CANARY="zz-side-only" ZZ_SMOKE_TMUX_BIN="$TMUX_BIN" \
+      "$LAUNCHER_BIN/zz" "$@"
+  elif [ "$SMOKE_MODE" -eq 1 ]; then
     env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
       -u EDITOR -u VISUAL \
       HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
@@ -227,6 +248,12 @@ prepare_smoke() {
 
   mkdir -p "$ZZ_SHIM_DIR" "$TMUX_SHIM_DIR" "$ZZ_HOME/.tmux/plugins" \
     "$ZZ_HOME/.tmux/bin"
+  if [ "$LAUNCHER_MODE" -eq 1 ]; then
+    [ -x "$(dirname -- "$ZZ_BIN")/zz_cli" ] ||
+      die "launcher scenario needs zz_cli beside $ZZ_BIN (cargo build -p zz)"
+    mkdir -p "$LAUNCHER_BIN" "$LAUNCHER_RUNTIME"
+    ln -s "$(dirname -- "$ZZ_BIN")/zz_cli" "$LAUNCHER_BIN/zz"
+  fi
   if [ "$CORPUS_MODE" = "required" ]; then
     [ -d "$CORPUS_DIR" ] || die "smoke corpus is missing: $CORPUS_DIR"
     CORPUS_DIR="$(cd -- "$CORPUS_DIR" && pwd)"
@@ -548,6 +575,11 @@ if [ "$SMOKE_MODE" -eq 1 ]; then
     shim:*)
       die "shim does not accept a value: $line"
       ;;
+    launcher:)
+      ;;
+    launcher:*)
+      die "launcher does not accept a value: $line"
+      ;;
     stage:*)
       staged_files+=("${line#stage:}")
       ;;
@@ -564,7 +596,16 @@ if [ "$SMOKE_MODE" -eq 1 ]; then
   done
 fi
 
-zz_command -f /dev/null daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
+if [ "$LAUNCHER_MODE" -eq 1 ]; then
+  env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+    -u EDITOR -u VISUAL \
+    HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
+    XDG_RUNTIME_DIR="$LAUNCHER_RUNTIME" TMUX_TMPDIR="$LAUNCHER_RUNTIME" \
+    PATH="$LAUNCHER_BIN:$(dirname -- "$TMUX_BIN"):$HARNESS_PATH" \
+    "$ZZ_BIN" -f /dev/null daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
+else
+  zz_command -f /dev/null daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
+fi
 ZZ_PID=$!
 
 socket_ready=0
@@ -627,7 +668,7 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   key_name=""
   command_text="$line"
   case "$line" in
-  corpus:* | shim:* | expect-warn:* | stage:*)
+  corpus:* | shim:* | launcher:* | expect-warn:* | stage:*)
     continue
     ;;
   conf:*)

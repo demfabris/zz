@@ -7,6 +7,7 @@
 #   compat/run.sh windows panes
 #   compat/run.sh --strict-geometry
 #   compat/run.sh --check-summary | --strict-geometry --attached-client
+#   ZZ_COMPAT_ZZ=path/to/zz compat/run.sh ...   (skip the build, use that binary)
 #   compat/run.sh --delta origin/main..HEAD --commands split-window,new-window
 #   compat/run.sh --delta origin/main..HEAD --list   (print selection, run nothing)
 set -euo pipefail
@@ -175,7 +176,7 @@ scenario_step_count() {
       sub(/^[[:space:]]+/, "", line)
       sub(/[[:space:]]+$/, "", line)
       if (line == "" || substr(line, 1, 1) == "#") next
-      if (line ~ /^(corpus:|shim:|expect-warn:|stage:)/) next
+      if (line ~ /^(corpus:|shim:|launcher:|expect-warn:|stage:)/) next
       count++
     }
     END { print count + 0 }
@@ -300,9 +301,32 @@ check_summary() {
     rm -f -- "$expected" "$actual"
     die "attached-client status is $attached_client_status in $summary_file; rerun with --attached-client"
   fi
+  attached_client_commit="$(awk -F '`' '/^Recorded at: `/{ print $2 }' "$summary_file")"
+  if [ -z "$attached_client_commit" ]; then
+    rm -f -- "$expected" "$actual"
+    die "attached-client PASS in $summary_file carries no commit stamp; a PASS that names no tree proves nothing, rerun compat/run.sh --attached-client"
+  fi
+  case "$attached_client_commit" in
+  *-dirty)
+    rm -f -- "$expected" "$actual"
+    die "attached-client PASS in $summary_file was recorded on a dirty tree ($attached_client_commit); rerun compat/run.sh --attached-client on a clean checkout"
+    ;;
+  esac
+  if ! git -C "$REPO_DIR" cat-file -e "$attached_client_commit^{commit}" 2>/dev/null; then
+    rm -f -- "$expected" "$actual"
+    die "attached-client PASS in $summary_file names commit $attached_client_commit, which this checkout does not have"
+  fi
+  if ! git -C "$REPO_DIR" merge-base --is-ancestor "$attached_client_commit" HEAD; then
+    rm -f -- "$expected" "$actual"
+    die "attached-client PASS in $summary_file was recorded at $attached_client_commit, which is not an ancestor of HEAD; rerun compat/run.sh --attached-client"
+  fi
+  if [ -n "$(git -C "$REPO_DIR" diff --name-only "$attached_client_commit" HEAD -- compat/attached-client.sh crates/)" ]; then
+    rm -f -- "$expected" "$actual"
+    die "attached-client PASS in $summary_file predates changes to the fixture or the crates since $attached_client_commit; rerun compat/run.sh --attached-client"
+  fi
   rm -f -- "$expected" "$actual"
-  printf 'summary current: %s scenarios, %s steps; attached-client %s\n' \
-    "$scenario_count" "$total_steps" "$attached_client_status"
+  printf 'summary current: %s scenarios, %s steps; attached-client %s at %s\n' \
+    "$scenario_count" "$total_steps" "$attached_client_status" "$attached_client_commit"
 }
 
 if [ "$CHECK_SUMMARY" -eq 1 ]; then
@@ -364,13 +388,21 @@ if [ "$needs_corpus" -eq 1 ]; then
   fi
 fi
 
-log "building zz"
-(
-  cd "$REPO_DIR"
-  cargo build -p zz
-)
-ZZ_BIN="$REPO_DIR/target/debug/zz"
-[ -x "$ZZ_BIN" ] || die "cargo build did not produce $ZZ_BIN"
+if [ -n "${ZZ_COMPAT_ZZ:-}" ]; then
+  ZZ_BIN="$ZZ_COMPAT_ZZ"
+  [ -x "$ZZ_BIN" ] || die "ZZ_COMPAT_ZZ is not an executable: $ZZ_BIN"
+  [ -x "$(dirname -- "$ZZ_BIN")/zz_cli" ] ||
+    warn "no zz_cli beside $ZZ_BIN; launcher scenarios will fail"
+  log "using prebuilt zz: $ZZ_BIN"
+else
+  log "building zz"
+  (
+    cd "$REPO_DIR"
+    cargo build -p zz
+  )
+  ZZ_BIN="$REPO_DIR/target/debug/zz"
+  [ -x "$ZZ_BIN" ] || die "cargo build did not produce $ZZ_BIN"
+fi
 
 cd "$REPO_DIR"
 
@@ -531,9 +563,16 @@ if [ "$ATTACHED_CLIENT" -eq 1 ]; then
   fi
 fi
 
+attached_client_commit="$(git -C "$REPO_DIR" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
+if [ -n "$(git -C "$REPO_DIR" status --porcelain --untracked-files=no -- compat/attached-client.sh crates/ 2>/dev/null)" ]; then
+  attached_client_commit="$attached_client_commit-dirty"
+fi
 {
   printf '\n## Attached-client fixture\n\n'
   printf 'Status: `%s`\n' "$attached_client_status"
+  if [ "$ATTACHED_CLIENT" -eq 1 ]; then
+    printf 'Recorded at: `%s`\n' "$attached_client_commit"
+  fi
 } >>"$SUMMARY_TMP"
 
 printf '\n'

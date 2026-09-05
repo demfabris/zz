@@ -1,6 +1,9 @@
-# Handoff for the tmux-compat campaign (registry closed; next work is in CAMPAIGN-REVIEW.md)
+# Handoff for the tmux-compat campaign (registry closed; instrument pass half done; machine move)
 
-Written 2026-09-03 ~00:40Z on the ubuntu box and rewritten 2026-09-04 after cycle 13 integrated.
+Written 2026-09-03 ~00:40Z on the ubuntu box, rewritten 2026-09-04 after cycle 13 integrated, and
+updated the same evening when fabrico paused the instrument pass for a machine move. READ "The
+instrument pass, as left" BELOW BEFORE ANYTHING ELSE: `compat/run.sh --check-summary` is red on
+main on purpose until the attached fixture is fixed and a full run is recorded.
 THE REGISTRY IS EMPTY: meter 100.0% (304/304), 65/65 groups, 0 open, 0 blocked, 174 closed records,
 42 accepted groups. The implementation phase of the campaign as scoped on 2026-08-31 is done.
 
@@ -64,10 +67,10 @@ read. The desktop GPUI app keeps its own look entirely.
 
 | Fact | Value |
 | --- | --- |
-| `origin/main` | `0092abf` (cycle-13 ledger recompute; lanes `fd2e790` geometry, `37e8df0` consumers) |
+| `origin/main` | the instrument-pass commit on top of `690767e` (the retrospective) and `0092abf` (cycle-13 ledger) |
 | Agreed-scope meter | 100.0% (304/304 items), 65/65 groups done, 0 partially burned; `python3 compat/progress.py`. Beside it publish the honest denominator the retrospective asks for: 304 of 757 identified items, because the 42 accepted groups hold 453 more |
 | Live registry | 0 open groups, 0 blocked, 0 items; 174 closed records, 42 accepted groups |
-| Corpus | 220 scenarios / 2,648 steps; the stored attached-client row reads PASS but the fixture does NOT complete on this box (see the retrospective's finding 11 and the instrument pass) |
+| Corpus | 221 scenarios / 2,655 steps; the stored attached-client row reads PASS with NO stamp, so `--check-summary` is red until a full run records a stamped PASS (see the instrument pass) |
 | `PROTOCOL_VERSION` | 98 (hex hello frame 0x62, test `..._ninety_eight`); the next wire change bumps to 99 (0x63) |
 | Unmerged work | None |
 | Board (issue #7) | MAIN and TRIAGE free. Every lock front from cycles 10 to 13 is INTEGRATED and released; the `F-SPLIT-MUX-*-V5` chain untouched and never part of this campaign |
@@ -107,18 +110,49 @@ synchronous with a 2 s cap; a custom key table is never left; the attached fixtu
 stored PASS; control-mode notifications were never diffed; `refresh-client -S` errors; the raw TUI
 keeps a 29-column sidebar at 80 columns; the CLI output writer changes bytes.
 
-### The instrument pass comes first
+### The instrument pass, as left (2026-09-04 evening)
 
-Not a cycle: one owner, hours each, no reviewers. Until it is done every attached-only close is
-unverified on this box and no status-rendering or entrypoint claim can be proved at all.
+Not a cycle: one owner, hours each, no reviewers. Two of three instruments landed; the third is
+measured and half fixed. `CAMPAIGN-LOG.md`'s last entry has the full measurements.
 
-1. Fix the attached-client fixture here (`probe_command_output_navigation`, `probe_command_prompt`)
-   and make `compat/run.sh --check-summary` refuse a `PASS` footer that carries no commit stamp or
-   predates the tip. `run.sh:311` only re-reads the footer today.
-2. A launcher mode in `compat/diff-scenario.sh`: the zz side runs the installed layout, no
-   `--socket`, `ZZ_SOCKET` unset, a scrubbed PATH with the pin tmux first.
-3. A row-level TUI differential: zz-tui below 50 columns or with the sidebar off, `status off` on
-   the recorder, diff the last row's `capture-pane -p -e` bytes over a small format corpus.
+DONE. `compat/run.sh` stamps the summary footer with `Recorded at: <commit>` on a full run and
+`--check-summary` refuses a footer with no stamp, a `-dirty` stamp, a stamp that is not an
+ancestor of HEAD, or a stamp behind which `compat/attached-client.sh` or `crates/` changed. The
+stored footer has NO stamp, so `--check-summary` is RED on main right now and every gate's records
+stage will fail until a full run with the fixture passing is recorded
+(`compat/run.sh --attached-client`, full corpus plus fixture, about 30 minutes). Every gate that
+merges code must re-record it. `ZZ_COMPAT_ZZ=<path to a built zz>` skips `run.sh`'s own build.
+
+DONE. `compat/diff-scenario.sh` has a `launcher:` header: the zz side runs the `zz_cli` launcher
+from PATH with no `--socket` and no `ZZ_SOCKET`, on the default socket under a scratch
+`XDG_RUNTIME_DIR`, with no harness `tmux` wrapper. `smoke/launcher-installed-layout` proves it
+(7 steps clean, summary row added). Findings 2 and 3 of the review can now be written as
+scenarios. It needs `zz_cli` beside `zz` (`cargo build -p zz` builds both).
+
+DONE, MEASURED, NOT ACTED ON. `compat/status-row.sh` runs both binaries attached inside an outer
+pinned tmux at 79x24 and diffs the last row's bytes with escapes after each status option. First
+run: 9 of 9 rows differ, and each difference is a finding for the desktop-status-row lane
+(truecolor SGR where the pin emits named colours, different default status colours, the default
+`status-right` showing the shell name where the pin shows the hostname, `#{window_height}` 22
+versus 23, a ` Ctrl-\ detach` hint the pin never draws). It exits 1 on any difference and prints
+both rows in `od -c` and `%q` form.
+
+HALF DONE. The attached-client fixture. One fix is in and verified (the command-output search
+prompt: the TUI now draws the pin's `(search down)`, and the fixture matched a bare `/` on the zz
+side; both sides now wait for the same string). Three more failures are MEASURED and not fixed:
+the command-output view is client-local (`#{pane_in_mode}` stays 0, `#{client_key_table}` is the
+observable, do not swap it), and one run saw that table drop to `root` after Escape under vi
+where a direct probe keeps it open, unresolved; `probe_command_prompt` on the tmux side raced its
+own BSpace keys against the prompt opening (answered `mainprompted`), a settle after `C-b ,`
+fixes it; `probe_side` once never saw `ATTACHED_ROOT_OK` because the first keys beat the zz
+client's readiness. A run takes about ten minutes and, when it dies, leaves zz daemons on
+`/tmp/zza-*.sock` that the trap does not reach: reap them by pid from the socket name. Run it as
+`compat/attached-client.sh <zz> <pin tmux>` with a zz built at HEAD; on this box the warm build
+is `~/dev/zz-gate-target/debug/zz`.
+
+Order for whoever resumes: (1) the two races (a settle before the rename keys, a readiness wait
+before `probe_side`'s first key), (2) the Escape question by probe, (3) a full
+`compat/run.sh --attached-client` to stamp the footer, then the gate is green again.
 
 ### Then three two-lane cycles
 

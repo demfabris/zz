@@ -1,0 +1,16 @@
+launcher:
+corpus: none
+# The zz side runs the way an installed zz runs: the `zz` launcher on PATH,
+# no --socket and no ZZ_SOCKET anywhere, the default socket under a scratch
+# XDG_RUNTIME_DIR, and no harness `tmux` shim in front of the panes. Every
+# other smoke scenario reaches the daemon through an explicit --socket and a
+# PATH wrapper the product does not ship, so this is the only row that proves
+# the launcher, the default socket and the client autostart path at all. The
+# daemon facts it reads are the ones an alias user's first commands read.
+new-window -n second
+out: list-windows -F #{window_index}:#{window_name}
+out: display-message -p #{session_name}
+split-window -t second
+out: list-panes -t second -F #{pane_index}
+kill-window -t second
+out: list-windows -F #{window_name}

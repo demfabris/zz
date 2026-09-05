@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
     printf '%s\n' \
-        "usage: scripts/profile-macos.sh <cpu|system|metal|diagnostics|memory> [target] [duration]" \
+        "usage: scripts/profile-macos.sh <cpu|system|metal|diagnostics|memory|startup> [target] [duration]" \
         "" \
         "targets:" \
         "  cpu:    gui (default), daemon, or all" \
@@ -11,6 +11,7 @@ usage() {
         "  metal:  gui" \
         "  diagnostics: gui" \
         "  memory: all" \
+        "  startup: gui (launch capture, no warmup)" \
         "" \
         "duration uses xctrace syntax (for example 500ms, 20s, or 2m)." \
         "Set ZZ_PROFILE_WARMUP_SECONDS to change the default 5-second warmup."
@@ -30,6 +31,7 @@ PROFILE_MODE=$1
 PROFILE_TARGET=${2:-gui}
 PROFILE_DURATION=${3:-20s}
 PROFILE_WARMUP_SECONDS=${ZZ_PROFILE_WARMUP_SECONDS:-5}
+PROFILE_REQUIRES_SYMBOLS=true
 
 case "$PROFILE_MODE" in
     cpu)
@@ -50,7 +52,14 @@ case "$PROFILE_MODE" in
         [[ "$PROFILE_TARGET" == "gui" ]] ||
             fail "diagnostic captures require the gui target"
         ;;
+    startup)
+        [[ "$PROFILE_TARGET" == "gui" ]] ||
+            fail "startup captures require the gui target"
+        PROFILE_WARMUP_SECONDS=0
+        PROFILE_REQUIRES_SYMBOLS=false
+        ;;
     memory)
+        PROFILE_REQUIRES_SYMBOLS=false
         [[ "$PROFILE_TARGET" == "all" ]] ||
             fail "memory captures require the all target"
         ;;
@@ -70,7 +79,12 @@ if [[ "$PROFILE_MODE" == "memory" ]]; then
     command -v python3 >/dev/null || fail "python3 is required"
 else
     command -v xcrun >/dev/null || fail "xcrun is required"
+fi
+if [[ "$PROFILE_REQUIRES_SYMBOLS" == "true" ]]; then
     command -v dwarfdump >/dev/null || fail "dwarfdump is required"
+fi
+if [[ "$PROFILE_MODE" == "startup" ]]; then
+    command -v python3 >/dev/null || fail "python3 is required"
 fi
 command -v pgrep >/dev/null || fail "pgrep is required"
 
@@ -85,7 +99,7 @@ SYMBOLS_DIR="$(dirname "$PROFILE_APP")/symbols"
     fail "profiling bundle is missing; run 'just profile-build mac' first"
 [[ -x "$HELPER_BINARY" ]] ||
     fail "profiling helper is missing; run 'just profile-build mac' first"
-if [[ "$PROFILE_MODE" != "memory" ]]; then
+if [[ "$PROFILE_REQUIRES_SYMBOLS" == "true" ]]; then
     [[ -d "$SYMBOLS_DIR/zz.dSYM" && -d "$SYMBOLS_DIR/zz_helper.dSYM" ]] ||
         fail "matching profiling dSYMs are missing; run 'just profile-build mac' first"
 fi
@@ -120,10 +134,43 @@ PROFILE_TRACE="$PROFILE_RUN_DIR/$PROFILE_MODE-$PROFILE_TARGET.trace"
 
 GUI_PID=
 DAEMON_PID=
+RECORDER_PID=
+
+discover_owned_processes() {
+    local candidate_pid candidate_command
+    while IFS= read -r candidate_pid; do
+        [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]] || continue
+        candidate_command=$(ps -p "$candidate_pid" -o command= 2>/dev/null || true)
+        candidate_command=${candidate_command#"${candidate_command%%[![:space:]]*}"}
+        if [[ "$candidate_command" == "$APP_BINARY --socket $PROFILE_SOCKET" ]]; then
+            GUI_PID=$candidate_pid
+        fi
+    done < <(pgrep -x zz 2>/dev/null || true)
+    if [[ -s "$PROFILE_IDENTITY" ]]; then
+        candidate_pid=$(awk -F= '$1 == "pid" { print $2 }' "$PROFILE_IDENTITY")
+        if [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]]; then
+            DAEMON_PID=$candidate_pid
+        fi
+    fi
+}
 
 stop_owned_processes() {
     local exit_status=$?
     trap - EXIT INT TERM
+
+    if [[ -n "$RECORDER_PID" ]] && kill -0 "$RECORDER_PID" 2>/dev/null; then
+        kill -INT "$RECORDER_PID" 2>/dev/null || true
+        local recorder_attempt=0
+        while kill -0 "$RECORDER_PID" 2>/dev/null && [[ $recorder_attempt -lt 100 ]]; do
+            sleep 0.05
+            recorder_attempt=$((recorder_attempt + 1))
+        done
+        if kill -0 "$RECORDER_PID" 2>/dev/null; then
+            kill -KILL "$RECORDER_PID" 2>/dev/null || true
+        fi
+        wait "$RECORDER_PID" 2>/dev/null || true
+    fi
+    discover_owned_processes
 
     if [[ -n "$GUI_PID" ]] && kill -0 "$GUI_PID" 2>/dev/null; then
         kill -TERM "$GUI_PID" 2>/dev/null || true
@@ -210,15 +257,102 @@ capture_process_tree() {
     fi
 }
 
-if [[ "$PROFILE_MODE" != "memory" ]]; then
+if [[ "$PROFILE_REQUIRES_SYMBOLS" == "true" ]]; then
     verify_debug_symbols "$APP_BINARY" "$SYMBOLS_DIR/zz.dSYM" app
     verify_debug_symbols "$HELPER_BINARY" "$SYMBOLS_DIR/zz_helper.dSYM" helper
 fi
+
+write_metadata() {
+    {
+        printf 'run_id=%s-%s-%s\n' "$PROFILE_TIMESTAMP" "$PROFILE_MODE" "$PROFILE_TARGET"
+        printf 'commit=%s\n' "$(git -C "$REPO_ROOT" rev-parse HEAD)"
+        printf 'mode=%s\n' "$PROFILE_MODE"
+        printf 'target=%s\n' "$PROFILE_TARGET"
+        printf 'duration=%s\n' "$PROFILE_DURATION"
+        printf 'warmup_seconds=%s\n' "$PROFILE_WARMUP_SECONDS"
+        printf 'app=%s\n' "$PROFILE_APP"
+        printf 'app_sha256=%s\n' "$(shasum -a 256 "$APP_BINARY" | awk '{ print $1 }')"
+        printf 'socket=%s\n' "$PROFILE_SOCKET"
+        printf 'gui_pid=%s\n' "$GUI_PID"
+        printf 'daemon_pid=%s\n' "$DAEMON_PID"
+        printf 'host=%s\n' "$(sw_vers -productVersion)"
+        printf 'architecture=%s\n' "$(uname -m)"
+        if [[ "$PROFILE_MODE" != "memory" ]]; then
+            printf 'xctrace=%s\n' "$(xcrun xctrace version)"
+        fi
+        if [[ "$PROFILE_MODE" == "diagnostics" || "$PROFILE_MODE" == "startup" ]]; then
+            printf 'log_filter=%s\n' "$RUST_LOG"
+        fi
+        if [[ "$PROFILE_MODE" == "startup" ]]; then
+            printf 'xctrace_exit_status=%s\n' "${capture_status-}"
+        fi
+        for variable in \
+            ZZ_BROWSER_FPS \
+            ZZ_BROWSER_GPU \
+            ZZ_BROWSER_SHARED_TEXTURE \
+            ZZ_BROWSER_EXTERNAL_BEGIN_FRAME \
+            ZZ_BROWSER_BF_ADAPTIVE
+        do
+            if [[ -n "${!variable-}" ]]; then
+                printf '%s=%s\n' "$variable" "${!variable}"
+            fi
+        done
+    } >"$PROFILE_RUN_DIR/metadata.txt"
+    git -C "$REPO_ROOT" status --short >"$PROFILE_RUN_DIR/git-status.txt"
+    if [[ "$PROFILE_REQUIRES_SYMBOLS" == "true" ]]; then
+        uuid_list "$APP_BINARY" >"$PROFILE_RUN_DIR/app-uuids.txt"
+        uuid_list "$HELPER_BINARY" >"$PROFILE_RUN_DIR/helper-uuids.txt"
+    fi
+}
 
 mkdir -p "$PROFILE_RUN_DIR/logs"
 export ZZ_LOG_DIR="$PROFILE_RUN_DIR/logs"
 if [[ "$PROFILE_MODE" == "diagnostics" ]]; then
     export RUST_LOG=${ZZ_PROFILE_LOG_FILTER:-"zz::diagnostics::terminal_render=trace"}
+fi
+if [[ "$PROFILE_MODE" == "startup" ]]; then
+    export RUST_LOG=${ZZ_PROFILE_LOG_FILTER:-"zz=info,zz::diagnostics::app_render=trace"}
+    write_metadata
+    printf 'zz profiling: recording launch and displayed surfaces for %s into %s\n' \
+        "$PROFILE_DURATION" "$PROFILE_TRACE"
+    xcrun xctrace record \
+        --template "Metal System Trace" \
+        --time-limit "$PROFILE_DURATION" \
+        --run-name "startup-gui" \
+        --output "$PROFILE_TRACE" \
+        --no-prompt \
+        --env "ZZ_LOG_DIR=$ZZ_LOG_DIR" \
+        --env "ZZ_SOCKET=$PROFILE_SOCKET" \
+        --env "RUST_LOG=$RUST_LOG" \
+        --target-stdout "$PROFILE_RUN_DIR/app.stdout.log" \
+        --launch -- "$APP_BINARY" --socket "$PROFILE_SOCKET" \
+        >"$PROFILE_RUN_DIR/xctrace.stdout.log" \
+        2>"$PROFILE_RUN_DIR/app.stderr.log" &
+    RECORDER_PID=$!
+    capture_status=0
+    wait "$RECORDER_PID" || capture_status=$?
+    RECORDER_PID=
+    discover_owned_processes
+    write_metadata
+    capture_process_tree "$PROFILE_RUN_DIR/processes-after.txt"
+    if [[ "$capture_status" != "0" && ! -d "$PROFILE_TRACE" ]]; then
+        tail -n 40 "$PROFILE_RUN_DIR/xctrace.stdout.log" "$PROFILE_RUN_DIR/app.stderr.log" >&2 || true
+        exit "$capture_status"
+    fi
+    summary_status=0
+    python3 "$SCRIPT_DIR/summarize-macos-startup.py" "$PROFILE_RUN_DIR" || summary_status=$?
+    if [[ "$summary_status" != "0" ]]; then
+        if [[ "$capture_status" != "0" ]]; then
+            exit "$capture_status"
+        fi
+        exit "$summary_status"
+    fi
+    if [[ "$capture_status" != "0" ]]; then
+        printf 'zz profiling: warning: xctrace exited %s; the saved launch trace passed export and completion checks (status retained in metadata)\n' \
+            "$capture_status" >&2
+    fi
+    printf 'zz profiling: capture complete: %s\n' "$PROFILE_RUN_DIR"
+    exit 0
 fi
 "$APP_BINARY" --socket "$PROFILE_SOCKET" \
     >"$PROFILE_RUN_DIR/app.stdout.log" \
@@ -247,43 +381,7 @@ DAEMON_PID=$(awk -F= '$1 == "pid" { print $2 }' "$PROFILE_IDENTITY")
 kill -0 "$DAEMON_PID" 2>/dev/null ||
     fail "isolated daemon pid $DAEMON_PID is not running"
 
-{
-    printf 'run_id=%s-%s-%s\n' "$PROFILE_TIMESTAMP" "$PROFILE_MODE" "$PROFILE_TARGET"
-    printf 'commit=%s\n' "$(git -C "$REPO_ROOT" rev-parse HEAD)"
-    printf 'mode=%s\n' "$PROFILE_MODE"
-    printf 'target=%s\n' "$PROFILE_TARGET"
-    printf 'duration=%s\n' "$PROFILE_DURATION"
-    printf 'warmup_seconds=%s\n' "$PROFILE_WARMUP_SECONDS"
-    printf 'app=%s\n' "$PROFILE_APP"
-    printf 'app_sha256=%s\n' "$(shasum -a 256 "$APP_BINARY" | awk '{ print $1 }')"
-    printf 'socket=%s\n' "$PROFILE_SOCKET"
-    printf 'gui_pid=%s\n' "$GUI_PID"
-    printf 'daemon_pid=%s\n' "$DAEMON_PID"
-    printf 'host=%s\n' "$(sw_vers -productVersion)"
-    printf 'architecture=%s\n' "$(uname -m)"
-    if [[ "$PROFILE_MODE" != "memory" ]]; then
-        printf 'xctrace=%s\n' "$(xcrun xctrace version)"
-    fi
-    if [[ "$PROFILE_MODE" == "diagnostics" ]]; then
-        printf 'log_filter=%s\n' "$RUST_LOG"
-    fi
-    for variable in \
-        ZZ_BROWSER_FPS \
-        ZZ_BROWSER_GPU \
-        ZZ_BROWSER_SHARED_TEXTURE \
-        ZZ_BROWSER_EXTERNAL_BEGIN_FRAME \
-        ZZ_BROWSER_BF_ADAPTIVE
-    do
-        if [[ -n "${!variable-}" ]]; then
-            printf '%s=%s\n' "$variable" "${!variable}"
-        fi
-    done
-} >"$PROFILE_RUN_DIR/metadata.txt"
-git -C "$REPO_ROOT" status --short >"$PROFILE_RUN_DIR/git-status.txt"
-if [[ "$PROFILE_MODE" != "memory" ]]; then
-    uuid_list "$APP_BINARY" >"$PROFILE_RUN_DIR/app-uuids.txt"
-    uuid_list "$HELPER_BINARY" >"$PROFILE_RUN_DIR/helper-uuids.txt"
-fi
+write_metadata
 capture_process_tree "$PROFILE_RUN_DIR/processes-before.txt"
 
 if [[ "$PROFILE_WARMUP_SECONDS" != "0" ]]; then

@@ -88,6 +88,10 @@ profile-memory platform duration="60s":
     @if [[ "{{ platform }}" != "mac" ]]; then echo "Memory capture currently supports macOS only" >&2; exit 2; fi
     @scripts/profile-macos.sh memory all "{{ duration }}"
 
+profile-startup platform duration="8s":
+    @if [[ "{{ platform }}" != "mac" ]]; then echo "Startup capture currently supports macOS only" >&2; exit 2; fi
+    @scripts/profile-macos.sh startup gui "{{ duration }}"
+
 # Profile scheduling, waits, wakeups, and IPC in a fresh isolated macOS run.
 profile-system platform duration="20s":
     @if [[ "{{ platform }}" != "mac" ]]; then echo "System Trace capture currently supports macOS only" >&2; exit 2; fi

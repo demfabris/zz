@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-09-05
+* **Update**: Moved desktop daemon startup and handshake to a background task, with connection completion driving the existing startup prompts. Added Metal launch captures that measure attributed displayed frames separately from CPU render milestones. Terminal blink tasks now stop on focus loss, window deactivation, and layout hiding. The macOS daemon retention sweep found terminal page mappings and libc live allocations returning to baseline after pane closure, with bounded allocator capacity accounting for much of the remaining footprint.
 * **Update**: Added macOS physical-footprint and RSS sampling for isolated or running desktop processes, documented capture limits, and corrected the CEF runtime page to describe deferred initialization.
 * **Update**: Added a live UI font picker to Interface settings, using native font catalogs on macOS, Linux, and Windows and persisting the choice in ui-font-family.
 * **Update**: Moved desktop status controls into Settings > Status bar, removed the bottom status bar, aligned row actions to their right edge, and replaced the desk globe with the round world icon.

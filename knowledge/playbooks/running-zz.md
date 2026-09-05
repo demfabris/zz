@@ -224,6 +224,7 @@ just profile-cpu-summary <run-dir>   # retain only the isolated owned process tr
 just profile-system mac 20s          # scheduling, waits, wakeups, and IPC
 just profile-metal mac 20s           # GPUI and CEF Metal work
 just profile-metal-summary <run-dir> # zz-only frame and GPU summary
+just profile-startup mac 8s          # launch to the first attributed displayed frame
 just profile-terminal-diagnostics mac 20s
 just profile-terminal-summary <run-dir>
 ```
@@ -268,11 +269,39 @@ graphics resources that RSS can miss. Compare high and low samples with
 target, so keep those snapshots separate from clean timing measurements.
 See [Apple's memory profiling explanation](https://developer.apple.com/videos/play/wwdc2022/10106/).
 
-These recipes measure after daemon readiness and warmup, including when warmup
-is zero. Startup profiling needs an Instruments launch recording using the
-complete bundle executable, a private socket, and cleanup of its daemon.
-The first `zz::diagnostics::app_render` log marks render construction, not the
-first frame presented to the display.
+Memory and attached Instruments captures start after daemon readiness and warmup,
+including when warmup is zero. `profile-startup` instead launches the bundle under
+Metal System Trace, with no warmup or dSYM requirement. For an existing release bundle:
+
+```sh
+ZZ_PROFILE_APP=/Applications/zz.app just profile-startup mac 8s
+python3 scripts/summarize-macos-startup.py target/profiles/<startup-run>
+```
+
+`startup-summary.json` identifies the earliest displayed surface whose structured
+process record matches the launched GUI PID. It resolves Instruments XML references
+and reports unavailable when that attribution is absent. Launch-relative time includes
+Instruments overhead; alignment with the logger clock is approximate. UI render logs
+and the first render containing a terminal remain separate CPU milestones. Neither
+establishes when terminal content reached the display.
+
+The 2026-09-05 startup comparison used matching release builds and a private minimal config.
+Three uninstrumented pairs reduced the median first workspace render from 169 to 123 ms with
+a fresh daemon. Two alternating Metal launch pairs measured approximately 225 versus 231 ms
+from logger initialization to the first displayed frame, so that sample showed no display-latency
+improvement. Holding the daemon handshake for 1.5 seconds prevented any baseline workspace render;
+the background-connection build rendered at 123 ms while still waiting for handshake bytes.
+
+The 2026-09-05 macOS retention sweep grew an isolated daemon from one terminal to nine,
+then closed eight. Ghostty's page mappings returned from 18 to 2 and libc live allocations
+returned from 18.5 MiB to the original 8.52 MiB, while libc retained 21.7 MiB of dirty
+pages versus 9.34 MiB initially. Repeated create/close cycles plateaued. This supports
+working terminal teardown with allocator retention; it does not establish a terminal
+object leak or justify forced allocator collection. `TerminalSession::drop` and the
+PTY actor shutdown release terminal state; Ghostty's `PageList.deinit` frees its page pools.
+Check VM tags against the allocator source: this build's mimalloc v3 uses tag 100,
+which `vmmap` labels `IOAccelerator` without `(graphics)`. That label alone is not
+evidence of daemon GPU allocations.
 
 `profile-terminal-diagnostics` is deliberately separate from clean CPU/Metal captures. It enables
 only the existing `zz::diagnostics::terminal_render` trace target and records cache hits, misses,

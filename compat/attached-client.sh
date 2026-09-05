@@ -1043,6 +1043,7 @@ configure_side() {
 probe_side() {
   local side="$1"
 
+  wait_for_terminal_ready "$side"
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" C-g Enter
   wait_for_marker "$side" ATTACHED_ROOT_OK
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" C-b x Enter
@@ -1184,6 +1185,7 @@ probe_command_prompt() {
   local side="$1"
 
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" C-b ','
+  wait_for_current_marker "$side" '(rename-window) main'
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" BSpace BSpace BSpace BSpace
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" prompted
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
@@ -2139,6 +2141,7 @@ probe_command_output_navigation() {
 
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" g /
   wait_for_output_search_prompt "$side"
+  assert_output_mode_stays "$side" copy-mode-vi
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" ATTACHED_NAV_CANCEL
   wait_for_current_marker "$side" ATTACHED_NAV_CANCEL
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Escape

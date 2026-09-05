@@ -8498,21 +8498,25 @@ impl Shared {
                             |window| BTreeSet::from([window]),
                         );
                         for pane in panes_for_windows(&inner, &windows) {
-                            let Some(terminal) = inner.terminals.get(&pane) else {
-                                continue;
-                            };
                             let options = terminal_worker_options(
                                 &inner.engine,
                                 &inner.appearance,
                                 &inner.config_files,
                                 pane,
                             )?;
-                            deferred_terminal_commands.push(
-                                DeferredTerminalCommand::SetEngineKnobs {
-                                    terminal: Arc::clone(terminal),
-                                    knobs: options.knobs,
-                                },
-                            );
+                            let outputs = inner
+                                .command_outputs
+                                .values()
+                                .filter(|output| output.pane == pane)
+                                .map(|output| &output.terminal);
+                            for terminal in inner.terminals.get(&pane).into_iter().chain(outputs) {
+                                deferred_terminal_commands.push(
+                                    DeferredTerminalCommand::SetEngineKnobs {
+                                        terminal: Arc::clone(terminal),
+                                        knobs: options.knobs,
+                                    },
+                                );
+                            }
                         }
                     }
                     MuxEffect::ResizeWindowFromClients { window, mode } => {
@@ -20015,6 +20019,7 @@ impl Shared {
         });
         let events = terminal.events();
         terminal.set_wrap_search(terminal_options.wrap_search);
+        terminal.set_engine_knobs(terminal_options.knobs);
         let view = TerminalViewId(client.0);
 
         let (
@@ -28567,7 +28572,9 @@ fn dismiss_overlays(
     if raising != Some(Overlay::DisplayPanes) && take_display_panes(inner, client).is_some() {
         events.push(EventPayload::DisplayPanes { state: None });
     }
-    if let Some(output) = take_command_output(inner, client) {
+    if raising != Some(Overlay::CommandPrompt)
+        && let Some(output) = take_command_output(inner, client)
+    {
         retired.push((client, output));
     }
     if raising != Some(Overlay::Popup)
@@ -69534,7 +69541,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
             .expect("output context");
 
-        set_test_window_mode_keys(&shared, 71, &mut context, window, "emacs");
+        set_test_window_mode_keys(&shared, 71, &mut context, window, "vi");
         for table in ["custom-client-table", "observer-table"] {
             shared
                 .execute(
@@ -69562,16 +69569,47 @@ bind - split-window -v -c "#{pane_current_path}"
                 .switch_table(Some("observer-table".to_owned()));
         }
         shared
-            .open_command_output(client, Some(pane), "fixture".to_owned(), "one\ntwo")
+            .open_command_output(
+                client,
+                Some(pane),
+                "fixture".to_owned(),
+                "one two tail\nother",
+            )
             .expect("open command output");
         take_command_output_message(&mailbox);
         {
             let inner = shared.inner.lock();
-            assert_eq!(inner.key_engines[&client].active_table(), Some("copy-mode"));
+            assert_eq!(
+                inner.key_engines[&client].active_table(),
+                Some("copy-mode-vi")
+            );
             assert_eq!(
                 inner.key_engines[&observer].active_table(),
                 Some("observer-table")
             );
+        }
+
+        let terminal = Arc::clone(&shared.inner.lock().command_outputs[&client].terminal);
+        let view = TerminalViewId(client.0);
+        for (mode_keys, expected_x) in [("vi", 4), ("emacs", 7)] {
+            if mode_keys == "emacs" {
+                set_test_window_mode_keys(&shared, 72, &mut context, window, mode_keys);
+            }
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("send-keys", ["-X", "search-forward", "two"]),
+                )
+                .expect("search command output");
+            wait_for_viewport(&terminal, view, mode_keys, |_| {
+                terminal.copy_mode_facts(view).is_some_and(|facts| {
+                    facts.cursor_x == expected_x
+                        && facts.cursor_line == "one two tail"
+                        && facts.search_match == "two"
+                })
+            });
         }
 
         set_test_window_mode_keys(&shared, 72, &mut context, window, "vi");
@@ -69634,6 +69672,40 @@ bind - split-window -v -c "#{pane_current_path}"
         );
         thread::sleep(Duration::from_millis(50));
         assert!(shared.inner.lock().command_outputs.contains_key(&client));
+
+        let output_id = current_command_output_id(&shared, client);
+        input_test_key(
+            &shared,
+            client,
+            &mut context,
+            pane,
+            test_key(KeyCode::Character('/'), Modifiers::default(), Some("/")),
+        );
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.command_prompts.contains_key(&client));
+            assert_eq!(inner.command_outputs[&client].output_id, output_id);
+            assert_eq!(
+                inner.key_engines[&client].active_table(),
+                Some("copy-mode-vi")
+            );
+        }
+        input_test_key(
+            &shared,
+            client,
+            &mut context,
+            pane,
+            test_key(KeyCode::Escape, Modifiers::default(), None),
+        );
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.command_prompts.contains_key(&client));
+            assert_eq!(inner.command_outputs[&client].output_id, output_id);
+            assert_eq!(
+                inner.key_engines[&client].active_table(),
+                Some("copy-mode-vi")
+            );
+        }
 
         set_test_window_mode_keys(&shared, 73, &mut context, window, "emacs");
         {

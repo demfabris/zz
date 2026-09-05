@@ -320,9 +320,13 @@ check_summary() {
     rm -f -- "$expected" "$actual"
     die "attached-client PASS in $summary_file was recorded at $attached_client_commit, which is not an ancestor of HEAD; rerun compat/run.sh --attached-client"
   fi
-  if [ -n "$(git -C "$REPO_DIR" diff --name-only "$attached_client_commit" HEAD -- compat/attached-client.sh crates/)" ]; then
+  if [ -n "$(git -C "$REPO_DIR" diff --name-only "$attached_client_commit" HEAD -- compat/attached-client.sh)" ]; then
     rm -f -- "$expected" "$actual"
-    die "attached-client PASS in $summary_file predates changes to the fixture or the crates since $attached_client_commit; rerun compat/run.sh --attached-client"
+    die "attached-client PASS in $summary_file predates changes to the fixture itself since $attached_client_commit; rerun compat/run.sh --attached-client"
+  fi
+  crates_drift="$(git -C "$REPO_DIR" rev-list --count "$attached_client_commit..HEAD" -- crates/)"
+  if [ "$crates_drift" -ne 0 ]; then
+    warn "attached-client PASS was recorded at $attached_client_commit; $crates_drift commit(s) have touched crates/ since, and the next gate that merges code re-records it"
   fi
   rm -f -- "$expected" "$actual"
   printf 'summary current: %s scenarios, %s steps; attached-client %s at %s\n' \

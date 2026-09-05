@@ -117,7 +117,9 @@ measured and half fixed. `CAMPAIGN-LOG.md`'s last entry has the full measurement
 
 DONE. `compat/run.sh` stamps the summary footer with `Recorded at: <commit>` on a full run and
 `--check-summary` refuses a footer with no stamp, a `-dirty` stamp, a stamp that is not an
-ancestor of HEAD, or a stamp behind which `compat/attached-client.sh` or `crates/` changed. The
+ancestor of HEAD, or a stamp behind which `compat/attached-client.sh` itself changed; commits that touch
+`crates/` after the stamp only print a drift warning (relaxed 2026-09-05 at fabrico's instruction: the gate
+re-records after every code merge, and ordinary commits to main must not force a 90-minute rerun). The
 stored footer has NO stamp, so `--check-summary` is RED on main right now and every gate's records
 stage will fail until a full run with the fixture passing is recorded
 (`compat/run.sh --attached-client`, full corpus plus fixture, about 30 minutes). Every gate that

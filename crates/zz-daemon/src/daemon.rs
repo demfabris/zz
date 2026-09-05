@@ -41988,7 +41988,17 @@ mod tests {
             &shared.inner.lock(),
             client
         ));
-        assert!(take_reliable_messages(&mailbox).is_empty());
+        let messages = take_reliable_messages(&mailbox);
+        assert!(
+            messages.iter().all(|message| matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Snapshot(_),
+                    ..
+                })
+            )),
+            "{messages:#?}"
+        );
         assert!(mailbox.state.lock().terminals.is_empty());
 
         shared

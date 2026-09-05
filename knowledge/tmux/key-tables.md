@@ -109,6 +109,8 @@ Native client keys are normalized before lookup and prefix comparison:
 | `" "` or `"Space"` | `" "` (a literal space) |
 | `Ctrl-x` | `C-x` |
 | `Alt-x` | `M-x` |
+| Shift + special key | `S-Left`, `S-PPage`, `S-F1`, etc.; Ctrl/Alt precede `S-` |
+| Shift + Tab | `BTab` |
 | otherwise | trimmed as-is (e.g. `C-b`, `M-Right`, `F2`, `PPage`) |
 
 The tmux command layer now validates key arguments before they reach the shared tables. It accepts

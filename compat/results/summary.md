@@ -227,6 +227,8 @@
 | smoke/keys-prefix-stock | 20 | yes | 0 | yes | yes | yes |
 | smoke/keys-prefix-attached | 3 | yes | 0 | yes | yes | yes |
 
+| smoke/keys-shift-attached | 3 | yes | 0 | yes | yes | yes |
+
 ## Attached-client fixture
 
 Status: `PASS`

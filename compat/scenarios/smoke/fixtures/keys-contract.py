@@ -27,6 +27,7 @@ if sys.argv[1] == "record":
 
 work = Path(sys.argv[1])
 prefix = sys.argv[2:]
+mode = os.environ.get("KEYS_CONTRACT_MODE", "prefix")
 session = "keyscontract"
 master = None
 pid = None
@@ -109,36 +110,73 @@ try:
     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
     wait_for(lambda: bool(cli("list-clients", "-t", "=" + session, "-F", "#{client_name}")), "attach")
     time.sleep(0.5)
-    screen.clear()
-    send(b"\x02x")
-    prompt = f"kill-pane {index}? (y/n)".encode()
-    wait_for(lambda: prompt in text(), "prefix x prompt")
-    print("confirm prompt=kill-pane #P? (y/n)")
-    send(b"n")
-    assert panes() == before, "n killed a pane"
-    print("confirm n=alive")
-    screen.clear()
-    send(b"\x02x")
-    wait_for(lambda: prompt in text(), "second prefix x prompt")
-    send(b"y")
-    wait_for(lambda: victim not in panes(), "y did not kill pane")
-    assert len(panes()) == len(before) - 1
-    print("confirm y=killed")
-    output = work / "paste"
-    command = shlex.join(["python3", str(Path(__file__).resolve()), "record", str(output)])
-    cli("respawn-pane", "-k", "-t", panes()[0], command)
-    screen.clear()
-    wait_for(lambda: b"PASTE_READY" in text(), "paste recorder")
-    cli("set-buffer", "KEYS_PASTE")
-    send(b"\x02]")
-    wait_for(output.exists, "paste bytes")
-    data = output.read_bytes()
-    assert data == b"\x1b[200~KEYS_PASTE\x1b[201~", data
-    print("paste=" + data.hex())
-    send(b"\x02d")
-    wait_for(lambda: not cli("list-clients", "-t", "=" + session, "-F", "#{client_name}"), "prefix d detach")
-    reap()
-    print("detach clients=0 exit=0")
+    if mode == "shift":
+        client = cli("list-clients", "-t", "=" + session, "-F", "#{client_name}")
+        cli("new-window", "-t", session, "-n", "second")
+        cli("select-window", "-t", session + ":1")
+        cli("bind-key", "-n", "S-Left", "previous-window")
+        cli("bind-key", "-n", "S-Right", "next-window")
+        def window():
+            return cli("display-message", "-p", "-c", client, "#{window_index}")
+        wait_for(lambda: window() == "1", "initial window")
+        send(b"\x1b[1;2D")
+        wait_for(lambda: window() == "0", "shift-left previous-window")
+        print("S-Left window=0")
+        send(b"\x1b[1;2C")
+        wait_for(lambda: window() == "1", "shift-right next-window")
+        print("S-Right window=1")
+        keys = [
+            ("S-Up", b"\x1b[1;2A"), ("S-Down", b"\x1b[1;2B"),
+            ("S-Left", b"\x1b[1;2D"), ("S-Right", b"\x1b[1;2C"),
+            ("BTab", b"\x1b[Z"),
+            ("S-Home", b"\x1b[1;2H"), ("S-End", b"\x1b[1;2F"),
+            ("S-PPage", b"\x1b[5;2~"), ("S-NPage", b"\x1b[6;2~"),
+            ("S-Insert", b"\x1b[2;2~"), ("S-Delete", b"\x1b[3;2~"),
+        ]
+        for number, final in enumerate("PQRS", 1):
+            keys.append((f"S-F{number}", f"\x1b[1;2{final}".encode()))
+        for number, code in enumerate([15, 17, 18, 19, 20, 21, 23, 24], 5):
+            keys.append((f"S-F{number}", f"\x1b[{code};2~".encode()))
+        for name, data in keys:
+            cli("bind-key", "-n", name, "set-option", "-g", "@shift-key", name)
+            cli("set-option", "-g", "@shift-key", "pending")
+            send(data)
+            wait_for(lambda: cli("show-options", "-gqv", "@shift-key") == name, name)
+            print(name + " fired")
+        send(b"\x02d")
+        reap()
+    else:
+        screen.clear()
+        send(b"\x02x")
+        prompt = f"kill-pane {index}? (y/n)".encode()
+        wait_for(lambda: prompt in text(), "prefix x prompt")
+        print("confirm prompt=kill-pane #P? (y/n)")
+        send(b"n")
+        assert panes() == before, "n killed a pane"
+        print("confirm n=alive")
+        screen.clear()
+        send(b"\x02x")
+        wait_for(lambda: prompt in text(), "second prefix x prompt")
+        send(b"y")
+        wait_for(lambda: victim not in panes(), "y did not kill pane")
+        assert len(panes()) == len(before) - 1
+        print("confirm y=killed")
+        output = work / "paste"
+        command = shlex.join(["python3", str(Path(__file__).resolve()), "record", str(output)])
+        cli("respawn-pane", "-k", "-t", panes()[0], command)
+        screen.clear()
+        wait_for(lambda: b"PASTE_READY" in text(), "paste recorder")
+        cli("set-buffer", "KEYS_PASTE")
+        send(b"\x02]")
+        wait_for(output.exists, "paste bytes")
+        data = output.read_bytes()
+        assert data == b"\x1b[200~KEYS_PASTE\x1b[201~", data
+        print("paste=" + data.hex())
+        send(b"\x02d")
+        wait_for(lambda: not cli("list-clients", "-t", "=" + session, "-F", "#{client_name}"), "prefix d detach")
+        reap()
+        print("detach clients=0 exit=0")
+
 finally:
     if pid:
         os.kill(pid, signal.SIGKILL)

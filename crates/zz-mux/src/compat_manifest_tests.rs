@@ -1348,9 +1348,22 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         .filter(|item| item.starts_with("binding:"))
         .cloned()
         .collect::<BTreeSet<_>>();
+    let execution_divergent_bindings = BTreeSet::from([
+        "binding:prefix:f".to_owned(),
+        "binding:prefix:M-n".to_owned(),
+        "binding:prefix:M-p".to_owned(),
+    ]);
+    for item in &execution_divergent_bindings {
+        assert_eq!(items[item], "keys.prefix-stock-commands");
+        assert!(!divergent_bindings.contains(item));
+    }
     assert_eq!(
-        tracked_bindings, divergent_bindings,
-        "divergent shared default bindings and tracked binding items differ"
+        tracked_bindings,
+        divergent_bindings
+            .union(&execution_divergent_bindings)
+            .cloned()
+            .collect(),
+        "textually or behaviorally divergent shared bindings and tracked items differ"
     );
 
     let shared_keys = upstream_keys

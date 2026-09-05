@@ -19,3 +19,23 @@ keys: prefix -
 keys: prefix '
 keys: prefix M-n
 keys: prefix M-p
+out: list-keys -N -T prefix x
+out: list-keys -N -T prefix &
+out: list-keys -N -T prefix ]
+out: list-keys -N -T prefix ?
+out: list-keys -N -T prefix d
+out: list-keys -N -T prefix PPage
+out: list-keys -N -T prefix f
+out: list-keys -N -T prefix .
+out: list-keys -N -T prefix (
+out: list-keys -N -T prefix )
+out: list-keys -N -T prefix L
+out: list-keys -N -T prefix m
+out: list-keys -N -T prefix M
+out: list-keys -N -T prefix i
+out: list-keys -N -T prefix ~
+out: list-keys -N -T prefix #
+out: list-keys -N -T prefix -
+list-keys -N -T prefix "'"
+out: list-keys -N -T prefix M-n
+out: list-keys -N -T prefix M-p

@@ -48,6 +48,7 @@ pub enum AppearancePageItem<C> {
     StatusClock,
     Animations,
     WidgetCornerRadius,
+    ShadowStrength,
     WindowBackgroundBlur,
     #[cfg(target_os = "linux")]
     WindowCornerRadius,
@@ -109,6 +110,7 @@ pub fn appearance_page_items<C>(
         },
         AppearancePageItem::Animations,
         AppearancePageItem::WidgetCornerRadius,
+        AppearancePageItem::ShadowStrength,
     ]);
     if has_window_blur {
         items.push(AppearancePageItem::WindowBackgroundBlur);

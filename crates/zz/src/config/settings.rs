@@ -139,6 +139,7 @@ pub(crate) struct SettingsView {
     editor_font_size: Entity<InputState>,
     pane_border_width: Entity<InputState>,
     widget_corner_radius: Entity<InputState>,
+    shadow_strength: Entity<InputState>,
     window_corner_radius: Entity<InputState>,
     chrome_pickers: BTreeMap<ChromeColor, Entity<ColorPickerState>>,
     mux_config_editor: Option<ConfigFileEditor>,
@@ -215,6 +216,13 @@ impl SettingsView {
             window,
             cx,
         );
+        let shadow_strength = numeric_value_input(
+            ConfigKey::ShadowStrength,
+            observed.shadow_strength.value,
+            5.0,
+            window,
+            cx,
+        );
         let window_corner_radius = numeric_value_input(
             ConfigKey::WindowCornerRadius,
             observed.window_corner_radius.value,
@@ -222,7 +230,7 @@ impl SettingsView {
             window,
             cx,
         );
-        let chrome_pickers = chrome_pickers(observed, window, cx);
+        let chrome_pickers = chrome_pickers(&observed, window, cx);
         let mut subscriptions = vec![
             cx.observe(&mux, |_, _, cx| cx.notify()),
             cx.observe_global::<config::FleetHosts>(|_, cx| cx.notify()),
@@ -253,6 +261,7 @@ impl SettingsView {
                 window,
                 cx,
             ),
+            numeric_input_subscription(&shadow_strength, ConfigKey::ShadowStrength, window, cx),
             numeric_input_subscription(
                 &window_corner_radius,
                 ConfigKey::WindowCornerRadius,
@@ -278,6 +287,7 @@ impl SettingsView {
             editor_font_size,
             pane_border_width,
             widget_corner_radius,
+            shadow_strength,
             window_corner_radius,
             chrome_pickers,
             mux_config_editor: None,
@@ -463,6 +473,18 @@ impl SettingsView {
                 window,
                 cx,
             );
+            if !numeric_input_matches_value(
+                ConfigKey::ShadowStrength,
+                &self.shadow_strength.read(cx).value(),
+                resolved.shadow_strength.value,
+            ) {
+                synchronize_text_input(
+                    &self.shadow_strength,
+                    &numeric_input_text(ConfigKey::ShadowStrength, resolved.shadow_strength.value),
+                    window,
+                    cx,
+                );
+            }
             synchronize_f32_input(
                 &self.window_corner_radius,
                 resolved.window_corner_radius.value,
@@ -557,6 +579,7 @@ impl SettingsView {
         &mut self,
         key: ConfigKey,
         input: &Entity<InputState>,
+        normalize: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -564,19 +587,23 @@ impl SettingsView {
         let value = match validate_numeric_value(key, &candidate) {
             Ok(value) => value,
             Err(message) => {
+                if !normalize {
+                    return;
+                }
                 toast::push(
                     Notification::error(format!("Invalid {}: {message}", key.as_str())),
                     cx,
                 );
-                let effective = numeric_config_value(self.observed, key).to_string();
+                let effective = numeric_input_text(key, numeric_config_value(&self.observed, key));
                 input.update(cx, |input, cx| input.set_value(effective, window, cx));
                 return;
             }
         };
-        let value = value.to_string();
-        if input.read(cx).value().as_ref() != value {
-            input.update(cx, |input, cx| input.set_value(value.clone(), window, cx));
+        let displayed = value.to_string();
+        if normalize && input.read(cx).value().as_ref() != displayed {
+            input.update(cx, |input, cx| input.set_value(displayed, window, cx));
         }
+        let value = (value / numeric_input_scale(key)).to_string();
         if let Err(error) = set_config_key(key, &value) {
             report_write_error("set", key.as_str(), &error, cx);
         }
@@ -659,13 +686,14 @@ impl SettingsView {
         settings_scroll_column(id)
     }
 
-    fn appearance_section(&self, resolved: AppConfig, cx: &Context<Self>) -> AnyElement {
+    fn appearance_section(&self, resolved: &AppConfig, cx: &Context<Self>) -> AnyElement {
         let items = appearance_page_items(crate::profile::profile(cx).has_window_blur);
         let inherited = inherited_chrome_colors(resolved.chrome_preset.value, cx.theme().mode);
         let view = cx.entity();
+        let resolved = *resolved;
         zz_ui::settings::appearance::appearance_page(items, move |item, position, _, cx| {
             view.update(cx, |this, cx| {
-                this.appearance_item(item, resolved, &inherited, position, cx)
+                this.appearance_item(item, &resolved, &inherited, position, cx)
             })
         })
         .into_any_element()
@@ -674,7 +702,7 @@ impl SettingsView {
     fn appearance_item(
         &self,
         item: AppearancePageItem,
-        resolved: AppConfig,
+        resolved: &AppConfig,
         inherited: &ThemeColor,
         position: StackPosition,
         cx: &Context<Self>,
@@ -767,6 +795,14 @@ impl SettingsView {
                 &self.widget_corner_radius,
                 cx,
             ),
+            AppearancePageItem::ShadowStrength => Self::numeric_setting(
+                ConfigKey::ShadowStrength,
+                "Shadow strength",
+                "Strength of shadows around controls and gapped panes, from 0% (off) to 100%.",
+                resolved.shadow_strength,
+                &self.shadow_strength,
+                cx,
+            ),
             AppearancePageItem::WindowBackgroundBlur => Self::boolean_setting(
                 ConfigKey::WindowBackgroundBlur,
                 "Window blur",
@@ -825,7 +861,7 @@ impl SettingsView {
         )
     }
 
-    fn theme_mode_setting(resolved: AppConfig, cx: &Context<Self>) -> SettingEntry {
+    fn theme_mode_setting(resolved: &AppConfig, cx: &Context<Self>) -> SettingEntry {
         let setting = resolved.theme_mode;
         SettingEntry::new("Theme", "Follow the system light/dark setting, or pin one.")
             .title_actions(key_annotations(ConfigKey::ThemeMode, setting.provenance))
@@ -847,7 +883,7 @@ impl SettingsView {
             ))
     }
 
-    fn app_icon_setting(resolved: AppConfig, cx: &Context<Self>) -> SettingEntry {
+    fn app_icon_setting(resolved: &AppConfig, cx: &Context<Self>) -> SettingEntry {
         let setting = resolved.app_icon;
         let appearance = cx.window_appearance();
         SettingEntry::new("App Icon", "Dock and app switcher.")
@@ -871,7 +907,7 @@ impl SettingsView {
             ))
     }
 
-    fn preset_setting(resolved: AppConfig, cx: &Context<Self>) -> SettingEntry {
+    fn preset_setting(resolved: &AppConfig, cx: &Context<Self>) -> SettingEntry {
         let setting = resolved.chrome_preset;
         let label = setting
             .value
@@ -912,7 +948,7 @@ impl SettingsView {
     fn chrome_color_setting(
         &self,
         color: ChromeColor,
-        resolved: AppConfig,
+        resolved: &AppConfig,
         inherited: &ThemeColor,
     ) -> SettingEntry {
         let setting = resolved.chrome(color);
@@ -961,7 +997,7 @@ impl SettingsView {
     fn browser_section(
         &self,
         browser: BrowserConfig,
-        resolved: AppConfig,
+        resolved: &AppConfig,
         cx: &Context<Self>,
     ) -> AnyElement {
         let setting = browser.element_selector_hotkey;
@@ -1141,7 +1177,7 @@ impl SettingsView {
             .into_any_element()
     }
 
-    fn advanced_section(resolved: AppConfig, cx: &Context<Self>) -> AnyElement {
+    fn advanced_section(resolved: &AppConfig, cx: &Context<Self>) -> AnyElement {
         Self::scroll_column("settings-advanced")
             .child(settings_page_description(SettingsSection::Advanced, cx))
             .when(crate::profile::profile(cx).has_tray, |column| {
@@ -1465,7 +1501,7 @@ impl SettingsView {
             .into_any_element()
     }
 
-    fn panes_section(&self, resolved: AppConfig, cx: &Context<Self>) -> AnyElement {
+    fn panes_section(&self, resolved: &AppConfig, cx: &Context<Self>) -> AnyElement {
         let gaps = resolved.pane_gaps.value;
         zz_ui::settings::panes_page(
 Self::boolean_setting(
@@ -1510,7 +1546,7 @@ Self::numeric_setting(
                         ).disabled(!gaps), cx).into_any_element()
     }
 
-    fn editor_section(&self, resolved: AppConfig, cx: &Context<Self>) -> AnyElement {
+    fn editor_section(&self, resolved: &AppConfig, cx: &Context<Self>) -> AnyElement {
         Self::scroll_column("settings-editor")
             .child(settings_page_description(SettingsSection::Editor, cx))
             .child(
@@ -1806,12 +1842,12 @@ impl Render for SettingsView {
         self.synchronize_terminal_editor(window, cx);
 
         let content = match self.section {
-            SettingsSection::Appearance => self.appearance_section(resolved, cx),
-            SettingsSection::Browser => self.browser_section(browser, resolved, cx),
-            SettingsSection::Editor => self.editor_section(resolved, cx),
-            SettingsSection::Panes => self.panes_section(resolved, cx),
+            SettingsSection::Appearance => self.appearance_section(&resolved, cx),
+            SettingsSection::Browser => self.browser_section(browser, &resolved, cx),
+            SettingsSection::Editor => self.editor_section(&resolved, cx),
+            SettingsSection::Panes => self.panes_section(&resolved, cx),
             SettingsSection::Hosts => self.hosts_section(cx),
-            SettingsSection::Advanced => Self::advanced_section(resolved, cx),
+            SettingsSection::Advanced => Self::advanced_section(&resolved, cx),
             SettingsSection::Terminal => self.config_file_section(ConfigFileKind::Terminal, cx),
             SettingsSection::Multiplexer => self.config_file_section(ConfigFileKind::Mux, cx),
             SettingsSection::About => Self::about_section(cx),
@@ -2105,7 +2141,7 @@ fn numeric_value_input(
     let (min, max) = numeric_range(key);
     cx.new(|cx| {
         InputState::new(window, cx)
-            .default_value(value.to_string())
+            .default_value(numeric_input_text(key, value))
             .step(step)
             .min(f64::from(min))
             .max(f64::from(max))
@@ -2152,7 +2188,9 @@ fn numeric_input_subscription(
         window,
         move |settings, input, event: &InputEvent, window, cx| {
             if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                settings.commit_numeric_input(key, input, window, cx);
+                settings.commit_numeric_input(key, input, true, window, cx);
+            } else if key == ConfigKey::ShadowStrength && matches!(event, InputEvent::Change) {
+                settings.commit_numeric_input(key, input, false, window, cx);
             }
         },
     )
@@ -2184,8 +2222,30 @@ fn synchronize_text_input(
 }
 
 fn numeric_range(key: ConfigKey) -> (f32, f32) {
-    key.numeric_range()
-        .expect("every Settings numeric field edits a numeric key")
+    let (min, max) = key
+        .numeric_range()
+        .expect("every Settings numeric field edits a numeric key");
+    let scale = numeric_input_scale(key);
+    (min * scale, max * scale)
+}
+
+fn numeric_input_scale(key: ConfigKey) -> f32 {
+    if key == ConfigKey::ShadowStrength {
+        100.0
+    } else {
+        1.0
+    }
+}
+
+fn numeric_input_text(key: ConfigKey, value: f32) -> String {
+    if key == ConfigKey::ShadowStrength {
+        format!("{:.2}", value * numeric_input_scale(key))
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_owned()
+    } else {
+        value.to_string()
+    }
 }
 
 fn validate_numeric_value(key: ConfigKey, value: &str) -> Result<f32, String> {
@@ -2198,13 +2258,19 @@ fn validate_numeric_value(key: ConfigKey, value: &str) -> Result<f32, String> {
     Ok(value)
 }
 
-fn numeric_config_value(config: AppConfig, key: ConfigKey) -> f32 {
+fn numeric_input_matches_value(key: ConfigKey, text: &str, value: f32) -> bool {
+    validate_numeric_value(key, text)
+        .is_ok_and(|shown| (shown / numeric_input_scale(key) - value).abs() < f32::EPSILON)
+}
+
+fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
     match key {
         ConfigKey::PaneInactiveOpacity => config.pane_inactive_opacity.value,
         ConfigKey::PaneCornerRadius => config.pane_corner_radius.value,
         ConfigKey::PaneMargin => config.pane_margin.value,
         ConfigKey::PaneBorderWidth => config.pane_border_width.value,
         ConfigKey::WidgetCornerRadius => config.widget_corner_radius.value,
+        ConfigKey::ShadowStrength => config.shadow_strength.value,
         ConfigKey::WindowCornerRadius => config.window_corner_radius.value,
         ConfigKey::EditorFontSize => config.editor_font_size.value,
         ConfigKey::UseSystemTitlebar
@@ -2242,7 +2308,7 @@ fn numeric_config_value(config: AppConfig, key: ConfigKey) -> f32 {
 }
 
 fn chrome_pickers(
-    observed: AppConfig,
+    observed: &AppConfig,
     window: &mut Window,
     cx: &mut Context<SettingsView>,
 ) -> BTreeMap<ChromeColor, Entity<ColorPickerState>> {
@@ -2503,6 +2569,33 @@ fn report_write_error(operation: &str, key: &str, error: &std::io::Error, cx: &m
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shadow_strength_inputs_convert_percentages_and_reject_invalid_edits() {
+        let key = ConfigKey::ShadowStrength;
+        assert_eq!(numeric_range(key), (0.0, 100.0));
+        for (factor, displayed) in [(0.0, "0"), (0.15, "15"), (0.5, "50"), (1.0, "100")] {
+            assert_eq!(numeric_input_text(key, factor), displayed);
+            let parsed = validate_numeric_value(key, displayed).expect("valid percentage");
+            assert!((parsed / numeric_input_scale(key) - factor).abs() < f32::EPSILON);
+        }
+        for value in ["", "-1", "101", "NaN", "inf", "invalid"] {
+            assert!(validate_numeric_value(key, value).is_err(), "{value}");
+        }
+        assert!(numeric_input_matches_value(key, "50.", 0.5));
+        assert!(numeric_input_matches_value(key, "0.", 0.0));
+        assert!(!numeric_input_matches_value(key, "", 0.5));
+        assert!(!numeric_input_matches_value(key, "50.", 1.0));
+        assert_eq!(
+            numeric_input_text(key, numeric_config_value(&AppConfig::default(), key)),
+            "100",
+        );
+        assert_eq!(numeric_range(ConfigKey::PaneInactiveOpacity), (0.0, 1.0));
+        assert_eq!(
+            numeric_input_text(ConfigKey::PaneInactiveOpacity, 0.7),
+            "0.7"
+        );
+    }
     use zz_daemon::{DaemonError, Endpoint};
 
     #[test]

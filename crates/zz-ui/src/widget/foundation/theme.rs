@@ -89,6 +89,7 @@ pub struct Theme {
     /// Corner radius, for *every* element that has one.
     pub radius: Pixels,
     pub shadow: bool,
+    pub shadow_strength: f32,
     pub transparent: Hsla,
     /// When scrollbars are visible, default: [`ScrollbarShow::Scrolling`].
     pub scrollbar_show: ScrollbarShow,
@@ -204,6 +205,7 @@ impl From<&ThemeColor> for Theme {
             mono_font_size: px(13.),
             radius: px(6.),
             shadow: true,
+            shadow_strength: 1.0,
             scrollbar_show: ScrollbarShow::default(),
             notification: NotificationSettings::default(),
             colors: *colors,

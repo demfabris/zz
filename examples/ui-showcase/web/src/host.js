@@ -21,7 +21,7 @@ function parameters() {
   for (const key of ["pin_x", "pin_y"]) if (query.has(key)) params.set(key, query.get(key));
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem("zz-preview") || "{}"); } catch {}
-  for (const key of ["radius", "pane_margin", "pane_radius", "pane_border", "inactive_opacity", "settings_section", "chrome_colors", "blur"]) {
+  for (const key of ["radius", "shadow_strength", "pane_margin", "pane_radius", "pane_border", "inactive_opacity", "settings_section", "chrome_colors", "blur"]) {
     const value = query.get(key) ?? saved[key];
     if (value !== undefined && value !== null) params.set(key, typeof value === "object" ? JSON.stringify(value) : value);
   }

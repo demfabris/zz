@@ -138,8 +138,11 @@ fn ring(sink: Pixels, cx: &App) -> BoxShadow {
 }
 
 pub fn control_shadow(cx: &App) -> Vec<BoxShadow> {
+    if cx.theme().shadow_strength == 0.0 {
+        return Vec::new();
+    }
     vec![BoxShadow {
-        color: cx.theme().scrim.alpha(0.2),
+        color: cx.theme().scrim.alpha(0.2 * cx.theme().shadow_strength),
         offset: point(px(0.), px(1.)),
         blur_radius: px(2.),
         spread_radius: px(0.),
@@ -407,6 +410,26 @@ mod tests {
     use gpui::px;
 
     use super::Size;
+
+    #[gpui::test]
+    fn control_shadow_strength_scales_ink_without_changing_shape(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        cx.update(|cx| {
+            let original = super::control_shadow(cx);
+            assert_eq!(original[0].color.a, 0.2);
+
+            crate::Theme::global_mut(cx).shadow_strength = 0.5;
+            let mut expected = original;
+            expected[0].color.a *= 0.5;
+            assert_eq!(super::control_shadow(cx), expected);
+
+            crate::Theme::change(crate::ThemeMode::Dark, None, cx);
+            assert_eq!(super::control_shadow(cx)[0].color.a, 0.1);
+
+            crate::Theme::global_mut(cx).shadow_strength = 0.0;
+            assert!(super::control_shadow(cx).is_empty());
+        });
+    }
 
     #[test]
     fn size_max_min_are_inverted_upstream_and_stay_that_way() {

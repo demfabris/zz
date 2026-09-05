@@ -81,6 +81,13 @@ impl SettingsFixture {
         let numbers = [
             ("zoom", options.zoom * 100.0, 50.0, 300.0, 5.0),
             ("radius", options.radius, 0.0, 24.0, 1.0),
+            (
+                "shadow-strength",
+                options.shadow_strength * 100.0,
+                0.0,
+                100.0,
+                5.0,
+            ),
             ("opacity", options.inactive_opacity, 0.0, 1.0, 0.1),
             ("margin", options.pane_margin, 0.0, 32.0, 1.0),
             ("pane-radius", options.pane_radius, 0.0, 32.0, 0.5),
@@ -108,6 +115,10 @@ impl SettingsFixture {
                             Theme::global_mut(cx).radius = px(value);
                         }
                         "opacity" => this.options.inactive_opacity = value,
+                        "shadow-strength" => {
+                            this.options.shadow_strength = value / 100.0;
+                            Theme::global_mut(cx).shadow_strength = this.options.shadow_strength;
+                        }
                         "margin" => this.options.pane_margin = value,
                         "pane-radius" => this.options.pane_radius = value,
                         "border" => this.options.pane_border = value,
@@ -443,6 +454,12 @@ self.number("border", "Pane border width", "Border width for gapped panes, in lo
                 "radius",
                 "Widget corner radius",
                 "Rounds every widget: buttons, inputs, tags, menus, dialogs.",
+                cx,
+            ),
+            AppearancePageItem::ShadowStrength => self.number(
+                "shadow-strength",
+                "Shadow strength",
+                "Strength of shadows around controls and gapped panes, from 0% (off) to 100%.",
                 cx,
             ),
             AppearancePageItem::WindowBackgroundBlur => self.toggle(

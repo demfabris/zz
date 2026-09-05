@@ -565,6 +565,7 @@ fn apply_zz_overrides(cx: &mut App) {
         .map(crate::terminal::view::terminal_font)
         .map(|font| font.family);
     let widget_corner_radius = config::widget_corner_radius(cx);
+    let shadow_strength = config::shadow_strength(cx);
     let chrome_preset = config::chrome_preset(cx);
     let chrome = config::chrome_colors(cx);
     let theme = Theme::global_mut(cx);
@@ -575,6 +576,7 @@ fn apply_zz_overrides(cx: &mut App) {
     }
 
     theme.radius = widget_corner_radius;
+    theme.shadow_strength = shadow_strength;
 }
 
 /// The palette a root inherits before explicit `chrome-*` edits.

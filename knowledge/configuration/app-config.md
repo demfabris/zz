@@ -9,14 +9,14 @@ tags:
 - window
 - appearance
 - mux
-timestamp: 2026-09-03T00:00:00-03:00
+timestamp: 2026-09-05T00:00:00-03:00
 ---
 
 # Overview
 
 The GUI process loads the first existing `zz/config` file from the user's platform configuration
 roots. `crates/zz/src/config/mod.rs` resolves the candidates when `run_app` enters the GPUI application
-closure, parses 35 named client-local behavior/layout/diagnostic/theme/browser knobs plus six
+closure, parses named client-local behavior/layout/diagnostic/theme/browser knobs plus
 chrome-color entries into typed
 `AppConfig` and `BrowserConfig` values, parses the one app-owned ACP key into `AgentConfig`,
 collects repeatable `chrome-keybind`/`chrome-unbind` entries for the client-local keymap, and collects the supported
@@ -32,7 +32,7 @@ preserving every other byte, comments included; the GUI fields reject a duplicat
 call it. `zz fleet list` prints name and endpoint; `zz fleet remove <name>` deletes every matching
 host line, as does a remote row's **Close host** . which additionally republishes `FleetHosts`
 (`config::remove_fleet_host_live`) so the running fleet drops the machine immediately. There is no bootstrap step, no key pinning, and no daemon-side setup . ssh already owns
-identity. These 41 local schema entries retain `Default`/`Override` provenance. Daemon-owned value
+identity. These local schema entries retain `Default`/`Override` provenance. Daemon-owned value
 grammar deliberately stays in the zz-terminal appearance loader or
 mux `set-option` engine.
 
@@ -84,7 +84,7 @@ knobs below and from the daemon-owned tmux tables in `zz/mux.conf`.
 
 ## Client-local keys
 
-The client-local schema has **41 entries: 35 named scalar keys plus six chrome colors.**
+The client-local schema includes these scalar settings and chrome colors.
 
 | Key | Default | Valid range | Consumer |
 | --- | ---: | --- | --- |
@@ -112,6 +112,7 @@ The client-local schema has **41 entries: 35 named scalar keys plus six chrome c
 | `pane-corner-radius` | `13.5` | `0..=32` | All four corners of every pane, on every platform; applies only with `pane-gaps` |
 | `pane-border-width` | `0.5` | `0..=8` | Border width while pane gaps are enabled; `0` disables the border |
 | `widget-corner-radius` | `6` | `0..=24` | The corner every zz-ui widget turns . buttons, inputs, tags, menus, dialogs |
+| `shadow-strength` | `1` | `0..=1` | Multiplier for shadows around controls and gapped panes; `0` turns them off |
 | `editor-font-size` | `13` | `8..=32` | Buffer text size in editor panes, in pixels |
 | `editor-line-numbers` | `true` | `true` or `false` | Whether editor panes draw the line-number rail |
 | `editor-relative-line-numbers` | `true` | `true` or `false` | Number the rail by distance from the cursor line, which keeps its absolute number |
@@ -135,7 +136,7 @@ normal watched-config refresh. The clock never shows seconds. `AppShell` aligns 
 the next minute boundary, then requests one redraw per minute while the bar and clock are visible;
 `time-date` renders `%H:%M · %b %d`.
 
-`widget-corner-radius` and the theme keys land on the **zz-ui theme** rather than being read
+`widget-corner-radius`, `shadow-strength`, and the theme keys land on the **zz-ui theme** rather than being read
 per-frame by a renderer: `zz::theme::apply_zz_overrides` pushes them onto the `Theme` global, and
 every widget already reads from there, so no component is plumbed individually. Because the preset
 and overrides are reapplied on every theme rebuild, they survive a light/dark switch, the same
@@ -519,7 +520,7 @@ always-live inactive-opacity factor.
 
 | Page | Groups |
 | --- | --- |
-| Interface | **Theme** (`theme-mode` as three drawn window previews, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Status bar** (`status-show-session`, `status-badges`, `status-align`, `status-agents`, `status-host`, `status-update`, `status-clock`) · **Tweaks** (`animations`, `widget-corner-radius`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
+| Interface | **Theme** (`theme-mode` as three drawn window previews, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Status bar** (`status-show-session`, `status-badges`, `status-align`, `status-agents`, `status-host`, `status-update`, `status-clock`) · **Tweaks** (`animations`, `widget-corner-radius`, `shadow-strength`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
 | Browser | **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
 | Panes | **Layout** (`pane-gaps`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
@@ -584,6 +585,11 @@ import stores concrete colors) and requesting a daemon reload. The button is dis
 exists, and its row names the path that will be read. The one-time first-run prompt
 (`crates/zz/src/config/import_prompt.rs`, marker file `<data-dir>/zz/import-prompted`) retains the
 combined Ghostty-and-tmux import.
+
+Shadow strength appears in Interface's Tweaks group beside Widget corner radius. The numeric control
+shows 0–100%, steps by five percentage points, and stores a 0–1 factor. Valid edits save as they are
+typed; partial or invalid values stay in the field until Enter or blur restores the effective value.
+Reset removes the override and restores 100% through the normal config watcher.
 
 Structured control callbacks, including Terminal, only write `zz/config`; they never mutate the
 GPUI config global directly. Multiplexer writes `zz/mux.conf` and requests a daemon reload. The

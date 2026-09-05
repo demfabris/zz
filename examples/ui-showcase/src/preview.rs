@@ -53,6 +53,7 @@ pub(crate) struct PreviewOptions {
     pub blur: bool,
     pub macos: bool,
     pub radius: f32,
+    pub shadow_strength: f32,
     pub pane_margin: f32,
     pub pane_radius: f32,
     pub pane_border: f32,
@@ -76,6 +77,7 @@ impl Default for PreviewOptions {
             blur: false,
             macos: cfg!(target_os = "macos"),
             radius: 6.0,
+            shadow_strength: 1.0,
             pane_margin: 6.0,
             pane_radius: 13.5,
             pane_border: 0.5,
@@ -117,6 +119,7 @@ impl PreviewOptions {
             (&mut self.pane_radius, 32.0, 13.5),
             (&mut self.pane_border, 8.0, 0.5),
             (&mut self.inactive_opacity, 1.0, 0.7),
+            (&mut self.shadow_strength, 1.0, 1.0),
         ] {
             *value = if value.is_finite() {
                 value.clamp(0.0, maximum)

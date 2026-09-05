@@ -39,6 +39,7 @@ fn launch(cx: &mut App, mut options: PreviewOptions, fonts: Vec<std::borrow::Cow
         theme.mono_font_family = options.mono_font.clone().into();
     }
     theme.radius = gpui::px(options.radius);
+    theme.shadow_strength = options.shadow_strength;
     cx.set_global(zz_ui::UiZoom(options.zoom));
     cx.set_global(options.clone());
 

@@ -10,7 +10,7 @@ async function start() {
     const options = { scene: "workspace", width: 1200, height: 760, dark: true, zoom: 1, sidebar: true, gaps: false, blur: false,
       radius: 6, macos: navigator.platform.startsWith("Mac"), ...saved };
     for (const key of ["scene", "settings_section"]) if (query.has(key)) options[key] = query.get(key);
-    for (const key of ["width", "height", "zoom", "radius", "pane_margin", "pane_radius", "pane_border", "inactive_opacity"]) if (query.has(key)) options[key] = Number(query.get(key));
+    for (const key of ["width", "height", "zoom", "radius", "shadow_strength", "pane_margin", "pane_radius", "pane_border", "inactive_opacity"]) if (query.has(key)) options[key] = Number(query.get(key));
     for (const key of ["dark", "sidebar", "gaps", "macos", "blur"]) if (query.has(key)) options[key] = query.get(key) === "true";
     if (query.has("chrome_colors")) {
       try { options.chrome_colors = JSON.parse(query.get("chrome_colors")); } catch {}

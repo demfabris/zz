@@ -63,6 +63,7 @@ const DEFAULT_PANE_MARGIN: f32 = 6.0;
 const DEFAULT_PANE_BORDER_WIDTH: f32 = 0.5;
 // The zz-ui theme's own default radius, restated here because the theme now reads it from here.
 const DEFAULT_WIDGET_CORNER_RADIUS: f32 = 6.0;
+const DEFAULT_SHADOW_STRENGTH: f32 = 1.0;
 const DEFAULT_USE_SYSTEM_TITLEBAR: bool = false;
 const DEFAULT_WINDOW_BACKGROUND_BLUR: bool = false;
 const DEFAULT_ANIMATIONS: bool = true;
@@ -147,6 +148,7 @@ pub enum ConfigKey {
     PaneMargin,
     PaneBorderWidth,
     WidgetCornerRadius,
+    ShadowStrength,
     EditorFontSize,
     EditorLineNumbers,
     EditorRelativeLineNumbers,
@@ -188,6 +190,7 @@ impl ConfigKey {
             Self::PaneMargin => "pane-margin",
             Self::PaneBorderWidth => "pane-border-width",
             Self::WidgetCornerRadius => "widget-corner-radius",
+            Self::ShadowStrength => "shadow-strength",
             Self::EditorFontSize => "editor-font-size",
             Self::EditorLineNumbers => "editor-line-numbers",
             Self::EditorRelativeLineNumbers => "editor-relative-line-numbers",
@@ -229,6 +232,7 @@ impl ConfigKey {
             "pane-margin" => Some(Self::PaneMargin),
             "pane-border-width" => Some(Self::PaneBorderWidth),
             "widget-corner-radius" => Some(Self::WidgetCornerRadius),
+            "shadow-strength" => Some(Self::ShadowStrength),
             "editor-font-size" => Some(Self::EditorFontSize),
             "editor-line-numbers" => Some(Self::EditorLineNumbers),
             "editor-relative-line-numbers" => Some(Self::EditorRelativeLineNumbers),
@@ -255,6 +259,7 @@ impl ConfigKey {
             Self::PaneCornerRadius => Some((0.0, MAX_PANE_CORNER_RADIUS)),
             Self::PaneBorderWidth => Some((0.0, MAX_PANE_BORDER_WIDTH)),
             Self::WidgetCornerRadius => Some((0.0, MAX_WIDGET_CORNER_RADIUS)),
+            Self::ShadowStrength => Some((0.0, 1.0)),
             Self::WindowCornerRadius => Some((0.0, MAX_WINDOW_CORNER_RADIUS)),
             Self::EditorFontSize => Some((MIN_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE)),
             Self::UseSystemTitlebar
@@ -357,6 +362,7 @@ pub struct AppConfig {
     pub pane_margin: ConfigValue<f32>,
     pub pane_border_width: ConfigValue<f32>,
     pub widget_corner_radius: ConfigValue<f32>,
+    pub shadow_strength: ConfigValue<f32>,
     pub editor_font_size: ConfigValue<f32>,
     pub editor_line_numbers: ConfigValue<bool>,
     pub editor_relative_line_numbers: ConfigValue<bool>,
@@ -401,6 +407,7 @@ impl Default for AppConfig {
             pane_margin: ConfigValue::from_default(DEFAULT_PANE_MARGIN),
             pane_border_width: ConfigValue::from_default(DEFAULT_PANE_BORDER_WIDTH),
             widget_corner_radius: ConfigValue::from_default(DEFAULT_WIDGET_CORNER_RADIUS),
+            shadow_strength: ConfigValue::from_default(DEFAULT_SHADOW_STRENGTH),
             editor_font_size: ConfigValue::from_default(DEFAULT_EDITOR_FONT_SIZE),
             editor_line_numbers: ConfigValue::from_default(DEFAULT_EDITOR_LINE_NUMBERS),
             editor_relative_line_numbers: ConfigValue::from_default(
@@ -447,6 +454,7 @@ impl AppConfig {
             | ConfigKey::PaneMargin
             | ConfigKey::PaneBorderWidth
             | ConfigKey::WidgetCornerRadius
+            | ConfigKey::ShadowStrength
             | ConfigKey::EditorFontSize
             | ConfigKey::BrowserElementSelectorHotkey
             | ConfigKey::BrowserSearchProvider
@@ -779,6 +787,10 @@ pub(crate) fn pane_border_width(cx: &App) -> Pixels {
 /// The corner every widget turns. `zz::theme` pushes it onto the zz-ui theme.
 pub(crate) fn widget_corner_radius(cx: &App) -> Pixels {
     px(resolved_config(cx).widget_corner_radius.value)
+}
+
+pub(crate) fn shadow_strength(cx: &App) -> f32 {
+    resolved_config(cx).shadow_strength.value
 }
 
 /// Editor pane type size. The family is not a knob: the editor inherits the
@@ -1497,6 +1509,7 @@ fn parse_config(source: &str) -> ParsedConfig {
             ConfigKey::PaneMargin => &mut parsed.config.pane_margin,
             ConfigKey::PaneBorderWidth => &mut parsed.config.pane_border_width,
             ConfigKey::WidgetCornerRadius => &mut parsed.config.widget_corner_radius,
+            ConfigKey::ShadowStrength => &mut parsed.config.shadow_strength,
             ConfigKey::EditorFontSize => &mut parsed.config.editor_font_size,
             ConfigKey::UseSystemTitlebar
             | ConfigKey::WindowBackgroundBlur
@@ -3814,6 +3827,54 @@ mod tests {
 
         let parsed = parse_config("widget-corner-radius = 900\n");
         assert_eq!(parsed.diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn shadow_strength_defaults_to_full_and_validates_finite_factors() {
+        let default = parse_config("").config.shadow_strength;
+        assert_f32_eq(default.value, 1.0);
+        assert_eq!(default.provenance, ConfigProvenance::Default);
+        for (source, expected) in [("0", 0.0), ("0.35", 0.35), ("1", 1.0)] {
+            let parsed = parse_config(&format!("shadow-strength = {source}\n"));
+            assert!(parsed.diagnostics.is_empty());
+            assert_f32_eq(parsed.config.shadow_strength.value, expected);
+            assert_eq!(
+                parsed.config.shadow_strength.provenance,
+                ConfigProvenance::Override
+            );
+        }
+        for value in ["-0.01", "1.01", "NaN", "inf", "nope"] {
+            let parsed = parse_config(&format!("shadow-strength = {value}\n"));
+            assert_eq!(parsed.diagnostics.len(), 1, "{value}");
+            assert_f32_eq(parsed.config.shadow_strength.value, 1.0);
+        }
+    }
+
+    #[gpui::test]
+    fn shadow_strength_writes_reload_the_theme_and_reset_to_full(cx: &mut gpui::TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(CONFIG_FILE_NAME);
+        cx.update(zz_ui::init);
+
+        for (value, expected, provenance) in [
+            (Some("0.5"), 0.5, ConfigProvenance::Override),
+            (Some("0"), 0.0, ConfigProvenance::Override),
+            (None, 1.0, ConfigProvenance::Default),
+        ] {
+            write_config_edit_at(&path, ConfigKey::ShadowStrength.as_str(), value)
+                .expect("write shadow strength");
+            assert!(
+                !write_config_edit_at(&path, ConfigKey::ShadowStrength.as_str(), value)
+                    .expect("unchanged shadow strength is not rewritten")
+            );
+            cx.update(|cx| {
+                install_config(Some(&path), Some(load_config(&path)), cx);
+                crate::theme::refresh_current_theme(cx);
+                assert_f32_eq(shadow_strength(cx), expected);
+                assert_f32_eq(zz_ui::Theme::global(cx).shadow_strength, expected);
+                assert_eq!(resolved_config(cx).shadow_strength.provenance, provenance);
+            });
+        }
     }
 
     #[test]

@@ -42,7 +42,7 @@ app and the TUI, which contain no chooser key maps at all.
 | --- | --- | --- |
 | `Binding` | `{ commands: Vec<CommandInvocation>, repeat: bool, note: Option<String> }` | What a key runs; `repeat` keeps the prefix table active (tmux `-r`); `note` is a `-N` description. |
 | `KeyTables` | `{ prefix: String, prefix2: Option<String>, tables: BTreeMap<String, BTreeMap<String, Binding>> }` | Named tables; default `prefix` is `"C-b"`, `prefix2` defaults unset. |
-| `KeyEngine` | `{ table, pending, repeat_count, repeat_deadline, prefix_deadline, last_repeat_key }` | Per-client mode: `None` = the effective root table, `Some("prefix")` after prefix, `pending` = awaiting a jump target key, `repeat_count` = buffered vi digits, and the deadline/key fields implement prefix and repeat timing. |
+| `KeyEngine` | `{ table, mode_table, pending, repeat_count, repeat_deadline, prefix_deadline, last_repeat_key }` | Per-client mode: `None` = the effective root table, `Some("prefix")` after prefix, `pending` = awaiting a jump target key, `repeat_count` = buffered vi digits, and the deadline/key fields implement prefix and repeat timing. |
 | `KeyDecision` | `Pass` \| `Prefix` \| `Ignore` \| `Commands(Vec<CommandInvocation>)` | Result of one keypress. |
 
 # Root vs prefix tables and default prefix

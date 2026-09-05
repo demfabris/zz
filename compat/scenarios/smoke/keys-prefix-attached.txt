@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/keys-contract.sh ~/keys-contract.sh
+stage: fixtures/keys-contract.py ~/keys-contract.py
+out: set-environment -gu KEYS_CONTRACT
+run-shell 'sh ~/keys-contract.sh'
+out: show-environment -g KEYS_CONTRACT

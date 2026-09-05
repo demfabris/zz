@@ -52,15 +52,26 @@ impl Default for KeyTables {
         };
         for (key, command) in [
             ("c", "new-window"),
+            ("d", "detach-client"),
+            ("PPage", "copy-mode -u"),
+            ("(", "switch-client -p"),
+            (")", "switch-client -n"),
+            ("L", "switch-client -l"),
+            ("m", "select-pane -m"),
+            ("M", "select-pane -M"),
+            ("i", "display-message"),
+            ("~", "show-messages"),
+            ("#", "list-buffers"),
+            ("-", "delete-buffer"),
+            ("M-n", "next-window -a"),
+            ("M-p", "previous-window -a"),
             ("%", "split-picker -h"),
             ("\"", "split-picker -v"),
             ("!", "break-pane"),
-            ("x", "kill-pane"),
-            ("&", "kill-window"),
             ("n", "next-window"),
             ("p", "previous-window"),
             ("l", "last-window"),
-            ("]", "paste-buffer"),
+            ("]", "paste-buffer -p"),
             ("o", "select-pane -t:.+"),
             ("C-o", "rotate-window"),
             ("M-o", "rotate-window -D"),
@@ -74,7 +85,7 @@ impl Default for KeyTables {
             ("M-6", "select-layout main-horizontal-mirrored"),
             ("M-7", "select-layout main-vertical-mirrored"),
             ("[", "copy-mode"),
-            ("?", "list-keys"),
+            ("?", "list-keys -N"),
             ("=", "choose-buffer -Z"),
             ("e", "send-last-output"),
             ("s", "focus-sidebar"),
@@ -94,6 +105,40 @@ impl Default for KeyTables {
                 key,
                 Binding {
                     commands: vec![CommandInvocation::new(name, parts)],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+        for (key, prompt, command) in [
+            ("x", "kill-pane #P? (y/n)", "kill-pane"),
+            ("&", "kill-window #W? (y/n)", "kill-window"),
+        ] {
+            tables.bind(
+                "prefix",
+                key,
+                Binding {
+                    commands: vec![CommandInvocation::new(
+                        "confirm-before",
+                        ["-p", prompt, command],
+                    )],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+        for (key, args, block) in [
+            ("f", vec![r#"{ find-window -Z "%%" }"#], 0),
+            (".", vec![r#"{ move-window -t "%%" }"#], 0),
+            ("'", vec!["-p", "index", r#"{ select-window -t ":%%" }"#], 2),
+        ] {
+            tables.bind(
+                "prefix",
+                key,
+                Binding {
+                    commands: vec![
+                        CommandInvocation::new("command-prompt", args).with_command_blocks([block]),
+                    ],
                     repeat: false,
                     note: None,
                 },
@@ -1751,7 +1796,7 @@ mod tests {
         );
         assert_eq!(
             tables.get("prefix", "?").unwrap().commands,
-            vec![CommandInvocation::new("list-keys", [] as [&str; 0])]
+            vec![CommandInvocation::new("list-keys", ["-N"])]
         );
         assert_eq!(
             tables.get("prefix", "=").unwrap().commands,

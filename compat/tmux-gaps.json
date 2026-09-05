@@ -665,7 +665,6 @@
         "binding:prefix:\"",
         "binding:prefix:$",
         "binding:prefix:%",
-        "binding:prefix:&",
         "binding:prefix:,",
         "binding:prefix:0",
         "binding:prefix:1",
@@ -677,25 +676,16 @@
         "binding:prefix:7",
         "binding:prefix:8",
         "binding:prefix:9",
-        "binding:prefix:?",
         "binding:prefix:C-Down",
         "binding:prefix:C-Left",
         "binding:prefix:C-Right",
         "binding:prefix:C-Up",
         "binding:prefix:M-Left",
         "binding:prefix:M-Up",
-        "binding:prefix:]",
         "binding:prefix:r",
         "binding:prefix:s",
         "binding:prefix:w",
-        "binding:prefix:x",
-        "key:prefix:#",
-        "key:prefix:'",
-        "key:prefix:(",
-        "key:prefix:)",
         "key:prefix:*",
-        "key:prefix:-",
-        "key:prefix:.",
         "key:prefix:/",
         "key:prefix:<",
         "key:prefix:>",
@@ -705,35 +695,28 @@
         "key:prefix:C-z",
         "key:prefix:D",
         "key:prefix:DC",
-        "key:prefix:L",
-        "key:prefix:M",
-        "key:prefix:M-n",
-        "key:prefix:M-p",
-        "key:prefix:PPage",
         "key:prefix:S-Down",
         "key:prefix:S-Left",
         "key:prefix:S-Right",
         "key:prefix:S-Up",
         "key:prefix:Tab",
-        "key:prefix:d",
-        "key:prefix:f",
         "key:prefix:g",
-        "key:prefix:i",
-        "key:prefix:m",
         "key:prefix:t",
-        "key:prefix:~",
         "semantic:default-prefix-remaps"
       ],
       "evidence": [
         "resource:knowledge/tmux/key-tables.md",
         "resource:crates/zz-protocol/src/key.rs",
-        "file:compat/attached-client.sh"
+        "file:compat/attached-client.sh",
+        "scenario:compat/scenarios/smoke/keys-prefix-stock.txt",
+        "scenario:compat/scenarios/smoke/keys-prefix-attached.txt"
       ],
       "acceptance": [
-        "The native defaults stay documented; imported tmux bindings retain exact tmux command semantics."
+        "Native replacement and omission keys are enumerated in the reason; imported tmux bindings retain their command semantics.",
+        "The former blanket acceptance \"The native defaults stay documented; imported tmux bindings retain exact tmux command semantics.\" no longer covers x & ] ? d PPage f . ( ) L m M i ~ # - apostrophe M-n M-p; their pin-derived command and attached behavior contract moved to keys.prefix-stock-commands."
       ],
       "depends_on": [],
-      "reason": "Picker and sidebar bindings are part of the zz GUI experience."
+      "reason": "The old clause \"Picker and sidebar bindings are part of the zz GUI experience.\" covered 33 missing stock keys and four changed commands as well as genuine native replacements. Pinned d77c9dc6 key-bindings.c and smoke/keys-prefix-stock measure x/& as confirm-before, ] as paste-buffer -p, ? as list-keys -N, d as detach-client, and PPage f . ( ) L m M i ~ # - apostrophe M-n M-p as stock commands. Those 20 keys left this group for keys.prefix-stock-commands (the 16 missing key:prefix items were promoted to binding:prefix contracts); the new stance adopts their exact stored commands and proves x, ], d with attached clients. Native replacements retained: % and double-quote open split-picker; s and w focus-sidebar; r reload-config; e send-last-output remains in keys.native-defaults. Native omissions retained: t (clock UI), D (client chooser), C (option editor), C-z (desktop suspension), Tab/BTab (window/session switcher), */@ (floating pane creation/toggle), g (floating pane navigation), </> (floating-pane size) defer to native desktop chrome rather than seeding unsupported tmux modes. / uses native binding help; DC and S-Up/S-Down/S-Left/S-Right use native viewport geometry rather than tmux client panning. Existing text-only differences for $/, and 0-9 and tiled-only resize variants C-Up/C-Down/C-Left/C-Right/M-Up/M-Left remain explicitly tracked here; this batch does not claim these strings match. Picker/sidebar extension keys remain owned by keys.native-defaults. decided 2026-09-05 by the orchestrator under fabrico's instruction to continue the campaign past the frozen scope; reversible."
     },
     {
       "id": "keys.move-table",
@@ -3280,6 +3263,18 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Literal DEL, caret plus DEL, and textual 0x7f now retain distinct key identities and pinned rendering across bind, list, filter, unbind, prefix, prefix2, and backspace. Raw DEL renders as C-?, caret plus DEL renders as C-C-?, and textual 0x7f renders as a raw DEL byte. send-prefix and configured BSpace emit one literal DEL for raw and textual-hex values while the caret-modified value emits nothing. Focused mux tests and live PTY capture cover both transport paths. The strict 40-step differential completes 196 fixture checks per engine with no differing channel."
+    },
+    {
+      "id": "keys.prefix-stock-commands",
+      "title": "Adopt stock prefix commands outside native chrome",
+      "closed_on": "2026-09-05",
+      "evidence": [
+        "resource:crates/zz-protocol/src/key.rs",
+        "scenario:compat/scenarios/smoke/keys-prefix-stock.txt",
+        "scenario:compat/scenarios/smoke/keys-prefix-attached.txt",
+        "file:compat/scenarios/smoke/fixtures/keys-contract.py"
+      ],
+      "resolution": "Relocated binding:prefix:&, binding:prefix:?, binding:prefix:], binding:prefix:x, key:prefix:#, key:prefix:', key:prefix:(, key:prefix:), key:prefix:-, key:prefix:., key:prefix:L, key:prefix:M, key:prefix:M-n, key:prefix:M-p, key:prefix:PPage, key:prefix:d, key:prefix:f, key:prefix:i, key:prefix:m, key:prefix:~ from keys.default-prefix, promoting missing keys to binding:prefix contracts. The old reason \"Picker and sidebar bindings are part of the zz GUI experience.\" was refuted by pinned d77c9dc6 key-bindings.c: x/& confirm before killing, ] requests bracketed paste, ? lists notes, d detaches, and the other 15 adopted keys have ordinary stock commands. Adopt exact defaults for x, &, ], ?, d, PPage, f, ., (, ), L, m, M, i, ~, #, -, ', M-n, M-p; decided 2026-09-05 by the orchestrator under fabrico's instruction to continue the campaign past the frozen scope; reversible. smoke/keys-prefix-stock compares all 20 stored command strings and repeat bits, including the pin-rendered nested command blocks. smoke/keys-prefix-attached drives both real clients with prefix x, n, prefix x, y, prefix ], and prefix d: the rendered prompt is kill-pane #P? (y/n), n keeps both panes, y removes the target pane, the recorder receives ESC[200~KEYS_PASTE ESC[201~ (without the explanatory space), and detach leaves no client and exits 0. All 20 binding contracts are proven and removed; native remainder is enumerated in keys.default-prefix."
     },
     {
       "id": "keys.strict-validation",

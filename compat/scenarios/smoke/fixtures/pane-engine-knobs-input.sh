@@ -42,6 +42,9 @@ cleanup() {
     cleanup_status=$?
     trap - EXIT
     set +e
+    if [ "$cleanup_status" -ne 0 ]; then
+        sed "s/^/pane-engine-knobs-input-$side: /" "$work/failures"
+    fi
     main_client kill-session -t "=$session" >/dev/null 2>&1
     main_client set-option -su backspace >/dev/null 2>&1
     exit "$cleanup_status"
@@ -65,6 +68,19 @@ await_line() {
     return 1
 }
 
+await_raw_ready() {
+    attempt=0
+    while [ "$attempt" -lt 400 ]; do
+        if [ -f "$1" ]; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.05
+    done
+    record_failure "raw child did not become ready within 20 seconds: $1"
+    return 1
+}
+
 named() {
     case "$1" in
     "$2") echo renamed ;;
@@ -72,10 +88,11 @@ named() {
     esac
 }
 
-raw="sh -c 'stty -echo -icanon min 1 time 0; exec cat'"
-visible="sh -c 'stty -echo -icanon min 1 time 0; exec cat -v'"
+raw="sh -c 'stty -echo -icanon min 1 time 0 && : > \"$work/raw.ready\" && exec cat'"
+visible="sh -c 'stty -echo -icanon min 1 time 0 && : > \"$work/visible.ready\" && exec cat -v'"
 
 main_client new-session -d -s "$session" -n renamer -x 40 -y 6 "$raw"
+await_raw_ready "$work/raw.ready"
 rename_pane="$(pane_of "=$session:renamer")"
 main_client set-option -w -t "$rename_pane" automatic-rename on
 
@@ -171,6 +188,7 @@ main_client set-hook -gu window-renamed
 
 check_equal backspace-defaults-to-c-question "C-?" "$(main_client show-options -s -v backspace)"
 main_client new-window -t "=$session" -n bspace "$visible"
+await_raw_ready "$work/visible.ready"
 bspace_pane="$(pane_of "=$session:bspace")"
 main_client send-keys -t "$bspace_pane" BSpace
 await_line "$bspace_pane" '\^?'
@@ -181,7 +199,6 @@ await_line "$bspace_pane" '\^H'
 main_client set-option -s backspace C-w
 main_client send-keys -t "$bspace_pane" BSpace
 await_line "$bspace_pane" '\^W'
-sleep 0.3
 check_equal backspace-writes-one-byte-per-key '^?^H^W' \
     "$(main_client capture-pane -p -t "$bspace_pane" | tr -d ' \n')"
 
@@ -210,7 +227,9 @@ check_equal verase-follows-the-default 'ERASE[^?]' \
 # input_key writes the option's own byte for an unmodified BSpace even when
 # VERASE could not take it.
 main_client set-option -s backspace 0x41
+rm -f "$work/visible.ready"
 main_client new-window -t "=$session" -n bsliteral "$visible"
+await_raw_ready "$work/visible.ready"
 literal_pane="$(pane_of "=$session:bsliteral")"
 main_client send-keys -t "$literal_pane" BSpace
 await_line "$literal_pane" 'A'

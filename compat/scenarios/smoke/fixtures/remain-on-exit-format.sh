@@ -111,7 +111,29 @@ check_equal status-pane-is-dead 1 "$(main_client display-message -p -t "=$sessio
 
 main_client new-window -t "=$session" -n wsignal 'sh -c "kill -TERM $$"'
 await_dead wsignal || { echo "remain-on-exit-format-$side: wsignal"; exit 0; }
-check_screen signal-notice-is-drawn 'DEADFMT[][term]' wsignal
+pin_signal=$(python3 - <<'SIGNAME'
+import ctypes
+import signal
+
+signo = int(signal.SIGTERM)
+try:
+    names = (ctypes.c_char_p * (signo + 1)).in_dll(ctypes.CDLL(None), "sys_signame")
+except ValueError:
+    print(signo)
+else:
+    print(names[signo].decode("ascii"))
+SIGNAME
+)
+expected_signal="$pin_signal"
+if [ "$pin_signal" != term ]; then
+    printf 'KNOWN DIVERGENCE formats.dead-signal-platform-name: zz=term pin=%s\n' "$pin_signal"
+    if [ "$side" = zz ]; then
+        expected_signal=term
+    fi
+fi
+check_equal signal-spelling-with-known-platform-divergence "$expected_signal" \
+    "$(main_client display-message -p -t "=$session:wsignal" '#{pane_dead_signal}')"
+check_screen signal-notice-is-drawn "DEADFMT[][$expected_signal]" wsignal
 
 main_client new-window -t "=$session" -n wzero 'sh -c "exit 0"'
 await_dead wzero || { echo "remain-on-exit-format-$side: wzero"; exit 0; }
@@ -198,7 +220,7 @@ await_gone woff || { echo "remain-on-exit-format-$side: woff"; exit 0; }
 check_equal off-closes-the-pane 0 \
     "$(main_client list-windows -t "=$session" -F '#{window_name}' | grep -c '^woff$' || true)"
 
-if [ "$check_count" -ne 13 ]; then
+if [ "$check_count" -ne 14 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then

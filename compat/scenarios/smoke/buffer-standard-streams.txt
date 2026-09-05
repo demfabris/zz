@@ -1,0 +1,6 @@
+corpus: none
+# Pinned d77c9dc6 cmd-load-buffer.c reads the invoking client's stdin;
+# cmd-save-buffer.c writes stdout verbatim, including with -a.
+stage: fixtures/buffer-standard-streams.py ~/buffer-standard-streams.py
+run-shell 'python3 ~/buffer-standard-streams.py'
+out: show-environment -g ZZ_BUFFER_STREAMS

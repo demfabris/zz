@@ -13138,10 +13138,26 @@ impl Shared {
         if handled_flags && !parsed.has('S') {
             return Ok(Execution::default());
         }
-        Err(
-            ServerError::UnsupportedCommand("refresh-client interactive behavior".to_owned())
-                .into(),
-        )
+        let startup_ready = *self.startup_ready.lock();
+        let request = {
+            let mut inner = self.inner.lock();
+            inner.engine.set_format_now(unix_timestamp());
+            status_request(
+                &inner,
+                target,
+                &inner.engine.state.snapshot(),
+                Arc::new(inner.engine.format_option_snapshot()),
+                format_hook_facts(&inner),
+                startup_ready,
+            )
+        };
+        let status = {
+            let mut renderer = self.status.lock();
+            renderer.forget(target);
+            renderer.render_initial(&request)
+        };
+        self.publish_to_client(target, EventPayload::StatusChanged { status });
+        Ok(Execution::default())
     }
 
     fn display_popup(

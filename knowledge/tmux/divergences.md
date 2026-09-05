@@ -1184,9 +1184,11 @@ nobody intends to drain. `accepted` plus `native` means zz's own surface serves 
   copy, view, and search state is per client, so a pane with two viewers has no single answer.
 - `formats.terminal-cells` (native): the cursor cell, tab stops, and progress state live in the
   terminal worker's VT, and the mux format engine models topology rather than a grid.
-- `formats.terminal-runtime` (native): the 28 VT runtime names keep the pin's inactive or default
-  value, which the [status line reference](/tmux/status-line.md) already records as default state
-  rather than support.
+- `formats.terminal-runtime` (native): 24 VT runtime names retain the pin's inactive or default
+  value. `history_size`, `cursor_x`, `cursor_y`, and `alternate_on` moved to
+  `formats.terminal-facts` on 2026-09-05 for tmux-resurrect's scrollback capture. The daemon reads
+  those four from bounded worker metadata; the [status line reference](/tmux/status-line.md)
+  lists the remaining defaults.
 - `messages.tty-model` (never): `show-messages -T` dumps the server's per-terminal terminfo
   capability table and `-J` its internal job fds; zz's daemon drives no client terminal through
   terminfo and publishes no job registry, so both reports describe a server zz is not.

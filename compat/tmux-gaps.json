@@ -498,7 +498,6 @@
       ],
       "owner": "terminal",
       "items": [
-        "format:alternate_on",
         "format:alternate_saved_x",
         "format:alternate_saved_y",
         "format:bracket_paste_flag",
@@ -506,11 +505,8 @@
         "format:cursor_flag",
         "format:cursor_shape",
         "format:cursor_very_visible",
-        "format:cursor_x",
-        "format:cursor_y",
         "format:history_all_bytes",
         "format:history_bytes",
-        "format:history_size",
         "format:insert_flag",
         "format:keypad_cursor_flag",
         "format:keypad_flag",
@@ -530,14 +526,15 @@
       "evidence": [
         "resource:crates/zz-mux/src/formats.rs",
         "resource:knowledge/tmux/divergences.md",
-        "resource:knowledge/tmux/status-line.md"
+        "resource:knowledge/tmux/status-line.md",
+        "scenario:compat/scenarios/smoke/terminal-facts.txt"
       ],
       "acceptance": [
-        "The mux keeps publishing the pin's inactive or default value for each of the 28 names, and the divergence matrix keeps them listed as unbacked rather than supported.",
+        "The mux keeps publishing the pin's inactive or default value for each of the 24 names, and the divergence matrix keeps them listed as unbacked rather than supported.",
         "Any later backing arrives through one bounded terminal-fact channel that does not block PTY drain."
       ],
       "depends_on": [],
-      "reason": "These 28 names report live VT state the pin reads straight from its own screen: cursor position and shape, alternate screen and saved cursor, DEC private modes, mouse reporting modes, history byte counts, scroll region, and graphics support. zz keeps that state in the terminal worker and the clients that draw it, so the mux publishes the pin's inactive or default value for each name, with `cursor_flag` and `wrap_flag` enabled and the rest zero, which the status-line reference already records as pinned default state rather than support. Zero is also the true answer for `sixel_support`, which zz does not implement. Reopen through the same bounded terminal-fact channel `formats.terminal-cells` names, once a workload asks for live VT facts in formats."
+      "reason": "These 28 names report live VT state the pin reads straight from its own screen: cursor position and shape, alternate screen and saved cursor, DEC private modes, mouse reporting modes, history byte counts, scroll region, and graphics support. zz keeps that state in the terminal worker and the clients that draw it, so the mux publishes the pin's inactive or default value for each name, with `cursor_flag` and `wrap_flag` enabled and the rest zero, which the status-line reference already records as pinned default state rather than support. Zero is also the true answer for `sixel_support`, which zz does not implement. Reopen through the same bounded terminal-fact channel `formats.terminal-cells` names, once a workload asks for live VT facts in formats. Relocated 2026-09-05: format:history_size, format:cursor_x, format:cursor_y and format:alternate_on move to formats.terminal-facts. The old clause was 'The mux keeps publishing the pin's inactive or default value for each of the 28 names', and the reopen condition was 'once a workload asks for live VT facts in formats'. tmux-resurrect scripts/save.sh reads history_size and cursor_y to size capture-pane -epJ -S; returning zero silently omits scrollback. smoke/terminal-facts measures pinned d77c9dc6 in a prompt-free 80x24 pane after seq 1 100: history_size/cursor_x/cursor_y/alternate_on = 77 0 23 0, then 77 0 23 1 on alternate entry, 77 0 23 0 on exit and 77 80 23 0 at pending wrap. A combined output-plus-alternate-entry chunk retains the same 77 history rows. The new stance adopts those four through bounded worker metadata and leaves exactly 24 default-backed names here; decided 2026-09-05 by the orchestrator under fabrico's instruction to continue the campaign past the frozen scope; reversible."
     },
     {
       "id": "hooks.shutdown-window-unlinked-order",
@@ -3053,6 +3050,19 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "The direct `SessionActive` backing now preserves tmux's three states: empty without a target session or format client, `1` when the selected format client is attached to the target session, and `0` when it is unattached or attached elsewhere. Command execution keeps the raw invoking client separate from the current or explicitly selected target client because tmux producers use both within the same command. Clientless lists, filters, chooser rows, and `list-commands` remain empty; target-aware command formats, deferred pane output, shell callbacks, buffer paths, capture boundaries, popup and menu text, `list-keys`, status rows, Control subscriptions, and display-panes labels receive their pinned client provenance. Fresh `new-session -c` keeps its independent session-path and spawn-path expansions, while non-detached `new-session -P` formats after attachment. Focused mux and daemon tests cover every reachable empty, false, and true branch, and the differential plus attached-client fixtures cover clientless and live attached paths. No wire protocol or snapshot field changed."
+    },
+    {
+      "id": "formats.terminal-facts",
+      "title": "Publish live history cursor and alternate-screen facts",
+      "closed_on": "2026-09-05",
+      "evidence": [
+        "scenario:compat/scenarios/smoke/terminal-facts.txt",
+        "file:compat/scenarios/smoke/fixtures/terminal-facts.py",
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:crates/zz-daemon/src/status.rs",
+        "resource:crates/zz-mux/src/formats.rs"
+      ],
+      "resolution": "Closed format:history_size, format:cursor_x, format:cursor_y and format:alternate_on, relocated from formats.terminal-runtime. Pinned d77c9dc6 format.c reads wp->base.grid->hsize, cx, cy and saved_grid. smoke/terminal-facts asserts five exact tuples: 77 0 23 0 after seq 1 100 in a prompt-free 80x24 pane, 77 0 23 1 in alternate mode, 77 0 23 0 after exit, 77 80 23 0 at pending wrap, and 77 0 23 1 when output and alternate entry arrive together. TerminalFacts is an in-process Copy value in the existing published worker state, read through daemon format hooks without a worker request or PTY drain wait. The existing CSI filter samples primary history before alternate entry, including split sequences; the terminal unit test covers one-byte, seven-byte and complete chunks plus repeated alternate entry. Pending wrap reports the terminal width. The values follow actual retained worker history, including existing history-limit/cap policy. No wire type changed; protocol remains v98."
     },
     {
       "id": "formats.window-activity-time",

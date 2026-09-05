@@ -269,9 +269,28 @@ struct EngineFilter {
     /// read; `None` once it outgrew the cap and can no longer be parsed.
     osc: Option<Vec<u8>>,
     bar: ProgressBar,
+    primary_history_size: usize,
 }
 
 impl EngineFilter {
+    fn facts(&self, terminal: &Terminal<'_, '_>) -> Result<TerminalFacts, WorkerError> {
+        let alternate_on = terminal.active_screen()? == Screen::Alternate;
+        Ok(TerminalFacts {
+            history_size: if alternate_on {
+                self.primary_history_size
+            } else {
+                terminal.scrollback_rows()?
+            },
+            cursor_x: if terminal.is_cursor_pending_wrap()? {
+                terminal.cols()?
+            } else {
+                terminal.cursor_x()?
+            },
+            cursor_y: terminal.cursor_y()?,
+            alternate_on,
+        })
+    }
+
     fn write(
         &mut self,
         mut bytes: &[u8],
@@ -319,7 +338,13 @@ impl EngineFilter {
                     bytes = &bytes[1..];
                     if byte >= 0x40 {
                         if csi_needs_rewrite(&self.sequence, byte, knobs) {
-                            write_engine_csi(&self.sequence, byte, knobs, terminal);
+                            write_engine_csi(
+                                &self.sequence,
+                                byte,
+                                knobs,
+                                terminal,
+                                &mut self.primary_history_size,
+                            );
                         } else {
                             let mut raw = Vec::with_capacity(self.sequence.len() + 3);
                             raw.extend_from_slice(b"\x1b[");
@@ -428,7 +453,13 @@ impl EngineFilter {
                     let parameters = &bytes[escape + 2..end];
                     if csi_needs_rewrite(parameters, final_byte, knobs) {
                         terminal.vt_write(&bytes[start..escape]);
-                        write_engine_csi(parameters, final_byte, knobs, terminal);
+                        write_engine_csi(
+                            parameters,
+                            final_byte,
+                            knobs,
+                            terminal,
+                            &mut self.primary_history_size,
+                        );
                         start = end + 1;
                     }
                     cursor = end + 1;
@@ -585,11 +616,6 @@ fn parse_osc_9_progress(payload: &[u8]) -> Option<(ProgressBarState, Option<u8>)
     Some((state, Some(u8::try_from(progress).ok()?)))
 }
 
-/// The two sequences the filter ever rewrites, decided from the bytes alone
-/// so that a chunk with neither passes through in one write: a non-private
-/// erase that may cover the whole screen while `scroll-on-clear` is on, and a
-/// private mode switch naming an alternate-screen mode while
-/// `alternate-screen` is off.
 fn csi_needs_rewrite(parameters: &[u8], final_byte: u8, knobs: EngineKnobs) -> bool {
     let private = parameters
         .first()
@@ -599,8 +625,7 @@ fn csi_needs_rewrite(parameters: &[u8], final_byte: u8, knobs: EngineKnobs) -> b
             let first = parameters.split(|byte| *byte == b';').next().unwrap_or(&[]);
             matches!(engine_parameter(first).unwrap_or(0), 0 | 2)
         }
-        b'h' | b'l' if !knobs.alternate_screen && parameters.first() == Some(&b'?') => parameters
-            [1..]
+        b'h' | b'l' if parameters.first() == Some(&b'?') => parameters[1..]
             .split(|byte| *byte == b';')
             .any(|parameter| matches!(engine_parameter(parameter), Some(47 | 1047 | 1049))),
         _ => false,
@@ -617,6 +642,7 @@ fn write_engine_csi(
     final_byte: u8,
     knobs: EngineKnobs,
     terminal: &mut Terminal<'_, '_>,
+    primary_history_size: &mut usize,
 ) {
     let controls = sequence
         .iter()
@@ -635,6 +661,17 @@ fn write_engine_csi(
             .collect::<Vec<u8>>();
         cleaned.as_slice()
     };
+    if final_byte == b'h'
+        && sequence.first() == Some(&b'?')
+        && sequence[1..]
+            .split(|byte| *byte == b';')
+            .any(|parameter| matches!(engine_parameter(parameter), Some(47 | 1047 | 1049)))
+        && terminal
+            .active_screen()
+            .is_ok_and(|screen| screen == Screen::Primary)
+    {
+        *primary_history_size = terminal.scrollback_rows().unwrap_or_default();
+    }
     let private = sequence
         .first()
         .is_some_and(|byte| (0x3c..0x40).contains(byte));
@@ -1174,12 +1211,21 @@ fn terminal_event_channel(
     (sender, events)
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TerminalFacts {
+    pub history_size: usize,
+    pub cursor_x: u16,
+    pub cursor_y: u16,
+    pub alternate_on: bool,
+}
+
 struct PublishedViewports {
     fallback: Arc<TerminalViewport>,
     by_view: HashMap<TerminalViewId, Arc<TerminalViewport>>,
     copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
     frozen: Option<Arc<FrozenHistory>>,
     bar: ProgressBar,
+    facts: TerminalFacts,
 }
 
 impl PublishedViewports {
@@ -1190,6 +1236,7 @@ impl PublishedViewports {
             copy_facts: HashMap::new(),
             frozen: None,
             bar: ProgressBar::default(),
+            facts: TerminalFacts::default(),
         }
     }
 }
@@ -1696,6 +1743,11 @@ impl TerminalSession {
     #[must_use]
     pub fn progress_bar(&self) -> ProgressBar {
         self.latest.read().bar
+    }
+
+    #[must_use]
+    pub fn facts(&self) -> TerminalFacts {
+        self.latest.read().facts
     }
 
     #[must_use]
@@ -3751,6 +3803,10 @@ impl Publisher {
             .store(completion.encode(), Ordering::Release);
     }
 
+    fn set_facts(&self, facts: TerminalFacts) {
+        self.latest.write().facts = facts;
+    }
+
     fn set_progress_bar(&self, bar: ProgressBar) {
         self.latest.write().bar = bar;
     }
@@ -5016,6 +5072,7 @@ fn run_terminal(
     )?);
 
     loop {
+        publisher.set_facts(engine_filter.facts(&terminal)?);
         #[cfg(unix)]
         {
             writer.flush_pending()?;
@@ -6032,6 +6089,7 @@ fn run_terminal(
                 search_worker.cancel(*view_id);
                 complete_view_search(&mut terminal, view)?;
             }
+            publisher.set_facts(engine_filter.facts(&terminal)?);
             let status = exit_status.take().expect("checked above");
             let signal = status.signal().and_then(signal_number);
             publisher.set_completion(TerminalProcessExit {
@@ -6062,6 +6120,7 @@ fn run_terminal(
                         if let Some(text) = text {
                             retained = true;
                             write_dead_notice(&mut terminal, &text)?;
+                            publisher.set_facts(engine_filter.facts(&terminal)?);
                             publish_active_views(
                                 &mut terminal,
                                 publisher,
@@ -13225,6 +13284,67 @@ fn resolve_style_color(value: StyleColor, palette: &[RgbColor; 256]) -> Option<C
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn terminal_facts_keep_primary_history_across_split_alternate_sequences() {
+        let mut bytes = Vec::new();
+        for line in 1..=100 {
+            write!(bytes, "{line}\r\n").expect("terminal output fixture");
+        }
+        bytes.extend_from_slice(b"\x1b[?1049h");
+        for chunk_size in [1, 7, bytes.len()] {
+            let mut terminal = Terminal::new(TerminalOptions {
+                cols: 80,
+                rows: 24,
+                max_scrollback: 2000,
+            })
+            .expect("terminal");
+            let mut filter = EngineFilter::default();
+            let mut renames = Vec::new();
+            let mut bar = None;
+            for chunk in bytes.chunks(chunk_size) {
+                filter.write(
+                    chunk,
+                    EngineKnobs::default(),
+                    &mut terminal,
+                    &mut renames,
+                    &mut bar,
+                );
+            }
+            assert_eq!(
+                filter.facts(&terminal).expect("alternate facts"),
+                TerminalFacts {
+                    history_size: 77,
+                    cursor_x: 0,
+                    cursor_y: 23,
+                    alternate_on: true,
+                }
+            );
+            filter.write(
+                b"\x1b[?1049h\x1b[?1049l",
+                EngineKnobs::default(),
+                &mut terminal,
+                &mut renames,
+                &mut bar,
+            );
+            filter.write(
+                &[b'x'; 80],
+                EngineKnobs::default(),
+                &mut terminal,
+                &mut renames,
+                &mut bar,
+            );
+            assert_eq!(
+                filter.facts(&terminal).expect("primary facts"),
+                TerminalFacts {
+                    history_size: 77,
+                    cursor_x: 80,
+                    cursor_y: 23,
+                    alternate_on: false,
+                }
+            );
+        }
+    }
+
     fn engine_filter_screen(knobs: EngineKnobs, chunks: &[&[u8]]) -> (String, Vec<String>) {
         let (text, renames, _) = engine_filter_run(knobs, chunks);
         (text, renames)

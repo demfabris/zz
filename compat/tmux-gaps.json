@@ -3024,9 +3024,11 @@
         "file:compat/scenarios/smoke/fixtures/terminal-facts.py",
         "resource:crates/zz-terminal/src/session.rs",
         "resource:crates/zz-daemon/src/status.rs",
-        "resource:crates/zz-mux/src/formats.rs"
+        "resource:crates/zz-mux/src/formats.rs",
+        "scenario:compat/scenarios/smoke/resurrect-save.txt",
+        "file:compat/scenarios/smoke/fixtures/resurrect-save.py"
       ],
-      "resolution": "Closed format:history_size, format:cursor_x, format:cursor_y and format:alternate_on, relocated from formats.terminal-runtime. Pinned d77c9dc6 format.c reads wp->base.grid->hsize, cx, cy and saved_grid. smoke/terminal-facts asserts five exact tuples: 77 0 23 0 after seq 1 100 in a prompt-free 80x24 pane, 77 0 23 1 in alternate mode, 77 0 23 0 after exit, 77 80 23 0 at pending wrap, and 77 0 23 1 when output and alternate entry arrive together. TerminalFacts is an in-process Copy value in the existing published worker state, read through daemon format hooks without a worker request or PTY drain wait. The existing CSI filter samples primary history before alternate entry, including split sequences; the terminal unit test covers one-byte, seven-byte and complete chunks plus repeated alternate entry. Pending wrap reports the terminal width. The values follow actual retained worker history, including existing history-limit/cap policy. No wire type changed; protocol remains v98."
+      "resolution": "Closed format:history_size, format:cursor_x, format:cursor_y and format:alternate_on, relocated from formats.terminal-runtime. Pinned d77c9dc6 format.c reads wp->base.grid->hsize, cx, cy and saved_grid. smoke/terminal-facts asserts five exact tuples: 77 0 23 0 after seq 1 100 in a prompt-free 80x24 pane, 77 0 23 1 in alternate mode, 77 0 23 0 after exit, 77 80 23 0 at pending wrap, and 77 0 23 1 when output and alternate entry arrive together. TerminalFacts is an in-process Copy value in the existing published worker state, read through daemon format hooks without a worker request or PTY drain wait. The existing CSI filter samples primary history before alternate entry, including split sequences; the terminal unit test covers one-byte, seven-byte and complete chunks plus repeated alternate entry. Pending wrap reports the terminal width. The values follow actual retained worker history, including existing history-limit/cap policy. No wire type changed; protocol remains v98. The first real tmux-resurrect save fixture also proves the downstream workload retains all 100 numbered lines through the plugin's history-sized capture and archive path, with the complete saved session-bearing pane record matching the pin."
     },
     {
       "id": "formats.window-activity-time",
@@ -3648,6 +3650,17 @@
         "file:compat/scenarios/pane-spawn-style-title-v2.txt"
       ],
       "resolution": "-k and -m are promoted out of the unsupported catalog. Measured on the pin, both write remain-on-exit `key` on the new pane's own option table and touch nothing wider: the window and global scopes stay unset, so a plain sibling split still dies while the flagged pane is retained after a clean or failing child exit. -m additionally stores its argument as that pane's remain-on-exit-format, raw and unexpanded, and -k alone leaves that format unset. Both spellings keep the pin's arity, so a bare -m answers `command split-window: -m expects an argument` and exits 1, and `split-window -?` now prints the pin's usage byte for byte. The retention decision and the key dismissal both reuse the existing paths unchanged: RemainOnExit::Key already retains every exit in retain_exited_pane, and the daemon consults dead_pane_dismisses_on_key only from the key handler, so mouse and paste input cannot dismiss a retained pane while the next key kills it. -W stays loudly unsupported under pane.command-completion; it enters the pin's floating two-phase path and blocks the command queue, which is why no scenario exercises it."
+    },
+    {
+      "id": "plugins.resurrect-save",
+      "title": "Run tmux-resurrect save against live scrollback",
+      "closed_on": "2026-09-05",
+      "evidence": [
+        "scenario:compat/scenarios/smoke/resurrect-save.txt",
+        "file:compat/scenarios/smoke/fixtures/resurrect-save.py",
+        "resource:crates/zz-terminal/src/session.rs"
+      ],
+      "resolution": "The previous plugin corpus gate proved parsing and bindings, not runtime save behavior. This fixture exercises the actual unmodified save_all path; quiet suppresses only the spinner. Ungrouped saves contain pane/window/state records, not a literal session record, so the complete pane row is the session-bearing record under comparison. The final pane row has no PID field; its intermediate pane_pid feeds the plugin process strategy, which is empty for a shell blocked in a builtin read. First measurement on pinned d77c9dc6 produced 100 LF-terminated numbered lines and the same selected pane record; zz retained all 100 lines after formats.terminal-facts but its live capture-pane -epJ emitted CRLF between rows. This mismatch is in the production VT capture formatter and must not be hidden by fixture newline normalization. The harness provides tmux on PATH inside plugin processes and panes; installed zz does not supply that wrapper, per the cycle-15 product decision. Adopting this bounded first plugin runtime proof was decided 2026-09-05 by the orchestrator under fabrico's instruction to continue the campaign past the frozen scope; reversible. Closed semantic:plugin-resurrect-save-runtime: the production live capture path now converts formatter CRLF row separators to LF only for capture-pane -e, matching pinned cmd-capture-pane.c:386. Other VT exports are unchanged. The runtime differential compares every captured byte and all 100 lines, verifies the timestamp-named last symlink, and compares the complete normalized pane record. A terminal test preserves SGR and checks both hard and joined soft-wrap line boundaries. The fixture does not claim plugin restore behavior, arbitrary foreground process reconstruction, or installed-product PATH setup."
     },
     {
       "id": "presentation.border-span-owner",

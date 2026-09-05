@@ -2404,10 +2404,8 @@ fn run_app(
                     ui_scale::apply_to_new_window(window, cx);
                     theme::sync_system_appearance(Some(window), cx);
                     let color_scheme = terminal_color_scheme(window.appearance());
-                    let mux = connect_interactive_client(&socket_path, color_scheme);
                     let mux = cx.new(|cx| {
-                        mux::client::MuxClient::new_with_color_scheme(
-                            mux,
+                        mux::client::MuxClient::new_connecting(
                             socket_path.clone(),
                             color_scheme,
                             cx,
@@ -2446,9 +2444,8 @@ fn run_app(
                             shutdown_mux
                                 .read(cx)
                                 .execute(CommandInvocation::new("kill-server", [] as [&str; 0]));
-                        } else {
-                            shutdown_mux.update(cx, |mux, _| mux.detach());
                         }
+                        shutdown_mux.update(cx, |mux, _| mux.detach());
                         let shutdown =
                             shutdown_controller.update(cx, BrowserController::shutdown);
                         let agent_shutdown = shutdown_agent_controller
@@ -2510,11 +2507,19 @@ fn run_app(
                     let shell = cx
                         .new(|cx| AppShell::new(view, controller, agent_controller, window, cx));
                     let observed_window_state = window_state.clone();
-                    window.defer(cx, move |window, cx| {
-                        if !workspace::maybe_prompt_stale_daemon(&mux, window, cx) {
-                            config::import_prompt::maybe_prompt(window, cx);
-                        }
-                    });
+                    window
+                        .subscribe(
+                            &mux,
+                            cx,
+                            |mux, _: &mux::client::InitialConnectionFinished, window, cx| {
+                                window.defer(cx, move |window, cx| {
+                                    if !workspace::maybe_prompt_stale_daemon(&mux, window, cx) {
+                                        config::import_prompt::maybe_prompt(window, cx);
+                                    }
+                                });
+                            },
+                        )
+                        .detach();
                     cx.new(|cx| {
                         let root = build_root(shell, window, cx);
                         window::state::observe(observed_window_state, window, cx);

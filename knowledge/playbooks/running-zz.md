@@ -49,6 +49,10 @@ launchers.
 `zz app` starts the first session in the directory where you ran the command. A Dock or Finder
 launch starts it in your home directory. The GUI includes that path when it creates a session, so
 the first terminal does not inherit the process directory of an empty daemon started earlier.
+The desktop window opens while a background task starts or connects to the daemon and reads its
+handshake. The local host stays in `Connecting` until that task finishes; terminal content follows
+the default attach. `MuxClient::new_connecting` keeps daemon startup and socket reads off the UI
+thread, and preserves the stale-daemon restart prompt when the handshake reports a version mismatch.
 
 `ZZ_SOCKET` owns daemon routing. `TMUX` carries compatibility metadata inside a pane or plugin job;
 zz refuses to parse a real tmux socket from it. An explicit `-S`, `-L`, or `--socket` still selects

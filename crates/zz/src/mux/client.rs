@@ -670,6 +670,8 @@ pub(crate) struct ClientNotificationCleared {
     pub(crate) message_id: u64,
 }
 
+pub(crate) struct InitialConnectionFinished;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct StaleDaemonInfo {
     pub(crate) daemon: Option<u16>,
@@ -995,6 +997,7 @@ pub struct MuxClient {
 }
 
 impl MuxClient {
+    #[cfg(test)]
     pub(crate) fn new(
         client: Result<InteractiveClient, DaemonError>,
         local_socket_path: PathBuf,
@@ -1003,22 +1006,30 @@ impl MuxClient {
         let color_scheme = client.as_ref().map_or(TerminalColorScheme::Dark, |client| {
             client.server_hello().appearance.color_scheme
         });
-        Self::new_inner(client, local_socket_path, color_scheme, cx)
+        Self::new_inner(Some(client), local_socket_path, color_scheme, cx)
     }
 
-    pub fn new_with_color_scheme(
-        client: Result<InteractiveClient, DaemonError>,
+    pub fn new_connecting(
         local_socket_path: PathBuf,
         color_scheme: TerminalColorScheme,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut state = Self::new(client, local_socket_path, cx);
-        state.color_scheme = color_scheme;
+        let state = Self::new_inner(None, local_socket_path.clone(), color_scheme, cx);
+        let connection = cx.background_executor().spawn(async move {
+            crate::connect_interactive_client(&local_socket_path, color_scheme)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = connection.await;
+            let _ = this.update(cx, |state, cx| {
+                state.finish_initial_connection(result, cx);
+            });
+        })
+        .detach();
         state
     }
 
     fn new_inner(
-        client: Result<InteractiveClient, DaemonError>,
+        client: Option<Result<InteractiveClient, DaemonError>>,
         local_socket_path: PathBuf,
         color_scheme: TerminalColorScheme,
         cx: &mut Context<Self>,
@@ -1100,20 +1111,24 @@ impl MuxClient {
         };
         if has_local {
             match client {
-                Ok(client) => {
+                Some(Ok(client)) => {
                     if let Err(error) = state.install_initial_local_connection(client, cx) {
                         state.error = Some(Arc::from(error));
                         return state;
                     }
                 }
-                Err(error) => {
+                Some(Err(error)) => {
                     if let DaemonError::IncompatibleDaemon { daemon, .. } = &error {
                         state.stale_daemon = Some(StaleDaemonInfo { daemon: *daemon });
                     }
                     state.error = Some(Arc::from(error.to_string()));
                 }
+                None => {
+                    state.connections.get_mut(&HostId::LOCAL).unwrap().state =
+                        HostState::Connecting;
+                }
             }
-        } else if let Ok(client) = client {
+        } else if let Some(Ok(client)) = client {
             let _ = client.detach();
         }
         if !has_local
@@ -1125,6 +1140,51 @@ impl MuxClient {
             state.ensure_all_connected(cx);
         }
         state
+    }
+
+    fn finish_initial_connection(
+        &mut self,
+        result: Result<InteractiveClient, DaemonError>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.shutting_down
+            || !self
+                .connections
+                .get(&HostId::LOCAL)
+                .is_some_and(|connection| connection.state == HostState::Connecting)
+        {
+            return;
+        }
+        if self.attached_host != HostId::LOCAL {
+            self.handle_connect_result(HostId::LOCAL, result, cx);
+            self.ensure_all_connected(cx);
+            cx.emit(InitialConnectionFinished);
+            return;
+        }
+        match result {
+            Ok(client) => {
+                if let Err(error) = self.install_initial_local_connection(client, cx) {
+                    self.connections.get_mut(&HostId::LOCAL).unwrap().state =
+                        HostState::Unreachable {
+                            reason: error.clone(),
+                        };
+                    self.error = Some(Arc::from(error));
+                } else {
+                    self.error = None;
+                    self.ensure_all_connected(cx);
+                }
+            }
+            Err(error) => {
+                if let DaemonError::IncompatibleDaemon { daemon, .. } = &error {
+                    self.stale_daemon = Some(StaleDaemonInfo { daemon: *daemon });
+                }
+                self.connections.get_mut(&HostId::LOCAL).unwrap().state =
+                    connect_error_state(&error);
+                self.error = Some(Arc::from(error.to_string()));
+            }
+        }
+        cx.notify();
+        cx.emit(InitialConnectionFinished);
     }
 
     fn install_initial_local_connection(
@@ -4224,6 +4284,7 @@ impl MuxClient {
     }
 }
 
+impl EventEmitter<InitialConnectionFinished> for MuxClient {}
 impl EventEmitter<ClientNotification> for MuxClient {}
 impl EventEmitter<ClientNotificationCleared> for MuxClient {}
 
@@ -4867,6 +4928,87 @@ mod tests {
         )
         .expect("connect test client");
         Some((client, server))
+    }
+
+    #[gpui::test]
+    fn initial_connection_stays_pending_until_completion(cx: &mut TestAppContext) {
+        let completed = std::rc::Rc::new(std::cell::Cell::new(false));
+        let mux = cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new_inner(
+                    None,
+                    zz_daemon::default_socket_path(),
+                    TerminalColorScheme::Light,
+                    cx,
+                )
+            });
+            assert_eq!(
+                mux.read(cx).attached_connection().state,
+                HostState::Connecting
+            );
+            assert!(mux.read(cx).error().is_none());
+            assert!(mux.read(cx).stale_daemon().is_none());
+            assert_eq!(mux.read(cx).color_scheme, TerminalColorScheme::Light);
+            let completed = completed.clone();
+            cx.subscribe(&mux, move |mux, _: &InitialConnectionFinished, cx| {
+                assert_eq!(mux.read(cx).stale_daemon().unwrap().daemon, Some(41));
+                completed.set(true);
+            })
+            .detach();
+            mux
+        });
+        assert!(!completed.get());
+        cx.update(|cx| {
+            mux.update(cx, |mux, cx| {
+                mux.finish_initial_connection(
+                    Err(DaemonError::IncompatibleDaemon {
+                        daemon: Some(41),
+                        client: PROTOCOL_VERSION,
+                    }),
+                    cx,
+                );
+            });
+            assert_eq!(mux.read(cx).stale_daemon().unwrap().daemon, Some(41));
+            assert_eq!(
+                mux.read(cx).attached_connection().state,
+                HostState::Incompatible {
+                    local: PROTOCOL_VERSION,
+                    remote: 41
+                }
+            );
+            assert!(
+                mux.read(cx)
+                    .error()
+                    .unwrap()
+                    .contains("daemon speaks protocol v41")
+            );
+        });
+        assert!(completed.get());
+    }
+
+    #[gpui::test]
+    fn initial_connection_cannot_report_errors_after_detach(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new_inner(
+                    None,
+                    zz_daemon::default_socket_path(),
+                    TerminalColorScheme::Dark,
+                    cx,
+                )
+            });
+            mux.update(cx, |mux, cx| {
+                mux.detach();
+                mux.finish_initial_connection(
+                    Err(DaemonError::Thread("late failure".to_owned())),
+                    cx,
+                );
+                assert!(mux.error().is_none());
+                assert!(mux.attached_connection().client.is_none());
+            });
+        });
     }
 
     #[test]

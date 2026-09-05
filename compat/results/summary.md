@@ -126,6 +126,7 @@
 | smoke/chooser-tree-vocabulary | 3 | yes | 0 | yes | yes | yes |
 | smoke/clear-history-hyperlinks | 3 | yes | 0 | yes | yes | yes |
 | smoke/cli-chain-parse-abort | 3 | yes | 0 | yes | yes | yes |
+| smoke/cli-output-bytes | 2 | yes | 0 | yes | yes | yes |
 | smoke/client-exit-actions | 3 | yes | 0 | yes | yes | yes |
 | smoke/client-non-utf8-cwd | 4 | yes | 0 | yes | yes | yes |
 | smoke/client-resized-context | 3 | yes | 0 | yes | yes | yes |

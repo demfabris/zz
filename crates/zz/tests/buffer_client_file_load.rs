@@ -24,7 +24,7 @@ fn a_relative_path_reads_the_clients_own_directory() {
     assert!(loaded.status.success(), "{loaded:?}");
     assert_eq!(
         daemon.buffer("relative"),
-        "client copy\n",
+        "client copy",
         "the daemon's own directory holds a different file of the same name"
     );
 }
@@ -39,7 +39,7 @@ fn a_nested_relative_path_hangs_from_the_client_directory() {
     let loaded =
         daemon.run_in_client_directory(&["load-buffer", "-b", "nested", "nested/deep.txt"]);
     assert!(loaded.status.success(), "{loaded:?}");
-    assert_eq!(daemon.buffer("nested"), "nested payload\n");
+    assert_eq!(daemon.buffer("nested"), "nested payload");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn a_tilde_path_hangs_from_the_daemons_home() {
     assert!(loaded.status.success(), "{loaded:?}");
     assert_eq!(
         daemon.buffer("tilde"),
-        "daemon home payload\n",
+        "daemon home payload",
         "the pin expands a leading ~/ with the server's own find_home"
     );
 }
@@ -74,7 +74,7 @@ fn an_absolute_path_is_read_as_written() {
     let loaded =
         daemon.run_in_client_directory(&["load-buffer", "-b", "absolute", &file.to_string_lossy()]);
     assert!(loaded.status.success(), "{loaded:?}");
-    assert_eq!(daemon.buffer("absolute"), "absolute payload\n");
+    assert_eq!(daemon.buffer("absolute"), "absolute payload");
 }
 
 #[test]

@@ -285,12 +285,8 @@ marks() {
         '#{copy_cursor_x},#{copy_cursor_y}|#{search_present}|#{search_match}|#{search_count}|#{search_count_partial}|#{search_timed_out}'
 }
 
-# save-buffer writes the bytes; show-buffer does not, because zz's CLI ends
-# the buffer with a newline the pin does not add.
 buffered() {
-    rm -f "$work/copied"
-    main_client save-buffer "$work/copied"
-    tr '\n' '/' <"$work/copied"
+    main_client show-buffer | tr '\n' '/'
 }
 
 printf 'alpha beta gamma\ndelta alpha epsilon\nzeta alpha\n' >"$work/search.txt"

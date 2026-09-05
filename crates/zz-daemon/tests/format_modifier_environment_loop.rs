@@ -131,7 +131,7 @@ fn each_flag_word_reads_its_own_store_when_the_names_collide() {
     assert_eq!(clients.format("base", &pick("g")), "<global>");
     // The client store is the attached client's own process environment, which
     // never learned the name.
-    assert_eq!(clients.format("base", &pick("c")), "");
+    assert_eq!(clients.format("base", &pick("c")), "\n");
 
     let path = std::env::var("PATH").expect("the test process has a PATH");
     assert_eq!(
@@ -268,7 +268,7 @@ fn nested_and_malformed_environment_loops_keep_the_pinned_fallback() {
         "[inZZ_LOOP_NEST]"
     );
     // An empty body runs the rows and contributes nothing.
-    assert_eq!(clients.format("base", "#{V:}"), "");
+    assert_eq!(clients.format("base", "#{V:}"), "\n");
 }
 
 #[test]

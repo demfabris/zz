@@ -16,7 +16,7 @@ const POSITION: &str = "#{L:<#{loop_index}:#{loop_last_flag}>}";
 #[test]
 fn an_empty_roster_produces_no_positions_at_all() {
     let mut clients = Clients::start("client-context-empty", &["base"]);
-    assert_eq!(clients.format("base", POSITION), "");
+    assert_eq!(clients.format("base", POSITION), "\n");
 }
 
 #[test]

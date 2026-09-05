@@ -36,9 +36,9 @@ fn surround(names: &[String], open: char, close: char) -> String {
 fn a_server_with_no_attached_client_expands_the_loop_to_nothing() {
     let mut clients = Clients::start("client-loop-empty", &["base"]);
 
-    assert_eq!(clients.format("base", ROW), "");
+    assert_eq!(clients.format("base", ROW), "\n");
     assert_eq!(clients.format("base", "[#{L:row}]"), "[]");
-    assert_eq!(clients.format("base", "#{L:#{loop_index}}"), "");
+    assert_eq!(clients.format("base", "#{L:#{loop_index}}"), "\n");
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn the_order_flags_and_reversal_follow_the_pinned_comparator() {
 #[test]
 fn attaching_and_detaching_change_the_roster_the_loop_walks() {
     let mut clients = Clients::start("client-loop-refresh", &["base"]);
-    assert_eq!(clients.format("base", "#{L:x}"), "");
+    assert_eq!(clients.format("base", "#{L:x}"), "\n");
 
     let first = clients.attach_interactive("base");
     assert_eq!(clients.format("base", "#{L:x}"), "x");
@@ -199,7 +199,7 @@ fn nested_and_malformed_client_loops_keep_the_pinned_fallback() {
     assert_eq!(clients.format("base", "#{L:[#{L:x}]}"), "[xx][xx]");
 
     // An empty body still runs the rows and contributes nothing.
-    assert_eq!(clients.format("base", "#{L:}"), "");
+    assert_eq!(clients.format("base", "#{L:}"), "\n");
 
     // Outside a loop the client formats keep answering for the one client the
     // format was expanded for, never for every row of the roster.

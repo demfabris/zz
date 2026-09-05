@@ -8099,6 +8099,10 @@ impl MuxEngine {
             expand_format_time_with_hooks(&format, self, format_context, hooks)
         };
         if options.has("-p") {
+            let mut text = text;
+            if text.is_empty() || text.as_bytes().ends_with(b"\n") {
+                text.push_bytes(b"\n");
+            }
             if trace.is_empty() {
                 return Ok(Execution::output(text));
             }
@@ -22126,15 +22130,15 @@ mod tests {
 
         let mut no_client = attached.clone();
         no_client.set_no_client();
-        assert_eq!(active(&mut engine, &mut no_client, first_pane), "");
-        assert_eq!(active(&mut engine, &mut no_client, second_pane), "");
+        assert_eq!(active(&mut engine, &mut no_client, first_pane), "\n");
+        assert_eq!(active(&mut engine, &mut no_client, second_pane), "\n");
 
         let saved = attached.clone();
         attached.set_format_client_session(Some(second));
         assert_eq!(active(&mut engine, &mut attached, first_pane), "0");
         assert_eq!(active(&mut engine, &mut attached, second_pane), "1");
         attached.set_format_client_session(None);
-        assert_eq!(active(&mut engine, &mut attached, first_pane), "");
+        assert_eq!(active(&mut engine, &mut attached, first_pane), "\n");
         attached.copy_client_attachment(&saved);
         assert_eq!(active(&mut engine, &mut attached, first_pane), "1");
 
@@ -22147,7 +22151,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            ""
+            "\n"
         );
     }
 
@@ -22457,6 +22461,19 @@ mod tests {
             Err(ServerError::CommandParse(ref actual))
                 if actual == "only one of -F or argument must be given"
         ));
+    }
+
+    #[test]
+    fn display_message_keeps_empty_and_existing_line_terminators() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        for (text, expected) in [("", "\n"), ("\n", "\n\n"), ("line\n", "line\n\n")] {
+            let output = engine
+                .execute(&mut context, &command("display-message", &["-p", text]))
+                .expect("printed message")
+                .output;
+            assert_eq!(output.as_bytes(), expected.as_bytes());
+        }
     }
 
     #[test]

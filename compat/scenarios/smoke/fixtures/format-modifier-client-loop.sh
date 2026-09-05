@@ -95,7 +95,8 @@ main_client new-session -d -s "$session"
 # A server nobody has attached to has no rows at all.
 check_equal empty-rows '[]' "$(expand '[#{L:<#{client_name}>}]')"
 check_equal empty-count 0 "$(expand '#{n:#{L:x}}')"
-check_equal empty-body '' "$(expand '#{L:}')"
+expand '#{L:}' >"$work/empty-body"
+check_equal empty-body-byte 0a "$(od -An -tx1 -v "$work/empty-body" | tr -d ' \n')"
 
 first_pid="$(attach one)"
 await_clients 1 || { echo "format-modifier-client-loop-$side: attach-one"; exit 0; }

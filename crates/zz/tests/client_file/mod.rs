@@ -122,7 +122,6 @@ impl Daemon {
             .expect("run a zz command")
     }
 
-    /// `show-buffer` prints the buffer and one newline of its own.
     pub fn buffer(&self, name: &str) -> String {
         let shown = self.run_in_client_directory(&["show-buffer", "-b", name]);
         assert!(shown.status.success(), "{shown:?}");

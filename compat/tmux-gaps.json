@@ -89,6 +89,30 @@
       "reason": "zz uses native chooser surfaces and the sidebar instead of tmux mode screens."
     },
     {
+      "id": "clients.cli-output-mixed-queue",
+      "title": "Match mixed buffer and printed-line command queues",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "now",
+      "ease": "medium",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "client",
+      "items": [
+        "semantic:cli-output-mixed-queue"
+      ],
+      "evidence": [
+        "scenario:compat/scenarios/smoke/cli-output-bytes.txt",
+        "file:compat/scenarios/smoke/fixtures/cli-output-bytes.py"
+      ],
+      "acceptance": [
+        "For a buffer containing hello, show-buffer -b bytes ; display -p an empty string emits exactly hello on pinned d77c9dc6, without the display newline. Match the pinned command-client queue behavior without losing direct empty display output."
+      ],
+      "depends_on": [],
+      "reason": "Discovered during direct byte-output proof on 2026-09-05: the durable cli-output-bytes fixture measures five bytes (hello) on the pin and six (hello plus LF) on zz for this mixed file_write/cmdq_print queue. Its final assertion deliberately records the two measured behaviors and is not a parity claim. Direct show-buffer and direct or sourced empty display are independently covered in clients.cli-output-bytes; this additional queue-lifetime behavior remains open rather than narrowing an unmeasured claim."
+    },
+    {
       "id": "clients.interactive-refresh",
       "title": "Complete interactive client commands",
       "decision": "native",
@@ -1822,6 +1846,20 @@
         "scenario:compat/scenarios/smoke/source-file-byte-name.txt"
       ],
       "resolution": "All three consumers carry the client's bytes now. Format expansion runs on RawText from the environment tail through lookup and expand to every sink that prints an expansion to a client, and the trim, pad and width modifiers were rewritten onto one walk that reproduces format-draw.c's: a byte that opens no complete UTF-8 sequence and is not printable ASCII takes no column, format_trim_left drops it even when the value fits, format_trim_right keeps it in that case, n: is strlen and w: is format_width. The client-encoding sanitizer exists for the first time: the client raises tmux's CLIENT_UTF8 for itself out of $TMUX and the first of LC_ALL, LC_CTYPE and LANG that is set, declares it on the hello as a capability string so no wire type moved, and the daemon spends one underscore per column a complete sequence would have drawn over output bound for a command or control client that raised nothing. The gate is the pin's SINK, not the client's kind alone: only a response whose pin twin is cmdq_print or cmdq_print_data is sanitized, so capture-pane -p (file_print_buffer for a command client, control_write for a control one) and save-buffer (file_write for a real path and for -) keep their bytes for every client shape, and show-buffer is sanitized for a control client but not for a session-less command client, which is the only shape zz's Command kind has. A byte-only path argument opens the path it names: MuxEffect::SourceFile and the daemon's SourceFileRequest carry RawText, and -F expands through expand_pane_format_bytes, so source-file runs a config file whose name a UTF-8 string cannot spell. Proved by smoke/environment-bytes at clean:18, the new smoke/client-utf8-sanitizer at clean:11, whose last row pins capture-pane -p answering 78 e6 bc a2 79 0a to a C-locale client on both binaries and the new smoke/source-file-byte-name at clean:4, all on both binaries, plus four pin-derived unit tests. What is left is listed here, and in the divergences page this record names: the s/// modifier, the #{Ve:} loop, cmdq_error's twin of the sanitizer, a newline inside one message, the missing-path diagnostic, load-buffer and save-buffer, and the passwd half of the tilde, the last three of which need ClientFileRequest.path or ClientMessage.text to become byte-capable and so need a protocol bump. The seven measurements that did not close are written up under 'What the byte-clean consumers still lose (2026-09-04)' in knowledge/tmux/divergences.md."
+    },
+    {
+      "id": "clients.cli-output-bytes",
+      "title": "Preserve command-client output bytes",
+      "closed_on": "2026-09-05",
+      "evidence": [
+        "scenario:compat/scenarios/smoke/cli-output-bytes.txt",
+        "file:compat/scenarios/smoke/fixtures/cli-output-bytes.py",
+        "resource:crates/zz/src/lib.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "file:compat/scenarios/smoke/fixtures/copy-mode-mode-keys-tail.sh",
+        "file:compat/scenarios/smoke/fixtures/format-modifier-client-loop.sh"
+      ],
+      "resolution": "Retrospective finding 15 had no slug. Pinned d77c9dc6 cmd-display-message.c calls cmdq_print, which writes a line even when empty, while cmd-save-buffer.c uses file_write for a command client's show-buffer. The old CLI returned immediately on empty output and appended a newline to every nonempty result. The new stance adopts exact printed-line and buffer stdout boundaries; decided 2026-09-05 by the orchestrator under fabrico's instruction to continue the campaign past the frozen scope; reversible. The existing copy-mode-mode-keys-tail fixture explicitly routed through save-buffer to avoid show-buffer's extra LF; the client-loop fixture's command substitution hid the empty result's missing LF. show-buffer's non-UTF-8 refusal remains in protocol.binary-streams. Closed semantic:cli-output-byte-fidelity: the differential fixture asserts empty display is 0a, existing message LF receives an additional terminator, literal display remains literal, show-buffer emits exactly five stored bytes and preserves a stored LF, and three sourced print commands emit 0a 6c 69 6e 65 0a 0a. The final mixed-queue measurement asserts the known per-side difference and belongs solely to the new open clients.cli-output-mixed-queue group; it is not a claimed parity proof. Both attached fixtures now observe direct bytes instead of the previous workaround or command substitution."
     },
     {
       "id": "clients.context-formats",

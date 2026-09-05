@@ -1,0 +1,6 @@
+corpus: none
+# A real attached client exposes cached status jobs. Command-mode T expansion
+# has no shell-job cache, and the two clients have different pane geometry.
+stage: fixtures/refresh-status.py ~/refresh-status.py
+run-shell 'python3 ~/refresh-status.py'
+out: show-environment -g ZZ_REFRESH_STATUS

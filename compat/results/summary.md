@@ -71,8 +71,8 @@
 | pane-spawn-options | 25 | yes | 0 | yes | yes | yes |
 | pane-spawn-retain | 27 | yes | 0 | yes | yes | yes |
 | pane-spawn-style-title-v2 | 18 | yes | 0 | yes | yes | yes |
-| panes | 9 | yes | 0 | yes | yes | yes |
 | pane-target-grammar | 70 | yes | 0 | yes | yes | yes |
+| panes | 9 | yes | 0 | yes | yes | yes |
 | prefix2 | 15 | yes | 0 | yes | yes | yes |
 | presets-mirrored | 6 | yes | 0 | yes | yes | yes |
 | presets | 7 | yes | 0 | yes | yes | yes |
@@ -87,13 +87,13 @@
 | sessions | 3 | yes | 0 | yes | yes | yes |
 | set-buffer-rename | 12 | yes | 0 | yes | yes | yes |
 | show-options-hooks | 34 | yes | 0 | yes | yes | yes |
-| source-hook-cwd-event | 3 | yes | 0 | yes | yes | yes |
-| source-hook-cwd-sourced | 3 | yes | 0 | yes | yes | yes |
 | source-file-current-file | 24 | yes | 0 | yes | yes | yes |
 | source-file-format | 40 | yes | 0 | yes | yes | yes |
 | source-file-output | 12 | yes | 0 | yes | yes | yes |
-| split-window-zoom | 11 | yes | 0 | yes | yes | yes |
+| source-hook-cwd-event | 3 | yes | 0 | yes | yes | yes |
+| source-hook-cwd-sourced | 3 | yes | 0 | yes | yes | yes |
 | split-window-zoom-hidden-width | 21 | yes | 0 | yes | yes | yes |
+| split-window-zoom | 11 | yes | 0 | yes | yes | yes |
 | splits-sized | 5 | yes | 0 | yes | yes | yes |
 | status-options | 79 | yes | 0 | yes | yes | yes |
 | strict-key-validation | 40 | yes | 0 | yes | yes | yes |
@@ -102,8 +102,8 @@
 | update-environment | 6 | yes | 0 | yes | yes | yes |
 | windows | 9 | yes | 0 | yes | yes | yes |
 | zoom | 5 | yes | 0 | yes | yes | yes |
-| known/known-pane-scrollbar-columns | 4 | yes | 2 | yes | no | yes |
 | known/known-main-preset-two-panes | 2 | yes | 1 | yes | yes | yes |
+| known/known-pane-scrollbar-columns | 4 | yes | 2 | yes | no | yes |
 | known/known-spread-mixed | 6 | yes | 1 | yes | yes | yes |
 | known/known-terminal-runtime | 28 | yes | 0 | no | yes | yes |
 | smoke/alias-group-forgery | 7 | yes | 0 | yes | yes | yes |
@@ -151,11 +151,11 @@
 | smoke/copy-mode-copy-line | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-formats | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
-| smoke/copy-mode-mode-keys | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-mode-keys-tail | 3 | yes | 0 | yes | yes | yes |
-| smoke/copy-mode-search | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-mode-keys | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-prompt-bindings | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-search | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-source-pane | 3 | yes | 0 | yes | yes | yes |
 | smoke/daemon-invalid-flags | 3 | yes | 0 | yes | yes | yes |
 | smoke/default-client-command | 3 | yes | 0 | yes | yes | yes |
@@ -168,11 +168,11 @@
 | smoke/display-menu-style-refresh | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-message-client-aliases | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-panes-template | 3 | yes | 0 | yes | yes | yes |
-| smoke/display-popup-kitty | 3 | yes | 0 | yes | yes | yes |
-| smoke/display-popup-kitty-noresize | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-drag | 3 | yes | 0 | yes | yes | yes |
-| smoke/display-popup-menu | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-kitty-noresize | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-kitty | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-menu-policy | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-menu | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-style-refresh | 3 | yes | 0 | yes | yes | yes |
 | smoke/display-popup-to-pane | 3 | yes | 0 | yes | yes | yes |
@@ -191,8 +191,8 @@
 | smoke/format-trace | 29 | yes | 0 | yes | yes | yes |
 | smoke/format-window-bigger | 3 | yes | 0 | yes | yes | yes |
 | smoke/fpp-init | 2 | yes | 0 | yes | yes | yes |
-| smoke/hooks-pane-focus | 3 | yes | 0 | yes | yes | yes |
 | smoke/hooks-pane-focus-clients | 2 | yes | 0 | yes | yes | yes |
+| smoke/hooks-pane-focus | 3 | yes | 0 | yes | yes | yes |
 | smoke/jobs-command-environment | 3 | yes | 0 | yes | yes | yes |
 | smoke/jobs-display-popup-environment | 3 | yes | 0 | yes | yes | yes |
 | smoke/jobs-shell-job-cwd | 3 | yes | 0 | yes | yes | yes |
@@ -209,8 +209,8 @@
 | smoke/pane-border-status | 34 | yes | 0 | yes | yes | yes |
 | smoke/pane-border-zorder | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-colours-palette | 3 | yes | 0 | yes | yes | yes |
-| smoke/pane-engine-knobs | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-engine-knobs-input | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-engine-knobs | 3 | yes | 0 | yes | yes | yes |
 | smoke/positional-maximums | 3 | yes | 0 | yes | yes | yes |
 | smoke/positional-minimums | 3 | yes | 0 | yes | yes | yes |
 | smoke/refresh-status | 2 | yes | 0 | yes | yes | yes |
@@ -237,3 +237,4 @@
 ## Attached-client fixture
 
 Status: `PASS`
+Recorded at: `c282741787c9`

@@ -7,6 +7,18 @@ tags: [tmux, copy-mode, view-mode, selection, search]
 timestamp: 2026-08-26T00:00:00-03:00
 ---
 
+# Cycle-14 checkpoint
+
+At the 2026-09-05 cycle-14 checkpoint, the merged registry has 46 active groups holding 434 items: 4 open, 0 blocked, and 42 accepted, plus 180 closed records.
+The frozen meter remains 304/304 items across 65/65 groups; 6 post-freeze items remain
+open across 4 groups. Ledger settlement is 222/226 known groups (98.2%). The full run covers
+231 scenarios / 2,742 steps / 4 registered known rows; attached-client `PASS`, recorded at `c282741787c9`. Summary SHA-256:
+`eb015c8382850aac3a8d2355fab28296667088c7c67592e8cd6e2c36639a8c2b`. The open groups are `clients.cli-output-mixed-queue`, `clients.command-output-pane-prompt`, `formats.dead-signal-platform-name`, and `keys.prefix-stock-commands`.
+
+The attached fixture preserves the stock-search discrepancy as open work: stock vi `/`
+discards zz command output when its prompt opens. The fixture separately proves navigation
+through the native search editor; that PASS does not claim stock-search parity.
+
 # Overview
 
 Copy mode is zz's native, per-client, read-only navigation over a pane's canonical libghostty

@@ -150,16 +150,20 @@ Directional ownership falls back through top, bottom, left, then right; ordinary
 same-side ties choose the lower `PaneId`. The focused `pane-border-span-owner` row passes all ten
 steps with zero TOPO, GEO, FMT, OUT, or WARN differences. Protocol, snapshots, and GPUI retain their
 prior contracts, and GPUI continues to take pane colors from its theme. Mutable tiled order after
-`join-pane`, `swap-pane`, or serialized `select-layout` remains under `F-PANE-BORDER-ZORDER`. The
-live registry has 42 active groups holding 453 items, with no group open, none blocked, 42 accepted,
-and 174 closed records; no item sits in an open group. No group remains unresolved; closed records
-plus accepted active groups resolve 216 of 216 known groups (100.0%).
+`join-pane`, `swap-pane`, or serialized `select-layout` remains under `F-PANE-BORDER-ZORDER`.
 
-The remaining `w` modifier needs a wider proof than the earlier forecast recorded. Pinned
+At the 2026-09-05 cycle-14 checkpoint, the merged registry has 46 active groups holding 434 items: 4 open, 0 blocked, and 42 accepted, plus 180 closed records.
+The frozen meter remains 304/304 items across 65/65 groups; 6 post-freeze items remain
+open across 4 groups. Ledger settlement is 222/226 known groups (98.2%). The full run covers
+231 scenarios / 2,742 steps / 4 registered known rows; attached-client `PASS`, recorded at `c282741787c9`. Summary SHA-256:
+`eb015c8382850aac3a8d2355fab28296667088c7c67592e8cd6e2c36639a8c2b`. The open groups are `clients.cli-output-mixed-queue`, `clients.command-output-pane-prompt`, `formats.dead-signal-platform-name`, and `keys.prefix-stock-commands`.
+
+The historical `w` forecast required a wider proof. Pinned
 `format_width` handles leading hashes, `#[...]` style spans, malformed markup, controls,
 `codepoint-widths[]`, a 162-entry default cache, and the host `wcwidth` policy selected by the
-harness build's `--disable-utf8proc`. zz uses `unicode-width` 0.2.2. Keep `w` under the hard later
-group until those cases have a fixed contract. Slice 10y closes the replay alias snapshot, and
+harness build's `--disable-utf8proc`. zz uses `unicode-width` 0.2.2. The old forecast kept `w` in the hard later
+group pending a fixed contract. That forecast is superseded: all 36 modifier
+tokens are implemented at the cycle-14 checkpoint. Slice 10y closes the replay alias snapshot, and
 slice 10z closes file-unit construction. Slice 10aa closes the `session_active` client-context
 audit. Slice 10ab closes `formats.window-activity-time/format:window_activity` with a Unix-second
 timestamp separate from logical window ordering. Window creation, parsed nonempty pane output, and
@@ -745,7 +749,7 @@ contains 10. `smoke/config-alias-parse-unit` and `smoke/config-chain-parse-abort
 `smoke/jobs-command-environment` contains 3, `aliases-multi-body` contains 8, and
 `option-name-formats` contains 60.
 The summary SHA-256 is
-`fdb38caafb85b65b4649b88198231371815c3738741511862bff9a50cb49bcec`.
+`eb015c8382850aac3a8d2355fab28296667088c7c67592e8cd6e2c36639a8c2b`.
 The historical 10r and 10s checkpoints remain 98 scenarios and 1,517 steps at SHA-256
 `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 The combined chooser row contributes three harness steps and 26 internal checks with zero TOPO,

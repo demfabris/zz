@@ -139,15 +139,17 @@ without leaking literal `R` syntax into either row.
 
 ## Current compatibility checkpoint
 
-At the 2026-09-02 checkpoint, zz implements all 36 of the pin's format modifiers.
-`formats.modifier-fidelity` closed on 2026-09-02, and no modifier token is still tracked. The live
-registry has 42 active groups, 453 active items, and 174 closed records: 0 open, 0 blocked, and 42
-accepted. No group remains unresolved. Closed records plus accepted active groups resolve 216 of
-216 known groups (100.0%). The persisted accepted artifact covers 220 scenarios and 2,648 steps with
-three registered known rows carrying GEO differences, every other channel clean, and SHA-256
-`5bef958b6945d2d07d39ab0409e47589e486e43695a458392fbae2957bfb4c1c`; its attached-client footer still reads `PASS` and is stale. The 45-step
-`formats-values` row passes as part of that artifact. The source partition contains 99 direct mux
-values, 44 daemon-delegated values, and 55 active gaps.
+All 36 pinned format modifier tokens are implemented; `formats.modifier-fidelity` closed on
+2026-09-02. Its cycle-14 instrument correction records the explicit smxx cancellation.
+
+At the 2026-09-05 cycle-14 checkpoint, the merged registry has 46 active groups holding 434 items: 4 open, 0 blocked, and 42 accepted, plus 180 closed records.
+The frozen meter remains 304/304 items across 65/65 groups; 6 post-freeze items remain
+open across 4 groups. Ledger settlement is 222/226 known groups (98.2%). The full run covers
+231 scenarios / 2,742 steps / 4 registered known rows; attached-client `PASS`, recorded at `c282741787c9`. Summary SHA-256:
+`eb015c8382850aac3a8d2355fab28296667088c7c67592e8cd6e2c36639a8c2b`. The open groups are `clients.cli-output-mixed-queue`, `clients.command-output-pane-prompt`, `formats.dead-signal-platform-name`, and `keys.prefix-stock-commands`.
+
+The source partition contains 99 direct mux values, 48 daemon-delegated values, and 51 tracked
+constant values, as asserted by `compat_manifest_tests.rs`. The 45-step `formats-values` row passes.
 
 Source Replay V3 contributes a 60-step clean row for located source diagnostics, physical command
 groups, Command stderr, Control frames, and detached callback shutdown order. The ten-step

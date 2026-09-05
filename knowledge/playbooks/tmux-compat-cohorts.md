@@ -810,6 +810,7 @@ gate ledgers every front it moots at integration time.
 | 10, 2026-09-02 | Control command worker and `split-window -W`, copy-mode search and prompt bindings, the popup pointer route (protocol v96) | `fd19cce1`, `cd03bb8d`, `9ddeae0f` | 90.5% to 97.4% |
 | 11, 2026-09-04 | the `set-hook -B` monitor subsystem and `display-message -v`, the copy-mode mode-keys tail and the first five chooser keys (protocol v97) | `89f36ac`, `3eda6ed` | 97.4% to 99.0% |
 | 12, 2026-09-04 | the rest of `mode_tree_key`'s chooser vocabulary, the client's environment and command bytes on `RawText` (protocol v98) | `12b4776`, `595616b` | 99.0% to 99.3% |
+| 14, 2026-09-05 | instrument, keys, buffers; protocol remains v98 | `f6348f19`, `533d253c`, `c2827417` | 100.0% frozen; four post-freeze groups open |
 | 13, 2026-09-04 | an attached pane's pty following the layout cell it reports, the three byte-clean consumers with the first `CLIENT_UTF8` output sanitizer (no bump, protocol stays v98) | `fd2e790`, `37e8df0` | 99.3% to 100.0% |
 
 Cycles 5 through 9 are omitted here rather than reconstructed; their merges and meter moves live in
@@ -826,6 +827,17 @@ decisions, the load-flake list, and the rule that proofs count only when re-run 
 
 The current pause state, the ready next-cycle script, and the machine-move checklist live in
 `compat/orchestration/HANDOFF.md` at the repository root, beside `CAMPAIGN-LOG.md` and the script.
+
+## Cycle-14 checkpoint
+
+At the 2026-09-05 cycle-14 checkpoint, the merged registry has 46 active groups holding 434 items: 4 open, 0 blocked, and 42 accepted, plus 180 closed records.
+The frozen meter remains 304/304 items across 65/65 groups; 6 post-freeze items remain
+open across 4 groups. Ledger settlement is 222/226 known groups (98.2%). The full run covers
+231 scenarios / 2,742 steps / 4 registered known rows; attached-client `PASS`, recorded at `c282741787c9`. Summary SHA-256:
+`eb015c8382850aac3a8d2355fab28296667088c7c67592e8cd6e2c36639a8c2b`. The open groups are `clients.cli-output-mixed-queue`, `clients.command-output-pane-prompt`, `formats.dead-signal-platform-name`, and `keys.prefix-stock-commands`.
+
+Cycle 14 used one Codex gpt-6-astra gate at high reasoning on Ubuntu, integrating instrument,
+keys, then buffers. The keys focus-test correction landed before the buffers daemon suite.
 
 ## Ownership and handoff
 

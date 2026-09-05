@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 13 FULLY INTEGRATED (PANE-GEOMETRY + BYTE-CLEAN-CONSUMERS LANES; AN ATTACHED PANE'S PTY NOW FOLLOWS THE CELL THE LAYOUT SETTLED ON + FORMAT EXPANSION, THE CLIENT-ENCODING SANITIZER AND A BYTE-ONLY PATH ARGUMENT ALL CARRY THE CLIENT'S BYTES; PROTOCOL STAYS V98); THE AGREED-SCOPE REGISTRY IS CLOSED**
+> Campaign delivery: **CYCLE 14 INTEGRATED: INSTRUMENT, KEYS, THEN BUFFERS; PROTOCOL V98; FROZEN SCOPE 304/304**
 >
-> Live work: **0 UNRESOLVED GROUPS (0 OPEN + 0 BLOCKED = 0)**
+> Live work: **4 OPEN + 0 BLOCKED = 4 UNRESOLVED GROUPS (6 POST-FREEZE ITEMS)**
 >
-> Ledger settlement: **100.0% (216 of 216 known groups: 100 x (174 CLOSED + 42 ACCEPTED) / (174 CLOSED + 42 LIVE)); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **98.2% (222 of 226 known groups: 180 CLOSED + 42 ACCEPTED); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **220 SCENARIOS, 2,648 STEPS, 3 REGISTERED KNOWN ROWS; THE PERSISTED ATTACHED-CLIENT ROW STILL READS PASS BUT THE FIXTURE DOES NOT COMPLETE ON THE UBUNTU BOX, SO THE PRACTICAL EXIT GATE IS NOT MET**
+> Exit evidence: **231 SCENARIOS, 2,742 STEPS, 4 REGISTERED KNOWN ROWS; ATTACHED-CLIENT PASS RECORDED AT c282741787c9; FOUR OPEN GROUPS KEEP THE PRACTICAL EXIT GATE OPEN**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 13 INTEGRATED 2026-09-04 ON THE UBUNTU BOX (TWO OPUS 5 LANES AT XHIGH, GEOMETRY THEN CONSUMERS, ONE GATE ALONE ON THE BOX). THE AGREED-SCOPE METER REACHED 304/304 AND THE CAMPAIGN'S IMPLEMENTATION PHASE IS DONE: EVERY LIVE GROUP THAT REMAINS CARRIES AN ACCEPTED `native` OR `never` DISPOSITION. WHAT IS LEFT IS NOT IMPLEMENTATION: `compat/attached-client.sh` IS UNRELIABLE ON THIS BOX AND NEEDS AN OWNER BEFORE THE EXIT GATE CAN BE CALLED; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **CYCLE 14 INTEGRATED 2026-09-05 ON THE UBUNTU BOX, CODEX GPT-6-ASTRA AT HIGH REASONING, ONE GATE ALONE. ACTUAL ORDER: INSTRUMENT, KEYS, BUFFERS; THE KEYS FOCUS-ASSERTION FIX PRECEDED THE BUFFERS DAEMON GATE.**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,27 +76,24 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | `origin/main` at `37e8df0` (cycle-13 consumers merge; the geometry lane landed first at `fd2e790`) plus this ledger recompute |
+| Published branch | Cycle-14 merges `f6348f19`, `533d253c`, `c2827417`; owner main advanced to `75d9ca24` during the full run; this records commit rebases onto that tip |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Cycle 13 of the orchestrated Opus 5 loop, 2 of 2 lanes integrated on the ubuntu box: an attached pane's pty now follows the cell the layout settled on, which is the pin's order, so a GUI client's floored measurement no longer reaches the pty while `#{pane_width}` keeps the layout's cell, with the window-extent back-solve rewritten per axis (exact on an axis a pane spans in full, guarded ratio on an axis it shares) and every write-back including the focus-change and detach passes now running (`fd2e790`); and the three byte-clean consumers, format expansion on `RawText` with the trim, pad and width modifiers rewritten onto `format-draw.c`'s counting rule, the first client-encoding sanitizer gated on tmux's `CLIENT_UTF8` and on the pin's sink rather than the client's kind, and `source-file` opening a path only bytes can spell (`37e8df0`). Protocol stays v98: neither lane owed a bump and neither took one. Four closes, `semantic:attached-gui-pane-width`, `semantic:format-expansion-non-utf8`, `semantic:client-utf8-output-sanitizer` and `semantic:config-tilde-home-non-utf8`, which empties the last two live groups |
-| Orchestration | Cycle 13 launched 2026-09-04 on the ubuntu box through `opus-compat-run-13.js`: two Opus 5 lanes at xhigh, one Opus 5 reviewer per lane, one gate running alone on the box. Geometry integrated first because its daemon resize-path diff was the one most likely to conflict; consumers rebased onto it and conflicted only in the generated `knowledge/tmux/gaps.md`, which was regenerated with `tmux-tracker.py write-report` rather than hand-merged, while `compat/tmux-gaps.json` auto-merged because the lanes closed different groups. Both reviewers returned approve-with-fixes; every defect was applied at the gate with the reviewer's own probe re-run as proof, including one blocker in the sanitizer's reach. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the state table; F-PANE-GEOMETRY-RESIDUE and F-BYTE-CLEAN-CONSUMERS are both INTEGRATED and released with nothing left open on either front |
+| Delivery | Cycle 14: instrument plus both code lanes integrated. Attached fixture/environment corrections; 17 attached prefix proofs, shifted keys and key-table lifecycle; buffer standard streams, four terminal facts, CLI bytes, status refresh and resurrect save. Protocol remains v98. |
+| Orchestration | Ubuntu, Codex gpt-6-astra at high reasoning, one gate alone; instrument then keys then buffers. Reviewer fixes applied before gates. Original campaign branch tips remain unchanged on origin; rebased tips landed on main without force pushes. |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
 | Agreed-scope meter | 100.0% (304 of 304 items frozen on 2026-08-31), 65 of 65 groups done, 0 partially burned; park dispositions 15 of 15; `python3 compat/progress.py` |
-| Completed fixed cohort | Cycle 13: 2 of 2 lanes integrated, agreed-scope meter 99.3% to 100.0%, unresolved groups 2 to 0 |
-| Previous completed cohort | Cycle 12: 2 of 2 lanes integrated, agreed-scope meter 99.0% to 99.3% |
-| Campaign point | The registry's agreed scope is empty. `rendering.geometry-residue` closed by putting zz's resize loop in the pin's order rather than by choosing between an attached GUI client's two pane widths: the pty follows the settled layout, so `#{pane_width}`, `#{window_layout}` and `stty size` agree the way `window_pane_resize` makes them agree on the pin. `clients.byte-clean-consumers` closed with all three consumers carrying bytes, and the sanitizer it added is gated on the pin's sink, so `capture-pane -p` and `save-buffer` keep their bytes for every client shape while `display-message` and the listings are sanitized. What remains live is 42 groups that all carry an accepted `native` or `never` disposition, so no group is waiting on implementation. The open work is elsewhere: `compat/attached-client.sh` does not complete on this box, and `compat/results/summary.md` still records it as `PASS` |
-| Live registry | 42 active groups, 453 active items, 174 closed records |
-| Active status | 0 open, 0 blocked, 42 accepted |
-| Known differentials | 3 registered cases: two geometry, one geometry plus output |
+| Completed fixed cohort | Cycle 14: instrument and 2/2 code lanes integrated; frozen meter remains 100.0% (304/304) |
+| Previous completed cohort | Cycle 13: 2/2 code lanes integrated; frozen meter reached 100.0% |
+| Campaign point | The frozen scope is complete; 6 post-freeze items remain in four open groups. The stamped attached-client proof passes. The practical exit gate remains open for the recorded behavioral differences. |
+| Live registry | 46 active groups, 434 active items, 180 closed records |
+| Active status | 4 open, 0 blocked, 42 accepted |
+| Known differentials | 4 registered cases: two GEO-only, one GEO plus OUT, and terminal-runtime with six FMT differences |
 
-Cycles 2 through 13 reached `origin/main` through the board's MAIN lock; cycle 13 ends at the
-ledger recompute that follows `37e8df0`. Resolve the commit containing the latest tracker update with
-`git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
-resolve live remote `main` with
-`git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
-before acting because other agents may share it.
+Cycles 2 through 14 reached `origin/main` through the board MAIN lock. Resolve the latest
+records commit with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md` and remote main with
+`git ls-remote origin refs/heads/main`.
 
 ### Campaign dashboard
 
@@ -106,15 +103,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 13: 2 of 2 lanes integrated (geometry then consumers, one gate, no interruption) |
-| Previous completed cohort | Cycle 12: 2 of 2 lanes integrated (tail then bytes, one gate, no interruption) |
-| New residual groups | Since the 2026-08-31 freeze: none still live. The 2 items cycle 12 opened as `clients.byte-clean-consumers` closed in cycle 13 along with the group |
-| Unresolved movement | Cycle 13: 2 at launch, 0 at close |
-| Live unresolved | 0 open + 0 blocked = 0 |
-| Practical exit gate | Open on one clause only: the attached-client fixture does not pass at full counts on this box. Every other clause is met |
-| Latest differential | 220 scenarios, 2,648 steps, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean; the persisted attached-client row still reads `PASS` and is stale |
-| Differential SHA-256 | `5bef958b6945d2d07d39ab0409e47589e486e43695a458392fbae2957bfb4c1c` |
-| Ledger settlement | 216 of 216 known groups = 100.0% |
+| Completed fixed cohort | Cycle 14: instrument and 2/2 code lanes integrated; frozen meter remains 100.0% (304/304) |
+| Previous completed cohort | Cycle 13: 2/2 code lanes integrated; frozen meter reached 100.0% |
+| New residual groups | 6 live post-freeze items across 4 open groups; see the merged registry |
+| Unresolved movement | Cycle 14 leaves four measured post-freeze groups open; none blocked |
+| Live unresolved | 4 open + 0 blocked = 4 |
+| Practical exit gate | Open for four recorded behavioral groups; the full attached-client evidence now passes with a commit stamp |
+| Latest differential | 231 scenarios / 2,742 steps / 4 registered known rows; attached-client `PASS`, recorded at `c282741787c9` |
+| Differential SHA-256 | `eb015c8382850aac3a8d2355fab28296667088c7c67592e8cd6e2c36639a8c2b` |
+| Ledger settlement | 222 of 226 known groups = 98.2% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -128,7 +125,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(174 + 42) / (174 + 42) = 216 / 216 = 100.0%
+(180 + 42) / (180 + 46) = 222 / 226 = 98.2%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -174,6 +171,21 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-05 cycle-14 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `f6348f19` instrument; `533d253c` keys; `c2827417` buffers, in that order |
+| Review actions | Instrument: corrected stock-array evidence and reproduced smxx/strikethrough 1/1 without the override on both binaries. Keys: applied the prefix-i proof patch; stock passes and no-op mutation fails on both binaries. Buffers: inherited original `93f90bea` as `ce7be406`; focus test passes solo and in the full daemon suite. Sorted the merged registry and regenerated gaps.md. |
+| Workspace gates | Instrument has no crates diff and skips tests/clippy. Keys workspace and clippy pass without flakes. Buffers workspace passes under the known-flake rule: history_request fails loaded and passes exact-solo; clippy passes. Protocol remains 98. |
+| Delta corpus | Instrument 184, keys 216, buffers 169 scenarios. Lists checked twice and reconciled with changed scenarios. Source-replay diagnostics runs solo in each gate. Instrument chooser-tree-vocabulary and format-modifier-client-loop, and buffers own-conf, fail under shard load and pass solo. |
+| Owner commits during full run | Owner commits `e9d23ec9`, `5dad18fe`, `b75bc348`, `4cee170c`, and `75d9ca24` landed during the full run. The records rebased conflict-free onto `75d9ca24`; the attached fixture is unchanged. The owner's `75d9ca24` makes post-stamp crate changes a warning, so the full run remains recorded at `c282741787c9`, with three owner crate commits afterward. |
+| Full exit evidence | 231 scenarios / 2,742 steps / 4 registered known rows; attached-client `PASS`, recorded at `c282741787c9`; all registered tuples match, all other rows clean |
+| Summary SHA-256 | `eb015c8382850aac3a8d2355fab28296667088c7c67592e8cd6e2c36639a8c2b` |
+| Live registry | 46 active groups holding 434 items: 4 open, 0 blocked, and 42 accepted, plus 180 closed records; 6 unresolved post-freeze items |
+| Ledger settlement | 222/226 known groups (98.2%); frozen scope remains 304/304 items and 65/65 groups |
+| Board | All three lane locks integrated and released; final records commit ledgered under MAIN. TRIAGE preserves the F-SPLIT-MUX-*-V5 chain and records the residual contracts. |
 
 ### 2026-09-04 cycle-13 integration checkpoint
 

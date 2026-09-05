@@ -442,3 +442,40 @@ once never saw `ATTACHED_ROOT_OK`: the first keys reached the zz client before i
 (3) and (4) are races the fixture must wait out, not behaviour. Every run leaves zz daemons on
 `/tmp/zza-*.sock` when it dies; the cleanup trap does not reach them. Reap by pid from the socket
 name, never by `pkill -f`.
+
+
+### 2026-09-05 cycle-14 integration
+
+One Codex gpt-6-astra gate ran alone on Ubuntu at high reasoning. Instrument landed first at
+`f6348f19`, keys second at `533d253c`, buffers third at `c2827417`. The instrument-only lane
+skipped workspace tests and clippy. Both code lanes ran the full workspace gate and clippy;
+keys had no failures, buffers had one loaded history-request failure that passed exact-solo.
+Delta gates covered 184, 216, and 169 scenarios. Instrument chooser-tree/client-format and buffers
+own-conf failures passed solo; source-replay diagnostics passed solo in each gate.
+
+Every reviewer fix landed before its gate. Instrument's stock-array correction records smxx and
+strikethrough at 1/1 on both binaries without the fixture override. Keys' new prefix-i proof passes
+stock and rejects a no-op binding on both binaries. Buffers inherits original `93f90bea` as
+`ce7be406`; the corrected focus assertion passes solo and in the full daemon suite. The combined
+registry needed sorting, and the generated gap report was regenerated. Protocol stays v98.
+
+The full corpus plus attached-client run passed on clean `c282741787c9`: 231 scenarios, 2,742
+steps, four registered known rows. The harness wrote the PASS and commit stamp itself and printed
+`summary current`. Summary SHA-256:
+`eb015c8382850aac3a8d2355fab28296667088c7c67592e8cd6e2c36639a8c2b`.
+The owned attached daemon exited and the fixture removed its scratch directory. No fixture retry
+or hand-written PASS was needed.
+
+Frozen delivery remains 304/304 items and 65/65 groups. Live state is 4 open, 0 blocked, 42
+accepted groups and 180 closed records: 222/226 settled (98.2%). Six post-freeze items remain
+open: mixed CLI queues, stock command-output search, Linux signal spelling, and prefix f/M-n/M-p.
+Interactive refresh and the 24-name terminal-runtime placeholder contract remain accepted, not
+open. All lane locks were ledgered and released; the final records commit owns MAIN settlement,
+and TRIAGE records the residuals without changing the F-SPLIT-MUX-*-V5 chain.
+
+Owner commits `e9d23ec9`, `5dad18fe`, `b75bc348`, `4cee170c`, and `75d9ca24` landed during the full run. The records rebased conflict-free onto `75d9ca24`; the attached fixture is unchanged. The owner's `75d9ca24` makes post-stamp crate changes a warning, so the full run remains recorded at `c282741787c9`, with three owner crate commits afterward.
+The first records push was refused non-fast-forward. A premature local-SHA MAIN ledger entry
+was corrected by an append-only note; the pushed rebased SHA is the final records entry.
+The bounded rebase check passed zz package tests and a fresh build, then six strict
+buffers/terminal scenarios. `--check-summary` prints summary current with three post-stamp
+crate commits warned under the owner's revised rule.

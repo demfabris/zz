@@ -1,30 +1,38 @@
-# Handoff for the tmux-compat campaign (registry closed; instrument pass half done; machine move)
+# Handoff for the tmux-compat campaign: cycle 14 integrated
 
-Written 2026-09-03 ~00:40Z on the ubuntu box, rewritten 2026-09-04 after cycle 13 integrated, and
-updated the same evening when fabrico paused the instrument pass for a machine move. READ "The
-instrument pass, as left" BELOW BEFORE ANYTHING ELSE: `compat/run.sh --check-summary` is red on
-main on purpose until the attached fixture is fixed and a full run is recorded.
-THE REGISTRY IS EMPTY: meter 100.0% (304/304), 65/65 groups, 0 open, 0 blocked, 174 closed records,
-42 accepted groups. The implementation phase of the campaign as scoped on 2026-08-31 is done.
+Updated 2026-09-05 after the Ubuntu cycle-14 gate. Start here; the older instrument-pass and
+machine-move sections below describe the cycle-13 pause and no longer define current state.
 
-It is not the end of the work, and the tracker's own headline says why: the persisted attached-client
-row reads PASS but the fixture does not complete on this box, so the practical exit gate is not met.
-A retrospective run the same day (`CAMPAIGN-REVIEW.md`, eight Fable reviewers and a critic) found
-fifteen ranked gaps the registry could never see because its list was drawn after argv parsing and
-below the screen. THE NEXT ORCHESTRATOR STARTS THERE: the instrument pass in that report comes
-before any cycle 14.
+Instrument landed at `f6348f19`, keys at `533d253c`, then buffers at `c2827417`. One Codex
+gpt-6-astra gate ran alone at high reasoning. This order put the repaired attached fixture on
+main before the stamped run and the keys focus-test correction on main before the buffers suite.
+All reviewer must-fixes were applied and their probes re-run. Protocol remains v98.
 
-THE CYCLE SHAPE CHANGED ON 2026-09-03 and this overrides every older script. Fabrico's instruction
-is TWO work lanes per cycle, not three, and every agent is Opus 5 at `effort: 'xhigh'`: workers,
-reviewers and the gate alike. The Fable reviewers and Fable gates of cycles 6 to 10 are history.
-Copy `opus-compat-run-11.js`, not `opus-compat-run-10.js`.
+The full run passed all 231 scenarios / 2,742 steps, with four registered known rows and the
+attached-client fixture PASS recorded at `c282741787c9`. The harness printed `summary current`.
+The SHA-256 of `compat/results/summary.md` is
+`eb015c8382850aac3a8d2355fab28296667088c7c67592e8cd6e2c36639a8c2b`.
+Owner commits `e9d23ec9`, `5dad18fe`, `b75bc348`, `4cee170c`, and `75d9ca24` landed during the full run. The records rebased conflict-free onto `75d9ca24`; the attached fixture is unchanged. The owner's `75d9ca24` makes post-stamp crate changes a warning, so the full run remains recorded at `c282741787c9`, with three owner crate commits afterward.
 
-The standing instruction from fabrico (2026-09-02) is "turn on the goal and go all the way": run
-cycles until the registry is closed, taking the product decisions the earlier handoff had parked
-and recording each one in the registry as reversible. Two were taken in cycle 10 (`command-prompt
--P` accepted as a client-owned presentation hint; `scroll-to-mouse` settled as a scrollbar-only
-name zz has no slider grab for), both with the sentence "decided 2026-09-02 by the orchestrator
-under fabrico's instruction to close the campaign; reversible" in their records.
+All three former environment-red rows now pass. The fixture's native-search proof does not close
+the separately measured stock-search output-loss defect.
+
+The frozen meter remains 100.0% (304/304 items, 65/65 groups). The live registry has 46 groups
+holding 434 items: 4 OPEN, 0 BLOCKED, 42 ACCEPTED; 180 closed records. Ledger settlement is
+222/226 (98.2%). Six post-freeze items remain open: mixed CLI output queues, command-output stock
+search prompts, Linux dead-signal names, and prefix `f`, `M-n`, `M-p`. Read their acceptance and
+measurements in `compat/tmux-gaps.json` before allocating the next work. `clients.interactive-refresh`
+and `formats.terminal-runtime` remain accepted, with explicit refresh and placeholder dispositions.
+
+The three cycle-14 lane locks are integrated and released. The records commit follows the stamped
+tip; MAIN and TRIAGE are released after its ledger and residual pass. The F-SPLIT-MUX-*-V5 chain
+stays untouched. Original campaign branch tips stay on origin; rebased tips landed on main without
+force pushes. Only this gate's instrument/keys/buffers worktrees are removed; the shared build
+directory, prior gate worktrees, and worker/reviewer worktrees remain.
+
+Next-cycle scope still comes from `CAMPAIGN-REVIEW.md` plus the four live groups. Older descriptions
+of an empty registry or a missing attached stamp are historical. The explicit cycle prompt owns
+agent choice, lane order, concurrency, and resource limits; do not inherit those from older scripts.
 
 ## What this campaign is
 
@@ -67,14 +75,14 @@ read. The desktop GPUI app keeps its own look entirely.
 
 | Fact | Value |
 | --- | --- |
-| `origin/main` | the instrument-pass commit on top of `690767e` (the retrospective) and `0092abf` (cycle-13 ledger) |
-| Agreed-scope meter | 100.0% (304/304 items), 65/65 groups done, 0 partially burned; `python3 compat/progress.py`. Beside it publish the honest denominator the retrospective asks for: 304 of 757 identified items, because the 42 accepted groups hold 453 more |
-| Live registry | 0 open groups, 0 blocked, 0 items; 174 closed records, 42 accepted groups |
-| Corpus | 221 scenarios / 2,655 steps; the stored attached-client row reads PASS with NO stamp, so `--check-summary` is red until a full run records a stamped PASS (see the instrument pass) |
-| `PROTOCOL_VERSION` | 98 (hex hello frame 0x62, test `..._ninety_eight`); the next wire change bumps to 99 (0x63) |
-| Unmerged work | None |
-| Board (issue #7) | MAIN and TRIAGE free. Every lock front from cycles 10 to 13 is INTEGRATED and released; the `F-SPLIT-MUX-*-V5` chain untouched and never part of this campaign |
-| Remotes | SSH (`git@github.com:demfabris/zz.git`) works on the ubuntu box; the macbook was switched to HTTPS through gh's credential helper in cycle 7 |
+| `origin/main` | `75d9ca24` (owner commits after `c2827417`) plus the rebased cycle-14 records commit |
+| Agreed-scope meter | 100.0% (304/304 items), 65/65 groups done; six live post-freeze items across four groups |
+| Live registry | 46 active groups / 434 items; 4 open, 0 blocked, 42 accepted; 180 closed records |
+| Corpus | 231 scenarios / 2,742 steps / four known rows; attached-client PASS recorded at `c282741787c9` |
+| `PROTOCOL_VERSION` | 98 (0x62); no cycle-14 wire change |
+| Unmerged cycle-14 work | None |
+| Board | All three cycle-14 locks integrated and released; MAIN and TRIAGE released after the records/residual pass; F-SPLIT-MUX-*-V5 unchanged |
+| Remotes | SSH origin unchanged; all cycle-14 pushes succeeded without force |
 
 ## The client lane landed (2026-09-03)
 
@@ -92,7 +100,7 @@ Three corpus rows fail on this box and are NOT any lane's: `smoke/format-modifie
 alone and again in a baseline worktree at `origin/main`, where they fail identically, two of them
 on the pin side only. Treat them as this box's terminfo and signal-name environment.
 
-## What is left: nothing in the registry, fifteen things outside it
+## Historical cycle-13 retrospective: fifteen things outside the frozen registry
 
 Cycle 12 (`595616b`, `12b4776`) closed `clients.path-encoding` in full and the chooser vocabulary,
 and measured the geometry residue rather than closing it; cycle 13 (`fd2e790`, `37e8df0`) closed
@@ -263,7 +271,7 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
    session itself". The repository and the board are the durable state.
 7. First task: the census below; the client gate that used to stand here is done.
 
-## Machine notes
+## Historical machine notes (through cycle 13)
 
 - **ubuntu box** (8 cores, 30 GB, Ubuntu 26.04, bash 5.3, btrfs): ran cycles 5, 6 (first half)
   and 10. SSH origin works. Worktrees `~/dev/zz-opus-dint`, `~/dev/zz-opus-panes`,

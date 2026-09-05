@@ -44,6 +44,7 @@ cleanup() {
     trap - EXIT
     set +e
     main_client kill-session -t "=$session" >/dev/null 2>&1
+    main_client set-option -su terminal-overrides >/dev/null 2>&1
     if [ -n "$viewer_pid" ]; then
         kill "$viewer_pid" >/dev/null 2>&1
         wait "$viewer_pid" >/dev/null 2>&1
@@ -75,6 +76,8 @@ pane="$(main_client list-panes -t "=$session" -F '#{pane_id}' | head -n 1)"
 check_equal absent-capability '' "$(main_client display-message -p -t "$pane" '#{I/c:smcup}')"
 check_equal absent-feature '' "$(main_client display-message -p -t "$pane" '#{I/f:RGB}')"
 check_equal absent-environment '' "$(main_client display-message -p -t "$pane" '#{I/e:FOO}')"
+
+main_client set-option -as terminal-overrides ",xterm-256color:smxx@"
 
 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
     TERM=xterm-256color COLORTERM=truecolor FOO=barvalue \

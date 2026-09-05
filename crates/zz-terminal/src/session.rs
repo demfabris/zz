@@ -8227,7 +8227,13 @@ fn capture_terminal(
     let mut output = vec![0_u8; length];
     let written = formatter.format_buf(&mut output).map_err(capture_failure)?;
     output.truncate(written);
-    String::from_utf8(output).map_err(|error| TerminalCaptureError::Failed(error.to_string()))
+    let output = String::from_utf8(output)
+        .map_err(|error| TerminalCaptureError::Failed(error.to_string()))?;
+    Ok(if options.escape_sequences {
+        output.replace("\r\n", "\n")
+    } else {
+        output
+    })
 }
 
 const PANE_RESET_PRELUDE: &[u8] = b"\x1b\\\x1b[m\x1b(B\x1b)B\x1b[r\x1b[?7h\x1b[?25h\x1b[?1l\x1b[4l\x1b[?6l\x1b[20l\x1b>\x1b[?12l\x1b[?2026l\x1b[?2031l\x1b[=0u\x1b[>4;0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l\x1b[?1004l\x1b[?2004l\x1b[3g";
@@ -16559,6 +16565,32 @@ mod tests {
         )
         .expect("joined capture");
         assert_eq!(output, "abcdefgh");
+    }
+
+    #[test]
+    fn live_styled_capture_keeps_sgr_and_uses_lf_between_rows() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 4,
+            rows: 3,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"\x1b[31mabcdef\r\ngh");
+        for (join_wrapped, lines) in [(false, 3), (true, 2)] {
+            let captured = capture_terminal(
+                &terminal,
+                None,
+                CaptureOptions {
+                    escape_sequences: true,
+                    join_wrapped,
+                    ..CaptureOptions::default()
+                },
+            )
+            .expect("styled capture");
+            assert!(captured.contains("\x1b["), "{captured:?}");
+            assert!(!captured.contains('\r'), "{captured:?}");
+            assert_eq!(captured.lines().count(), lines, "{captured:?}");
+        }
     }
 
     #[test]

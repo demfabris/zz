@@ -1,0 +1,8 @@
+corpus: required
+# Run the pinned plugin's actual save path, including its history-sized capture.
+# The harness supplies tmux on PATH; installed zz does not provide that shim.
+# quiet skips only the spinner, keeping save_all and its artifacts unchanged.
+# Ungrouped saves have no session record: compare the session-bearing pane row.
+stage: fixtures/resurrect-save.py ~/resurrect-save.py
+run-shell 'python3 ~/resurrect-save.py'
+out: show-environment -g ZZ_RESURRECT_SAVE

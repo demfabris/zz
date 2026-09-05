@@ -117,6 +117,7 @@
 | smoke/args-parse-set-hook | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-set-option | 3 | yes | 0 | yes | yes | yes |
 | smoke/buffer-clipboard-write | 3 | yes | 0 | yes | yes | yes |
+| smoke/buffer-standard-streams | 2 | yes | 0 | yes | yes | yes |
 | smoke/cheap-flags | 22 | yes | 0 | yes | yes | yes |
 | smoke/chooser-buffer-confirm-flag | 3 | yes | 0 | yes | yes | yes |
 | smoke/chooser-buffer-vocabulary | 3 | yes | 0 | yes | yes | yes |
@@ -214,6 +215,7 @@
 | smoke/refresh-status | 2 | yes | 0 | yes | yes | yes |
 | smoke/remain-on-exit-format | 3 | yes | 0 | yes | yes | yes |
 | smoke/resurrect-init | 3 | yes | 0 | yes | yes | yes |
+| smoke/resurrect-save | 2 | yes | 0 | yes | yes | yes |
 | smoke/send-keys-client-selection | 3 | yes | 0 | yes | yes | yes |
 | smoke/send-keys-control | 3 | yes | 0 | yes | yes | yes |
 | smoke/send-keys-inject | 3 | yes | 0 | yes | yes | yes |
@@ -226,13 +228,10 @@
 | smoke/source-replay-diagnostics | 60 | yes | 0 | yes | yes | yes |
 | smoke/split-window-wait | 1 | yes | 0 | yes | yes | yes |
 | smoke/status-keys-editor-default | 2 | yes | 0 | yes | yes | yes |
+| smoke/terminal-facts | 2 | yes | 0 | yes | yes | yes |
 | smoke/tpm-init | 5 | yes | 0 | yes | yes | yes |
 | smoke/vim-tmux-navigator | 8 | yes | 0 | yes | yes | yes |
 | smoke/yank | 3 | yes | 0 | yes | yes | yes |
-
-| smoke/buffer-standard-streams | 2 | yes | 0 | yes | yes | yes |
-
-| smoke/terminal-facts | 2 | yes | 0 | yes | yes | yes |
 
 ## Attached-client fixture
 

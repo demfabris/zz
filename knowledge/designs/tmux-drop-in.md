@@ -2098,6 +2098,13 @@ So:
 
 ## Phase 6 — control mode (COMPLETE 2026-08-18)
 
+The completion date records the original phase delivery. Cycle 15 (2026-09-05) reopened
+notification fidelity under `control-mode.notifications` in `compat/tmux-gaps.json`.
+`compat/scenarios/smoke/fixtures/control-notify.py` retains `%` lines; its pin-derived
+checks and recorded differences supersede the broad parity claims in the dated waves
+below. See [the remeasurement](/tmux/divergences.md#control-notification-remeasurement-2026-09-05).
+The one-hour real-iTerm2 session on a Mac remains an unperformed maintainer task.
+
 `-C`/`-CC` for iTerm2 and control-mode scripts. The transport, verified against iTerm2's
 `TmuxGateway.m`: iTerm2 launches `tmux -CC` **in a PTY and parses the `%begin`/`%output` text
 protocol from the process's stdio** — it never opens tmux's socket. So control mode is a zz
@@ -2131,10 +2138,12 @@ pane visibility). The harness (phase 2) does not wait for this.
   positive control. Ledgered: `history_size`/`history_bytes` render honest
   zeros (shape exact, needs a history-stats seam);
   `session_grouped`/`session_group`/`pane_floating_flag` render empty
-  through conditionals; zz blocks are COMPLETE where the pin's WAIT
-  commands emit late bare lines; zz emits ONE block per stdin command where
-  the pin adds a flags-0 block per after-hook; no `default-client-command`
-  option (new-session hardcoded, the pin's default).
+  through conditionals; no `default-client-command` option (new-session
+  hardcoded, the pin's default). Cycle 15 supersedes the original complete-block
+  and missing-after-hook claims: both engines end the guard before bare
+  `NOTIFY_WAIT` output from `run-shell`, and both emit a flags-0 after-hook
+  block. For `after-rename-window`, the pin emits the hook block before
+  `%window-renamed`, while zz emits it after; the registry keeps that order open.
 
 - **Wave 6b** (`cbb34a2`, stamped `0dc46aa`, CONFIRMED-CLOSED 2026-08-18) —
   notifications + layout strings + basic %output. Protocol v66:
@@ -2151,11 +2160,12 @@ pane visibility). The harness (phase 2) does not wait for this.
   an open block, arrival order preserved), %output with the pin's exact
   escaping (\NNN for 0x00-0x1F + backslash, 8-bit raw — byte-identical
   concatenated streams), %message, %config-error, `%exit too far behind` on
-  the overflow disconnect. window-unlinked ALWAYS renders
-  %unlinked-window-close (the pin's deferred callback runs post-unlink, so
-  plain %window-close is unreachable without linked windows — probe-caught,
-  reviewer-verified against control-notify.c). Live two-client mutation
-  probe: notification streams line-identical INCLUDING ordering, modulo the
+  the overflow disconnect. The original window-unlinked renderer emitted only
+  `%unlinked-window-close`. Cycle 15 measures the pin's reachable `%window-close`:
+  a window remains linked in the client's session while another session unlinks it.
+  zz rejects `link-window` and `unlink-window`, so this live lifecycle remains open
+  even with a membership-aware renderer. The original live two-client mutation
+  probe found line-identical streams for its command list, modulo the
   ledgered automatic-rename class (the pin's 500ms sniffer emits transient
   `tmux`/`kernel_task` names; zz single-fires the settled name). Ledgered:
   the A5 overflow trigger divergence (count/size vs the pin's 5-minute age
@@ -2205,8 +2215,9 @@ pane visibility). The harness (phase 2) does not wait for this.
   byte-identical to the pin (subscription probes must hold the control
   client's stdin OPEN across the pin's 1s timer). Ledgered: %pause/
   %continue placement (pin writes them INSIDE the triggering block via
-  synchronous control_write; zz after it — blocks-complete family,
-  reviewer-endorsed); zz-lax %-word parsing on the control stdin (pin:
+  synchronous control_write; zz after it). Cycle 15 retains that ordering
+  difference in `control-mode.notifications`, alongside zz-lax %-word parsing
+  on the control stdin (pin:
   `parse error: syntax error` for unquoted %0:pause); stdin commands share
   the 32-slot channel with %output (a flood can delay a new command by up
   to 32 events — bounded, thin-client property); pipe_pane_has_no_gap +
@@ -2744,7 +2755,8 @@ sites (bind `{}` bodies, set-hook, if-shell, confirm-before, command-prompt) exp
 against the LIVE engine global environment (hidden included). Guards: 25 parser unit
 tests, daemon readback regressions, and the 15-step `smoke/config-grammar` harness
 scenario byte-diffed against the pin. Ledgered divergences: control-mode stdin keeps
-`$VAR` LITERAL (pin expands server-side; non-expanding entry point, test-pinned);
+`$VAR` LITERAL (pin expands server-side; cycle 15 measures `EXPANDED` versus literal
+`$NOTIFY_ENV` and tracks the difference in `control-mode.notifications`);
 stored bind and hook lists and typed `if-shell`, `run-shell`, and `confirm-before` callbacks now
 retain their lexical construction through execution. Typed `command-prompt` templates retain their
 structured prepared command list through submission without re-expanding aliases. String templates

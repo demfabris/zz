@@ -12832,12 +12832,25 @@ impl Shared {
                 .switch_table(None);
             self.sync_prefix_armed(target_client);
         }
+        let (outbound, control_target) = {
+            let inner = self.inner.lock();
+            (
+                inner.subscribers.get(&target_client).cloned(),
+                inner.client_kinds.get(&target_client) == Some(&ClientKind::Control),
+            )
+        };
+        if control_target {
+            if let Some(outbound) = outbound.as_ref() {
+                self.send_attached(target_client, outbound, target_session, snapshot.clone());
+            }
+            self.publish_mux_snapshots();
+            attach_events.sort_by_key(|event| event.name != "client-session-changed");
+        }
         self.run_event_hooks(attach_events);
         if target_client == invoking_client {
             retarget_context_to_attachment(&self.inner.lock(), target_client, context);
         }
-        let outbound = { self.inner.lock().subscribers.get(&target_client).cloned() };
-        if let Some(outbound) = outbound {
+        if !control_target && let Some(outbound) = outbound {
             self.send_attached(target_client, &outbound, target_session, snapshot);
         }
         self.publish_snapshot();
@@ -13036,8 +13049,9 @@ impl Shared {
 
     fn set_control_client_size(&self, client: ClientId, value: &str) -> Result<(), DaemonError> {
         let update = parse_control_client_size(value)?;
-        let (changed, resizes) = {
+        let (changed, resizes, notifications) = {
             let mut inner = self.inner.lock();
+            let before = MuxHookSnapshot::capture(&inner.engine);
             let mut affected = control_client_sized_panes(&inner, client);
             let output = inner.control_outputs.entry(client).or_default();
             match update {
@@ -13052,11 +13066,26 @@ impl Shared {
             affected.extend(control_client_sized_panes(&inner, client));
             let changed = write_back_terminal_geometries(&mut inner, &affected);
             let resizes = terminal_resizes_for_panes(&inner, &affected);
-            (changed, resizes)
+            let after = MuxHookSnapshot::capture(&inner.engine);
+            let notifications = mux_hook_events(&before, &after, "refresh-client")
+                .into_iter()
+                .filter(|event| event.name == "window-layout-changed")
+                .collect::<Vec<_>>();
+            (changed, resizes, notifications)
         };
         apply_terminal_resizes(resizes);
         if changed {
             self.publish_snapshot_state();
+        }
+        for event in notifications {
+            self.publish_to_control_clients(
+                EventPayload::HookEvent {
+                    name: event.name.to_owned(),
+                    variables: event.variables,
+                },
+                None,
+                true,
+            );
         }
         Ok(())
     }
@@ -48532,6 +48561,116 @@ mod tests {
             DaemonError::Server(ServerError::InvalidCommand(message))
                 if message == "not a control client"
         ));
+    }
+
+    #[test]
+    fn control_resize_notifies_after_the_live_layout_snapshot() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "control-layout", "layout");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("layout-control".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        take_reliable_messages(&mailbox);
+        shared.set_control_client_size(control, "100,30").unwrap();
+        let messages = take_reliable_messages(&mailbox);
+        let snapshot_position = messages
+            .iter()
+            .position(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event { payload: EventPayload::Snapshot(snapshot), .. })
+                        if snapshot.sessions.iter().flat_map(|session| &session.windows)
+                            .any(|state| state.id == window && state.layout_dump.contains("100x30"))
+                )
+            })
+            .expect("live 100x30 snapshot");
+        let notifications = messages
+            .iter()
+            .enumerate()
+            .filter_map(|(index, message)| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::HookEvent { name, variables },
+                    ..
+                }) if name == "window-layout-changed"
+                    && variables.get("hook_window") == Some(&window.to_string()) =>
+                {
+                    Some(index)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(notifications.len(), 1);
+        assert!(snapshot_position < notifications[0]);
+        shared.set_control_client_size(control, "100,30").unwrap();
+        assert!(!take_reliable_messages(&mailbox).iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event { payload: EventPayload::HookEvent { name, .. }, .. })
+                if name == "window-layout-changed"
+        )));
+    }
+
+    #[test]
+    fn control_switch_publishes_the_new_attachment_before_its_live_layout_notice() {
+        let shared = Arc::new(Shared::new(1));
+        let (first, first_pane, _) = output_view_session_fixture(&shared, "layout-first", "first");
+        let (second, second_pane, _) =
+            output_view_session_fixture(&shared, "layout-second", "second");
+        let (first_window, second_window) = {
+            let inner = shared.inner.lock();
+            (
+                inner.engine.state.window_for_pane(first_pane).unwrap(),
+                inner.engine.state.window_for_pane(second_pane).unwrap(),
+            )
+        };
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("switch-layout".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, first).unwrap();
+        shared.set_control_client_size(control, "100,30").unwrap();
+        take_reliable_messages(&mailbox);
+        let mut context = ExecutionContext::new(Some(first), Some(first_window), Some(first_pane));
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-t", "layout-second"]),
+            )
+            .unwrap();
+        let messages = take_reliable_messages(&mailbox);
+        let attachment = messages.iter().position(|message| matches!(
+            message,
+            ProtocolMessage::Attached { session, snapshot, .. }
+                if *session == second && snapshot.sessions.iter().flat_map(|session| &session.windows)
+                    .any(|window| window.id == second_window && window.layout_dump.contains("100x30"))
+        )).expect("new attachment carries resized layout");
+        let session_changed = messages.iter().position(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event { payload: EventPayload::HookEvent { name, .. }, .. })
+                if name == "client-session-changed"
+        )).expect("session change notification");
+        let layout_changed = messages.iter().position(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event { payload: EventPayload::HookEvent { name, variables }, .. })
+                if name == "window-layout-changed" && variables.get("hook_window") == Some(&second_window.to_string())
+        )).expect("layout change notification");
+        assert!(attachment < session_changed && session_changed < layout_changed);
     }
 
     #[test]

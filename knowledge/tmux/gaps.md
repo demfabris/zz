@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **46**. Classified items: **431**.
+Tracked gap groups: **47**. Classified items: **441**.
 
-- Status: open: 4, accepted: 42.
-- Decision: adopt: 4, native: 32, never: 10.
-- Priority: now: 4, none: 42.
+- Status: open: 5, accepted: 42.
+- Decision: adopt: 5, native: 32, never: 10.
+- Priority: now: 5, none: 42.
 - Closed history entries: 183.
-- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 44, presentation: 6, protocol: 2.
+- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 54, presentation: 6, protocol: 2.
 
 ## Measured surface
 
@@ -54,6 +54,7 @@ structure as proof.
 | `formats.dead-signal-platform-name` | Match the pinned platform spelling of dead-pane signals | adopt | open | easy | mux | daily, scripts | none |
 | `clients.cli-output-mixed-queue` | Match mixed buffer and printed-line command queues | adopt | open | medium | client | scripts | none |
 | `clients.command-output-pane-prompt` | Preserve command output beneath stock pane search prompts | adopt | open | medium | daemon | daily, scripts | none |
+| `control-mode.notifications` | Compare control notification transcripts with pinned tmux | adopt | open | hard | daemon | remote, scripts | none |
 | `status.background-jobs` | Run cached status shell jobs without blocking clients | adopt | open | hard | daemon | daily, gui, scripts | none |
 
 ## None
@@ -274,6 +275,32 @@ The GUI superset needs its own names so tmux spellings can keep frozen tmux mean
   - `resource:knowledge/designs/tmux-superset-roadmap.md`
 - Acceptance:
   - `Every zz-native exact command name and alias remains explicitly classified and does not equal a tmux exact spelling.`
+
+### `control-mode.notifications`: Compare control notification transcripts with pinned tmux
+
+Implemented and measured 2026-09-05 against pinned d77c9dc6 with smoke/control-notify. Removed proved items semantic:control-notify-differential and semantic:layout-change-live-after-refresh. The fixture retains all requested notification kinds plus pane-mode-changed in 44 recorded phases; it validates each original guard tuple before replacing timestamps and block numbers, canonicalizes client names, fixture paths and output ages, and removes only its own marked barrier blocks. Fresh isolated servers make session/window/pane IDs deterministic. Each side must match its full checked-in transcript; equal phases prove parity, while unequal phases remain explicit requirements below. The pin and zz now both emit %layout-change @0 a87d,100x30,0,0,0 a87d,100x30,0,0,0 * after refresh-client -C 100,30. Before the fix zz emitted no line. The switch-client baseline emitted stale b260,80x24,0,0,3 despite the next query returning a880,100x30,0,0,3; the repaired Control path sends the live Attached/snapshot before session-changed and layout-change, matching both the pin line and the subsequent query. Remaining measured bytes: split sends window-pane-changed then layout-change on the pin, reversed on zz (layout-change-order); activity layout ends with #- on the pin and - on zz (layout-flags); pause and continue occur between begin/end on the pin and after end on zz (pause and continue); display-message -p "$NOTIFY_ENV" prints EXPANDED on the pin and literal $NOTIFY_ENV on zz (environment-expansion); an after-rename-window flags-0 hook block precedes window-renamed on the pin and follows it on zz (window-renamed-order); unquoted %1:pause produces parse error: syntax error / %error on the pin but succeeds and emits %pause on zz (percent-word); new-session after the copy-mode cancel sequence emits an extra %pane-mode-changed %1 on zz before unlinked-window-add and sessions-changed (pane-mode-changed). Link-window emits %window-add @0 and unlink-window elsewhere emits %window-close @0 on the pin while the window stays in the observer session; zz returns unsupported command: link-window / unlink-window, so window-add/window-close remain open despite pin-derived renderer membership tests. This does not relocate or revise the accepted linked-window command stance. Two old documentation clauses were refuted: both engines emit late bare NOTIFY_WAIT after the run-shell end guard, and both emit a flags-0 after-hook block. Those phases now have parity assertions. The one-hour real iTerm2 -CC session on macOS remains unperformed and maintainer-owned. No protocol change or new native policy was made.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `now` / `hard`
+- Owner: `daemon`
+- User impact: remote, scripts
+- Items: `semantic:control-notify-continue`, `semantic:control-notify-environment-expansion`, `semantic:control-notify-layout-change-order`, `semantic:control-notify-layout-flags`, `semantic:control-notify-pane-mode-changed`, `semantic:control-notify-pause`, `semantic:control-notify-percent-word`, `semantic:control-notify-window-add`, `semantic:control-notify-window-close`, `semantic:control-notify-window-renamed-order`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz/src/control_mode.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `scenario:compat/scenarios/smoke/control-notify.txt`
+  - `file:compat/scenarios/smoke/fixtures/control-notify.py`
+  - `file:compat/scenarios/smoke/fixtures/control-notify.json`
+  - `resource:knowledge/tmux/divergences.md`
+  - `resource:knowledge/designs/tmux-drop-in.md`
+  - `resource:third_party/tmux-reference/UPSTREAM.md`
+- Acceptance:
+  - `Replay a retained -C transcript covering the pinned notification inventory, including framing, raw and extended output, layout/window/session/client mutations, pause/continue, subscriptions, buffers, messages, config errors, pane modes and exit. Preserve command guard pairing and notification placement; normalize only fixture paths, client identities, timestamps/block numbers and output age.`
+  - `After refresh-client -C and session switching, every layout-change line contains the live layout reported by list-windows, and the new session is announced before its layout.`
+  - `Match the pin notification kinds, bytes and ordering in each recorded divergent phase; the fixture must assert each side explicitly until that difference closes.`
+  - `Run a one-hour real iTerm2 -CC session on macOS as a maintainer validation task; a Linux -C transcript does not prove it.`
 
 ### `formats.dead-signal-platform-name`: Match the pinned platform spelling of dead-pane signals
 

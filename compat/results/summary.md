@@ -146,6 +146,7 @@
 | smoke/config-non-utf8-byte-matrix | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-non-utf8-file-bytes | 8 | yes | 0 | yes | yes | yes |
 | smoke/continuum-init | 2 | yes | 0 | yes | yes | yes |
+| smoke/control-notify | 2 | yes | 0 | yes | yes | yes |
 | smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
 | smoke/control-eof-drain | 1 | yes | 0 | yes | yes | yes |
 | smoke/control-hard-loss | 1 | yes | 0 | yes | yes | yes |

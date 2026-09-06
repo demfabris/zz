@@ -1,0 +1,446 @@
+{
+  "tmux": {
+    "startup": [
+      "%begin T B 0",
+      "%end T B 0",
+      "%session-changed $0 notify-main"
+    ],
+    "queries": [
+      "%begin T B 1",
+      "$0 notify-main",
+      "%end T B 1",
+      "%begin T B 1",
+      "@0 b25d,80x24,0,0,0",
+      "%end T B 1",
+      "%begin T B 1",
+      "%0 80 24",
+      "%end T B 1"
+    ],
+    "error": [
+      "%begin T B 1",
+      "parse error: unknown command: definitely-no-such-command",
+      "%error T B 1"
+    ],
+    "resize": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%layout-change @0 a87d,100x30,0,0,0 a87d,100x30,0,0,0 *"
+    ],
+    "live-layout": [
+      "%begin T B 1",
+      "@0 a87d,100x30,0,0,0 a87d,100x30,0,0,0",
+      "%end T B 1"
+    ],
+    "window-add": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-add @1"
+    ],
+    "window-renamed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-renamed @1 renamed"
+    ],
+    "session-window-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%session-window-changed $0 @1"
+    ],
+    "split": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-pane-changed @1 %2",
+      "%layout-change @1 eb8f,100x30,0,0{50x30,0,0,1,49x30,51,0,2} eb8f,100x30,0,0{50x30,0,0,1,49x30,51,0,2} *"
+    ],
+    "window-pane-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-pane-changed @1 %1"
+    ],
+    "output": [
+      "%output %1 NOTIFY_OUTPUT\\015\\012"
+    ],
+    "activity-watch": [
+      "%begin T B 1",
+      "%end T B 1"
+    ],
+    "activity-output": [
+      "%output %0 NOTIFY_ACTIVITY\\015\\012"
+    ],
+    "activity-layout": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%layout-change @0 acfd,101x31,0,0,0 acfd,101x31,0,0,0 #-"
+    ],
+    "pause": [
+      "%begin T B 1",
+      "%pause %1",
+      "%end T B 1"
+    ],
+    "continue": [
+      "%begin T B 1",
+      "%continue %1",
+      "%end T B 1"
+    ],
+    "extended-output": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%extended-output %1 AGE : NOTIFY_EXTENDED\\015\\012"
+    ],
+    "paste-buffer-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%paste-buffer-changed notify-buffer"
+    ],
+    "paste-buffer-deleted": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%paste-buffer-deleted notify-buffer"
+    ],
+    "subscription-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%subscription-changed notify $0 - - - : notify-main"
+    ],
+    "subscription-remove": [
+      "%begin T B 1",
+      "%end T B 1"
+    ],
+    "environment-set": [
+      "%begin T B 1",
+      "%end T B 1"
+    ],
+    "environment-expansion": [
+      "%begin T B 1",
+      "EXPANDED",
+      "%end T B 1"
+    ],
+    "wait-output": [
+      "%begin T B 1",
+      "%end T B 1",
+      "NOTIFY_WAIT"
+    ],
+    "hook-set": [
+      "%begin T B 1",
+      "%end T B 1"
+    ],
+    "hook-output": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%begin T B 0",
+      "NOTIFY_HOOK",
+      "%end T B 0",
+      "%window-renamed @0 hooked"
+    ],
+    "hook-remove": [
+      "%begin T B 1",
+      "%end T B 1"
+    ],
+    "percent-word": [
+      "%begin T B 1",
+      "parse error: syntax error",
+      "%error T B 1"
+    ],
+    "percent-recover": [
+      "%begin T B 1",
+      "%end T B 1"
+    ],
+    "message": [
+      "%message NOTIFY_MESSAGE"
+    ],
+    "config-error": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%config-error FIXTURE/invalid.conf:1: unknown command: definitely-no-such-command"
+    ],
+    "pane-mode-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%pane-mode-changed %1"
+    ],
+    "pane-mode-ended": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%pane-mode-changed %1"
+    ],
+    "sessions-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%unlinked-window-add @2",
+      "%sessions-changed"
+    ],
+    "unlinked-window-renamed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%unlinked-window-renamed @2 outside"
+    ],
+    "linked-window-add": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-add @0",
+      "%session-window-changed $1 @0"
+    ],
+    "linked-window-close": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%session-window-changed $1 @2",
+      "%window-close @0"
+    ],
+    "session-renamed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%session-renamed $1 renamed-other"
+    ],
+    "client-session-changed": [
+      "%client-session-changed CLIENT $0 notify-main",
+      "%client-session-changed CLIENT $1 renamed-other"
+    ],
+    "client-detached": [
+      "%client-detached CLIENT"
+    ],
+    "session-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%session-changed $1 renamed-other",
+      "%layout-change @2 a880,100x30,0,0,3 a880,100x30,0,0,3 *"
+    ],
+    "live-layout-after-switch": [
+      "%begin T B 1",
+      "@2 a880,100x30,0,0,3 a880,100x30,0,0,3",
+      "%end T B 1"
+    ],
+    "unlinked-window-close": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%session-window-changed $0 @0",
+      "%unlinked-window-close @1"
+    ],
+    "exit": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%exit"
+    ]
+  },
+  "zz": {
+    "startup": [
+      "%begin T B 0",
+      "%end T B 0",
+      "%session-changed $0 notify-main"
+    ],
+    "queries": [
+      "%begin T B 1",
+      "$0 notify-main",
+      "%end T B 1",
+      "%begin T B 1",
+      "@0 b25d,80x24,0,0,0",
+      "%end T B 1",
+      "%begin T B 1",
+      "%0 80 24",
+      "%end T B 1"
+    ],
+    "error": [
+      "%begin T B 1",
+      "parse error: unknown command: definitely-no-such-command",
+      "%error T B 1"
+    ],
+    "resize": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%layout-change @0 a87d,100x30,0,0,0 a87d,100x30,0,0,0 *"
+    ],
+    "live-layout": [
+      "%begin T B 1",
+      "@0 a87d,100x30,0,0,0 a87d,100x30,0,0,0",
+      "%end T B 1"
+    ],
+    "window-add": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-add @1"
+    ],
+    "window-renamed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-renamed @1 renamed"
+    ],
+    "session-window-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%session-window-changed $0 @1"
+    ],
+    "split": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%layout-change @1 eb8f,100x30,0,0{50x30,0,0,1,49x30,51,0,2} eb8f,100x30,0,0{50x30,0,0,1,49x30,51,0,2} *",
+      "%window-pane-changed @1 %2"
+    ],
+    "window-pane-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-pane-changed @1 %1"
+    ],
+    "output": [
+      "%output %1 NOTIFY_OUTPUT\\015\\012"
+    ],
+    "activity-watch": [
+      "%begin T B 1",
+      "%end T B 1"
+    ],
+    "activity-output": [
+      "%output %0 NOTIFY_ACTIVITY\\015\\012"
+    ],
+    "activity-layout": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%layout-change @0 acfd,101x31,0,0,0 acfd,101x31,0,0,0 -"
+    ],
+    "pause": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%pause %1"
+    ],
+    "continue": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%continue %1"
+    ],
+    "extended-output": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%extended-output %1 AGE : NOTIFY_EXTENDED\\015\\012"
+    ],
+    "paste-buffer-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%paste-buffer-changed notify-buffer"
+    ],
+    "paste-buffer-deleted": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%paste-buffer-deleted notify-buffer"
+    ],
+    "subscription-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%subscription-changed notify $0 - - - : notify-main"
+    ],
+    "subscription-remove": [
+      "%begin T B 1",
+      "%end T B 1"
+    ],
+    "environment-set": [
+      "%begin T B 1",
+      "%end T B 1"
+    ],
+    "environment-expansion": [
+      "%begin T B 1",
+      "$NOTIFY_ENV",
+      "%end T B 1"
+    ],
+    "wait-output": [
+      "%begin T B 1",
+      "%end T B 1",
+      "NOTIFY_WAIT"
+    ],
+    "hook-set": [
+      "%begin T B 1",
+      "%end T B 1"
+    ],
+    "hook-output": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-renamed @0 hooked",
+      "%begin T B 0",
+      "NOTIFY_HOOK",
+      "%end T B 0"
+    ],
+    "hook-remove": [
+      "%begin T B 1",
+      "%end T B 1"
+    ],
+    "percent-word": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%pause %1"
+    ],
+    "percent-recover": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%continue %1"
+    ],
+    "message": [
+      "%message NOTIFY_MESSAGE"
+    ],
+    "config-error": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%config-error FIXTURE/invalid.conf:1: unknown command: definitely-no-such-command"
+    ],
+    "pane-mode-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%pane-mode-changed %1"
+    ],
+    "pane-mode-ended": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%pane-mode-changed %1"
+    ],
+    "sessions-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%pane-mode-changed %1",
+      "%unlinked-window-add @2",
+      "%sessions-changed"
+    ],
+    "unlinked-window-renamed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%unlinked-window-renamed @2 outside"
+    ],
+    "linked-window-add": [
+      "%begin T B 1",
+      "unsupported command: link-window",
+      "%error T B 1"
+    ],
+    "linked-window-close": [
+      "%begin T B 1",
+      "unsupported command: unlink-window",
+      "%error T B 1"
+    ],
+    "session-renamed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%session-renamed $1 renamed-other"
+    ],
+    "client-session-changed": [
+      "%client-session-changed CLIENT $0 notify-main",
+      "%client-session-changed CLIENT $1 renamed-other"
+    ],
+    "client-detached": [
+      "%client-detached CLIENT"
+    ],
+    "session-changed": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%session-changed $1 renamed-other",
+      "%layout-change @2 a880,100x30,0,0,3 a880,100x30,0,0,3 *"
+    ],
+    "live-layout-after-switch": [
+      "%begin T B 1",
+      "@2 a880,100x30,0,0,3 a880,100x30,0,0,3",
+      "%end T B 1"
+    ],
+    "unlinked-window-close": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%session-window-changed $0 @0",
+      "%unlinked-window-close @1"
+    ],
+    "exit": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%exit"
+    ]
+  }
+}

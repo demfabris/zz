@@ -22606,6 +22606,12 @@ impl Shared {
         }
     }
 
+    /// Forward an application's own OSC 52 the way `input_osc_52` does.
+    /// `input_osc_52_parse` returns 0 unless `set-clipboard` is `on`
+    /// (`options_get_number(global_options, "set-clipboard") != 2`), so under
+    /// `external` and `off` alike the pin writes nothing to the outer terminal,
+    /// creates no buffer and raises no `pane-set-clipboard`. Measured on pinned
+    /// d77c9dc6 in `compat/scenarios/smoke/copy-selection-clipboard-bytes`.
     fn deliver_clipboard_write(
         self: &Arc<Self>,
         pane: PaneId,
@@ -22617,15 +22623,10 @@ impl Shared {
             .lock()
             .engine
             .mux_option_value(MuxOptionKey::SetClipboard);
-        let mut clipboard_hook = false;
-        match set_clipboard.as_str() {
-            "off" => return,
-            "on" => {
-                clipboard_hook = true;
-                self.store_copy_buffer(text.clone(), PasteBufferAction::Create { prefix: None });
-            }
-            _ => {}
+        if set_clipboard != "on" {
+            return;
         }
+        self.store_copy_buffer(text.clone(), PasteBufferAction::Create { prefix: None });
         self.publish_for_pane(
             pane,
             &EventPayload::Clipboard {
@@ -22636,9 +22637,7 @@ impl Shared {
                 producer: ClipboardProducer::Application,
             },
         );
-        if clipboard_hook {
-            self.raise_pane_set_clipboard(pane);
-        }
+        self.raise_pane_set_clipboard(pane);
     }
 
     /// Pick the victim's exit action the way `cmd_detach_client_exec` picks

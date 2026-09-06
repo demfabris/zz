@@ -1544,11 +1544,11 @@ fn handle_core_event(
             Ok(ProtocolOutcome::None)
         }
         CoreEvent::Clipboard {
-            request_id,
+            producer,
             target,
             text,
             ..
-        } => match clipboard::encode(clipboard::Selection::for_request(request_id, target), &text) {
+        } => match clipboard::encode(clipboard::Selection::for_producer(producer, target), &text) {
             Osc52::Empty => Ok(ProtocolOutcome::None),
             Osc52::Encoded(output) => Ok(ProtocolOutcome::QueueControl(output)),
             Osc52::TooLarge => {

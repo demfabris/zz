@@ -224,6 +224,7 @@
 | smoke/pane-tmux-path | 3 | yes | 0 | yes | yes | yes |
 | smoke/plugin-runtime-continuum | 2 | yes | 0 | yes | yes | yes |
 | smoke/plugin-runtime-fpp | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-oh-my-tmux | 4 | yes | 0 | yes | yes | yes |
 | smoke/plugin-runtime-resurrect-restore | 2 | yes | 0 | yes | yes | yes |
 | smoke/plugin-runtime-tpm-install | 2 | yes | 0 | yes | yes | yes |
 | smoke/plugin-runtime-vim-tmux-navigator | 2 | yes | 0 | yes | yes | yes |

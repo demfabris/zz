@@ -1,0 +1,19 @@
+corpus: required
+# Oh My Tmux's prefix y run for real on both binaries. The config binds it at
+# .tmux.conf:131 behind `if -b 'command -v xsel'`, to
+# `run -b "\"$TMUX_PROGRAM\" ${TMUX_SOCKET:+-S \"$TMUX_SOCKET\"} save-buffer - | xsel -i -b"`,
+# so the fixture puts a fake xsel first on the server PATH, pins
+# XDG_SESSION_TYPE away from wayland so the .tmux.conf:134 wl-copy branch cannot
+# win the race between the async `if -b` jobs, re-sources the corpus config, and
+# reads the installed binding back out of list-keys before firing it. The
+# keypress is a real C-b y on an attached pty client; the observables are the
+# bytes the fake clipboard received, its argv, the paste buffer and the pane
+# mode. The status half asserts the config's own status-left and status-right
+# templates and runs its _username helper (.tmux.conf:1641) both as a status
+# #() job with status-interval 1 on the attached client and as a run-shell.
+stage: ~/.tmux/plugins/oh-my-tmux/.tmux.conf.local ~/.tmux.conf.local
+stage: fixtures/oh-my-tmux-runtime.py ~/oh-my-tmux-runtime.py
+conf: ~/.tmux/plugins/oh-my-tmux/.tmux.conf
+out: set-environment -gu ZZ_OH_MY_TMUX_RUNTIME
+run-shell 'python3 ~/oh-my-tmux-runtime.py'
+out: show-environment -g ZZ_OH_MY_TMUX_RUNTIME

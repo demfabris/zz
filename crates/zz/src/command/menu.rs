@@ -1,6 +1,7 @@
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke,
-    MouseButton, MouseDownEvent, Render, ScrollWheelEvent, Window, div, prelude::*, px,
+    MouseButton, MouseDownEvent, MouseUpEvent, Render, ScrollWheelEvent, Window, div, prelude::*,
+    px,
 };
 use zz_client::{MenuKeyResult, resolve_menu_key};
 use zz_protocol::{InputMessage, MenuAction, MenuState};
@@ -53,14 +54,22 @@ impl MenuView {
     }
 
     /// `menu_key_cb`'s `MENU_NOMOUSE` arm: a menu raised without `-M` and
-    /// without an invoking mouse event answers only button 1, which it
-    /// swallows, and leaves on any other button with nothing chosen.
+    /// without an invoking mouse event closes with nothing chosen for every
+    /// report whose `MOUSE_BUTTONS(m->b)` is not `MOUSE_BUTTON_1`, wherever the
+    /// pointer is, because that arm runs before the box test. Only a button-1
+    /// press is swallowed: `tty-keys.c` reports `b = 3` for an SGR release and
+    /// `MOUSE_BUTTONS(3)` is 3, so the release leaves the menu.
     fn cancel_on_pointer(
         &mut self,
         _: &MouseDownEvent,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.send(MenuAction::Cancel, cx);
+        cx.stop_propagation();
+    }
+
+    fn cancel_on_release(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.send(MenuAction::Cancel, cx);
         cx.stop_propagation();
     }
@@ -134,13 +143,12 @@ impl Render for MenuView {
                         })
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-                            if mouse_keys {
-                                mux.read(cx).send_input(InputMessage::Menu {
-                                    action: MenuAction::Choose(
-                                        u32::try_from(index).unwrap_or(u32::MAX),
-                                    ),
-                                });
-                            }
+                            let action = if mouse_keys {
+                                MenuAction::Choose(u32::try_from(index).unwrap_or(u32::MAX))
+                            } else {
+                                MenuAction::Cancel
+                            };
+                            mux.read(cx).send_input(InputMessage::Menu { action });
                             cx.stop_propagation();
                         })
                         .child(item.name.clone())
@@ -167,6 +175,7 @@ impl Render for MenuView {
                     MouseButton::Middle,
                     cx.listener(Self::cancel_on_pointer),
                 )
+                .on_mouse_up(MouseButton::Left, cx.listener(Self::cancel_on_release))
                 .on_scroll_wheel(cx.listener(|menu, _: &ScrollWheelEvent, _, cx| {
                     menu.send(MenuAction::Cancel, cx);
                     cx.stop_propagation();

@@ -4243,10 +4243,30 @@ mod tests {
 
         input.borrow_mut().clear();
         cx.simulate_mouse_down(inside, MouseButton::Left, Modifiers::default());
-        cx.simulate_mouse_up(inside, MouseButton::Left, Modifiers::default());
         assert!(
             input.borrow().is_empty(),
-            "a NOMOUSE menu swallows button 1 and chooses nothing: {:?}",
+            "a NOMOUSE menu swallows the button 1 press: {:?}",
+            input.borrow()
+        );
+        cx.simulate_mouse_up(inside, MouseButton::Left, Modifiers::default());
+        assert!(
+            input.borrow().iter().any(|message| matches!(
+                message,
+                InputMessage::Menu {
+                    action: zz_protocol::MenuAction::Cancel
+                }
+            )),
+            "a NOMOUSE menu leaves on the button 1 release, which reports 3: {:?}",
+            input.borrow()
+        );
+        assert!(
+            !input.borrow().iter().any(|message| matches!(
+                message,
+                InputMessage::Menu {
+                    action: zz_protocol::MenuAction::Choose(_)
+                }
+            )),
+            "a NOMOUSE menu chooses nothing under button 1: {:?}",
             input.borrow()
         );
 

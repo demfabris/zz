@@ -2134,6 +2134,56 @@ impl MuxClient {
             .is_some_and(|option| option.value == "on")
     }
 
+    /// The daemon-published `set-clipboard`, read the way the pin reads
+    /// `global_options`: only `off` suppresses a system-clipboard write.
+    #[must_use]
+    pub(crate) fn set_clipboard_writes(&self) -> bool {
+        self.core
+            .mux_options()
+            .get(MuxOptionKey::SetClipboard)
+            .is_none_or(|option| option.value != "off")
+    }
+
+    /// Land one clipboard write from the daemon.
+    ///
+    /// `request_id` separates the two producers the pin keeps apart. A zero id
+    /// is an application's own OSC 52, which `input_osc_52` forwards with the
+    /// selection field the application named; a non-zero id answers this
+    /// client's `copy-selection`, which `window_copy_copy_buffer` writes with
+    /// an empty selection field so the outer terminal picks its default, and
+    /// which the pin skips outright while `set-clipboard` is `off`. The
+    /// desktop is that outer terminal, so a copy-selection lands in CLIPBOARD
+    /// as well as PRIMARY unless `set-clipboard` is `off`.
+    fn write_clipboard(
+        &self,
+        request_id: u64,
+        target: ClipboardTarget,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        if text.is_empty() {
+            return;
+        }
+        let item = ClipboardItem::new_string(text);
+        match target {
+            ClipboardTarget::Clipboard => cx.write_to_clipboard(item),
+            ClipboardTarget::Primary => {
+                #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+                {
+                    if request_id != 0 && self.set_clipboard_writes() {
+                        cx.write_to_clipboard(item.clone());
+                    }
+                    cx.write_to_primary(item);
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+                {
+                    let _ = request_id;
+                    cx.write_to_clipboard(item);
+                }
+            }
+        }
+    }
+
     /// Whether the daemon reported this client's prefix sequence as armed.
     #[must_use]
     pub(crate) const fn prefix_armed(&self) -> bool {
@@ -3776,20 +3826,12 @@ impl MuxClient {
             CoreEvent::ClientMessageCleared { message_id } => {
                 cx.emit(ClientNotificationCleared { message_id });
             }
-            CoreEvent::Clipboard { target, text, .. } => {
-                if !text.is_empty() {
-                    let item = ClipboardItem::new_string(text);
-                    match target {
-                        ClipboardTarget::Clipboard => cx.write_to_clipboard(item),
-                        ClipboardTarget::Primary => {
-                            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-                            cx.write_to_primary(item);
-                            #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
-                            cx.write_to_clipboard(item);
-                        }
-                    }
-                }
-            }
+            CoreEvent::Clipboard {
+                request_id,
+                target,
+                text,
+                ..
+            } => self.write_clipboard(request_id, target, text, cx),
             CoreEvent::OpenUri { pane, uri } => self.route_open_uri(pane, &uri, cx),
             CoreEvent::AgentCommand {
                 pane,
@@ -5153,6 +5195,115 @@ mod tests {
                 });
                 assert_eq!(mux.read(cx).focus_follows_mouse(), expected, "{value}");
             }
+        });
+    }
+
+    /// Derived from pinned tmux d77c9dc6.
+    ///
+    /// `window_copy_copy_buffer` (window-copy.c) writes the selection through
+    /// `screen_write_setselection(&ctx, "", buf, len)` — an empty selection
+    /// field — and only when `set-clipboard` is not `off`; measured on the pin
+    /// on a real pty, a `copy-selection-and-cancel` emits
+    /// `ESC ] 52 ; ; <base64> BEL` under `external` and under `on`, and emits
+    /// nothing at all under `off`. An empty field asks the outer terminal for
+    /// its default selection, which is the system clipboard. The desktop is
+    /// that outer terminal, so a drag selection has to reach CLIPBOARD, not
+    /// PRIMARY alone.
+    ///
+    /// `input_osc_52` (input.c) is the other producer and keeps the
+    /// application's own selection field, so an application write — the one
+    /// the daemon publishes with `request_id` zero — is left alone.
+    #[gpui::test]
+    fn a_copy_selection_reaches_the_clipboard_unless_set_clipboard_is_off(cx: &mut TestAppContext) {
+        fn clipboard_write(mux: &mut MuxClient, request_id: u64, text: &str, cx: &mut Context<MuxClient>) {
+            mux.handle_message_for_test(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 0,
+                    payload: EventPayload::Clipboard {
+                        pane: PaneId(1),
+                        request_id,
+                        target: ClipboardTarget::Primary,
+                        text: text.to_owned(),
+                    },
+                }),
+                cx,
+            );
+        }
+
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("clipboard fixture".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            mux.update(cx, |mux, _| {
+                install_fake_connection(mux, HostId::LOCAL);
+            });
+            assert!(
+                mux.read(cx).set_clipboard_writes(),
+                "the pin's set-clipboard default is external, which writes"
+            );
+
+            for (value, mirrored) in [("external", true), ("on", true), ("off", false)] {
+                mux.update(cx, |mux, cx| {
+                    let mut options = MuxOptions::default();
+                    options.set(
+                        MuxOptionKey::SetClipboard,
+                        value,
+                        zz_protocol::MuxOptionSource::RuntimeCommand,
+                    );
+                    mux.seed_core(EventPayload::MuxOptionsChanged { options });
+                    clipboard_write(mux, 7, value, cx);
+                });
+                assert_eq!(mux.read(cx).set_clipboard_writes(), mirrored, "{value}");
+                let clipboard = cx.read_from_clipboard().and_then(|item| item.text());
+                if mirrored {
+                    assert_eq!(
+                        clipboard.as_deref(),
+                        Some(value),
+                        "set-clipboard {value} writes the selection the pin would have sent \
+                         through the empty OSC 52 selection field"
+                    );
+                } else {
+                    assert_ne!(
+                        clipboard.as_deref(),
+                        Some(value),
+                        "set-clipboard off leaves the system clipboard alone, as the pin does"
+                    );
+                }
+                #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+                assert_eq!(
+                    cx.read_from_primary().and_then(|item| item.text()).as_deref(),
+                    Some(value),
+                    "PRIMARY always takes the drag selection, at every set-clipboard value"
+                );
+            }
+
+            mux.update(cx, |mux, cx| {
+                let mut options = MuxOptions::default();
+                options.set(
+                    MuxOptionKey::SetClipboard,
+                    "on",
+                    zz_protocol::MuxOptionSource::RuntimeCommand,
+                );
+                mux.seed_core(EventPayload::MuxOptionsChanged { options });
+                clipboard_write(mux, 0, "application-osc52", cx);
+            });
+            assert_ne!(
+                cx.read_from_clipboard().and_then(|item| item.text()).as_deref(),
+                Some("application-osc52"),
+                "an application's own OSC 52 keeps the selection field it named, the way \
+                 input_osc_52 forwards it"
+            );
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            assert_eq!(
+                cx.read_from_primary().and_then(|item| item.text()).as_deref(),
+                Some("application-osc52"),
+                "an application asking for PRIMARY still gets PRIMARY"
+            );
         });
     }
 

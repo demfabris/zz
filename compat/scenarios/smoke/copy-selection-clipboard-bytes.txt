@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/copy-selection-clipboard-bytes.sh ~/copy-selection-clipboard-bytes.sh
+stage: fixtures/copy-selection-clipboard-bytes-pty.py ~/copy-selection-clipboard-bytes-pty.py
+out: set-environment -gu COPY_SELECTION_CLIPBOARD_BYTES
+run-shell 'sh ~/copy-selection-clipboard-bytes.sh'
+out: show-environment -g COPY_SELECTION_CLIPBOARD_BYTES

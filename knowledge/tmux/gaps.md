@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **44**. Classified items: **434**.
+Tracked gap groups: **45**. Classified items: **435**.
 
-- Status: open: 2, accepted: 42.
-- Decision: adopt: 2, native: 32, never: 10.
-- Priority: now: 2, none: 42.
+- Status: open: 3, accepted: 42.
+- Decision: adopt: 3, native: 32, never: 10.
+- Priority: now: 3, none: 42.
 - Closed history entries: 188.
-- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 46, presentation: 7, protocol: 2.
+- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 47, presentation: 7, protocol: 2.
 
 ## Measured surface
 
@@ -52,6 +52,7 @@ structure as proof.
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `clients.cli-output-sourced-raw-newline-claim` | Carry the sourced stdout claim kind to the command client | adopt | open | medium | daemon | scripts | none |
+| `desktop.drag-to-clipboard` | Land a desktop drag selection where a paste can reach it | adopt | open | medium | client | daily, gui | none |
 | `control-mode.notifications` | Compare control notification transcripts with pinned tmux | adopt | open | hard | daemon | remote, scripts | none |
 
 ## None
@@ -285,6 +286,31 @@ Implemented and measured 2026-09-05 against pinned d77c9dc6 with smoke/control-n
   - `Match the pin notification kinds, bytes and ordering in each recorded divergent phase; the fixture must assert each side explicitly until that difference closes.`
   - `Run a one-hour real iTerm2 -CC session on macOS as a maintainer validation task; a Linux -C transcript does not prove it.`
   - `An EOF or blank-return Control client draining refresh-client -C commands emits no layout-change notification, while a live Control client still receives the current resized layout. Preserve the existing control-eof-drain transcript without weakening its assertions.`
+
+### `desktop.drag-to-clipboard`: Land a desktop drag selection where a paste can reach it
+
+Opened 2026-09-06 from retrospective finding 8's clipboard half. Before this cycle crates/zz/src/mux/client.rs answered CoreEvent::Clipboard with target Primary by calling cx.write_to_primary on linux and freebsd and nothing else, so a drag selection in the desktop landed in PRIMARY only: a tmux-yank user who drag-selected and pressed Ctrl+V got nothing. PRODUCT DECISION: on Linux the desktop mirrors a drag selection to CLIPBOARD in addition to PRIMARY whenever set-clipboard is not off, and writes PRIMARY alone when it is off; macOS is unchanged. Old behaviour: PRIMARY only, at every set-clipboard value. Measured pin behaviour: window_copy_copy_buffer emits one OSC 52 write with an empty selection field under set-clipboard external and on and no write under off, and an empty field means the outer terminal's default target, which is the system clipboard. New stance: the desktop is that outer terminal, so it resolves the empty field to CLIPBOARD and keeps PRIMARY as the X11 convention every terminal emulator follows. decided 2026-09-06 by the orchestrator under fabrico's cycle-16 instruction; reversible. The GPUI half is unit-proved: mux::client::tests::a_copy_selection_reaches_the_clipboard_unless_set_clipboard_is_off drives EventPayload::Clipboard through handle_message_for_test and reads gpui's clipboard and primary back, at set-clipboard external, on and off, and separately at request_id 0. The raw TUI half is measured on both binaries by smoke/copy-selection-clipboard-bytes, which attaches a real pty to each side and scans the OSC 52 writes. MEASURED DIVERGENCE, recorded with the bytes: for send-keys -X copy-selection-and-cancel the pin writes ESC ] 52 ; ; YWxwaGEtYnJhdm8= BEL and zz writes ESC ] 52 ; c ; YWxwaGEtYnJhdm8= BEL. The gating and the payload agree at every set-clipboard value; the selection field alone diverges, and the differential asserts each side's measured field so a change in either goes red. CAUSE, for the daemon and protocol owners: the pin keeps two producers apart, window_copy_copy_buffer with the empty field and input_osc_52 with the application's own field, and zz's wire cannot. Both reach a client as EventPayload::Clipboard with request_id 0 — zz-mux copy_mode_action builds every CopyModeCopy with request_id 0, and zz-daemon deliver_clipboard_write publishes an application's OSC 52 with request_id 0 as well. Only a client-issued TerminalViewAction::CopySelection carries a non-zero id. crates/zz-tui/src/clipboard.rs therefore writes the pin's empty field for a non-zero id and keeps the named field for a zero id, which is correct wherever the wire can tell them apart. Separating them fully needs a wire change and is not in this lane. SECOND DIVERGENCE, not fixed here and outside this lane's zone: the pin's input_osc_52 forwards an application's OSC 52 only when set-clipboard is on (options_get_number == 2), while zz-daemon deliver_clipboard_write forwards it under external as well and suppresses only off.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `now` / `medium`
+- Owner: `client`
+- User impact: daily, gui
+- Items: `semantic:desktop-drag-selection-clipboard`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz/src/mux/client.rs`
+  - `resource:crates/zz/src/terminal/view.rs`
+  - `resource:crates/zz-tui/src/clipboard.rs`
+  - `scenario:compat/scenarios/smoke/copy-selection-clipboard-bytes.txt`
+  - `file:compat/scenarios/smoke/fixtures/copy-selection-clipboard-bytes.sh`
+  - `file:compat/scenarios/smoke/fixtures/copy-selection-clipboard-bytes-pty.py`
+  - `resource:compat/orchestration/CAMPAIGN-REVIEW.md`
+- Acceptance:
+  - `Measured on pinned tmux d77c9dc6 through smoke/copy-selection-clipboard-bytes: window_copy_copy_buffer writes a copy-selection with screen_write_setselection(&ctx, "", buf, len), so with the clipboard terminal feature's Ms=\\E]52;%p1%s;%p2%s\\a the outer terminal receives ESC ] 52 ; ; <base64> BEL — one write, an empty selection field, which asks the terminal for its own default target. set-clipboard external and on each emit that write; set-clipboard off emits none.`
+  - `On Linux the desktop mirrors a drag selection to CLIPBOARD in addition to PRIMARY whenever the session's set-clipboard option is not off, and writes PRIMARY alone when it is off. macOS is unchanged: it has one pasteboard and ClipboardTarget::Primary already lands there.`
+  - `An application's own OSC 52 keeps the target it named. input_osc_52 forwards the application's clip field verbatim, so a desktop write the daemon publishes with request_id 0 still goes to PRIMARY when the application asked for PRIMARY.`
+  - `The raw TUI writes the pin's empty selection field for a client-issued copy-selection and keeps the named field for a write it cannot attribute.`
 
 ### `formats.expansion-budgets`: Keep format expansion deterministic
 

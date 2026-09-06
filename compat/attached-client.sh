@@ -2165,11 +2165,7 @@ probe_command_output_prompt_lifecycle() {
     wait_for_current_marker "$side" ATTACHED_NAV_00
     tmux_outer_command send-keys -t "$OUTER_SESSION:$side" /
     wait_for_output_search_prompt "$side"
-    if [ "$side" = zz ]; then
-      wait_for_client_state "$side" root
-    else
-      assert_output_mode_stays "$side" copy-mode-vi stock-search-open
-    fi
+    assert_output_mode_stays "$side" copy-mode-vi stock-search-open
     if [ "$action" = Escape ]; then
       marker=ATTACHED_NAV_CANCEL
     else
@@ -2179,21 +2175,14 @@ probe_command_output_prompt_lifecycle() {
     wait_for_current_marker "$side" "$marker"
     tmux_outer_command send-keys -t "$OUTER_SESSION:$side" "$action"
     wait_for_current_marker_absent "$side" '(search down)'
-    if [ "$side" = zz ]; then
-      wait_for_client_state "$side" root
-      wait_for_current_marker_absent "$side" ATTACHED_NAV_00
-      wait_for_current_marker_absent "$side" ATTACHED_NAV_35
-      printf 'KNOWN DIVERGENCE clients.command-output-pane-prompt: zz stock search discards output before %s (pin preserves it)\n' "$action"
+    assert_output_mode_stays "$side" copy-mode-vi "stock-search-$action"
+    if [ "$action" = Escape ]; then
+      wait_for_current_marker "$side" ATTACHED_NAV_00
     else
-      assert_output_mode_stays "$side" copy-mode-vi "stock-search-$action"
-      if [ "$action" = Escape ]; then
-        wait_for_current_marker "$side" ATTACHED_NAV_00
-      else
-        wait_for_current_marker "$side" 'ATTACHED_NAV_35 ATTACHED_NAV_MATCH'
-      fi
-      tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
-      wait_for_mode_state "$side" root
+      wait_for_current_marker "$side" 'ATTACHED_NAV_35 ATTACHED_NAV_MATCH'
     fi
+    tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
+    wait_for_mode_state "$side" root
   done
   side_command "$side" set-window-option -u -t "$INNER_WINDOW_TARGET" mode-keys
 }

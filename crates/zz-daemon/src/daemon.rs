@@ -28697,7 +28697,9 @@ fn dismiss_overlays(
     if raising != Some(Overlay::DisplayPanes) && take_display_panes(inner, client).is_some() {
         events.push(EventPayload::DisplayPanes { state: None });
     }
-    if let Some(output) = take_command_output(inner, client) {
+    if raising != Some(Overlay::CommandPrompt)
+        && let Some(output) = take_command_output(inner, client)
+    {
         retired.push((client, output));
     }
     if raising != Some(Overlay::Popup)

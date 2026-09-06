@@ -116,34 +116,6 @@
       "reason": "Measured 2026-09-05 while closing the direct CLI mixed-queue item. The pin emits bytes hello (5 bytes), empty stderr and status 0; zz emits hello LF AFTER LF (12 bytes), empty stderr and status 0. The durable cli-output-bytes fixture explicitly asserts those different bytes rather than calling this parity. The CLI writer can track direct argv commands but source-file returns already aggregated CommandOutcome stdout, so it cannot reconstruct internal file_write versus cmdq_print boundaries. This requires a daemon/source replay fix outside this lane output-writer zone; no protocol change or native decision was made. Direct empty displays and homogeneous sourced print queues remain independently proved, so their closed scope was not relocated."
     },
     {
-      "id": "clients.command-output-pane-prompt",
-      "title": "Preserve command output beneath stock pane search prompts",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "now",
-      "ease": "medium",
-      "impact": [
-        "daily",
-        "scripts"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:command-output-pane-prompt-lifecycle"
-      ],
-      "evidence": [
-        "file:compat/attached-client.sh",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz-mux/src/command.rs",
-        "resource:third_party/tmux-reference/UPSTREAM.md"
-      ],
-      "acceptance": [
-        "On an attached client with vi mode keys and a retained source-file output view, the stock / binding opens command-prompt -P without discarding that output view.",
-        "Escape dismisses only the search prompt and preserves the output, its mode and navigation state; submitting ATTACHED_NAV_MATCH searches the retained output and exposes ATTACHED_NAV_35 ATTACHED_NAV_MATCH."
-      ],
-      "depends_on": [],
-      "reason": "Measured 2026-09-05 against pinned tmux d77c9dc6 and zz 6b6171fc on Ubuntu with compat/attached-client.sh --command-output and probe_command_output_prompt_lifecycle. The pin preserves pane_in_mode=1 while opening and closing the stock / prompt. zz changes client_key_table from copy-mode-vi to root as soon as that prompt opens, before Escape: MuxEffect::CommandPrompt calls dismiss_overlays, which takes the client-local command output. Idle Escape and selection Escape still dispatch clear-selection and preserve the view on both binaries. This refutes the old clients.tui-command-output-navigation claim \"Search submission or cancellation closes only that local editor\" for the current stock binding. prompt.pane-rendered accepted client-side placement for -P, but did not authorize losing the retained output. The fixture explicitly asserts the stock lifecycle divergence on both binaries and retains the original search editing, cancellation, submission, next/previous and copy assertions through zz native copy-mode-search-prompt; those native-path passes do not close this stock-binding defect. No product change or new native policy was made. The native editor draws /; the stock prompt still must draw (search down) on both sides. Both prompt spellings have bounded rendered-row checks, and the temporary native binding must restore byte-for-byte to its saved list-keys row. Cycle 15 remeasurement at fd8123b4 with compat/attached-client.sh --command-output confirms both stock Escape and Enter still discard output before prompt completion. Ownership audit: dismiss_overlays unconditionally calls take_command_output, removing ServerState.command_outputs and restoring previous_key_table; retire_command_output cancels terminal copy mode and publishes CommandOutput with viewport None. pane_carries_a_mode_command then cannot route stock send-keys -X search-forward to the removed output. ClientCore, the TUI CommandPromptChanged consumer and GPUI MuxClient store prompt state independently and do not cause this removal. The required candidate fix is to skip take_command_output when raising Overlay::CommandPrompt. That daemon prompt-dismissal hunk is outside this lane's authorized status-render and control-notification zones, so no client-only workaround or acceptance narrowing was applied. Full attached-fixture double-run remains required after that daemon fix; only the bounded command-output probe was rerun here."
-    },
-    {
       "id": "clients.interactive-refresh",
       "title": "Complete interactive client commands",
       "decision": "native",
@@ -1969,6 +1941,18 @@
         "resource:crates/zz/src/lib.rs"
       ],
       "resolution": "Closed semantic:cli-output-mixed-queue with the pinned file.c stdout-stream ownership rule. A first show-buffer/save-buffer-to-stdout writes hello without LF and suppresses later printed stdout, including empty and nonempty display output. A printed stream followed by a file write, or a second file write, emits Bad file descriptor: - on stderr and sets exit status 1; later printed output still runs when the printed stream owns stdout. Named file writes do not claim stdout. The cli-output-bytes fixture checks exact bytes, stderr and exit statuses for all those cases while retaining direct and sourced empty-display proofs. lib.rs now retains one output writer per CLI queue and incorporates emission failure into the queue exit status. No wire change. source-file internal mixed streams still arrive aggregated and remain explicitly measured under clients.cli-output-sourced-mixed-queue."
+    },
+    {
+      "id": "clients.command-output-pane-prompt",
+      "title": "Preserve command output beneath stock pane search prompts",
+      "closed_on": "2026-09-06",
+      "evidence": [
+        "file:compat/attached-client.sh",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:third_party/tmux-reference/UPSTREAM.md"
+      ],
+      "resolution": "Proved 2026-09-06 against pinned d77c9dc6. semantic:command-output-pane-prompt-lifecycle is closed. Pin derivation: status_prompt_set only touches the client status line, so nothing in the pin's prompt path clears the pane mode; a fresh isolated -f /dev/null pin server measured #{client_key_table} root and #{pane_in_mode} 1 for an attached client in copy-mode-vi, confirming the pane mode and not the client key table is the pin's retention channel. zz's dismiss_overlays called take_command_output unconditionally, which removed ServerState.command_outputs and restored previous_key_table the moment MuxEffect::CommandPrompt raised Overlay::CommandPrompt, so the retained source-file output view and its copy-mode-vi table were gone before the user typed anything. take_command_output is now skipped for that one raise, matching every other overlay's raising guard in the same function; no other dismiss_overlays call site passes Overlay::CommandPrompt, so no other dismissal changed. Nothing else was needed: MuxEffect::TerminalView already routes a mode action to inner.command_outputs ahead of the pane terminal, pane_carries_a_mode_command already reports a retained output as a mode, and input_command_prompt_key and input_command_prompt_text already intercept keys before the key-table decision, so leaving copy-mode-vi installed cannot steal prompt keys. probe_command_output_prompt_lifecycle in compat/attached-client.sh now runs one shared body for both binaries across open, Escape and Enter: the search prompt draws (search down), the view survives the settle window on both sides through assert_output_mode_stays (pane_in_mode 1 on the pin, client_key_table copy-mode-vi on zz), Escape returns to ATTACHED_NAV_00, Enter on ATTACHED_NAV_MATCH exposes ATTACHED_NAV_35 ATTACHED_NAV_MATCH from the retained output, and q leaves the view on both. The per-side KNOWN DIVERGENCE branch is deleted. compat/attached-client.sh ran twice end to end at this tip and printed attached-client compatibility: PASS both times; the bounded --command-output run also passed. probe_command_output_navigation keeps the native copy-mode-search-prompt coverage and its byte-for-byte list-keys restoration unchanged. The old clients.tui-command-output-navigation clause \"Search submission or cancellation closes only that local editor\" now holds for the stock binding too. No product decision, protocol change or native policy was made."
     },
     {
       "id": "clients.context-formats",

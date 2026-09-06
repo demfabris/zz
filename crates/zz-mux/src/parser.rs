@@ -401,8 +401,10 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         word: &mut String,
         word_started: &mut bool,
         word_is_command_block: &mut bool,
+        word_is_percent: &mut bool,
         words: &mut Vec<String>,
         command_block_words: &mut Vec<usize>,
+        percent_words: &mut Vec<usize>,
         eager_assignment: &mut bool,
     ) {
         if !*word_started {
@@ -417,9 +419,13 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         if *word_is_command_block {
             command_block_words.push(words.len());
         }
+        if *word_is_percent {
+            percent_words.push(words.len());
+        }
         words.push(std::mem::take(word));
         *word_started = false;
         *word_is_command_block = false;
+        *word_is_percent = false;
         if words.len() != 1 {
             return;
         }
@@ -441,8 +447,10 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         word: &mut String,
         word_started: &mut bool,
         word_is_command_block: &mut bool,
+        word_is_percent: &mut bool,
         words: &mut Vec<String>,
         command_block_words: &mut Vec<usize>,
+        percent_words: &mut Vec<usize>,
         eager_assignment: &mut bool,
     ) {
         self.finish_word(
@@ -451,8 +459,10 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
             word,
             word_started,
             word_is_command_block,
+            word_is_percent,
             words,
             command_block_words,
+            percent_words,
             eager_assignment,
         );
         if self.aborted {
@@ -460,10 +470,22 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         }
         if words.is_empty() {
             command_block_words.clear();
+            percent_words.clear();
             return;
         }
         let tokens = std::mem::take(words);
         let command_block_tokens = std::mem::take(command_block_words);
+        let percent_tokens = std::mem::take(percent_words);
+        if percent_tokens.iter().any(|index| {
+            tokens.get(*index).is_some_and(|token| {
+                is_invalid_percent_token(token)
+                    && !is_conditional_token(token)
+                    && !(*index == 0 && token == "%hidden")
+            })
+        }) {
+            self.diagnostic(line, column, "syntax error");
+            return;
+        }
         if tokens.first().is_some_and(|token| token == "%hidden") {
             self.finish_hidden(line, column, &tokens);
             return;
@@ -483,10 +505,6 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
                 "%else" | "%endif" => {
                     self.finish_conditional(&tokens[start], None, line, column);
                     start += 1;
-                }
-                token if is_invalid_percent_token(token) => {
-                    self.diagnostic(line, column, "syntax error");
-                    return;
                 }
                 _ => {
                     let end = tokens[start + 1..]
@@ -690,13 +708,26 @@ impl ConfigContext for LiteralVariableContext {
     }
 }
 
-struct RecordingHomeContext {
-    names: BTreeSet<String>,
+/// The names one line hands the daemon before it can be parsed the way the
+/// pin's server parses it: the `~` user names `yylex_get_word` resolves through
+/// the passwd database, and the `$NAME` variables `yylex_token_variable` reads
+/// through `environ_find(global_environ, name)`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ConfigExpansionNames {
+    /// Every `~` user name, with the empty name standing for a bare `~`.
+    pub homes: BTreeSet<String>,
+    /// Every `$NAME` and `${NAME}` variable name.
+    pub variables: BTreeSet<String>,
 }
 
-impl ConfigContext for RecordingHomeContext {
-    fn variable(&mut self, _name: &str) -> Option<String> {
-        None
+struct RecordingExpansionContext {
+    names: ConfigExpansionNames,
+}
+
+impl ConfigContext for RecordingExpansionContext {
+    fn variable(&mut self, name: &str) -> Option<String> {
+        self.names.variables.insert(name.to_owned());
+        Some(String::new())
     }
 
     fn condition(&mut self, _condition: &str) -> bool {
@@ -704,22 +735,19 @@ impl ConfigContext for RecordingHomeContext {
     }
 
     fn user_home(&mut self, name: Option<&str>) -> Option<String> {
-        self.names.insert(name.unwrap_or_default().to_owned());
+        self.names.homes.insert(name.unwrap_or_default().to_owned());
         Some(String::new())
     }
-
-    fn expand_variables(&self) -> bool {
-        false
-    }
 }
 
-struct ResolvedHomeContext<'a> {
+struct ResolvedExpansionContext<'a> {
     homes: &'a BTreeMap<String, String>,
+    variables: &'a BTreeMap<String, String>,
 }
 
-impl ConfigContext for ResolvedHomeContext<'_> {
-    fn variable(&mut self, _name: &str) -> Option<String> {
-        None
+impl ConfigContext for ResolvedExpansionContext<'_> {
+    fn variable(&mut self, name: &str) -> Option<String> {
+        self.variables.get(name).cloned()
     }
 
     fn condition(&mut self, _condition: &str) -> bool {
@@ -728,10 +756,6 @@ impl ConfigContext for ResolvedHomeContext<'_> {
 
     fn user_home(&mut self, name: Option<&str>) -> Option<String> {
         self.homes.get(name.unwrap_or_default()).cloned()
-    }
-
-    fn expand_variables(&self) -> bool {
-        false
     }
 }
 
@@ -863,26 +887,33 @@ pub(crate) fn parse_config_without_variable_expansion(
     parse_config_with(source, input, &mut LiteralVariableContext)
 }
 
-/// Every user name whose home `input` needs, with the empty name standing for a
-/// bare `~`. The pass answers each lookup with an empty home so the walk records
-/// the whole line instead of stopping at the first unresolved tilde.
-pub fn config_home_directory_names(source: impl Into<String>, input: &str) -> BTreeSet<String> {
-    let mut context = RecordingHomeContext {
-        names: BTreeSet::new(),
+/// Every `~` user name and `$NAME` variable `input` needs before it can be
+/// parsed. The pass answers each lookup with an empty value so the walk records
+/// the whole line instead of stopping at the first unresolved name.
+pub fn config_expansion_names(source: impl Into<String>, input: &str) -> ConfigExpansionNames {
+    let mut context = RecordingExpansionContext {
+        names: ConfigExpansionNames::default(),
     };
     parse_config_with(source, input, &mut context);
     context.names
 }
 
-/// Parse without variable expansion, resolving every `~` from `homes` instead of
-/// this process's own passwd entry. A name missing from `homes` is a failed
-/// lookup and becomes the pin's located syntax error.
-pub fn parse_config_with_home_directories(
+/// Parse resolving every `~` from `homes` and every `$NAME` from `variables`
+/// instead of from this process's own passwd entry and environment. A user name
+/// missing from `homes` is a failed lookup and becomes the pin's located syntax
+/// error; a variable missing from `variables` is unset and expands to nothing,
+/// which is what `yylex_token_variable` does with a name `environ_find` misses.
+pub fn parse_config_with_expansions(
     source: impl Into<String>,
     input: &str,
     homes: &BTreeMap<String, String>,
+    variables: &BTreeMap<String, String>,
 ) -> ParsedConfig {
-    parse_config_with(source, input, &mut ResolvedHomeContext { homes })
+    parse_config_with(
+        source,
+        input,
+        &mut ResolvedExpansionContext { homes, variables },
+    )
 }
 
 pub(crate) fn parse_config_with<C: ConfigContext>(
@@ -989,6 +1020,7 @@ where
     };
     let mut words = Vec::new();
     let mut command_block_words = Vec::new();
+    let mut percent_words = Vec::new();
     let mut word = String::new();
     let mut word_started = false;
     let mut percent_word = false;
@@ -1094,8 +1126,10 @@ where
                     &mut word,
                     &mut word_started,
                     &mut word_is_command_block,
+                    &mut percent_word,
                     &mut words,
                     &mut command_block_words,
+                    &mut percent_words,
                 );
                 last_state = None;
             }
@@ -1114,8 +1148,10 @@ where
                     &mut word,
                     &mut word_started,
                     &mut word_is_command_block,
+                    &mut percent_word,
                     &mut words,
                     &mut command_block_words,
+                    &mut percent_words,
                     &mut eager_assignment,
                 );
                 in_comment = false;
@@ -1143,8 +1179,10 @@ where
                     &mut word,
                     &mut word_started,
                     &mut word_is_command_block,
+                    &mut percent_word,
                     &mut words,
                     &mut command_block_words,
+                    &mut percent_words,
                     &mut eager_assignment,
                 );
                 quote = Quote::None;
@@ -1162,8 +1200,10 @@ where
                 &mut word,
                 &mut word_started,
                 &mut word_is_command_block,
+                &mut percent_word,
                 &mut words,
                 &mut command_block_words,
+                &mut percent_words,
                 &mut eager_assignment,
             );
             byte_eof_seen = true;
@@ -1342,8 +1382,10 @@ where
                         &mut word,
                         &mut word_started,
                         &mut word_is_command_block,
+                        &mut percent_word,
                         &mut words,
                         &mut command_block_words,
+                        &mut percent_words,
                         &mut eager_assignment,
                     );
                     if character == '\n' {
@@ -1361,8 +1403,10 @@ where
                         &mut word,
                         &mut word_started,
                         &mut word_is_command_block,
+                        &mut percent_word,
                         &mut words,
                         &mut command_block_words,
+                        &mut percent_words,
                         &mut eager_assignment,
                     );
                     last_state = None;
@@ -1418,8 +1462,10 @@ where
                         &mut word,
                         &mut word_started,
                         &mut word_is_command_block,
+                        &mut percent_word,
                         &mut words,
                         &mut command_block_words,
+                        &mut percent_words,
                         &mut eager_assignment,
                     );
                 }
@@ -1475,16 +1521,22 @@ fn finish_word(
     word: &mut String,
     word_started: &mut bool,
     word_is_command_block: &mut bool,
+    word_is_percent: &mut bool,
     words: &mut Vec<String>,
     command_block_words: &mut Vec<usize>,
+    percent_words: &mut Vec<usize>,
 ) {
     if *word_started {
         if *word_is_command_block {
             command_block_words.push(words.len());
         }
+        if *word_is_percent {
+            percent_words.push(words.len());
+        }
         words.push(std::mem::take(word));
         *word_started = false;
         *word_is_command_block = false;
+        *word_is_percent = false;
     }
 }
 
@@ -1868,30 +1920,109 @@ mod tests {
         assert_eq!(command.args[12], "/users/alice/bin");
     }
 
+    /// Derived from pinned tmux d77c9dc6. `yylex` takes any unquoted word
+    /// beginning with `%` as a condition unless the rest is all `%` or digits,
+    /// and returns ERROR for a condition it does not recognise, for every word
+    /// on the line and not only the first. Measured over `-C` on the pin:
+    /// `refresh-client -A %1:pause`, `display-message -p a %1:pause` and
+    /// `set -g @x %1:pause` each answer `parse error: syntax error`;
+    /// `display-message -p %%`, `%12` and `%1` each print their word;
+    /// `display-message -p foo%bar` reaches strftime; and a quoted
+    /// `\'%1:pause\'` is an ordinary word, so at the head of a line it is
+    /// `unknown command: %1:pause` rather than a syntax error.
     #[test]
-    fn records_every_tilde_name_a_line_needs_without_stopping_at_the_first() {
-        let names = config_home_directory_names(
+    fn an_unquoted_percent_word_is_a_condition_in_every_argument_position() {
+        for line in [
+            "refresh-client -A %1:pause",
+            "display-message -p a %1:pause",
+            "set -g @x %1:pause",
+            "%1:pause",
+            "display-message -p %pause",
+        ] {
+            let parsed = parse_config("<control>", line);
+            assert!(parsed.commands.is_empty(), "{line}");
+            assert_eq!(parsed.diagnostics[0].message, "syntax error", "{line}");
+        }
+        for (line, args) in [
+            ("display-message -p %%", vec!["-p", "%%"]),
+            ("display-message -p %12", vec!["-p", "%12"]),
+            ("display-message -p %1", vec!["-p", "%1"]),
+            ("display-message -p foo%bar", vec!["-p", "foo%bar"]),
+            ("display-message -p '%1:pause'", vec!["-p", "%1:pause"]),
+            ("display-message -p \"%1:pause\"", vec!["-p", "%1:pause"]),
+        ] {
+            let parsed = parse_config("<control>", line);
+            assert!(parsed.diagnostics.is_empty(), "{line}");
+            assert_eq!(parsed.commands[0].args, args, "{line}");
+        }
+        let quoted_head = parse_config("<control>", "'%1:pause'");
+        assert!(quoted_head.diagnostics.is_empty());
+        assert_eq!(quoted_head.commands[0].name, "%1:pause");
+    }
+
+    #[test]
+    fn records_every_tilde_and_variable_name_a_line_needs_without_stopping_at_the_first() {
+        let names = config_expansion_names(
             "<control>",
             r#"run-shell ~/a ~alice/b '~/literal' ~ ~bob "$KEEP~/quoted""#,
         );
         assert_eq!(
-            names.iter().map(String::as_str).collect::<Vec<_>>(),
+            names.homes.iter().map(String::as_str).collect::<Vec<_>>(),
             ["", "alice", "bob"]
         );
-        assert!(config_home_directory_names("<control>", "run-shell '~/literal'").is_empty());
-        assert!(config_home_directory_names("<control>", "# ~/comment").is_empty());
+        assert_eq!(
+            names
+                .variables
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["HOME", "KEEP"],
+            "a bare tilde asks for HOME before it falls back to the passwd entry"
+        );
+        assert!(
+            config_expansion_names("<control>", "run-shell '~/literal' '$LITERAL'")
+                .homes
+                .is_empty()
+        );
+        assert!(
+            config_expansion_names("<control>", "run-shell '~/literal' '$LITERAL'")
+                .variables
+                .is_empty()
+        );
+        assert_eq!(
+            config_expansion_names("<control>", "# ~/comment $NAME"),
+            ConfigExpansionNames::default()
+        );
+        assert_eq!(
+            config_expansion_names("<control>", "display-message -p ${BRACED} $PLAIN")
+                .variables
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["BRACED", "PLAIN"]
+        );
     }
 
+    /// Derived from pinned tmux d77c9dc6. `yylex_token_variable` expands
+    /// `$NAME` and `${NAME}` through `environ_find(global_environ, name)` while
+    /// the server parses the line, an unset name expands to nothing, and a
+    /// single-quoted `\'$NAME\'` never reaches the expansion at all. Measured
+    /// over `-C` on the pin: `display-message -p "$NOTIFY_ENV"` prints the value
+    /// set by an earlier `set-environment -g`, `display-message -p
+    /// "$NOPE_UNSET"` prints an empty line, and `display-message -p
+    /// \'$NOTIFY_ENV\'` prints the literal `$NOTIFY_ENV`.
     #[test]
-    fn resolves_tildes_from_supplied_homes_and_keeps_variables_literal() {
+    fn resolves_tildes_and_variables_from_the_supplied_batches() {
         let homes = BTreeMap::from([
             (String::new(), "/server/home".to_owned()),
             ("alice".to_owned(), "/users/alice".to_owned()),
         ]);
-        let parsed = parse_config_with_home_directories(
+        let variables = BTreeMap::from([("SET".to_owned(), "value".to_owned())]);
+        let parsed = parse_config_with_expansions(
             "<control>",
-            "run-shell ~ ~/bin ~alice/bin $LITERAL",
+            "run-shell ~ ~/bin ~alice/bin $SET ${SET} $UNSET '$SET' \"$SET\"",
             &homes,
+            &variables,
         );
         assert!(parsed.diagnostics.is_empty());
         assert_eq!(
@@ -1900,7 +2031,11 @@ mod tests {
                 "/server/home",
                 "/server/home/bin",
                 "/users/alice/bin",
-                "$LITERAL"
+                "value",
+                "value",
+                "",
+                "$SET",
+                "value"
             ]
         );
     }
@@ -1908,7 +2043,12 @@ mod tests {
     #[test]
     fn a_home_missing_from_the_batch_is_the_pinned_syntax_error() {
         let homes = BTreeMap::from([(String::new(), "/server/home".to_owned())]);
-        let parsed = parse_config_with_home_directories("<control>", "run-shell ~nobody", &homes);
+        let parsed = parse_config_with_expansions(
+            "<control>",
+            "run-shell ~nobody",
+            &homes,
+            &BTreeMap::new(),
+        );
         assert!(parsed.commands.is_empty());
         assert_eq!(parsed.diagnostics[0].message, "syntax error");
     }

@@ -109,6 +109,13 @@ const MAX_CLIENT_KEY_INJECTION_DEPTH: u32 = 16;
 const CONTROL_SUBSCRIPTION_INTERVAL: Duration = Duration::from_secs(1);
 thread_local! {
     static CLIENT_KEY_INJECTION_DEPTH: Cell<u32> = const { Cell::new(0) };
+    /// Structural control notifications raised while the calling thread runs
+    /// one direct Control command, held until that command's `after-` hook has
+    /// finished. On the pin a notification is a `notify_add` command-queue item
+    /// and drains only when the queue goes idle, so the hook block that
+    /// `cmdq_insert_hook` queued behind the command always precedes it.
+    static DEFERRED_CONTROL_NOTIFICATIONS: RefCell<Option<Vec<DeferredControlNotification>>> =
+        const { RefCell::new(None) };
 }
 const CONTROL_CELL_WIDTH_PX: u32 = 8;
 const CONTROL_CELL_HEIGHT_PX: u32 = 18;
@@ -5469,13 +5476,21 @@ impl Shared {
             };
             context.set_control_command_target(Some((client, flags)));
         }
-        let execution = self.execute_with_mux_source_routed(
-            client,
-            kind,
-            context,
-            &command,
-            MuxOptionSource::RuntimeCommand,
-        );
+        let defer_notifications = kind == ClientKind::Control;
+        let execution = {
+            let _deferral = defer_notifications.then(|| self.defer_control_notifications());
+            let execution = self.execute_with_mux_source_routed(
+                client,
+                kind,
+                context,
+                &command,
+                MuxOptionSource::RuntimeCommand,
+            );
+            if defer_notifications {
+                self.publish_deferred_control_notifications();
+            }
+            execution
+        };
         context.set_control_command_target(previous_control_target);
         let response = match execution {
             Ok(execution) => CommandResponse::Success {
@@ -5776,6 +5791,19 @@ impl Shared {
             inner.cold_bootstrap.prepare(client, failed);
         }
         commands
+    }
+
+    /// Read the `$NAME` variables one Control line needs out of the server's
+    /// global environment, the way the pin's `yylex_token_variable` reads them
+    /// through `environ_find(global_environ, name)` while the server parses that
+    /// line. A name the server does not hold is `None`, which the pin expands to
+    /// nothing.
+    fn resolve_environment(&self, names: &[String]) -> Vec<Option<String>> {
+        let inner = self.inner.lock();
+        names
+            .iter()
+            .map(|name| inner.engine.global_environment_variable(name))
+            .collect()
     }
 
     fn resolve_home_directories(&self, users: &[String]) -> Vec<Option<String>> {
@@ -7055,8 +7083,41 @@ impl Shared {
                 break;
             }
         }
+        if DEFERRED_CONTROL_NOTIFICATIONS.with(|slot| {
+            slot.borrow_mut().as_mut().is_some_and(|held| {
+                held.extend(control_notifications.iter().cloned().map(
+                    |(payload, exclude_client, attached_only)| DeferredControlNotification {
+                        payload,
+                        exclude_client,
+                        attached_only,
+                    },
+                ));
+                true
+            })
+        }) {
+            return;
+        }
         for (payload, exclude_client, attached_only) in control_notifications {
             self.publish_to_control_clients(payload, exclude_client, attached_only);
+        }
+    }
+
+    /// Hold every structural notification this thread raises until the scope
+    /// ends, which is after the command's `after-` hook has run.
+    fn defer_control_notifications(self: &Arc<Self>) -> DeferredControlNotificationScope {
+        DEFERRED_CONTROL_NOTIFICATIONS.with(|slot| *slot.borrow_mut() = Some(Vec::new()));
+        DeferredControlNotificationScope
+    }
+
+    fn publish_deferred_control_notifications(self: &Arc<Self>) {
+        let held = DEFERRED_CONTROL_NOTIFICATIONS
+            .with(|slot| slot.borrow_mut().take().unwrap_or_default());
+        for notification in held {
+            self.publish_to_control_clients(
+                notification.payload,
+                notification.exclude_client,
+                notification.attached_only,
+            );
         }
     }
 
@@ -37043,6 +37104,26 @@ thread_local! {
     static COMMAND_QUEUE_PARK: Cell<Option<(ClientId, u64)>> = const { Cell::new(None) };
 }
 
+/// One held structural notification and the audience it was raised for.
+struct DeferredControlNotification {
+    payload: EventPayload,
+    exclude_client: Option<ClientId>,
+    attached_only: bool,
+}
+
+/// Clears the hold if the command unwinds before its scope ends, so a panic or
+/// an early return cannot leave the next command on this thread deferring into
+/// a stale list.
+struct DeferredControlNotificationScope;
+
+impl Drop for DeferredControlNotificationScope {
+    fn drop(&mut self) {
+        DEFERRED_CONTROL_NOTIFICATIONS.with(|slot| {
+            slot.borrow_mut().take();
+        });
+    }
+}
+
 struct CommandQueueParkScope;
 
 impl CommandQueueParkScope {
@@ -37325,6 +37406,11 @@ fn handle_connection<S: TransportStream>(
                     request_id,
                     homes,
                 });
+            }
+            ProtocolMessage::EnvironmentRequest { request_id, names } => {
+                let values = shared.resolve_environment(&names);
+                let _ = outbound
+                    .enqueue_reliable(&ProtocolMessage::EnvironmentResponse { request_id, values });
             }
             ProtocolMessage::PrepareCommandList {
                 request_id,
@@ -70587,8 +70673,17 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(inner.paste_buffers[0].automatic);
     }
 
+    /// Derived from pinned tmux d77c9dc6. `input_osc_52_parse` (input.c) opens
+    /// with `if (options_get_number(global_options, "set-clipboard") != 2)
+    /// return (0);`, so an application's own OSC 52 reaches the outer terminal,
+    /// the buffer stack and `pane-set-clipboard` only under `on`; under
+    /// `external` and `off` the pin does nothing at all. Measured on the pin
+    /// through `compat/scenarios/smoke/copy-selection-clipboard-bytes`: a pane
+    /// writing `ESC ] 52 ; c ; YXBwbGljYXRpb24= BEL` produces one
+    /// `selection=c payload=application` write and one buffer under `on`, and
+    /// no write and no buffer under `external` or `off`.
     #[test]
-    fn app_clipboard_writes_reach_every_viewer_and_obey_set_clipboard() {
+    fn app_clipboard_writes_reach_every_viewer_only_under_set_clipboard_on() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
         let (client, _) =
@@ -70618,14 +70713,11 @@ bind - split-window -v -c "#{pane_current_path}"
         take_reliable_messages(&observer_mailbox);
 
         shared.deliver_clipboard_write(pane, ClipboardTarget::Clipboard, "external".to_owned());
-        assert_eq!(
-            take_clipboard_writes(&mailbox, pane),
-            vec![(ClipboardTarget::Clipboard, "external".to_owned())]
+        assert!(
+            take_clipboard_writes(&mailbox, pane).is_empty(),
+            "input_osc_52_parse refuses unless set-clipboard is on"
         );
-        assert_eq!(
-            take_clipboard_writes(&observer_mailbox, pane),
-            vec![(ClipboardTarget::Clipboard, "external".to_owned())]
-        );
+        assert!(take_clipboard_writes(&observer_mailbox, pane).is_empty());
         assert!(shared.inner.lock().paste_buffers.is_empty());
 
         shared

@@ -3,7 +3,7 @@ corpus: none
 # fixtures/ so compat/run.sh never collects it; run it by hand:
 #
 #   ZZ_COMPAT_ZZ=<zz> compat/diff-scenario.sh \
-#     compat/scenarios/smoke/fixtures/stderr-parity-negative.txt <zz> <tmux>
+#     compat/scenarios/smoke/fixtures/stderr-parity-negative.scenario <zz> <tmux>
 #
 # Both steps exit 1 on BOTH binaries, which is exactly the shape a plain
 # scenario calls clean: the exit-class check only fires when one side succeeds.

@@ -1,3 +1,7 @@
 corpus: none
 stage: fixtures/control-eof-drain.sh ~/control-eof-drain.sh
 run-shell 'sh ~/control-eof-drain.sh'
+# The stamp is the positive observable: without it this scenario
+# compares only the shape of what the fixture printed, so a setup
+# that failed the same way on both sides would still read clean.
+out: show-environment -g CONTROL_EOF_DRAIN

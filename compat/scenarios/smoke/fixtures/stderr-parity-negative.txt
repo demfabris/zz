@@ -1,0 +1,15 @@
+corpus: none
+# Negative control for the err: query kind, deliberately red. It lives under
+# fixtures/ so compat/run.sh never collects it; run it by hand:
+#
+#   ZZ_COMPAT_ZZ=<zz> compat/diff-scenario.sh \
+#     compat/scenarios/smoke/fixtures/stderr-parity-negative.txt <zz> <tmux>
+#
+# Both steps exit 1 on BOTH binaries, which is exactly the shape a plain
+# scenario calls clean: the exit-class check only fires when one side succeeds.
+# Under err: each is an OUT divergence naming the two messages. Measured
+# 2026-09-06 at this lane's tip: 2 step(s), 0 TOPO, 0 GEO, 2 OUT divergence(s);
+# zz says "target not found: nosuchbuffer" where the pin says
+# "no buffer nosuchbuffer".
+err: paste-buffer -b nosuchbuffer
+err: save-buffer -b nosuchbuffer /dev/null

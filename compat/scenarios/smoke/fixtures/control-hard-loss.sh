@@ -26,3 +26,6 @@ if [ -s "$work/errors" ]; then
 fi
 
 sed 's/^/observed /' "$work/observed"
+
+# shellcheck disable=SC2086
+"$binary" "$@" set-environment -g CONTROL_HARD_LOSS reached-end

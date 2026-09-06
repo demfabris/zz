@@ -152,6 +152,24 @@ env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
 client_pid=$!
 await_clients 1 || { echo "format-listing-$side: attach"; exit 0; }
 
+# Before any reply, the two sides disagree and this records it rather than
+# steering past it. The pin's c->theme is THEME_UNKNOWN and
+# format_cb_client_theme returns NULL for that, so #{client_theme} is empty and
+# the name is absent from the -a listing entirely. zz has no unknown state and
+# answers dark from the moment the client attaches. Measured 2026-09-06 and
+# held open as semantic:harness-theme-steering under harness.proof-holes.
+if [ "$side" = tmux ]; then
+    check_equal theme-unsteered '' \
+        "$(main_client display-message -p -t "$pane" '#{client_theme}')"
+    check_equal theme-unsteered-listed 0 \
+        "$(main_client display-message -a -p -t "$pane" | grep -c '^client_theme=')"
+else
+    check_equal theme-unsteered dark \
+        "$(main_client display-message -p -t "$pane" '#{client_theme}')"
+    check_equal theme-unsteered-listed 1 \
+        "$(main_client display-message -a -p -t "$pane" | grep -c '^client_theme=')"
+fi
+
 # c->theme is THEME_UNKNOWN until the terminal answers the query, and
 # format_cb_client_theme returns NULL for that, so the client reports dark the
 # way a terminal that supports \033[?2031h does.
@@ -178,11 +196,11 @@ check_equal attached-theme "client_theme=dark" "$(grep '^client_theme=' "$work/a
 check_equal attached-bigger "window_bigger=0" "$(grep '^window_bigger=' "$work/attached")"
 check_equal attached-active "session_active=1" "$(grep '^session_active=' "$work/attached")"
 
-if [ "$check_count" -ne 26 ]; then
+if [ "$check_count" -ne 28 ]; then
     record_failure total-checks
 fi
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g FORMAT_LISTING clean:26
+    main_client set-environment -g FORMAT_LISTING clean:28
 else
     sed "s/^/format-listing-$side: /" "$work/failures"
 fi

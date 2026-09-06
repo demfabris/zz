@@ -9,6 +9,10 @@ export LC_ALL=C
 
 if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ]; then
     side=zz
+    main_client() {
+        env -u TMUX -u TMUX_PANE \
+            "$ZZ_SMOKE_ZZ_BIN" --socket "$ZZ_SMOKE_ZZ_SOCKET" "$@"
+    }
     control_client() {
         env -u TMUX -u TMUX_PANE \
             "$ZZ_SMOKE_ZZ_BIN" --socket "$ZZ_SMOKE_ZZ_SOCKET" \
@@ -16,6 +20,10 @@ if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ]; then
     }
 else
     side=tmux
+    main_client() {
+        env -u TMUX -u TMUX_PANE \
+            "$ZZ_SMOKE_TMUX_BIN" -L "$ZZ_SMOKE_TMUX_LABEL" "$@"
+    }
     control_client() {
         env -u TMUX -u TMUX_PANE \
             "$ZZ_SMOKE_TMUX_BIN" -L "$ZZ_SMOKE_TMUX_LABEL" \
@@ -131,3 +139,5 @@ grep -E '^(SRC-|parse error)' "$work/source.raw" | sed 's/^/source-park | /' || 
 if [ -s "$work/source.err" ]; then
     sed 's/^/source-park ! /' "$work/source.err"
 fi
+
+main_client set-environment -g CONTROL_EOF_DRAIN reached-end

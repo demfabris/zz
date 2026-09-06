@@ -923,6 +923,9 @@ impl ControlState {
         window: &zz_protocol::WindowSnapshot,
     ) -> String {
         let mut flags = String::new();
+        if window.activity {
+            flags.push('#');
+        }
         if window.panes.values().any(|pane| pane.bell) {
             flags.push('!');
         }
@@ -962,7 +965,7 @@ fn handle_protocol<W: Write>(
                 output.pane_output(&render_pane_output(pane, &bytes))?;
             }
             EventPayload::PaneOutputState { pane, paused } => {
-                output.notify(
+                output.notify_in_block(
                     format!("%{} {pane}", if paused { "pause" } else { "continue" }).as_bytes(),
                 )?;
             }
@@ -1690,6 +1693,15 @@ impl<W: Write> ControlWriter<W> {
             self.output.flush()?;
         }
         Ok(())
+    }
+
+    /// `control_pause_pane` and `control_continue_pane` reach `control_write`
+    /// straight from `refresh-client`, so their line lands inside the running
+    /// command's guard; the notify queue's own lines drain after it instead.
+    fn notify_in_block(&mut self, line: &[u8]) -> io::Result<()> {
+        self.output.write_all(line)?;
+        self.output.write_all(b"\n")?;
+        self.output.flush()
     }
 
     fn notify(&mut self, line: &[u8]) -> io::Result<()> {

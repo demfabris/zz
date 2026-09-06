@@ -3331,6 +3331,14 @@ fn mux_hook_events(
                 after,
             ));
         }
+        if previous.active_pane != state.active_pane {
+            events.push(PendingHookEvent::window(
+                "window-pane-changed",
+                *window,
+                state,
+                after,
+            ));
+        }
         if previous.layout != state.layout || previous.zoomed_pane != state.zoomed_pane {
             events.push(PendingHookEvent::window(
                 "window-layout-changed",
@@ -3346,14 +3354,6 @@ fn mux_hook_events(
                     after,
                 ));
             }
-        }
-        if previous.active_pane != state.active_pane {
-            events.push(PendingHookEvent::window(
-                "window-pane-changed",
-                *window,
-                state,
-                after,
-            ));
         }
     }
     for (pane, state) in &after.panes {
@@ -6939,6 +6939,7 @@ impl Shared {
         publish_control: bool,
     ) {
         let shutdown_already_blocked = self.active_shutdown_blockers() != 0;
+        let mut control_notifications = Vec::new();
         for event in events {
             let attached_only = matches!(
                 event.name,
@@ -6966,14 +6967,14 @@ impl Shared {
                 }
             }
             if publish_control {
-                self.publish_to_control_clients(
+                control_notifications.push((
                     EventPayload::HookEvent {
                         name: event.name.to_owned(),
                         variables: control_variables,
                     },
                     event.exclude_client,
                     attached_only,
-                );
+                ));
             }
             let (context, commands) = {
                 let inner = self.inner.lock();
@@ -7003,6 +7004,9 @@ impl Shared {
             if draining && yielded {
                 break;
             }
+        }
+        for (payload, exclude_client, attached_only) in control_notifications {
+            self.publish_to_control_clients(payload, exclude_client, attached_only);
         }
     }
 
@@ -29950,11 +29954,12 @@ fn reconcile_copy_session(
                 && (session.observed || session.scroll_exit || session.exiting) =>
         {
             let kill = session.kill;
+            let announced = session.exiting;
             exit_copy_session(inner, client);
             if kill {
                 inner.copy_kill_panes.push(pane);
             }
-            (None, true)
+            (None, !announced)
         }
         _ => (None, false),
     }
@@ -71890,7 +71895,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let (unclaimed, changed) =
             reconcile_copy_session(&mut inner, pane, client, TerminalMode::Live);
         assert!(unclaimed.is_none());
-        assert!(changed);
+        assert!(!changed);
         assert!(!inner.copy_sessions.contains_key(&client));
     }
 

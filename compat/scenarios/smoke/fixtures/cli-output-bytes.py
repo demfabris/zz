@@ -74,7 +74,20 @@ try:
         observed = subprocess.run(["tmux", *args], capture_output=True, timeout=15)
         if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
             raise AssertionError((args, observed.stdout, observed.stderr, observed.returncode))
+    nested_raw = pathlib.Path(os.environ["HOME"]) / "cli-output-nested-raw.conf"
+    nested_raw.write_text(f"source-file {raw_only}\nsource-file {raw_only}\n")
+    nested_print = pathlib.Path(os.environ["HOME"]) / "cli-output-nested-print.conf"
+    nested_print.write_text(
+        f"display-message -p OUTER\nsource-file {raw_only}\ndisplay-message -p TAIL\n")
+    for args, expected in (
+        (["source-file", str(nested_raw)], b"hello"),
+        (["source-file", str(nested_print)], b"OUTER\nTAIL\n"),
+    ):
+        observed = subprocess.run(["tmux", *args], capture_output=True, timeout=15)
+        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
+            raise AssertionError((args, observed.stdout, observed.stderr, observed.returncode))
     print("sourced stdout ownership: raw claim, dropped prints and EBADF match the pin")
+    print("nested source frames share one claim: a nested raw write after any write is EBADF")
     tmux("set-buffer", "-b", "newline", "hello\n")
     raw_newline = pathlib.Path(os.environ["HOME"]) / "cli-output-raw-newline.conf"
     raw_newline.write_text("show-buffer -b newline\n")
@@ -82,7 +95,7 @@ try:
     require_bytes(["source-file", str(raw_newline), ";", "display", "-p", "AFTER"], trailing)
     print("KNOWN DIVERGENCE cli-output-sourced-raw-newline-claim: pin=hello LF, zz=hello LF AFTER LF")
     tmux("delete-buffer", "-b", "newline")
-    result = "clean:16"
+    result = "clean:18"
 except Exception as error:
     print(repr(error), flush=True)
 finally:

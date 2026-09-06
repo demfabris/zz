@@ -25659,25 +25659,28 @@ impl ConfigLoadReport {
     }
 
     fn note_stdout(&mut self, output: &RawText, raw: bool) -> ReplayStdoutWrite {
-        let Some(transcript) = self
-            .stdout_transcript
-            .as_mut()
-            .and_then(|transcripts| transcripts.last_mut())
-        else {
+        let Some(transcripts) = self.stdout_transcript.as_mut() else {
             return ReplayStdoutWrite::Written;
         };
-        if output.as_bytes().is_empty() {
+        if output.as_bytes().is_empty() || transcripts.is_empty() {
             return ReplayStdoutWrite::Written;
         }
+        let claimed = transcripts.iter().any(|frame| frame.raw_claimed);
+        let written = transcripts
+            .iter()
+            .any(|frame| !frame.replay.as_bytes().is_empty());
+        let transcript = transcripts
+            .last_mut()
+            .expect("stdout transcript has a frame");
         if raw {
-            if transcript.raw_claimed || !transcript.replay.as_bytes().is_empty() {
+            if claimed || written {
                 return ReplayStdoutWrite::Denied;
             }
             transcript.raw_claimed = true;
             transcript.replay.push_bytes(output.as_bytes());
             return ReplayStdoutWrite::Written;
         }
-        if transcript.raw_claimed {
+        if claimed {
             return ReplayStdoutWrite::Dropped;
         }
         append_inserted_output(&mut transcript.replay, output);

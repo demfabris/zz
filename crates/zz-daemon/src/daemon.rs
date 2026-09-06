@@ -7403,9 +7403,10 @@ impl Shared {
                         let current_path = if empty {
                             start_path.clone()
                         } else {
-                            terminal_working_directory(&session)
-                                .map(|path| path.to_string_lossy().into_owned())
-                                .unwrap_or_default()
+                            terminal_working_directory(&session).map_or_else(
+                                || start_path.clone(),
+                                |path| path.to_string_lossy().into_owned(),
+                            )
                         };
                         deferred_terminal_commands.push(
                             DeferredTerminalCommand::SetWordSeparators {
@@ -7439,6 +7440,8 @@ impl Shared {
                             },
                             &mut hooks,
                         );
+                        let default_title = inner.engine.default_pane_title().to_owned();
+                        let _ = inner.engine.state.update_pane_title(*pane, default_title);
                         let attached_clients = inner
                             .engine
                             .state
@@ -7567,9 +7570,10 @@ impl Shared {
                         let current_path = if *empty {
                             start_path.clone()
                         } else {
-                            terminal_working_directory(&session)
-                                .map(|path| path.to_string_lossy().into_owned())
-                                .unwrap_or_default()
+                            terminal_working_directory(&session).map_or_else(
+                                || start_path.clone(),
+                                |path| path.to_string_lossy().into_owned(),
+                            )
                         };
                         deferred_terminal_commands.push(
                             DeferredTerminalCommand::SetWordSeparators {
@@ -10505,6 +10509,8 @@ impl Shared {
     ) -> Result<Execution, DaemonError> {
         let args = &invocation.args;
         let parsed = parse_run_shell_args(args)?;
+        let inserted_target =
+            ExecutionContext::new(context.session, context.window, context.pane);
         let draining = queue_execution.is_some_and(CommandQueueExecution::is_draining);
         let detached = queue_execution.is_some_and(|execution| execution.detached);
         let (
@@ -10705,6 +10711,7 @@ impl Shared {
                             return;
                         }
                         let mut context = command_context;
+                        context.retarget(&inserted_target);
                         let execution = if parsed.background {
                             shared.execute_detached_inserted_commands_with_control_target(
                                 client,
@@ -10766,6 +10773,7 @@ impl Shared {
                         DaemonError::Thread(format!("run-shell delay worker stopped: {error}"))
                     })?;
                     let mut command_context = command_context;
+                    command_context.retarget(&inserted_target);
                     let result = self.execute_foreground_inserted_commands(
                         client,
                         kind,
@@ -10929,6 +10937,8 @@ impl Shared {
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_if_shell_args(&command.args)?;
+        let inserted_target =
+            ExecutionContext::new(context.session, context.window, context.pane);
         let draining = queue_execution.is_some_and(CommandQueueExecution::is_draining);
         let detached = queue_execution.is_some_and(|execution| execution.detached);
         let branches = parsed
@@ -11011,6 +11021,7 @@ impl Shared {
                 return Ok(Execution::default());
             };
             let mut command_context = command_context;
+            command_context.retarget(&inserted_target);
             let result = self.execute_foreground_inserted_commands(
                 client,
                 kind,
@@ -11070,6 +11081,7 @@ impl Shared {
                             return;
                         };
                         let mut context = command_context;
+                        context.retarget(&inserted_target);
                         match shared.execute_inserted_commands_with_control_target(
                             client,
                             kind,
@@ -11150,6 +11162,7 @@ impl Shared {
             return Ok(Execution::default());
         };
         let mut command_context = command_context;
+        command_context.retarget(&inserted_target);
         let result = self.execute_foreground_inserted_commands(
             client,
             kind,
@@ -21116,6 +21129,11 @@ impl Shared {
             if !inner.engine.allow_set_title(pane) {
                 return;
             }
+            let title = if title.is_empty() {
+                inner.engine.default_pane_title().to_owned()
+            } else {
+                title.to_owned()
+            };
             let changed = inner
                 .engine
                 .state
@@ -21225,9 +21243,8 @@ impl Shared {
         current_command: &str,
         output_activity: bool,
     ) {
-        let current_path = terminal_working_directory(terminal)
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let live_path =
+            terminal_working_directory(terminal).map(|path| path.to_string_lossy().into_owned());
         let reported_path = viewport.working_directory().unwrap_or_default().to_owned();
         let pid = terminal.process_id();
         let tty = terminal
@@ -21270,6 +21287,7 @@ impl Shared {
                 .pane_runtime_facts(pane)
                 .cloned()
                 .unwrap_or_default();
+            let current_path = live_path.unwrap_or_else(|| previous.start_path.clone());
             let facts = format_hook_facts(&inner);
             let mut hooks = DaemonFormatHooks::command(&facts);
             let before = MuxHookSnapshot::capture(&inner.engine);
@@ -69621,11 +69639,11 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("session");
         let first = context.pane.expect("first pane");
         let source = Arc::clone(&shared.inner.lock().terminals[&first]);
-        let reported_path = reported.to_string_lossy().into_owned();
+        let reported_payload = format!("file://workstation{}", reported.to_string_lossy());
         source.send_text(format!(
-            "cd '{}'\nprintf '\\033]7;file://workstation{}\\a'\n",
+            "cd '{}'\nprintf '\\033]7;{}\\a'\n",
             reported.display(),
-            reported_path
+            reported_payload
         ));
 
         let wait_for_cwd = |terminal: &TerminalSession| {
@@ -69646,8 +69664,9 @@ bind - split-window -v -c "#{pane_current_path}"
         wait_for_cwd(&source);
 
         let expected_path = expected.to_string_lossy().into_owned();
+        let reported_path = reported.to_string_lossy().into_owned();
         let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
+        let settled_report = loop {
             let facts = shared
                 .inner
                 .lock()
@@ -69655,15 +69674,18 @@ bind - split-window -v -c "#{pane_current_path}"
                 .pane_runtime_facts(first)
                 .cloned()
                 .unwrap_or_default();
-            if facts.current_path == expected_path && facts.reported_path == reported_path {
-                break;
+            if facts.current_path == expected_path
+                && facts.reported_path.starts_with("file://")
+                && facts.reported_path.ends_with(&reported_path)
+            {
+                break facts.reported_path;
             }
             assert!(
                 Instant::now() < deadline,
                 "timed out waiting for pane path facts; facts={facts:?}",
             );
             thread::sleep(Duration::from_millis(10));
-        }
+        };
         let first_target = first.to_string();
         let paths = shared
             .execute(
@@ -69681,7 +69703,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .expect("live pane paths");
-        assert_eq!(paths.output, format!("{expected_path}|{reported_path}"));
+        assert_eq!(paths.output, format!("{expected_path}|{settled_report}"));
 
         shared
             .execute(

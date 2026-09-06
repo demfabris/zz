@@ -12779,14 +12779,7 @@ fn reported_working_directory(value: &str) -> Option<String> {
     if value.is_empty() {
         return None;
     }
-    if !value.starts_with("file://") {
-        return Some(value.to_owned());
-    }
-    let mut url = url::Url::parse(value).ok()?;
-    url.set_host(Some("localhost")).ok()?;
-    url.to_file_path()
-        .ok()
-        .map(|path| path.to_string_lossy().into_owned())
+    Some(value.to_owned())
 }
 
 fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
@@ -13861,28 +13854,24 @@ mod tests {
     }
 
     #[test]
-    fn reported_working_directories_strip_file_hosts_and_decode_paths() {
-        let (uri, expected) = if cfg!(windows) {
-            (
-                "file://workstation/C:/Users/a%20b/%E7%95%8C",
-                "C:\\Users\\a b\\界",
-            )
-        } else {
-            ("file://workstation/tmp/a%20b/%E7%95%8C", "/tmp/a b/界")
-        };
-        assert_eq!(reported_working_directory(uri).as_deref(), Some(expected));
-        if !cfg!(windows) {
-            assert_eq!(
-                reported_working_directory("file://workstation/tmp/a b").as_deref(),
-                Some("/tmp/a b")
-            );
-        }
+    fn reported_working_directories_keep_the_payload_the_pane_reported() {
+        assert_eq!(
+            reported_working_directory("file://workstation/tmp/a%20b/%E7%95%8C").as_deref(),
+            Some("file://workstation/tmp/a%20b/%E7%95%8C")
+        );
+        assert_eq!(
+            reported_working_directory("file://workstation/tmp/a b").as_deref(),
+            Some("file://workstation/tmp/a b")
+        );
         assert_eq!(
             reported_working_directory("/reported/path").as_deref(),
             Some("/reported/path")
         );
         assert_eq!(reported_working_directory(""), None);
-        assert_eq!(reported_working_directory("file://[invalid"), None);
+        assert_eq!(
+            reported_working_directory("file://[invalid").as_deref(),
+            Some("file://[invalid")
+        );
     }
 
     fn copy_mode_survives_downward_action(

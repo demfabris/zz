@@ -1,0 +1,16 @@
+corpus: none
+# The pane facts a plugin's own script reads, measured against pinned tmux.
+# Nested targets: cmd-if-shell.c:99 and cmd-run-shell.c:236 hand the command
+# they insert cmdq_get_state(item), the invoking client's current pane, not the
+# item's resolved -t target, so send-keys under run-shell -C and if-shell lands
+# in the active pane while the -t pane's sink stays empty; the format expansion
+# inside the inserted -C command and the if-shell condition still follow -t.
+# Title default: window.c:1141 seeds a new pane's title from gethostname.
+# Spawn path: format_cb_current_path answers the pane's directory the first
+# time the pane's own first command asks. pane_path: format.c:2331 reads
+# wp->base.path, which only OSC 7 sets, so it is empty until the pane's program
+# reports one and the reported payload verbatim afterwards.
+stage: fixtures/plugin-reader.py ~/plugin-reader.py
+stage: fixtures/pane-runtime-facts.py ~/pane-runtime-facts.py
+run-shell 'python3 ~/pane-runtime-facts.py'
+out: show-environment -g ZZ_PANE_RUNTIME_FACTS

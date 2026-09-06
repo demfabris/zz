@@ -3,9 +3,12 @@ corpus: required
 # client with status on and status-interval 1 runs the status-right #() job,
 # which is continuum_save.sh, which runs tmux-resurrect's save.sh and stamps
 # @continuum-save-last-timestamp. The indicator is the plugin's own
-# continuum_status.sh, read at interval 15 and at 0. The pane carries an OSC 2
-# title because a titleless pane's saved record differs between the binaries
-# (semantic:plugin-runtime-resurrect-record-shape).
+# continuum_status.sh, read at interval 15 and at 0. The first pane carries an
+# OSC 2 title and the second carries none, so the save writes one record whose
+# title column is the reported title and one whose title column is the pane
+# default window.c:1141 seeds from gethostname; both records keep resurrect's
+# eleven TAB-separated fields, which a titleless pane used to shift by a column
+# on zz (semantic:plugin-runtime-resurrect-record-shape).
 stage: fixtures/continuum-runtime.py ~/continuum-runtime.py
 run-shell 'python3 ~/continuum-runtime.py'
 out: show-environment -g ZZ_CONTINUUM_RUNTIME

@@ -52,9 +52,9 @@ pub use model::{
     joined_layout, swapped_layout,
 };
 pub use parser::{
-    ConfigCommandBytes, ConfigDiagnostic, ConfigEnvironmentAssignmentBytes, ParsedConfig,
-    ParsedConfigBytes, command_block_body, config_home_directory_names, parse_config,
-    parse_config_with_home_directories, user_home,
+    ConfigCommandBytes, ConfigDiagnostic, ConfigEnvironmentAssignmentBytes, ConfigExpansionNames,
+    ParsedConfig, ParsedConfigBytes, command_block_body, config_expansion_names, parse_config,
+    parse_config_with_expansions, user_home,
 };
 pub use sort::{TmuxSort, TmuxSortOrder, WINDOW_BUFFER_ORDER_SEQ, WINDOW_TREE_ORDER_SEQ};
 pub use status::{

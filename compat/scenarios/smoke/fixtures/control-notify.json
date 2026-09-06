@@ -334,7 +334,7 @@
     ],
     "environment-expansion": [
       "%begin T B 1",
-      "$NOTIFY_ENV",
+      "EXPANDED",
       "%end T B 1"
     ],
     "wait-output": [
@@ -349,10 +349,10 @@
     "hook-output": [
       "%begin T B 1",
       "%end T B 1",
-      "%window-renamed @0 hooked",
       "%begin T B 0",
       "NOTIFY_HOOK",
-      "%end T B 0"
+      "%end T B 0",
+      "%window-renamed @0 hooked"
     ],
     "hook-remove": [
       "%begin T B 1",
@@ -360,12 +360,11 @@
     ],
     "percent-word": [
       "%begin T B 1",
-      "%pause %1",
-      "%end T B 1"
+      "parse error: syntax error",
+      "%error T B 1"
     ],
     "percent-recover": [
       "%begin T B 1",
-      "%continue %1",
       "%end T B 1"
     ],
     "message": [

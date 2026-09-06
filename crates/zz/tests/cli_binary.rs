@@ -7229,8 +7229,13 @@ mod daemon_autostart {
                 .expect("pane id")
                 .trim()
                 .to_owned();
+            // The pane spec is quoted because pinned tmux d77c9dc6 refuses the
+            // unquoted form: `yylex` takes any unquoted word beginning with `%`
+            // as a condition unless the rest is all `%` or digits, and
+            // `%1:off` is neither, so `refresh-client -A %1:off` answers
+            // `parse error: syntax error`. Measured over `-C` on the pin.
             fn control(stdin: &mut ChildStdin, pane: &str, state: &str) {
-                writeln!(stdin, "refresh-client -A {pane}:{state}").expect("write pane state");
+                writeln!(stdin, "refresh-client -A '{pane}:{state}'").expect("write pane state");
                 stdin.flush().expect("flush pane state");
                 thread::sleep(Duration::from_millis(100));
             }

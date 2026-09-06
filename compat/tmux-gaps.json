@@ -191,6 +191,7 @@
       "items": [
         "semantic:per-client-active-pane",
         "semantic:per-client-current-window",
+        "semantic:popup-underlay-focus-events",
         "semantic:read-only-ignore-size",
         "semantic:read-only-same-uid"
       ],
@@ -199,14 +200,16 @@
         "resource:crates/zz-mux/src/model.rs",
         "resource:crates/zz-protocol/src/snapshot.rs",
         "resource:knowledge/tmux/divergences.md",
-        "scenario:compat/scenarios/last-pane-input-off.txt"
+        "scenario:compat/scenarios/last-pane-input-off.txt",
+        "file:compat/attached-client.sh"
       ],
       "acceptance": [
         "The divergence matrix documents per-client focus and single-user read-only policy; imported tmux command syntax keeps its meaning.",
-        "The active-pane client flag is retained and reported, while the pane a window is on stays one shared model fact that every client sees."
+        "The active-pane client flag is retained and reported, while the pane a window is on stays one shared model fact that every client sees.",
+        "A pane a display-popup covers keeps the pin's focus routing on the pin and gets none on zz; the attached fixture waits on both sides, positively on the pin and as a bounded absence on zz, so neither side can pass by accident."
       ],
       "depends_on": [],
-      "reason": "Independent GUI clients and per-client sizing are core zz behavior. Widened 2026-09-02 for semantic:per-client-active-pane, relocated from clients.active-pane, which is now empty. The pin really does keep a per-client active pane: `refresh-client -f active-pane` sets CLIENT_ACTIVEPANE, `server_client_set_pane` stores the pane on a per-client-and-window record and `server_client_get_pane` reads it back, feeding target resolution through `cmd_find_from_client`, the active border and highlight in screen-redraw.c and window-border.c, `run-shell` with no target, and the tty cursor. Measured on a throwaway pin server with two attached 80x24 pty clients and a two-pane window. The flag is retained and reported: `#{client_flags}` answers `attached,focused,active-pane,UTF-8` for the client that asked and `attached,focused,UTF-8` for the other, which zz already matches. What the measurement adds is how little of it is observable in the format layer: `format_cb_pane_active` compares `ft->wp` with `wp->window->active`, so `#{pane_active}` and every `list-panes` row stay window-global on the pin too, and a per-client selection never shows up there. It is also unreachable from the CLI: `cmd_select_pane_exec` takes the per-client branch only when `cmdq_get_client(item)` has a session, and a command client's session is NULL, so `select-pane -t %1` typed on the command line moved the WINDOW's active pane from %0 to %1 and moved the rows with it even while an attached client carried the flag. Only a command running on the attached client's own queue reaches `server_client_set_pane`. The product stance: in zz the pane a window is on is model state, one shared fact that every client sees and that the snapshot carries, while per-client view state - the focused window, the client size, copy and view mode, the chooser and the sidebar - already lives on the client, which is what semantic:per-client-current-window in this group settles. Adding a per-client active pane would move a model field into the view layer and split pane targeting per client, and zz's answer is that clients differ by which WINDOW they look at, not by which pane inside it is active. The flag stays retained and reported so scripts that set it are not refused. Reopen only if zz moves the active pane out of the mux model."
+      "reason": "Independent GUI clients and per-client sizing are core zz behavior. Widened 2026-09-02 for semantic:per-client-active-pane, relocated from clients.active-pane, which is now empty. The pin really does keep a per-client active pane: `refresh-client -f active-pane` sets CLIENT_ACTIVEPANE, `server_client_set_pane` stores the pane on a per-client-and-window record and `server_client_get_pane` reads it back, feeding target resolution through `cmd_find_from_client`, the active border and highlight in screen-redraw.c and window-border.c, `run-shell` with no target, and the tty cursor. Measured on a throwaway pin server with two attached 80x24 pty clients and a two-pane window. The flag is retained and reported: `#{client_flags}` answers `attached,focused,active-pane,UTF-8` for the client that asked and `attached,focused,UTF-8` for the other, which zz already matches. What the measurement adds is how little of it is observable in the format layer: `format_cb_pane_active` compares `ft->wp` with `wp->window->active`, so `#{pane_active}` and every `list-panes` row stay window-global on the pin too, and a per-client selection never shows up there. It is also unreachable from the CLI: `cmd_select_pane_exec` takes the per-client branch only when `cmdq_get_client(item)` has a session, and a command client's session is NULL, so `select-pane -t %1` typed on the command line moved the WINDOW's active pane from %0 to %1 and moved the rows with it even while an attached client carried the flag. Only a command running on the attached client's own queue reaches `server_client_set_pane`. The product stance: in zz the pane a window is on is model state, one shared fact that every client sees and that the snapshot carries, while per-client view state - the focused window, the client size, copy and view mode, the chooser and the sidebar - already lives on the client, which is what semantic:per-client-current-window in this group settles. Adding a per-client active pane would move a model field into the view layer and split pane targeting per client, and zz's answer is that clients differ by which WINDOW they look at, not by which pane inside it is active. The flag stays retained and reported so scripts that set it are not refused. Reopen only if zz moves the active pane out of the mux model. Widened 2026-09-06 for semantic:popup-underlay-focus-events, measured by the proof-debt lane while closing a hole in compat/attached-client.sh: the popup underlay probe waited for the focus pair on the tmux side only, and its byte assertion passed on zz precisely BECAUSE nothing arrived, so the zz side proved nothing. With focus-events on and a display-popup opened over a pane whose program has set DECSET 1004, the pin writes the focus-out sequence ESC [ O (27 91 79) to the covered pane when the popup takes focus and ESC [ I (27 91 73) when it gives focus back, three pairs across the probe's three popups; zz writes neither byte, and the covered pane's next read is the ordinary z (122) the probe types at the end. The victim is any pane program that acts on focus, vim's autoread being the common one: opening a popup over vim on the pin makes vim recheck the file, and on zz it does not. The stance stays native and no zz code changed here: focus is a per-client fact in zz and a popup is a client overlay, not a window the pane loses focus to. What changed is the proof - compat/attached-client.sh now waits on BOTH sides, positively on the pin through wait_for_pane_marker and as a bounded absence on zz through assert_pane_marker_absent, and assert_popup_underlay_result counts the focus markers against the side's own focus_pairs (6 on the pin, 0 on zz) instead of accepting the shared final byte alone. Reopen if zz grows a server-owned notion of a pane losing focus to an overlay."
     },
     {
       "id": "commands.native-client-tools",
@@ -582,6 +585,45 @@
       ],
       "depends_on": [],
       "reason": "These 24 retained names describe VT state, but zz currently exposes constants: cursor_flag and wrap_flag are 1 and the other 22 are 0. These are placeholders, not generally the pin's inactive or default values, and even matching fresh-pane constants do not establish live-state support. Relocated 2026-09-05: format:history_size, format:cursor_x, format:cursor_y and format:alternate_on moved to formats.terminal-facts. The old 28-name clause was 'The mux keeps publishing the pin's inactive or default value for each of the 28 names', and the reopen condition was 'once a workload asks for live VT facts in formats'. tmux-resurrect scripts/save.sh reads history_size and cursor_y to size capture-pane -epJ -S; returning zero silently omits scrollback. smoke/terminal-facts measures pinned d77c9dc6 in a prompt-free 80x24 pane after seq 1 100: history_size/cursor_x/cursor_y/alternate_on = 77 0 23 0, then 77 0 23 1 on alternate entry, 77 0 23 0 on exit and 77 80 23 0 at pending wrap. The new stance adopts those four through bounded worker metadata and retains the other 24 as explicitly unbacked constants; decided 2026-09-05 by the orchestrator under fabrico's instruction to continue the campaign past the frozen scope; reversible. Review correction 2026-09-05: the rewritten clause 'The mux keeps publishing the pin's inactive or default value for each of the 24 names, and the divergence matrix keeps them listed as unbacked rather than supported.' was also false. Reproduce with ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/run.sh --strict-geometry known/known-terminal-runtime. In a fresh prompt-free 80x24 pane, the pin answers alternate_saved_x=4294967295 (no saved cursor), alternate_saved_y=4294967295 (no saved cursor), cursor_shape=default, history_all_bytes=24,960,0,0,0,0, history_bytes=960 and scroll_region_lower=23; zz answers 0 for all six. The other 18 fresh-pane answers match. The product stance retains all six named zero placeholders with those measured pin values, rather than asserting parity; the top-level known differential registers exactly six FMT differences across all 24 names. Equal-geometry lifecycle probe: python3 compat/scenarios/smoke/fixtures/terminal-lifecycle.py --zz target/debug/zz --tmux /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux. Both panes are 80x24. For actions seq 1 100, CSI ?1049h, CSI 3J, CSI ?1049l, CSI ?1049h, RIS (ESC c), CSI ?1049l, tuples history_size/cursor_x/cursor_y/alternate_on are pin [77 0 23 0; 77 0 23 1; 0 0 23 1; 0 0 23 0; 0 0 23 1; 0 0 0 1; 0 0 23 0] and zz [77 0 23 0; 77 0 23 1; 77 0 23 1; 77 0 23 0; 77 0 23 1; 0 0 0 0; 0 0 0 0]. Ordinary alternate entry and exit agree, including alternate_on returning to 0. Known engine divergences remain: CSI 3J during alternate mode does not clear zz's primary history, RIS exits zz's alternate screen while the pin stays in it, and the following alternate exit restores row 23 on the pin but leaves zz at row 0. These are recorded engine-lifecycle differences, not claimed parity; the standalone probe asserts each backend's measured vector without treating them as equal."
+    },
+    {
+      "id": "harness.proof-holes",
+      "title": "Close the places a proof passes without proving",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "now",
+      "ease": "medium",
+      "impact": [
+        "admin",
+        "scripts"
+      ],
+      "owner": "mux",
+      "items": [
+        "semantic:harness-theme-steering"
+      ],
+      "evidence": [
+        "file:compat/diff-scenario.sh",
+        "file:compat/attached-client.sh",
+        "file:compat/tmux-tracker.py",
+        "file:compat/check.sh",
+        "scenario:compat/scenarios/stderr-parity.txt",
+        "file:compat/scenarios/smoke/fixtures/stderr-parity-negative.txt",
+        "file:compat/scenarios/smoke/fixtures/format-listing.sh",
+        "scenario:compat/scenarios/smoke/control-eof-drain.txt",
+        "scenario:compat/scenarios/smoke/control-hard-loss.txt",
+        "scenario:compat/scenarios/smoke/split-window-wait.txt"
+      ],
+      "acceptance": [
+        "compat/diff-scenario.sh has an err: query kind that compares exit status, stderr bytes and stdout bytes on both sides, a plain scenario uses it, and a committed negative control shows it fires on two commands that both exit nonzero with different messages.",
+        "Every smoke scenario that runs a staged fixture reads back a value only a fixture that reached its end could have set, so a setup that failed the same way on both sides is a divergence rather than a clean row.",
+        "format-listing.sh records what each binary answers for #{client_theme} before any terminal reply, instead of steering the pin into the answer it wants.",
+        "compat/attached-client.sh waits for the popup underlay focus pair on both sides, positively on the pin and as a bounded absence on zz, and counts the focus markers against that side's own focus_pairs.",
+        "Where both binaries answer the same daemon fact for a mode, the attached fixture waits on that fact on both sides; where they answer none in common, the helper says so and asserts both facts with each side's measured value.",
+        "python3 compat/tmux-tracker.py check fails when any file:, scenario: or resource: entry, or any repo path cited in a reason or resolution, does not exist.",
+        "Every closed record that has a differential proof in the corpus cites it; the ones that cannot are named with the reason."
+      ],
+      "depends_on": [],
+      "reason": "Registered 2026-09-06 by the proof-debt lane, from the cycle-16 review's proofs lens: seven places where a proof passes without proving what it claims. Six are fixed here and one is fixed and left open because the divergence it uncovered needs an owner. (a) semantic:harness-stderr-plain-mode, CLOSED. compat/diff-scenario.sh compared stderr only in smoke mode, so a plain scenario was clean whenever both sides exited nonzero however differently they explained themselves. The new err: query kind runs one command on both sides and compares the exit status, the stderr bytes and the stdout bytes; it counts into out_divergences. compat/scenarios/stderr-parity.txt holds 14 of those, thirteen failing commands and one success, and every message matches the pin byte for byte. The negative control lives at compat/scenarios/smoke/fixtures/stderr-parity-negative.txt, under fixtures/ so run.sh never collects it: two commands that exit 1 on BOTH binaries, which is exactly the shape a plain scenario calls clean, and under err: each is an OUT divergence. It also found a real divergence: zz answers `target not found: nosuchbuffer` where the pin answers `no buffer nosuchbuffer`, for both `paste-buffer -b` and `save-buffer -b`. That one needs a mux owner and is recorded here rather than fixed. (b) semantic:harness-stdout-shape-fixtures, CLOSED. The review said four fixtures would stay clean on a shared environmental failure; the search found three, and the search is repeatable: a smoke scenario that runs a fixture and never reads back a value the fixture had to set. smoke/control-eof-drain, smoke/control-hard-loss and smoke/split-window-wait were the three; every other staged scenario already reads an option or an environment variable the staged file alone could set. Each fixture now stamps a global environment variable at the point it reaches the end, and each scenario reads it with out:, which fails on BOTH sides when the variable is unset - an out: step counts a divergence when either side exits nonzero, so a shared failure can no longer be silent. (c) semantic:harness-theme-steering, CLOSED as a harness fix, OPEN as a divergence. format-listing.sh answered the pin's theme query before asking anything, so both sides said client_theme=dark and the unsteered answer was never recorded. It now measures before the reply and asserts each side's own value: the pin answers empty and omits client_theme from the display-message -a listing entirely, because c->theme is THEME_UNKNOWN and format_cb_client_theme returns NULL for it; zz answers dark from the moment the client attaches and lists client_theme=dark. The steered pair still runs afterwards, so the reply is still proved to be honoured. The divergence - zz has no unknown theme state - is the open half of this item and likely belongs to options.client-terminal-negotiation. (d) semantic:harness-underlay-focus-both-sides, CLOSED. Relocated as a registry item to clients.read-only-and-focus, which now owns semantic:popup-underlay-focus-events with the measured bytes. compat/attached-client.sh waits on both sides now. (e) semantic:harness-per-side-observables, CLOSED. wait_for_output_mode and wait_for_mode_state asserted a different fact per side. wait_for_mode_state now waits on #{pane_in_mode} on BOTH sides, which is the shared fact for real copy mode, and keeps zz's key-table check on top. Command-output mode turned out to have NO shared fact and the helper now says so and asserts both facts on both sides: measured 2026-09-06, the pin's view-mode lives on the pane so #{pane_in_mode} is 1 while #{client_key_table} stays root, because tmux resolves a mode's keys through the pane's mode and never through the client's table; zz's mode is per client so #{client_key_table} is the copy table while #{pane_in_mode} stays 0, because run-shell output goes to the invoking client's overlay and opens no pane mode. That also corrected a mislabelled call: probe_source_file_output was waiting through the copy-mode helper for what is an output view. (f) semantic:harness-evidence-drift-rule, CLOSED. The path-existence rule already covered evidence[] and acceptance[]; what nothing checked was the path citations inside reason and resolution prose, which is where the campaign actually names its scenarios. tmux-tracker.py check now scans both for tokens under compat/, crates/, knowledge/, clients/, third_party/, bench/, site/, examples/ and packaging/, skipping the generated compat/.cache and compat/results trees, and fails on a missing one. compat/check.sh runs that check as its second step, so the rule gates every commit rather than only a full check run. Mutation-tested by citing a smoke scenario name that does not exist from a reason, which failed as `gaps[0].reason cites a missing path`. Nothing in the tree was broken at this tip: 1508 evidence entries and 100 prose citations, all resolving. (g) semantic:harness-resource-only-closes, CLOSED. 18 closed records carried only resource: pointers. 17 now also cite the scenario, fixture or manifest test in the corpus that exercises them. The one left is display-panes.gpui-escape-fallthrough, whose subject is the GPUI overlay's Escape synthesis and mouse fallthrough: it has no differential proof and cannot have one, because the corpus drives the raw TUI and the zz_cli launcher, never the desktop client. It is listed here rather than given a citation it does not have."
     },
     {
       "id": "hooks.shutdown-window-unlinked-order",
@@ -1837,7 +1879,11 @@
         "resource:crates/zz-mux/src/command.rs",
         "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/divergences.md",
-        "resource:knowledge/designs/tmux-superset-roadmap.md"
+        "resource:knowledge/designs/tmux-superset-roadmap.md",
+        "scenario:compat/scenarios/command-alias.txt",
+        "scenario:compat/scenarios/aliases-multi-body.txt",
+        "scenario:compat/scenarios/smoke/alias-group-forgery.txt",
+        "scenario:compat/scenarios/smoke/config-alias-parse-unit.txt"
       ],
       "resolution": "MuxEngine::resolve_command_alias now returns Miss, Expanded, or MatchedUnsupported with empty, multiple-command, and unparsable reasons. Every mux and daemon construction entry point converts a matched unsupported body to `unknown command: <typed name>` instead of falling through to a shadowed canonical name or catalog alias. Direct execution, daemon routing, terminal-qualified replay, bind-key and set-hook storage, option-command normalization, and read-only preflight share that result. Stored bind-key and set-hook command lists execute the commands constructed for storage without another user-alias lookup; read-only clients authorize the same frozen list as one all-or-nothing chain before effects. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks are likewise frozen after lexical construction. Typed `if-shell` and `run-shell` callbacks preserve physical groups: a failed group stops its remaining commands while later physical lines continue; string callbacks remain one group. Typed `command-prompt` templates retain their structured constructed command list through submission without another user-alias lookup. String templates substitute raw source before a fresh parse and complete construction pass against the then-current alias table. Both prompt paths replace the first `%%` and every `%1`, with trailing-percent quoting; typed substitution preserves leaf-argument boundaries and physical groups, while string templates and free input form one group. `set-hook` and command-valued native set-option intentionally apply their documented second construction stage. A selected typed `display-menu` action drops its structural wrapper before its fresh construction stage, while a quoted brace string remains literal. Alias-resolution failures use the same command-output and key-command-failed path as other per-command failures. Focused regressions prove `kill-server=`, multi-command `list-windows` and `lsw` shadows, and an unparsable `kill-session` shadow cannot shut down, list, kill a session, replace a binding, install a hook, or change an option command. Each construction path admits one user-alias layer, and a malformed shadow refuses before read-only authorization. `aliases.command-bodies` remains open for actual empty and multi-command execution; local CLI preprocessing is closed under aliases.client-preflight, while remote preprocessing remains under aliases.remote-client-preflight."
     },
@@ -1912,7 +1958,10 @@
       "evidence": [
         "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/status-line.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/smoke/chooser-kill-keys.txt",
+        "scenario:compat/scenarios/smoke/chooser-tree-vocabulary.txt",
+        "file:compat/scenarios/smoke/fixtures/chooser-drive.py"
       ],
       "resolution": "Choose-tree and choose-buffer now account each writable native action or raw key exactly once against the source session, advance that client as the latest geometry owner, and preserve pane bells. A raw key routes through chooser bindings only when that same client owns the chooser; another client's key follows its own ordinary input path. Read-only raw keys bypass the retained chooser into normal root-table resolution, while read-only dedicated chooser actions and rejected terminal-view input update activity and latest geometry before rejection without clearing the bell. Read-only-safe local view actions also bypass the retained chooser, reach the pane, and account exactly once. Activating a different session records the source-session input first and then the target-session attach, preserving the pin's two legitimate activity boundaries. Pane Focus and ClearLinkHover remain outside chooser activity accounting."
     },
@@ -2211,7 +2260,10 @@
         "resource:crates/zz-mux/src/command.rs",
         "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/commands.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "file:compat/attached-client.sh",
+        "scenario:compat/scenarios/copy-mode-cursor-view.txt",
+        "scenario:compat/scenarios/copy-mode-selection-lifecycle.txt"
       ],
       "resolution": "Read-only clients can use direct local scroll, copy-mode entry, movement, history, line, word, paragraph, prompt, bracket, goto-line, set-mark, jump-to-mark, and cancel actions. One typed copy-action classifier also authorizes `send-keys -X`; selection, copying, search, rectangle, jump capture, paste, clear-history, raw mouse, mixed wheel, and application pane-focus effects remain blocked. Non-`-X` `send-keys`, including an otherwise unsupported `-M` request, is rejected as read-only before repeat or full option parsing. Pin-recognized but zz-unimplemented unsafe copy actions reject; genuinely unknown and empty `-X` actions retain the pin's later no-op or no-mode path. Direct command requests and an entire stored binding chain are preflighted before any effect, including one-layer aliases, and rejected paths report `client is read-only` without terminal or browser input. Safe actions bypass retained chooser and display-panes surfaces, reach the pane, and update activity and latest geometry exactly once without clearing bells or dismissing the modal. Rejected non-focus actions, including mouse input, preserve the same bell and accounting behavior. Pane Focus is rejected without activity because v73 ClientFocus owns client-window accounting. A read-only command cannot fan a local view effect into a pane outside its attachment. The accepted uncoupled ignore-size and same-uid differences remain under `clients.read-only-and-focus`; committed-text accounting is closed separately."
     },
@@ -2655,7 +2707,10 @@
       "evidence": [
         "resource:crates/zz-daemon/src/daemon.rs",
         "resource:crates/zz/src/control_mode.rs",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/smoke/source-file-control.txt",
+        "scenario:compat/scenarios/smoke/source-replay-diagnostics.txt",
+        "scenario:compat/scenarios/smoke/source-file-diagnostics.txt"
       ],
       "resolution": "The daemon marks grouped source-read diagnostics sent to Control as ClientMessageKind::Error. The Control client routes those Error events to standalone %error frames without inspecting text, so numeric OS errors, paths containing colon-space, and localized or platform-specific read errors cannot fall through or change classification with sibling order. This closure covers internal typed identity only. A later pinned probe showed that external parser and hook-source read failures instead close the surrounding guard, write raw unframed text, and consume an invisible source-completion command number; the later protocol-v78 control-mode.hook-source-read-diagnostics closure owns and closes that placement and numbering. Invalid UTF-8 was a zz-side typed read error at this checkpoint; a later pinned lone-0xff probe showed different config-byte semantics and moved that case to config.non-utf8-file-bytes. Protocol v76 sourced-command guards separately carry the parsed source command's own no-match, glob, and depth diagnostics. Config summaries and lexer-owned diagnostics remain generic Warning events behind the prose classifier tracked under control-mode.diagnostic-typing. The known-family Warning fallback remains for legacy producers, while the exact protocol handshake rejects v75 and v76 client-daemon skew before either event path can mix."
     },
@@ -2742,7 +2797,9 @@
       "evidence": [
         "resource:crates/zz-terminal/src/session.rs",
         "resource:knowledge/tmux/copy-mode.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/copy-mode-cursor-view.txt",
+        "scenario:compat/scenarios/copy-mode-recentre.txt"
       ],
       "resolution": "The top-line, middle-line, and bottom-line actions now move the copy cursor to column zero at the current frozen viewport's top, middle, or bottom row. Each action preserves the viewport offset and bounds its target to the retained revision. The full zz-terminal library suite passes 197 tests. This close covers only those three fixed-row placements; it does not claim history-bottom, logical-line, scrolling, wrapping, or wider action fidelity, which remains active under copy-mode.action-fidelity."
     },
@@ -2781,7 +2838,9 @@
         "resource:crates/zz-protocol/src/catalog.rs",
         "resource:crates/zz-mux/src/formats.rs",
         "resource:knowledge/tmux/status-line.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/smoke/format-listing.txt",
+        "file:compat/scenarios/smoke/fixtures/format-listing.sh"
       ],
       "resolution": "display-message -a walks format_each and both items close against the re-scoped measurement. The expander gained a per-variable, per-context declines answer: `format_listing` walks the same 198-entry FORMAT_VARIABLES table in declaration order, skips every entry whose pin callback would return NULL, and then appends the command's own tree entries in key order, which is `command` for an ordinary command. The declines rule is derived name by name from format.c rather than from an empty value: the scope gate reproduces the `ft->s`, `ft->wl` and `ft->wp` null checks, the whole Client family is gated on the `format_cb_client_name` witness (with client_mode_format excluded, because its callback reads a global option, exactly like buffer_mode_format), the mouse_* names and the six session_group names never answer, session_attached_list and window_active_clients_list decline when their evbuffer would be empty, the three pane_dead names decline on a live pane, session_active needs a client as well as a session, and the delegated names decline when the daemon producer declines. One listing-only rule came out of the measurement: `format_each` prints a FORMAT_TABLE_TIME entry as tv_sec while `format_find` turns a zero time into NULL, so `session_last_attached=0` appears in the listing where the same name expands empty; the seven time entries whose callback answers whenever their scope object exists carry that fallback and buffer_created and pane_dead_time, the two that really do return NULL, do not. Four producer corrections were needed to make the sets match, each one the pin's behaviour: client_last_session and client_theme now decline instead of answering empty (THEME_UNKNOWN is a NULL, and the daemon now records a colour scheme only for a client that reported one rather than assuming the server's active scheme at registration); window_active_clients and window_active_clients_list are answered for command expansions from a new per-window client fact, where they used to be filled only on the status path and answered 0 and empty everywhere else; and session_attached_list now joins `client_format_name`, the tty for a pty client, where it used to join the device name the hello carries, which is what `loop->name` is in format_cb_session_attached_list. Proved by compat/scenarios/smoke/format-listing.txt on both binaries, 26 checks: 143 lines for a pane with no client, alphabetical table pass with `command=display-message` last, the 56 declining names named one by one, 172 lines with an attached client, the 28 added back named one by one, nothing removed by attaching, and the values both binaries own outright (wrap_flag=1, session_grouped=0, pane_pipe=0, pane_unseen_changes=0, session_last_attached=0, pane_index=0, window_bigger=0, session_active=1, client_theme=dark). -a runs before the template is looked at, so -l, a trailing message and a missing -p all leave the listing at 143 lines while the -F conflict is still refused first; the flag is promoted in catalog.rs. Two facts the fixture had to work around are recorded rather than claimed. client_theme is THEME_UNKNOWN on the pin under a dumb pty, so the pin's client answers nothing until the terminal replies to the `\\033[?996n` query; the zz raw client hard-codes dark in its hello, so the differential makes the pin's client report dark with `\\033[?997;1n` and both sides then list the name. And the mouse_* names decline here because no mouse event is in the tree; inside a mouse binding the pin answers them and zz does not, which belongs to formats.mouse-context."
     },
@@ -2924,7 +2983,10 @@
         "resource:crates/zz-daemon/src/daemon.rs",
         "resource:crates/zz-mux/src/formats.rs",
         "resource:knowledge/tmux/status-line.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/buffer-path-format.txt",
+        "scenario:compat/scenarios/set-buffer-rename.txt",
+        "scenario:compat/scenarios/smoke/chooser-buffer-vocabulary.txt"
       ],
       "resolution": "List-buffers supplies row-local buffer facts to -F and -f, while choose-buffer supplies the same facts to -f and -K. Ordinary expansion selects the newest automatic buffer. All five tracked variables now read one retained name, data value, and creation time; buffer_sample applies tmux-compatible escaping and truncation, buffer_full preserves the complete lossy text, and #{command} remains a command-item fact. buffer_mode_format stays separate because zz uses a native buffer chooser. The focused cargo test -p zz-daemon --lib buffer_ run passes all 15 tests."
     },
@@ -3149,7 +3211,9 @@
       "evidence": [
         "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/status-line.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/session-activity.txt",
+        "scenario:compat/scenarios/mru-activity.txt"
       ],
       "resolution": "Writable choose-tree and choose-buffer raw keys, dedicated actions, and terminal-view input now touch source-session activity exactly once, advance the latest geometry owner, and preserve bells. Read-only raw keys bypass chooser, display-panes, and command-prompt consumption into ordinary key-table resolution. Read-only dedicated modal actions and rejected non-focus terminal-view actions update activity plus the latest geometry owner before rejection, retain the modal, and preserve the pane bell; raw mouse motion is included. Read-only-safe local navigation uses the same once-only accounting, bypasses retained chooser and display-panes surfaces, and reaches the pane under `clients.read-only-local-view-actions`; pane Focus is rejected without activity, and ClearLinkHover remains a safe non-input action. Writable display-panes consumes a valid selection and bare buttonless hover Motion without activity, but an unmatched key, Escape, non-hover mouse action, or wheel tears down the overlay and falls through ordinary input; timeout closes it without activity. Writable command-prompt consumption remains no-activity. Cross-client chooser routing and display-panes fallthrough are recorded as focused closed entries. Client focus signaling plus attach and latest geometry are closed separately. Committed text inherits these modal decisions through `formats.session-activity-text-input`, and client focus follows the writable prompt and display-panes prequeue under `formats.session-activity-focus-modal-consumption`."
     },
@@ -3160,7 +3224,9 @@
       "evidence": [
         "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/status-line.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/session-activity.txt",
+        "scenario:compat/scenarios/smoke/hooks-pane-focus-clients.txt"
       ],
       "resolution": "Every successful same- or other-session attach advances the existing geometry-owner sequence and recalculates all affected terminal sizes, independent of `focus-events`; a two-client regression with different retained geometries proves a same-session reattach immediately selects that client's whole geometry. Client FocusIn advances the same sequence and recomputes visible terminal sizes when `focus-events` is on. Under `window-size latest`, rows, columns, and cell metrics all come from that owner; manual, largest, and smallest retain their mode-correct rows and columns while refreshing the owner's cell metrics. FocusOut updates activity without changing the owner or geometry. A zz-side writable two-client daemon regression with different retained geometries mirrors the pinned FocusIn/latest rows-and-columns rule. `ClientFocus` is not CLI-drivable, so this is not a differential-harness proof. A second non-latest regression uses equal rows and columns with distinct cell metrics and observes the terminal process the owner-only resize. The separate read-only fixture proves that zz accepts the notification and updates activity. It does not prove tmux `attach -r` resize behavior because tmux couples read-only with `ignore-size` while zz does not."
     },
@@ -3172,7 +3238,9 @@
         "resource:crates/zz-protocol/src/message.rs",
         "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/status-line.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/session-activity.txt",
+        "file:compat/attached-client.sh"
       ],
       "resolution": "With `focus-events` enabled, the daemon now runs the pinned writable prequeue before it accounts `ClientFocus`. It dismisses the active status message and resumes frozen terminal publication, then closes `display-panes`, cancels its deadline, and continues through prompts. Key prompts submit the exact `FocusIn` or `FocusOut` text and consume the transition. Numeric prompts submit their buffer without recording prompt history and pass the transition. Text, Single, Incremental, and BackspaceExit prompts consume it and stay open. Choose-tree and choose-buffer bypass the prequeue because tmux handles them as pane modes. Read-only clients retain every modal and account both directions. FocusIn alone advances latest geometry, and neither direction clears bells. When a FocusIn both changes latest geometry and changes an activity-sorted chooser, the daemon publishes the snapshot and independently refreshes the chooser. The daemon snapshots the option gate before a Numeric prompt can change it, so an accepted transition still accounts. This slice adds no wire change and retains the `ClientFocus` shape introduced in protocol v73. Daemon regressions provide the proof because `ClientFocus` is not CLI-drivable. Pane `command-prompt -P` remains blocked under `prompt.pane-rendered`. Synthetic `Any` dispatch after activity and FocusIn geometry accounting closed separately under `keys.client-focus-events`; exact `FocusIn` and `FocusOut` remain invalid as bindable key names."
     },
@@ -3189,7 +3257,9 @@
         "resource:clients/ios/Sources/ZZStore.swift",
         "resource:knowledge/protocol/wire-protocol.md",
         "resource:knowledge/tmux/status-line.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/session-activity.txt",
+        "scenario:compat/scenarios/smoke/command-prompt-editing.txt"
       ],
       "resolution": "The daemon now correlates committed text with its preceding key through one bounded ordered queue per client. Every validated press or repeat Key with `text_follows: true` appends an entry that records its pane and Terminal or BrowserSurface lane. Text scans forward to the first entry for its pane and lane, retires only the older skipped prefix, and consumes that match while preserving later entries. It inherits the matched Key's activity and modal result, so the pair contributes at most one activity/latest update; empty Text is inert but also retires any linked dispatch suppression. If no entry matches, the queue stays intact and nonempty Text is standalone. A two-browser-pane regression strands one earlier key and proves the later bound key keeps its suppression debt until its matching Text, so neither the binding nor text is replayed. Bounded eviction and every explicit cleanup retire linked suppression debt. Writable standalone text reaches chooser, command-prompt, and display-panes before activity; terminal command-output text accounts once before it is swallowed, while browser command-output text is consumed before activity. Standalone read-only terminal text accounts once without a bell or PTY write, while read-only browser text keeps zz's existing silent drop. Paired writable chooser input follows its key result; writable prompt and display-panes consumption can remain at zero. Read-only terminal pairs bypass retained modals, account on the key, and never write the trailing text. The queue clears on detach, unregister/reconnect, and successful wire Attach, but survives a synchronous binding-driven `switch-client` so the trailing Text still belongs to its Key. GPUI terminal standalone input and GPUI browser key-plus-text input are proved at their emitters; TUI keys remain unpaired, while FFI and iOS retain their explicit standalone/key contracts."
     },
@@ -3389,7 +3459,10 @@
         "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/key-tables.md",
         "resource:knowledge/tmux/status-line.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/smoke/hooks-pane-focus-clients.txt",
+        "scenario:compat/scenarios/smoke/hooks-pane-focus.txt",
+        "scenario:compat/scenarios/smoke/focus-follows-mouse.txt"
       ],
       "resolution": "With focus-events enabled, writable ClientFocus runs through the modal prequeue, then session activity and FocusIn-only latest-geometry accounting, then synthetic Any dispatch. The daemon selects transient tables in chooser, copy-mode or command-output, and effective-root order. A transient Any binding wins; an unbound transient table falls back to the effective root without retiring the mode. A root Any binding runs when no transient mode applies. The daemon resolves attachment and pane context again after prompt submission before it dispatches the selected command. Disabled focus bypasses accounting and dispatch. Read-only focus retains its modal bypass, resolves the whole Any binding, authorizes every command before any effect, and rejects a mixed safe and unsafe chain atomically. Exact FocusIn and FocusOut remain invalid key names, and even injected exact bindings do not replace Any. Synthetic ingress preserves pending copy jump capture, numeric prefix state, repeat metadata and deadlines, table fallback and retirement, prefix synchronization, client isolation, and the next real key. The focused daemon cluster passes 9 of 9 tests, and an independent Codex read-only review returned CODE GO. ClientFocus is not CLI-drivable, so this closure makes no differential or canonical-suite claim."
     },
@@ -3437,7 +3510,9 @@
         "resource:crates/zz-mux/src/command.rs",
         "resource:crates/zz-mux/src/compat_manifest_tests.rs",
         "resource:knowledge/tmux/key-tables.md",
-        "resource:knowledge/tmux/copy-mode.md"
+        "resource:knowledge/tmux/copy-mode.md",
+        "scenario:compat/scenarios/copy-mode-stock-action-keys.txt",
+        "scenario:compat/scenarios/copy-mode-bindings.txt"
       ],
       "resolution": "Added the six remaining stock emacs keys whose typed actions already existed: C-[ runs cancel, C-k runs copy-pipe-end-of-line-and-cancel, C-w runs copy-pipe-and-cancel, N runs search-reverse, R runs rectangle-toggle, and n runs search-again. Each binding stores the pin's single send-keys -X command and carries no repeat bit. KeyEngine tests cover the six bindings and retain the prior Escape, M-w, and C-g bindings; exact equality with the audited stock key set proves that none overwrote another key. Mux tests cover cancel, both copy variants, forward and reverse search repetition, and rectangle toggle as typed terminal effects. The 17 absent stock keys remain under keys.copy-mode-prompt-defaults and keys.copy-mode-unsupported-default-actions."
     },
@@ -3450,7 +3525,10 @@
         "resource:crates/zz-mux/src/command.rs",
         "resource:crates/zz-mux/src/compat_manifest_tests.rs",
         "resource:knowledge/tmux/key-tables.md",
-        "resource:knowledge/tmux/copy-mode.md"
+        "resource:knowledge/tmux/copy-mode.md",
+        "scenario:compat/scenarios/copy-mode-goto-line.txt",
+        "scenario:compat/scenarios/copy-mode-previous-bracket.txt",
+        "scenario:compat/scenarios/smoke/copy-mode-mode-keys.txt"
       ],
       "resolution": "Added the pin's 13 previously absent emacs navigation keys with exact send-keys -X command shapes and nonrepeat metadata: C-Down, C-M-Down, C-M-Up, C-M-f, C-Up, End, Home, M-<, M->, M-Down, M-R, M-Up, and Space. Their existing typed actions cover line scrolling, semantic-prompt navigation, matching brackets, line endpoints, history endpoints, half pages, top-line positioning, and page-down without a new terminal action or UI flow. KeyEngine and mux effect tests cover every key and action, and shifted Alt input reaches M-R, M-<, and M->. At this historical closure 23 stock keys remained: six supported non-navigation defaults, ten prompt-backed defaults, and seven keys behind unsupported actions. The later keys.copy-mode-defaults closure reduced the current residual to 17."
     },
@@ -3462,7 +3540,9 @@
         "resource:crates/zz-protocol/src/key.rs",
         "resource:crates/zz-mux/src/compat_manifest_tests.rs",
         "resource:knowledge/tmux/key-tables.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/smoke/copy-mode-prompt-bindings.txt",
+        "file:compat/scenarios/smoke/fixtures/copy-mode-prompt-bindings.sh"
       ],
       "resolution": "All ten keys are installed, so the emacs copy table no longer swallows M-1 through M-9 and g. M-1 through M-9 arm zz's per-client numeric capture with the same `copy-mode-repeat <digit>` command the vi digits use, and the capture rule that only vi digits could extend now covers both copy tables, so M-1 2 accumulates to 12 exactly as the pin's PROMPT_NUMERIC prompt accumulates digits after its -I seed. The next copy action consumes the count through the same engine path as vi: the count lands as one `-N <count>` pair before the argument containing -X, which is what the pin's `{ send-keys -N \"%%\" }` block does when it writes wme->prefix for the following action. g opens the same goto-line prompt vi ':' opens, and both now carry a structured `{ send-keys -X goto-line -- \"%%\" }` command block instead of the old string template, so submission edits the leaf argument in place and a typed line number cannot inject a second command. The exact stored command shape in this group's acceptance was not reached and did not vanish: the pin renders both families through `command-prompt -P`, whose pane-cell prompt is loudly unsupported by the accepted `prompt.pane-rendered` decision. The nine M-digit shape divergences moved to `keys.copy-mode-native-numeric-prefix`, which already owns that stance for the vi digits, and `binding:copy-mode:g` moved to `keys.copy-mode-binding-fidelity` beside `binding:copy-mode-vi::`. Nothing wire-reachable changed."
     },
@@ -3846,7 +3926,10 @@
         "resource:crates/zz-terminal/src/session.rs",
         "resource:crates/zz-tui/src/terminal_event.rs",
         "resource:crates/zz-tui/src/tty.rs",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/smoke/pane-engine-knobs.txt",
+        "scenario:compat/scenarios/smoke/pane-engine-knobs-input.txt",
+        "scenario:compat/scenarios/behavior-options.txt"
       ],
       "resolution": "All eighteen options now carry an explicit decision instead of sitting in one undifferentiated basket. Seven went to `options.client-terminal-negotiation` as native: terminal-features, terminal-overrides, user-keys, extended-keys, and extended-keys-format all exist to rewrite or query a terminfo entry for a client terminal that zz's daemon never opens, xterm-keys is marked `no longer used` in the pin's own options table, and assume-paste-time is a heuristic the pin itself disables on any terminal reporting bracketed paste, which is every zz client. Eight went to `options.pane-engine-knobs` parked: allow-rename, alternate-screen, scroll-on-clear, backspace, get-clipboard, codepoint-widths, variation-selector-always-wide, and input-buffer-size each need a per-pane knob channel, and half of them additionally need a libghostty primitive that does not exist, with the pinned behavior for each measured into that group's reason on 2026-09-01. Two went to `options.client-attach-and-focus` parked: default-client-command and focus-follows-mouse are ordinary client work blocked only on option values reaching the client. `editor` went to `pane.floating-model`, which already owns the floating-pane stance its only pin-side read depends on, and whose startup seeding zz already reproduces exactly. Three tests derived from those pin measurements now hold the classification honest: zz-terminal proves `send-keys BSpace` writes the pin's default 0x7f and that clearing the whole screen leaves history alone, which is the pin's scroll-on-clear off case and the parked divergence, and zz-tui proves a bracketed-paste run carrying 0x02 arrives as one Paste rather than as a C-b key, which is the case the pin's own assume-paste-time guard skips. Nothing wire-reachable changed."
     },
@@ -4386,7 +4469,10 @@
         "resource:compat/tmux-tracker.py",
         "resource:crates/zz-protocol/src/catalog.rs",
         "resource:crates/zz-mux/src/compat_manifest_tests.rs",
-        "resource:knowledge/playbooks/compat-harness.md"
+        "resource:knowledge/playbooks/compat-harness.md",
+        "scenario:compat/scenarios/smoke/args-parse-bind-key.txt",
+        "scenario:compat/scenarios/smoke/args-parse-choosers.txt",
+        "scenario:compat/scenarios/smoke/args-parse-set-option.txt"
       ],
       "resolution": "Oracle schema 4 parses the pinned `args_parse` callback references and rejects callback bodies outside six recognized rules. It records 14 command-to-rule assignments from nine callbacks, including `display-menu` item groups, `run-shell -C`, and the `set-hook -B` specialization. The Rust catalog carries typed rules for the 12 implemented commands. The manifest gate requires every rule absent from `COMMAND_ARGS_PARSE_BEHAVES` to retain a command-specific `args-parse:` item; `choose-client` and `switch-mode` stay covered by their unimplemented command items. This closes discovery only. Runtime adoption remains open under `tracker.semantic-coverage`."
     },

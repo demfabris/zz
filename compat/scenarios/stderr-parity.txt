@@ -1,0 +1,18 @@
+# A plain scenario only compares exit CLASS, so two sides that both fail are
+# clean however differently they explain themselves. The err: query kind
+# compares the exit status, stderr bytes and stdout bytes of one command, which
+# is the only way a plain scenario can hold an error message to the pin's words.
+err: list-sessions -t nosuchsession
+err: list-panes -t nosuchwindow
+err: select-window -t w:99
+err: kill-pane -t w:0.99
+err: set-option -g nosuch-option value
+err: show-options -gv nosuch-option
+err: set-window-option -t w:0 nosuch-window-option value
+err: unbind-key -T nosuchtable C-z
+err: source-file /nonexistent-census-path
+err: display-message -p -t nosuchpane #{pane_id}
+err: swap-pane -s w:0.0 -t w:0.0
+err: rename-window
+err: display-message -p census-ok
+err: show-options -gv status-interval

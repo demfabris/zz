@@ -2,3 +2,7 @@ corpus: none
 stage: fixtures/control-hard-loss.sh ~/control-hard-loss.sh
 stage: fixtures/control-hard-loss.py ~/control-hard-loss.py
 run-shell 'sh ~/control-hard-loss.sh'
+# The stamp is the positive observable: without it this scenario
+# compares only the shape of what the fixture printed, so a setup
+# that failed the same way on both sides would still read clean.
+out: show-environment -g CONTROL_HARD_LOSS

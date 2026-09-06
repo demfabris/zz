@@ -90,3 +90,5 @@ wait "$parked_pid" 2>/dev/null || true
 printf 'parked-after rc=%s panes=[%s]\n' "$(cat "$work/parked.exit" 2>/dev/null)" "$(panes)"
 
 main_client kill-session -t "=$session" >/dev/null 2>&1 || true
+
+main_client set-environment -g SPLIT_WINDOW_WAIT reached-end

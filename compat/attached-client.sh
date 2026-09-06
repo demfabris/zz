@@ -643,41 +643,59 @@ assert_attached_client_count_stays() {
 }
 
 LAST_MODE_STATE=""
+wait_for_pane_in_mode() {
+  local side="$1"
+  local expected_value="$2"
+  local attempt
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    LAST_MODE_STATE="$(side_command "$side" display-message -p -t "$INNER_SESSION:0.0" '#{pane_in_mode}' 2>/dev/null || true)"
+    if [ "$LAST_MODE_STATE" = "$expected_value" ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side pane_in_mode did not become $expected_value within 10 seconds; last state: ${LAST_MODE_STATE:-<empty>}"
+}
+
+# #{pane_in_mode} is the fact both binaries answer for copy mode, so both sides
+# wait on it; zz additionally names the key table its per-client view installs.
 wait_for_mode_state() {
   local side="$1"
   local expected="$2"
   local expected_value
-  local attempt
-
-  if [ "$side" = "zz" ]; then
-    wait_for_client_state zz "$expected"
-    return 0
-  fi
 
   if [ "$expected" = "copy-mode" ]; then
     expected_value=1
   else
     expected_value=0
   fi
-
-  for ((attempt = 0; attempt < 200; attempt++)); do
-    LAST_MODE_STATE="$(tmux_inner_command display-message -p -t "$INNER_SESSION:0.0" '#{pane_in_mode}' 2>/dev/null || true)"
-    if [ "$LAST_MODE_STATE" = "$expected_value" ]; then
-      return 0
-    fi
-    sleep 0.05
-  done
-  fixture_failure "tmux pane mode did not become $expected within 10 seconds; last state: ${LAST_MODE_STATE:-<empty>}"
+  wait_for_pane_in_mode "$side" "$expected_value"
+  if [ "$side" = "zz" ]; then
+    wait_for_client_state zz "$expected"
+  fi
 }
 
+# Command-output mode has NO fact both binaries answer, and this states that
+# instead of leaving each side to assert whichever one it happens to have.
+# Measured 2026-09-06: the pin opens a view-mode ON THE PANE, so
+# #{pane_in_mode} answers 1 while #{client_key_table} stays root, because tmux
+# looks a mode's keys up through the pane's mode and never through the client's
+# table. zz's mode is per client, so #{client_key_table} answers the copy table
+# while #{pane_in_mode} stays 0, because run-shell output goes to the invoking
+# client's overlay and opens no pane mode. Both sides now assert BOTH facts
+# with their own measured values; before, each asserted one and never looked at
+# the other. The split is the run-shell routing under clients.interactive-refresh.
 wait_for_output_mode() {
   local side="$1"
   local table="$2"
 
-  if [ "$side" = "zz" ]; then
-    wait_for_client_state zz "$table"
+  if [ "$side" = tmux ]; then
+    wait_for_pane_in_mode tmux 1
+    wait_for_client_state tmux root
   else
-    wait_for_mode_state tmux copy-mode
+    wait_for_client_state zz "$table"
+    wait_for_pane_in_mode zz 0
   fi
 }
 
@@ -957,24 +975,42 @@ assert_pane_marker_absent() {
 
 assert_popup_underlay_result() {
   local side="$1"
+  local pairs="$2"
   local captured
   local markers
+  local focus_seen
+  local focus_expected
 
   captured="$(side_command "$side" capture-pane -p -J -S - -t "$INNER_PANE_TARGET" 2>/dev/null || true)"
   markers="$(grep -Eo 'UNDERLAY_BYTE_[0-9]+' <<<"$captured" || true)"
   if [ "$markers" != "UNDERLAY_BYTE_122" ]; then
     fixture_failure "$side popup underlay byte result was ${markers:-<empty>}"
   fi
+  focus_seen="$({ grep -Eo 'ATTACHED_POPUP_UNDERLAY_FOCUS_(IN|OUT)_[0-9]+' <<<"$captured" || true; } | wc -l | tr -d '[:space:]')"
+  focus_expected=$((pairs * 2))
+  if [ "$focus_seen" != "$focus_expected" ]; then
+    fixture_failure "$side popup underlay saw $focus_seen focus markers, expected $focus_expected"
+  fi
 }
 
+# Both sides are waited on. The pin routes focus-out and focus-in to the pane a
+# display-popup covers, so its underlay prints the pair and the wait is a
+# positive one. zz routes no focus event to a covered pane, so its side states
+# that absence with a deadline instead of skipping the step; the byte assertion
+# alone used to pass on zz precisely BECAUSE nothing arrived. The divergence is
+# semantic:popup-underlay-focus-events under clients.read-only-and-focus.
 wait_for_popup_underlay_focus() {
   local side="$1"
   local direction="$2"
   local ordinal="$3"
+  local marker="ATTACHED_POPUP_UNDERLAY_FOCUS_${direction}_${ordinal}"
 
   if [ "$side" = tmux ]; then
-    wait_for_pane_marker "$side" "ATTACHED_POPUP_UNDERLAY_FOCUS_${direction}_${ordinal}"
+    wait_for_pane_marker "$side" "$marker"
+    return 0
   fi
+  sleep 0.5
+  assert_pane_marker_absent "$side" "$marker"
 }
 
 pane_flattened_substring_count() {
@@ -1656,7 +1692,7 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" z
   wait_for_pane_marker "$side" UNDERLAY_BYTE_122
   wait_for_pane_marker "$side" ATTACHED_POPUP_UNDERLAY_DRAINED
-  assert_popup_underlay_result "$side"
+  assert_popup_underlay_result "$side" "$focus_pairs"
   side_command "$side" set-option -gu focus-events ||
     fixture_failure "$side could not restore popup focus routing"
 }
@@ -2136,7 +2172,7 @@ probe_source_file_output() {
 
   tmux_outer_command resize-window -t "$OUTER_SESSION:$side" -x 200
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" F3
-  wait_for_mode_state "$side" copy-mode
+  wait_for_output_mode "$side" copy-mode
   wait_for_ordered_current_lines "$side" \
     "$SOURCE_OUTPUT_ROOT:1: display-message -p ATTACHED_ROOT_ONE" \
     "$SOURCE_OUTPUT_ROOT:2: source-file -v $SOURCE_OUTPUT_CHILD" \

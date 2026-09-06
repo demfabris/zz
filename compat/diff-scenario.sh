@@ -687,6 +687,7 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   run_tmux=1
   is_fmt=0
   is_out=0
+  is_err=0
   is_conf=0
   is_keys=0
   key_table=""
@@ -714,6 +715,10 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
     is_out=1
     command_text="${line#out:}"
     ;;
+  err:*)
+    is_err=1
+    command_text="${line#err:}"
+    ;;
   zz-only:*)
     run_tmux=0
     command_text="${line#zz-only:}"
@@ -725,9 +730,10 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   esac
   command_text="${command_text#"${command_text%%[![:space:]]*}"}"
   command_text="${command_text%"${command_text##*[![:space:]]}"}"
-  if [ "$is_fmt" -eq 0 ] && [ "$is_out" -eq 0 ] && [ "$is_conf" -eq 0 ] &&
-    [ "$is_keys" -eq 0 ] &&
-    [[ "$command_text" == fmt:* || "$command_text" == out:* ]]; then
+  if [ "$is_fmt" -eq 0 ] && [ "$is_out" -eq 0 ] && [ "$is_err" -eq 0 ] &&
+    [ "$is_conf" -eq 0 ] && [ "$is_keys" -eq 0 ] &&
+    [[ "$command_text" == fmt:* || "$command_text" == out:* ||
+      "$command_text" == err:* ]]; then
     die "query lines must run on both sides: $line"
   fi
   [ -n "$command_text" ] || die "empty command after side prefix: $line"
@@ -744,7 +750,7 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
       list-keys -T "$key_table" -F
       '#{key_table}|#{key_string}|#{key_repeat}|#{key_command}'
     )
-  elif [ "$is_fmt" -eq 1 ] || [ "$is_out" -eq 1 ]; then
+  elif [ "$is_fmt" -eq 1 ] || [ "$is_out" -eq 1 ] || [ "$is_err" -eq 1 ]; then
     case "$command_text" in
     *'$'* | *'`'* | *"'"* | *'"'* | *'#('*)
       die "unsupported content in query line: $command_text"
@@ -853,6 +859,17 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
     elif ! compare_snapshot OUT "$steps" "$zz_stdout" "$tmux_stdout"; then
       out_step_diverged=1
     fi
+  elif [ "$is_err" -eq 1 ]; then
+    if [ "$zz_rc" -ne "$tmux_rc" ]; then
+      printf 'ERR QUERY: exit %d vs %d\n' "$zz_rc" "$tmux_rc" >>"$LOG_FILE"
+      out_step_diverged=1
+    fi
+    if ! compare_snapshot ERR "$steps" "$zz_stderr" "$tmux_stderr"; then
+      out_step_diverged=1
+    fi
+    if ! compare_snapshot "ERR STDOUT" "$steps" "$zz_stdout" "$tmux_stdout"; then
+      out_step_diverged=1
+    fi
   elif [ "$run_zz" -eq 1 ] && [ "$run_tmux" -eq 1 ]; then
     if { [ "$zz_rc" -eq 0 ] && [ "$tmux_rc" -ne 0 ]; } ||
       { [ "$zz_rc" -ne 0 ] && [ "$tmux_rc" -eq 0 ]; }; then
@@ -898,12 +915,13 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
         "$zz_smoke_stdout" "$tmux_smoke_stdout"; then
         warn_step_diverged=1
       fi
-    elif [ "$is_fmt" -eq 0 ] && [ "$is_out" -eq 0 ]; then
+    elif [ "$is_fmt" -eq 0 ] && [ "$is_out" -eq 0 ] && [ "$is_err" -eq 0 ]; then
       if ! compare_snapshot "SMOKE STDOUT" "$steps" "$zz_stdout" "$tmux_stdout"; then
         warn_step_diverged=1
       fi
     fi
-    if ! compare_snapshot "SMOKE STDERR" "$steps" "$zz_stderr" "$tmux_stderr"; then
+    if [ "$is_err" -eq 0 ] &&
+      ! compare_snapshot "SMOKE STDERR" "$steps" "$zz_stderr" "$tmux_stderr"; then
       warn_step_diverged=1
     fi
     if [ "$key_extract_failed" -eq 1 ]; then

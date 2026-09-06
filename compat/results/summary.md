@@ -99,6 +99,7 @@
 | split-window-zoom | 11 | yes | 0 | yes | yes | yes |
 | splits-sized | 5 | yes | 0 | yes | yes | yes |
 | status-options | 79 | yes | 0 | yes | yes | yes |
+| stderr-parity | 14 | yes | 0 | yes | yes | yes |
 | strict-key-validation | 40 | yes | 0 | yes | yes | yes |
 | switch-client | 6 | yes | 0 | yes | yes | yes |
 | targets | 16 | yes | 0 | yes | yes | yes |
@@ -150,8 +151,8 @@
 | smoke/config-non-utf8-file-bytes | 8 | yes | 0 | yes | yes | yes |
 | smoke/continuum-init | 2 | yes | 0 | yes | yes | yes |
 | smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
-| smoke/control-eof-drain | 1 | yes | 0 | yes | yes | yes |
-| smoke/control-hard-loss | 1 | yes | 0 | yes | yes | yes |
+| smoke/control-eof-drain | 2 | yes | 0 | yes | yes | yes |
+| smoke/control-hard-loss | 2 | yes | 0 | yes | yes | yes |
 | smoke/control-notify | 2 | yes | 0 | yes | yes | yes |
 | smoke/control-tilde-environment | 2 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-command-errors | 3 | yes | 0 | yes | yes | yes |
@@ -239,7 +240,7 @@
 | smoke/source-file-diagnostics | 12 | yes | 0 | yes | yes | yes |
 | smoke/source-file-tilde | 3 | yes | 0 | yes | yes | yes |
 | smoke/source-replay-diagnostics | 60 | yes | 0 | yes | yes | yes |
-| smoke/split-window-wait | 1 | yes | 0 | yes | yes | yes |
+| smoke/split-window-wait | 2 | yes | 0 | yes | yes | yes |
 | smoke/status-background-jobs | 2 | yes | 0 | yes | yes | yes |
 | smoke/status-keys-editor-default | 2 | yes | 0 | yes | yes | yes |
 | smoke/terminal-facts | 2 | yes | 0 | yes | yes | yes |

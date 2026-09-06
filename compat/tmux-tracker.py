@@ -113,6 +113,34 @@ def check_path_reference(value, location, errors):
         errors.append(f"{location} references a missing path: {value}")
 
 
+CITATION_ROOTS = (
+    "compat/",
+    "crates/",
+    "knowledge/",
+    "clients/",
+    "third_party/",
+    "bench/",
+    "site/",
+    "examples/",
+    "packaging/",
+)
+CITATION_SKIP = ("compat/.cache/", "compat/results/")
+CITATION_PATTERN = re.compile(
+    r"(?:" + "|".join(re.escape(root) for root in CITATION_ROOTS) + r")[A-Za-z0-9_./-]+"
+)
+
+
+def check_prose_citations(text, location, errors):
+    if not isinstance(text, str):
+        return
+    for token in CITATION_PATTERN.findall(text):
+        token = token.rstrip(".,;:")
+        if token.startswith(CITATION_SKIP) or token.endswith("/"):
+            continue
+        if not (ROOT / token).exists():
+            errors.append(f"{location} cites a missing path: {token}")
+
+
 def validate_manifest(manifest, oracle, include_report):
     errors = []
     if not isinstance(manifest, dict):
@@ -200,6 +228,8 @@ def validate_manifest(manifest, oracle, include_report):
             check_path_reference(value, location, errors)
         for value in acceptance:
             check_path_reference(value, location, errors)
+            check_prose_citations(value, f"{location}.acceptance", errors)
+        check_prose_citations(gap.get("reason"), f"{location}.reason", errors)
         status = gap.get("status")
         decision = gap.get("decision")
         priority = gap.get("priority")
@@ -280,6 +310,7 @@ def validate_manifest(manifest, oracle, include_report):
             if re.match(r"^(resource|scenario|file):", value) is None:
                 errors.append(f"{location}.evidence must use resource:, scenario:, or file:: {value}")
             check_path_reference(value, location, errors)
+        check_prose_citations(entry.get("resolution"), f"{location}.resolution", errors)
     if closed_ids != sorted(closed_ids):
         errors.append("compat/tmux-gaps.json closed entries must be sorted by id")
     if not isinstance(oracle, dict):

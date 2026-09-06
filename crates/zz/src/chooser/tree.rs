@@ -19,7 +19,7 @@ const TREE_HINTS: &[ChooserHint] = &[
     },
     ChooserHint {
         keys: &["left", "right"],
-        label: "collapse",
+        label: "expand",
     },
     ChooserHint {
         keys: &["enter"],
@@ -50,11 +50,7 @@ impl ChooserSpec for TreeChooser {
     const ROWS_ID: &'static str = "choose-tree-rows";
     const ROW_ID: &'static str = "choose-tree-row";
     const CLOSE_ID: &'static str = "choose-tree-close";
-    const WIDTH: f32 = 0.82;
-    const MAX_WIDTH: f32 = 920.0;
-    const HEIGHT: f32 = 0.74;
-    const MIN_HEIGHT: f32 = 300.0;
-    const MAX_HEIGHT: f32 = 640.0;
+    const MAX_WIDTH: f32 = 600.0;
     const HINTS: &'static [ChooserHint] = TREE_HINTS;
 
     fn state(mux: &MuxClient) -> Option<Self::State> {
@@ -100,10 +96,7 @@ impl ChooserSpec for TreeChooser {
             ChooseTreeKind::Windows => "sessions and windows",
             ChooseTreeKind::Panes => "sessions, windows, and panes",
         };
-        chooser_subtitle(
-            format!("{count} {targets} · daemon-owned"),
-            state.filter_no_matches,
-        )
+        chooser_subtitle(format!("{count} {targets}"), state.filter_no_matches)
     }
 
     fn row(

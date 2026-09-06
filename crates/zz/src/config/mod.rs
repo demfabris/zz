@@ -35,6 +35,7 @@ use crate::{
 };
 
 pub(crate) mod import;
+mod mux_bindings;
 #[cfg(not(target_os = "ios"))]
 pub(crate) mod import_prompt;
 pub(crate) mod settings;

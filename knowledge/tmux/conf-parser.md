@@ -5,21 +5,20 @@ description: A single-pass tmux-style tokenizer plus the daemon replay layer tha
 resource: crates/zz-mux/src/parser.rs
 tags: [tmux, parser, config, tokenizer, mux-conf]
 timestamp: 2026-08-26T00:00:00-03:00
-last_updated: 2026-09-03
+last_updated: 2026-09-06
 last_updated_by: Claude
 ---
 
 # Overview
 
 `parser.rs` implements `parse_config(source, input) -> ParsedConfig`, the lexer used for startup
-config, `source-file`, and each `command-prompt` submission. By default the daemon reads the first
-existing zz-owned platform candidate for `zz/mux.conf`: XDG config, the home config directory,
-macOS Application Support, or Windows AppData in platform order. One or more top-level startup `-f`
-files replace that default for the initial load. `#{config_files}` retains that ordered startup
-selection until `reload-config` returns to the first existing platform candidate; reload then
-replaces the fact with that selected path, or empties it when no candidate exists. Later
-`source-file` calls do not append to the fact. The daemon does not read `~/.tmux.conf`; the client's
-import flow copies a user's tmux config to the first existing or first constructible candidate. See
+config, `source-file`, and each `command-prompt` submission. The daemon's `selected_mux_config_files`
+discovers tmux configuration roots, then appends the first existing zz-owned platform candidate for
+`zz/mux.conf`: XDG config, the home config directory, macOS Application Support, or Windows AppData
+in platform order. Top-level startup `-f` files replace the tmux roots while zz overrides still load
+last. `reload-config` replays the same discovery or explicit roots and the selected zz file;
+`replay_mux_config_files` records that ordered selection in `#{config_files}`. Later `source-file`
+calls do not append to the fact. The GUI's tmux action explains this discovery without copying files. See
 [Application configuration](/configuration/app-config.md).
 
 The lexer is a single character-by-character state machine (modeled on tmux's `cmd-parse.y` /

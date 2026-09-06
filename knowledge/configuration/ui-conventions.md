@@ -4,7 +4,7 @@ title: UI design conventions
 description: The component, palette, and styling rules that keep zz application chrome consistent and theme-aware.
 resource: crates/zz/src/command/palette.rs
 tags: [ui, gpui, zz-ui, theme, chrome, clippy]
-timestamp: 2026-09-04T00:00:00Z
+timestamp: 2026-09-06T00:00:00Z
 ---
 
 # Overview
@@ -80,6 +80,15 @@ Settings uses 13px primary row labels, so `Input::small()` renders its editable 
 shared dialog surface is similarly compact: 400px default width, 12px gutters, 13px title, 12px
 description, and Small action buttons. Explicitly sized content dialogs such as the attachment
 preview retain their own width.
+
+Native tree and paste-buffer choosers use `zz-ui::chooser::ChooserModal`: 600px and 640px
+maximum widths, 40px rows, 12px header/footer gutters, and the shared compact close button.
+The surface grows with its row count up to ten visible rows and scrolls within the available
+window height. It sits near the top of the workspace like the command palette. Tree rows use
+the shared navigation icons, a muted target ID after the label, and a small checkmark for active
+entries. Their selection uses `workspace_row_highlight`; the header and footer share the body
+color. The outer radius adds the 4px row inset to the theme radius. The Commands & choosers
+catalog includes the complete modal alongside the individual rows and search footer.
 
 **A toast is that same surface.** `widget/overlay/notification.rs` imports the width, gutter and two
 text sizes from `widget/overlay/dialog.rs` rather than restating them, so the two things that

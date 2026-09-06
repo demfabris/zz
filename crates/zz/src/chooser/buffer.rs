@@ -48,11 +48,7 @@ impl ChooserSpec for BufferChooser {
     const ROWS_ID: &'static str = "choose-buffer-rows";
     const ROW_ID: &'static str = "choose-buffer-row";
     const CLOSE_ID: &'static str = "choose-buffer-close";
-    const WIDTH: f32 = 0.76;
-    const MAX_WIDTH: f32 = 840.0;
-    const HEIGHT: f32 = 0.68;
-    const MIN_HEIGHT: f32 = 280.0;
-    const MAX_HEIGHT: f32 = 580.0;
+    const MAX_WIDTH: f32 = 640.0;
     const HINTS: &'static [ChooserHint] = BUFFER_HINTS;
 
     fn state(mux: &MuxClient) -> Option<Self::State> {
@@ -87,10 +83,7 @@ impl ChooserSpec for BufferChooser {
     }
 
     fn subtitle(state: &Self::State, count: usize) -> String {
-        chooser_subtitle(
-            format!("{count} buffers · daemon-owned"),
-            state.filter_no_matches,
-        )
+        chooser_subtitle(format!("{count} buffers"), state.filter_no_matches)
     }
 
     fn row(

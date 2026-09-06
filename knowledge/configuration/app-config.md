@@ -9,7 +9,7 @@ tags:
 - window
 - appearance
 - mux
-timestamp: 2026-09-05T00:00:00-03:00
+timestamp: 2026-09-06T00:00:00-03:00
 ---
 
 # Overview
@@ -531,13 +531,13 @@ always-live inactive-opacity factor.
 | Panes | **Layout** (`pane-gaps`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |
 | System | **Tray** (`tray`, only where the profile has one) · **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`, each row present only with its cargo feature). `auto-restart-stale-daemon` is a file key with no Settings row |
-| Multiplexer | Full-file editor for `zz/mux.conf`, with Save and tmux discovery information |
+| Multiplexer | **Split panes** (shortcut and Pane picker / Terminal / Browser for Split below and Split right), followed by the `zz/mux.conf` editor with Save and tmux discovery information |
 | Terminal | Full-file Ghostty-compatible configuration editor, with Save and **Import Ghostty…** |
 | About | Centered mark (the Dock render at 88pt), name, tagline and version badge · **Updates** (`check-for-updates`, plus a Latest-release row that reads the update state: Check now, or Update / What's new once a newer release is known; desktop only) · **Build** (`CARGO_PKG_VERSION`, OS · arch, the short `ZZ_GPUI_SOURCE` revision, with a copy button on Version that puts all three on one line) · **Project** (repository, releases, new issue, license) |
 
-Every structured row shows its effective client-local or daemon-resolved appearance provenance and
-a Reset button that removes the corresponding `zz/config` key. The Multiplexer file editor
-deliberately has no per-key badges or Reset controls. All chrome colors come from `cx.theme()`
+Structured `zz/config` rows show their effective client-local or daemon-resolved appearance provenance and
+a Reset button that removes the corresponding key. Multiplexer uses effective prefix bindings
+without per-key provenance badges or Reset controls. All chrome colors come from `cx.theme()`
 semantic values.
 
 The Theme group is two picker cards rather than rows of buttons, because both choices are about
@@ -581,6 +581,24 @@ highlighting (`tree-sitter-tmux`, upstream's own `highlights.scm`), and a delibe
 inset frame . a file surface, not a control. Save uses the
 1 MiB bounded atomic writer; a clean editor reloads when entered, while unsaved text is retained. A
 successful mux save asks the daemon to `reload-config`.
+
+The **Split panes** rows in `crates/zz/src/config/settings/multiplexer.rs` read
+`MuxClient::prefix_bindings`, the daemon's effective table after tmux files, zz overrides, and runtime
+commands. Each direction selects one shortcut, preferring `-` / `|`, then `"` / `%`, then another
+binding that splits in that direction. A renamed shortcut stays selected while Settings remains open.
+Additional shortcuts stay in the text editor. Choosing a pane type or pressing Enter in the shortcut
+field saves an ordinary `bind-key` override through the same atomic writer and reload request.
+Renaming also unbinds the previous key; an occupied destination key is rejected.
+
+`crates/zz/src/config/mux_bindings.rs` preserves unrelated source text and replaces matching overrides
+in the trailing generated split-binding group when users change selections again. Simple direction
+flags and `-c "#{pane_current_path}"` map to the dropdown; other arguments or command chains show
+**Custom** and remain editable in the text editor. Shortcut changes retain command arguments,
+repeat settings, and notes. Pane-type changes use the corresponding `split-picker`, `split-window`,
+or `split-browser` command; terminal and picker commands inherit the source terminal directory.
+The controls require a connected local session and a clean editor. They check for external file edits
+before saving and wait for the daemon to publish the changed binding before accepting another edit.
+If the daemon does not confirm within five seconds, Settings offers a reload retry.
 
 Multiplexer's **tmux configuration…** action explains that the daemon reads tmux files in place
 at startup. It does not overwrite the file or discard the editor buffer. Terminal's confirmed

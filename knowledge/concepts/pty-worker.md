@@ -138,9 +138,10 @@ Title sync and exit detection ride whichever frames exist. Each frame's title go
 so the watcher reads `latest_viewport()` instead and runs both checks off that fallback. A pane whose
 last viewer detached keeps its sidebar label current and still closes when its shell exits.
 
-`publish_terminal_for_pane` takes the view's `ClientId` and delivers only while that client is still
-attached to the pane's session and the pane is currently **visible** to it (`visible_terminals`, keyed
-per client, honoring active window + zoom). The frame lands in that client's `OutboundMailbox`
+`publish_terminal_for_pane` takes the view's `ClientId` and delivers while that client remains
+attached to the pane's session, publication is not frozen, and the pane has an entry in that client's
+`streamed_terminals`. The entry selects a foreground or preview stream; preview delivery reserves
+mailbox capacity for foreground panes and uses a separate byte limit. The frame lands in that client's `OutboundMailbox`
 terminal lane (one coalesced pending frame per pane), where the watcher's `is_current_terminal` guard
 and the mailbox's generation check (`delivered_terminals`) promote a stale-base patch back to a full
 viewport. Full details of the mailbox lanes and backpressure live in

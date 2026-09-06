@@ -1,12 +1,15 @@
 //! The command palette and daemon chooser pieces.
 
 use gpui::{AnyElement, App, Context, ParentElement as _, Styled as _, div, prelude::*, px};
-use zz_ui::ActiveTheme as _;
 use zz_ui::chooser::{
-    ChooserHint, ChooserPaneKind, ChooserRowTheme, ChooserSearch, buffer_chooser_row,
-    chooser_footer, tree_chooser_row,
+    ChooserDimensions, ChooserHint, ChooserModal, ChooserPaneKind, ChooserRowTheme, ChooserSearch,
+    buffer_chooser_row, chooser_footer, tree_chooser_row,
 };
 use zz_ui::command::{command_kind_badge, command_palette_input, command_palette_row};
+use zz_ui::{
+    ActiveTheme as _, IconName,
+    button::{Button, ButtonVariants as _},
+};
 
 use super::{Showcase, gallery, specimen_block, specimens, story_stack};
 use zz_ui::Colorize as _;
@@ -20,7 +23,7 @@ const TREE_HINTS: &[ChooserHint] = &[
     },
     ChooserHint {
         keys: &["left", "right"],
-        label: "collapse",
+        label: "expand",
     },
     ChooserHint {
         keys: &["enter"],
@@ -38,6 +41,24 @@ const TREE_HINTS: &[ChooserHint] = &[
 
 pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> AnyElement {
     story_stack()
+        .child(
+            gallery("Window picker", "The compact chooser surface with a mixed session tree.", cx)
+                .child(
+                    ChooserModal::new(
+                        "catalog-tree-chooser",
+                        "Choose window",
+                        "4 sessions and windows",
+                        ChooserDimensions { max_width: 600.0, row_count: 4 },
+                        div().flex().flex_col().w_full()
+                            .child(tree_row(10, "$0", "clairvo", "2 windows", 0, true, true, None, cx))
+                            .child(tree_row(11, "@1", "1:just", "2 panes", 1, false, false, None, cx))
+                            .child(tree_row(12, "@0", "2:claude", "1 pane", 1, false, false, None, cx))
+                            .child(tree_row(13, "$1", "zz", "1 window", 0, false, false, None, cx)),
+                        Button::compact_icon("catalog-chooser-close", IconName::Xmark).ghost().flat(),
+                        MONO,
+                    ).hints(TREE_HINTS),
+                ),
+        )
         .child(
             gallery(
                 "Palette input",

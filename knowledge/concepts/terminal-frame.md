@@ -67,10 +67,11 @@ Content publishes are themselves time-coalesced in the actor
 (`CONTENT_PUBLISH_STALENESS`, 16 ms): a PTY burst arriving later than that after the previous publish
 snapshots immediately, so interactive echo is never delayed. Faster bursts (sustained floods)
 defer to a select-deadline arm, capping full-grid snapshot builds on the drain path at ~60 Hz
-regardless of throughput. The reader thread likewise folds everything FIONREAD reports as queued into one
-pool buffer (up to 64 KiB) before waking the actor, bounded and never blocking past the first read. On
-macOS this rarely exceeds a kilobyte (the pty's tiny output queue blocks the producer per ~1 KiB, making
-throughput scheduler-roundtrip-bound); Linux's deeper ldisc queue is where the folding batches. The reliable-event queue for `CopyReady`/`OpenUri`/`ViewClosed` is separate
+regardless of throughput. In `crates/zz-terminal/src/session.rs`, macOS and other non-Linux Unix
+targets drain the PTY on the actor thread through `Wake::PtyReadable`. Linux uses `gather_pty_linux`
+with four pooled 64 KiB buffers; non-Unix targets use the blocking `read_pty` thread. See
+[PTY drain topology](/terminal/pty-drain.md) for the platform paths and drain limits.
+The reliable-event queue for `CopyReady`/`OpenUri`/`ViewClosed` is separate
 and byte-bounded. If a copy or URI action exceeds that backlog it is discarded and logged without
 stopping the actor; loss of the event consumer remains fatal. A client reads its own newest frame via
 `TerminalSession::latest_viewport_for(view)`, or `latest_viewport()` for the fallback. The

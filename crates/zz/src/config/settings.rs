@@ -1,5 +1,7 @@
 //! Native settings route backed by the application configuration.
 
+mod multiplexer;
+
 use std::{
     collections::BTreeMap,
     io::{self, ErrorKind},
@@ -145,6 +147,7 @@ pub(crate) struct SettingsView {
     window_corner_radius: Entity<InputState>,
     chrome_pickers: BTreeMap<ChromeColor, Entity<ColorPickerState>>,
     mux_config_editor: Option<ConfigFileEditor>,
+    mux_split_controls: Option<multiplexer::SplitControls>,
     observed_appearance_overrides: Vec<ConfigOverrideEntry>,
     terminal_config_editor: Option<ConfigFileEditor>,
     hosts_state: Option<HostsSectionState>,
@@ -298,6 +301,7 @@ impl SettingsView {
             window_corner_radius,
             chrome_pickers,
             mux_config_editor: None,
+            mux_split_controls: None,
             observed_appearance_overrides,
             terminal_config_editor: None,
             hosts_state: None,
@@ -1493,6 +1497,9 @@ impl SettingsView {
                     .min_h_0()
                     .gap(px(10.0))
                     .child(settings_page_description(kind.section(), cx))
+                    .when(kind == ConfigFileKind::Mux, |page| {
+                        page.child(self.mux_splits_section(cx))
+                    })
                     .child(
                         div()
                             .flex()
@@ -1906,6 +1913,7 @@ impl Render for SettingsView {
         self.synchronize_ui_zoom_input(window, cx);
         self.synchronize_ui_font(window, cx);
         self.synchronize_terminal_editor(window, cx);
+        self.synchronize_mux_splits(window, cx);
 
         let content = match self.section {
             SettingsSection::Appearance => self.appearance_section(&resolved, cx),

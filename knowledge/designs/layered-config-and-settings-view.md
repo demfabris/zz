@@ -1,7 +1,7 @@
 ---
 type: Design Plan
 title: Layered configuration & native settings view
-description: The decision record behind zz/config as the single native configuration surface - one flat file, daemon-owned keys crossing the wire, structured app and Terminal controls, and a direct mux.conf editor.
+description: The decision record behind zz/config, daemon-owned keys crossing the wire, and native settings with split shortcut controls and a mux.conf editor.
 status: Complete
 tags:
 - configuration
@@ -11,6 +11,7 @@ tags:
 - provenance
 - design-plan
 timestamp: 2026-07-30T00:00:00Z
+last_updated: 2026-09-06
 ---
 
 # Overview
@@ -18,8 +19,8 @@ timestamp: 2026-07-30T00:00:00Z
 `zz/config` is zz's whole application configuration surface. Every knob zz honors has a spelling in
 that one flat file, whether the value is consumed by the GUI client or by the daemon. The native
 settings view keeps structured controls for app-level and terminal-appearance choices; Multiplexer
-exposes the separate zz-owned `mux.conf` directly. The user's Ghostty and tmux configs are read only
-during an explicit import.
+exposes split shortcut controls above the separate zz-owned `mux.conf` editor. Users import Ghostty
+appearance on request; the daemon reads tmux config files in place before zz overrides.
 
 This document records the shape and the reasoning. Current grammar and key tables live in
 [Application configuration](/configuration/app-config.md),
@@ -28,14 +29,14 @@ This document records the shape and the reasoning. Current grammar and key table
 # Resolution model
 
 One resolver per domain produces `(effective value, provenance)`. The app consumes both where
-needed. Structured client-local and Terminal Settings rows display provenance; the Multiplexer
-full-file editor does not attempt to mirror per-key state.
+needed. Structured client-local and Terminal Settings rows display provenance. Multiplexer's split
+rows read the effective prefix table; its full-file editor covers the remaining commands and options.
 
 | Domain | Ladder | Provenance tiers |
 |--------|--------|------------------|
 | Client-local knobs | built-in default < `zz/config` | `Default`, `Override` |
 | Terminal appearance (`AppearanceConfigKey::ALL`) | built-in defaults < theme file named by a `theme` override < the rest of the `zz/config` override set | `Default`, `ThemeFile`, `Ghostty`, `Override` |
-| Mux options | defaults < `zz/mux.conf` < `zz/config` override < runtime command | `Default`, `TmuxConfig`, `Override`, `RuntimeCommand` |
+| Mux options | defaults < tmux files (or explicit `-f` roots) < `zz/mux.conf` < `zz/config` override < runtime command | `Default`, `TmuxConfig`, `Override`, `RuntimeCommand` |
 
 Client-local provenance is `Override` whenever the key is *present*, even if its value is invalid, so
 Reset can delete a stale bad line instead of presenting it as absent.
@@ -61,7 +62,9 @@ place that already owns each grammar.
 | Terminal appearance, including face-specific `font-family*` stacks, `font-feature`, synthetic/thickening policy, colors, palette, padding, policy, `theme`, and the `zz-*` extension keys | daemon | `crates/zz-terminal/src/appearance.rs` |
 | `prefix`, `mode-keys`, `history-limit`, `word-separators`, `copy-command`, `set-clipboard`, `buffer-limit`, `synchronize-panes` | daemon | `crates/zz-mux/src/command.rs` |
 
-Daemon-owned pane key tables remain in `zz/mux.conf`; the Settings view still has no binding editor.
+Daemon-owned pane key tables use tmux config files and zz-owned `zz/mux.conf` overrides. Settings
+offers shortcut and pane-type controls for Split below and Split right, with custom commands left
+in the text editor. See [Application configuration](/configuration/app-config.md) for the current behavior.
 Client-owned chrome gained repeatable file-only overrides through `chrome-keybind` and
 `chrome-unbind`, resolved by `ChromeKeymap`. The browser element-selector shortcut remains a
 dedicated validated scalar because Settings exposes that one action directly.
@@ -112,8 +115,8 @@ copy helper is removed; import entry points explain the in-place behavior. This 
 
 `crates/zz/src/config/settings.rs` renders the `WorkspaceRoute::Settings` route in the main window
 (`Cmd+,` / `Ctrl+,`) from zz-ui form widgets, per [UI conventions](/configuration/ui-conventions.md).
-`SettingsSection::ALL` is nine pages . Appearance, Editor, Panes, Multiplexer, Browser, Terminal,
-Hosts, Advanced, About . arranged in the labeled Appearance, Tools, and Advanced sidebar groups.
+`SettingsSection::ALL` has ten pages: Interface, Status bar, Editor, Panes, Multiplexer, Browser,
+Terminal, Hosts, System, About, arranged in the Appearance, Tools, and Advanced sidebar groups.
 About sets nothing: it shows the mark, the version, the platform and gpui revision this build carries
 (copyable as one line for a bug report), and links to the repository, releases, and a new issue. See
 [app-config](/configuration/app-config.md) for the page map.

@@ -11,7 +11,7 @@ use zz_ui::chooser::{
 };
 pub(crate) use zz_ui::chooser::{ChooserHint, ChooserRowTheme};
 use zz_ui::{
-    ActiveTheme as _, IconName, Sizable as _,
+    ActiveTheme as _, IconName,
     button::{Button, ButtonVariants as _},
 };
 
@@ -48,11 +48,7 @@ pub(crate) trait ChooserSpec: Default + 'static {
     const ROWS_ID: &'static str;
     const ROW_ID: &'static str;
     const CLOSE_ID: &'static str;
-    const WIDTH: f32;
     const MAX_WIDTH: f32;
-    const HEIGHT: f32;
-    const MIN_HEIGHT: f32;
-    const MAX_HEIGHT: f32;
     const HINTS: &'static [ChooserHint];
 
     fn state(mux: &MuxClient) -> Option<Self::State>;
@@ -328,10 +324,9 @@ impl<S: ChooserSpec> Render for Chooser<S> {
         });
 
         let close_mux = self.mux.clone();
-        let close = Button::new(S::CLOSE_ID)
-            .xsmall()
+        let close = Button::compact_icon(S::CLOSE_ID, IconName::Xmark)
             .ghost()
-            .icon(IconName::Xmark)
+            .flat()
             .tooltip("Close")
             .on_click(move |_, _, cx| {
                 S::send(close_mux.read(cx), S::close());
@@ -342,11 +337,8 @@ impl<S: ChooserSpec> Render for Chooser<S> {
             S::title(&state),
             S::subtitle(&state, count),
             ChooserDimensions {
-                width: S::WIDTH,
                 max_width: S::MAX_WIDTH,
-                height: S::HEIGHT,
-                min_height: S::MIN_HEIGHT,
-                max_height: S::MAX_HEIGHT,
+                row_count: count,
             },
             rows,
             close,
@@ -367,8 +359,10 @@ impl<S: ChooserSpec> Render for Chooser<S> {
                     .absolute()
                     .inset_0()
                     .flex()
-                    .items_center()
+                    .items_start()
                     .justify_center()
+                    .px(gpui::px(24.0))
+                    .py(gpui::px(22.0))
                     .bg(cx.theme().scrim)
                     .track_focus(&self.focus_handle)
                     .on_key_down(cx.listener(Self::on_key_down))

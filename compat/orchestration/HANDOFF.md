@@ -202,7 +202,7 @@ medium reasoning on the default tier, a reviewer behind each, one serial gate; r
 `~/dev/zz-run-15`; worker worktrees `~/dev/zz-lane-config` and `~/dev/zz-lane-status`, created
 fresh at origin/main with cold targets; reviewers get a worktree without a build and
 `CARGO_TARGET_DIR` pointing at their lane's warm worker target). Lock fronts
-`F-CONFIG-ENTRYPOINT` and `F-STATUS-CONTROL-NOTIFY`.
+`F-CONFIG-ENTRYPOINT` and `F-STATUS-CONTROL-NOTIFY-V2`.
 
 Lane config (`campaign/batch-config-entrypoint`): `config.discovery` (finding 2),
 `pane.tmux-on-path` (finding 3), and the `f`, `M-n`, `M-p` remainder of

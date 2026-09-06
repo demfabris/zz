@@ -115,7 +115,7 @@ try:
 
     print("NEW_WINDOW_PRINT=" + tmux(
         "new-window", "-t", session + ":", "-n", "printed", "-c", str(root),
-        "-P", "-F", "#{pane_current_path}|[#{pane_path}]|#{pane_title}",
+        "-P", "-F", "[#{pane_path}]|#{pane_title}",
         "exec sleep 600").replace(str(root), "<DIR>").replace(host, "<HOST>"))
 
     for index in (1, 2, 3):

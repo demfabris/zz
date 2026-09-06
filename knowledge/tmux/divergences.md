@@ -1639,12 +1639,14 @@ prints one newline on the pin and nothing at all on zz.
 # 2026-09-06: the proof-debt pass
 
 Cycle 16's proof-debt lane spent its budget on proofs rather than code, and this is what it left
-behind. Three plugin RUNTIME paths now run on both binaries and diff a file the plugin wrote or a
+behind. Seven plugin RUNTIME paths now run on both binaries and diff a file the plugin wrote or a
 daemon fact, never a screen: vim-tmux-navigator's `is_vim` branch fired through its own installed
 root `C-h` binding against a real process named `vim`, tmux-yank's `copy_line.sh` piping a real
-selection into a fake clipboard, and tmux-continuum's save fired the way it really fires, by the
-`status-right` `#()` job on an attached client. Everything else the corpus knew about plugins was
-their installer.
+selection into a fake clipboard, tmux-continuum's status answer and its save fired the way it really
+fires, by the `status-right` `#()` job on an attached client, tmux-resurrect's `restore.sh` against a
+save the same run produced, tpm's prefix `I` install cloning a local repository with no network, and
+tmux-fpp's prefix `f` window driving a stand-in picker. Everything else the corpus knew about plugins
+was their installer.
 
 Three divergences came out of writing them. The pin does not push an outer `-t` into the commands
 `if-shell` or `run-shell -C` then run - `cmd-if-shell.c` and `cmd-run-shell.c` hand the new item

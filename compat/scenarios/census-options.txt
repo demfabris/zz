@@ -1,13 +1,20 @@
 # The seventeen consumed options compat/census.py reported as registered but
 # never named by any proof. Each is set and read back in its own table, and the
 # three with a cheap deterministic observable are also exercised: buffer-limit
-# through the buffers it evicts, synchronize-panes through #{pane_synchronized},
-# default-command through the pane a new window starts.
+# through the automatically named buffers it evicts, synchronize-panes through
+# #{pane_synchronized}, default-command through the pane a new window starts.
+# paste.c:267 paste_set only reaches paste_add, which reads buffer-limit, on the
+# unnamed path, so three named buffers all survive the limit and the three
+# unnamed ones that follow trim to the newest two.
 set-option -s buffer-limit 2
 out: show-options -sv buffer-limit
 set-buffer -b censusa aaa
 set-buffer -b censusb bbb
 set-buffer -b censusc ccc
+out: list-buffers -F #{buffer_name}
+set-buffer censusd
+set-buffer censuse
+set-buffer censusf
 out: list-buffers -F #{buffer_name}
 set-option -s buffer-limit 50
 set-option -s copy-command /bin/true

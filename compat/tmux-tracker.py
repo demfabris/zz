@@ -124,7 +124,7 @@ CITATION_ROOTS = (
     "examples/",
     "packaging/",
 )
-CITATION_SKIP = ("compat/.cache/", "compat/results/")
+CITATION_SKIP = ("compat/.cache", "compat/results")
 CITATION_PATTERN = re.compile(
     r"(?:" + "|".join(re.escape(root) for root in CITATION_ROOTS) + r")[A-Za-z0-9_./-]+"
 )

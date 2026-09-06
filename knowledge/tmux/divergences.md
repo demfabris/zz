@@ -5,7 +5,7 @@ description: "Dated rationale and source evidence for measured tmux divergences,
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 last_updated_by: Claude
 ---
 
@@ -1689,6 +1689,56 @@ Thirteen accepted groups whose reason was a single sentence now carry the pin so
 the behaviour zz declines, the measurement, and the stance. Counted as a reason of one sentence under
 260 characters, `origin/main` had sixteen and this pass leaves two: `sessions.linked-groups`, which
 another lane owns this cycle, and `formats.session-activity-wake-lifecycle`.
+
+# 2026-09-07: the proof side of cycle 17
+
+The last plugin runtime path ran. Oh My Tmux binds `prefix y` at `.tmux.conf:130-139` behind six
+ordered `if -b` jobs that pick a clipboard tool by `command -v` at config time, so
+`compat/scenarios/smoke/plugin-runtime-oh-my-tmux.txt` pins the branch - a fake `xsel` first on the
+server PATH, `XDG_SESSION_TYPE` pinned away from `wayland` - and then fires the real key on an
+attached pty client. Both binaries install the same binding byte for byte, both write the same 19
+clipboard bytes with the same `-i -b` argv, both leave the paste buffer and the pane mode alone, and
+both run the config's own `_username` helper - as a `status-right` `#()` job with `status-interval 1`
+and as a `run-shell` - to the same answer. The config's `TMUX_PROGRAM` resolves to the server's own
+executable on both sides, the pinned `tmux` binary against the `zz` binary under test, because zz
+hands its jobs a `ZZ_SOCKET` and so passes the config's own pid round trip; it never falls back to
+the `tmux` wrapper `pane.tmux-on-path` puts on the pane PATH. Two fixture lessons came out of it. A
+job's environment is the global environment with the session's own environment copied over it, so
+`set-environment -g` alone leaves a plugin's `command -v` probe answering the box's real values;
+anything a plugin resolves through the environment has to be set with `-g` and with `-t` on every
+session. And the zz raw TUI client stops reading its stdin once its own pty output fills the buffer,
+so a fixture that presses keys on an attached zz client and never drains the master gets no keypress
+at all - measured as `prefix d` not detaching under 82 KB of unread debug-build log spew, with every
+binding firing once a thread drained the master. The pin has no such threshold at this size.
+
+The census remainder was settled by giving each name an owner rather than by narrowing. `#P` was a
+false positive - its only corpus occurrence was the literal prompt text in
+`compat/scenarios/smoke/fixtures/keys-contract.py` - and now expands with the other aliases in
+`compat/scenarios/census-formats.txt`, answering `0` on both sides. `start_time` is the server's own
+epoch and stays undiffable by construction. The five cell formats went to `formats.terminal-cells`
+(`cursor_character` empty against one space, `cursor_colour` empty against `none`, `pane_bg` and
+`pane_fg` empty against `default`, `pane_tabs` empty against `8,16,24,32,40,48,56,64,72`, zz first),
+`pane_key_mode` to `formats.pane-runtime` (empty against `VT10x`), the three mode templates to
+`formats.native-modes`, and `history_limit` to `presentation.native-status` as the product default
+already behind `smoke/sensible` (10000 against 2000). `#T` and `pane_path` went to
+`pane.runtime-facts`, the daemon-owned group the orchestrator gave them before this cycle, which
+proves both in its own scenario. Each receiving group's reason now carries the measurement.
+
+The client theme is a decided divergence, not a hole. Measured before any terminal reply in
+`compat/scenarios/smoke/fixtures/format-listing.sh`, the pin answers an empty `#{client_theme}` and
+omits the name from a `display-message -a` listing entirely, because `c->theme` is `THEME_UNKNOWN`
+and `format_cb_client_theme` returns `NULL` for it; zz answers `dark` from the moment the client
+attaches and always lists the name. Accepted as native in `options.client-terminal-negotiation`: a zz
+client always carries a theme, the desktop from the operating system and the raw TUI dark until the
+terminal answers, so `client_theme` is never empty and the `client-dark-theme` and `client-light-theme`
+hooks fire on the reply rather than on attach. A script that reads an empty `#{client_theme}` as "not
+negotiated yet" has no equivalent here and should branch on the hook. Decided 2026-09-07 by the
+orchestrator under fabrico's cycle-17 instruction to finish the campaign; reversible.
+
+With `plugins.runtime-paths`, `proofs.census-coverage` and `harness.proof-holes` closed, the seven
+proof holes the cycle-16 review found all have a home: five were fixed in the harness, the popup
+underlay focus pair moved to `clients.read-only-and-focus`, and the theme divergence moved to
+`options.client-terminal-negotiation`.
 
 # Related
 

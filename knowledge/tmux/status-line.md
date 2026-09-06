@@ -5,7 +5,7 @@ description: The daemon expands tmux status formats per client for the cell-fait
 resource: crates/zz-mux/src/formats.rs
 tags: [tmux, status-line, formats, gui, tui, options]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-06
+last_updated: 2026-09-07
 last_updated_by: Claude
 ---
 
@@ -29,6 +29,10 @@ publishes client-specific styled data for terminal clients:
   overflow menu. The right side can show a live Agent-pane count, remote host, update, and clock.
 - Prompts, choosers, and copy mode remain native surfaces. Compatibility covers their state and
   input behavior, not terminal escape output.
+
+The raw TUI's drawn status row is measured against the pin row by row by `compat/status-row.sh`,
+and the pane geometry that row leaves behind by `compat/tui-pane-geometry.sh`; both attach a real
+client on each binary rather than reading a daemon fact.
 
 `StatusLine.customized` records whether an explicit status-related write is active for the
 recipient's scope. GUI clients do not read it.

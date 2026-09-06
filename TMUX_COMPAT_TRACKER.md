@@ -87,7 +87,7 @@ percentage is a ledger health metric, not a compatibility claim.
 | Completed fixed cohort | Cycle 15: 2/2 code lanes integrated; frozen meter remains 100.0% (304/304) |
 | Previous completed cohort | Cycle 14: instrument and 2/2 code lanes integrated; frozen meter 100.0% |
 | Campaign point | The frozen scope is complete; 13 post-freeze items remain in four open groups. The stamped full corpus and attached-client proof pass; the practical exit gate remains open for the recorded differences. |
-| Live registry | 46 active groups, 440 active items, 185 closed records |
+| Live registry | 46 active groups, 441 active items, 185 closed records |
 | Active status | 4 open, 0 blocked, 42 accepted |
 | Known differentials | 4 registered cases: two GEO-only, one GEO plus OUT, and terminal-runtime with six FMT differences |
 

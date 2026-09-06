@@ -5,7 +5,7 @@ description: "Dated rationale and source evidence for measured tmux divergences,
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-04
+last_updated: 2026-09-06
 last_updated_by: Claude
 ---
 
@@ -1177,6 +1177,17 @@ described above and the separately tracked long key-modifier spelling overaccept
 | Session groups | `new-session -t`. | Cataloged, rejected. |
 | `StatusLine.customized` | No equivalent — tmux has no wire and no explicit-write ledger. | zz-native v71 field: true while any explicit `status`, `status-*`, or `status-format` write is in force for the recipient's scope (even when the value equals the default); scalar and whole-array unsets clear their mark, an indexed `status-format[N]` unset keeps it. It gates only the TUI's `Ctrl-\ detach` hint. GUI visibility follows sidebar mode: hidden with the sidebar expanded, visible in the title bar when retracted. `customized` has no GUI appearance effect. |
 | Presentation | Status line, prompts, choosers drawn as terminal escapes. | The TUI renders the daemon's personalized `status-format[]` rows through the shared `zz-client` compositor that reproduces `format-draw.c` alignment sections, `fill=`, list focus/truncation, blank-row base style, and hit ranges. It places that authoritative block at `status-position`, replaces the selected `message_line` row with messages or a prompt, and routes window-range clicks. The GUI builds native session, window, Agent, host, update, and clock items from structured state and app settings. It shows the status bar in the title bar when the sidebar is retracted and hides it when the sidebar is expanded. tmux status rows, strings, styles, `customized`, and `status-position` have no GUI presentation authority. Prompts and choosers stay native on both where implemented. Raw zz-tui handles command prompts, confirmations, menus, popups, choose trees, choose buffers, and display-panes. `display-menu.behavior-fidelity` and `display-popup.behavior-fidelity` own the broader behavior classes outside those presentation closures. |
+
+## Desktop status bar (2026-09-06)
+
+The desktop keeps its native status bar and never renders `status-format[]` rows; the TUI stays
+the only client that draws them. Decided by fabrico on 2026-09-06 for cycle 16, reversible, and
+recorded as `presentation:gui-status-row-native` under `presentation.native-status`; the campaign
+review's finding 1 asked for the decision either way. Themes and status plugins that only write
+status options (catppuccin, dracula, powerline, tmux-battery, tmux-cpu, tmux-prefix-highlight,
+tmux-mode-indicator, oh-my-tmux's theme, tmux-continuum's indicator) configure the TUI row and
+change nothing in the desktop: the config parses and the options store, silently.
+`CoreEvent::StatusChanged` is consumed as a no-op in `crates/zz/src/mux/client.rs` by design.
 
 ## Control notification remeasurement (2026-09-05)
 

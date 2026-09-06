@@ -5,7 +5,7 @@ description: The daemon expands tmux status formats per client for the cell-fait
 resource: crates/zz-mux/src/formats.rs
 tags: [tmux, status-line, formats, gui, tui, options]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-05
+last_updated: 2026-09-06
 last_updated_by: Claude
 ---
 
@@ -18,6 +18,9 @@ publishes client-specific styled data for terminal clients:
   the pane canvas, and places messages/prompts on `message-line`.
 - GUI clients ignore `StatusLine`, including its title, rows, halves, styles, alignment, placement,
   and `customized` bit. They contain no tmux style parser in the status-bar path.
+  This is a product decision, not a gap: the desktop owns its status bar and does not replicate
+  the tmux one (fabrico, 2026-09-06, `presentation:gui-status-row-native`), so status themes and
+  plugins configure the TUI row only.
 - The desktop builds its native bar from `zz_client::StatusBarModel`, the attached
   `MuxSnapshot`, the host tree, update state, and seven app-side settings. Sidebar mode places it
   below the workspace; titlebar mode places it above the workspace with the native controls.

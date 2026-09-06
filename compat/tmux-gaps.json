@@ -1,7 +1,7 @@
 {
   "schema": 3,
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-  "updated_on": "2026-09-05",
+  "updated_on": "2026-09-06",
   "gaps": [
     {
       "id": "aliases.remote-client-preflight",
@@ -1446,6 +1446,7 @@
       ],
       "owner": "client",
       "items": [
+        "presentation:gui-status-row-native",
         "presentation:in-ui-error-width",
         "presentation:status-block-suppression-threshold",
         "semantic:automatic-rename-timing",
@@ -1462,10 +1463,11 @@
         "file:compat/packaged-cli.sh"
       ],
       "acceptance": [
-        "The divergence matrix records the remaining native presentation and lifecycle decisions and packaged-client tests protect the launcher and lifecycle contract; startup config discovery moved to config.discovery, which adopts in-place tmux candidates with a final zz mux.conf layer."
+        "The divergence matrix records the remaining native presentation and lifecycle decisions and packaged-client tests protect the launcher and lifecycle contract; startup config discovery moved to config.discovery, which adopts in-place tmux candidates with a final zz mux.conf layer.",
+        "The desktop never renders tmux status rows: its status bar is native, built from snapshot state and app settings, and knowledge/tmux/status-line.md and knowledge/tmux/tmux-compat.md say so in the same words."
       ],
       "depends_on": [],
-      "reason": "Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle. Relocated semantic:config-files-native-discovery to config.discovery. The old clause \"The divergence matrix records each product decision and packaged-client tests protect the launcher and lifecycle contract.\" and reason \"Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle.\" did not justify startup config ownership. Pinned d77c9dc6 Makefile.am TMUX_CONF is \"$(sysconfdir)/tmux.conf:~/.tmux.conf:$XDG_CONFIG_HOME/tmux/tmux.conf:~/.config/tmux/tmux.conf\"; cfg.c start_cfg executes \"for (i = 0; i < cfg_nfiles; i++) load_cfg(cfg_files[i], c, NULL, NULL, flags, NULL)\". tmux.c clears that list on the first -f. The discovery scenarios measure every existing home/XDG candidate in that order and explicit-file replacement. New stance: zz reads tmux candidates in place, then zz/mux.conf last; -f replaces the tmux candidates while mux.conf still layers last; remove the import copy. decided 2026-09-05 by fabrico for cycle 15; reversible."
+      "reason": "Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle. Relocated semantic:config-files-native-discovery to config.discovery. The old clause \"The divergence matrix records each product decision and packaged-client tests protect the launcher and lifecycle contract.\" and reason \"Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle.\" did not justify startup config ownership. Pinned d77c9dc6 Makefile.am TMUX_CONF is \"$(sysconfdir)/tmux.conf:~/.tmux.conf:$XDG_CONFIG_HOME/tmux/tmux.conf:~/.config/tmux/tmux.conf\"; cfg.c start_cfg executes \"for (i = 0; i < cfg_nfiles; i++) load_cfg(cfg_files[i], c, NULL, NULL, flags, NULL)\". tmux.c clears that list on the first -f. The discovery scenarios measure every existing home/XDG candidate in that order and explicit-file replacement. New stance: zz reads tmux candidates in place, then zz/mux.conf last; -f replaces the tmux candidates while mux.conf still layers last; remove the import copy. decided 2026-09-05 by fabrico for cycle 15; reversible. Desktop status bar (presentation:gui-status-row-native): the GPUI client keeps its native status bar and never draws status-format[] rows; the TUI stays the only client that renders them, and crates/zz/src/mux/client.rs consumes CoreEvent::StatusChanged as a no-op by design. Themes and status plugins that only write status options (catppuccin, dracula, powerline, tmux-battery, tmux-cpu, tmux-prefix-highlight, tmux-mode-indicator, oh-my-tmux's theme, tmux-continuum's indicator) configure the TUI row and change nothing in the desktop: the config parses and the options store, silently. compat/orchestration/CAMPAIGN-REVIEW.md finding 1 asked for this decision either way. decided 2026-09-06 by fabrico for cycle 16; reversible."
     },
     {
       "id": "protocol.binary-streams",

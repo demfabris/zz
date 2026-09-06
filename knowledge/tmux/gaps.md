@@ -4,7 +4,7 @@ title: tmux compatibility gap report
 description: "Live TODO and status report for tmux compatibility gaps, decisions, evidence, and acceptance gates."
 resource: compat/tmux-gaps.json
 tags: [tmux, compatibility, gaps, tracker]
-timestamp: 2026-09-05T00:00:00-03:00
+timestamp: 2026-09-06T00:00:00-03:00
 ---
 
 # Overview
@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **46**. Classified items: **440**.
+Tracked gap groups: **46**. Classified items: **441**.
 
 - Status: open: 4, accepted: 42.
 - Decision: adopt: 4, native: 32, never: 10.
 - Priority: now: 4, none: 42.
 - Closed history entries: 185.
-- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 53, presentation: 6, protocol: 2.
+- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 53, presentation: 7, protocol: 2.
 
 ## Measured surface
 
@@ -863,14 +863,14 @@ In the pin a floating pane is a mux object: `new-pane` creates one by default, `
 
 ### `presentation.native-status`: Keep native status and lifecycle presentation
 
-Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle. Relocated semantic:config-files-native-discovery to config.discovery. The old clause "The divergence matrix records each product decision and packaged-client tests protect the launcher and lifecycle contract." and reason "Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle." did not justify startup config ownership. Pinned d77c9dc6 Makefile.am TMUX_CONF is "$(sysconfdir)/tmux.conf:~/.tmux.conf:$XDG_CONFIG_HOME/tmux/tmux.conf:~/.config/tmux/tmux.conf"; cfg.c start_cfg executes "for (i = 0; i < cfg_nfiles; i++) load_cfg(cfg_files[i], c, NULL, NULL, flags, NULL)". tmux.c clears that list on the first -f. The discovery scenarios measure every existing home/XDG candidate in that order and explicit-file replacement. New stance: zz reads tmux candidates in place, then zz/mux.conf last; -f replaces the tmux candidates while mux.conf still layers last; remove the import copy. decided 2026-09-05 by fabrico for cycle 15; reversible.
+Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle. Relocated semantic:config-files-native-discovery to config.discovery. The old clause "The divergence matrix records each product decision and packaged-client tests protect the launcher and lifecycle contract." and reason "Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle." did not justify startup config ownership. Pinned d77c9dc6 Makefile.am TMUX_CONF is "$(sysconfdir)/tmux.conf:~/.tmux.conf:$XDG_CONFIG_HOME/tmux/tmux.conf:~/.config/tmux/tmux.conf"; cfg.c start_cfg executes "for (i = 0; i < cfg_nfiles; i++) load_cfg(cfg_files[i], c, NULL, NULL, flags, NULL)". tmux.c clears that list on the first -f. The discovery scenarios measure every existing home/XDG candidate in that order and explicit-file replacement. New stance: zz reads tmux candidates in place, then zz/mux.conf last; -f replaces the tmux candidates while mux.conf still layers last; remove the import copy. decided 2026-09-05 by fabrico for cycle 15; reversible. Desktop status bar (presentation:gui-status-row-native): the GPUI client keeps its native status bar and never draws status-format[] rows; the TUI stays the only client that renders them, and crates/zz/src/mux/client.rs consumes CoreEvent::StatusChanged as a no-op by design. Themes and status plugins that only write status options (catppuccin, dracula, powerline, tmux-battery, tmux-cpu, tmux-prefix-highlight, tmux-mode-indicator, oh-my-tmux's theme, tmux-continuum's indicator) configure the TUI row and change nothing in the desktop: the config parses and the options store, silently. compat/orchestration/CAMPAIGN-REVIEW.md finding 1 asked for this decision either way. decided 2026-09-06 by fabrico for cycle 16; reversible.
 
 - Decision: `native`
 - Status: `accepted`
 - Priority and ease: `none` / `none`
 - Owner: `client`
 - User impact: daily, gui, remote
-- Items: `presentation:in-ui-error-width`, `presentation:status-block-suppression-threshold`, `semantic:automatic-rename-timing`, `semantic:bare-launcher-attach-current`, `semantic:empty-daemon-command-query`, `semantic:history-limit-product-default`, `semantic:lifecycle-subscriber-guard`, `semantic:set-titles-empty-expansion`, `semantic:version-suffix`
+- Items: `presentation:gui-status-row-native`, `presentation:in-ui-error-width`, `presentation:status-block-suppression-threshold`, `semantic:automatic-rename-timing`, `semantic:bare-launcher-attach-current`, `semantic:empty-daemon-command-query`, `semantic:history-limit-product-default`, `semantic:lifecycle-subscriber-guard`, `semantic:set-titles-empty-expansion`, `semantic:version-suffix`
 - Depends on: none
 - Evidence:
   - `resource:knowledge/tmux/divergences.md`
@@ -878,6 +878,7 @@ Native chrome and a persistent daemon need explicit behavior where tmux assumes 
   - `file:compat/packaged-cli.sh`
 - Acceptance:
   - `The divergence matrix records the remaining native presentation and lifecycle decisions and packaged-client tests protect the launcher and lifecycle contract; startup config discovery moved to config.discovery, which adopts in-place tmux candidates with a final zz mux.conf layer.`
+  - `The desktop never renders tmux status rows: its status bar is native, built from snapshot state and app settings, and knowledge/tmux/status-line.md and knowledge/tmux/tmux-compat.md say so in the same words.`
 
 ### `protocol.binary-streams`: Design one bounded command stream
 

@@ -259,16 +259,27 @@ loops are in CAMPAIGN-LOG.md under "cycle 15 on the ubuntu box".
 
 ### Cycle 16
 
-As the review lays it out: lane A the desktop as a tmux client (the GUI status row once the
-product decision is written into the registry, Linux drag-to-CLIPBOARD, the overlay payload
-matrix, the sidebar auto-hide threshold), lane B the proof debt (per-plugin runtime fixtures,
-the census scenarios, the harness holes, slugs for prose-only divergences). Give lane B the
-registry-only halves of the four open groups above, and put the daemon-owned ones
-(`command-output-pane-prompt`, the sourced mixed queue, the status loop-tag identity) into a
-third daemon lane if the box has the cores, otherwise into cycle 17. Fronts need disjoint zones;
-lane A is desktop-gpui, client-core, raw-tui; lane B declares no zones; a daemon lane is
-daemon-core, daemon-status, mux-formats. Copy `codex-compat-run-15.py`, keep the reviewer target
-sharing, add "never run bare `tmux` without -L" to COMMON.
+Two decisions from fabrico on 2026-09-06, before launch. First, the desktop owns its status bar
+and does not replicate tmux's: recorded as `presentation:gui-status-row-native` under
+`presentation.native-status`, so the GUI status row is off the table and no front carries it.
+Second, every agent this cycle is Opus 5 at xhigh, not Codex: the cycle runs as a Claude Code
+workflow script again, `opus-compat-run-16.js` in the shape of `opus-compat-run-13.js` (lanes
+pipelined into their reviewers, one bounded fix pass by a fresh agent when a review rejects, then
+a re-review, then the serialized gate). The script cannot run timers, so the lock fronts are
+claimed with 14h leases at launch instead of a renew loop; the proof lane builds nothing and tests
+the gate's warm `zz-gate-target/debug/zz`.
+
+As the review lays it out, minus the status row: lane A the desktop as a tmux client (Linux
+drag-to-CLIPBOARD, the overlay payload matrix, the sidebar auto-hide threshold; the row's 180 min
+are free, and the review's leftovers inside lane A's zones are `clock-mode` and `choose-client`),
+lane B the proof debt (per-plugin runtime fixtures, the census scenarios, the harness holes, slugs
+for prose-only divergences). Give lane B the registry-only halves of the four open groups above,
+and put the daemon-owned ones (`command-output-pane-prompt`, the sourced mixed queue, the status
+loop-tag identity) into a third daemon lane if the box has the cores, otherwise into cycle 17.
+Fronts need disjoint zones; lane A is desktop-gpui, client-core, raw-tui; lane B declares no
+zones (compat-registry); the daemon lane is daemon-core, daemon-status, mux-formats,
+control-client, with `lib.rs`'s output writer and one attached-fixture probe declared as its
+excursions. Reviewers share the worker's target; COMMON forbids a bare `tmux` without -L.
 
 ### Two things the closing cycles taught
 

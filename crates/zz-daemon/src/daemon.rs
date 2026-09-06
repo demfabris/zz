@@ -8113,6 +8113,9 @@ impl Shared {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
                         {
+                            if command_name == "find-window" {
+                                continue;
+                            }
                             return Err(ServerError::InvalidCommand(
                                 "choose-tree requires an interactive client".to_owned(),
                             )

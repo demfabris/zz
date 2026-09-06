@@ -5519,10 +5519,11 @@ impl MuxEngine {
     }
 
     fn window_alerted(&self, window: WindowId) -> bool {
-        self.state
-            .windows
-            .get(&window)
-            .is_some_and(|window| window.panes.values().any(|pane| pane.bell))
+        self.state.windows.get(&window).is_some_and(|window| {
+            window.activity_flag
+                || window.silence_flag
+                || window.panes.values().any(|pane| pane.bell)
+        })
     }
 
     fn renumber_session_if_enabled(&mut self, session: SessionId) -> Result<(), ServerError> {
@@ -5787,8 +5788,40 @@ impl MuxEngine {
                 "find-window requires exactly one match string".to_owned(),
             ));
         }
-        self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        Ok(Execution::default())
+        let pattern = &positional[0];
+        let suffix = match (options.has("-r"), options.has("-i")) {
+            (true, true) => "/ri",
+            (true, false) => "/r",
+            (false, true) => "/i",
+            (false, false) => "",
+        };
+        let star = if options.has("-r") { "" } else { "*" };
+        let all = !options.has("-C") && !options.has("-N") && !options.has("-T");
+        let mut predicates = Vec::new();
+        if all || options.has("-C") {
+            predicates.push(format!("#{{C{suffix}:{pattern}}}"));
+        }
+        for (flag, field) in [("-N", "window_name"), ("-T", "pane_title")] {
+            if all || options.has(flag) {
+                predicates.push(format!("#{{m{suffix}:{star}{pattern}{star},#{{{field}}}}}"));
+            }
+        }
+        let filter = predicates
+            .into_iter()
+            .rev()
+            .reduce(|right, left| format!("#{{||:{left},{right}}}"))
+            .expect("find-window selects at least one match class");
+        let mut chooser_args = vec![RawText::from("-f"), RawText::from(filter)];
+        if let Some(target) = options.value("-t") {
+            chooser_args.extend(["-t".into(), target.into()]);
+        }
+        if options.has("-Z") {
+            chooser_args.push("-Z".into());
+        }
+        self.choose_tree(
+            context,
+            &CommandInvocation::new("choose-tree", chooser_args),
+        )
     }
 
     fn split_window(
@@ -20875,6 +20908,57 @@ mod tests {
             ),
             Err(ServerError::InvalidCommand(message)) if message == "invalid sort order"
         ));
+    }
+
+    #[test]
+    fn alert_window_steps_cover_pinned_bell_activity_and_silence_flags() {
+        for flag in ["bell", "activity", "silence"] {
+            for verb in ["next-window", "previous-window"] {
+                let mut engine = MuxEngine::default();
+                let mut context = ExecutionContext::default();
+                engine
+                    .execute(
+                        &mut context,
+                        &command("new-session", &["-s", "alerts", "-n", "first"]),
+                    )
+                    .expect("session");
+                engine
+                    .execute(&mut context, &command("new-window", &["-n", "second"]))
+                    .expect("second window");
+                let alerted = context.window.expect("second window id");
+                let pane = context.pane.expect("second pane");
+                engine
+                    .execute(&mut context, &command("select-window", &["-t", "alerts:0"]))
+                    .expect("first window");
+                match flag {
+                    "bell" => {
+                        engine.state.set_pane_bell(pane, true);
+                    }
+                    "activity" => {
+                        engine
+                            .state
+                            .windows
+                            .get_mut(&alerted)
+                            .unwrap()
+                            .activity_flag = true;
+                    }
+                    "silence" => {
+                        engine.state.windows.get_mut(&alerted).unwrap().silence_flag = true;
+                    }
+                    _ => unreachable!(),
+                }
+                engine
+                    .execute(&mut context, &command(verb, &["-a"]))
+                    .expect("select alerted window");
+                assert_eq!(context.window, Some(alerted), "{verb} {flag}");
+                assert!(!engine.window_alerted(alerted));
+                assert!(
+                    engine
+                        .execute(&mut context, &command(verb, &["-a"]))
+                        .is_err()
+                );
+            }
+        }
     }
 
     #[test]
@@ -42217,7 +42301,15 @@ mod tests {
                     &command("find-window", &["-CiNrTZ", "-t", "w:0", pattern]),
                 )
                 .unwrap();
-            assert_eq!(found, Execution::default());
+            assert!(found.output.is_empty());
+            let [MuxEffect::ChooseTree { filter, kind, .. }] = found.effects.as_slice() else {
+                panic!("find-window must open the native pane chooser");
+            };
+            assert_eq!(*kind, ChooseTreeKind::Panes);
+            assert_eq!(
+                filter.as_deref(),
+                Some("#{||:#{C/ri:PATTERN},#{||:#{m/ri:PATTERN,#{window_name}},#{m/ri:PATTERN,#{pane_title}}}}".replace("PATTERN", pattern).as_str())
+            );
         }
 
         let row = engine

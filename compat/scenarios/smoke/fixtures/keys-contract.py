@@ -111,24 +111,26 @@ try:
         os.execvpe(prefix[0], [*prefix, "attach-session", "-t", "=" + session], environment)
     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
     wait_for(lambda: bool(cli("list-clients", "-t", "=" + session, "-F", "#{client_name}")), "attach")
-    time.sleep(0.5)
+    if mode not in ("find-window", "activity"):
+        time.sleep(0.5)
     if mode == "find-window":
         client = cli("list-clients", "-t", "=" + session, "-F", "#{client_name}")
         cli("new-window", "-t", session, "-n", "KEYS_FIND_SENTINEL")
         cli("select-window", "-t", session + ":0")
         screen.clear()
-        send(b"\x02f")
+        os.write(master, b"\x02f")
         wait_for(lambda: b"(find-window)" in text(), "find-window prompt")
-        send(b"KEYS_FIND_SENTINEL\r")
-        time.sleep(0.5)
-        print("after-submit table=" + cli("display-message", "-p", "-c", client, "#{client_key_table}"))
-        print("after-submit pane_in_mode=" + cli("display-message", "-p", "-c", client, "#{pane_in_mode}"))
-        send(b"\x1b[B\r")
-        time.sleep(0.5)
-        selected = cli("display-message", "-p", "-c", client, "#{window_index}")
-        print("after-select window_index=" + selected)
-        assert selected == ("0" if "--socket" in prefix else "1"), selected
-        send(b"\x02d")
+        screen.clear()
+        os.write(master, b"KEYS_FIND_SENTINEL\r")
+        if "--socket" in prefix:
+            wait_for(lambda: b"Choose pane" in text(), "native filtered chooser")
+        else:
+            wait_for(lambda: cli("display-message", "-p", "-c", client, "#{pane_in_mode}") == "1", "pin filtered chooser")
+        assert cli("display-message", "-p", "-c", client, "#{window_index}") == "0"
+        os.write(master, b"\x1b[B\r")
+        wait_for(lambda: cli("display-message", "-p", "-c", client, "#{window_index}") == "1", "find-window chosen match")
+        print("f prompt=find-window chooser=filtered selected=1")
+        os.write(master, b"\x02d")
         reap()
     elif mode == "activity":
         client = cli("list-clients", "-t", "=" + session, "-F", "#{client_name}")
@@ -137,26 +139,31 @@ try:
             if target is not None:
                 args.extend(["-t", target])
             return cli(*args, "#{" + value + "}")
+        cli("new-window", "-t", session, "-n", "quiet")
         cli("new-window", "-t", session, "-n", "alerted")
-        cli("select-window", "-t", session + ":0")
-        cli("set-window-option", "-t", session + ":1", "monitor-activity", "on")
-        cli("respawn-pane", "-k", "-t", session + ":1", 'printf "ALERT_READY\\n"; exec cat')
-        wait_for(lambda: fact("window_activity_flag", session + ":1") == "1", "next activity flag")
-        send(b"\x02\x1bn")
-        time.sleep(0.5)
-        selected = fact("window_index")
-        print("M-n activity=1 window_index=" + selected)
-        assert selected == ("0" if "--socket" in prefix else "1"), selected
-        cli("select-window", "-t", session + ":1")
-        cli("set-window-option", "-t", session + ":0", "monitor-activity", "on")
-        cli("respawn-pane", "-k", "-t", victim, 'printf "ALERT_PREVIOUS\\n"; exec cat')
-        wait_for(lambda: fact("window_activity_flag", session + ":0") == "1", "previous activity flag")
-        send(b"\x02\x1bp")
-        time.sleep(0.5)
-        selected = fact("window_index")
-        print("M-p activity=1 window_index=" + selected)
-        assert selected == ("1" if "--socket" in prefix else "0"), selected
-        send(b"\x02d")
+        for alert in ("activity", "bell", "silence"):
+            for number in (0, 1, 2):
+                target = session + ":" + str(number)
+                cli("set-window-option", "-t", target, "monitor-activity", "off")
+                cli("set-window-option", "-t", target, "monitor-silence", "0")
+                cli("set-window-option", "-t", target, "monitor-bell", "on")
+                cli("select-window", "-t", target)
+            cli("select-window", "-t", session + ":0")
+            for direction, number, key in (("M-n", 2, b"\x1bn"), ("M-p", 0, b"\x1bp")):
+                target = session + ":" + str(number)
+                if alert == "activity":
+                    cli("set-window-option", "-t", target, "monitor-activity", "on")
+                command = 'printf "ALERT_READY\\n' + ('\\a' if alert == "bell" else '') + '"; exec cat'
+                cli("respawn-pane", "-k", "-t", target, command)
+                wait_for(lambda: "ALERT_READY" in cli("capture-pane", "-p", "-t", target), "alert source ready")
+                if alert == "silence":
+                    cli("set-window-option", "-t", target, "monitor-silence", "1")
+                wait_for(lambda: fact("window_" + alert + "_flag", target) == "1", direction + " " + alert + " flag")
+                assert fact("window_" + alert + "_flag", session + ":1") == "0", "quiet window alerted"
+                os.write(master, b"\x02" + key)
+                wait_for(lambda: fact("window_index") == str(number), direction + " " + alert + " selection")
+                print(direction + " " + alert + "=1 skipped=quiet window_index=" + str(number))
+        os.write(master, b"\x02d")
         reap()
     elif mode == "lifecycle":
         client = cli("list-clients", "-t", "=" + session, "-F", "#{client_name}")
@@ -322,7 +329,7 @@ try:
         prefix_key(b"f")
         wait_for(lambda: b"(find-window)" in text(), "find-window prompt")
         send(b"\x03")
-        print("f prompt=find-window cancelled; execution remains open")
+        print("f prompt=find-window cancelled")
         cli("select-window", "-t", session + ":0")
         prefix_key(b"'")
         wait_for(lambda: b"index" in text(), "select-window prompt")

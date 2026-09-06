@@ -1,0 +1,9 @@
+corpus: none
+stage: fixtures/keys-contract.sh ~/keys-contract.sh
+stage: fixtures/keys-contract.py ~/keys-contract.py
+set-environment -g KEYS_CONTRACT_MODE find-window
+run-shell 'sh ~/keys-contract.sh'
+out: show-environment -g KEYS_CONTRACT
+set-environment -g KEYS_CONTRACT_MODE activity
+run-shell 'sh ~/keys-contract.sh'
+out: show-environment -g KEYS_CONTRACT

@@ -19,6 +19,10 @@ The cycle-14 stock-prefix proof compares all 20 adopted notes and commands. Seve
 have attached execution proofs; `f`, `M-n`, and `M-p` remain open with measured command gaps.
 The `i` proof excludes command-log rows and requires a new information message after the key.
 
+Cycle 15 closes those three bindings in `smoke/keys-prefix-remainder`: `f` prompts, opens
+a filtered native chooser, and selects the chosen window; `M-n`/`M-p` skip a quiet window
+and select alerts from activity, bell, and silence on both attached clients.
+
 # Overview
 
 `key.rs` owns tmux-compatible key binding storage and the per-client keypress state machine. Since

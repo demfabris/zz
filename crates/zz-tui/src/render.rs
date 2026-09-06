@@ -2497,18 +2497,92 @@ fn write_tmux_sgr(
         write!(output, "\x1b[58;2;{};{};{}m", colour.r, colour.g, colour.b)
             .expect("writing to Vec cannot fail");
     }
-    let foreground = style.fg.map_or(default_foreground, |colour| {
-        resolve_tmux_colour(colour, default_foreground, appearance)
-    });
-    let background = style.bg.map_or(default_background, |colour| {
-        resolve_tmux_colour(colour, default_background, appearance)
-    });
+    write_ground(output, style.fg, default_foreground, Ground::Foreground);
+    write_ground(output, style.bg, default_background, Ground::Background);
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Ground {
+    Foreground,
+    Background,
+}
+
+/// `tty_colours_fg` and `tty_colours_bg`: a named or indexed colour reaches the
+/// terminal as the `setaf`/`setab` capability for that index, so the viewer's
+/// own palette decides what green is, and only an RGB colour is sent as
+/// truecolor. On `xterm-256color` those capabilities expand to `3n`/`4n` below
+/// 8, `9n`/`10n` below 16 and `38;5;n`/`48;5;n` above. `default` and
+/// `terminal` reset the ground, the way `tty_colours` sends `39` and `49`.
+fn write_ground(output: &mut Vec<u8>, colour: Option<TmuxColour>, fallback: Color, ground: Ground) {
+    let Some(colour) = colour else {
+        write_rgb_ground(output, fallback, ground);
+        return;
+    };
+    match colour {
+        TmuxColour::Basic(index) | TmuxColour::Indexed(index) => {
+            let (low, bright, extended) = match ground {
+                Ground::Foreground => (30, 90, 38),
+                Ground::Background => (40, 100, 48),
+            };
+            if index < 8 {
+                write!(output, "\x1b[{}m", low + u16::from(index))
+            } else if index < 16 {
+                write!(output, "\x1b[{}m", bright + u16::from(index) - 8)
+            } else {
+                write!(output, "\x1b[{extended};5;{index}m")
+            }
+            .expect("writing to Vec cannot fail");
+        }
+        TmuxColour::Rgb(value) => write_rgb_ground(output, Color::from_packed(value), ground),
+        TmuxColour::Theme(index) => {
+            write_rgb_ground(output, theme_colour(index).unwrap_or(fallback), ground);
+        }
+        TmuxColour::Default | TmuxColour::Terminal => {
+            output.extend_from_slice(match ground {
+                Ground::Foreground => b"\x1b[39m",
+                Ground::Background => b"\x1b[49m",
+            });
+        }
+    }
+}
+
+fn write_rgb_ground(output: &mut Vec<u8>, colour: Color, ground: Ground) {
+    let base = match ground {
+        Ground::Foreground => 38,
+        Ground::Background => 48,
+    };
     write!(
         output,
-        "\x1b[38;2;{};{};{};48;2;{};{};{}m",
-        foreground.r, foreground.g, foreground.b, background.r, background.g, background.b
+        "\x1b[{base};2;{};{};{}m",
+        colour.r, colour.g, colour.b
     )
     .expect("writing to Vec cannot fail");
+}
+
+/// The dark half of `colour_theme_table`, resolved the way
+/// `server_client_update_theme_colours` resolves it for a client that reports
+/// 256 colours or more: each `dark-theme-*` option's default expands to the
+/// X11 name here, and `colour_fromstring` turns that into an RGB colour. The
+/// raw TUI already assumes a terminal that takes truecolor, which is a
+/// stronger assumption than 256 colours, and `theme` defaults to `detect`
+/// with a dark terminal.
+const DARK_THEME_COLOURS: [&str; 10] = [
+    "gray5",
+    "gray90",
+    "gray70",
+    "gray15",
+    "yellowgreen",
+    "darkgoldenrod",
+    "indianred",
+    "skyblue3",
+    "cadetblue",
+    "mediumpurple",
+];
+
+fn theme_colour(index: u8) -> Option<Color> {
+    DARK_THEME_COLOURS
+        .get(usize::from(index))
+        .and_then(|name| zz_terminal::parse_x11_color(name))
 }
 
 fn resolve_tmux_colour(
@@ -2521,9 +2595,7 @@ fn resolve_tmux_colour(
             appearance.palette[usize::from(index)]
         }
         TmuxColour::Rgb(value) => Color::from_packed(value),
-        TmuxColour::Theme(index) => [0, 7, 7, 0, 2, 3, 1, 4, 6, 5]
-            .get(usize::from(index))
-            .map_or(fallback, |index| appearance.palette[*index]),
+        TmuxColour::Theme(index) => theme_colour(index).unwrap_or(fallback),
         TmuxColour::Default | TmuxColour::Terminal => fallback,
     }
 }
@@ -2688,10 +2760,18 @@ mod tests {
     }
 
     #[test]
-    fn styled_lines_render_palette_rgb_and_attributes_without_markers() {
+    /// `tty_colours_fg` sends a named or indexed colour as the `setaf`
+    /// capability for that index and only an RGB colour as truecolor, so the
+    /// viewer's palette decides what red is. On `xterm-256color` that expands
+    /// to `\x1b[31m` for red, `\x1b[38;5;42m` for colour42 and `\x1b[92m` for
+    /// brightgreen. `#[bg=default]` is not tested here: `apply_colour` folds
+    /// it back to the base style's colour, the way `style_apply` does, so it
+    /// never reaches the writer as `TmuxColour::Default`.
+    #[test]
+    fn styled_lines_send_named_and_indexed_colours_the_way_the_pin_does() {
         let appearance = TerminalAppearance::default();
         let line = StyledLine::parsed(
-            "#[fg=red,bg=#010203,bold,underscore,reverse]X#[fg=colour42,nobold,nounderscore,noreverse]Y",
+            "#[fg=red,bg=#010203,bold,underscore,reverse]X#[fg=colour42,nobold,nounderscore,noreverse]Y#[fg=brightgreen]Z",
         );
         let mut output = Vec::new();
         write_styled_text(
@@ -2704,17 +2784,22 @@ mod tests {
             &appearance,
         );
         let output = String::from_utf8(output).unwrap();
-        let red = appearance.palette[1];
-        let indexed = appearance.palette[42];
 
         assert!(output.contains("\x1b[1m"));
         assert!(output.contains("\x1b[4m"));
         assert!(output.contains("\x1b[7m"));
-        assert!(output.contains(&format!("38;2;{};{};{}", red.r, red.g, red.b)));
-        assert!(output.contains("48;2;1;2;3"));
-        assert!(output.contains(&format!("38;2;{};{};{}", indexed.r, indexed.g, indexed.b)));
+        assert!(output.contains("\x1b[31m"), "{output:?}");
+        assert!(output.contains("\x1b[48;2;1;2;3m"), "{output:?}");
+        assert!(output.contains("\x1b[38;5;42m"), "{output:?}");
+        assert!(output.contains("\x1b[92m"), "{output:?}");
+        let red = appearance.palette[1];
+        assert!(
+            !output.contains(&format!("38;2;{};{};{}", red.r, red.g, red.b)),
+            "a named colour must not be resolved against zz's own palette: {output:?}"
+        );
         assert!(output.contains('X'));
         assert!(output.contains('Y'));
+        assert!(output.contains('Z'));
         assert!(!output.contains("#["));
     }
 
@@ -2869,8 +2954,6 @@ mod tests {
         renderer.paint_popup(&model, true);
         renderer.place_popup_cursor(&model);
         let output = String::from_utf8(renderer.output).unwrap();
-        let red = model.appearance.palette[1];
-        let blue = model.appearance.palette[4];
 
         assert!(output.contains("\x1b[3;6H"), "{output:?}");
         assert!(output.contains("Popup ti"), "{output:?}");
@@ -2880,8 +2963,8 @@ mod tests {
         assert!(output.contains('┘'));
         assert!(output.contains("pop"));
         assert!(output.contains("\x1b[1m"));
-        assert!(output.contains(&format!("38;2;{};{};{}", red.r, red.g, red.b)));
-        assert!(output.contains(&format!("48;2;{};{};{}", blue.r, blue.g, blue.b)));
+        assert!(output.contains("\x1b[31m"), "{output:?}");
+        assert!(output.contains("\x1b[44m"), "{output:?}");
         assert!(output.contains("\x1b[4;8H"), "{output:?}");
         assert!(output.contains("\x1b[6 q\x1b]12;"));
     }
@@ -3123,8 +3206,6 @@ mod tests {
         let mut renderer = Renderer::new();
         renderer.paint_status_block(&model, true);
         let output = String::from_utf8(renderer.output).unwrap();
-        let blue = model.appearance.palette[4];
-        let red = model.appearance.palette[1];
 
         assert!(output.contains("\x1b[9;1H"), "row 8 paints: {output:?}");
         assert!(
@@ -3133,8 +3214,8 @@ mod tests {
         );
         assert!(output.contains("HOT"));
         assert!(output.contains("\x1b[1m"));
-        assert!(output.contains(&format!("48;2;{};{};{}", blue.r, blue.g, blue.b)));
-        assert!(output.contains(&format!("38;2;{};{};{}", red.r, red.g, red.b)));
+        assert!(output.contains("\x1b[44m"), "{output:?}");
+        assert!(output.contains("\x1b[31m"), "{output:?}");
         assert!(!output.contains("#["));
     }
 

@@ -157,7 +157,10 @@ await_clients 1 || { echo "format-listing-$side: attach"; exit 0; }
 # format_cb_client_theme returns NULL for that, so #{client_theme} is empty and
 # the name is absent from the -a listing entirely. zz has no unknown state and
 # answers dark from the moment the client attaches. Measured 2026-09-06 and
-# held open as semantic:harness-theme-steering under harness.proof-holes.
+# accepted as native 2026-09-07: semantic:harness-theme-steering moved to
+# options.client-terminal-negotiation, where the stance is that a zz client
+# always carries a theme, so client_theme is never empty and the dark and
+# light theme hooks fire on the terminal's reply rather than on attach.
 if [ "$side" = tmux ]; then
     check_equal theme-unsteered '' \
         "$(main_client display-message -p -t "$pane" '#{client_theme}')"

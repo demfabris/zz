@@ -490,30 +490,25 @@ impl Renderer {
                 continue;
             };
             let active = active == Some(entry.pane);
-            let status_row = model.pane_border_status().is_on();
-            let header = if status_row {
-                pane.border_status_text.clone()
-            } else {
-                pane_header(model, entry.pane, &pane.title)
-            };
-            let header_changed = self.headers.get(&entry.pane) != Some(&header);
-            if force || header_changed {
-                let border = model.pane_border_colour(entry.pane, active);
-                if status_row {
+            let header_changed = if entry.border_status.is_on() {
+                let header = pane.border_status_text.clone();
+                let changed = self.headers.get(&entry.pane) != Some(&header);
+                if force || changed {
                     self.paint_border_status_row(
                         entry.status_row(),
                         &header,
                         active,
-                        border,
+                        model.pane_border_colour(entry.pane, active),
                         lines,
                         model.pane_index(entry.pane),
                         model,
                     );
-                } else {
-                    self.paint_header_segment(entry.rect, &header, active, border, model);
+                    self.headers.insert(entry.pane, header);
                 }
-                self.headers.insert(entry.pane, header);
-            }
+                changed
+            } else {
+                self.headers.remove(&entry.pane).is_some()
+            };
             let content = entry.content();
             let browser_live = matches!(pane.kind, PaneKindSnapshot::Browser(_))
                 && self.browser_frame_live(entry.pane);
@@ -1808,24 +1803,6 @@ fn viewport_row(viewport: &TerminalViewport, row: u16, width: u16) -> Option<&[P
     viewport
         .row(row)
         .map(|cells| &cells[..cells.len().min(usize::from(width))])
-}
-
-fn pane_header(model: &Model, pane: PaneId, title: &str) -> String {
-    let Some(entry) = model.pane_rect(pane) else {
-        return format!(" {title} ");
-    };
-    let Some(viewport) = model.viewports.get(&pane) else {
-        return format!(" {title} ");
-    };
-    let content = entry.content();
-    if viewport.columns == content.width && viewport.rows == content.height {
-        format!(" {title} ")
-    } else {
-        format!(
-            " {title} · grid {}×{} (owned elsewhere) ",
-            viewport.columns, viewport.rows
-        )
-    }
 }
 
 fn divider_cells(dividers: &[Divider]) -> BTreeSet<(u16, u16)> {

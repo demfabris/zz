@@ -91,26 +91,27 @@ pub(crate) fn resolve_floating(spec: FloatingSpec, bounds: Rect) -> Option<Float
 pub(crate) struct PaneRect {
     pub pane: PaneId,
     pub rect: Rect,
-    /// `pane-border-status bottom` puts the pane's status row on its last row
-    /// instead of its first, the way `layout_fix_panes` leaves `yoff` alone
-    /// and only shrinks `sy`.
-    pub status_at_bottom: bool,
+    /// `pane-border-status` decides whether a row of the pane's box is spent on
+    /// a status row at all, and where. `layout_fix_panes` reserves nothing
+    /// while the option is `off`, leaves `yoff` alone and only shrinks `sy`
+    /// under `bottom`, and moves `yoff` down one row under `top`.
+    pub border_status: PaneBorderStatus,
 }
 
 impl PaneRect {
     pub const fn content(self) -> Rect {
-        if self.status_at_bottom {
-            Rect {
+        match self.border_status {
+            PaneBorderStatus::Off => self.rect,
+            PaneBorderStatus::Bottom => Rect {
                 height: self.rect.height.saturating_sub(1),
                 ..self.rect
-            }
-        } else {
-            self.rect.content()
+            },
+            PaneBorderStatus::Top => self.rect.content(),
         }
     }
 
     pub fn status_row(self) -> Rect {
-        let y = if self.status_at_bottom {
+        let y = if matches!(self.border_status, PaneBorderStatus::Bottom) {
             self.rect
                 .y
                 .saturating_add(self.rect.height.saturating_sub(1))
@@ -121,7 +122,7 @@ impl PaneRect {
             x: self.rect.x,
             y,
             width: self.rect.width,
-            height: u16::from(self.rect.height > 0),
+            height: u16::from(self.rect.height > 0 && self.border_status.is_on()),
         }
     }
 }
@@ -289,13 +290,7 @@ pub(crate) fn resolve(
     indicators: PaneBorderIndicators,
 ) -> ResolvedLayout {
     let mut resolved = ResolvedLayout::default();
-    collect(
-        node,
-        rect,
-        active_pane,
-        status == PaneBorderStatus::Bottom,
-        &mut resolved,
-    );
+    collect(node, rect, active_pane, status, &mut resolved);
     let split_colours = indicators.colours() && resolved.panes.len() == 2;
     resolved.dividers = resolved
         .dividers
@@ -425,14 +420,14 @@ fn collect(
     node: &LayoutNode,
     rect: Rect,
     active: PaneId,
-    status_at_bottom: bool,
+    border_status: PaneBorderStatus,
     output: &mut ResolvedLayout,
 ) {
     match node {
         LayoutNode::Pane(pane) => output.panes.push(PaneRect {
             pane: *pane,
             rect,
-            status_at_bottom,
+            border_status,
         }),
         LayoutNode::Split {
             axis,
@@ -503,8 +498,8 @@ fn collect(
                     first_pane(first).or_else(|| first_pane(second))
                 },
             });
-            collect(first, first_rect, active, status_at_bottom, output);
-            collect(second, second_rect, active, status_at_bottom, output);
+            collect(first, first_rect, active, border_status, output);
+            collect(second, second_rect, active, border_status, output);
         }
     }
 }
@@ -537,30 +532,39 @@ fn resolved_ratio(ratio: f32) -> f32 {
 mod tests {
     use super::*;
 
-    /// `layout_fix_panes` leaves `yoff` alone under `pane-border-status bottom`
-    /// and only shrinks `sy`, so the content box starts on the pane's first row
-    /// there and one row down under `top`; the mouse route has to read the
-    /// same box the renderer paints.
+    /// `layout_fix_panes` reserves a pane status row only while
+    /// `pane-border-status` is on: `off` leaves the whole box to the pane,
+    /// `bottom` leaves `yoff` alone and only shrinks `sy`, and `top` moves
+    /// `yoff` down one row. The mouse route has to read the same box the
+    /// renderer paints.
     #[test]
-    fn pane_content_starts_on_the_first_row_when_the_status_is_at_the_bottom() {
+    fn the_pane_status_row_costs_a_row_only_while_pane_border_status_is_on() {
         let rect = Rect {
             x: 3,
             y: 5,
             width: 20,
             height: 8,
         };
+        let off = PaneRect {
+            pane: PaneId(0),
+            rect,
+            border_status: PaneBorderStatus::Off,
+        };
         let top = PaneRect {
             pane: PaneId(0),
             rect,
-            status_at_bottom: false,
+            border_status: PaneBorderStatus::Top,
         };
         let bottom = PaneRect {
             pane: PaneId(0),
             rect,
-            status_at_bottom: true,
+            border_status: PaneBorderStatus::Bottom,
         };
+        assert_eq!(off.content(), rect);
+        assert_eq!(off.status_row().height, 0);
         assert_eq!(top.content(), rect.content());
         assert_eq!(top.content().y, 6);
+        assert_eq!(top.status_row().height, 1);
         assert_eq!(bottom.content().y, 5);
         assert_eq!(bottom.content().height, 7);
         assert!(bottom.content().contains(3, 5));

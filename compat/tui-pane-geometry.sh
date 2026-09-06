@@ -8,9 +8,10 @@
 # inner pane on each side, and diffs the columns. `ssh -t host zz attach` on a
 # stock 80x24 terminal has to leave the pane as wide as pinned tmux leaves it.
 #
-# Rows are recorded, not asserted: zz reserves a status block the pin draws in
-# one row, so the two differ by construction and closing that is not this
-# fixture's claim.
+# Rows are asserted at every width. The pin spends one row of 24 on its status
+# line and nothing on pane chrome while pane-border-status is off, so the pane
+# gets 23; the raw TUI has to hand over the same 23 whether its sidebar shows
+# or not.
 set -eEuo pipefail
 
 usage() {
@@ -35,11 +36,13 @@ resolve_binary() {
 ZZ_BIN="$(resolve_binary "$ZZ_INPUT")" || { printf 'error: zz binary not found: %s\n' "$ZZ_INPUT" >&2; exit 2; }
 TMUX_BIN="$(resolve_binary "$TMUX_INPUT")" || { printf 'error: tmux binary not found: %s\n' "$TMUX_INPUT" >&2; exit 2; }
 
-# Each entry is SIZE|MODE. `same` asserts both binaries hand the pane the same
-# columns; `record` prints them without asserting, for a width where zz's
-# sidebar is chrome the pin has no counterpart for. The sidebar's auto-hide
-# threshold is 109 columns — 80 for the pane plus 28 for the sidebar and 1 for
-# its border — so 80 and 100 must match and 120 is where zz's own chrome starts.
+# Each entry is SIZE|MODE, and MODE governs the COLUMNS only: `same` asserts
+# both binaries hand the pane the same columns; `record` prints them without
+# asserting, for a width where zz's sidebar is chrome the pin has no
+# counterpart for. The sidebar's auto-hide threshold is 109 columns — 80 for
+# the pane plus 28 for the sidebar and 1 for its border — so 80 and 100 must
+# match and 120 is where zz's own chrome starts. Rows are asserted at all
+# three: the sidebar is a column of chrome, never a row of it.
 SIZES=(80x24\|same 100x24\|same 120x24\|record)
 SCRATCH_DIR="$(mktemp -d /tmp/zzgeo.XXXXXX)"
 TOKEN="${SCRATCH_DIR##*.}"
@@ -209,7 +212,13 @@ for entry in "${SIZES[@]}"; do
     printf 'note  %s columns recorded, not asserted: tmux %s, zz %s (zz shows its sidebar here)\n' \
       "$size" "$tmux_columns" "$zz_columns"
   fi
-  printf '      %s rows recorded, not asserted: tmux %s, zz %s\n' "$size" "$tmux_rows" "$zz_rows"
+  CHECKS=$((CHECKS + 1))
+  if [ "$zz_rows" = "$tmux_rows" ]; then
+    printf 'ok    %s rows: both %s\n' "$size" "$zz_rows"
+  else
+    FAILURES=$((FAILURES + 1))
+    printf 'DIFF  %s rows: tmux %s, zz %s\n' "$size" "$tmux_rows" "$zz_rows"
+  fi
 
   zz_command kill-session -t "=$INNER_SESSION" >/dev/null 2>&1 || true
   tmux_inner_command kill-session -t "=$INNER_SESSION" >/dev/null 2>&1 || true
@@ -217,7 +226,7 @@ for entry in "${SIZES[@]}"; do
 done
 
 if [ "$FAILURES" -ne 0 ]; then
-  printf '%s of %s asserted widths differ\n' "$FAILURES" "$CHECKS"
+  printf '%s of %s asserted measurements differ\n' "$FAILURES" "$CHECKS"
   exit 1
 fi
-printf 'all %s asserted widths identical\n' "$CHECKS"
+printf 'all %s asserted measurements identical\n' "$CHECKS"

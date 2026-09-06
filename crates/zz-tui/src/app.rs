@@ -1870,7 +1870,7 @@ fn visible_browser_surfaces(model: &Model, max_surface_bytes: u64) -> Vec<Browse
             let PaneKindSnapshot::Browser(descriptor) = &snapshot.kind else {
                 return None;
             };
-            let content = entry.rect.content();
+            let content = entry.content();
             Some(BrowserSurface {
                 pane: entry.pane,
                 descriptor: descriptor.clone(),
@@ -2319,8 +2319,20 @@ mod tests {
         ));
 
         assert!(
+            crate::input::app_mouse_forward_action(&model, event, 5, 0, 40, 0).is_some(),
+            "pane-border-status off reserves no row, so the pane's first row is content"
+        );
+
+        let mut snapshot = (*model.snapshot).clone();
+        snapshot.sessions[0].windows[0].pane_border_status = zz_protocol::PaneBorderStatus::Top;
+        model.update_snapshot(Arc::new(snapshot));
+        assert!(
             crate::input::app_mouse_forward_action(&model, event, 5, 0, 40, 0).is_none(),
-            "the pane header row is not content: nothing forwards"
+            "pane-border-status top spends the pane's first row on the status row"
+        );
+        assert!(
+            crate::input::app_mouse_forward_action(&model, event, 5, 1, 40, 16).is_some(),
+            "the row below it is content again"
         );
     }
 

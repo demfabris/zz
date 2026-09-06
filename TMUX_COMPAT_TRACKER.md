@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 14 INTEGRATED: INSTRUMENT, KEYS, THEN BUFFERS; PROTOCOL V98; FROZEN SCOPE 304/304**
+> Campaign delivery: **CYCLE 15 INTEGRATED: CONFIG THEN STATUS; PROTOCOL V98; FROZEN SCOPE 304/304**
 >
-> Live work: **4 OPEN + 0 BLOCKED = 4 UNRESOLVED GROUPS (6 POST-FREEZE ITEMS)**
+> Live work: **4 OPEN + 0 BLOCKED = 4 UNRESOLVED GROUPS (13 POST-FREEZE ITEMS)**
 >
-> Ledger settlement: **98.2% (222 of 226 known groups: 180 CLOSED + 42 ACCEPTED); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **98.3% (227 of 231 known groups: 185 CLOSED + 42 ACCEPTED); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **231 SCENARIOS, 2,742 STEPS, 4 REGISTERED KNOWN ROWS; ATTACHED-CLIENT PASS RECORDED AT c282741787c9; FOUR OPEN GROUPS KEEP THE PRACTICAL EXIT GATE OPEN**
+> Exit evidence: **238 SCENARIOS, 2,795 STEPS, 4 REGISTERED KNOWN ROWS; ATTACHED-CLIENT PASS RECORDED AT d59236fc92d2; FOUR OPEN GROUPS KEEP THE PRACTICAL EXIT GATE OPEN**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 14 INTEGRATED 2026-09-05 ON THE UBUNTU BOX, CODEX GPT-6-ASTRA (WORKERS AT HIGH REASONING ON THE FAST TIER, THEN MEDIUM ON THE DEFAULT TIER FROM 14:45 INCLUDING THE GATE), ONE GATE ALONE. ACTUAL ORDER: INSTRUMENT, KEYS, BUFFERS; THE KEYS FOCUS-ASSERTION FIX PRECEDED THE BUFFERS DAEMON GATE.**
+> Orchestration: **CYCLE 15 INTEGRATED ON THE UBUNTU BOX, CODEX GPT-6-ASTRA LANES AT MEDIUM REASONING ON THE DEFAULT TIER, CONFIG THEN STATUS, ONE GATE ALONE.**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,22 +76,22 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | Cycle-14 merges `f6348f19`, `533d253c`, `c2827417`; owner main advanced to `75d9ca24` during the full run; this records commit rebases onto that tip |
+| Published branch | Cycle-15 config `fc4f5ded` and status `d59236fc` pushed to main in that order; full run stamped at `d59236fc92d2` |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Cycle 14: instrument plus both code lanes integrated. Attached fixture/environment corrections; 17 attached prefix proofs, shifted keys and key-table lifecycle; buffer standard streams, four terminal facts, CLI bytes, status refresh and resurrect save. Protocol remains v98. |
-| Orchestration | Ubuntu, Codex gpt-6-astra (workers at high/fast, reviewers and the gate at medium/default after the 14:45 switch), one gate alone; instrument then keys then buffers. Reviewer fixes applied before gates. Original campaign branch tips remain unchanged on origin; rebased tips landed on main without force pushes. |
+| Delivery | Cycle 15: configuration discovery/reload, pane tmux PATH and nested refusal, remaining prefix commands, cached background status jobs, live Control layouts, direct mixed CLI stdout ownership, and platform dead-signal spelling. Protocol remains v98. |
+| Orchestration | Ubuntu, Codex gpt-6-astra lanes at medium reasoning on the default tier; one gate alone, config then status. Reviewer fixes applied before gates. Original campaign branches remain at their reviewed tips; rebased commits landed on main without force pushes. |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
 | Agreed-scope meter | 100.0% (304 of 304 items frozen on 2026-08-31), 65 of 65 groups done, 0 partially burned; park dispositions 15 of 15; `python3 compat/progress.py` |
-| Completed fixed cohort | Cycle 14: instrument and 2/2 code lanes integrated; frozen meter remains 100.0% (304/304) |
-| Previous completed cohort | Cycle 13: 2/2 code lanes integrated; frozen meter reached 100.0% |
-| Campaign point | The frozen scope is complete; 6 post-freeze items remain in four open groups. The stamped attached-client proof passes. The practical exit gate remains open for the recorded behavioral differences. |
-| Live registry | 46 active groups, 434 active items, 180 closed records |
+| Completed fixed cohort | Cycle 15: 2/2 code lanes integrated; frozen meter remains 100.0% (304/304) |
+| Previous completed cohort | Cycle 14: instrument and 2/2 code lanes integrated; frozen meter 100.0% |
+| Campaign point | The frozen scope is complete; 13 post-freeze items remain in four open groups. The stamped full corpus and attached-client proof pass; the practical exit gate remains open for the recorded differences. |
+| Live registry | 46 active groups, 440 active items, 185 closed records |
 | Active status | 4 open, 0 blocked, 42 accepted |
 | Known differentials | 4 registered cases: two GEO-only, one GEO plus OUT, and terminal-runtime with six FMT differences |
 
-Cycles 2 through 14 reached `origin/main` through the board MAIN lock. Resolve the latest
+Cycles 2 through 15 reached `origin/main` through the board MAIN lock. Resolve the latest
 records commit with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md` and remote main with
 `git ls-remote origin refs/heads/main`.
 
@@ -103,15 +103,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 14: instrument and 2/2 code lanes integrated; frozen meter remains 100.0% (304/304) |
-| Previous completed cohort | Cycle 13: 2/2 code lanes integrated; frozen meter reached 100.0% |
-| New residual groups | 6 live post-freeze items across 4 open groups; see the merged registry |
-| Unresolved movement | Cycle 14 leaves four measured post-freeze groups open; none blocked |
-| Live unresolved | 4 open + 0 blocked = 4 |
+| Completed fixed cohort | Cycle 15: 2/2 code lanes integrated; frozen meter remains 100.0% (304/304) |
+| Previous completed cohort | Cycle 14: instrument and 2/2 code lanes integrated; frozen meter 100.0% |
+| New residual groups | 13 live post-freeze items across 4 open groups; sourced stdout ownership, stock command-output prompts, ten Control notification residues, and status loop-tag job identity |
+| Unresolved movement | Cycle 15 closes config discovery, pane PATH, remaining prefix commands, direct mixed queues and signal spelling; four measured groups remain open, none blocked |
+| Live unresolved | 4 open + 0 blocked = 4 (13 post-freeze items) |
 | Practical exit gate | Open for four recorded behavioral groups; the full attached-client evidence now passes with a commit stamp |
-| Latest differential | 231 scenarios / 2,742 steps / 4 registered known rows; attached-client `PASS`, recorded at `c282741787c9` |
-| Differential SHA-256 | `eb015c8382850aac3a8d2355fab28296667088c7c67592e8cd6e2c36639a8c2b` |
-| Ledger settlement | 222 of 226 known groups = 98.2% |
+| Latest differential | 238 scenarios / 2,795 steps / 4 registered known rows; attached-client `PASS`, recorded at `d59236fc92d2` |
+| Differential SHA-256 | `f0ac2b7bda5c2bb3c2835aee89e7666ac367429be9cfd0c69c112b3a048f2b56` |
+| Ledger settlement | 227 of 231 known groups = 98.3% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -125,7 +125,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(180 + 42) / (180 + 46) = 222 / 226 = 98.2%
+(185 + 42) / (185 + 46) = 227 / 231 = 98.3%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -171,6 +171,21 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-05 cycle-15 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `fc4f5ded` config, then `d59236fc` status; each pushed after its own gate |
+| Review actions | Config follow-up quotes the superseded wrapper policy in pane.tmux-on-path and marks it superseded in plugins.resurrect-save; reviewer launcher probe passes. Status follow-up maps Linux PWR to 30 and STKFLT to 16, adds format and drawn-notice proofs, and corrects both stale closure references; reviewer signal/bytes probe matches the pin. |
+| Workspace gates | Both full workspace all-feature suites and clippy with warnings denied passed. Initial config run inherited host configuration; the complete scratch-HOME rerun passed. Status workspace passed without reruns. Protocol remains 98. |
+| Delta corpus | Config 221 scenarios; status 236 plus full attached fixture. Lists checked twice and reconciled. Config chooser-tree-vocabulary/client-loop and status popup-menu-policy/copy-mode-prompt-bindings/background-jobs failed loaded and passed unchanged solo. Source replay passed solo in each gate. |
+| Full exit evidence | 238 scenarios / 2,795 steps / 4 registered known rows; attached-client PASS at `d59236fc92d2`. The full run passed without retries and wrote the stamp itself. |
+| Summary SHA-256 | `f0ac2b7bda5c2bb3c2835aee89e7666ac367429be9cfd0c69c112b3a048f2b56` |
+| Live registry | 46 active groups holding 440 items: 4 open, 0 blocked, 42 accepted; 185 closed records; 13 unresolved post-freeze items |
+| Remaining work | Sourced stdout ownership, stock command-output prompt lifecycle, ten Control notification residues, status loop-tag job identity; macOS signal runtime and real iTerm2 validation remain maintainer tasks |
+| Ledger settlement | 227/231 known groups (98.3%); frozen scope 304/304 items and 65/65 groups |
+| Board | Both lane locks integrated and released; records settlement belongs to MAIN. Preserve the F-SPLIT-MUX-*-V5 chain. Original campaign branches remain unchanged on origin. |
 
 ### 2026-09-05 cycle-14 integration checkpoint
 

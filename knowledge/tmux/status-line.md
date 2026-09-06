@@ -141,11 +141,14 @@ without leaking literal `R` syntax into either row.
 All 36 pinned format modifier tokens are implemented; `formats.modifier-fidelity` closed on
 2026-09-02. Its cycle-14 instrument correction records the explicit smxx cancellation.
 
-At the 2026-09-05 cycle-14 checkpoint, the merged registry has 46 active groups holding 434 items: 4 open, 0 blocked, and 42 accepted, plus 180 closed records.
-The frozen meter remains 304/304 items across 65/65 groups; 6 post-freeze items remain
-open across 4 groups. Ledger settlement is 222/226 known groups (98.2%). The full run covers
-231 scenarios / 2,742 steps / 4 registered known rows; attached-client `PASS`, recorded at `c282741787c9`. Summary SHA-256:
-`eb015c8382850aac3a8d2355fab28296667088c7c67592e8cd6e2c36639a8c2b`. The open groups are `clients.cli-output-mixed-queue`, `clients.command-output-pane-prompt`, `formats.dead-signal-platform-name`, and `keys.prefix-stock-commands`.
+At the 2026-09-05 cycle-15 integration checkpoint, the merged registry has 46 active groups
+holding 440 items: 4 open, 0 blocked, and 42 accepted, plus 185 closed records.
+The frozen meter remains 304/304 items across 65/65 groups; 13 post-freeze items remain
+open across 4 groups. Ledger settlement is 227/231 known groups (98.3%). The full run covers
+238 scenarios / 2,795 steps / 4 registered known rows; attached-client `PASS`, recorded at
+`d59236fc92d2`. Summary SHA-256: `f0ac2b7bda5c2bb3c2835aee89e7666ac367429be9cfd0c69c112b3a048f2b56`.
+The open groups are `clients.cli-output-sourced-mixed-queue`, `clients.command-output-pane-prompt`,
+`control-mode.notifications`, and `status.background-jobs`.
 
 The source partition contains 99 direct mux values, 48 daemon-delegated values, and 51 tracked
 constant values, as asserted by `compat_manifest_tests.rs`. The 45-step `formats-values` row passes.

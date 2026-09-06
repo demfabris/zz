@@ -106,9 +106,6 @@
 | known/known-pane-scrollbar-columns | 4 | yes | 2 | yes | no | yes |
 | known/known-spread-mixed | 6 | yes | 1 | yes | yes | yes |
 | known/known-terminal-runtime | 28 | yes | 0 | no | yes | yes |
-| smoke/config-discovery | 13 | yes | 0 | yes | yes | yes |
-| smoke/config-discovery-explicit | 14 | yes | 0 | yes | yes | yes |
-| smoke/config-discovery-launcher | 13 | yes | 0 | yes | yes | yes |
 | smoke/alias-group-forgery | 7 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-bind-key | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-choosers | 3 | yes | 0 | yes | yes | yes |
@@ -142,14 +139,17 @@
 | smoke/command-prompt-target | 3 | yes | 0 | yes | yes | yes |
 | smoke/config-alias-parse-unit | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-chain-parse-abort | 2 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery-explicit | 14 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery-launcher | 13 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery | 13 | yes | 0 | yes | yes | yes |
 | smoke/config-grammar | 17 | yes | 0 | yes | yes | yes |
 | smoke/config-non-utf8-byte-matrix | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-non-utf8-file-bytes | 8 | yes | 0 | yes | yes | yes |
 | smoke/continuum-init | 2 | yes | 0 | yes | yes | yes |
-| smoke/control-notify | 2 | yes | 0 | yes | yes | yes |
 | smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
 | smoke/control-eof-drain | 1 | yes | 0 | yes | yes | yes |
 | smoke/control-hard-loss | 1 | yes | 0 | yes | yes | yes |
+| smoke/control-notify | 2 | yes | 0 | yes | yes | yes |
 | smoke/control-tilde-environment | 2 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-command-errors | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-copy-line | 3 | yes | 0 | yes | yes | yes |
@@ -209,7 +209,6 @@
 | smoke/launcher-installed-layout | 7 | yes | 0 | yes | yes | yes |
 | smoke/oh-my-tmux | 15 | yes | 0 | yes | yes | yes |
 | smoke/own-conf | 6 | yes | 0 | yes | yes | yes |
-| smoke/pane-tmux-path | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-border-indicators | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-border-lines | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-border-status | 34 | yes | 0 | yes | yes | yes |
@@ -217,6 +216,7 @@
 | smoke/pane-colours-palette | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-engine-knobs-input | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-engine-knobs | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-tmux-path | 3 | yes | 0 | yes | yes | yes |
 | smoke/positional-maximums | 3 | yes | 0 | yes | yes | yes |
 | smoke/positional-minimums | 3 | yes | 0 | yes | yes | yes |
 | smoke/refresh-status | 2 | yes | 0 | yes | yes | yes |
@@ -244,4 +244,4 @@
 ## Attached-client fixture
 
 Status: `PASS`
-Recorded at: `c282741787c9`
+Recorded at: `d59236fc92d2`

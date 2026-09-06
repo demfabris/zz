@@ -521,3 +521,37 @@ was corrected by an append-only note; the pushed rebased SHA is the final record
 The bounded rebase check passed zz package tests and a fresh build, then six strict
 buffers/terminal scenarios. `--check-summary` prints summary current with three post-stamp
 crate commits warned under the owner's revised rule.
+
+### 2026-09-05 cycle-15 integration
+
+Codex gpt-6-astra lanes ran at medium reasoning on the default tier on Ubuntu. One integration
+gate ran alone: config landed at `fc4f5ded`, then status at `d59236fc`, each after its own full
+workspace, clippy, delta and records gate. The gate kept protocol 98 and regenerated gaps.md at
+each rebase conflict; the disjoint source hunks merged without conflicts. Original campaign
+branches remain at their reviewed tips on origin; no force push occurred.
+
+Both reviews were approve-with-fixes. Config's follow-up quotes the old no-wrapper product clause
+and supersedes it in both durable records. The reviewer's instrumented launcher probe confirms
+the daemon wrapper is first on pane PATH and shared with jobs. Status's follow-up maps Linux
+PWR/power failure to 30 and STKFLT/stack fault to 16, adds unit and drawn-notice fixture coverage,
+and corrects stale direct-mixed-queue and signal closure references. The original reviewer probe
+now matches the pin for TERM, PWR, STKFLT, their drawn notices, and mixed stdout bytes.
+
+Config's first workspace command inherited host configuration and failed four assertions; the
+complete scratch-HOME rerun passed. All subsequent gate commands that could start servers used
+scratch configuration. Config's 221-scenario delta had chooser-tree-vocabulary and client-loop
+load failures; status's 236-scenario delta had popup-menu-policy, copy-mode-prompt-bindings, and
+background-status-job load failures. Each passed unchanged alone. Source replay passed alone in
+both gates, and the full status attached-client fixture passed before its push.
+
+The final full run passed without retries at clean `d59236fc92d2`: 238 scenarios, 2,795 steps,
+four registered known rows, and attached-client PASS. The harness wrote the stamp and printed
+summary current. Summary SHA-256: `f0ac2b7bda5c2bb3c2835aee89e7666ac367429be9cfd0c69c112b3a048f2b56`.
+
+Frozen delivery remains 304/304 items and 65/65 groups. The live registry holds 46 active groups
+and 440 items: 4 open, 0 blocked, 42 accepted, plus 185 closed records; 227/231 settled (98.3%).
+Thirteen post-freeze items remain: sourced stdout ownership, stock command-output prompt lifecycle,
+ten Control notification residues, and status loop-tag job identity. These need daemon/source
+replay or mux hook ownership beyond the lanes' zones. macOS signal runtime and a one-hour real
+iTerm2 session remain maintainer validations. Both lane locks were integrated and released;
+MAIN owns the records settlement, and TRIAGE preserves the F-SPLIT-MUX-*-V5 chain.

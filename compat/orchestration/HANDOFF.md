@@ -1,3 +1,18 @@
+# Current handoff: cycle 15 integrated
+
+Cycle 15 landed config `fc4f5ded`, then status `d59236fc`, through one Codex gpt-6-astra gate
+running alone on Ubuntu. The lanes used medium reasoning on the default tier. The full run at
+`d59236fc92d2` passed: 238 scenarios, 2,795 steps, attached-client PASS with a valid stamp.
+The live registry has 4 open groups, 0 blocked, 42 accepted and 185 closed records; 13 post-freeze
+items remain, with frozen delivery still 304/304. Read TMUX_COMPAT_TRACKER.md and the live board
+for the current checkpoint; CAMPAIGN-LOG.md records the reviews, fixes, gates and remaining work.
+
+The earlier handoff below is historical context. Its empty-registry, red-fixture, machine-move,
+model-selection and machine-environment claims describe the pre-cycle-14 state and are superseded
+by this checkpoint and the user's current run instructions. The operational recipes and the
+"Pages that carry live checkpoint numbers" list remain useful. New zz probes must use a scratch
+HOME/XDG configuration or `-f /dev/null`, because startup now discovers tmux configuration.
+
 # Handoff for the tmux-compat campaign: cycle 14 integrated
 
 Updated 2026-09-05 after the Ubuntu cycle-14 gate. Start here; the older instrument-pass and

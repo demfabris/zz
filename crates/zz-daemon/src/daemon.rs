@@ -1492,7 +1492,7 @@ impl TmuxShimGuard {
             let mut options = fs::OpenOptions::new();
             options.create_new(true).write(true).mode(0o700);
             let mut file = options.open(&path)?;
-            file.write_all(b"#!/bin/sh\nexec \"$ZZ_TMUX_EXECUTABLE\" \"$@\"\n")?;
+            file.write_all(b"#!/bin/sh\nif [ \"$#\" -eq 0 ] && [ -n \"${TMUX-}\" ]; then\n    printf '%s\\n' 'sessions should be nested with care, unset $TMUX to force' >&2\n    exit 1\nfi\nexec \"$ZZ_TMUX_EXECUTABLE\" \"$@\"\n")?;
             file.flush()
         })();
         if let Err(error) = result {
@@ -7355,6 +7355,14 @@ impl Shared {
                             ("ZZ_SESSION".into(), Some(pane_session.to_string().into())),
                             ("TMUX_PANE".into(), Some(pane.to_string().into())),
                         ]);
+                        #[cfg(unix)]
+                        if let Some(shim) = self.tmux_shim.lock().as_ref() {
+                            crate::configure_pane_tmux_environment(
+                                &mut env,
+                                &shim.directory,
+                                &shim.executable,
+                            );
+                        }
                         if let Some(path) = &working_directory {
                             env.push(("PWD".into(), Some(path.as_os_str().to_owned())));
                         }
@@ -7511,6 +7519,14 @@ impl Shared {
                                 .map(|(name, value)| (name.into(), Some(value.into()))),
                         );
                         env.push(("TMUX_PANE".into(), Some(pane.to_string().into())));
+                        #[cfg(unix)]
+                        if let Some(shim) = self.tmux_shim.lock().as_ref() {
+                            crate::configure_pane_tmux_environment(
+                                &mut env,
+                                &shim.directory,
+                                &shim.executable,
+                            );
+                        }
                         if let Some(path) = &working_directory {
                             env.push(("PWD".into(), Some(path.as_os_str().to_owned())));
                         }
@@ -64663,6 +64679,60 @@ set-option -g @alias-mixed-next yes
         assert_eq!(
             output.output,
             format!("one|two three|{socket}|{expected_path}")
+        );
+
+        let mut context = ExecutionContext::default();
+        for invocation in [
+            CommandInvocation::new("new-session", ["-d", "-s", "pane-shim", "/bin/sh"]),
+            CommandInvocation::new("respawn-pane", ["-k", "/bin/sh"]),
+        ] {
+            shared
+                .execute(ClientId(7), ClientKind::Command, &mut context, &invocation)
+                .expect("spawn pane with private tmux shim");
+            let pane = context.pane.expect("spawned pane");
+            let inner = shared.inner.lock();
+            let environment = &inner.terminal_spawns[&pane].env;
+            let value = |name: &str| {
+                environment
+                    .iter()
+                    .rev()
+                    .find_map(|(candidate, value)| (candidate == name).then_some(value.as_deref()))
+                    .flatten()
+            };
+            assert_eq!(value("PATH"), Some(OsStr::new(&expected_path)));
+            assert_eq!(
+                value(crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE),
+                Some(directory.path().join("fake-zz").as_os_str())
+            );
+        }
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", "pane-shim"]),
+            )
+            .expect("remove shim pane");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tmux_shim_refuses_bare_nested_invocation_before_running_zz() {
+        let shim =
+            TmuxShimGuard::install(PathBuf::from("/bin/echo")).expect("install tmux wrapper");
+        let output = std::process::Command::new(shim.directory.join("tmux"))
+            .env("TMUX", "/tmp/zzprobe-nested.sock,1,0")
+            .env(
+                crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE,
+                &shim.executable,
+            )
+            .output()
+            .expect("run bare nested wrapper");
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            output.stderr,
+            b"sessions should be nested with care, unset $TMUX to force\n"
         );
     }
 

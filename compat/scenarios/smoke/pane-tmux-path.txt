@@ -1,0 +1,10 @@
+launcher:
+corpus: required
+# Both servers use scratch HOME/XDG and -f /dev/null. The zz launcher layout
+# has the pinned tmux on PATH and no harness wrapper; commands typed into the
+# pane must reach zz through the daemon's own private wrapper.
+stage: fixtures/pane-tmux-path.py ~/pane-tmux-path.py
+stage: fixtures/pane-tmux-path.sh ~/pane-tmux-path.sh
+run-shell 'sh ~/pane-tmux-path.sh'
+out: show-environment -g PANE_TMUX_PATH
+keys: root C-l

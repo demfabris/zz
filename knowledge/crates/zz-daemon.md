@@ -544,6 +544,14 @@ path may inject `-N <count>` into the first qualifying copy action. A key-bound
 The pane-kind picker is reached only through the zz-native `split-picker` verb, which zz's default
 `%`/`"` bindings name directly.
 
+Terminal panes receive the daemon’s private `tmux` wrapper directory first on `PATH`,
+including after `respawn-pane`. The daemon also supplies `ZZ_TMUX_EXECUTABLE`, `TMUX`,
+`TMUX_PANE`, and the enclosing zz socket and pane identity. Shell jobs use the same wrapper.
+A pane command such as `tmux display -p '#{pane_id}'` therefore reaches its enclosing zz
+server. Bare `tmux` with `TMUX` set returns the pinned nested-session refusal and exit 1.
+`smoke/pane-tmux-path` proves both spawn paths and runs vim-tmux-navigator’s shell script
+and Neovim navigation command from a pane under the installed launcher layout.
+
 `new-session` also emits `Attach` after its initial terminal is created; `-d` suppresses it. For an interactive client,
 the daemon switches that client to the new session and publishes `ProtocolMessage::Attached`
 before starting the new terminal watcher or publishing its changed snapshot; this prevents a

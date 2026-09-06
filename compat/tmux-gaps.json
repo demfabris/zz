@@ -3771,6 +3771,18 @@
       "resolution": "-k and -m are promoted out of the unsupported catalog. Measured on the pin, both write remain-on-exit `key` on the new pane's own option table and touch nothing wider: the window and global scopes stay unset, so a plain sibling split still dies while the flagged pane is retained after a clean or failing child exit. -m additionally stores its argument as that pane's remain-on-exit-format, raw and unexpanded, and -k alone leaves that format unset. Both spellings keep the pin's arity, so a bare -m answers `command split-window: -m expects an argument` and exits 1, and `split-window -?` now prints the pin's usage byte for byte. The retention decision and the key dismissal both reuse the existing paths unchanged: RemainOnExit::Key already retains every exit in retain_exited_pane, and the daemon consults dead_pane_dismisses_on_key only from the key handler, so mouse and paste input cannot dismiss a retained pane while the next key kills it. -W stays loudly unsupported under pane.command-completion; it enters the pin's floating two-phase path and blocks the command queue, which is why no scenario exercises it."
     },
     {
+      "id": "pane.tmux-on-path",
+      "title": "Route pane tmux commands through the enclosing zz daemon",
+      "closed_on": "2026-09-05",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-daemon/src/lib.rs",
+        "scenario:compat/scenarios/smoke/pane-tmux-path.txt",
+        "file:compat/scenarios/smoke/fixtures/pane-tmux-path.py"
+      ],
+      "resolution": "The old behavior limited the private tmux wrapper to shell jobs; pane spawn supplied TMUX/TMUX_PANE/ZZ_* but no private PATH entry. The old no-shim job test remains a no-guard unit case, not a product justification for pane behavior. In the checked-in launcher fixture against pinned d77c9dc6, pane tmux display -p pane_id prints its own %0 and bare tmux prints \"sessions should be nested with care, unset $TMUX to force\" with newline, stderr only, rc1 (tmux.c nested-session check). Before this change both commands in a zz pane with pinned tmux first on PATH returned \"server exited unexpectedly\" with newline, stderr only, rc1. The old TmuxShimGuard script execed the bundled zz directly, so a zero-argument wrapper call selected its application entrypoint; the wrapper now refuses nested zero-argument calls before executing that binary. New stance: prepend the daemon private wrapper directory to each pane PATH as for jobs and retain the pin nested refusal. decided 2026-09-05 by fabrico for cycle 15; reversible. Closed semantic:pane-tmux-on-path and semantic:pane-nested-tmux-refusal. smoke/pane-tmux-path runs through zz_cli on the default scratch socket with the real pinned tmux on inherited PATH and no harness wrapper. It types commands into the pane PTY, compares own pane_id and exact nested-refusal stderr/status, repeats both after respawn, runs the corpus vim-tmux-navigator.tmux script from the shell, and executes the corpus Vim TmuxNavigateRight command under nvim --headless -u NONE -i NONE --noplugin to select the adjacent pane. The fixture requires nvim and the pinned plugin corpus. Unit tests cover environment precedence in both spawn paths and refusal before executing the wrapped binary. No wire change."
+    },
+    {
       "id": "plugins.resurrect-save",
       "title": "Run tmux-resurrect save against live scrollback",
       "closed_on": "2026-09-05",

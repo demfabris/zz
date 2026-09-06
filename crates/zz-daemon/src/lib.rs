@@ -1,7 +1,10 @@
 //! Persistent mux daemon, local IPC transport, and command client.
 
 #[cfg(feature = "daemon")]
-use std::{ffi::OsStr, process::Command};
+use std::{
+    ffi::{OsStr, OsString},
+    process::Command,
+};
 use std::{
     io,
     path::{Path, PathBuf},
@@ -112,21 +115,40 @@ fn incompatible_daemon_message(daemon: Option<u16>, client: u16) -> String {
 }
 
 #[cfg(feature = "daemon")]
-fn configure_tmux_shim(
-    process: &mut Command,
+fn tmux_shim_environment(
     tmux_shim: Option<&Path>,
     zz_executable: Option<&Path>,
     path: Option<&OsStr>,
-) {
+) -> Vec<(OsString, OsString)> {
     let (Some(tmux_shim), Some(zz_executable)) = (tmux_shim, zz_executable) else {
-        return;
+        return Vec::new();
     };
     let paths = std::iter::once(tmux_shim.to_path_buf())
         .chain(path.into_iter().flat_map(std::env::split_paths));
+    let mut environment = Vec::with_capacity(2);
     if let Ok(path) = std::env::join_paths(paths) {
-        process.env("PATH", path);
+        environment.push(("PATH".into(), path));
     }
-    process.env(TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE, zz_executable);
+    environment.push((
+        TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE.into(),
+        zz_executable.as_os_str().to_owned(),
+    ));
+    environment
+}
+
+#[cfg(all(feature = "daemon", unix))]
+fn configure_pane_tmux_environment(
+    environment: &mut Vec<(OsString, Option<OsString>)>,
+    tmux_shim: &Path,
+    zz_executable: &Path,
+) {
+    let path = environment
+        .iter()
+        .rev()
+        .find_map(|(name, value)| (name == "PATH").then_some(value.as_deref()))
+        .flatten();
+    let shim = tmux_shim_environment(Some(tmux_shim), Some(zz_executable), path);
+    environment.extend(shim.into_iter().map(|(name, value)| (name, Some(value))));
 }
 
 #[cfg(feature = "daemon")]
@@ -174,7 +196,11 @@ fn configure_shell_job_environment(
             .env("COLORTERM", "truecolor");
     }
     process.env("TMUX", tmux).env("ZZ_SOCKET", zz_socket);
-    configure_tmux_shim(process, tmux_shim, zz_executable, path.as_deref());
+    process.envs(tmux_shim_environment(
+        tmux_shim,
+        zz_executable,
+        path.as_deref(),
+    ));
 }
 
 /// The text `strerror` would give for an IO failure. Rust appends its own

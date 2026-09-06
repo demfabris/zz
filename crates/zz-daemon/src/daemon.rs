@@ -10509,8 +10509,7 @@ impl Shared {
     ) -> Result<Execution, DaemonError> {
         let args = &invocation.args;
         let parsed = parse_run_shell_args(args)?;
-        let inserted_target =
-            ExecutionContext::new(context.session, context.window, context.pane);
+        let inserted_target = ExecutionContext::new(context.session, context.window, context.pane);
         let draining = queue_execution.is_some_and(CommandQueueExecution::is_draining);
         let detached = queue_execution.is_some_and(|execution| execution.detached);
         let (
@@ -10937,8 +10936,7 @@ impl Shared {
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_if_shell_args(&command.args)?;
-        let inserted_target =
-            ExecutionContext::new(context.session, context.window, context.pane);
+        let inserted_target = ExecutionContext::new(context.session, context.window, context.pane);
         let draining = queue_execution.is_some_and(CommandQueueExecution::is_draining);
         let detached = queue_execution.is_some_and(|execution| execution.detached);
         let branches = parsed

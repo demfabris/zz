@@ -7551,8 +7551,6 @@ impl Shared {
                             },
                             &mut hooks,
                         );
-                        let default_title = inner.engine.default_pane_title().to_owned();
-                        let _ = inner.engine.state.update_pane_title(*pane, default_title);
                         let attached_clients = inner
                             .engine
                             .state
@@ -21254,11 +21252,9 @@ impl Shared {
             if !inner.engine.allow_set_title(pane) {
                 return;
             }
-            let title = if title.is_empty() {
-                inner.engine.default_pane_title().to_owned()
-            } else {
-                title.to_owned()
-            };
+            if title.is_empty() {
+                return;
+            }
             let changed = inner
                 .engine
                 .state

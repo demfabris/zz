@@ -405,6 +405,7 @@ pub struct MuxState {
     next_split_id: u64,
     next_sort_point: u64,
     format_now: u64,
+    default_pane_title: String,
     last_active_session: Option<SessionId>,
     input_options: InputOptions,
     marked_pane: Option<(SessionId, WindowId, PaneId)>,
@@ -416,6 +417,13 @@ impl MuxState {
     #[must_use]
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// `window.c` seeds a new pane's title from `gethostname`, so a terminal
+    /// pane that has reported no title of its own answers `#{pane_title}` with
+    /// the server's host name.
+    pub(crate) fn set_default_pane_title(&mut self, title: impl Into<String>) {
+        self.default_pane_title = title.into();
     }
 
     pub(crate) const fn set_format_now(&mut self, now: u64) {
@@ -495,7 +503,7 @@ impl MuxState {
         let active_point = self.allocate_sort_point();
         let pane = Pane {
             id: pane_id,
-            title: "terminal".to_owned(),
+            title: pane_title(&PaneKind::Terminal, &self.default_pane_title),
             kind: PaneKind::Terminal,
             active_point,
             bell: false,
@@ -621,7 +629,7 @@ impl MuxState {
         let active_point = self.allocate_sort_point();
         let pane = Pane {
             id: pane_id,
-            title: pane_title(&kind),
+            title: pane_title(&kind, &self.default_pane_title),
             kind,
             active_point,
             bell: false,
@@ -1175,7 +1183,7 @@ impl MuxState {
             pane_id,
             Pane {
                 id: pane_id,
-                title: pane_title(&kind),
+                title: pane_title(&kind, &self.default_pane_title),
                 kind,
                 active_point,
                 bell: false,
@@ -1777,7 +1785,7 @@ impl MuxState {
         let inherit_cwd_from = inherit_cwd_from
             .filter(|donor| self.cwd_donor(*donor) == Some(*donor))
             .or_else(|| self.cwd_donor(pane));
-        let title = pane_title(&kind);
+        let title = pane_title(&kind, &self.default_pane_title);
         let pane_state = self
             .pane_mut(pane)
             .expect("the validated picker pane still exists");
@@ -3846,10 +3854,11 @@ fn swap_window_id(value: WindowId, source: WindowId, target: WindowId) -> Window
     }
 }
 
-fn pane_title(kind: &PaneKind) -> String {
+fn pane_title(kind: &PaneKind, terminal: &str) -> String {
     match kind {
         PaneKind::Picker { .. } => "new pane".to_owned(),
-        PaneKind::Terminal => "terminal".to_owned(),
+        PaneKind::Terminal if terminal.is_empty() => "terminal".to_owned(),
+        PaneKind::Terminal => terminal.to_owned(),
         PaneKind::Browser(browser) if browser.url() == "about:blank" => "browser".to_owned(),
         PaneKind::Browser(browser) => browser.url().to_owned(),
         PaneKind::Agent(_) => "agent".to_owned(),

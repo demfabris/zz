@@ -952,6 +952,7 @@ fn handle_protocol<W: Write>(
             EventPayload::Snapshot(snapshot) => state.adopt_snapshot(snapshot),
             EventPayload::HookEvent { name, variables } => {
                 if state.attached_session.is_some()
+                    && (name != "window-layout-changed" || !output.exit_draining)
                     && let Some(line) = render_hook(state, &name, &variables)
                 {
                     output.notify(line.as_bytes())?;
@@ -1338,7 +1339,7 @@ fn capture_pending_return<W: Write>(
     match PendingReturn::from_stdin(stdin, return_code, pending_stdin.len()) {
         Ok(return_event) => {
             if return_event.discards_pane_output() {
-                output.discard_pane_output();
+                output.begin_exit_drain();
             }
             if pending_return.is_none() {
                 *pending_return = Some(return_event);
@@ -1460,7 +1461,7 @@ fn finish_control_return<W: Write>(
     pending_stdin: &mut VecDeque<StdinEvent>,
 ) -> io::Result<u8> {
     if pending_return.discards_pane_output() {
-        output.discard_pane_output();
+        output.begin_exit_drain();
     }
     let code = pending_return.code();
     let (input_closed, input_error) = match pending_return {
@@ -1661,7 +1662,7 @@ struct ControlWriter<W: Write> {
     command_guard_frames: u64,
     block_open: bool,
     deferred: VecDeque<DeferredOutput>,
-    pane_output_enabled: bool,
+    exit_draining: bool,
     exit_requested: bool,
     exit_held: bool,
     st_sent: bool,
@@ -1676,7 +1677,7 @@ impl<W: Write> ControlWriter<W> {
             command_guard_frames: 0,
             block_open: false,
             deferred: VecDeque::new(),
-            pane_output_enabled: true,
+            exit_draining: false,
             exit_requested: false,
             exit_held: false,
             st_sent: false,
@@ -1703,7 +1704,7 @@ impl<W: Write> ControlWriter<W> {
     }
 
     fn pane_output(&mut self, line: &[u8]) -> io::Result<()> {
-        if !self.pane_output_enabled {
+        if self.exit_draining {
             return Ok(());
         }
         if self.block_open {
@@ -1716,8 +1717,8 @@ impl<W: Write> ControlWriter<W> {
         self.output.flush()
     }
 
-    fn discard_pane_output(&mut self) {
-        self.pane_output_enabled = false;
+    fn begin_exit_drain(&mut self) {
+        self.exit_draining = true;
         self.deferred
             .retain(|deferred| !matches!(deferred, DeferredOutput::PaneOutput(_)));
     }
@@ -3967,6 +3968,64 @@ mod tests {
             render_hook(&state, "window-layout-changed", &variables).as_deref(),
             Some("%layout-change @3 abcd,80x24,0,0,5 ef01,80x24,0,0,5 !*-Z")
         );
+    }
+
+    #[test]
+    fn blank_and_eof_suppress_layout_notifications_while_live_clients_keep_them() {
+        for stdin in [StdinEvent::Line(String::new()), StdinEvent::Eof] {
+            let mut draining_state = layout_notification_state();
+            let mut live_state = layout_notification_state();
+            let mut draining = ControlWriter::new(Vec::new(), false);
+            let mut live = ControlWriter::new(Vec::new(), false);
+            let mut pending_return = None;
+            let mut pending_stdin = VecDeque::new();
+            capture_pending_return(
+                stdin,
+                0,
+                &mut pending_return,
+                &mut pending_stdin,
+                &mut draining,
+            );
+            let mut snapshot = live_state.snapshot.clone();
+            let window = &mut snapshot.sessions[0].windows[0];
+            window.layout_dump = "aafd,120x40,0,0,0".to_owned();
+            window.visible_layout_dump = "aafd,120x40,0,0,0".to_owned();
+            for (state, writer) in [
+                (&mut draining_state, &mut draining),
+                (&mut live_state, &mut live),
+            ] {
+                for (sequence, payload) in [
+                    (1, EventPayload::Snapshot(snapshot.clone())),
+                    (
+                        2,
+                        EventPayload::HookEvent {
+                            name: "window-layout-changed".to_owned(),
+                            variables: BTreeMap::from([(
+                                "hook_window".to_owned(),
+                                "@3".to_owned(),
+                            )]),
+                        },
+                    ),
+                ] {
+                    handle_protocol(
+                        ProtocolMessage::Event(zz_protocol::Event { sequence, payload }),
+                        state,
+                        writer,
+                    )
+                    .unwrap();
+                }
+            }
+            assert!(pending_return.is_some());
+            assert!(draining.output.is_empty());
+            assert_eq!(
+                draining_state.snapshot.sessions[0].windows[0].layout_dump,
+                "aafd,120x40,0,0,0"
+            );
+            assert_eq!(
+                live.output,
+                b"%layout-change @3 aafd,120x40,0,0,0 aafd,120x40,0,0,0 !*-Z\n"
+            );
+        }
     }
 
     #[test]

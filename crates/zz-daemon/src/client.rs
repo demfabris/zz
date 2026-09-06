@@ -791,6 +791,12 @@ impl InteractiveClient {
         Ok(request_id)
     }
 
+    pub fn request_environment(&self, names: Vec<String>) -> Result<u64, DaemonError> {
+        let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        self.send(&ProtocolMessage::EnvironmentRequest { request_id, names })?;
+        Ok(request_id)
+    }
+
     pub fn request_resync(&self) -> Result<(), DaemonError> {
         self.send(&ProtocolMessage::Resync)
     }

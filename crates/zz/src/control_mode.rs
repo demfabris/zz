@@ -205,7 +205,7 @@ fn drive<W: Write>(
         );
         match event {
             MainEvent::Stdin(StdinEvent::Line(line)) => {
-                let mut resolved = resolve_home_directories(
+                let mut resolved = resolve_line_expansions(
                     client.as_ref(),
                     &receiver,
                     output,
@@ -230,7 +230,7 @@ fn drive<W: Write>(
                         _ => 1,
                     });
                 }
-                match parse_line(&line, &resolved.homes) {
+                match parse_line(&line, &resolved.homes, &resolved.variables) {
                     ParsedLine::Return => {
                         return finish_control_return(
                             client.as_ref(),
@@ -249,7 +249,7 @@ fn drive<W: Write>(
                     }
                     ParsedLine::Ignore => {
                         if let Some(pending_return) =
-                            settle_home_directory_return(&mut resolved, &mut state)
+                            settle_expansion_return(&mut resolved, &mut state)
                         {
                             return finish_control_return(
                                 client.as_ref(),
@@ -266,7 +266,7 @@ fn drive<W: Write>(
                     ParsedLine::Error(error) => {
                         output.parse_error(&error)?;
                         if let Some(pending_return) =
-                            settle_home_directory_return(&mut resolved, &mut state)
+                            settle_expansion_return(&mut resolved, &mut state)
                         {
                             return finish_control_return(
                                 client.as_ref(),
@@ -528,63 +528,105 @@ fn prepare_command_unit<W: Write>(
     }
 }
 
-fn match_home_directory_response(
-    message: ProtocolMessage,
+/// One expansion answer the daemon still owes this line.
+struct PendingExpansion {
+    variables: bool,
     request_id: u64,
-) -> Result<Vec<Option<String>>, ProtocolMessage> {
-    match message {
-        ProtocolMessage::HomeDirectoryResponse {
-            request_id: response_id,
-            homes,
-        } if response_id == request_id => Ok(homes),
-        message => Err(message),
+    names: Vec<String>,
+}
+
+impl PendingExpansion {
+    fn answers(&self, message: &ProtocolMessage) -> bool {
+        match message {
+            ProtocolMessage::HomeDirectoryResponse { request_id, .. } => {
+                !self.variables && *request_id == self.request_id
+            }
+            ProtocolMessage::EnvironmentResponse { request_id, .. } => {
+                self.variables && *request_id == self.request_id
+            }
+            _ => false,
+        }
     }
 }
 
-fn resolve_home_directories<W: Write>(
+fn expansion_answer(message: ProtocolMessage) -> Vec<Option<String>> {
+    match message {
+        ProtocolMessage::HomeDirectoryResponse { homes, .. } => homes,
+        ProtocolMessage::EnvironmentResponse { values, .. } => values,
+        _ => Vec::new(),
+    }
+}
+
+/// Resolve everything the daemon owns before this line can be parsed: the `~`
+/// user names, and the `$NAME` variables the pin's own lexer reads out of
+/// `global_environ` while the server parses the same line. Both requests go out
+/// before either answer is waited on, so a line carrying both still costs one
+/// round trip.
+fn resolve_line_expansions<W: Write>(
     client: &InteractiveClient,
     receiver: &mpsc::Receiver<MainEvent>,
     output: &mut ControlWriter<W>,
     line: &str,
     state: &mut ControlState,
     pending_stdin: &mut VecDeque<StdinEvent>,
-) -> io::Result<HomeUnit> {
-    let mut unit = HomeUnit::default();
-    if !line.contains('~') {
+) -> io::Result<ExpansionUnit> {
+    let mut unit = ExpansionUnit::default();
+    if !line.contains('~') && !line.contains('$') {
         return Ok(unit);
     }
-    let users = zz_mux::config_home_directory_names(CONTROL_PARSE_SOURCE, line);
-    if users.is_empty() {
+    let names = zz_mux::config_expansion_names(CONTROL_PARSE_SOURCE, line);
+    let users: Vec<String> = names.homes.into_iter().collect();
+    let variables: Vec<String> = names.variables.into_iter().collect();
+    if users.is_empty() && variables.is_empty() {
         return Ok(unit);
     }
-    let users: Vec<String> = users.into_iter().collect();
-    let request_id = client
-        .request_home_directories(users.clone())
-        .map_err(io::Error::other)?;
-    loop {
+    let mut pending = Vec::new();
+    if !users.is_empty() {
+        pending.push(PendingExpansion {
+            variables: false,
+            request_id: client
+                .request_home_directories(users.clone())
+                .map_err(io::Error::other)?,
+            names: users,
+        });
+    }
+    if !variables.is_empty() {
+        pending.push(PendingExpansion {
+            variables: true,
+            request_id: client
+                .request_environment(variables.clone())
+                .map_err(io::Error::other)?,
+            names: variables,
+        });
+    }
+    while !pending.is_empty() {
         match receiver.recv().unwrap_or(MainEvent::Disconnected) {
             MainEvent::Protocol(message) => {
-                match match_home_directory_response(*message, request_id) {
-                    Ok(homes) => {
-                        if homes.len() != users.len() {
-                            return Err(io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                "home directory count mismatch",
-                            ));
-                        }
-                        unit.homes = users
-                            .into_iter()
-                            .zip(homes)
-                            .filter_map(|(user, home)| home.map(|home| (user, home)))
-                            .collect();
-                        return Ok(unit);
+                let Some(index) = pending.iter().position(|entry| entry.answers(&message)) else {
+                    let signal = handle_protocol(*message, state, output)?;
+                    if signal.is_some() && unit.exit != ExitSignal::Detached {
+                        unit.exit = signal;
                     }
-                    Err(message) => {
-                        let signal = handle_protocol(message, state, output)?;
-                        if signal.is_some() && unit.exit != ExitSignal::Detached {
-                            unit.exit = signal;
-                        }
-                    }
+                    continue;
+                };
+                let entry = pending.remove(index);
+                let values = expansion_answer(*message);
+                if values.len() != entry.names.len() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "expansion count mismatch",
+                    ));
+                }
+                let resolved = entry
+                    .names
+                    .into_iter()
+                    .zip(values)
+                    .filter_map(|(name, value)| value.map(|value| (name, value)))
+                    .collect();
+                if entry.variables {
+                    unit.variables = resolved;
+                } else {
+                    unit.homes = resolved;
                 }
             }
             MainEvent::Stdin(stdin) => {
@@ -606,6 +648,7 @@ fn resolve_home_directories<W: Write>(
             }
         }
     }
+    Ok(unit)
 }
 
 fn match_prepared_response(
@@ -1434,8 +1477,8 @@ fn settle_preparation_error_return(
     take_ready_pending_return(state_return)
 }
 
-fn settle_home_directory_return(
-    resolved: &mut HomeUnit,
+fn settle_expansion_return(
+    resolved: &mut ExpansionUnit,
     state: &mut ControlState,
 ) -> Option<PendingReturn> {
     resolved.pending_return.as_ref()?;
@@ -1619,11 +1662,15 @@ fn wait_for_exit_input(
     }
 }
 
-fn parse_line(line: &str, homes: &BTreeMap<String, String>) -> ParsedLine {
+fn parse_line(
+    line: &str,
+    homes: &BTreeMap<String, String>,
+    variables: &BTreeMap<String, String>,
+) -> ParsedLine {
     if line.is_empty() {
         return ParsedLine::Return;
     }
-    let parsed = zz_mux::parse_config_with_home_directories(CONTROL_PARSE_SOURCE, line, homes);
+    let parsed = zz_mux::parse_config_with_expansions(CONTROL_PARSE_SOURCE, line, homes, variables);
     if let Some(diagnostic) = parsed.diagnostics.first() {
         return ParsedLine::Error(format!("parse error: {}", diagnostic.message));
     }
@@ -2035,8 +2082,9 @@ struct PreparedUnit {
 }
 
 #[derive(Default)]
-struct HomeUnit {
+struct ExpansionUnit {
     homes: BTreeMap<String, String>,
+    variables: BTreeMap<String, String>,
     exit: ExitSignal,
     pending_return: Option<PendingReturn>,
 }
@@ -2927,7 +2975,9 @@ mod tests {
             .as_mut()
             .expect("pending EOF")
             .consume_preceding_input();
-        let ParsedLine::Commands(mut commands) = parse_line(&line, &BTreeMap::new()) else {
+        let ParsedLine::Commands(mut commands) =
+            parse_line(&line, &BTreeMap::new(), &BTreeMap::new())
+        else {
             panic!("invalid bind-key did not parse for preparation");
         };
         let prepared = PreparedCommand {
@@ -3218,13 +3268,21 @@ mod tests {
 
     #[test]
     fn parser_distinguishes_return_ignores_chains_and_errors() {
-        assert_eq!(parse_line("", &BTreeMap::new()), ParsedLine::Return);
-        assert_eq!(parse_line("   ", &BTreeMap::new()), ParsedLine::Ignore);
         assert_eq!(
-            parse_line(" # ignored", &BTreeMap::new()),
+            parse_line("", &BTreeMap::new(), &BTreeMap::new()),
+            ParsedLine::Return
+        );
+        assert_eq!(
+            parse_line("   ", &BTreeMap::new(), &BTreeMap::new()),
             ParsedLine::Ignore
         );
-        let ParsedLine::Commands(commands) = parse_line("ls ; list-panes", &BTreeMap::new()) else {
+        assert_eq!(
+            parse_line(" # ignored", &BTreeMap::new(), &BTreeMap::new()),
+            ParsedLine::Ignore
+        );
+        let ParsedLine::Commands(commands) =
+            parse_line("ls ; list-panes", &BTreeMap::new(), &BTreeMap::new())
+        else {
             panic!("semicolon chain was not parsed");
         };
         assert_eq!(
@@ -3234,21 +3292,31 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["ls", "list-panes"]
         );
-        let ParsedLine::Commands(commands) = parse_line("bogus-command", &BTreeMap::new()) else {
+        let ParsedLine::Commands(commands) =
+            parse_line("bogus-command", &BTreeMap::new(), &BTreeMap::new())
+        else {
             panic!("unknown command was rejected before live preparation");
         };
         assert_eq!(commands[0].name, "bogus-command");
-        let ParsedLine::Commands(commands) = parse_line("set 'oops", &BTreeMap::new()) else {
+        let ParsedLine::Commands(commands) =
+            parse_line("set 'oops", &BTreeMap::new(), &BTreeMap::new())
+        else {
             panic!("open quote at EOF was rejected");
         };
         assert_eq!(commands[0].name, "set");
         assert_eq!(commands[0].args, ["oops"]);
-        let ParsedLine::Commands(commands) =
-            parse_line("set-environment -g CONTROL_LITERAL $FOO", &BTreeMap::new())
-        else {
-            panic!("literal variable command was not parsed");
+        let ParsedLine::Commands(commands) = parse_line(
+            "set-environment -g CONTROL_LITERAL $FOO",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ) else {
+            panic!("variable command was not parsed");
         };
-        assert_eq!(commands[0].args, ["-g", "CONTROL_LITERAL", "$FOO"]);
+        assert_eq!(
+            commands[0].args,
+            ["-g", "CONTROL_LITERAL", ""],
+            "the pin's lexer expands an unset $NAME to nothing while the server parses the line"
+        );
     }
 
     #[test]
@@ -3281,25 +3349,69 @@ mod tests {
     }
 
     #[test]
-    fn home_directory_response_matching_ignores_stale_request_ids() {
-        let stale = ProtocolMessage::HomeDirectoryResponse {
+    fn expansion_answers_are_matched_by_kind_and_request_id() {
+        let homes = PendingExpansion {
+            variables: false,
+            request_id: 9,
+            names: vec![String::new()],
+        };
+        let variables = PendingExpansion {
+            variables: true,
+            request_id: 9,
+            names: vec!["NOTIFY_ENV".to_owned()],
+        };
+        let home_answer = ProtocolMessage::HomeDirectoryResponse {
+            request_id: 9,
+            homes: vec![Some("/server/home".to_owned())],
+        };
+        let variable_answer = ProtocolMessage::EnvironmentResponse {
+            request_id: 9,
+            values: vec![Some("EXPANDED".to_owned())],
+        };
+        assert!(homes.answers(&home_answer));
+        assert!(!homes.answers(&variable_answer));
+        assert!(variables.answers(&variable_answer));
+        assert!(!variables.answers(&home_answer));
+        assert!(!homes.answers(&ProtocolMessage::HomeDirectoryResponse {
             request_id: 8,
             homes: Vec::new(),
-        };
-        assert!(matches!(
-            match_home_directory_response(stale, 9),
-            Err(ProtocolMessage::HomeDirectoryResponse { request_id: 8, .. })
-        ));
+        }));
+        assert!(!variables.answers(&ProtocolMessage::EnvironmentResponse {
+            request_id: 8,
+            values: Vec::new(),
+        }));
         assert_eq!(
-            match_home_directory_response(
-                ProtocolMessage::HomeDirectoryResponse {
-                    request_id: 9,
-                    homes: vec![Some("/server/home".to_owned()), None],
-                },
-                9,
-            )
-            .unwrap(),
-            [Some("/server/home".to_owned()), None]
+            expansion_answer(home_answer),
+            [Some("/server/home".to_owned())]
+        );
+        assert_eq!(
+            expansion_answer(variable_answer),
+            [Some("EXPANDED".to_owned())]
+        );
+    }
+
+    /// Derived from pinned tmux d77c9dc6. `yylex_token_variable` expands a
+    /// `$NAME` on a control line through `environ_find(global_environ, name)`
+    /// in the server, so the value an earlier `set-environment -g` stored
+    /// reaches the next line, an unset name expands to nothing, and a
+    /// single-quoted `\'$NAME\'` stays literal. Measured over `-C` on the pin:
+    /// `set-environment -g NOTIFY_ENV EXPANDED` then `display-message -p
+    /// "$NOTIFY_ENV"` prints `EXPANDED`, `display-message -p "$NOPE_UNSET"`
+    /// prints an empty line, and `display-message -p \'$NOTIFY_ENV\'` prints
+    /// `$NOTIFY_ENV`.
+    #[test]
+    fn control_lines_expand_variables_from_the_daemon_global_environment() {
+        let variables = BTreeMap::from([("NOTIFY_ENV".to_owned(), "EXPANDED".to_owned())]);
+        let ParsedLine::Commands(commands) = parse_line(
+            "display-message -p \"$NOTIFY_ENV\" $NOTIFY_ENV '$NOTIFY_ENV' \"$NOPE_UNSET\"",
+            &BTreeMap::new(),
+            &variables,
+        ) else {
+            panic!("variable line was not parsed");
+        };
+        assert_eq!(
+            commands[0].args,
+            ["-p", "EXPANDED", "EXPANDED", "$NOTIFY_ENV", ""]
         );
     }
 
@@ -3309,26 +3421,24 @@ mod tests {
             (String::new(), "/server/home".to_owned()),
             ("alice".to_owned(), "/users/alice".to_owned()),
         ]);
-        let ParsedLine::Commands(commands) =
-            parse_line("display-message -p ~ ~/x ~alice/y $LITERAL", &homes)
-        else {
+        let ParsedLine::Commands(commands) = parse_line(
+            "display-message -p ~ ~/x ~alice/y $UNSET",
+            &homes,
+            &BTreeMap::new(),
+        ) else {
             panic!("tilde line was not parsed");
         };
         assert_eq!(
             commands[0].args,
-            [
-                "-p",
-                "/server/home",
-                "/server/home/x",
-                "/users/alice/y",
-                "$LITERAL"
-            ]
+            ["-p", "/server/home", "/server/home/x", "/users/alice/y", ""]
         );
         assert_eq!(
-            parse_line("display-message -p ~nobody", &homes),
+            parse_line("display-message -p ~nobody", &homes, &BTreeMap::new()),
             ParsedLine::Error("parse error: syntax error".to_owned())
         );
-        let ParsedLine::Commands(commands) = parse_line("display-message -p '~'", &homes) else {
+        let ParsedLine::Commands(commands) =
+            parse_line("display-message -p '~'", &homes, &BTreeMap::new())
+        else {
             panic!("single-quoted tilde was not parsed");
         };
         assert_eq!(commands[0].args, ["-p", "~"]);

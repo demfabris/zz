@@ -59,7 +59,12 @@ impl MenuView {
     /// pointer is, because that arm runs before the box test. Only a button-1
     /// press is swallowed: `tty-keys.c` reports `b = 3` for an SGR release and
     /// `MOUSE_BUTTONS(3)` is 3, so the release leaves the menu.
-    fn cancel_on_pointer(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn cancel_on_pointer(
+        &mut self,
+        _: &MouseDownEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.send(MenuAction::Cancel, cx);
         cx.stop_propagation();
     }
@@ -162,13 +167,19 @@ impl Render for MenuView {
             .on_key_down(cx.listener(Self::on_key_down))
             .on_key_up(|_, _, cx| cx.stop_propagation())
             .when(!self.state.mouse_keys, |menu| {
-                menu.on_mouse_down(MouseButton::Right, cx.listener(Self::cancel_on_pointer))
-                    .on_mouse_down(MouseButton::Middle, cx.listener(Self::cancel_on_pointer))
-                    .on_mouse_up(MouseButton::Left, cx.listener(Self::cancel_on_release))
-                    .on_scroll_wheel(cx.listener(|menu, _: &ScrollWheelEvent, _, cx| {
-                        menu.send(MenuAction::Cancel, cx);
-                        cx.stop_propagation();
-                    }))
+                menu.on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(Self::cancel_on_pointer),
+                )
+                .on_mouse_down(
+                    MouseButton::Middle,
+                    cx.listener(Self::cancel_on_pointer),
+                )
+                .on_mouse_up(MouseButton::Left, cx.listener(Self::cancel_on_release))
+                .on_scroll_wheel(cx.listener(|menu, _: &ScrollWheelEvent, _, cx| {
+                    menu.send(MenuAction::Cancel, cx);
+                    cx.stop_propagation();
+                }))
             })
             .children(rows)
     }

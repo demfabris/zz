@@ -100,6 +100,11 @@ try:
         tmux("display-message", "-p", "-t", session + ":title-exec.0", "#T")
         == exec_title))
 
+    tmux("select-pane", "-t", session + ":title-exec.0", "-T", "chosen-title")
+    print("SELECT_PANE_TITLE=" + settle(
+        lambda: tmux("display-message", "-p", "-t", session + ":title-exec.0",
+                     "#{pane_title}"), "chosen-title"))
+
     osc2 = root / "osc2.sh"
     osc2.write_text("printf '\\033]2;pane-osc2-title\\007'\nexec sleep 600\n")
     tmux("new-window", "-t", session + ":", "-n", "title-osc2", "-c", str(root),

@@ -3200,6 +3200,7 @@ impl MuxEngine {
         self.format_host_short = host_short.into();
         self.format_socket_path = socket_path.into();
         self.format_start_time = start_time;
+        self.state.set_default_pane_title(self.format_host.clone());
         self.state.set_format_now(start_time);
     }
 
@@ -3694,14 +3695,6 @@ impl MuxEngine {
     #[must_use]
     pub fn pane_runtime_facts(&self, pane: PaneId) -> Option<&PaneRuntimeFacts> {
         self.pane_runtime_facts.get(&pane)
-    }
-
-    /// `window.c` seeds a new pane's title from `gethostname`, so a pane that
-    /// has not reported one through OSC 2 answers `#{pane_title}` with the
-    /// server's host name.
-    #[must_use]
-    pub fn default_pane_title(&self) -> &str {
-        &self.format_host
     }
 
     pub(crate) fn format_host(&self) -> &str {

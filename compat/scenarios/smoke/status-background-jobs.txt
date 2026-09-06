@@ -1,0 +1,4 @@
+corpus: none
+stage: fixtures/status-background-jobs.py ~/status-background-jobs.py
+run-shell 'python3 ~/status-background-jobs.py'
+out: show-environment -g ZZ_STATUS_BACKGROUND_JOBS

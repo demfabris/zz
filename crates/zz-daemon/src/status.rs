@@ -8,7 +8,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex, OnceLock},
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use chrono::Local;
@@ -26,16 +26,158 @@ use zz_terminal::{CellWidth, CopyModeFacts, ProgressBar, TerminalSession, Termin
 
 use crate::{configure_shell_job_environment, paths::home_directory, shell_process};
 
-const SHELL_TIMEOUT: Duration = Duration::from_secs(2);
-const SHELL_POLL_INTERVAL: Duration = Duration::from_millis(10);
-const MAX_SHELL_OUTPUT_BYTES: u64 = 4 * 1024;
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum ShellCacheScope {
     Attached(ClientId),
     Unattached,
 }
 
-type ShellCacheKey = (ShellCacheScope, PathBuf, String);
+type ShellCacheKey = (ShellCacheScope, String);
+#[derive(Default)]
+struct ShellCacheEntry {
+    expanded: Option<String>,
+    output: Option<String>,
+    last: u64,
+    job: Option<ShellJob>,
+}
+
+struct ShellJob {
+    child: Option<Child>,
+    #[cfg(unix)]
+    stdout: std::process::ChildStdout,
+    #[cfg(unix)]
+    pending: Vec<u8>,
+    #[cfg(unix)]
+    updated: bool,
+    #[cfg(unix)]
+    eof: bool,
+    #[cfg(not(unix))]
+    output: Arc<Mutex<ShellOutput>>,
+}
+
+#[cfg(not(unix))]
+#[derive(Default)]
+struct ShellOutput {
+    latest: Option<String>,
+    complete: bool,
+    streamed: bool,
+}
+
+impl ShellCacheEntry {
+    fn poll(&mut self) -> bool {
+        let Some(job) = self.job.as_mut() else {
+            return false;
+        };
+        let (output, complete, streamed) = job.poll();
+        let changed = output.is_some() || complete;
+        if let Some(output) = output {
+            self.output = Some(output);
+        }
+        if streamed {
+            self.last = shell_second();
+        }
+        if complete {
+            self.job = None;
+        }
+        changed
+    }
+}
+
+impl ShellJob {
+    #[cfg(unix)]
+    fn poll(&mut self) -> (Option<String>, bool, bool) {
+        let mut latest = None;
+        let mut streamed = false;
+        let mut buffer = [0; 4096];
+        if !self.eof {
+            for _ in 0..16 {
+                match self.stdout.read(&mut buffer) {
+                    Ok(0) => {
+                        if !self.pending.is_empty() || !self.updated {
+                            latest = Some(String::from_utf8_lossy(&self.pending).into_owned());
+                        }
+                        self.eof = true;
+                        break;
+                    }
+                    Ok(length) => {
+                        for byte in &buffer[..length] {
+                            if *byte == b'\n' {
+                                if self.pending.last() == Some(&b'\r') {
+                                    self.pending.pop();
+                                }
+                                latest = Some(String::from_utf8_lossy(&self.pending).into_owned());
+                                self.pending.clear();
+                                self.updated = true;
+                                streamed = true;
+                            } else {
+                                self.pending.push(*byte);
+                            }
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => {
+                        self.eof = true;
+                        break;
+                    }
+                }
+            }
+        }
+        (latest, self.reaped(self.eof), streamed)
+    }
+
+    #[cfg(not(unix))]
+    fn poll(&mut self) -> (Option<String>, bool, bool) {
+        let (latest, eof, streamed) = {
+            let mut output = self
+                .output
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            (
+                output.latest.take(),
+                output.complete,
+                std::mem::take(&mut output.streamed),
+            )
+        };
+        (latest, self.reaped(eof), streamed)
+    }
+
+    fn reaped(&mut self, eof: bool) -> bool {
+        if !eof {
+            return false;
+        }
+        let Some(child) = self.child.as_mut() else {
+            return true;
+        };
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            self.child = None;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Drop for ShellJob {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            #[cfg(unix)]
+            let _ = rustix::process::kill_process_group(
+                rustix::process::Pid::from_child(&child),
+                rustix::process::Signal::KILL,
+            );
+            thread::spawn(move || terminate_shell(&mut child));
+        }
+    }
+}
+
+fn shell_second() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 pub(crate) const LIST_CLIENTS_CONTEXT_FORMATS: [&str; 1] = ["line"];
 /// The `window_copy_formats` names zz answers. tmux adds them to the format
 /// tree from the pane's mode entry; zz reads them off the client view that
@@ -62,7 +204,7 @@ pub(crate) const SHOW_MESSAGES_CONTEXT_FORMATS: [&str; 3] =
 
 #[derive(Default)]
 pub(crate) struct StatusRenderer {
-    shell_cache: BTreeMap<ShellCacheKey, String>,
+    shell_cache: BTreeMap<ShellCacheKey, ShellCacheEntry>,
     published: BTreeMap<ClientId, StatusLine>,
     tmux_shim: Option<PathBuf>,
     zz_executable: Option<PathBuf>,
@@ -444,6 +586,35 @@ pub(crate) struct MessageFormatFacts {
 }
 
 impl StatusRenderer {
+    pub(crate) fn poll_jobs(&mut self) -> BTreeSet<ClientId> {
+        let now = shell_second();
+        self.shell_cache
+            .retain(|_, entry| now.saturating_sub(entry.last) < 3600);
+        let mut changed = BTreeSet::new();
+        for ((scope, _), entry) in &mut self.shell_cache {
+            if entry.poll()
+                && let ShellCacheScope::Attached(client) = scope
+            {
+                changed.insert(*client);
+            }
+        }
+        changed
+    }
+
+    pub(crate) fn render_forced(&mut self, request: &StatusRequest) -> StatusLine {
+        let mut touched = BTreeSet::new();
+        let status = render(
+            &mut self.shell_cache,
+            &mut touched,
+            request,
+            true,
+            self.tmux_shim.as_deref(),
+            self.zz_executable.as_deref(),
+        );
+        self.published.insert(request.client, status.clone());
+        status
+    }
+
     pub(crate) fn render_changed(
         &mut self,
         requests: &[StatusRequest],
@@ -489,7 +660,7 @@ impl StatusRenderer {
 
     pub(crate) fn forget(&mut self, client: ClientId) {
         self.published.remove(&client);
-        self.shell_cache.retain(|(scope, _, _), _| {
+        self.shell_cache.retain(|(scope, _), _| {
             !matches!(scope, ShellCacheScope::Attached(cached) if *cached == client)
         });
     }
@@ -578,7 +749,7 @@ pub(crate) fn host_names() -> &'static (String, String) {
 }
 
 fn render(
-    cache: &mut BTreeMap<ShellCacheKey, String>,
+    cache: &mut BTreeMap<ShellCacheKey, ShellCacheEntry>,
     touched: &mut BTreeSet<ShellCacheKey>,
     request: &StatusRequest,
     refresh: bool,
@@ -901,7 +1072,7 @@ pub(crate) struct DaemonFormatHooks<'a> {
     variables: Option<&'a BTreeMap<String, String>>,
     command_item: Option<&'a str>,
     option_snapshot: Option<&'a StatusRowVariables>,
-    cache: Option<&'a mut BTreeMap<ShellCacheKey, String>>,
+    cache: Option<&'a mut BTreeMap<ShellCacheKey, ShellCacheEntry>>,
     touched: Option<&'a mut BTreeSet<ShellCacheKey>>,
     refresh: bool,
     now: chrono::DateTime<Local>,
@@ -963,7 +1134,7 @@ impl<'a> DaemonFormatHooks<'a> {
         facts: &'a FormatHookFacts,
         context: &'a StatusContext,
         option_snapshot: Option<&'a StatusRowVariables>,
-        cache: &'a mut BTreeMap<ShellCacheKey, String>,
+        cache: &'a mut BTreeMap<ShellCacheKey, ShellCacheEntry>,
         touched: &'a mut BTreeSet<ShellCacheKey>,
         refresh: bool,
         now: chrono::DateTime<Local>,
@@ -1122,11 +1293,14 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     }
 
     fn shell(&mut self, command: &str) -> String {
-        let (Some(cache), Some(touched)) = (self.cache.as_deref_mut(), self.touched.as_deref_mut())
-        else {
+        let Some(context) = self.status_context else {
             return String::new();
         };
-        let Some(context) = self.status_context else {
+        let mut expansion = DaemonFormatHooks::command(self.facts);
+        expansion.option_snapshot = self.option_snapshot;
+        let expanded = zz_mux::expand_format_values(command, context, &mut expansion);
+        let (Some(cache), Some(touched)) = (self.cache.as_deref_mut(), self.touched.as_deref_mut())
+        else {
             return String::new();
         };
         let Some(client) = self.status_client else {
@@ -1138,25 +1312,40 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         } else {
             ShellCacheScope::Unattached
         };
-        let key = (scope, cwd.clone(), command.to_owned());
-        touched.insert(key.clone());
-        if !self.refresh
-            && let Some(cached) = cache.get(&key)
+        let key = (scope, command.to_owned());
+        let first_reference = touched.insert(key.clone());
+        let entry = cache.entry(key).or_default();
+        let now = shell_second();
+        let force = entry.expanded.as_deref() != Some(expanded.as_str())
+            || (self.refresh && first_reference);
+        if force || (entry.job.is_none() && entry.last != now) {
+            entry.job = None;
+            entry.expanded = Some(expanded.clone());
+            entry.last = now;
+            entry.job = run_shell(
+                &expanded,
+                context,
+                &cwd,
+                self.environment.unwrap_or_default(),
+                self.default_terminal.unwrap_or("tmux-256color"),
+                self.startup,
+                self.tmux_shim,
+                self.zz_executable,
+            );
+            if entry.job.is_none() {
+                entry.output = Some(format!("<'{command}' didn't start>"));
+            }
+        } else if entry.job.is_some()
+            && now.saturating_sub(entry.last) > 1
+            && entry.output.is_none()
         {
-            return cached.clone();
+            entry.output = Some(format!("<'{command}' not ready>"));
         }
-        let output = run_shell(
-            command,
+        zz_mux::expand_format_values(
+            entry.output.as_deref().unwrap_or_default(),
             context,
-            &cwd,
-            self.environment.unwrap_or_default(),
-            self.default_terminal.unwrap_or("tmux-256color"),
-            self.startup,
-            self.tmux_shim,
-            self.zz_executable,
-        );
-        cache.insert(key, output.clone());
-        output
+            &mut expansion,
+        )
     }
 
     fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
@@ -1610,7 +1799,7 @@ fn run_shell(
     startup: bool,
     tmux_shim: Option<&std::path::Path>,
     zz_executable: Option<&std::path::Path>,
-) -> String {
+) -> Option<ShellJob> {
     let mut process = shell_process(command);
     let tmux = format!("{},{},-1", context.socket_path, std::process::id());
     configure_shell_job_environment(
@@ -1640,34 +1829,83 @@ fn run_shell(
             target: "zz_daemon::status",
             "status command failed to start command={command}"
         );
-        return String::new();
+        return None;
     };
 
-    let deadline = Instant::now() + SHELL_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() >= deadline => {
-                log::debug!(
-                    target: "zz_daemon::status",
-                    "status command timed out command={command}"
-                );
-                terminate_shell(&mut child);
-                return String::new();
-            }
-            Ok(None) => thread::sleep(SHELL_POLL_INTERVAL),
+    let stdout = child.stdout.take()?;
+    #[cfg(unix)]
+    {
+        let nonblocking = rustix::fs::fcntl_getfl(&stdout).and_then(|flags| {
+            rustix::fs::fcntl_setfl(&stdout, flags | rustix::fs::OFlags::NONBLOCK)
+        });
+        if nonblocking.is_err() {
+            thread::spawn(move || terminate_shell(&mut child));
+            return None;
+        }
+        Some(ShellJob {
+            child: Some(child),
+            stdout,
+            pending: Vec::new(),
+            updated: false,
+            eof: false,
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let mut stdout = stdout;
+        let output = Arc::new(Mutex::new(ShellOutput::default()));
+        let reader_output = output.clone();
+        let reader = thread::Builder::new()
+            .name("zz-status-job".to_owned())
+            .spawn(move || {
+                let mut buffer = [0; 4096];
+                let mut pending = Vec::new();
+                let mut updated = false;
+                loop {
+                    match stdout.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(length) => {
+                            for byte in &buffer[..length] {
+                                if *byte == b'\n' {
+                                    if pending.last() == Some(&b'\r') {
+                                        pending.pop();
+                                    }
+                                    let line = String::from_utf8_lossy(&pending).into_owned();
+                                    let mut output = reader_output
+                                        .lock()
+                                        .unwrap_or_else(|error| error.into_inner());
+                                    output.latest = Some(line);
+                                    output.streamed = true;
+                                    pending.clear();
+                                    updated = true;
+                                } else {
+                                    pending.push(*byte);
+                                }
+                            }
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                        Err(_) => break,
+                    }
+                }
+                let mut output = reader_output
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                if !pending.is_empty() || !updated {
+                    output.latest = Some(String::from_utf8_lossy(&pending).into_owned());
+                }
+                output.complete = true;
+            });
+        match reader {
+            Ok(_) => Some(ShellJob {
+                child: Some(child),
+                output,
+            }),
             Err(_) => {
                 terminate_shell(&mut child);
-                return String::new();
+                None
             }
         }
     }
-
-    let mut buffer = Vec::new();
-    if let Some(stdout) = child.stdout.take() {
-        let _ = stdout.take(MAX_SHELL_OUTPUT_BYTES).read_to_end(&mut buffer);
-    }
-    first_line(&buffer)
 }
 
 fn status_working_directory(context: &StatusContext) -> PathBuf {
@@ -1701,20 +1939,28 @@ fn terminate_shell(child: &mut Child) {
     let _ = child.wait();
 }
 
-fn first_line(output: &[u8]) -> String {
-    let line = output
-        .split(|byte| *byte == b'\n')
-        .next()
-        .unwrap_or_default();
-    String::from_utf8_lossy(line).trim_end().to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
     use zz_mux::{PaneKind, SplitSize, expand_format_values};
     use zz_protocol::Axis;
     use zz_terminal::{SessionStatus, TerminalViewId};
+
+    fn settled(renderer: &mut StatusRenderer, request: &StatusRequest) -> StatusLine {
+        renderer.render_initial(request);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while renderer
+            .shell_cache
+            .values()
+            .any(|entry| entry.job.is_some())
+        {
+            renderer.poll_jobs();
+            assert!(Instant::now() < deadline, "status jobs did not complete");
+            thread::sleep(Duration::from_millis(5));
+        }
+        renderer.render_initial(request)
+    }
 
     fn request(client: u64, left: &str, right: &str) -> StatusRequest {
         StatusRequest {
@@ -2554,18 +2800,19 @@ mod tests {
         let requests = [request(1, &format, "")];
 
         let first = renderer.render_changed(&requests, false);
-        let initial = first[0].1.left.clone();
-        assert_eq!(initial, "first", "a first render runs the command");
+        assert_eq!(
+            first[0].1.left, "",
+            "a first render starts the command without waiting"
+        );
+        assert_eq!(settled(&mut renderer, &requests[0]).left, "first");
         std::fs::write(&source, "second\n").expect("the second value is written");
-        assert!(renderer.render_changed(&requests, false).is_empty());
-        let ticked = renderer.render_changed(&requests, true);
-        assert_eq!(ticked.len(), 1);
-        assert_eq!(ticked[0].1.left, "second");
+        assert_eq!(renderer.render_forced(&requests[0]).left, "first");
+        assert_eq!(settled(&mut renderer, &requests[0]).left, "second");
     }
 
     #[cfg(unix)]
     #[test]
-    fn status_command_cache_is_scoped_to_the_working_directory() {
+    fn attached_status_jobs_start_in_each_clients_working_directory() {
         let directory = tempfile::tempdir().expect("working directory fixture");
         let first_cwd = directory.path().join("first");
         let second_cwd = directory.path().join("second");
@@ -2575,10 +2822,16 @@ mod tests {
         let second_cwd = std::fs::canonicalize(second_cwd).expect("second cwd resolves");
         let mut first = request(1, "#(pwd -P)", "");
         first.context.session_path = first_cwd.to_string_lossy().into_owned();
+        first.facts.client = Some(ClientFormatFacts::default());
         let mut second = request(2, "#(pwd -P)", "");
         second.context.session_path = second_cwd.to_string_lossy().into_owned();
+        second.facts.client = Some(ClientFormatFacts::default());
 
-        let statuses = StatusRenderer::default().render_changed(&[first, second], false);
+        let mut renderer = StatusRenderer::default();
+        let statuses = [
+            (first.client, settled(&mut renderer, &first)),
+            (second.client, settled(&mut renderer, &second)),
+        ];
 
         assert_eq!(statuses.len(), 2);
         assert_eq!(statuses[0].1.left, first_cwd.to_string_lossy());
@@ -2597,13 +2850,13 @@ mod tests {
         first.context.session_path = cwd.to_string_lossy().into_owned();
         let mut renderer = StatusRenderer::default();
 
-        assert_eq!(renderer.render_initial(&first).left, "first");
+        assert_eq!(settled(&mut renderer, &first).left, "first");
         renderer.forget(ClientId(1));
         std::fs::write(&source, "second\n").expect("the second value is written");
         let mut second = request(2, &format, "");
         second.context.session_path = cwd.to_string_lossy().into_owned();
 
-        assert_eq!(renderer.render_initial(&second).left, "first");
+        assert_eq!(settled(&mut renderer, &second).left, "first");
         assert_eq!(renderer.shell_cache.len(), 1);
     }
 
@@ -2620,13 +2873,13 @@ mod tests {
         first.facts.client = Some(ClientFormatFacts::default());
         let mut renderer = StatusRenderer::default();
 
-        assert_eq!(renderer.render_initial(&first).left, "first");
+        assert_eq!(settled(&mut renderer, &first).left, "first");
         std::fs::write(&source, "second\n").expect("the second value is written");
         let mut second = request(2, &format, "");
         second.context.session_path = cwd.to_string_lossy().into_owned();
         second.facts.client = Some(ClientFormatFacts::default());
 
-        assert_eq!(renderer.render_initial(&second).left, "second");
+        assert_eq!(settled(&mut renderer, &second).left, "second");
         assert_eq!(renderer.shell_cache.len(), 2);
         renderer.forget(ClientId(1));
         assert_eq!(renderer.shell_cache.len(), 1);
@@ -2634,7 +2887,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn status_command_cache_prunes_working_directories_no_client_uses() {
+    fn status_command_cache_prunes_clients_missing_from_a_full_refresh() {
         let directory = tempfile::tempdir().expect("working directory fixture");
         let first_cwd = directory.path().join("first");
         let second_cwd = directory.path().join("second");
@@ -2644,18 +2897,24 @@ mod tests {
         let second_cwd = std::fs::canonicalize(second_cwd).expect("second cwd resolves");
         let mut first = request(1, "#(pwd -P)", "");
         first.context.session_path = first_cwd.to_string_lossy().into_owned();
+        first.facts.client = Some(ClientFormatFacts::default());
         let mut second = request(2, "#(pwd -P)", "");
         second.context.session_path = second_cwd.to_string_lossy().into_owned();
+        second.facts.client = Some(ClientFormatFacts::default());
         let mut renderer = StatusRenderer::default();
 
         renderer.render_changed(&[first, second], true);
         assert_eq!(renderer.shell_cache.len(), 2);
         let mut remaining = request(1, "#(pwd -P)", "");
         remaining.context.session_path = first_cwd.to_string_lossy().into_owned();
+        remaining.facts.client = Some(ClientFormatFacts::default());
         renderer.render_changed(&[remaining], true);
 
         assert_eq!(renderer.shell_cache.len(), 1);
-        assert_eq!(renderer.shell_cache.keys().next().unwrap().1, first_cwd);
+        assert_eq!(
+            renderer.shell_cache.keys().next().unwrap().0,
+            ShellCacheScope::Attached(ClientId(1))
+        );
     }
 
     #[cfg(unix)]
@@ -2689,7 +2948,7 @@ mod tests {
             .to_string_lossy()
             .into_owned();
 
-        let status = StatusRenderer::default().render_initial(&status_request);
+        let status = settled(&mut StatusRenderer::default(), &status_request);
 
         assert_eq!(
             status.left,
@@ -2764,7 +3023,7 @@ mod tests {
             ..StatusFormats::default()
         };
         post_startup.context.socket_path = socket.to_owned();
-        let status = StatusRenderer::default().render_initial(&post_startup);
+        let status = settled(&mut StatusRenderer::default(), &post_startup);
         assert_eq!(
             status.left,
             format!(
@@ -2787,7 +3046,7 @@ mod tests {
         };
         startup.context.socket_path = socket.to_owned();
         startup.startup = true;
-        let status = StatusRenderer::default().render_initial(&startup);
+        let status = settled(&mut StatusRenderer::default(), &startup);
         assert_eq!(
             status.left,
             format!(
@@ -2830,7 +3089,7 @@ mod tests {
         renderer.set_tmux_shim(shim, executable);
 
         assert_eq!(
-            renderer.render_initial(&status_request).left,
+            settled(&mut renderer, &status_request).left,
             format!("status|{socket}")
         );
     }
@@ -2845,7 +3104,7 @@ mod tests {
             renderer
                 .shell_cache
                 .keys()
-                .map(|(_, _, command)| command.as_str())
+                .map(|(_, command)| command.as_str())
                 .collect::<Vec<_>>(),
             ["echo kept"]
         );
@@ -2862,40 +3121,105 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
-    fn only_the_first_output_line_is_used() {
-        assert_eq!(first_line(b"one\ntwo\n"), "one");
-        assert_eq!(first_line(b"trailing \t\n"), "trailing");
-        assert_eq!(first_line(b""), "");
+    fn status_jobs_keep_the_last_line_and_trailing_spaces() {
+        let status = settled(
+            &mut StatusRenderer::default(),
+            &request(1, "#(printf 'one\\ntwo \\t\\n')", "#(printf 'one\\ntail')"),
+        );
+        assert_eq!(status.left, "two \t");
+        assert_eq!(status.right, "tail");
     }
 
+    #[cfg(unix)]
     #[test]
-    fn a_wedged_process_tree_is_killed_and_renders_blank() {
-        #[cfg(unix)]
-        let command = "sleep 30 & wait";
-        #[cfg(windows)]
-        let command = "ping -n 31 127.0.0.1";
-        let context = StatusContext::default();
-        let cwd = status_working_directory(&context);
-
-        let started = Instant::now();
-        assert_eq!(
-            run_shell(
-                command,
-                &context,
-                &cwd,
-                &[],
-                "tmux-256color",
-                false,
-                None,
-                None
+    fn status_jobs_preserve_complete_long_lines_in_the_cache() {
+        let mut renderer = StatusRenderer::default();
+        let expected = format!("{}TAIL", "0".repeat(5000));
+        settled(
+            &mut renderer,
+            &request(
+                1,
+                &format!("#(printf '{expected}\\n')"),
+                &format!("#(printf '{expected}')"),
             ),
-            ""
         );
-        assert!(
-            started.elapsed() < SHELL_TIMEOUT * 3,
-            "the timeout, not the command, bounds the render"
+        assert_eq!(renderer.shell_cache.len(), 2);
+        for entry in renderer.shell_cache.values() {
+            assert_eq!(entry.output.as_deref(), Some(expected.as_str()));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_running_job_publishes_lines_and_is_cancelled_on_forget() {
+        let directory = tempfile::tempdir().expect("job fixture");
+        let release = directory.path().join("release");
+        let format = format!(
+            "#(mkfifo '{}'; printf 'ready\\n'; read token < '{}'; printf 'done\\n')",
+            release.display(),
+            release.display()
         );
+        let mut request = request(1, &format, "");
+        request.facts.client = Some(ClientFormatFacts::default());
+        let mut renderer = StatusRenderer::default();
+        let started = Instant::now();
+        assert!(renderer.render_initial(&request).left.is_empty());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            renderer.poll_jobs();
+            if renderer.render_initial(&request).left == "ready" {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "running job output never published"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        let pid = renderer
+            .shell_cache
+            .values()
+            .next()
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .child
+            .as_ref()
+            .unwrap()
+            .id();
+        renderer.forget(request.client);
+        assert!(renderer.shell_cache.is_empty());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while rustix::process::test_kill_process(
+            rustix::process::Pid::from_raw(pid as i32).unwrap(),
+        )
+        .is_ok()
+        {
+            assert!(
+                Instant::now() < deadline,
+                "cancelled status job was not reaped"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_same_job_in_two_status_formats_runs_once() {
+        let directory = tempfile::tempdir().expect("job count fixture");
+        let count = directory.path().join("count");
+        let format = format!("#(echo run >> '{}'; echo value)", count.display());
+        let mut renderer = StatusRenderer::default();
+        let request = request(1, &format, &format);
+        assert_eq!(renderer.render_forced(&request).left, "");
+        let status = settled(&mut renderer, &request);
+        assert_eq!(status.left, "value");
+        assert_eq!(status.right, "value");
+        assert_eq!(std::fs::read_to_string(count).unwrap(), "run\n");
     }
 }
 

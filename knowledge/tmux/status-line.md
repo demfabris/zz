@@ -5,7 +5,7 @@ description: The daemon expands tmux status formats per client for the cell-fait
 resource: crates/zz-mux/src/formats.rs
 tags: [tmux, status-line, formats, gui, tui, options]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-03
+last_updated: 2026-09-05
 last_updated_by: Claude
 ---
 
@@ -35,8 +35,7 @@ recipient's scope. GUI clients do not read it.
 The **daemon**. Three reasons, strongest first:
 
 1. `#(command)` must run on the daemon's host. Attached clients keep independent cache entries so
-   their session and cwd contexts can differ. Unattached query clients share entries by effective
-   cwd. A client-side expander would run commands on the wrong machine.
+   their session contexts can differ. Unattached query clients share a global job cache. A client-side expander would run commands on the wrong machine.
 2. A client renders; it does not own mux state. `#S` is a daemon fact.
 3. The wire then carries finished text, so the client needs no format engine.
 
@@ -105,7 +104,7 @@ whole body as a variable name, or expands a nested `#{...}` body as plain format
 | `#{S:...}`, `#{W:...}`, `#{P:...}` | expand once per session, window, or pane; an optional second body formats the active row |
 | `#{C:text}`, `#{C/ri:pattern}` | return the one-based visible pane row matching a glob substring or ERE; no match is `0` |
 | `#{R:value,count}` | expand both operands through the recursive engine, then repeat the value `count` times |
-| `#(uptime)` | shell command output, first line only |
+| `#(uptime)` | cached background shell output, latest complete line or final partial line |
 | `#[fg=green,bold]` | style directives, preserved as markers (inner `#{…}`/`#()` expand like the pin); the TUI parses them into styled terminal runs |
 
 The parser accepts semicolon modifier chains and nested bodies. It evaluates modifier arguments
@@ -183,7 +182,8 @@ the startup client cwd, an unattached provenance client's cwd, the selected targ
 invoking client's attached session before falling back to `HOME` and then `/`. Positive-delay jobs
 retain the selected path before the timer and apply the existing-path fallback when the child
 starts. Status jobs use the attached session's retained path. Attached clients keep independent
-command caches, while unattached query clients share entries by effective cwd. Ten focused daemon
+command caches. Cycle 15 replaces the original cwd-keyed unattached cache with the pinned global
+raw-command key; window/pane loop tags remain open in `status.background-jobs`. Ten focused daemon
 shell-job tests and 32 status tests pass. The three-step
 `smoke/jobs-shell-job-cwd` row completes eight checks per engine with no differing channel. The
 attached fixture covers 24 real cases across Interactive and Control clients, `run-shell` and
@@ -428,21 +428,24 @@ Two format rules preserve the status renderer's contract:
 
 # When the status re-renders
 
-| Trigger | `#()` commands |
-| --- | --- |
-| `status-interval` tick | re-run |
-| a mux snapshot changes (rename, split, focus, attach) | reuse matching scope/cwd/command; run on a miss |
-| a `status-*` option changes | reuse matching scope/cwd/command; run on a miss |
-| a client connects | reuse the unattached scope; run on a miss |
+The daemon starts `#()` jobs without waiting for their output. The first expansion returns empty;
+a later expansion can show the pin's `<'command' not ready>` placeholder when a running job has
+produced nothing for more than one second. The sampler drains output without blocking, retains the
+latest complete line and final partial line, and publishes changes even with `status-interval 0`.
+A rerun keeps the previous value visible.
 
-Timer ticks refresh active command keys. Other renders expand strings and start a command only when
-the scope, effective cwd, and command text have no cache entry. Attach and cwd changes can therefore
-run a command before the next tick, while pane-title traffic with unchanged keys stays cached.
+`status-interval` controls each session's periodic expansions. During an expansion, an idle job
+can restart once the wall-clock second differs from its last start or streamed update.
+`refresh-client` bare and `-S` force a restart; changing the expanded command also forces it.
+Identical raw commands in ordinary left and right formats share one job per attached client.
+Unattached clients share a global cache. Detach cancels that client's jobs; unused entries expire
+after an hour. Job cancellation and process reaping do not wait under the status mutex.
 
-`#()` commands are bounded where tmux's are not: 2 seconds, then the child is killed and contributes
-whatever it had already written. A wedged script costs one stale field instead of stalling the
-daemon. The state lock is released before any command runs, and cached output for commands no format
-names any more is dropped on the next tick.
+Window and pane loops still lack the pin's format-tag key. The attached
+`smoke/status-background-jobs` fixture records two jobs for a two-window loop on the pin and one on
+zz. `status.background-jobs` retains that requirement; ordinary left/right sharing does not prove
+loop isolation. Cached job lines retain their full output before format modifiers run; the fixture
+checks the tail of a line longer than 4 KiB on both binaries.
 
 Each status child starts from the modeled global environment rather than the daemon process
 environment. The daemon removes hidden and unset values, uses the modeled PATH for its private tmux
@@ -456,7 +459,7 @@ valid home directory and then `/` when that path does not exist.
 | --- | --- |
 | `crates/zz-mux/src/formats.rs` | The 198-name registry, scope backfill, scalar modifier parser, recursive expander, and `StatusHooks` seam. |
 | `crates/zz-mux/src/status.rs` | `StatusFormats` and `StatusOption` state. |
-| `crates/zz-daemon/src/status.rs` | `StatusRenderer`, strftime, bounded `#()` execution, buffer facts, visible-row search, and per-client diffing. |
+| `crates/zz-daemon/src/status.rs` | `StatusRenderer`, strftime, background `#()` jobs, buffer facts, visible-row search, and per-client diffing. |
 | `crates/zz-daemon/src/daemon.rs` | Pane runtime-fact feeds, buffer-row hooks, `refresh_status`, the sampler thread, and status publication. |
 | `crates/zz-client/src/status.rs` | Cell-accurate row composition, style runs, alignment, list truncation, and semantic hit ranges. |
 | `crates/zz-client/src/status_bar.rs` | Pure native status-bar projection from snapshot data and typed settings. |

@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **45**. Classified items: **430**.
+Tracked gap groups: **46**. Classified items: **431**.
 
-- Status: open: 3, accepted: 42.
-- Decision: adopt: 3, native: 32, never: 10.
-- Priority: now: 3, none: 42.
+- Status: open: 4, accepted: 42.
+- Decision: adopt: 4, native: 32, never: 10.
+- Priority: now: 4, none: 42.
 - Closed history entries: 183.
-- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 43, presentation: 6, protocol: 2.
+- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 44, presentation: 6, protocol: 2.
 
 ## Measured surface
 
@@ -54,6 +54,7 @@ structure as proof.
 | `formats.dead-signal-platform-name` | Match the pinned platform spelling of dead-pane signals | adopt | open | easy | mux | daily, scripts | none |
 | `clients.cli-output-mixed-queue` | Match mixed buffer and printed-line command queues | adopt | open | medium | client | scripts | none |
 | `clients.command-output-pane-prompt` | Preserve command output beneath stock pane search prompts | adopt | open | medium | daemon | daily, scripts | none |
+| `status.background-jobs` | Run cached status shell jobs without blocking clients | adopt | open | hard | daemon | daily, gui, scripts | none |
 
 ## None
 
@@ -943,6 +944,28 @@ One window belongs to one session in zz.
   - `resource:knowledge/designs/tmux-superset-roadmap.md`
 - Acceptance:
   - `The catalog rejects group-only syntax loudly and the divergence matrix keeps the permanent exclusion visible.`
+
+### `status.background-jobs`: Run cached status shell jobs without blocking clients
+
+Implemented 2026-09-05 from retrospective finding 9. Removed proved items semantic:status-shell-jobs-nonblocking, semantic:status-shell-jobs-cached-output and semantic:status-shell-jobs-rerun-cadence. The attached status-background-jobs fixture measured empty draw in 0.301 seconds on zz and 0.034 seconds on pinned d77c9dc6, one shared ordinary left/right job, three-second completion, retained output during ordinary and forced reruns, and changed output on the interval. smoke/refresh-status retains interval-zero and bare/-S refresh coverage. The daemon drains stdout without waiting, publishes completion per client even at interval zero, schedules session intervals independently, and retains the latest complete line or final partial output. format_job_get gates idle starts by fj->last != time(NULL), not by a status-interval comparison inside the job function; streamed updates advance last, completion alone does not. One measured residue remains an adoption requirement. The window-loop fixture starts two jobs for two windows on the pin but one on zz; StatusHooks::shell(command) carries no loop format tag, so fixing the key needs a mux hook extension outside this lane. That residue assertion prints explicit pin/zz expectations and does not normalize output into a parity claim. The cached-output length probe originally drew LIMIT[TAIL] on the pin but LIMIT[0000] on zz because of the inherited 4KiB shell-output bound. The bound is now removed from cached lines, and both engines must draw LIMIT[TAIL] after reading 5000 zeroes followed by TAIL; semantic:status-shell-jobs-output-limit is also proved and removed. The existing StatusLine wire bounds remain enforced after format expansion. No product decision or protocol change was made.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `now` / `hard`
+- Owner: `daemon`
+- User impact: daily, gui, scripts
+- Items: `semantic:status-shell-jobs-format-key`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-daemon/src/status.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `scenario:compat/scenarios/smoke/status-background-jobs.txt`
+  - `file:compat/scenarios/smoke/fixtures/status-background-jobs.py`
+  - `scenario:compat/scenarios/smoke/refresh-status.txt`
+  - `resource:third_party/tmux-reference/UPSTREAM.md`
+- Acceptance:
+  - `Job identity includes the client, format tag and raw command; identical left/right commands share a job, while window and pane loop contexts use independent tags. Changed expanded commands force a restart.`
+  - `Retain the full cached shell-output line before format transformations: a line of 5000 zeroes followed by TAIL, expanded through #{=-4:#{E:status-left}}, draws LIMIT[TAIL] as on the pin.`
 
 ### `terminal.resize-pane-trim`: Keep the scrollback out of the active grid
 

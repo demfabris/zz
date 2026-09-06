@@ -20080,6 +20080,10 @@ impl Shared {
             .into());
         }
         self.close_popup(client, true);
+        let text = text
+            .strip_suffix('\n')
+            .filter(|rest| !rest.is_empty())
+            .unwrap_or(text);
         let text = bounded_command_output(text);
         let (pane, word_separators, terminal_options) = {
             let inner = self.inner.lock();

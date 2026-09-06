@@ -41,9 +41,26 @@ try:
     path.write_text("display-message -p ''\ndisplay-message -p line\ndisplay-message -p ''\n")
     require_bytes(["source-file", str(path)], b"\nline\n\n")
     tmux("set-buffer", "-b", "bytes", "hello")
-    mixed = b"hello\n" if os.environ.get("ZZ_SMOKE_ZZ_BIN") else b"hello"
-    require_bytes(["show-buffer", "-b", "bytes", ";", "display", "-p", ""], mixed)
-    result = "clean:8"
+    require_bytes(["show-buffer", "-b", "bytes", ";", "display", "-p", ""], b"hello")
+    require_bytes(["show-buffer", "-b", "bytes", ";", "display", "-p", "AFTER"], b"hello")
+    require_bytes(["save-buffer", "-b", "bytes", "-", ";", "display", "-p", "AFTER"], b"hello")
+    saved = pathlib.Path(os.environ["HOME"]) / "cli-output-saved"
+    require_bytes(["save-buffer", "-b", "bytes", str(saved), ";", "display", "-p", "AFTER"], b"AFTER\n")
+    if saved.read_bytes() != b"hello":
+        raise AssertionError(("named file write", saved.read_bytes()))
+    for args, expected in (
+        (["display", "-p", "BEFORE", ";", "show-buffer", "-b", "bytes"], b"BEFORE\n"),
+        (["show-buffer", "-b", "bytes", ";", "display", "-p", "AFTER", ";", "show-buffer", "-b", "bytes"], b"hello"),
+        (["display", "-p", "", ";", "show-buffer", "-b", "bytes", ";", "display", "-p", "AFTER"], b"\nAFTER\n"),
+    ):
+        observed = subprocess.run(["tmux", *args], capture_output=True, timeout=15)
+        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
+            raise AssertionError((args, observed.stdout, observed.stderr, observed.returncode))
+    path.write_text("show-buffer -b bytes\ndisplay-message -p AFTER\n")
+    sourced = b"hello\nAFTER\n" if os.environ.get("ZZ_SMOKE_ZZ_BIN") else b"hello"
+    require_bytes(["source-file", str(path)], sourced)
+    print("KNOWN DIVERGENCE cli-output-sourced-stream-ownership: pin=hello, zz=hello LF AFTER LF")
+    result = "clean:15"
 except Exception as error:
     print(repr(error), flush=True)
 finally:

@@ -1,0 +1,10 @@
+corpus: required
+# tpm's prefix I install flow, run for real with no network: the fixture makes a
+# local git repository holding a one-line plugin, names it with @plugin in the
+# staged ~/.tmux.conf, reads the prefix I binding back out of list-keys and runs
+# that exact command. The observables are the cloned tree on disk, the clone's
+# HEAD subject, and the option the plugin sets when tpm sources it on the next
+# config load.
+stage: fixtures/tpm-install-runtime.py ~/tpm-install-runtime.py
+run-shell 'python3 ~/tpm-install-runtime.py'
+out: show-environment -g ZZ_TPM_INSTALL

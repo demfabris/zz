@@ -1,0 +1,13 @@
+corpus: required
+# tmux-fpp's prefix f runtime, with @fpp-path pointing at a stand-in picker. The
+# fixture reads the installed prefix f binding out of list-keys and runs that
+# exact command against a pane whose two lines are known, so the differential is
+# the binding text, the captured pane text the picker was fed on stdin, and the
+# window name and cwd the picker reads from inside the new fpp window.
+# The picker polls for its own cwd on a bounded loop rather than asking once:
+# zz answers #{pane_current_path} empty for a moment after a pane spawns where
+# the pin answers it by the pane's first command, which is
+# semantic:plugin-runtime-fpp-window-lifetime under plugins.runtime-paths.
+stage: fixtures/fpp-runtime.py ~/fpp-runtime.py
+run-shell 'python3 ~/fpp-runtime.py'
+out: show-environment -g ZZ_FPP_RUNTIME

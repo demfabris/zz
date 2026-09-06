@@ -464,10 +464,9 @@ interactive clients as the user has devices. Per-client maps carry the rest:
 - **Runtime source versus native reload.** Runtime `source-file` parses every declared match through
   `load_config_file_with_report_for_terminal_and_options` in declared-path and glob order, then
   replays those matches in the same order, including the active default `zz/mux.conf`. A loud miss marks failure without stopping later matches, and a
-  repeated default, after, default list applies as `DAD`. Only explicit `reload-config` rediscovers
-  the current default candidate, replaces `config_files`, resets `KeyTables`, rebuilds appearance,
-  and reapplies stored mux overrides. Startup retains first-existing default discovery or the
-  ordered explicit `-f` roots. Parse-only and nested source paths keep the ordinary loader contract.
+  repeated default, after, default list applies as `DAD`. Explicit `reload-config` shares startup root selection and replay: discovered tmux files or the
+  retained ordered `-f` roots, followed by the current zz mux layer. It replaces `config_files`,
+  resets `KeyTables`, rebuilds appearance, and reapplies stored mux overrides. Parse-only and nested source paths keep the ordinary loader contract.
 - **Steal.** `attach-session -d` runs `evict_other_clients`: every other client of the target session
   gets `EventPayload::Detached { by: Some(stealer's device name) }` and loses its attachment. A
   command-only client cannot attach but can still evict. Session teardown sends the same event with

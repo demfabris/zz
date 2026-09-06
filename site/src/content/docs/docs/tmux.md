@@ -19,7 +19,8 @@ It then reads your `zz/mux.conf` (normally `~/.config/zz/mux.conf`) so you can
 keep zz-specific overrides there. Duplicate paths load once.
 
 `zz -f <file>` replaces the tmux candidate list with that file; `zz/mux.conf`
-still loads last. Multiple `-f` arguments load in their given order. The
+still loads last. Multiple `-f` arguments load in their given order. Saving in
+Settings reloads the same tmux files and applies your current `zz/mux.conf` last. The
 `import-tmux-config` command now explains this behavior without copying files.
 Your tmux config stays in place, so plugin managers and `source-file ~/.tmux.conf`
 use the same file. `set -g prefix`, key bindings, `history-limit`, `mode-keys`,

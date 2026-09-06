@@ -20,3 +20,6 @@ tmux-only: set-option -g @discovery-layer mux-last
 zz-only: run-shell 'sh ~/config-discovery-import.sh'
 zz-only: source-file -F '#{XDG_CONFIG_HOME}/zz/mux.conf'
 out: show-options -g @discovery-layer
+zz-only: reload-config
+out: list-keys -T prefix
+out: show-options -g @discovery-layer

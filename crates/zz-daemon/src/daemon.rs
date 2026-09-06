@@ -2876,7 +2876,7 @@ struct Shared {
     startup_config_causes: Mutex<Option<Vec<String>>>,
     exit_empty_armed: AtomicBool,
     server_id: u64,
-    load_user_config: bool,
+    mux_config_selection: Mutex<(bool, Option<Vec<PathBuf>>)>,
     paste_directory: PathBuf,
     socket_path: PathBuf,
     #[cfg(test)]
@@ -3944,7 +3944,7 @@ impl Shared {
             startup_config_causes: Mutex::new(None),
             exit_empty_armed: AtomicBool::new(false),
             server_id,
-            load_user_config,
+            mux_config_selection: Mutex::new((load_user_config, None)),
             paste_directory,
             socket_path,
             #[cfg(test)]
@@ -3993,47 +3993,22 @@ impl Shared {
         self.start_silence_deadline_dispatcher()?;
         self.start_client_message_deadline_dispatcher()?;
         let mut context = ExecutionContext::default();
-        let config_files = startup_mux_config_files(
-            load_user_config,
-            mux_config_files,
-            tmux_config_candidates,
-            default_mux_config,
-        );
-        self.inner.lock().config_files = format_config_files(&config_files);
+        *self.mux_config_selection.lock() =
+            (load_user_config, mux_config_files.map(<[PathBuf]>::to_vec));
+        let config_files = self.selected_mux_config_files();
         let mut report = ConfigLoadReport::startup();
-        let explicit_roots = mux_config_files.is_some();
-        let mut parsed_roots = Vec::new();
-        for config in &config_files {
-            if let Some(parsed) =
-                self.parse_startup_config_file(config, &mut report, explicit_roots)
-            {
-                parsed_roots.push((config, parsed));
-            }
-        }
-        let mut source_invocations = SourceInvocationAccounting::Startup { used: 0 };
-        let mut deferred_control_config_warnings = Vec::new();
         self.inner.lock().startup_source_client_working_directory =
             initial_client_working_directory.map(Path::to_owned);
-        let replay_result = (|| {
-            for (config, parsed) in parsed_roots {
-                self.replay_config_file(
-                    config,
-                    parsed,
-                    &mut context,
-                    0,
-                    &mut report,
-                    ClientTerminal::NoClient,
-                    initial_client_working_directory,
-                    &mut source_invocations,
-                    SourceFileLoadOptions::default(),
-                    &mut deferred_control_config_warnings,
-                )?;
-            }
-            Ok::<(), DaemonError>(())
-        })();
+        let replay_result = self.replay_mux_config_files(
+            &config_files,
+            &mut context,
+            &mut report,
+            ClientTerminal::NoClient,
+            initial_client_working_directory,
+            SourceFileLoadOptions::default(),
+        );
         self.inner.lock().startup_source_client_working_directory = None;
         replay_result?;
-        self.publish_deferred_control_config_warnings(deferred_control_config_warnings);
         *self.startup_config_causes.lock() = report.take_startup_causes();
         self.apply_stored_mux_config_overrides("startup-mux-replay");
         let history_settings = {
@@ -23356,6 +23331,61 @@ impl Shared {
         });
     }
 
+    fn selected_mux_config_files(&self) -> Vec<PathBuf> {
+        let selection = self.mux_config_selection.lock();
+        startup_mux_config_files(
+            selection.0,
+            selection.1.as_deref(),
+            tmux_config_candidates,
+            default_mux_config,
+        )
+    }
+
+    fn replay_mux_config_files(
+        self: &Arc<Self>,
+        files: &[PathBuf],
+        context: &mut ExecutionContext,
+        report: &mut ConfigLoadReport,
+        terminal: ClientTerminal,
+        source_client_base: Option<&Path>,
+        options: SourceFileLoadOptions,
+    ) -> Result<(), DaemonError> {
+        self.inner.lock().config_files = format_config_files(files);
+        let explicit = self.mux_config_selection.lock().1.is_some();
+        let mut parsed_roots = Vec::new();
+        for config in files {
+            let parsed = if report.startup_causes.is_some() {
+                self.parse_startup_config_file(config, report, explicit)
+            } else {
+                self.parse_config_file(config, report, options, true)?
+            };
+            if let Some(parsed) = parsed {
+                parsed_roots.push((config, parsed));
+            }
+        }
+        let mut source_invocations = SourceInvocationAccounting::Startup { used: 0 };
+        let mut warnings = Vec::new();
+        let result = (|| {
+            for (config, parsed) in parsed_roots {
+                self.replay_config_file(
+                    config,
+                    parsed,
+                    context,
+                    0,
+                    report,
+                    terminal,
+                    source_client_base,
+                    &mut source_invocations,
+                    options,
+                    &mut warnings,
+                )?;
+            }
+            Ok(())
+        })();
+        self.publish_deferred_control_config_warnings(warnings);
+        result
+    }
+
     fn reload_user_config_with_source_base(
         self: &Arc<Self>,
         client: ClientId,
@@ -23363,15 +23393,10 @@ impl Shared {
         source_client_base: Option<&Path>,
         options: SourceFileLoadOptions,
     ) -> Result<(), DaemonError> {
-        let mux_config = self
-            .load_user_config
-            .then(default_mux_config)
-            .flatten()
-            .filter(|path| path.is_file());
-        self.reload_user_config_with_mux_file_and_source_base(
+        self.reload_user_config_with_files_and_source_base(
             client,
             context,
-            mux_config.as_deref(),
+            &self.selected_mux_config_files(),
             source_client_base,
             options,
         )
@@ -23384,25 +23409,26 @@ impl Shared {
         context: &mut ExecutionContext,
         mux_config: Option<&Path>,
     ) -> Result<(), DaemonError> {
-        self.reload_user_config_with_mux_file_and_source_base(
+        self.reload_user_config_with_files_and_source_base(
             client,
             context,
-            mux_config,
+            &mux_config
+                .into_iter()
+                .map(Path::to_owned)
+                .collect::<Vec<_>>(),
             None,
             SourceFileLoadOptions::default(),
         )
     }
 
-    fn reload_user_config_with_mux_file_and_source_base(
+    fn reload_user_config_with_files_and_source_base(
         self: &Arc<Self>,
         client: ClientId,
         context: &mut ExecutionContext,
-        mux_config: Option<&Path>,
+        config_files: &[PathBuf],
         source_client_base: Option<&Path>,
         options: SourceFileLoadOptions,
     ) -> Result<(), DaemonError> {
-        self.inner.lock().config_files =
-            mux_config.map_or_else(String::new, |path| path.to_string_lossy().into_owned());
         let (kind, color_scheme, appearance_config_overrides, config_client_terminal) = {
             let inner = self.inner.lock();
             let kind = inner
@@ -23425,19 +23451,14 @@ impl Shared {
         log_appearance_load("reload", &load);
         self.inner.lock().engine.keys = KeyTables::default();
         let mut report = ConfigLoadReport::default();
-        let mut source_invocations = SourceInvocationAccounting::Startup { used: 0 };
-        if let Some(config) = mux_config {
-            self.load_config_file_with_report_for_terminal_and_options(
-                config,
-                context,
-                0,
-                &mut report,
-                config_client_terminal,
-                source_client_base,
-                &mut source_invocations,
-                options,
-            )?;
-        }
+        self.replay_mux_config_files(
+            config_files,
+            context,
+            &mut report,
+            config_client_terminal,
+            source_client_base,
+            options,
+        )?;
         self.apply_stored_mux_config_overrides("reload-mux-replay");
         self.route_source_verbose(client, kind, context.pane, report.verbose_lines());
 
@@ -23560,6 +23581,7 @@ impl Shared {
         )
     }
 
+    #[cfg(test)]
     fn load_config_file_with_report_for_terminal_and_options(
         self: &Arc<Self>,
         path: &Path,
@@ -40261,6 +40283,104 @@ mod tests {
     }
 
     #[test]
+    fn reload_config_preserves_discovered_and_explicit_root_bindings() {
+        const CHILD: &str = "ZZ_TEST_CONFIG_RELOAD_ROOTS";
+        if std::env::var_os(CHILD).is_none() {
+            let directory = tempfile::tempdir().expect("scratch home");
+            let home = directory.path();
+            fs::create_dir_all(home.join(".config/zz")).expect("native config directory");
+            fs::write(
+                home.join(".tmux.conf"),
+                "bind-key -T prefix F11 display-message HOME_BINDING\n",
+            )
+            .expect("home binding");
+            fs::write(
+                home.join("explicit.conf"),
+                "bind-key -T prefix F11 display-message EXPLICIT_BINDING\n",
+            )
+            .expect("explicit binding");
+            let mut child = std::process::Command::new(
+                std::env::current_exe().expect("test binary"),
+            )
+            .args([
+                "--exact",
+                "daemon::tests::reload_config_preserves_discovered_and_explicit_root_bindings",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD, "1")
+            .env("HOME", home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .spawn()
+            .expect("isolated reload regression");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let status = loop {
+                if let Some(status) = child.try_wait().expect("poll reload regression") {
+                    break status;
+                }
+                if Instant::now() >= deadline {
+                    child.kill().expect("stop stalled regression");
+                    child.wait().expect("reap stalled regression");
+                    panic!("isolated reload regression stalled");
+                }
+                std::thread::yield_now();
+            };
+            assert!(status.success());
+            return;
+        }
+        let home = PathBuf::from(std::env::var_os("HOME").expect("scratch HOME"));
+        let mux = home.join(".config/zz/mux.conf");
+        for explicit in [false, true] {
+            let roots = explicit.then(|| vec![home.join("explicit.conf")]);
+            let shared = Arc::new(Shared::new(1));
+            shared
+                .initialize_with_mux_config_files(true, roots.as_deref(), None)
+                .expect("startup roots");
+            let mut context = ExecutionContext::default();
+            let expected = if explicit {
+                "EXPLICIT_BINDING"
+            } else {
+                "HOME_BINDING"
+            };
+            for reloading in [false, true] {
+                if reloading {
+                    fs::write(&mux, "bind-key -T prefix F12 display-message MUX_SAVED\n")
+                        .expect("save mux config after startup");
+                    shared
+                        .execute(
+                            ClientId(7),
+                            ClientKind::Command,
+                            &mut context,
+                            &CommandInvocation::new("reload-config", [] as [&str; 0]),
+                        )
+                        .expect("Settings reload command");
+                }
+                let binding = shared
+                    .execute(
+                        ClientId(7),
+                        ClientKind::Command,
+                        &mut context,
+                        &CommandInvocation::new("list-keys", ["-T", "prefix", "F11"]),
+                    )
+                    .expect("root F11 survives reload")
+                    .output;
+                assert!(binding.contains(expected), "{binding}");
+            }
+            let binding = shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("list-keys", ["-T", "prefix", "F12"]),
+                )
+                .expect("saved mux binding")
+                .output;
+            assert!(binding.contains("MUX_SAVED"), "{binding}");
+            fs::remove_file(&mux).expect("reset native layer");
+        }
+    }
+
+    #[test]
     fn reload_config_files_tracks_the_selected_file_or_empty_selection() {
         let directory = tempfile::tempdir().expect("temporary config directory");
         let startup = directory.path().join("startup.conf");
@@ -54044,10 +54164,10 @@ set-option -g @alias-mixed-next yes
             .entry(command)
             .or_default();
         shared
-            .reload_user_config_with_mux_file_and_source_base(
+            .reload_user_config_with_files_and_source_base(
                 command,
                 &mut context,
-                Some(&reload_root),
+                std::slice::from_ref(&reload_root),
                 Some(directory.path()),
                 SourceFileLoadOptions {
                     verbose: true,

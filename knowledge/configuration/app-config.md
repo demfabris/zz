@@ -52,7 +52,9 @@ configuration in place at startup: `/etc/tmux.conf`, `~/.tmux.conf`,
 `$XDG_CONFIG_HOME/tmux/tmux.conf`, then `~/.config/tmux/tmux.conf`, skipping missing files and
 repeated paths. The selected zz-owned `zz/mux.conf` loads last. Explicit `-f` files replace the
 tmux candidate list, in argument order, while `zz/mux.conf` remains the final layer. The tmux
-import entry points now explain discovery without copying or overwriting files.
+import entry points now explain discovery without copying or overwriting files. Settings saves
+request `reload-config`, which replays the same discovery or explicit roots and the current
+zz mux layer, preserving bindings from tmux files.
 
 # Discovery and loading
 

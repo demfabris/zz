@@ -13707,6 +13707,10 @@ fn tmux_signal_name(value: &str) -> String {
             "info" => Some(libc::SIGINFO),
             "usr1" => Some(libc::SIGUSR1),
             "usr2" => Some(libc::SIGUSR2),
+            #[cfg(target_os = "linux")]
+            "pwr" => Some(libc::SIGPWR),
+            #[cfg(target_os = "linux")]
+            "stkflt" => Some(libc::SIGSTKFLT),
             _ => name.parse::<i32>().ok(),
         };
         let Some(signal) = signal else {
@@ -13778,6 +13782,8 @@ fn short_signal_name(value: &str) -> String {
             | "info"
             | "usr1"
             | "usr2"
+            | "pwr"
+            | "stkflt"
     ) {
         return short.to_owned();
     }
@@ -13819,6 +13825,8 @@ fn short_signal_name(value: &str) -> String {
         ("information request", "info"),
         ("user defined signal 1", "usr1"),
         ("user defined signal 2", "usr2"),
+        ("power failure", "pwr"),
+        ("stack fault", "stkflt"),
     ] {
         if lower.starts_with(description) {
             return name.to_owned();
@@ -32592,6 +32600,10 @@ mod tests {
             ("User defined signal 2", "12"),
             ("SIGSTOP", "19"),
             ("31", "31"),
+            ("SIGPWR", "30"),
+            ("Power failure", "30"),
+            ("SIGSTKFLT", "16"),
+            ("Stack fault", "16"),
         ] {
             assert_eq!(tmux_signal_name(value), expected);
         }

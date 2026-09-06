@@ -136,7 +136,17 @@ if [ "$(uname -s)" = Linux ]; then
     check_equal realtime-signal-spelling "$realtime_signal" \
         "$(main_client display-message -p -t "=$session:wrealtime" '#{pane_dead_signal}')"
     check_screen realtime-signal-notice "DEADFMT[][$realtime_signal]" wrealtime
-    expected_count=16
+    for signal_spec in PWR:30 STKFLT:16; do
+        signal_name=${signal_spec%:*}
+        signal_number=${signal_spec#*:}
+        signal_window=w$signal_name
+        main_client new-window -t "=$session" -n "$signal_window" "kill -$signal_name \$\$"
+        await_dead "$signal_window" || { echo "remain-on-exit-format-$side: $signal_window"; exit 0; }
+        check_equal "$signal_name-signal-spelling" "$signal_number" \
+            "$(main_client display-message -p -t "=$session:$signal_window" '#{pane_dead_signal}')"
+        check_screen "$signal_name-signal-notice" "DEADFMT[][$signal_number]" "$signal_window"
+    done
+    expected_count=20
 fi
 
 main_client new-window -t "=$session" -n wzero 'sh -c "exit 0"'

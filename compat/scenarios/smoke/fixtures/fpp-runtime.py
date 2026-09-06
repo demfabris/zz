@@ -1,6 +1,7 @@
 import os
 import pathlib
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -39,14 +40,12 @@ fake = root / "bin/fpp"
 fake.write_text(
     "#!/bin/sh\n"
     "cat > %s\n"
-    "attempt=0\n"
-    "while [ \"$attempt\" -lt 60 ]; do\n"
-    "  seen=$(tmux display-message -p '#{window_name}|#{pane_current_path}' 2>&1)\n"
-    "  case \"$seen\" in *'|/'*) printf '%%s\\n' \"$seen\" > %s; break;; esac\n"
-    "  attempt=$((attempt + 1))\n"
-    "  sleep 0.05\n"
-    "done\n"
-    % (root / "fpp.stdin", root / "fpp.here"))
+    "tmux display-message -p 'ONE|#{window_name}|#{pane_current_path}' > %s 2>&1\n"
+    "tmux display-message -p 'TWO|#{pane_index}' >> %s 2>&1\n"
+    "tmux display-message -p 'THREE|#{session_name}' >> %s 2>&1\n"
+    "tmux display-message -p 'FOUR|#{pane_title}' >> %s 2>&1\n"
+    % (root / "fpp.stdin", root / "fpp.here", root / "fpp.here",
+       root / "fpp.here", root / "fpp.here"))
 fake.chmod(0o755)
 
 try:
@@ -71,13 +70,13 @@ try:
 
     tmux("select-window", "-t", session + ":0")
     tmux("run-shell", "-t", session + ":0.0", "-C", binding)
-    settle(lambda: (root / "fpp.here").read_text().strip()
-           if (root / "fpp.here").exists() else "",
-           "fpp|" + str(root))
+    settle(lambda: len((root / "fpp.here").read_text().splitlines())
+           if (root / "fpp.here").exists() else 0, 4)
     print("FPP_STDIN=" + (root / "fpp.stdin").read_text().strip()
           .replace("\n", " ; "))
     print("FPP_CONTEXT=" + (root / "fpp.here").read_text().strip()
-          .replace(str(root), "<DIR>"))
+          .replace(str(root), "<DIR>").replace(socket.gethostname(), "<HOST>")
+          .replace("\n", " ; "))
     settle(lambda: tmux("list-windows", "-t", session, "-F",
                         "#{window_name}").split(), ["source"])
     print("FPP_WINDOW_CLOSED=True")

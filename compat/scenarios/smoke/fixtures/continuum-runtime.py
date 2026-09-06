@@ -4,6 +4,7 @@ import pathlib
 import pty
 import re
 import shutil
+import socket
 import struct
 import termios
 import subprocess
@@ -63,6 +64,8 @@ try:
     tmux("set-window-option", "-t", session + ":0", "automatic-rename", "off")
     settle(lambda: tmux("display-message", "-p", "-t", session + ":0.0",
                         "#{pane_title}"), "CONTINUUM")
+    tmux("split-window", "-h", "-t", session + ":0.0", "-c", str(root),
+         "exec sleep 600")
     tmux("run-shell", str(resurrect / "resurrect.tmux"))
     tmux("run-shell", str(continuum / "continuum.tmux"))
 
@@ -96,8 +99,14 @@ try:
         re.fullmatch(r"tmux_resurrect_\d{8}T\d{6}\.txt", filename)))
     records = [line for line in last.read_text().splitlines()
                if line.startswith("pane\t" + session + "\t")]
+    host = socket.gethostname()
     print("CONTINUUM_SAVE_PANES=" + "\n".join(
-        record.replace(str(root), "<DIR>") for record in records))
+        record.replace(str(root), "<DIR>").replace(host, "<HOST>")
+        for record in records))
+    print("CONTINUUM_SAVE_PANE_FIELDS=" + ",".join(
+        str(len(record.split("\t"))) for record in records))
+    print("CONTINUUM_SAVE_PANE_TITLES=" + ",".join(
+        record.split("\t")[6].replace(host, "<HOST>") for record in records))
     result = "clean:status-job-and-save-trigger"
 except Exception as error:
     print(repr(error), flush=True)

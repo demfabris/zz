@@ -3696,6 +3696,14 @@ impl MuxEngine {
         self.pane_runtime_facts.get(&pane)
     }
 
+    /// `window.c` seeds a new pane's title from `gethostname`, so a pane that
+    /// has not reported one through OSC 2 answers `#{pane_title}` with the
+    /// server's host name.
+    #[must_use]
+    pub fn default_pane_title(&self) -> &str {
+        &self.format_host
+    }
+
     pub(crate) fn format_host(&self) -> &str {
         &self.format_host
     }

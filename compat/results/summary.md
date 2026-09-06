@@ -221,6 +221,7 @@
 | smoke/pane-colours-palette | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-engine-knobs-input | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-engine-knobs | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-runtime-facts | 2 | yes | 0 | yes | yes | yes |
 | smoke/pane-tmux-path | 3 | yes | 0 | yes | yes | yes |
 | smoke/plugin-runtime-continuum | 2 | yes | 0 | yes | yes | yes |
 | smoke/plugin-runtime-fpp | 2 | yes | 0 | yes | yes | yes |

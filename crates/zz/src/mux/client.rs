@@ -2168,18 +2168,11 @@ impl MuxClient {
         match target {
             ClipboardTarget::Clipboard => cx.write_to_clipboard(item),
             ClipboardTarget::Primary => {
+                if request_id != 0 && self.set_clipboard_writes() {
+                    cx.write_to_clipboard(item.clone());
+                }
                 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-                {
-                    if request_id != 0 && self.set_clipboard_writes() {
-                        cx.write_to_clipboard(item.clone());
-                    }
-                    cx.write_to_primary(item);
-                }
-                #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
-                {
-                    let _ = request_id;
-                    cx.write_to_clipboard(item);
-                }
+                cx.write_to_primary(item);
             }
         }
     }

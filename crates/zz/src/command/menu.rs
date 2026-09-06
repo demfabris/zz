@@ -1,6 +1,6 @@
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke,
-    MouseButton, Render, Window, div, prelude::*, px,
+    MouseButton, MouseDownEvent, Render, ScrollWheelEvent, Window, div, prelude::*, px,
 };
 use zz_client::{MenuKeyResult, resolve_menu_key};
 use zz_protocol::{InputMessage, MenuAction, MenuState};
@@ -52,6 +52,19 @@ impl MenuView {
         self.mux.read(cx).send_input(InputMessage::Menu { action });
     }
 
+    /// `menu_key_cb`'s `MENU_NOMOUSE` arm: a menu raised without `-M` and
+    /// without an invoking mouse event answers only button 1, which it
+    /// swallows, and leaves on any other button with nothing chosen.
+    fn cancel_on_pointer(
+        &mut self,
+        _: &MouseDownEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.send(MenuAction::Cancel, cx);
+        cx.stop_propagation();
+    }
+
     fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         match resolve_keystroke(&self.state, self.selected, &event.keystroke) {
             MenuKeyResult::Action(action) => self.send(action, cx),
@@ -100,8 +113,10 @@ impl Render for MenuView {
                     let selected = self.selected == Some(index);
                     let enabled = item.enabled;
                     let mux = self.mux.clone();
+                    let mouse_keys = self.state.mouse_keys;
                     div()
                         .id(("display-menu-row", index))
+                        .debug_selector(move || format!("display-menu-row-{index}"))
                         .flex_1()
                         .flex()
                         .items_center()
@@ -119,11 +134,13 @@ impl Render for MenuView {
                         })
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-                            mux.read(cx).send_input(InputMessage::Menu {
-                                action: MenuAction::Choose(
-                                    u32::try_from(index).unwrap_or(u32::MAX),
-                                ),
-                            });
+                            if mouse_keys {
+                                mux.read(cx).send_input(InputMessage::Menu {
+                                    action: MenuAction::Choose(
+                                        u32::try_from(index).unwrap_or(u32::MAX),
+                                    ),
+                                });
+                            }
                             cx.stop_propagation();
                         })
                         .child(item.name.clone())
@@ -141,6 +158,20 @@ impl Render for MenuView {
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::on_key_down))
             .on_key_up(|_, _, cx| cx.stop_propagation())
+            .when(!self.state.mouse_keys, |menu| {
+                menu.on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(Self::cancel_on_pointer),
+                )
+                .on_mouse_down(
+                    MouseButton::Middle,
+                    cx.listener(Self::cancel_on_pointer),
+                )
+                .on_scroll_wheel(cx.listener(|menu, _: &ScrollWheelEvent, _, cx| {
+                    menu.send(MenuAction::Cancel, cx);
+                    cx.stop_propagation();
+                }))
+            })
             .children(rows)
     }
 }

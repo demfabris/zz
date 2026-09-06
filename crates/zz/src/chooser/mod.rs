@@ -363,6 +363,7 @@ impl<S: ChooserSpec> Render for Chooser<S> {
             .round_div(
                 div()
                     .id(S::OVERLAY_ID)
+                    .debug_selector(|| S::OVERLAY_ID.to_owned())
                     .absolute()
                     .inset_0()
                     .flex()

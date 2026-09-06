@@ -24,8 +24,8 @@ pub use core::{
 };
 pub use layout::{NormalizedPaneRect, pane_rects};
 pub use menu::{
-    MenuBox, MenuKeyResult, MenuPasteResult, MenuPointerKind, resolve_menu_key, resolve_menu_mouse,
-    resolve_menu_paste,
+    MOUSE_BUTTON_1, MenuBox, MenuKeyResult, MenuPasteResult, MenuPointerKind, resolve_menu_key,
+    resolve_menu_mouse, resolve_menu_paste,
 };
 pub use status::{ComposedStatusRow, StatusHitRange, compose_status_row, compose_status_row_over};
 pub use status_bar::{

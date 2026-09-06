@@ -209,7 +209,7 @@ it for cycle 15, keep the prompts' rules, rewrite the lane batches from the regi
 - The Claude Code harness kills background shell tasks when free memory dips during concurrent
   links; Monitor tasks survive. Three lanes building at once on the 8-core box is the ceiling.
 
-### Cycle 15 (launched 2026-09-05 evening on the ubuntu box)
+### Cycle 15 (2026-09-05 22:40 to 2026-09-06 04:34 on the ubuntu box, integrated)
 
 From the review's "Next cycles" plus the four groups cycle 14 left open. Script:
 `compat/orchestration/codex-compat-run-15.py` (same shape as cycle 14: two Codex lanes at
@@ -248,7 +248,27 @@ The box's real `~/.tmux.conf` (the user's dotfiles) means decision 1 has a footg
 probe and gate server started outside the harness: keep HOME scrubbed or pass `-f /dev/null`,
 as the harness does for both sides.
 
-Cycle 16 stays as the review lays it out (the desktop status row and the proof debt).
+Outcome: both lanes merged (config `fc4f5ded`, status `d59236fc`), stamp at `d59236fc92d2`,
+ledger `43ccc5e4`. Seven groups closed; four stay open with 13 post-freeze items, every one of
+them needing ownership outside the lanes' zones: `clients.cli-output-sourced-mixed-queue`
+(daemon aggregation loses stream boundaries before the CLI writer), `clients.command-output-pane-prompt`
+(MuxEffect::CommandPrompt dismissing the client-local output is a daemon lifecycle decision),
+`control-mode.notifications` (ten measured residues, `%window-close` among them),
+`status.background-jobs` (loop-format job identity needs mux StatusHooks). The reviews and fix
+loops are in CAMPAIGN-LOG.md under "cycle 15 on the ubuntu box".
+
+### Cycle 16
+
+As the review lays it out: lane A the desktop as a tmux client (the GUI status row once the
+product decision is written into the registry, Linux drag-to-CLIPBOARD, the overlay payload
+matrix, the sidebar auto-hide threshold), lane B the proof debt (per-plugin runtime fixtures,
+the census scenarios, the harness holes, slugs for prose-only divergences). Give lane B the
+registry-only halves of the four open groups above, and put the daemon-owned ones
+(`command-output-pane-prompt`, the sourced mixed queue, the status loop-tag identity) into a
+third daemon lane if the box has the cores, otherwise into cycle 17. Fronts need disjoint zones;
+lane A is desktop-gpui, client-core, raw-tui; lane B declares no zones; a daemon lane is
+daemon-core, daemon-status, mux-formats. Copy `codex-compat-run-15.py`, keep the reviewer target
+sharing, add "never run bare `tmux` without -L" to COMMON.
 
 ### Two things the closing cycles taught
 

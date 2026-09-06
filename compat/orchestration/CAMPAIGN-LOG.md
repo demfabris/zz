@@ -522,6 +522,56 @@ The bounded rebase check passed zz package tests and a fresh build, then six str
 buffers/terminal scenarios. `--check-summary` prints summary current with three post-stamp
 crate commits warned under the owner's revised rule.
 
+## 2026-09-05/06: cycle 15 on the ubuntu box, the second Codex cycle (22:40 to 04:34)
+
+Launched from the layout commit with two fresh worktrees and cold targets; both workers compiled
+first and were productive inside 35 minutes. Lanes at medium reasoning on the default tier, the
+orchestrator `codex-compat-run-15.py`, run dir `~/dev/zz-run-15`.
+
+- 22:40 launch. 23:36 config worker done in 55 min with all three groups closed. 23:48 its review
+  REJECTED in 12 minutes (the reviewer shared the worker's target, so it skipped the cold build):
+  reload-config rebuilt the key tables from mux.conf alone and erased every binding discovered from
+  the tmux files, and Settings runs reload-config after each save. Resumed worker session 23:49 to
+  00:08 fixed it (startup and reload share one root selection, F11 regression test). Re-review
+  00:08 to 00:28: approve-with-fixes (two registry records contradicted each other about the pane
+  wrapper).
+- 23:58 status worker done in 78 min: four groups closed with recorded residues, the stock
+  command-output prompt lifecycle left open as a daemon lifecycle change outside its zones. 00:20
+  review REJECTED: `DATE[#(date +%s%N)]` never rendered on zz (completion polled once a second and
+  cached under a stale key) and a pre-existing scenario, control-eof-drain, regressed with an extra
+  `%layout-change` while an EOF'd control client drained. Resumed session 00:20 to 01:11 fixed both
+  and measured the premise wrong: the pin strftime-expands `%s` inside `#()` before the shell runs,
+  so that job's key changes every second. Re-review 01:11 to 01:35: approve-with-fixes (unnamed
+  Linux signals still spelled by description, stale registry references).
+- 01:36 to 04:34 gate, alone: config `fc4f5ded` at 02:20 (fast-forward), status `d59236fc` at
+  03:03 (rebased), stamped full run without retries, ledger `43ccc5e4` at 04:32. The gate's own
+  follow-ups were the two must-fixes.
+
+Four rejects or must-fixes, all real; two were regressions no lane test covered (reload, EOF drain)
+and one a wrong close (signal spelling). Each fix loop cost about an hour and fifty minutes of
+worker plus re-review time. Total wall clock 5h54, of which the gate was three hours.
+
+Tooling lessons, in addition to cycle 14's:
+
+- Board fronts must carry disjoint zones; an overlap makes the second claim fail with "zones busy".
+  The status front was withdrawn and re-fronted as `-V2` with the daemon.rs, lib.rs and command.rs
+  hunks declared as excursions in its notes.
+- Reviewers get a worktree without a build and `CARGO_TARGET_DIR` pointing at the worker's target
+  (the worker is finished by then). Reviews took 12 to 24 minutes instead of a cold build each, and
+  review worktrees are free to delete.
+- The orchestrator's renew loop shortens the 10h launch leases to 4h and renews MAIN unheld (a void
+  comment). When stages are driven by hand after killing the orchestrator, run a renew loop per lock
+  front.
+- The restart pattern from cycle 14 held: kill the python orchestrator, resume the worker's Codex
+  session with a fix prompt via `codex exec resume … -o worker-<lane>.json`, merge the fix report
+  with the first pass so the gate sees the whole lane, `--stage work --lane <lane>` for the
+  re-review with the old review JSON moved aside, `--stage gate` once both lanes hold an approve.
+- A worker's early probe ran a bare `tmux set-environment -g` against the default socket; no server
+  was running there, and only its own report disclosed it. Prompts should forbid bare `tmux` without
+  `-L` outright.
+- Deleting the eight closed worktrees and the gate target's incremental cache freed 234G before
+  launch; the cold rebuild cost about 30 minutes per lane.
+
 ### 2026-09-05 cycle-15 integration
 
 Codex gpt-6-astra lanes ran at medium reasoning on the default tier on Ubuntu. One integration

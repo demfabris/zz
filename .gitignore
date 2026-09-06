@@ -38,3 +38,4 @@
 node_modules/
 .astro/
 crash.log
+__pycache__/

@@ -1,4 +1,4 @@
-# Current handoff: cycle 15 integrated
+# Current handoff: cycle 16 integrated
 
 Cycle 15 landed config `fc4f5ded`, then status `d59236fc`, through one Codex gpt-6-astra gate
 running alone on Ubuntu. The lanes used medium reasoning on the default tier. The full run at
@@ -257,29 +257,64 @@ them needing ownership outside the lanes' zones: `clients.cli-output-sourced-mix
 `status.background-jobs` (loop-format job identity needs mux StatusHooks). The reviews and fix
 loops are in CAMPAIGN-LOG.md under "cycle 15 on the ubuntu box".
 
-### Cycle 16
+### Cycle 16 (2026-09-06 08:42 to 17:41 on the ubuntu box, integrated)
 
-Two decisions from fabrico on 2026-09-06, before launch. First, the desktop owns its status bar
-and does not replicate tmux's: recorded as `presentation:gui-status-row-native` under
-`presentation.native-status`, so the GUI status row is off the table and no front carries it.
-Second, every agent this cycle is Opus 5 at xhigh, not Codex: the cycle runs as a Claude Code
-workflow script again, `opus-compat-run-16.js` in the shape of `opus-compat-run-13.js` (lanes
-pipelined into their reviewers, one bounded fix pass by a fresh agent when a review rejects, then
-a re-review, then the serialized gate). The script cannot run timers, so the lock fronts are
-claimed with 14h leases at launch instead of a renew loop; the proof lane builds nothing and tests
-the gate's warm `zz-gate-target/debug/zz`.
+Run as a Claude Code workflow, `compat/orchestration/opus-compat-run-16.js`, every agent Opus 5 at
+xhigh: three lanes pipelined into their reviewers, a fix pass wired for a reject (none fired, all
+three reviews came back approve-with-fixes), then one serialized gate. Worktrees `zz-lane-desktop`,
+`zz-lane-proof`, `zz-lane-daemon` and `zz-review-*` are left in place; the gate's own worktrees are
+gone and `zz-gate-target` stays warm. Locks F-DESKTOP-TMUX-CLIENT, F-PROOF-DEBT and
+F-DAEMON-OPEN-GROUPS were claimed with 14h leases at launch (a workflow cannot run a renew loop)
+and all read INTEGRATED. Run id `wf_984520e7-b4d`; the journal under the session's
+`subagents/workflows/` directory carries every agent's full report.
 
-As the review lays it out, minus the status row: lane A the desktop as a tmux client (Linux
-drag-to-CLIPBOARD, the overlay payload matrix, the sidebar auto-hide threshold; the row's 180 min
-are free, and the review's leftovers inside lane A's zones are `clock-mode` and `choose-client`),
-lane B the proof debt (per-plugin runtime fixtures, the census scenarios, the harness holes, slugs
-for prose-only divergences). Give lane B the registry-only halves of the four open groups above,
-and put the daemon-owned ones (`command-output-pane-prompt`, the sourced mixed queue, the status
-loop-tag identity) into a third daemon lane if the box has the cores, otherwise into cycle 17.
-Fronts need disjoint zones; lane A is desktop-gpui, client-core, raw-tui; lane B declares no
-zones (compat-registry); the daemon lane is daemon-core, daemon-status, mux-formats,
-control-client, with `lib.rs`'s output writer and one attached-fixture probe declared as its
-excursions. Reviewers share the worker's target; COMMON forbids a bare `tmux` without -L.
+Decisions: fabrico's, recorded before launch, that the desktop owns its status bar
+(`presentation:gui-status-row-native`); two delegated to the orchestrator inside the lanes and
+recorded as reversible, that a Linux drag selection also goes to CLIPBOARD unless `set-clipboard`
+is off, and that the raw TUI hides its sidebar below 109 columns so an 80x24 terminal gets the
+pin's 80-column pane.
+
+Outcome: daemon `b547b29e` (all four cycle-15 leftovers: the search prompt keeps the command
+output, status jobs keyed by loop tag, sourced stdout ownership, five of ten control residues,
+window-add and window-close relocated under sessions.linked-groups), desktop `b6732f05` (drag
+selection to CLIPBOARD, the gpui overlay consumer matrix, the sidebar at 80 columns), proof
+`6edc5c7e` (seven plugin runtime paths, `compat/census.py` with the option and hook census
+closed, six of seven harness holes, prose slugs and pin citations), records `62aa597c`. Stamped
+full run PASS at `6edc5c7ec425`: 249 scenarios, 3,073 steps, no retries. Meter 304/304; fourteen
+post-freeze items across eight open groups, listed in the cycle 17 section.
+
+What the reviews caught, all fixed at the gate: the sourced-stdout close asserted a once-only claim
+the code kept per frame; the NOMOUSE menu close was derived from the press half of `menu_key_cb`
+only and the new test asserted the divergence; a prose-citation rule that aborted every tool on a
+tree without `compat/.cache`; a vacuous buffer-limit observable; two citations of a file the pinned
+tree does not have. What only the gate caught: both code lanes were red on `cargo test -p zz`
+(the `cli_binary` and `control_mode` integration tests), which neither the lanes nor the reviewers
+ran. The sidebar change exposed that the raw TUI paints `status-left` only inside the sidebar,
+registered as `presentation:tui-status-left-needs-the-sidebar` instead of hidden.
+
+### Cycle 17
+
+Fourteen items, eight groups, by owner. Daemon lane (daemon-core, control-client, protocol-message
+if the wire field is taken): `clients.cli-output-sourced-raw-newline-claim` (the claim kind must
+ride the response explicitly, a wire change), the three `control-mode.notifications` residues
+(environment expansion, the `%1:pause` parse error, the after-rename hook order), the pane-spawn
+halves of `plugins.runtime-paths` (`nested-command-target`, `fpp-window-lifetime`), and the ten
+dead-code items `cargo clippy -p zz-tui --all-targets -- -D warnings` reports inside zz-daemon.
+Client lane (client-core, raw-tui, desktop-gpui): `semantic:tui-copy-selection-osc52-field`
+(wants the same wire field), `tui.sidebar-auto-hide`'s two rows and its missing `status-left`,
+`presentation:gui-menu-mouse-policy`, oh-my-tmux's `prefix y` fixture. Proof lane (compat-registry,
+no cargo): the format census remainder, `harness-theme-steering`, `resurrect-record-shape`, and
+the iTerm2 hour stays fabrico's. Give the wire field to ONE lane and let the other consume it
+after the gate, or run them serially.
+
+Runner changes before launching: any lane that touches crates/zz, zz-tui, zz-client, zz-daemon
+or control_mode.rs runs `cargo test -p zz --jobs N` (all targets, the integration tests included)
+before its last commit, and every reviewer runs it too; the gate's inner timeout on the stamped
+full run is at least two hours (it takes about 70 minutes now); the gate rebuilds in the worktree
+under test before spawning any binary from the shared target; `smoke/pane-border-lines` joins the
+known-flake list for shard load; `compat/check.sh` must honour an inherited `CARGO_TARGET_DIR`.
+Copy `opus-compat-run-16.js`; keep disjoint zones and the registry-record ownership lists, they
+merged clean three times.
 
 ### Two things the closing cycles taught
 

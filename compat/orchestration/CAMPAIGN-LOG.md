@@ -667,3 +667,32 @@ policy, the status block's two rows and its missing `status-left`, four plugin r
 measurements awaiting owners, the format census remainder, and harness theme steering. A one-hour
 real iTerm2 session remains a maintainer validation. All three lane locks were integrated and
 released; MAIN owns the records settlement, and TRIAGE preserves the F-SPLIT-MUX-*-V5 chain.
+
+## 2026-09-06: cycle 16 on the ubuntu box, back on Opus 5 through the Workflow tool (08:42 to 17:41)
+
+Fabrico set two things before launch: the desktop keeps its native status bar (recorded on
+`presentation.native-status` as `presentation:gui-status-row-native`, commit `5235ef46`), and the
+cycle runs on Opus 5 at xhigh rather than Codex. The runner went back to the workflow-script shape of
+cycles 5 to 13, `opus-compat-run-16.js`, with one addition: a fix stage by a fresh agent between a
+rejected review and a re-review, inside the pipeline. It never fired; all three reviews were
+approve-with-fixes and the gate applied the fixes.
+
+Timeline (local): desktop worker 08:42 to 09:39, review approve-with-fixes at 10:05 (the NOMOUSE
+menu close); proof worker to 10:31, review at 10:57 (four must-fixes, the citation rule among
+them); daemon worker to 12:02, review at 12:40 (the once-only stdout claim). Gate 12:40 to 17:41:
+daemon integrated by 13:40 with two fixes of its own, desktop at 14:08 after the menu fix and three
+red `cli_binary` status tests, proof at 14:53, then the stamped full run. The first full run died at
+scenario 137 on the gate's own 48-minute inner timeout and was restarted with two hours; the second
+passed first time (249 scenarios, 3,073 steps, PASS at `6edc5c7ec425`), records `62aa597c` pushed.
+Fabrico pushed `2678806e` to main mid-cycle; the daemon rebase took it cleanly.
+
+Lessons for the runner. Workers and reviewers never ran `cargo test -p zz`, so the integration
+tests under crates/zz/tests were the gate's to discover red twice; that command joins the worker
+and reviewer rules. Three lanes with declared, disjoint registry records merged with nothing but
+generated `gaps.md` conflicts, so the ownership lists in the batch prompts are worth their length.
+The proof lane building nothing and testing the gate's warm binary worked and freed the cores for
+two cold builds. A shared gate target means `target/debug/zz` is whichever worktree built last;
+rebuild before spawning. A journal watch armed by the orchestrator had a shell-quoting bug and
+never fired; it did not matter because the gate handled the fixture-changed summary failure on its
+own, but a monitor's script belongs in a file, not an inline `python -c`. `compat/__pycache__`
+was tracked and rewritten by every board call; untracked in the close-out commit.

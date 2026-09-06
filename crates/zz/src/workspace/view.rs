@@ -11,9 +11,10 @@ use std::{
 use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
     Corners, CursorStyle, DragMoveEvent, Entity, EntityId, FocusHandle, IntoElement, KeyUpEvent,
-    Keystroke, MouseButton, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render,
-    Size, StyleRefinement, Window, div, ease_out_quint, prelude::*, px,
+    Keystroke, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels,
+    Point, Render, Size, StyleRefinement, Window, div, ease_out_quint, prelude::*, px,
 };
+use zz_client::MenuPointerKind;
 use zz_mux::{display_width, joined_layout, swapped_layout};
 use zz_protocol::{
     AgentCommand, Axis, ClientMessageKind, CommandInvocation, DisplayPanesAction, GuiResponse,
@@ -2014,6 +2015,58 @@ impl AppView {
         cx.stop_propagation();
     }
 
+    /// A pointer report that lands outside the menu's own surface. `menu.c`
+    /// gives `menu_key_cb` every mouse report while the menu owns the client's
+    /// overlay, so the reports the menu's occluding surface never sees have to
+    /// reach it too: that is where a release closes a menu that is not
+    /// stay-open, and where any press closes one that is.
+    fn route_menu_pointer(
+        &mut self,
+        kind: MenuPointerKind,
+        buttons: u8,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(menu) = self.menu.clone() else {
+            return;
+        };
+        menu.update(cx, |menu, cx| {
+            menu.pointer(kind, buttons, position, window, cx);
+        });
+        cx.stop_propagation();
+    }
+
+    fn on_menu_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.route_menu_pointer(
+            MenuPointerKind::Press,
+            crate::command::menu::press_buttons(event.button),
+            event.position,
+            window,
+            cx,
+        );
+    }
+
+    fn on_menu_mouse_up(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.route_menu_pointer(
+            MenuPointerKind::Release,
+            crate::command::menu::RELEASE_BUTTONS,
+            event.position,
+            window,
+            cx,
+        );
+    }
+
     fn on_split_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         if event.button != MouseButton::Left {
             return;
@@ -2819,6 +2872,8 @@ impl Render for AppView {
                         || !crate::theme::chrome_blur(cx),
                     |surface| surface.bg(gap_background),
                 )
+                .capture_any_mouse_down(cx.listener(Self::on_menu_mouse_down))
+                .capture_any_mouse_up(cx.listener(Self::on_menu_mouse_up))
                 .capture_any_mouse_up(cx.listener(Self::on_split_mouse_up))
                 .capture_any_mouse_up(cx.listener(Self::on_pane_mouse_up))
                 .on_mouse_exit(cx.listener(Self::on_pane_mouse_exit)),
@@ -4282,6 +4337,225 @@ mod tests {
                 }
             )),
             "a menu that took the mouse still chooses the row under button 1: {:?}",
+            input.borrow()
+        );
+    }
+
+    /// A workspace with one pane and a `display-menu` up, plus the input queue
+    /// the daemon would have received. `mouse_keys` is the pin's `MENU_NOMOUSE`
+    /// flag inverted: true is a menu that took the mouse.
+    fn menu_mouse_fixture(
+        cx: &mut TestAppContext,
+        mouse_keys: bool,
+        stay_open: bool,
+    ) -> (Rc<RefCell<Vec<InputMessage>>>, &mut gpui::VisualTestContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let input_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let captured_input = Rc::clone(&input_slot);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("menu mouse".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+            captured_mux.replace(Some(mux.clone()));
+            captured_input.replace(Some(input));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        let input = input_slot.borrow().clone().expect("captured input");
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
+        });
+        cx.run_until_parked();
+
+        let mut state = menu_state_for_test();
+        state.mouse_keys = mouse_keys;
+        state.stay_open = stay_open;
+        state.height = 5;
+        state.items = (0..3)
+            .map(|index| {
+                Some(zz_protocol::MenuItem {
+                    name: format!("Item {index}"),
+                    key: None,
+                    annotation: None,
+                    enabled: true,
+                })
+            })
+            .collect();
+        state.selected = None;
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: zz_protocol::EventPayload::Menu { state: Some(state) },
+                }),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        input.borrow_mut().clear();
+        (input, cx)
+    }
+
+    fn menu_chose(input: &Rc<RefCell<Vec<InputMessage>>>, index: u32) -> bool {
+        input.borrow().iter().any(|message| {
+            matches!(
+                message,
+                InputMessage::Menu {
+                    action: zz_protocol::MenuAction::Choose(chosen)
+                } if *chosen == index
+            )
+        })
+    }
+
+    fn menu_cancelled(input: &Rc<RefCell<Vec<InputMessage>>>) -> bool {
+        input.borrow().iter().any(|message| {
+            matches!(
+                message,
+                InputMessage::Menu {
+                    action: zz_protocol::MenuAction::Cancel
+                }
+            )
+        })
+    }
+
+    /// `menu_key_cb`: a report inside the box that neither chooses nor closes
+    /// sets `md->choice` to `m->y - (md->py + 1)`, so a bare motion moves the
+    /// highlight and nothing else. Enter then chooses the row the highlight
+    /// sits on, which is how this reads the highlight without asking the view
+    /// for its private state.
+    #[gpui::test]
+    fn a_mouse_menu_moves_its_highlight_under_a_motion(cx: &mut TestAppContext) {
+        let (input, cx) = menu_mouse_fixture(cx, true, false);
+        let row = cx
+            .debug_bounds("display-menu-row-2")
+            .expect("the menu drew its third row");
+
+        cx.simulate_mouse_move(row.center(), None, Modifiers::default());
+        assert!(
+            !menu_cancelled(&input) && input.borrow().is_empty(),
+            "a motion neither chooses nor closes: {:?}",
+            input.borrow()
+        );
+
+        cx.simulate_keystrokes("enter");
+        assert!(
+            menu_chose(&input, 2),
+            "Enter chooses the row the motion highlighted: {:?}",
+            input.borrow()
+        );
+    }
+
+    /// `menu_key_cb`: for a menu that is not stay-open, `!move && MOUSE_RELEASE`
+    /// inside the box goes to `chosen`, and `chosen` reads `md->choice`, which
+    /// the release never sets. So the release chooses the row the highlight
+    /// already sits on, not the row it lands on, and a press on its own only
+    /// moves the highlight there.
+    #[gpui::test]
+    fn a_release_inside_a_mouse_menu_chooses_the_highlighted_row(cx: &mut TestAppContext) {
+        let (input, cx) = menu_mouse_fixture(cx, true, false);
+        let highlighted = cx
+            .debug_bounds("display-menu-row-2")
+            .expect("the menu drew its third row");
+        let landed_on = cx
+            .debug_bounds("display-menu-row-0")
+            .expect("the menu drew its first row");
+
+        cx.simulate_mouse_down(landed_on.center(), MouseButton::Left, Modifiers::default());
+        assert!(
+            input.borrow().is_empty(),
+            "the press only moves the highlight: {:?}",
+            input.borrow()
+        );
+
+        cx.simulate_mouse_move(highlighted.center(), None, Modifiers::default());
+        cx.simulate_mouse_up(landed_on.center(), MouseButton::Left, Modifiers::default());
+        assert!(
+            menu_chose(&input, 2),
+            "the release chooses the highlighted row: {:?}",
+            input.borrow()
+        );
+        assert!(
+            !menu_chose(&input, 0),
+            "and not the row it landed on: {:?}",
+            input.borrow()
+        );
+    }
+
+    /// `menu_key_cb`: outside the box, a menu that is not stay-open closes on
+    /// `!move && MOUSE_RELEASE` and on nothing else, so the press that opened
+    /// the way to it leaves the menu up.
+    #[gpui::test]
+    fn a_release_outside_a_mouse_menu_closes_it_and_a_press_does_not(cx: &mut TestAppContext) {
+        let (input, cx) = menu_mouse_fixture(cx, true, false);
+        let menu = cx
+            .debug_bounds("display-menu")
+            .expect("the menu drew its box");
+        let outside = gpui::point(menu.origin.x - px(24.0), menu.center().y);
+
+        cx.simulate_mouse_down(outside, MouseButton::Left, Modifiers::default());
+        assert!(
+            !menu_cancelled(&input),
+            "a press outside leaves the menu up: {:?}",
+            input.borrow()
+        );
+        cx.simulate_mouse_up(outside, MouseButton::Left, Modifiers::default());
+        assert!(
+            menu_cancelled(&input),
+            "a release outside closes the menu: {:?}",
+            input.borrow()
+        );
+        assert!(
+            !menu_chose(&input, 0) && !menu_chose(&input, 1) && !menu_chose(&input, 2),
+            "closing outside the box chooses nothing: {:?}",
+            input.borrow()
+        );
+    }
+
+    /// `menu_key_cb`: with `MENU_STAYOPEN` the outside arm inverts. It closes on
+    /// any report that is neither a release, a wheel nor a drag, so the press
+    /// that leaves a plain menu up closes this one, and the wheel that closes
+    /// nothing still closes nothing.
+    #[gpui::test]
+    fn a_stay_open_menu_closes_outside_on_a_press_and_not_on_a_wheel(cx: &mut TestAppContext) {
+        let (input, cx) = menu_mouse_fixture(cx, true, true);
+        let menu = cx
+            .debug_bounds("display-menu")
+            .expect("the menu drew its box");
+        let outside = gpui::point(menu.origin.x - px(24.0), menu.center().y);
+
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: outside,
+            delta: gpui::ScrollDelta::Lines(gpui::point(0.0, -1.0)),
+            modifiers: Modifiers::default(),
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+        assert!(
+            !menu_cancelled(&input),
+            "a wheel outside a stay-open menu leaves it up: {:?}",
+            input.borrow()
+        );
+
+        cx.simulate_mouse_down(outside, MouseButton::Left, Modifiers::default());
+        assert!(
+            menu_cancelled(&input),
+            "a press outside closes a stay-open menu: {:?}",
             input.borrow()
         );
     }

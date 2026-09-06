@@ -2104,7 +2104,14 @@ mod daemon_autostart {
             ["new-session", "-d", "-s", "stock", "-n", "main"].as_slice(),
             ["set", "-t", "stock", "status-left", "LEFT"].as_slice(),
             ["set", "-t", "stock", "status-right", "RIGHT"].as_slice(),
-            ["setw", "-t", "stock", "window-status-current-format", "CUSTOM"].as_slice(),
+            [
+                "setw",
+                "-t",
+                "stock",
+                "window-status-current-format",
+                "CUSTOM",
+            ]
+            .as_slice(),
         ] {
             let output = fixture.run(arguments);
             assert_eq!(

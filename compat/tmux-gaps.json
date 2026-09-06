@@ -327,35 +327,6 @@
       "reason": "Implemented and measured 2026-09-05 against pinned d77c9dc6 with smoke/control-notify. Removed proved items semantic:control-notify-differential and semantic:layout-change-live-after-refresh. The fixture retains all requested notification kinds plus pane-mode-changed in 44 recorded phases; it validates each original guard tuple before replacing timestamps and block numbers, canonicalizes client names, fixture paths and output ages, and removes only its own marked barrier blocks. Fresh isolated servers make session/window/pane IDs deterministic. Each side must match its full checked-in transcript; equal phases prove parity, while unequal phases remain explicit requirements below. The pin and zz now both emit %layout-change @0 a87d,100x30,0,0,0 a87d,100x30,0,0,0 * after refresh-client -C 100,30. Before the fix zz emitted no line. The switch-client baseline emitted stale b260,80x24,0,0,3 despite the next query returning a880,100x30,0,0,3; the repaired Control path sends the live Attached/snapshot before session-changed and layout-change, matching both the pin line and the subsequent query. Remaining measured bytes: split sends window-pane-changed then layout-change on the pin, reversed on zz (layout-change-order); activity layout ends with #- on the pin and - on zz (layout-flags); pause and continue occur between begin/end on the pin and after end on zz (pause and continue); display-message -p \"$NOTIFY_ENV\" prints EXPANDED on the pin and literal $NOTIFY_ENV on zz (environment-expansion); an after-rename-window flags-0 hook block precedes window-renamed on the pin and follows it on zz (window-renamed-order); unquoted %1:pause produces parse error: syntax error / %error on the pin but succeeds and emits %pause on zz (percent-word); new-session after the copy-mode cancel sequence emits an extra %pane-mode-changed %1 on zz before unlinked-window-add and sessions-changed (pane-mode-changed). Link-window emits %window-add @0 and unlink-window elsewhere emits %window-close @0 on the pin while the window stays in the observer session; zz returns unsupported command: link-window / unlink-window, so window-add/window-close remain open despite pin-derived renderer membership tests. This does not relocate or revise the accepted linked-window command stance. Two old documentation clauses were refuted: both engines emit late bare NOTIFY_WAIT after the run-shell end guard, and both emit a flags-0 after-hook block. Those phases now have parity assertions. The one-hour real iTerm2 -CC session on macOS remains unperformed and maintainer-owned. No protocol change or new native policy was made."
     },
     {
-      "id": "formats.dead-signal-platform-name",
-      "title": "Match the pinned platform spelling of dead-pane signals",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "now",
-      "ease": "easy",
-      "impact": [
-        "daily",
-        "scripts"
-      ],
-      "owner": "mux",
-      "items": [
-        "semantic:dead-pane-signal-platform-name"
-      ],
-      "evidence": [
-        "scenario:compat/scenarios/smoke/remain-on-exit-format.txt",
-        "file:compat/scenarios/smoke/fixtures/remain-on-exit-format.sh",
-        "resource:crates/zz-mux/src/command.rs",
-        "resource:crates/zz-mux/src/formats.rs",
-        "resource:third_party/tmux-reference/UPSTREAM.md"
-      ],
-      "acceptance": [
-        "pane_dead_signal uses the pinned platform spelling: sig2name returns sys_signame[signal] when available, otherwise the decimal signal number; SIGTERM is 15 on this Linux pin and term on macOS.",
-        "The remain-on-exit-format notice embeds that same pinned signal spelling after a signal exit."
-      ],
-      "depends_on": [],
-      "reason": "Measured 2026-09-05 on Ubuntu against pinned tmux d77c9dc6 and zz 6b6171fc with smoke/remain-on-exit-format. The old fixture literal DEADFMT[][term] passes zz and fails the Linux pin, which draws DEADFMT[][15]. This is a real formatter divergence, not a Linux rendering failure: pinned format_cb_pane_dead_signal calls tmux.c sig2name, whose HAVE_SYS_SIGNAME branch uses the libc symbol and whose fallback formats the decimal number. This pin was configured without sys_signame. zz command.rs normalizes SIGTERM/Terminated to term on Unix regardless of that platform branch. The fixture now derives the pin expectation from libc sys_signame availability, explicitly prints the known divergence on both sides, and asserts both the measured formatter spelling and the entire drawn notice. It does not normalize capture output or declare the spelling compatible. No product decision or Rust change was made; this new semantic residue leaves the frozen scope unchanged."
-    },
-    {
       "id": "formats.expansion-budgets",
       "title": "Keep format expansion deterministic",
       "decision": "native",
@@ -2962,6 +2933,20 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "DaemonFormatHooks now carries an optional canonical command-item name after explicit item-state variables, so an explicit `command` override still wins without copying the name into ExecutionContext. execute_with_mux_source_raw passes the resolved entry through the daemon-owned immediate expansion surfaces: run-shell shell and string -C, if-shell conditions, capture-pane -S/-E, pipe-pane shell, list-buffers and list-clients formats and filters, display-popup title/directory/position, display-menu title/items/position, confirm-before string-command preparation, and the post-spawn PaneFormatOutput re-expansion for new-window and split-window -P/-F. Canonical names survive built-in aliases, unique prefixes, and one-layer user aliases. Typed command blocks skip the parent expansion and their children report their own commands; daemon-preempted hook bodies report their own command while retaining the trigger in `#{hook}`. Confirm prompts and delayed refresh-client subscriptions expand outside a queue item and keep `#{command}` empty. Popup argv and environment assignments remain raw. The pinned 24-step strict differential covers shell and -C routes, every resolution spelling, typed blocks, if-shell parent and child routing, hook routing, list-buffers, and both pane-creation print paths with zero TOPO, GEO, FMT, OUT, or WARN differences."
+    },
+    {
+      "id": "formats.dead-signal-platform-name",
+      "title": "Match the pinned platform spelling of dead-pane signals",
+      "closed_on": "2026-09-05",
+      "evidence": [
+        "scenario:compat/scenarios/smoke/remain-on-exit-format.txt",
+        "file:compat/scenarios/smoke/fixtures/remain-on-exit-format.sh",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:third_party/tmux-reference/UPSTREAM.md"
+      ],
+      "resolution": "The old fixture clause DEADFMT[][term] and zz's Unix-wide normalized signal name were refuted by pinned tmux d77c9dc6 on Linux: format_cb_pane_dead_signal calls sig2name, whose no-sys_signame fallback returns decimal 15 for SIGTERM, so the drawn notice is DEADFMT[][15]. The product stance now matches each platform: decimal signal numbers on Linux and libc sys_signame spelling on macOS, exactly as the platform-built pin reports; decided 2026-09-05 by fabrico for cycle 15; reversible. tmux_signal_name now follows that platform distinction, and smoke/remain-on-exit-format asserts the same libc-derived spelling and complete drawn notice on both binaries without a divergence allowance. Linux runtime parity is proved here; macOS runtime validation remains a maintainer check on macOS. The same fixture also kills a Linux pane with SIGRTMIN (34 on this host), requiring pane_dead_signal=34 and DEADFMT[][34]. libc supplies Real-time signal 0 to portable-pty; the formatter now resolves that relative description using SIGRTMIN instead of misreading its suffix as signal zero."
     },
     {
       "id": "formats.modifier-fidelity",

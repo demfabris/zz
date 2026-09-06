@@ -13656,6 +13656,89 @@ fn option_is_unset(options: &Options) -> bool {
 }
 
 fn tmux_signal_name(value: &str) -> String {
+    #[cfg(target_os = "linux")]
+    if let Some(signal) = value
+        .trim()
+        .to_ascii_lowercase()
+        .strip_prefix("real-time signal ")
+        .and_then(|offset| offset.parse::<i32>().ok())
+        .filter(|offset| *offset >= 0)
+        .and_then(|offset| nix::libc::SIGRTMIN().checked_add(offset))
+        .filter(|signal| *signal <= nix::libc::SIGRTMAX())
+    {
+        return signal.to_string();
+    }
+    let name = short_signal_name(value);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use nix::libc;
+
+        let signal = match name.as_str() {
+            "hup" => Some(libc::SIGHUP),
+            "int" => Some(libc::SIGINT),
+            "quit" => Some(libc::SIGQUIT),
+            "ill" => Some(libc::SIGILL),
+            "trap" => Some(libc::SIGTRAP),
+            "abrt" => Some(libc::SIGABRT),
+            #[cfg(target_os = "macos")]
+            "emt" => Some(libc::SIGEMT),
+            "fpe" => Some(libc::SIGFPE),
+            "kill" => Some(libc::SIGKILL),
+            "bus" => Some(libc::SIGBUS),
+            "segv" => Some(libc::SIGSEGV),
+            "sys" => Some(libc::SIGSYS),
+            "pipe" => Some(libc::SIGPIPE),
+            "alrm" => Some(libc::SIGALRM),
+            "term" => Some(libc::SIGTERM),
+            "urg" => Some(libc::SIGURG),
+            "stop" => Some(libc::SIGSTOP),
+            "tstp" => Some(libc::SIGTSTP),
+            "cont" => Some(libc::SIGCONT),
+            "chld" => Some(libc::SIGCHLD),
+            "ttin" => Some(libc::SIGTTIN),
+            "ttou" => Some(libc::SIGTTOU),
+            "io" => Some(libc::SIGIO),
+            "xcpu" => Some(libc::SIGXCPU),
+            "xfsz" => Some(libc::SIGXFSZ),
+            "vtalrm" => Some(libc::SIGVTALRM),
+            "prof" => Some(libc::SIGPROF),
+            "winch" => Some(libc::SIGWINCH),
+            #[cfg(target_os = "macos")]
+            "info" => Some(libc::SIGINFO),
+            "usr1" => Some(libc::SIGUSR1),
+            "usr2" => Some(libc::SIGUSR2),
+            _ => name.parse::<i32>().ok(),
+        };
+        let Some(signal) = signal else {
+            return name;
+        };
+        #[cfg(target_os = "linux")]
+        return signal.to_string();
+        #[cfg(target_os = "macos")]
+        return macos_signal_name(signal);
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    name
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn macos_signal_name(signal: i32) -> String {
+    unsafe extern "C" {
+        static sys_signame: [*const std::ffi::c_char; 32];
+    }
+    if signal > 0 && signal < 32 {
+        let name = unsafe { sys_signame[signal as usize] };
+        if !name.is_null() {
+            return unsafe { std::ffi::CStr::from_ptr(name) }
+                .to_string_lossy()
+                .into_owned();
+        }
+    }
+    signal.to_string()
+}
+
+fn short_signal_name(value: &str) -> String {
     let value = value.trim();
     if value.is_empty() {
         return String::new();
@@ -13704,6 +13787,7 @@ fn tmux_signal_name(value: &str) -> String {
         ("quit", "quit"),
         ("illegal instruction", "ill"),
         ("trace/bpt trap", "trap"),
+        ("trace/breakpoint trap", "trap"),
         ("trace trap", "trap"),
         ("abort trap", "abrt"),
         ("aborted", "abrt"),
@@ -32487,6 +32571,54 @@ mod tests {
     }
 
     #[test]
+    fn dead_signal_spelling_matches_the_platform_pin() {
+        let term = if cfg!(target_os = "linux") {
+            "15"
+        } else {
+            "term"
+        };
+        for value in ["SIGTERM", "term", "Terminated", "Terminated: 15"] {
+            assert_eq!(tmux_signal_name(value), term);
+        }
+        assert_eq!(tmux_signal_name(""), "");
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        assert_eq!(tmux_signal_name("15"), term);
+        #[cfg(target_os = "linux")]
+        for (value, expected) in [
+            ("SIGBUS", "7"),
+            ("Bus error", "7"),
+            ("Trace/breakpoint trap", "5"),
+            ("SIGUSR1", "10"),
+            ("User defined signal 2", "12"),
+            ("SIGSTOP", "19"),
+            ("31", "31"),
+        ] {
+            assert_eq!(tmux_signal_name(value), expected);
+        }
+        #[cfg(target_os = "macos")]
+        for (value, expected) in [("7", "emt"), ("10", "bus"), ("30", "usr1"), ("32", "32")] {
+            assert_eq!(tmux_signal_name(value), expected);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dead_signal_realtime_descriptions_restore_the_signal_number() {
+        let first = nix::libc::SIGRTMIN();
+        let last = nix::libc::SIGRTMAX();
+        for offset in [0, 1, last - first] {
+            assert_eq!(
+                tmux_signal_name(&format!("Real-time signal {offset}")),
+                (first + offset).to_string()
+            );
+        }
+        assert_ne!(
+            tmux_signal_name(&format!("Real-time signal {}", last - first + 1)),
+            (last + 1).to_string()
+        );
+    }
+
+    #[test]
     fn runtime_facts_apply_automatic_window_names_and_dead_signals() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -32556,7 +32688,11 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            "1::term"
+            if cfg!(target_os = "linux") {
+                "1::15"
+            } else {
+                "1::term"
+            }
         );
 
         engine

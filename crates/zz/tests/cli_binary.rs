@@ -235,13 +235,23 @@ mod daemon_autostart {
         }
     }
 
-    #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+    /// Wide enough for the raw TUI's sidebar, which auto-hides below
+    /// `sidebar::AUTO_HIDE_COLUMNS` so that a narrower terminal keeps every
+    /// column for its pane. The sidebar carries `status-left`, so a status
+    /// assertion that reads it has to attach at this width.
+    const SIDEBAR_COLUMNS: u16 = 120;
+
     fn open_pty() -> io::Result<(File, File)> {
+        open_pty_sized(80)
+    }
+
+    #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+    fn open_pty_sized(columns: u16) -> io::Result<(File, File)> {
         let mut master = -1;
         let mut slave = -1;
         let mut size = libc::winsize {
             ws_row: 24,
-            ws_col: 80,
+            ws_col: columns,
             ws_xpixel: 0,
             ws_ypixel: 0,
         };
@@ -2001,7 +2011,7 @@ mod daemon_autostart {
             );
         }
 
-        let Ok((mut master, slave)) = open_pty() else {
+        let Ok((mut master, slave)) = open_pty_sized(SIDEBAR_COLUMNS) else {
             return;
         };
         rustix::io::ioctl_fionbio(&master, true).expect("set pty master nonblocking");
@@ -2070,14 +2080,25 @@ mod daemon_autostart {
     ) -> (bool, Vec<u8>, Option<std::process::ExitStatus>) {
         let mut command = fixture.command();
         command.args(attach);
-        capture_command_until(command, needles)
+        capture_command_until(command, needles, 80)
+    }
+
+    fn capture_tui_until_beside_the_sidebar(
+        fixture: &Fixture,
+        attach: &[&str],
+        needles: &[&[u8]],
+    ) -> (bool, Vec<u8>, Option<std::process::ExitStatus>) {
+        let mut command = fixture.command();
+        command.args(attach);
+        capture_command_until(command, needles, SIDEBAR_COLUMNS)
     }
 
     fn capture_command_until(
         mut command: Command,
         needles: &[&[u8]],
+        columns: u16,
     ) -> (bool, Vec<u8>, Option<std::process::ExitStatus>) {
-        let Ok((mut master, slave)) = open_pty() else {
+        let Ok((mut master, slave)) = open_pty_sized(columns) else {
             return (true, Vec::new(), None);
         };
         rustix::io::ioctl_fionbio(&master, true).expect("set pty master nonblocking");
@@ -2189,7 +2210,7 @@ mod daemon_autostart {
             );
         }
 
-        let (rendered, captured, early_status) = capture_tui_until(
+        let (rendered, captured, early_status) = capture_tui_until_beside_the_sidebar(
             &fixture,
             &["attach-session", "-t", "multirow"],
             &[b"[multirow]", b"ROWTWO"],
@@ -2237,7 +2258,11 @@ mod daemon_autostart {
         }
 
         let (rendered, captured, early_status) =
-            capture_tui_until(&fixture, &["attach-session", "-t", "toppos"], &[b"TOPMARK"]);
+            capture_tui_until_beside_the_sidebar(
+                &fixture,
+                &["attach-session", "-t", "toppos"],
+                &[b"TOPMARK"],
+            );
         assert!(
             rendered,
             "child exited early={early_status:?}; pty output={}",
@@ -3265,7 +3290,7 @@ mod daemon_autostart {
             let mut command = launcher.command(&fixture);
             command.args(arguments);
             let (rendered, captured, early_status) =
-                capture_command_until(command, &[b"\x1b[?1049h"]);
+                capture_command_until(command, &[b"\x1b[?1049h"], 80);
             assert!(
                 rendered,
                 "{name}: child exited early={early_status:?}; pty output={}",
@@ -3314,7 +3339,7 @@ mod daemon_autostart {
             .env("ZZ_BIN", env!("CARGO_BIN_EXE_zz"))
             .env("ZZ_CONF", &fixture.config)
             .env("ZZ_TEST_SOCKET", &fixture.socket);
-        let (rendered, captured, early_status) = capture_command_until(command, &[b"\x1b[?1049h"]);
+        let (rendered, captured, early_status) = capture_command_until(command, &[b"\x1b[?1049h"], 80);
         assert!(
             rendered,
             "child exited early={early_status:?}; pty output={}",
@@ -3397,7 +3422,7 @@ mod daemon_autostart {
             .env(NAME, "ignored")
             .args(["attach-session", "-E", "-t", "=native-attach-e"]);
         let (rendered, captured, early_status) =
-            capture_command_until(preserved, &[b"ZZ_NATIVE_ATTACH_E_READY"]);
+            capture_command_until(preserved, &[b"ZZ_NATIVE_ATTACH_E_READY"], 80);
         if rendered && captured.is_empty() {
             return;
         }
@@ -3416,7 +3441,7 @@ mod daemon_autostart {
             .env(NAME, "refreshed")
             .args(["attach-session", "-t", "=native-attach-e"]);
         let (rendered, captured, early_status) =
-            capture_command_until(refreshed, &[b"ZZ_NATIVE_ATTACH_E_READY"]);
+            capture_command_until(refreshed, &[b"ZZ_NATIVE_ATTACH_E_READY"], 80);
         assert!(
             rendered,
             "ordinary native attach exited early={early_status:?}; output={}",

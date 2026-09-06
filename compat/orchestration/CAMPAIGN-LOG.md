@@ -696,3 +696,36 @@ rebuild before spawning. A journal watch armed by the orchestrator had a shell-q
 never fired; it did not matter because the gate handled the fixture-changed summary failure on its
 own, but a monitor's script belongs in a file, not an inline `python -c`. `compat/__pycache__`
 was tracked and rewritten by every board call; untracked in the close-out commit.
+
+## 2026-09-06: cycle 17 launched at 21:09Z on the ubuntu box and frozen at 23:44Z for a machine shutdown
+
+Four lanes this time, all Opus 5 at xhigh through `opus-compat-run-17.js`: wire (the cycle's only
+protocol bump, 98 to 99, carrying the sourced stdout claim kind, the OSC 52 producer and control
+environment expansion, plus the percent-word parse error and the hook-before-rename order), panes
+(the new `pane.runtime-facts` group the orchestrator split out of `plugins.runtime-paths` before
+launch in records commit `e0987ace`, plus the zz-tui clippy dead code), client (the raw TUI rows and
+status-left, a new `tui.status-row` group from the status-row tool's classes, the desktop menu
+mouse arm) and proof (oh-my-tmux prefix y, the census close by citation, the theme stance). The
+panes lane got a fresh worktree with a btrfs reflink copy of the gate's 70 GB target directory,
+which took 3.5 seconds and gave it a warm dependency cache.
+
+Two and a half hours in, fabrico had to shut the box down. State at the stop: the proof, client and
+panes workers had reported and pushed (`fe917342`, `e8bf4d1b`, `c3a66301`); the proof and client
+reviews had come back approve-with-fixes with one must-fix each (two disclosed divergences without
+slugs; a duplicated `#[test]` attribute); the panes review was 26 tool calls in; the wire worker had
+all three groups committed on a clean tree and was re-running its proofs at tip, minutes from its
+push. The orchestrator pushed the wire tip as `campaign/batch-wire-control-claims-frozen`
+(`fb0dc67f`) as insurance, and after the stop found the worker had amended that commit during its
+proofs, so the clean worktree's tip `711040e6` went up under the real name
+`campaign/batch-wire-control-claims`; the orchestrator stopped the workflow, reaped the agents' servers by pid, released the four
+locks with the state in their reasons, exported the journal's cached reports and reviews to
+`cycle-17-reports.json`, and generated `opus-compat-run-17b.js` from the cycle script with those
+reports inlined, a resume pass for the wire lane, and a shared review target for a machine with no
+warm builds. HANDOFF.md's top section is the resume recipe. Nothing merged; `origin/main` stayed at
+fabrico's `a7ca9482`.
+
+Lessons. A freeze costs one insurance push per unreported lane and a journal export; the Workflow
+journal is the only place a finished worker's report lives, so export it before the machine goes.
+A worker's own push is the last thing it does, after every proof at tip, so a lane that is "done"
+in git is still an hour from reporting when its proofs include the attached fixture and the zz
+suite twice; the next runner could push a `-wip` tip before the proofs and the real name after.

@@ -1,4 +1,70 @@
-# Current handoff: cycle 16 integrated
+# Current handoff: cycle 17 FROZEN mid-flight (2026-09-06 23:44Z), resume it on any machine
+
+Fabrico had to shut the ubuntu box down two and a half hours into cycle 17. Nothing is lost and
+nothing is merged: all four lane branches are on origin, three lanes' reports and two reviews are
+cached in `compat/orchestration/cycle-17-reports.json`, and
+`compat/orchestration/opus-compat-run-17b.js` resumes the cycle from exactly that state. The gate
+never started, so `origin/main` (`a7ca9482`) still carries the pre-cycle registry: 15 post-freeze
+items across 9 open groups, meter 304/304. Fabrico pushed `b0d69603` (set-clipboard off on every
+platform) and `a7ca9482` (session picker) during the cycle; no lane is rebased on them.
+
+| Lane | Branch on origin | Tip | Worker report | Review |
+| --- | --- | --- | --- | --- |
+| wire | `campaign/batch-wire-control-claims` (pushed by the orchestrator from the worker's clean worktree; the worker never reached its own push; `campaign/batch-wire-control-claims-frozen` at `fb0dc67f` is an older pre-amend copy of the same tip, ignore it) | `711040e6` (3 commits: the v99 bump with the sourced stdout claim kind, the OSC 52 producer with the on-only application gating, the three control residues, the last one amended by the worker after its proofs) | none: it was re-running its proofs at tip (zz suite, builds, control scenarios, the attached fixture) when the box froze | none |
+| panes | `campaign/batch-pane-runtime-facts` | `c3a66301` (4 commits: pane.runtime-facts closed, the zz-tui clippy hygiene, a title-seed repair, one racy row dropped) | cached | in progress at the freeze (26 tool calls in); re-run on resume |
+| client | `campaign/batch-tui-status-menu` | `e8bf4d1b` (4 commits: the pin's rows, colour encoding, the menu mouse arm, two box-caused cli_binary reds named) | cached | cached: approve-with-fixes, one must-fix (a duplicated `#[test]` attribute in `crates/zz-tui/src/render.rs`) |
+| proof | `campaign/batch-census-close` | `fe917342` (4 commits: oh-my-tmux prefix y, the census close, the theme stance, records) | cached | cached: approve-with-fixes, one must-fix (two disclosed divergences need slugs: the raw TUI stdin stall under pty backpressure, the buffer-name error text) |
+
+What the reports claim, unverified by any gate: the proof lane closes its three groups (its own
+meter reading 12 items / 6 groups after it alone); the client lane closes `tui.sidebar-auto-hide`
+(the missing row was a per-pane header the raw TUI reserved unconditionally, not the status block,
+and the status-left clause did not reproduce at `e0987ace`, so it is retired as unreproducible and
+the band asserted) and `desktop.overlay-consumers`, and registers `tui.status-row` with one item
+left of the classes it measured (9 of 9 rows differing at the base, 2 of 11 comparisons at its tip);
+the panes lane closes `pane.runtime-facts` with one value-semantics change on an existing wire
+field (`TerminalPresentation.working_directory` now carries the OSC 7 payload verbatim; no type
+change, no bump); the wire lane's three commits close the raw-newline claim, the OSC 52 field and
+the three control residues if its proofs hold. Read `cycle-17-reports.json` for the notes.
+
+Board: the four locks `F-WIRE-CONTROL-CLAIMS`, `F-PANE-RUNTIME-FACTS`, `F-TUI-STATUS-MENU` and
+`F-CENSUS-CLOSE` are RELEASED with the freeze state in their reasons; MAIN and TRIAGE are free.
+Records commit `e0987ace` (the `pane.runtime-facts` split and `opus-compat-run-17.js`) is
+ledgered under MAIN. The agents' leftover servers on this box were reaped by pid; the user's own
+zz daemon and tmux were never touched.
+
+## Resuming cycle 17
+
+1. On a fresh machine, do the "Resuming on another machine" list further down (clone, the two
+   caches, `gh auth login`, the rm-home hook, a holder identity). On the ubuntu box itself nothing
+   is needed: the worktrees `~/dev/zz-lane-{daemon,panes,desktop,proof}` sit clean at the branch
+   tips with warm targets, `~/dev/zz-review-*` are the reviewers' scratch, `~/dev/zz-orch-17` is
+   the orchestrator's read-only checkout, and `~/dev/zz-gate-target` is warm at main's code.
+2. Claim the four locks again under the machine's holder identity, 14h leases, `--branch` the
+   branch names above and `--base e0987ace`.
+3. Run `Workflow({ scriptPath: '<checkout>/compat/orchestration/opus-compat-run-17b.js', args: {...} })`.
+   The script inlines the cached reports and reviews: the panes, client and proof workers are
+   skipped, the proof and client reviews are skipped, the wire lane gets a RESUME worker pass
+   (create the worktree from `campaign/batch-wire-control-claims`, re-run every proof at tip on
+   that machine, push any fix, report), then the wire and panes reviews run, then the
+   gate exactly as `opus-compat-run-17.js` describes it (wire, panes, client, proof; the stamped
+   full run; the records recompute). The `M` defaults are the ubuntu box's paths: on any other
+   machine pass EVERY arg (`root`, `dev`, `holder`, `machine`, `cores`, `workerJobs`,
+   `workerThreads`, `gateJobs`, `gateThreads`, `shards`, `gateZz`, `reviewTarget`, `protected`,
+   `boxNote`, `gitNote`); the macbook's values are in the historical machine notes below
+   (16 cores: 8/4 workers, 16/8 gate, 8 shards; HTTPS origin; bash 3.2; APFS; a live tmux server and
+   `/Applications/zz.app` daemon that no agent may kill). The reviewers fall back to a shared
+   `reviewTarget` build directory when the worker's target does not exist on the machine.
+4. When the gate reports, do the close-out this file describes for cycle 16: verify `origin/main`,
+   the board and `progress.py`, write the CAMPAIGN-LOG orchestrator entry and the next handoff.
+5. To carry the orchestrator session itself, copy `~/.claude/projects/-home-demfabris-dev-zz/`
+   (the session `5b711658-e6a1-4b30-a11a-77510f6f0c70.jsonl`, its directory with the workflow
+   journals, and `memory/`) as "Moving the Claude Code session itself" says; the repository, the
+   board and this file are enough without it.
+
+The earlier handoffs below (cycle 16 integrated, cycle 14, the instrument pass, the machine move)
+are historical context; their operational recipes still apply.
+
+# Earlier handoff: cycle 16 integrated
 
 Cycle 15 landed config `fc4f5ded`, then status `d59236fc`, through one Codex gpt-6-astra gate
 running alone on Ubuntu. The lanes used medium reasoning on the default tier. The full run at

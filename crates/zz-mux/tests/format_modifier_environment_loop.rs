@@ -8,7 +8,9 @@
 
 use std::collections::BTreeMap;
 
-use zz_mux::{FormatClientRow, FormatEnvironRow, StatusContext, StatusHooks, expand_status};
+use zz_mux::{
+    FormatClientRow, FormatEnvironRow, FormatJobTag, StatusContext, StatusHooks, expand_status,
+};
 use zz_protocol::RawText;
 
 fn row(name: &str, value: &str) -> FormatEnvironRow {
@@ -30,7 +32,7 @@ impl StatusHooks for Stores {
         literal.to_owned()
     }
 
-    fn shell(&mut self, _command: &str) -> String {
+    fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
         String::new()
     }
 

@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use zz_mux::{FormatClientRow, StatusContext, StatusHooks, expand_status};
+use zz_mux::{FormatClientRow, FormatJobTag, StatusContext, StatusHooks, expand_status};
 
 struct Roster {
     rows: Vec<FormatClientRow>,
@@ -42,7 +42,7 @@ impl StatusHooks for Roster {
         literal.to_owned()
     }
 
-    fn shell(&mut self, _command: &str) -> String {
+    fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
         String::new()
     }
 

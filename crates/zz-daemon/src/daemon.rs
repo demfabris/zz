@@ -884,7 +884,7 @@ impl StatusHooks for InertFormatHooks<'_> {
         literal.to_owned()
     }
 
-    fn shell(&mut self, _command: &str) -> String {
+    fn shell(&mut self, _command: &str, _tag: &zz_mux::FormatJobTag) -> String {
         String::new()
     }
 

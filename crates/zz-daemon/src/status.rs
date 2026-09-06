@@ -15,8 +15,8 @@ use chrono::Local;
 use glob::{MatchOptions, Pattern};
 use regex::RegexBuilder;
 use zz_mux::{
-    FormatClientRow, FormatEnvironRow, MuxEngine, StatusContext, StatusFormats, StatusHooks,
-    StatusRowVariables, TtyTerm, display_width, expand_status,
+    FormatClientRow, FormatEnvironRow, FormatJobTag, MuxEngine, StatusContext, StatusFormats,
+    StatusHooks, StatusRowVariables, TtyTerm, display_width, expand_status,
 };
 use zz_protocol::{
     ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, RawText, SessionId,
@@ -32,7 +32,7 @@ enum ShellCacheScope {
     Unattached,
 }
 
-type ShellCacheKey = (ShellCacheScope, String);
+type ShellCacheKey = (ShellCacheScope, FormatJobTag, String);
 #[derive(Default)]
 struct ShellCacheEntry {
     expanded: Option<String>,
@@ -543,7 +543,7 @@ impl StatusRenderer {
         self.shell_cache
             .retain(|_, entry| now.saturating_sub(entry.last) < 3600);
         let mut changed = BTreeSet::new();
-        for ((scope, _), entry) in &mut self.shell_cache {
+        for ((scope, _, _), entry) in &mut self.shell_cache {
             if entry.poll()
                 && let ShellCacheScope::Attached(client) = scope
             {
@@ -615,7 +615,7 @@ impl StatusRenderer {
 
     pub(crate) fn forget(&mut self, client: ClientId) {
         self.published.remove(&client);
-        self.shell_cache.retain(|(scope, _), _| {
+        self.shell_cache.retain(|(scope, _, _), _| {
             !matches!(scope, ShellCacheScope::Attached(cached) if *cached == client)
         });
     }
@@ -1255,7 +1255,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         formatted
     }
 
-    fn shell(&mut self, command: &str) -> String {
+    fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String {
         let Some(context) = self.status_context else {
             return String::new();
         };
@@ -1275,7 +1275,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         } else {
             ShellCacheScope::Unattached
         };
-        let key = (scope, command.to_owned());
+        let key = (scope, tag.clone(), command.to_owned());
         let first_reference = touched.insert(key.clone());
         let entry = cache.entry(key).or_default();
         let now = shell_second();
@@ -3056,7 +3056,7 @@ mod tests {
             renderer
                 .shell_cache
                 .keys()
-                .map(|(_, command)| command.as_str())
+                .map(|(_, _, command)| command.as_str())
                 .collect::<Vec<_>>(),
             ["echo kept"]
         );

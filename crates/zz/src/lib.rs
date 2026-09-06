@@ -1230,6 +1230,7 @@ fn run_command_mode(
             return Some(ExitCode::FAILURE);
         }
     };
+    let mut output_writer = CommandOutputWriter::default();
     if let Some(prepared_commands) = prepared_commands {
         let recover_kill = prepared_commands
             .first()
@@ -1245,8 +1246,9 @@ fn run_command_mode(
                     command.canonical_name.as_deref(),
                     Some("save-buffer" | "show-buffer")
                 );
-                print_command_output_with_mode(&outcome.stdout, raw);
+                let status = output_writer.print(&outcome.stdout, raw);
                 print_command_error(&outcome.stderr);
+                status
             },
         ) {
             Ok(exit_code) => Some(ExitCode::from(exit_code)),
@@ -1254,7 +1256,7 @@ fn run_command_mode(
                 Some(recover_kill_server_failure(socket_path, &error))
             }
             Err((_, DaemonError::CommandFailed { output, error })) => {
-                print_command_output(&output);
+                output_writer.print(&output, false);
                 eprintln!("{}", command_error_message(&error));
                 Some(ExitCode::FAILURE)
             }
@@ -1268,7 +1270,7 @@ fn run_command_mode(
         command_chain,
         |command| client.execute_streams(command.clone()),
         |command, outcome| {
-            print_command_output_with_mode(
+            let status = output_writer.print(
                 &outcome.stdout,
                 matches!(
                     canonical_command(&command.name),
@@ -1276,11 +1278,12 @@ fn run_command_mode(
                 ),
             );
             print_command_error(&outcome.stderr);
+            status
         },
     ) {
         Ok(exit_code) => Some(ExitCode::from(exit_code)),
         Err(DaemonError::CommandFailed { output, error }) => {
-            print_command_output(&output);
+            output_writer.print(&output, false);
             eprintln!("{}", command_error_message(&error));
             Some(ExitCode::FAILURE)
         }
@@ -1549,14 +1552,17 @@ fn split_command_chain(arguments: &[RawText]) -> Vec<CommandInvocation> {
 fn execute_command_chain<T, E>(
     commands: impl IntoIterator<Item = T>,
     mut execute: impl FnMut(&T) -> Result<CommandOutcome, E>,
-    mut emit: impl FnMut(&T, &CommandOutcome),
+    mut emit: impl FnMut(&T, &CommandOutcome) -> u8,
 ) -> Result<u8, E> {
     let mut exit_code = 0;
     for command in commands {
         let outcome = execute(&command)?;
-        emit(&command, &outcome);
+        let output_status = emit(&command, &outcome);
         if outcome.exit_code != 0 {
             exit_code = outcome.exit_code;
+        }
+        if output_status != 0 {
+            exit_code = output_status;
         }
     }
     Ok(exit_code)
@@ -1902,22 +1908,52 @@ fn format_local_command_error(path: &Path, error: DaemonError) -> String {
 }
 
 #[cfg(not(target_os = "ios"))]
-fn print_command_output(output: &RawText) {
-    print_command_output_with_mode(output, false);
+#[derive(Default)]
+struct CommandOutputWriter {
+    raw_owner: Option<bool>,
 }
 
 #[cfg(not(target_os = "ios"))]
-fn print_command_output_with_mode(output: &RawText, raw: bool) {
-    let output = output.as_bytes();
-    if output.is_empty() {
-        return;
+impl CommandOutputWriter {
+    fn write(
+        &mut self,
+        output: &RawText,
+        raw: bool,
+        stdout: &mut impl io::Write,
+    ) -> io::Result<()> {
+        let output = output.as_bytes();
+        if output.is_empty() {
+            return Ok(());
+        }
+        if raw && self.raw_owner.is_some() {
+            return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
+        if self.raw_owner == Some(true) {
+            return Ok(());
+        }
+        self.raw_owner = Some(raw);
+        stdout.write_all(output)?;
+        if !raw && !output.ends_with(b"\n") {
+            stdout.write_all(b"\n")?;
+        }
+        stdout.flush()
     }
-    let mut stdout = io::stdout().lock();
-    let _ = stdout.write_all(output);
-    if !raw && !output.ends_with(b"\n") {
-        let _ = stdout.write_all(b"\n");
+
+    fn print(&mut self, output: &RawText, raw: bool) -> u8 {
+        if let Err(error) = self.write(output, raw, &mut io::stdout().lock())
+            && raw
+            && error.raw_os_error() == Some(libc::EBADF)
+        {
+            eprintln!("{}: -", os_error_text(&error));
+            return 1;
+        }
+        0
     }
-    let _ = stdout.flush();
+}
+
+#[cfg(not(target_os = "ios"))]
+fn print_command_output(output: &RawText) {
+    CommandOutputWriter::default().print(output, false);
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -2780,14 +2816,15 @@ mod tests {
     use zz_terminal::TerminalColorScheme;
 
     use super::{
-        ApplicationArgumentError, CommandOutcome, DaemonBootstrapArgumentError,
-        DaemonBootstrapArguments, NativeAttachArgumentError, TMUX_USAGE, TMUX_VERSION_OUTPUT,
-        append_prepared_command_stdin_payload, append_stdin_payload, application_arguments,
-        application_working_directory, attach_prefix_uses_tui, command_chain_uses_tui,
-        command_error_message, command_reads_stdin, daemon_is_missing, daemon_transport_failure,
-        execute_command_chain, implicit_tmux_endpoint_conflict, native_attach_command,
-        new_session_uses_tui, parse_daemon_bootstrap_arguments, parse_native_attach_arguments,
-        prepared_attach_uses_tui, prepared_command_chain_uses_tui, prepared_command_reads_stdin,
+        ApplicationArgumentError, CommandOutcome, CommandOutputWriter,
+        DaemonBootstrapArgumentError, DaemonBootstrapArguments, NativeAttachArgumentError,
+        TMUX_USAGE, TMUX_VERSION_OUTPUT, append_prepared_command_stdin_payload,
+        append_stdin_payload, application_arguments, application_working_directory,
+        attach_prefix_uses_tui, command_chain_uses_tui, command_error_message, command_reads_stdin,
+        daemon_is_missing, daemon_transport_failure, execute_command_chain,
+        implicit_tmux_endpoint_conflict, native_attach_command, new_session_uses_tui,
+        parse_daemon_bootstrap_arguments, parse_native_attach_arguments, prepared_attach_uses_tui,
+        prepared_command_chain_uses_tui, prepared_command_reads_stdin,
         prepared_kill_server_recovery, prepared_native_attach, protocol_version_output,
         run_command_mode, split_command_chain, terminal_color_scheme, tmux_command_starts_server,
         validated_bootstrap_client_working_directory,
@@ -3533,7 +3570,10 @@ mod tests {
                     _ => panic!("command after the failure executed"),
                 }
             },
-            |_, outcome| output.push(outcome.stdout.clone()),
+            |_, outcome| {
+                output.push(outcome.stdout.clone());
+                0
+            },
         );
         assert_eq!(result, Err(17));
         assert_eq!(seen, ["first", "fail"]);
@@ -3568,7 +3608,10 @@ mod tests {
                     },
                 })
             },
-            |_, outcome| streams.push((outcome.stdout.clone(), outcome.stderr.clone())),
+            |_, outcome| {
+                streams.push((outcome.stdout.clone(), outcome.stderr.clone()));
+                0
+            },
         );
         assert_eq!(result, Ok(5));
         assert_eq!(seen, ["three", "zero", "five"]);
@@ -3580,6 +3623,69 @@ mod tests {
                 (RawText::default(), String::new()),
             ]
         );
+    }
+
+    #[test]
+    fn command_output_file_stream_owns_stdout_after_its_first_write() {
+        let mut writer = CommandOutputWriter::default();
+        let mut stdout = Vec::new();
+        writer.write(&"hello".into(), true, &mut stdout).unwrap();
+        writer.write(&"\n".into(), false, &mut stdout).unwrap();
+        writer.write(&"AFTER\n".into(), false, &mut stdout).unwrap();
+        assert_eq!(stdout, b"hello");
+        assert_eq!(
+            writer
+                .write(&"again".into(), true, &mut stdout)
+                .unwrap_err()
+                .raw_os_error(),
+            Some(libc::EBADF)
+        );
+        assert_eq!(stdout, b"hello");
+    }
+
+    #[test]
+    fn command_output_print_stream_survives_a_later_file_collision() {
+        let mut writer = CommandOutputWriter::default();
+        let mut stdout = Vec::new();
+        writer.write(&"\n".into(), false, &mut stdout).unwrap();
+        assert_eq!(
+            writer
+                .write(&"hello".into(), true, &mut stdout)
+                .unwrap_err()
+                .raw_os_error(),
+            Some(libc::EBADF)
+        );
+        writer.write(&"AFTER\n".into(), false, &mut stdout).unwrap();
+        assert_eq!(stdout, b"\nAFTER\n");
+    }
+
+    #[test]
+    fn command_output_empty_results_do_not_claim_stdout() {
+        for raw in [false, true] {
+            let mut writer = CommandOutputWriter::default();
+            let mut stdout = Vec::new();
+            writer.write(&RawText::default(), raw, &mut stdout).unwrap();
+            writer.write(&"hello".into(), true, &mut stdout).unwrap();
+            assert_eq!(stdout, b"hello");
+        }
+    }
+
+    #[test]
+    fn command_chains_continue_after_output_stream_errors() {
+        let mut writer = CommandOutputWriter::default();
+        let mut stdout = Vec::new();
+        let result: Result<u8, ()> = execute_command_chain(
+            [(false, "\n"), (true, "hello"), (false, "AFTER\n")],
+            |(_, text)| {
+                Ok(CommandOutcome {
+                    stdout: (*text).into(),
+                    ..CommandOutcome::default()
+                })
+            },
+            |(raw, _), outcome| u8::from(writer.write(&outcome.stdout, *raw, &mut stdout).is_err()),
+        );
+        assert_eq!(result, Ok(1));
+        assert_eq!(stdout, b"\nAFTER\n");
     }
 
     #[test]

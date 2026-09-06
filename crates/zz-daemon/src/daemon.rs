@@ -4799,23 +4799,31 @@ impl Shared {
 
     fn start_status_sampler(self: &Arc<Self>) -> Result<(), DaemonError> {
         let shared = Arc::downgrade(self);
-        thread::Builder::new()
+        let sampler = thread::Builder::new()
             .name("zz-daemon-status".to_owned())
             .spawn(move || {
-                let mut due = BTreeMap::new();
+                let mut due: BTreeMap<SessionId, (Instant, Duration)> = BTreeMap::new();
+                let mut next_tick = Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL;
                 loop {
-                    thread::sleep(CONTROL_SUBSCRIPTION_INTERVAL);
+                    let next_wake = due
+                        .values()
+                        .map(|(deadline, _)| *deadline)
+                        .fold(next_tick, Instant::min);
+                    thread::park_timeout(next_wake.saturating_duration_since(Instant::now()));
                     let Some(shared) = shared.upgrade() else {
                         break;
                     };
                     if shared.stopping.load(Ordering::Acquire) {
                         break;
                     }
-                    shared.refresh_control_subscriptions();
-                    shared.run_format_monitors();
                     let jobs_changed = shared.status.lock().poll_jobs();
                     if !jobs_changed.is_empty() {
                         shared.refresh_status_filtered(false, None, Some(&jobs_changed));
+                    }
+                    if Instant::now() >= next_tick {
+                        next_tick = Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL;
+                        shared.refresh_control_subscriptions();
+                        shared.run_format_monitors();
                     }
                     let intervals = {
                         let inner = shared.inner.lock();
@@ -4843,7 +4851,12 @@ impl Shared {
                                 due.remove(&session);
                                 return None;
                             }
-                            let deadline = due.entry(session).or_insert(now);
+                            let (deadline, previous_interval) =
+                                due.entry(session).or_insert((now, interval));
+                            if *previous_interval != interval {
+                                *deadline = now + interval;
+                                *previous_interval = interval;
+                            }
                             if now < *deadline {
                                 return None;
                             }
@@ -4857,6 +4870,7 @@ impl Shared {
                 }
             })
             .map_err(|error| DaemonError::Thread(error.to_string()))?;
+        self.status.lock().set_job_waker(sampler.thread().clone());
         Ok(())
     }
 

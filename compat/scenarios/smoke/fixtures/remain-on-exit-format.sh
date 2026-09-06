@@ -25,6 +25,7 @@ mkdir -p "$work"
 : >"$work/failures"
 failed=0
 check_count=0
+expected_count=14
 
 record_failure() {
     failed=1
@@ -124,16 +125,19 @@ else:
     print(names[signo].decode("ascii"))
 SIGNAME
 )
-expected_signal="$pin_signal"
-if [ "$pin_signal" != term ]; then
-    printf 'KNOWN DIVERGENCE formats.dead-signal-platform-name: zz=term pin=%s\n' "$pin_signal"
-    if [ "$side" = zz ]; then
-        expected_signal=term
-    fi
-fi
-check_equal signal-spelling-with-known-platform-divergence "$expected_signal" \
+check_equal signal-spelling-matches-platform "$pin_signal" \
     "$(main_client display-message -p -t "=$session:wsignal" '#{pane_dead_signal}')"
-check_screen signal-notice-is-drawn "DEADFMT[][$expected_signal]" wsignal
+check_screen signal-notice-is-drawn "DEADFMT[][$pin_signal]" wsignal
+
+if [ "$(uname -s)" = Linux ]; then
+    realtime_signal=$(python3 -c 'import signal; print(int(signal.SIGRTMIN))')
+    main_client new-window -t "=$session" -n wrealtime "kill -$realtime_signal \$\$"
+    await_dead wrealtime || { echo "remain-on-exit-format-$side: wrealtime"; exit 0; }
+    check_equal realtime-signal-spelling "$realtime_signal" \
+        "$(main_client display-message -p -t "=$session:wrealtime" '#{pane_dead_signal}')"
+    check_screen realtime-signal-notice "DEADFMT[][$realtime_signal]" wrealtime
+    expected_count=16
+fi
 
 main_client new-window -t "=$session" -n wzero 'sh -c "exit 0"'
 await_dead wzero || { echo "remain-on-exit-format-$side: wzero"; exit 0; }
@@ -220,7 +224,7 @@ await_gone woff || { echo "remain-on-exit-format-$side: woff"; exit 0; }
 check_equal off-closes-the-pane 0 \
     "$(main_client list-windows -t "=$session" -F '#{window_name}' | grep -c '^woff$' || true)"
 
-if [ "$check_count" -ne 14 ]; then
+if [ "$check_count" -ne "$expected_count" ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then

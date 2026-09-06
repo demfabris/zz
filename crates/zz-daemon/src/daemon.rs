@@ -45530,7 +45530,11 @@ mod tests {
                 )
                 .expect("read signal facts")
                 .output,
-            "1::term"
+            if cfg!(target_os = "linux") {
+                "1::15"
+            } else {
+                "1::term"
+            }
         );
         shared
             .execute(

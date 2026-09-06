@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **47**. Classified items: **447**.
+Tracked gap groups: **48**. Classified items: **448**.
 
-- Status: open: 5, accepted: 42.
-- Decision: adopt: 5, native: 32, never: 10.
-- Priority: now: 5, none: 42.
+- Status: open: 6, accepted: 42.
+- Decision: adopt: 6, native: 32, never: 10.
+- Priority: now: 6, none: 42.
 - Closed history entries: 185.
-- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 59, presentation: 7, protocol: 2.
+- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 60, presentation: 7, protocol: 2.
 
 ## Measured surface
 
@@ -51,6 +51,7 @@ structure as proof.
 
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `proofs.census-coverage` | Fire the names the registry only registers | adopt | open | easy | mux | scripts, admin | none |
 | `clients.cli-output-sourced-mixed-queue` | Preserve stdout stream ownership inside sourced command queues | adopt | open | medium | daemon | scripts | none |
 | `clients.command-output-pane-prompt` | Preserve command output beneath stock pane search prompts | adopt | open | medium | daemon | daily, scripts | none |
 | `plugins.runtime-paths` | Run the plugins, not only their installers | adopt | open | medium | mux | daily, scripts | none |
@@ -907,6 +908,32 @@ Native chrome and a persistent daemon need explicit behavior where tmux assumes 
 - Acceptance:
   - `The divergence matrix records the remaining native presentation and lifecycle decisions and packaged-client tests protect the launcher and lifecycle contract; startup config discovery moved to config.discovery, which adopts in-place tmux candidates with a final zz mux.conf layer.`
   - `The desktop never renders tmux status rows: its status bar is native, built from snapshot state and app settings, and knowledge/tmux/status-line.md and knowledge/tmux/tmux-compat.md say so in the same words.`
+
+### `proofs.census-coverage`: Fire the names the registry only registers
+
+Registered 2026-09-06 by the proof-debt lane. The oracle lens counted names the registry tracks that no proof in this repo ever fires: 17 consumed options with no scenario, 39 of 68 hooks never triggered, and 33 formats plus the #H #h #F #P #T aliases and the e and p modifiers never expanded. compat/census.py is that count made repeatable: it reads compat/tmux-oracle.json (options, hooks, formats, format_modifiers) and the TMUX_OPTION_CONSUMERS roster, walks compat/scenarios/**, compat/attached-client.sh, compat/status-row.sh and compat/diff-scenario.sh with comment lines stripped, and prints the never-exercised list per family. The roster is in crates/zz-mux/src/command.rs:65, not tmux_options.rs as the cycle-16 brief said; tmux_options.rs holds the option TABLES, command.rs holds the consumed roster. compat/check.sh now prints the census as a non-failing report so the next cycle sees drift. Its output at this lane's tip: census: 448 corpus files under compat/scenarios, compat/attached-client.sh, compat/status-row.sh, compat/diff-scenario.sh; options: 0 of 118 never exercised; hooks: 8 of 68 never exercised; after-copy-mode; after-display-panes; after-refresh-client; alert-activity; alert-silence; client-dark-theme; client-light-theme; window-unlinked; formats: 12 of 198 never exercised; buffer_mode_format; client_mode_format; cursor_character; cursor_colour; history_limit; pane_bg; pane_fg; pane_key_mode; pane_path; pane_tabs; start_time; tree_mode_format; format_aliases: 1 of 9 never exercised; #T; format_modifiers: 0 of 2 never exercised. CLOSED. semantic:census-options: all 17 are set and read back in their own table by compat/scenarios/census-options.txt, and the three with a cheap deterministic observable also get one - buffer-limit 2 evicts the oldest of three named buffers on both sides, synchronize-panes is read through #{pane_synchronized} off, on and off again, and default-command `exec sleep 600` shows up as the new window's #{pane_start_command}. semantic:census-hooks: 29 of the 37 fire identically on both binaries in compat/scenarios/census-hooks.txt, each pre-seeded to no through a global environment variable so the readback compares a value rather than an exit class. semantic:census-formats: 39 steps in compat/scenarios/census-formats.txt expand the remaining formats, the #H #h #F #P #T aliases and both the e and p modifiers (#{e|+:2,3}, #{e|*|f|2:1.5,2}, #{p12:zz}, #{p-12:zz}), with a second window, a second pane, synchronize-panes on and a second session for the names that need them. WHAT THE CENSUS STILL LISTS, AND WHY. Eight hooks cannot be fired by a detached command client and are left for a fixture with a real pty: after-copy-mode and after-display-panes need a client at all on zz (semantic:copy-mode-headless-target, clients.interactive-refresh), after-refresh-client and the client-dark-theme / client-light-theme pair need an attached client's theme reply, alert-activity and alert-silence need monitor-activity plus a pane that writes and then goes quiet, and window-unlinked cannot fire on zz at all because link-window is an unsupported command there - measured 2026-09-06, `link-window -s w:linked -t w:9` answered exit 1 `unsupported command: link-window` on zz and exit 0 on the pin, which left zz with 2 windows and the pin with 3 including `9:linked`. That belongs to sessions.linked-groups and is not touched here. TWELVE FORMATS MEASURED DIVERGENT OR UNDIFFABLE, values from compat/results/census-formats.log on 2026-09-06 (zz first, pin second): buffer_mode_format `` vs `#{t/p:buffer_created}: #{buffer_sample}`; client_mode_format `` vs `#[fg=themelightgrey]#{t/p:client_activity}: session #[default]#{session_name}`; tree_mode_format `` vs the pin's long window/pane template - the three mode-format defaults are empty on zz because its choosers are native surfaces with no mode-tree template (choosers.native-presentation); cursor_character `` vs ` ` (one space); cursor_colour `` vs `none`; pane_bg `` vs `default`; pane_fg `` vs `default`; pane_key_mode `` vs `VT10x`; pane_tabs `` vs `8,16,24,32,40,48,56,64,72`; pane_path `/home/demfabris/dev/zz-lane-proof` (the invoking cwd) vs `` (the pin leaves it empty until OSC 7); history_limit `10000` vs `2000`, which is zz's deliberate default and is already the premise of smoke/sensible; and #T, which is #{pane_title}: `bash` on zz for a default-shell pane against `ubuntu` on the pin, the same default the pin takes from the short host name and the same divergence as semantic:plugin-runtime-resurrect-record-shape under plugins.runtime-paths. start_time is the server's own epoch and differs by construction, so it is recorded as undiffable rather than listed as a gap. Each of the eleven real ones needs an owner; they are recorded here rather than closed, and the group stays open until they are relocated.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `now` / `easy`
+- Owner: `mux`
+- User impact: scripts, admin
+- Items: `semantic:census-formats`
+- Depends on: none
+- Evidence:
+  - `file:compat/census.py`
+  - `file:compat/check.sh`
+  - `scenario:compat/scenarios/census-options.txt`
+  - `scenario:compat/scenarios/census-hooks.txt`
+  - `scenario:compat/scenarios/census-formats.txt`
+  - `resource:crates/zz-mux/src/command.rs`
+  - `resource:compat/tmux-oracle.json`
+- Acceptance:
+  - `compat/census.py exists, reads the pinned oracle and the TMUX_OPTION_CONSUMERS roster, walks the differential corpus and the attached fixtures with comment lines stripped, and prints the never-exercised list for options, hooks, formats, format aliases and format modifiers.`
+  - `compat/check.sh runs the census as a non-failing report so the next cycle sees drift instead of rediscovering it.`
+  - `Every one of the 17 consumed options the lens listed is set and read back in its own option table by a differential scenario, and buffer-limit, synchronize-panes and default-command additionally have an observable effect asserted.`
+  - `Every hook the lens listed that a detached command client can trigger is fired through set-hook and read back as a value on both binaries; the eight that cannot are recorded with the reason they cannot.`
+  - `Every format, alias and modifier the lens listed is either expanded by a differential scenario or recorded with both sides' measured values and why it cannot be asserted.`
 
 ### `protocol.binary-streams`: Design one bounded command stream
 

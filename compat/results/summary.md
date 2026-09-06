@@ -13,6 +13,9 @@
 | buffer-client-file-save | 3 | yes | 0 | yes | yes | yes |
 | buffer-path-format | 36 | yes | 0 | yes | yes | yes |
 | capture-pane | 23 | yes | 0 | yes | yes | yes |
+| census-formats | 39 | yes | 0 | yes | yes | yes |
+| census-hooks | 152 | yes | 0 | yes | yes | yes |
+| census-options | 51 | yes | 0 | yes | yes | yes |
 | collapse | 4 | yes | 0 | yes | yes | yes |
 | command-alias | 16 | yes | 0 | yes | yes | yes |
 | command-item-format | 125 | yes | 0 | yes | yes | yes |

@@ -1,0 +1,161 @@
+# Every after-* and event hook compat/census.py reported as registered but
+# never triggered by any proof, fired here through set-hook writing a global
+# environment variable and read back with show-environment. Each name is
+# pre-seeded to no so the readback compares a value, not an exit class, and
+# every resize is restored so a later window inherits the same size on both.
+# Eight of the 37 the census listed cannot be fired detached and are recorded
+# with the reason under semantic:census-hooks in proofs.census-coverage:
+# after-copy-mode, after-display-panes, after-refresh-client, alert-activity,
+# alert-silence, client-dark-theme, client-light-theme and window-unlinked.
+set-environment -g CENSUS_AFTER_KILL_PANE no
+set-hook -g after-kill-pane "set-environment -g CENSUS_AFTER_KILL_PANE yes"
+split-window -t w:0
+kill-pane -t w:0.1
+set-hook -gu after-kill-pane
+out: show-environment -g CENSUS_AFTER_KILL_PANE
+set-environment -g CENSUS_AFTER_LIST_BUFFERS no
+set-hook -g after-list-buffers "set-environment -g CENSUS_AFTER_LIST_BUFFERS yes"
+list-buffers
+set-hook -gu after-list-buffers
+out: show-environment -g CENSUS_AFTER_LIST_BUFFERS
+set-environment -g CENSUS_AFTER_LIST_CLIENTS no
+set-hook -g after-list-clients "set-environment -g CENSUS_AFTER_LIST_CLIENTS yes"
+list-clients
+set-hook -gu after-list-clients
+out: show-environment -g CENSUS_AFTER_LIST_CLIENTS
+set-environment -g CENSUS_AFTER_LIST_KEYS no
+set-hook -g after-list-keys "set-environment -g CENSUS_AFTER_LIST_KEYS yes"
+list-keys -T prefix
+set-hook -gu after-list-keys
+out: show-environment -g CENSUS_AFTER_LIST_KEYS
+set-environment -g CENSUS_AFTER_LIST_PANES no
+set-hook -g after-list-panes "set-environment -g CENSUS_AFTER_LIST_PANES yes"
+list-panes -t w:0
+set-hook -gu after-list-panes
+out: show-environment -g CENSUS_AFTER_LIST_PANES
+set-environment -g CENSUS_AFTER_LIST_SESSIONS no
+set-hook -g after-list-sessions "set-environment -g CENSUS_AFTER_LIST_SESSIONS yes"
+list-sessions
+set-hook -gu after-list-sessions
+out: show-environment -g CENSUS_AFTER_LIST_SESSIONS
+set-environment -g CENSUS_AFTER_LIST_WINDOWS no
+set-hook -g after-list-windows "set-environment -g CENSUS_AFTER_LIST_WINDOWS yes"
+list-windows -t w
+set-hook -gu after-list-windows
+out: show-environment -g CENSUS_AFTER_LIST_WINDOWS
+set-environment -g CENSUS_AFTER_LOAD_BUFFER no
+set-hook -g after-load-buffer "set-environment -g CENSUS_AFTER_LOAD_BUFFER yes"
+load-buffer -b censusbuf /etc/hostname
+set-hook -gu after-load-buffer
+out: show-environment -g CENSUS_AFTER_LOAD_BUFFER
+set-environment -g CENSUS_AFTER_LOCK_SERVER no
+set-hook -g after-lock-server "set-environment -g CENSUS_AFTER_LOCK_SERVER yes"
+set-option -g lock-command /bin/true
+lock-server
+set-hook -gu after-lock-server
+out: show-environment -g CENSUS_AFTER_LOCK_SERVER
+set-environment -g CENSUS_AFTER_NEW_SESSION no
+set-hook -g after-new-session "set-environment -g CENSUS_AFTER_NEW_SESSION yes"
+new-session -d -s census-extra
+set-hook -gu after-new-session
+out: show-environment -g CENSUS_AFTER_NEW_SESSION
+set-environment -g CENSUS_AFTER_PASTE_BUFFER no
+set-hook -g after-paste-buffer "set-environment -g CENSUS_AFTER_PASTE_BUFFER yes"
+set-buffer -b censuspaste hello
+paste-buffer -b censuspaste -t w:0
+set-hook -gu after-paste-buffer
+out: show-environment -g CENSUS_AFTER_PASTE_BUFFER
+set-environment -g CENSUS_AFTER_PIPE_PANE no
+set-hook -g after-pipe-pane "set-environment -g CENSUS_AFTER_PIPE_PANE yes"
+pipe-pane -t w:0
+set-hook -gu after-pipe-pane
+out: show-environment -g CENSUS_AFTER_PIPE_PANE
+set-environment -g CENSUS_AFTER_RENAME_SESSION no
+set-hook -g after-rename-session "set-environment -g CENSUS_AFTER_RENAME_SESSION yes"
+rename-session -t census-extra census-renamed
+set-hook -gu after-rename-session
+out: show-environment -g CENSUS_AFTER_RENAME_SESSION
+set-environment -g CENSUS_AFTER_RESIZE_PANE no
+set-hook -g after-resize-pane "set-environment -g CENSUS_AFTER_RESIZE_PANE yes"
+resize-pane -t w:0 -D 1
+set-hook -gu after-resize-pane
+out: show-environment -g CENSUS_AFTER_RESIZE_PANE
+set-environment -g CENSUS_AFTER_RESIZE_WINDOW no
+set-hook -g after-resize-window "set-environment -g CENSUS_AFTER_RESIZE_WINDOW yes"
+resize-window -t w:0 -x 90 -y 30
+resize-window -t w:0 -x 80 -y 24
+set-hook -gu after-resize-window
+out: show-environment -g CENSUS_AFTER_RESIZE_WINDOW
+set-environment -g CENSUS_AFTER_SAVE_BUFFER no
+set-hook -g after-save-buffer "set-environment -g CENSUS_AFTER_SAVE_BUFFER yes"
+save-buffer -b censuspaste /dev/null
+set-hook -gu after-save-buffer
+out: show-environment -g CENSUS_AFTER_SAVE_BUFFER
+set-environment -g CENSUS_AFTER_SELECT_LAYOUT no
+set-hook -g after-select-layout "set-environment -g CENSUS_AFTER_SELECT_LAYOUT yes"
+select-layout -t w:0 even-horizontal
+set-hook -gu after-select-layout
+out: show-environment -g CENSUS_AFTER_SELECT_LAYOUT
+set-environment -g CENSUS_AFTER_SEND_KEYS no
+set-hook -g after-send-keys "set-environment -g CENSUS_AFTER_SEND_KEYS yes"
+send-keys -t w:0 Escape
+set-hook -gu after-send-keys
+out: show-environment -g CENSUS_AFTER_SEND_KEYS
+set-environment -g CENSUS_AFTER_SET_ENVIRONMENT no
+set-hook -g after-set-environment "set-environment -g CENSUS_AFTER_SET_ENVIRONMENT yes"
+set-environment -g CENSUS_ENV probe
+set-hook -gu after-set-environment
+out: show-environment -g CENSUS_AFTER_SET_ENVIRONMENT
+set-environment -g CENSUS_AFTER_SET_HOOK no
+set-hook -g after-set-hook "set-environment -g CENSUS_AFTER_SET_HOOK yes"
+set-hook -g after-show-messages "set-environment -g CENSUS_SPARE 1"
+set-hook -gu after-set-hook
+out: show-environment -g CENSUS_AFTER_SET_HOOK
+set-environment -g CENSUS_AFTER_SET_OPTION no
+set-hook -g after-set-option "set-environment -g CENSUS_AFTER_SET_OPTION yes"
+set-option -g history-limit 5000
+set-hook -gu after-set-option
+out: show-environment -g CENSUS_AFTER_SET_OPTION
+set-environment -g CENSUS_AFTER_SHOW_ENVIRONMENT no
+set-hook -g after-show-environment "set-environment -g CENSUS_AFTER_SHOW_ENVIRONMENT yes"
+show-environment -g
+set-hook -gu after-show-environment
+out: show-environment -g CENSUS_AFTER_SHOW_ENVIRONMENT
+set-environment -g CENSUS_AFTER_SHOW_MESSAGES no
+set-hook -g after-show-messages "set-environment -g CENSUS_AFTER_SHOW_MESSAGES yes"
+show-messages
+set-hook -gu after-show-messages
+out: show-environment -g CENSUS_AFTER_SHOW_MESSAGES
+set-environment -g CENSUS_AFTER_SHOW_OPTIONS no
+set-hook -g after-show-options "set-environment -g CENSUS_AFTER_SHOW_OPTIONS yes"
+show-options -g
+set-hook -gu after-show-options
+out: show-environment -g CENSUS_AFTER_SHOW_OPTIONS
+set-environment -g CENSUS_AFTER_UNBIND_KEY no
+set-hook -g after-unbind-key "set-environment -g CENSUS_AFTER_UNBIND_KEY yes"
+bind-key -T prefix F1 display-message census
+unbind-key -T prefix F1
+set-hook -gu after-unbind-key
+out: show-environment -g CENSUS_AFTER_UNBIND_KEY
+set-environment -g CENSUS_PANE_TITLE_CHANGED no
+set-hook -g pane-title-changed "set-environment -g CENSUS_PANE_TITLE_CHANGED yes"
+select-pane -t w:0 -T census-title
+set-hook -gu pane-title-changed
+out: show-environment -g CENSUS_PANE_TITLE_CHANGED
+set-environment -g CENSUS_SESSION_CLOSED no
+set-hook -g session-closed "set-environment -g CENSUS_SESSION_CLOSED yes"
+kill-session -t census-renamed
+set-hook -gu session-closed
+out: show-environment -g CENSUS_SESSION_CLOSED
+set-environment -g CENSUS_WINDOW_LAYOUT_CHANGED no
+set-hook -g window-layout-changed "set-environment -g CENSUS_WINDOW_LAYOUT_CHANGED yes"
+split-window -t w:0
+kill-pane -t w:0.1
+set-hook -gu window-layout-changed
+out: show-environment -g CENSUS_WINDOW_LAYOUT_CHANGED
+set-environment -g CENSUS_WINDOW_RESIZED no
+set-hook -g window-resized "set-environment -g CENSUS_WINDOW_RESIZED yes"
+resize-window -t w:0 -x 88 -y 26
+resize-window -t w:0 -x 80 -y 24
+set-hook -gu window-resized
+out: show-environment -g CENSUS_WINDOW_RESIZED

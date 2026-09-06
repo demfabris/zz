@@ -1,0 +1,48 @@
+# Every pinned format compat/census.py reported as registered but never
+# expanded by any proof in this repo, plus the single-letter aliases and the
+# e and p modifiers. One display-message per name so a divergence names itself.
+# Twelve names measured on 2026-09-06 diverge or cannot be diffed at all; both
+# sides' values are recorded under semantic:census-formats in
+# proofs.census-coverage instead of being asserted here: buffer_mode_format,
+# client_mode_format, tree_mode_format, cursor_character, cursor_colour,
+# history_limit, pane_bg, pane_fg, pane_key_mode, pane_path, pane_tabs and #T,
+# plus start_time, which is the server's own epoch and differs by construction.
+new-window -n second
+split-window -h -t w:0
+set-window-option -t w:0 synchronize-panes on
+new-session -d -s other
+fmt: #{active_window_index}
+fmt: #{host}
+fmt: #{host_short}
+fmt: #{last_window_index}
+fmt: #{pane_flags}
+fmt: #{pane_floating_flag}
+fmt: #{pane_last}
+fmt: #{pane_search_string}
+fmt: #{pane_start_command_list}
+fmt: #{pane_start_path}
+fmt: #{pane_synchronized}
+fmt: #{pane_z}
+fmt: #{pane_zoomed_flag}
+fmt: #{next_session_id}
+fmt: #{server_sessions}
+fmt: #{session_bell_flag}
+fmt: #{session_many_attached}
+fmt: #{session_stack}
+fmt: #{session_windows}
+fmt: #{window_active_clients}
+fmt: #{window_active_sessions}
+fmt: #{window_active_sessions_list}
+fmt: #{window_end_flag}
+fmt: #{window_linked}
+fmt: #{window_linked_sessions}
+fmt: #{window_linked_sessions_list}
+fmt: #{window_raw_flags}
+fmt: #{window_stack_index}
+fmt: #{window_start_flag}
+fmt: #H
+fmt: #h
+fmt: #{e|+:2,3}
+fmt: #{e|*|f|2:1.5,2}
+fmt: #{p12:zz}
+fmt: #{p-12:zz}

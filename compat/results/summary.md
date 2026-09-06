@@ -228,6 +228,7 @@
 | smoke/source-file-tilde | 3 | yes | 0 | yes | yes | yes |
 | smoke/source-replay-diagnostics | 60 | yes | 0 | yes | yes | yes |
 | smoke/split-window-wait | 1 | yes | 0 | yes | yes | yes |
+| smoke/status-background-jobs | 2 | yes | 0 | yes | yes | yes |
 | smoke/status-keys-editor-default | 2 | yes | 0 | yes | yes | yes |
 | smoke/terminal-facts | 2 | yes | 0 | yes | yes | yes |
 | smoke/tpm-init | 5 | yes | 0 | yes | yes | yes |

@@ -1611,6 +1611,37 @@
       "reason": "One window belongs to one session in zz."
     },
     {
+      "id": "status.background-jobs",
+      "title": "Run cached status shell jobs without blocking clients",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "now",
+      "ease": "hard",
+      "impact": [
+        "daily",
+        "gui",
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:status-shell-jobs-format-key"
+      ],
+      "evidence": [
+        "resource:crates/zz-daemon/src/status.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/smoke/status-background-jobs.txt",
+        "file:compat/scenarios/smoke/fixtures/status-background-jobs.py",
+        "scenario:compat/scenarios/smoke/refresh-status.txt",
+        "resource:third_party/tmux-reference/UPSTREAM.md"
+      ],
+      "acceptance": [
+        "Job identity includes the client, format tag and raw command; identical left/right commands share a job, while window and pane loop contexts use independent tags. Changed expanded commands force a restart.",
+        "Retain the full cached shell-output line before format transformations: a line of 5000 zeroes followed by TAIL, expanded through #{=-4:#{E:status-left}}, draws LIMIT[TAIL] as on the pin."
+      ],
+      "depends_on": [],
+      "reason": "Implemented 2026-09-05 from retrospective finding 9. Removed proved items semantic:status-shell-jobs-nonblocking, semantic:status-shell-jobs-cached-output and semantic:status-shell-jobs-rerun-cadence. The attached status-background-jobs fixture measured empty draw in 0.301 seconds on zz and 0.034 seconds on pinned d77c9dc6, one shared ordinary left/right job, three-second completion, retained output during ordinary and forced reruns, and changed output on the interval. smoke/refresh-status retains interval-zero and bare/-S refresh coverage. The daemon drains stdout without waiting, publishes completion per client even at interval zero, schedules session intervals independently, and retains the latest complete line or final partial output. format_job_get gates idle starts by fj->last != time(NULL), not by a status-interval comparison inside the job function; streamed updates advance last, completion alone does not. One measured residue remains an adoption requirement. The window-loop fixture starts two jobs for two windows on the pin but one on zz; StatusHooks::shell(command) carries no loop format tag, so fixing the key needs a mux hook extension outside this lane. That residue assertion prints explicit pin/zz expectations and does not normalize output into a parity claim. The cached-output length probe originally drew LIMIT[TAIL] on the pin but LIMIT[0000] on zz because of the inherited 4KiB shell-output bound. The bound is now removed from cached lines, and both engines must draw LIMIT[TAIL] after reading 5000 zeroes followed by TAIL; semantic:status-shell-jobs-output-limit is also proved and removed. The existing StatusLine wire bounds remain enforced after format expansion. No product decision or protocol change was made."
+    },
+    {
       "id": "terminal.resize-pane-trim",
       "title": "Keep the scrollback out of the active grid",
       "decision": "never",

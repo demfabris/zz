@@ -4574,6 +4574,15 @@ impl Shared {
     }
 
     fn refresh_status_for_sessions(&self, refresh: bool, sessions: Option<&BTreeSet<SessionId>>) {
+        self.refresh_status_filtered(refresh, sessions, None);
+    }
+
+    fn refresh_status_filtered(
+        &self,
+        refresh: bool,
+        sessions: Option<&BTreeSet<SessionId>>,
+        clients: Option<&BTreeSet<ClientId>>,
+    ) {
         let startup_ready = *self.startup_ready.lock();
         let requests = {
             let mut inner = self.inner.lock();
@@ -4586,10 +4595,11 @@ impl Shared {
                 .keys()
                 .copied()
                 .filter(|client| {
-                    sessions.is_none_or(|sessions| {
-                        client_attached_session(&inner, *client)
-                            .is_some_and(|session| sessions.contains(&session))
-                    })
+                    clients.is_none_or(|clients| clients.contains(client))
+                        && sessions.is_none_or(|sessions| {
+                            client_attached_session(&inner, *client)
+                                .is_some_and(|session| sessions.contains(&session))
+                        })
                 })
                 .map(|client| {
                     status_request(
@@ -4792,7 +4802,7 @@ impl Shared {
         thread::Builder::new()
             .name("zz-daemon-status".to_owned())
             .spawn(move || {
-                let mut due = Instant::now();
+                let mut due = BTreeMap::new();
                 loop {
                     thread::sleep(CONTROL_SUBSCRIPTION_INTERVAL);
                     let Some(shared) = shared.upgrade() else {
@@ -4803,33 +4813,47 @@ impl Shared {
                     }
                     shared.refresh_control_subscriptions();
                     shared.run_format_monitors();
-                    let interval = {
+                    let jobs_changed = shared.status.lock().poll_jobs();
+                    if !jobs_changed.is_empty() {
+                        shared.refresh_status_filtered(false, None, Some(&jobs_changed));
+                    }
+                    let intervals = {
                         let inner = shared.inner.lock();
                         inner
                             .subscribers
                             .keys()
-                            .map(|client| {
-                                inner
-                                    .engine
-                                    .status_formats_for_session(client_attached_session(
-                                        &inner, *client,
-                                    ))
-                                    .interval
+                            .filter_map(|client| client_attached_session(&inner, *client))
+                            .map(|session| {
+                                (
+                                    session,
+                                    inner
+                                        .engine
+                                        .status_formats_for_session(Some(session))
+                                        .interval,
+                                )
                             })
-                            .filter(|interval| !interval.is_zero())
-                            .min()
-                            .unwrap_or_default()
+                            .collect::<BTreeMap<_, _>>()
                     };
-                    if interval.is_zero() {
-                        due = Instant::now();
-                        continue;
-                    }
+                    due.retain(|session, _| intervals.contains_key(session));
                     let now = Instant::now();
-                    if now < due {
-                        continue;
+                    let sessions = intervals
+                        .into_iter()
+                        .filter_map(|(session, interval)| {
+                            if interval.is_zero() {
+                                due.remove(&session);
+                                return None;
+                            }
+                            let deadline = due.entry(session).or_insert(now);
+                            if now < *deadline {
+                                return None;
+                            }
+                            *deadline = now + interval;
+                            Some(session)
+                        })
+                        .collect::<BTreeSet<_>>();
+                    if !sessions.is_empty() {
+                        shared.refresh_status_for_sessions(false, Some(&sessions));
                     }
-                    due = now + interval;
-                    shared.refresh_status(true);
                 }
             })
             .map_err(|error| DaemonError::Thread(error.to_string()))?;
@@ -13153,8 +13177,7 @@ impl Shared {
         };
         let status = {
             let mut renderer = self.status.lock();
-            renderer.forget(target);
-            renderer.render_initial(&request)
+            renderer.render_forced(&request)
         };
         self.publish_to_client(target, EventPayload::StatusChanged { status });
         Ok(Execution::default())

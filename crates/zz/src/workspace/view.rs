@@ -3147,11 +3147,13 @@ fn split_ratio_basis(ratio: f32) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
     use super::*;
     use crate::terminal::view::GridSize;
     use gpui::{Modifiers, TestAppContext, point};
+    use zz_client::CoreEvent;
+    use zz_protocol::CommandPromptKind;
 
     #[derive(Debug, PartialEq)]
     enum PaneReleaseStep {
@@ -3774,6 +3776,494 @@ mod tests {
             stay_open: false,
             mouse_keys: false,
         }
+    }
+
+    /// Every overlay payload the daemon can publish, and the workspace consumer
+    /// each one must find.
+    ///
+    /// The exhaustive match is the point: a `CoreEvent` variant added later
+    /// cannot compile until someone says whether it raises an overlay, and a
+    /// kind that says it does has to name an element the matrix can find on the
+    /// drawn window. Cycle 11's silently destructive desktop chooser was a
+    /// payload that reached a no-op arm; nothing under the campaign ran the
+    /// GPUI client, so nothing caught it.
+    fn overlay_selector(event: &CoreEvent) -> Option<&'static str> {
+        match event {
+            CoreEvent::CommandPromptChanged => Some("command-palette-overlay"),
+            CoreEvent::ChooseTreeChanged => Some("choose-tree-overlay"),
+            CoreEvent::ChooseBufferChanged => Some("choose-buffer-overlay"),
+            CoreEvent::DisplayPanesChanged => Some("display-panes-input"),
+            CoreEvent::PopupChanged => Some("display-popup"),
+            CoreEvent::MenuChanged => Some("display-menu"),
+            CoreEvent::ConfirmChanged => Some("confirm-before"),
+            CoreEvent::HelloReceived
+            | CoreEvent::Attached { .. }
+            | CoreEvent::SnapshotChanged
+            | CoreEvent::ViewportChanged { .. }
+            | CoreEvent::AppearanceChanged
+            | CoreEvent::MuxOptionsChanged
+            | CoreEvent::KeyTablesChanged
+            | CoreEvent::StatusChanged
+            | CoreEvent::PrefixArmed { .. }
+            | CoreEvent::PrefixCancelled { .. }
+            | CoreEvent::CommandOutputChanged
+            | CoreEvent::PaneRemoved { .. }
+            | CoreEvent::Bell { .. }
+            | CoreEvent::FocusSidebar
+            | CoreEvent::Detached { .. }
+            | CoreEvent::ServerStopping
+            | CoreEvent::CommandResponse(_)
+            | CoreEvent::ClientMessage { .. }
+            | CoreEvent::ClientMessageCleared { .. }
+            | CoreEvent::Clipboard { .. }
+            | CoreEvent::OpenUri { .. }
+            | CoreEvent::AgentCommand { .. }
+            | CoreEvent::BrowserCommand { .. }
+            | CoreEvent::TerminalUiCommand { .. }
+            | CoreEvent::HistoryChunk { .. }
+            | CoreEvent::KittyImageBegin { .. }
+            | CoreEvent::KittyImageChunk { .. }
+            | CoreEvent::KittyImagesRemoved { .. }
+            | CoreEvent::AgentUpdates { .. }
+            | CoreEvent::AgentStateChanged { .. }
+            | CoreEvent::AgentLagged { .. }
+            | CoreEvent::AgentSessions { .. }
+            | CoreEvent::Message(_) => None,
+        }
+    }
+
+    fn command_prompt_state_for_test() -> zz_protocol::CommandPromptState {
+        zz_protocol::CommandPromptState {
+            prompt: ":".to_owned(),
+            input: String::new(),
+            cursor: 0,
+            kind: CommandPromptKind::Command,
+            history: Vec::new(),
+            prompt_type: zz_protocol::CommandPromptType::Command,
+            mode: zz_protocol::CommandPromptMode::Text,
+            no_freeze: false,
+        }
+    }
+
+    fn choose_tree_state_for_test() -> zz_protocol::ChooseTreeState {
+        let item = |label: &str, target| zz_protocol::ChooseTreeItem {
+            label: label.to_owned(),
+            detail: String::new(),
+            target,
+            depth: 0,
+            flags: 0,
+            pane_kind: None,
+            key: String::new(),
+            text: String::new(),
+        };
+        zz_protocol::ChooseTreeState {
+            items: vec![
+                item("session", zz_protocol::ChooseTreeTarget::Session(SessionId(0))),
+                item("window", zz_protocol::ChooseTreeTarget::Window(WindowId(0))),
+            ],
+            search: None,
+            selected: 0,
+            kind: zz_protocol::ChooseTreeKind::Windows,
+            filter_no_matches: false,
+            prompt: String::new(),
+            help: false,
+        }
+    }
+
+    fn choose_buffer_state_for_test() -> zz_protocol::ChooseBufferState {
+        let item = |name: &str| zz_protocol::ChooseBufferItem {
+            name: name.to_owned(),
+            preview: "preview".to_owned(),
+            size_bytes: 7,
+            created_unix_seconds: 0,
+            key: String::new(),
+            text: String::new(),
+            tagged: false,
+        };
+        zz_protocol::ChooseBufferState {
+            items: vec![item("buffer0"), item("buffer1")],
+            search: None,
+            selected: 0,
+            filter_no_matches: false,
+            help: false,
+        }
+    }
+
+    fn display_panes_state_for_test() -> zz_protocol::DisplayPanesState {
+        zz_protocol::DisplayPanesState {
+            window: WindowId(0),
+            duration_ms: 1000,
+            indicators: vec![zz_protocol::PaneIndicator {
+                pane: PaneId(0),
+                index: 0,
+                select_key: b'0',
+                flags: zz_protocol::PaneIndicator::ACTIVE,
+                label: "0".to_owned(),
+            }],
+        }
+    }
+
+    #[gpui::test]
+    fn every_daemon_overlay_payload_reaches_a_desktop_consumer(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let input_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let captured_input = Rc::clone(&input_slot);
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("overlay matrix".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+            captured_mux.replace(Some(mux.clone()));
+            captured_input.replace(Some(input));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        let input = input_slot.borrow().clone().expect("captured input");
+        let popup_pane = PaneId(u64::MAX - 1);
+        let sequence = Cell::new(0_u64);
+
+        let publish = |payload: zz_protocol::EventPayload, cx: &mut gpui::VisualTestContext| {
+            sequence.set(sequence.get() + 1);
+            mux.update(cx, |mux, cx| {
+                mux.handle_message_for_test(
+                    zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: sequence.get(),
+                        payload,
+                    }),
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+        };
+
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
+        });
+        cx.run_until_parked();
+
+        // Kind, the payload that raises it, the payload that retires it, the
+        // key the overlay answers, and the shape that key has to reach the
+        // daemon as. Every element the matrix looks for is the selector
+        // `overlay_selector` maps the kind's CoreEvent to.
+        struct OverlayCase {
+            event: CoreEvent,
+            raise: zz_protocol::EventPayload,
+            retire: zz_protocol::EventPayload,
+            keystroke: &'static str,
+            reaches_daemon: fn(&InputMessage) -> bool,
+        }
+
+        let cases = vec![
+            OverlayCase {
+                event: CoreEvent::CommandPromptChanged,
+                raise: zz_protocol::EventPayload::CommandPrompt {
+                    state: Some(command_prompt_state_for_test()),
+                },
+                retire: zz_protocol::EventPayload::CommandPrompt { state: None },
+                keystroke: "escape",
+                reaches_daemon: |message| {
+                    matches!(message, InputMessage::CommandPrompt { .. })
+                },
+            },
+            OverlayCase {
+                event: CoreEvent::ChooseTreeChanged,
+                raise: zz_protocol::EventPayload::ChooseTree {
+                    state: Some(choose_tree_state_for_test()),
+                },
+                retire: zz_protocol::EventPayload::ChooseTree { state: None },
+                keystroke: "down",
+                reaches_daemon: |message| matches!(message, InputMessage::ChooseTree { .. }),
+            },
+            OverlayCase {
+                event: CoreEvent::ChooseBufferChanged,
+                raise: zz_protocol::EventPayload::ChooseBuffer {
+                    state: Some(choose_buffer_state_for_test()),
+                },
+                retire: zz_protocol::EventPayload::ChooseBuffer { state: None },
+                keystroke: "down",
+                reaches_daemon: |message| matches!(message, InputMessage::ChooseBuffer { .. }),
+            },
+            OverlayCase {
+                event: CoreEvent::DisplayPanesChanged,
+                raise: zz_protocol::EventPayload::DisplayPanes {
+                    state: Some(display_panes_state_for_test()),
+                },
+                retire: zz_protocol::EventPayload::DisplayPanes { state: None },
+                keystroke: "escape",
+                reaches_daemon: |message| matches!(message, InputMessage::DisplayPanes { .. }),
+            },
+            OverlayCase {
+                event: CoreEvent::PopupChanged,
+                raise: zz_protocol::EventPayload::Popup {
+                    state: Some(popup_state_for_test(popup_pane)),
+                },
+                retire: zz_protocol::EventPayload::Popup { state: None },
+                keystroke: "x",
+                reaches_daemon: |message| matches!(message, InputMessage::Popup { .. }),
+            },
+            OverlayCase {
+                event: CoreEvent::MenuChanged,
+                raise: zz_protocol::EventPayload::Menu {
+                    state: Some(menu_state_for_test()),
+                },
+                retire: zz_protocol::EventPayload::Menu { state: None },
+                keystroke: "q",
+                reaches_daemon: |message| matches!(message, InputMessage::Menu { .. }),
+            },
+            OverlayCase {
+                event: CoreEvent::ConfirmChanged,
+                raise: zz_protocol::EventPayload::Confirm {
+                    state: Some(zz_protocol::ConfirmState {
+                        prompt: "Confirm? (y/n) ".to_owned(),
+                        confirm_key: b'y',
+                        default_yes: false,
+                    }),
+                },
+                retire: zz_protocol::EventPayload::Confirm { state: None },
+                keystroke: "y",
+                reaches_daemon: |message| matches!(message, InputMessage::Confirm { .. }),
+            },
+        ];
+
+        for case in cases {
+            let selector = overlay_selector(&case.event)
+                .unwrap_or_else(|| panic!("{:?} claims no overlay element", case.event));
+            publish(case.raise, cx);
+            assert!(
+                cx.debug_bounds(selector).is_some(),
+                "{selector} published its state and drew nothing"
+            );
+            let focused = workspace.read_with(cx, |workspace, cx| {
+                workspace
+                    .visible_overlay(cx)
+                    .map(|(_, focus)| focus)
+                    .expect("a published overlay is the visible overlay")
+            });
+            assert!(
+                cx.update(|window, cx| focused.contains_focused(window, cx)),
+                "{selector} drew without taking the keyboard"
+            );
+            input.borrow_mut().clear();
+            cx.simulate_keystrokes(case.keystroke);
+            assert!(
+                input.borrow().iter().any(case.reaches_daemon),
+                "{selector} swallowed {} instead of answering the daemon: {:?}",
+                case.keystroke,
+                input.borrow()
+            );
+            publish(case.retire, cx);
+            assert!(
+                cx.debug_bounds(selector).is_none(),
+                "{selector} outlived the state that raised it"
+            );
+        }
+
+        // The two update payloads carry no state of their own: they advance a
+        // chooser the daemon already published, so the consumer they need is
+        // the running chooser's own synchronize, not a new element.
+        publish(
+            zz_protocol::EventPayload::ChooseTree {
+                state: Some(choose_tree_state_for_test()),
+            },
+            cx,
+        );
+        let tree_revision = mux.read_with(cx, |mux, _| mux.choose_tree_revision());
+        publish(
+            zz_protocol::EventPayload::ChooseTreeUpdate {
+                search: Some(zz_protocol::ChooseTreeSearchState {
+                    query: "win".to_owned(),
+                    reverse: false,
+                }),
+                selected: 1,
+            },
+            cx,
+        );
+        assert!(cx.debug_bounds("choose-tree-overlay").is_some());
+        mux.read_with(cx, |mux, _| {
+            let state = mux.choose_tree().expect("the update kept the chooser open");
+            assert_eq!(state.selected, 1, "ChooseTreeUpdate moved no selection");
+            assert_eq!(
+                state.search.as_ref().map(|search| search.query.as_str()),
+                Some("win"),
+                "ChooseTreeUpdate landed no search"
+            );
+            assert_ne!(
+                mux.choose_tree_revision(),
+                tree_revision,
+                "ChooseTreeUpdate bumped no revision, so no consumer redraws"
+            );
+        });
+        publish(zz_protocol::EventPayload::ChooseTree { state: None }, cx);
+
+        publish(
+            zz_protocol::EventPayload::ChooseBuffer {
+                state: Some(choose_buffer_state_for_test()),
+            },
+            cx,
+        );
+        let buffer_revision = mux.read_with(cx, |mux, _| mux.choose_buffer_revision());
+        publish(
+            zz_protocol::EventPayload::ChooseBufferUpdate {
+                search: Some(zz_protocol::ChooseBufferSearchState {
+                    query: "buf".to_owned(),
+                    reverse: false,
+                }),
+                selected: 1,
+            },
+            cx,
+        );
+        assert!(cx.debug_bounds("choose-buffer-overlay").is_some());
+        mux.read_with(cx, |mux, _| {
+            let state = mux
+                .choose_buffer()
+                .expect("the update kept the chooser open");
+            assert_eq!(state.selected, 1, "ChooseBufferUpdate moved no selection");
+            assert_eq!(
+                state.search.as_ref().map(|search| search.query.as_str()),
+                Some("buf"),
+                "ChooseBufferUpdate landed no search"
+            );
+            assert_ne!(
+                mux.choose_buffer_revision(),
+                buffer_revision,
+                "ChooseBufferUpdate bumped no revision, so no consumer redraws"
+            );
+        });
+        publish(zz_protocol::EventPayload::ChooseBuffer { state: None }, cx);
+        assert!(workspace.read_with(cx, |workspace, cx| workspace.visible_overlay(cx).is_none()));
+    }
+
+    /// Derived from pinned tmux d77c9dc6, menu.c `menu_key_cb`:
+    ///
+    /// ```c
+    /// if (md->flags & MENU_NOMOUSE) {
+    ///         if (MOUSE_BUTTONS(m->b) != MOUSE_BUTTON_1)
+    ///                 return (1);
+    ///         return (0);
+    /// }
+    /// ```
+    ///
+    /// A `display-menu` raised without `-M` and without an invoking mouse
+    /// event is `MENU_NOMOUSE` — `menu_prepare` also leaves `MODE_MOUSE_ALL`
+    /// and `MODE_MOUSE_BUTTON` off for it. Button 1 is swallowed and the menu
+    /// stays; any other button returns 1, which closes the menu with nothing
+    /// chosen. `MenuState::mouse_keys` carries that flag to every client, and
+    /// the desktop was the client that dropped it: `resolve_menu_mouse` in the
+    /// client core reads it, but only crates/zz-tui/src/input.rs called that,
+    /// so a right-click over the desktop menu did nothing and a left-click
+    /// chose a row the pin would never have chosen.
+    #[gpui::test]
+    fn a_nomouse_menu_leaves_on_any_button_but_the_first(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let input_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let captured_input = Rc::clone(&input_slot);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("menu mouse".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+            captured_mux.replace(Some(mux.clone()));
+            captured_input.replace(Some(input));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        let input = input_slot.borrow().clone().expect("captured input");
+        let sequence = Cell::new(0_u64);
+        let raise = |mouse_keys: bool, cx: &mut gpui::VisualTestContext| {
+            let mut state = menu_state_for_test();
+            state.mouse_keys = mouse_keys;
+            sequence.set(sequence.get() + 1);
+            mux.update(cx, |mux, cx| {
+                mux.handle_message_for_test(
+                    zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: sequence.get(),
+                        payload: zz_protocol::EventPayload::Menu { state: Some(state) },
+                    }),
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+        };
+
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
+        });
+        cx.run_until_parked();
+
+        raise(false, cx);
+        let row = cx
+            .debug_bounds("display-menu-row-0")
+            .expect("the menu drew its first row");
+        let inside = row.center();
+
+        input.borrow_mut().clear();
+        cx.simulate_mouse_down(inside, MouseButton::Right, Modifiers::default());
+        assert!(
+            input.borrow().iter().any(|message| matches!(
+                message,
+                InputMessage::Menu {
+                    action: zz_protocol::MenuAction::Cancel
+                }
+            )),
+            "a NOMOUSE menu must leave on button 3: {:?}",
+            input.borrow()
+        );
+
+        input.borrow_mut().clear();
+        cx.simulate_mouse_down(inside, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(inside, MouseButton::Left, Modifiers::default());
+        assert!(
+            input.borrow().is_empty(),
+            "a NOMOUSE menu swallows button 1 and chooses nothing: {:?}",
+            input.borrow()
+        );
+
+        raise(true, cx);
+        input.borrow_mut().clear();
+        cx.simulate_mouse_down(inside, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(inside, MouseButton::Left, Modifiers::default());
+        assert!(
+            input.borrow().iter().any(|message| matches!(
+                message,
+                InputMessage::Menu {
+                    action: zz_protocol::MenuAction::Choose(0)
+                }
+            )),
+            "a menu that took the mouse still chooses the row under button 1: {:?}",
+            input.borrow()
+        );
     }
 
     #[gpui::test]

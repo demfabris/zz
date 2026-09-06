@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **47**. Classified items: **442**.
+Tracked gap groups: **48**. Classified items: **443**.
 
-- Status: open: 5, accepted: 42.
-- Decision: adopt: 5, native: 32, never: 10.
-- Priority: now: 5, none: 42.
+- Status: open: 6, accepted: 42.
+- Decision: adopt: 6, native: 32, never: 10.
+- Priority: now: 6, none: 42.
 - Closed history entries: 185.
-- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 54, presentation: 7, protocol: 2.
+- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 54, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -54,6 +54,7 @@ structure as proof.
 | `clients.cli-output-sourced-mixed-queue` | Preserve stdout stream ownership inside sourced command queues | adopt | open | medium | daemon | scripts | none |
 | `clients.command-output-pane-prompt` | Preserve command output beneath stock pane search prompts | adopt | open | medium | daemon | daily, scripts | none |
 | `desktop.drag-to-clipboard` | Land a desktop drag selection where a paste can reach it | adopt | open | medium | client | daily, gui | none |
+| `desktop.overlay-consumers` | Give every daemon overlay payload a desktop consumer | adopt | open | medium | gui | daily, gui | none |
 | `control-mode.notifications` | Compare control notification transcripts with pinned tmux | adopt | open | hard | daemon | remote, scripts | none |
 | `status.background-jobs` | Run cached status shell jobs without blocking clients | adopt | open | hard | daemon | daily, gui, scripts | none |
 
@@ -331,6 +332,32 @@ Opened 2026-09-06 from retrospective finding 8's clipboard half. Before this cyc
   - `On Linux the desktop mirrors a drag selection to CLIPBOARD in addition to PRIMARY whenever the session's set-clipboard option is not off, and writes PRIMARY alone when it is off. macOS is unchanged: it has one pasteboard and ClipboardTarget::Primary already lands there.`
   - `An application's own OSC 52 keeps the target it named. input_osc_52 forwards the application's clip field verbatim, so a desktop write the daemon publishes with request_id 0 still goes to PRIMARY when the application asked for PRIMARY.`
   - `The raw TUI writes the pin's empty selection field for a client-issued copy-selection and keeps the named field for a write it cannot attribute.`
+
+### `desktop.overlay-consumers`: Give every daemon overlay payload a desktop consumer
+
+Opened 2026-09-06 from the harness lens's finding that the GPUI client was never run under the campaign, so daemon overlay state could exist with no desktop consumer — cycle 11's silently destructive kill in the desktop chooser was that class. Removed proved item presentation:gui-overlay-consumer-matrix. workspace::view::tests::every_daemon_overlay_payload_reaches_a_desktop_consumer drives all nine payload kinds through MuxClient::handle_message_for_test, the same reduction path the live client uses, draws the window after each, and asserts per kind that the element is on the drawn window, that AppView::visible_overlay names it and holds the keyboard, that one key reaches the daemon as that overlay's InputMessage, and that the retiring payload removes the element. The two update kinds carry no element of their own, so they are asserted on the chooser they advance: selection, search and revision. The matrix reads its selector from an exhaustive match over CoreEvent, so a variant added later cannot compile until it is classified. Four overlays had no debug selector to find and now carry one: choose-tree-overlay, choose-buffer-overlay, display-panes-input and command-palette-overlay. ONE KIND WAS UNCONSUMED AND IS FIXED. MenuState::mouse_keys is the pin's MENU_NOMOUSE flag; zz-daemon publishes it from the parsed command, zz_client::resolve_menu_mouse reads it, and only crates/zz-tui/src/input.rs called that. The desktop MenuView answered MouseButton::Left on a row and nothing else, so over a menu the pin would have closed, a right-click did nothing and a left-click chose a row. It now swallows button 1 and cancels on button 3, button 2 and the wheel while mouse_keys is false, proved by workspace::view::tests::a_nomouse_menu_leaves_on_any_button_but_the_first, which fails on the previous behaviour with an empty input queue. REMAINING, and why it is its own item: the fix covers menu_key_cb's NOMOUSE arm only. A mouse-capable desktop menu still ignores motion highlighting, a release outside the box, and stay_open on the mouse path. The policy exists whole in zz_client::resolve_menu_mouse with its own pin-derived tests; wiring it needs the desktop menu's pixel geometry mapped onto the MenuBox cell frame that AppView::menu_overlay already computes, which did not fit this lane's budget. CHECKED AND NOT A GAP: PopupState::close_on_any_key looked unconsumed in crates/zz and is not. popup.c closes a popup whose job has exited when POPUP_CLOSEANYKEY is set and the key is neither a mouse report nor a paste; zz-daemon applies that to every PopupAction::Key, so the desktop, which forwards keys as PopupAction::Key, gets it from the daemon. The raw TUI's own arm is an extra on its focus path. ChooseBufferItem::tagged, ChooseTreeState::prompt, ChooseTreeState::help and ChooseBufferState::help are all read by crates/zz/src/chooser.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `now` / `medium`
+- Owner: `gui`
+- User impact: daily, gui
+- Items: `presentation:gui-menu-mouse-policy`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz/src/workspace/view.rs`
+  - `resource:crates/zz/src/command/menu.rs`
+  - `resource:crates/zz/src/chooser/mod.rs`
+  - `resource:crates/zz/src/pane/display.rs`
+  - `resource:crates/zz/src/command/palette.rs`
+  - `resource:crates/zz-client/src/menu.rs`
+  - `resource:crates/zz-tui/src/input.rs`
+  - `resource:compat/orchestration/CAMPAIGN-REVIEW.md`
+- Acceptance:
+  - `Every overlay payload the daemon can publish reaches a desktop consumer: the element draws on the window, it takes the keyboard, a key it answers reaches the daemon as its own InputMessage, and the retiring payload takes the element away. The kinds are EventPayload::CommandPrompt, ChooseTree, ChooseTreeUpdate, ChooseBuffer, ChooseBufferUpdate, DisplayPanes, Popup, Menu and Confirm.`
+  - `Adding a CoreEvent variant cannot compile until someone classifies it as an overlay or not, so a future overlay kind cannot reach the desktop without a consumer.`
+  - `Measured on pinned tmux d77c9dc6, menu.c menu_key_cb: a MENU_NOMOUSE menu — every display-menu without -M and without an invoking mouse event, for which menu_prepare also leaves MODE_MOUSE_ALL and MODE_MOUSE_BUTTON off — returns 1 for any button that is not button 1, closing the menu with nothing chosen, and returns 0 for button 1, swallowing it. The desktop menu obeys that and still chooses the row under button 1 when the menu did take the mouse.`
+  - `OPEN: the rest of menu_key_cb's mouse arm. A mouse-capable menu moves its highlight on a press or a motion, chooses the row the highlight sits on when a release lands inside the box, closes on a release outside the box when it is not stay-open, and a stay-open menu instead closes on any report that is neither a release, a wheel nor a drag. zz_client::resolve_menu_mouse already carries all of that, derived from the pin; the desktop must call it instead of answering button 1 on a row.`
 
 ### `formats.expansion-budgets`: Keep format expansion deterministic
 

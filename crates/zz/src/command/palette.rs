@@ -485,6 +485,7 @@ impl Render for CommandPaletteView {
         let focus = self.focus(cx);
         div()
             .id("command-palette-overlay")
+            .debug_selector(|| "command-palette-overlay".to_owned())
             .absolute()
             .inset_0()
             .flex()

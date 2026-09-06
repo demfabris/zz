@@ -58,6 +58,7 @@ impl Render for DisplayPanesView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("display-panes-input")
+            .debug_selector(|| "display-panes-input".to_owned())
             .absolute()
             .top(px(0.0))
             .left(px(0.0))

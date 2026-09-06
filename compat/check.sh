@@ -8,6 +8,11 @@ tmux_bin="$("$COMPAT_DIR/fetch-tmux.sh")"
 python3 "$COMPAT_DIR/tmux-oracle.py" --check --tmux "$tmux_bin"
 python3 "$COMPAT_DIR/tmux-tracker.py" check
 python3 "$COMPAT_DIR/board_test.py"
+
+# Drift report, never a gate: names the pin registers that no proof fires.
+printf '\n== proof census ==\n'
+python3 "$COMPAT_DIR/census.py" --quiet || true
+printf '\n'
 cd "$REPO_DIR"
 test_list="$(cargo test -p zz-mux --lib -- --list)"
 for required_test in \

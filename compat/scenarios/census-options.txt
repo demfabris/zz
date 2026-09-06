@@ -1,0 +1,56 @@
+# The seventeen consumed options compat/census.py reported as registered but
+# never named by any proof. Each is set and read back in its own table, and the
+# three with a cheap deterministic observable are also exercised: buffer-limit
+# through the buffers it evicts, synchronize-panes through #{pane_synchronized},
+# default-command through the pane a new window starts.
+set-option -s buffer-limit 2
+out: show-options -sv buffer-limit
+set-buffer -b censusa aaa
+set-buffer -b censusb bbb
+set-buffer -b censusc ccc
+out: list-buffers -F #{buffer_name}
+set-option -s buffer-limit 50
+set-option -s copy-command /bin/true
+out: show-options -sv copy-command
+set-option -s exit-unattached off
+out: show-options -sv exit-unattached
+set-option -s message-limit 5
+out: show-options -sv message-limit
+set-option -g default-command sleep-census
+out: show-options -gv default-command
+set-option -g default-shell /bin/sh
+out: show-options -gv default-shell
+set-option -g destroy-unattached off
+out: show-options -gv destroy-unattached
+set-option -g initial-repeat-time 700
+out: show-options -gv initial-repeat-time
+set-option -gw pane-status-style fg=red
+out: show-options -gwv pane-status-style
+set-option -gw pane-status-current-style fg=green
+out: show-options -gwv pane-status-current-style
+set-option -gw session-status-style fg=blue
+out: show-options -gwv session-status-style
+set-option -gw session-status-current-style fg=cyan
+out: show-options -gwv session-status-current-style
+set-option -gw copy-mode-mark-style fg=black,bg=yellow
+out: show-options -gwv copy-mode-mark-style
+set-option -gw copy-mode-current-match-style fg=black,bg=magenta
+out: show-options -gwv copy-mode-current-match-style
+set-option -gw window-pane-status-format census-pane
+out: show-options -gwv window-pane-status-format
+set-option -gw window-pane-current-status-format census-current
+out: show-options -gwv window-pane-current-status-format
+fmt: #{pane_synchronized}
+set-window-option -t w:0 synchronize-panes on
+out: show-options -wv -t w:0 synchronize-panes
+fmt: #{pane_synchronized}
+set-window-option -t w:0 synchronize-panes off
+fmt: #{pane_synchronized}
+set-option -g default-command "exec sleep 600"
+new-window -d -n census-dc -t w:
+select-window -t w:census-dc
+fmt: #{pane_start_command}
+select-window -t w:0
+kill-window -t w:census-dc
+set-option -gu default-command
+out: show-options -gv default-command

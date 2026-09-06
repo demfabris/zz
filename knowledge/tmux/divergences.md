@@ -1636,6 +1636,59 @@ One divergence found while probing belongs to nobody yet: `display-message -p` w
 prints one newline on the pin and nothing at all on zz.
 
 
+# 2026-09-06: the proof-debt pass
+
+Cycle 16's proof-debt lane spent its budget on proofs rather than code, and this is what it left
+behind. Three plugin RUNTIME paths now run on both binaries and diff a file the plugin wrote or a
+daemon fact, never a screen: vim-tmux-navigator's `is_vim` branch fired through its own installed
+root `C-h` binding against a real process named `vim`, tmux-yank's `copy_line.sh` piping a real
+selection into a fake clipboard, and tmux-continuum's save fired the way it really fires, by the
+`status-right` `#()` job on an attached client. Everything else the corpus knew about plugins was
+their installer.
+
+Three divergences came out of writing them. The pin does not push an outer `-t` into the commands
+`if-shell` or `run-shell -C` then run - `cmd-if-shell.c` and `cmd-run-shell.c` hand the new item
+`cmdq_get_state(item)`, the invoking client's CURRENT pane, not the item's resolved target - while zz
+does; measured with two panes and a raw-mode reader each, `run-shell -t <pane0> -C "send-keys -l A"`
+put the byte in pane 0 on zz and pane 1 on the pin. Format expansion is not affected: a nested
+`#{pane_tty}` follows `-t` on both. The pin's default `#{pane_title}` is the short host name and
+zz's is empty, which corrupts tmux-resurrect's save file rather than merely looking different: its
+record is tab-delimited and read back with `IFS=<tab> read`, so the empty title collapses and the
+pane pid lands in the full-command column. And `#{client_theme}` before any terminal reply is empty
+and absent from the `display-message -a` listing on the pin, where zz answers `dark` immediately -
+zz has no unknown theme state.
+
+The proof harness itself gained the parts that were missing. `compat/diff-scenario.sh` has an `err:`
+query kind, because a plain scenario compared stderr nowhere and was therefore clean whenever both
+sides failed differently; it immediately found `target not found: nosuchbuffer` against the pin's
+`no buffer nosuchbuffer`. Three fixtures whose scenarios only compared the shape of what they printed
+now stamp a value the scenario reads back, so a setup that failed the same way on both sides is a
+divergence. `compat/attached-client.sh` waits for the popup underlay focus pair on both sides instead
+of the pin only - its byte assertion had been passing on zz precisely because nothing arrived - and
+the mode helpers assert the same daemon fact on both sides where one exists and say so where none
+does. `compat/tmux-tracker.py check` now fails on a repo path cited in a `reason` or a `resolution`
+that does not exist, and `compat/census.py`, wired into `compat/check.sh`, prints the pinned names
+no proof fires; three new scenarios emptied the option and hook lists and left twelve formats and
+eight hooks recorded with why.
+
+The tail the review listed as prose now has slugs. `presentation.native-status` carries the retained
+pane whose scrollback a GUI client cannot read and the `TERM_PROGRAM` split (panes get `zz` and
+`0.4.0`, jobs and popups get `tmux` and `3.8-zz`, where the pin gives both `tmux` and `next-3.8`).
+`commands.native-client-tools` carries the two `display-panes` residues.
+`clients.interactive-refresh` carries the copy-mode search string, which the pin keeps on the pane -
+measured, it survives `-X cancel` and a fresh `copy-mode` - and the Control per-window geometry clamp.
+`options.native-overlay-styles` carries the two GPUI overlay residues, `pane.floating-model` carries
+nested attach inside a `display-popup` as explicitly unproved with the fixture that would settle it,
+and `clients.read-only-and-focus` carries the popup underlay focus events. One residue found no home:
+`set-option -t :nope history-limit` exits 0 on the pin and 1 on zz with `no such session: :nope`, and
+no open group owns option-target resolution, so it stays measured in the `targets.exact-match-prefix`
+closed record until the mux owner gives it one.
+
+Thirteen accepted groups whose reason was a single sentence now carry the pin source that defines
+the behaviour zz declines, the measurement, and the stance. Counted as a reason of one sentence under
+260 characters, `origin/main` had sixteen and this pass leaves two: `sessions.linked-groups`, which
+another lane owns this cycle, and `formats.session-activity-wake-lifecycle`.
+
 # Related
 
 - [live tmux compatibility gaps](/tmux/gaps.md) — generated TODO, decision, and status report.

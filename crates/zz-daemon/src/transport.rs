@@ -1,13 +1,16 @@
+#[cfg(any(feature = "daemon", windows))]
+use std::time::Duration;
 use std::{
     ffi::OsString,
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    time::Duration,
 };
 
+#[cfg(any(feature = "daemon", windows))]
+use interprocess::local_socket::{ListenerNonblockingMode, ListenerOptions};
 use interprocess::{
     TryClone,
-    local_socket::{GenericFilePath, ListenerNonblockingMode, ListenerOptions, prelude::*},
+    local_socket::{GenericFilePath, prelude::*},
 };
 
 pub(crate) const SOCKET_ENVIRONMENT_VARIABLE: &str = "ZZ_SOCKET";
@@ -21,13 +24,16 @@ pub(crate) struct PeerCredentials {
 
 pub(crate) trait Transport {
     type Endpoint: ?Sized;
+    #[cfg(any(feature = "daemon", windows))]
     type Listener: TransportListener<Stream = Self::Stream>;
     type Stream: TransportStream;
 
+    #[cfg(any(feature = "daemon", windows))]
     fn bind(endpoint: &Self::Endpoint) -> io::Result<Self::Listener>;
     fn connect(endpoint: &Self::Endpoint) -> io::Result<Self::Stream>;
 }
 
+#[cfg(any(feature = "daemon", windows))]
 pub(crate) trait TransportListener {
     type Stream: TransportStream;
 
@@ -43,6 +49,7 @@ pub(crate) trait TransportListener {
 pub(crate) trait TransportStream: Read + Write + Send + Sized + 'static {
     fn try_clone(&self) -> io::Result<Self>;
 
+    #[cfg(feature = "daemon")]
     fn shutdown(&self) -> io::Result<()> {
         Ok(())
     }
@@ -86,9 +93,11 @@ pub(crate) struct LocalTransport;
 
 impl Transport for LocalTransport {
     type Endpoint = Path;
+    #[cfg(any(feature = "daemon", windows))]
     type Listener = LocalListener;
     type Stream = LocalStream;
 
+    #[cfg(any(feature = "daemon", windows))]
     fn bind(endpoint: &Self::Endpoint) -> io::Result<Self::Listener> {
         let name = endpoint.as_os_str().to_fs_name::<GenericFilePath>()?;
         ListenerOptions::new()
@@ -103,8 +112,10 @@ impl Transport for LocalTransport {
     }
 }
 
+#[cfg(any(feature = "daemon", windows))]
 pub(crate) struct LocalListener(LocalSocketListener);
 
+#[cfg(any(feature = "daemon", windows))]
 impl TransportListener for LocalListener {
     type Stream = LocalStream;
 
@@ -171,7 +182,7 @@ impl TransportStream for LocalStream {
         self.0.try_clone().map(Self)
     }
 
-    #[cfg(unix)]
+    #[cfg(all(feature = "daemon", unix))]
     fn shutdown(&self) -> io::Result<()> {
         LocalStream::shutdown(self)
     }

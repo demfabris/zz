@@ -47,13 +47,13 @@ fn nonempty_env(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-#[cfg(not(windows))]
+#[cfg(all(feature = "daemon", not(windows)))]
 pub(crate) fn home_directory() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
 // Windows has no `HOME`: `USERPROFILE` is the real home, `HOME` only a shell fallback.
-#[cfg(windows)]
+#[cfg(all(feature = "daemon", windows))]
 pub(crate) fn home_directory() -> Option<PathBuf> {
     nonempty_env("USERPROFILE").or_else(|| nonempty_env("HOME"))
 }

@@ -584,7 +584,10 @@ mod tests {
         );
         assert!(state.visible(120));
         state.focus(60);
-        assert!(state.visible(60), "C-a s still shows it below the threshold");
+        assert!(
+            state.visible(60),
+            "C-a s still shows it below the threshold"
+        );
         state.hide();
         assert!(!state.visible(120));
 

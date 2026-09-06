@@ -3104,6 +3104,7 @@ mod tests {
                 output: "%1: last output".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: zz_protocol::StdoutClaim::None,
             }),
         );
         queue_event(
@@ -3145,6 +3146,7 @@ mod tests {
                     output: Default::default(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: zz_protocol::StdoutClaim::None,
                 }),
             );
         }
@@ -3168,6 +3170,7 @@ mod tests {
             output: "ok".into(),
             exit_code: 0,
             stderr: String::new(),
+            stdout_claim: zz_protocol::StdoutClaim::None,
         })));
         assert_eq!(unsafe { zz_command_reply_request_id(reply) }, 11);
         assert!(unsafe { zz_command_reply_ok(reply) });

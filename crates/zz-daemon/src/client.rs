@@ -18,7 +18,7 @@ use zz_protocol::{
     MAX_CLIENT_ENVIRONMENT_ENTRIES, MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_FILE_BYTES,
     MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId,
     PasteUploadPurpose, PreparedCommand, ProtocolMessage, RawText, ServerError, ServerHello,
-    encode_protocol_message_into, read_protocol_message_into,
+    StdoutClaim, encode_protocol_message_into, read_protocol_message_into,
 };
 
 /// `EIO`, the error the pin's client reports for anything that fails after the
@@ -106,6 +106,10 @@ pub struct CommandOutcome {
     pub stdout: RawText,
     pub stderr: String,
     pub exit_code: u8,
+    /// Which of the pin's two stdout writers claimed the command client's
+    /// stream while `stdout` was produced. The CLI writer reads this instead of
+    /// guessing from the bytes.
+    pub stdout_claim: StdoutClaim,
 }
 
 pub struct CommandClient {
@@ -275,11 +279,13 @@ impl CommandClient {
                     output,
                     exit_code,
                     stderr,
+                    stdout_claim,
                 }) if response_id == request_id => {
                     return Ok(CommandOutcome {
                         stdout: output,
                         stderr,
                         exit_code,
+                        stdout_claim,
                     });
                 }
                 ProtocolMessage::CommandResponse(CommandResponse::Error {

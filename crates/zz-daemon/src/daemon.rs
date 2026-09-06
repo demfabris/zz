@@ -36,21 +36,22 @@ use zz_protocol::{
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
     ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientExitAction,
     ClientFileOperation, ClientFileRequest, ClientFileResponse, ClientHello, ClientId,
-    ClientInstanceId, ClientKind, ClientMessageKind, ClientPath, CommandInvocation,
-    CommandPromptAction, CommandPromptKind, CommandPromptMode, CommandPromptState,
-    CommandPromptType, CommandRequest, CommandResolution, CommandResponse, ConfigOverrideEntry,
-    ConfirmAction, ConfirmState, ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState,
-    Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
-    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_ITEM_TEXT_BYTES,
-    MAX_CHOOSE_TREE_QUERY_BYTES, MAX_ENCODED_FRAME_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES,
-    MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
-    MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey,
-    MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
-    PaneId, PaneIndicator, PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction,
-    PopupBorderLines, PopupPointer, PopupPointerButton, PopupState, PreparedCommand,
-    PreparedCommandResult, ProtocolError, ProtocolMessage, RawText, SPLIT_RATIO_BASIS, ServerError,
-    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, WindowId,
-    canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
+    ClientInstanceId, ClientKind, ClientMessageKind, ClientPath, ClipboardProducer,
+    CommandInvocation, CommandPromptAction, CommandPromptKind, CommandPromptMode,
+    CommandPromptState, CommandPromptType, CommandRequest, CommandResolution, CommandResponse,
+    ConfigOverrideEntry, ConfirmAction, ConfirmState, ControlSourceFileEvent, DisplayPanesAction,
+    DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES,
+    MAX_BROWSER_KEY_REPEAT, MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES,
+    MAX_CHOOSE_ITEM_TEXT_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES, MAX_ENCODED_FRAME_BYTES,
+    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES,
+    MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction,
+    MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
+    PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer,
+    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
+    ProtocolMessage, RawText, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
+    SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId, canonical_key,
+    encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
     layout_menu_row, menu_row_cells, menu_row_width, read_protocol_message_into, resolve_command,
     terminal_patch_frame_len, terminal_viewport_frame_len,
 };
@@ -5446,6 +5447,7 @@ impl Shared {
                 output: execution.output,
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             },
             Err(
                 DaemonError::CommandExit { output, exit_code }
@@ -5455,6 +5457,7 @@ impl Shared {
                 output,
                 exit_code,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             },
             Err(DaemonError::CommandFailed { output, error }) => {
                 let error = daemon_server_error(*error);
@@ -5479,7 +5482,9 @@ impl Shared {
                 }
             }
         };
-        let mut response = match self.inner.lock().command_streams.remove(&client) {
+        let streams = self.inner.lock().command_streams.remove(&client);
+        let recorded_claim = streams.as_ref().and_then(|streams| streams.stdout_claim);
+        let mut response = match streams {
             Some(streams) if !streams.is_empty() => merge_command_streams(response, &streams),
             _ => response,
         };
@@ -5492,6 +5497,15 @@ impl Shared {
             if !output.is_empty() {
                 *output = sanitize_client_output(output);
             }
+        }
+        if let CommandResponse::Success {
+            output,
+            stdout_claim,
+            ..
+        } = &mut response
+        {
+            *stdout_claim =
+                recorded_claim.unwrap_or_else(|| default_stdout_claim(&command.name, output));
         }
         let output = match &response {
             CommandResponse::Success { output, .. } | CommandResponse::Error { output, .. } => {
@@ -9421,6 +9435,18 @@ impl Shared {
             }
             if !options.suppress_replay_output {
                 if let Some((verbose, replay)) = report.stdout_transcript() {
+                    if control_target.is_none() && source_kind == ClientKind::Command {
+                        let claim = if report.stdout_raw_claimed() {
+                            Some(StdoutClaim::Raw)
+                        } else if verbose.is_empty() && replay.is_empty() {
+                            None
+                        } else {
+                            Some(StdoutClaim::Print)
+                        };
+                        if let Some(claim) = claim {
+                            self.record_command_stdout_claim(source_client, claim);
+                        }
+                    }
                     append_inserted_output(&mut source_verbose_output, verbose);
                     append_inserted_output(&mut source_replay_output, replay);
                 }
@@ -20272,6 +20298,7 @@ impl Shared {
                                         request_id: copy.request_id,
                                         target,
                                         text: copy.text,
+                                        producer: ClipboardProducer::Server,
                                     },
                                 );
                                 shared.raise_copy_mode_set_clipboard(pane);
@@ -20363,6 +20390,7 @@ impl Shared {
                                         request_id: 0,
                                         target,
                                         text,
+                                        producer: ClipboardProducer::Application,
                                     },
                                 );
                             }
@@ -20406,6 +20434,7 @@ impl Shared {
                                         request_id: copy.request_id,
                                         target,
                                         text: copy.text,
+                                        producer: ClipboardProducer::Server,
                                     },
                                 );
                             }
@@ -20887,6 +20916,7 @@ impl Shared {
                                         request_id: copy.request_id,
                                         target,
                                         text: copy.text,
+                                        producer: ClipboardProducer::Server,
                                     },
                                 );
                                 shared.raise_copy_mode_set_clipboard(pane);
@@ -22068,6 +22098,18 @@ impl Shared {
         }
     }
 
+    /// Name which of the pin's two stdout writers claimed this Command
+    /// request's stream. `file_write` on `-` beats `cmdq_print`, the way the
+    /// pin's first writer keeps the `dup`ed descriptor for the whole run.
+    fn record_command_stdout_claim(&self, client: ClientId, claim: StdoutClaim) {
+        if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
+            let current = streams.stdout_claim.unwrap_or(StdoutClaim::None);
+            if stdout_claim_rank(claim) > stdout_claim_rank(current) {
+                streams.stdout_claim = Some(claim);
+            }
+        }
+    }
+
     /// Raise the running Command request's exit status, mirroring the pin's
     /// `c->retval = 1`.
     fn record_command_failure(&self, client: ClientId) {
@@ -22555,6 +22597,7 @@ impl Shared {
                 request_id: 0,
                 target,
                 text,
+                producer: ClipboardProducer::Application,
             },
         );
         if clipboard_hook {
@@ -22614,6 +22657,7 @@ impl Shared {
                 request_id: 0,
                 target: ClipboardTarget::Clipboard,
                 text: text.to_owned(),
+                producer: ClipboardProducer::Server,
             },
         );
     }
@@ -25706,6 +25750,17 @@ impl ConfigLoadReport {
         }
     }
 
+    /// Whether a `file_write` on `-` owned the command client's stdout while
+    /// this report replayed. The pin's claim is a property of the writer, not
+    /// of the bytes: a raw buffer ending in a newline looks exactly like a
+    /// print, which is what `semantic:cli-output-sourced-raw-newline-claim`
+    /// measured.
+    fn stdout_raw_claimed(&self) -> bool {
+        self.stdout_transcript
+            .as_ref()
+            .is_some_and(|transcripts| transcripts.iter().any(|frame| frame.raw_claimed))
+    }
+
     fn stdout_transcript(&self) -> Option<(&str, &str)> {
         self.stdout_transcript.as_ref().map(|transcripts| {
             let transcript = transcripts
@@ -25841,6 +25896,7 @@ impl ConfigLoadReport {
             .last_mut()
             .expect("nested stdout frame has a parent");
         append_inserted_output(&mut parent.replay, &output);
+        parent.raw_claimed |= transcript.raw_claimed;
     }
 
     fn note_verbose_commands(&mut self, commands: &[CommandInvocation], top_level: bool) {
@@ -26087,6 +26143,7 @@ struct CommandStreams {
     stderr: String,
     control_error: String,
     exit_code: u8,
+    stdout_claim: Option<StdoutClaim>,
 }
 
 #[derive(Default)]
@@ -34852,6 +34909,28 @@ fn select_if_shell_branch(
     }
 }
 
+const fn stdout_claim_rank(claim: StdoutClaim) -> u8 {
+    match claim {
+        StdoutClaim::None => 0,
+        StdoutClaim::Print => 1,
+        StdoutClaim::Raw => 2,
+    }
+}
+
+/// The claim a command with no replay transcript of its own makes. `save-buffer`
+/// and `show-buffer` reach a session-less command client through `file_write`,
+/// which owns the stream and terminates nothing; everything else that answers a
+/// command client goes through `cmdq_print`.
+fn default_stdout_claim(command: &str, output: &RawText) -> StdoutClaim {
+    if output.is_empty() {
+        return StdoutClaim::None;
+    }
+    match canonical_command(command) {
+        "save-buffer" | "show-buffer" => StdoutClaim::Raw,
+        _ => StdoutClaim::Print,
+    }
+}
+
 fn merge_command_streams(response: CommandResponse, streams: &CommandStreams) -> CommandResponse {
     match response {
         CommandResponse::Success {
@@ -34859,6 +34938,7 @@ fn merge_command_streams(response: CommandResponse, streams: &CommandStreams) ->
             mut output,
             exit_code,
             mut stderr,
+            stdout_claim,
         } => {
             append_inserted_output(&mut output, &streams.stdout);
             if !streams.control_error.is_empty() {
@@ -34879,6 +34959,7 @@ fn merge_command_streams(response: CommandResponse, streams: &CommandStreams) ->
                 output,
                 exit_code,
                 stderr,
+                stdout_claim,
             }
         }
         CommandResponse::Error {
@@ -39771,6 +39852,7 @@ mod tests {
                 .into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -39890,6 +39972,7 @@ mod tests {
                 output: format!("{}:6: unknown command: wibble\n", root.display()).into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert!(read_global_option(&shared, "@alias-same").is_empty());
@@ -39921,6 +40004,7 @@ mod tests {
                 output: format!("{}:4: unknown command: wibble\n", parse_only.display()).into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert!(read_global_option(&shared, "@parse-only-alias").is_empty());
@@ -40090,6 +40174,7 @@ mod tests {
                 .into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -44825,14 +44910,16 @@ mod tests {
                     continue;
                 }
                 if matches!(
-                    &response,
-                    ProtocolMessage::CommandResponse(CommandResponse::Success {
-                        request_id: 41,
-                        output,
-                        exit_code: 0,
-                        stderr,
-                    }) if output.is_empty() && stderr.is_empty()
-                ) {
+                                    &response,
+                                    ProtocolMessage::CommandResponse(CommandResponse::Success {
+                                        request_id: 41,
+                                        output,
+                                        exit_code: 0,
+                                        stderr,
+                                                            ..
+                }) if output.is_empty() && stderr.is_empty()
+                                )
+                {
                     break;
                 }
             }
@@ -49651,6 +49738,7 @@ mod tests {
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -50178,6 +50266,7 @@ mod tests {
                 output: format!("{bad}:1: unknown command: wibble\n").into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -50195,6 +50284,7 @@ mod tests {
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
 
@@ -50212,6 +50302,7 @@ mod tests {
                 output: format!("{bad}:1: unknown command: wibble\n").into(),
                 exit_code: 1,
                 stderr: format!("No such file or directory: {missing}\n"),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -50233,6 +50324,7 @@ mod tests {
                 .into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -50266,6 +50358,7 @@ mod tests {
                 output: format!("No such file or directory: {missing}\n").into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -50287,6 +50380,7 @@ mod tests {
                 output: format!("{bad}:1: unknown command: wibble\n").into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         let warnings = take_reliable_messages(&mailbox)
@@ -50355,6 +50449,7 @@ mod tests {
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: format!("{path}:1: syntax error\n"),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
         }
@@ -50385,6 +50480,7 @@ mod tests {
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{inner}:1: syntax error\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
     }
@@ -50458,6 +50554,7 @@ mod tests {
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: format!("{path}:1: syntax error\n"),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(read_global_option(&shared, before), "yes", "{name} prefix");
@@ -50493,6 +50590,7 @@ set-option -g @quoted-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{quoted}:1: syntax error\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
         for name in [
@@ -50539,6 +50637,7 @@ set-option -g @alias-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{aliased}:1: syntax error\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
         for name in ["@alias-inner-before", "@alias-inner-same", "@alias-next"] {
@@ -50604,6 +50703,7 @@ set-option -g @alias-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: format!("{path}:1: syntax error\n"),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -50635,6 +50735,7 @@ set-option -g @alias-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{alias_if_group}:1: syntax error\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -50666,6 +50767,7 @@ set-option -g @alias-run-caller-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{alias_run_string}:1: syntax error\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
         for name in [
@@ -50715,6 +50817,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n{diagnostic}\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(read_global_option(&shared, "@alias-mixed-before"), "yes");
@@ -50775,6 +50878,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n{diagnostic}\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -50831,6 +50935,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -50897,6 +51002,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{command_path}:1: syntax error\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
         for name in [
@@ -50951,6 +51057,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             let diagnostic = format!("{}:1: syntax error", path.display());
@@ -51216,6 +51323,7 @@ set-option -g @alias-mixed-next yes
                         output: RawText::default(),
                         exit_code: 1,
                         stderr: String::new(),
+                        stdout_claim: StdoutClaim::None,
                     }
                 );
                 let timeline = timeline(take_reliable_messages(&mailbox));
@@ -51317,6 +51425,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -51361,6 +51470,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -51408,6 +51518,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -51449,6 +51560,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -51479,6 +51591,7 @@ set-option -g @alias-mixed-next yes
                 output: "AFTER_CALLBACK_ERROR".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert!(shared.inner.lock().command_streams.is_empty());
@@ -51592,6 +51705,7 @@ set-option -g @alias-mixed-next yes
                         output: RawText::default(),
                         exit_code: 1,
                         stderr: String::new(),
+                        stdout_claim: StdoutClaim::None,
                     }
                 );
                 assert_eq!(
@@ -51725,6 +51839,7 @@ set-option -g @alias-mixed-next yes
                             output: RawText::default(),
                             exit_code: 1,
                             stderr: String::new(),
+                            stdout_claim: StdoutClaim::None,
                         },
                         "{wrapper} {mode}",
                     );
@@ -51762,6 +51877,7 @@ set-option -g @alias-mixed-next yes
                             output: format!("{marker}\n").into(),
                             exit_code: 1,
                             stderr: format!("{diagnostic}\n"),
+                            stdout_claim: StdoutClaim::Print,
                         },
                         "{wrapper} {mode}",
                     );
@@ -51835,6 +51951,7 @@ set-option -g @alias-mixed-next yes
                     output: format!("{marker}\n").into(),
                     exit_code: 1,
                     stderr: format!("{diagnostic}\n"),
+                    stdout_claim: StdoutClaim::Print,
                 }
             );
         }
@@ -51927,6 +52044,7 @@ set-option -g @alias-mixed-next yes
                 output: "LATER\n".into(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n"),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -51969,6 +52087,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -52011,6 +52130,7 @@ set-option -g @alias-mixed-next yes
                 output: "LATER\n".into(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n{diagnostic}\n"),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert!(shared.inner.lock().command_streams.is_empty());
@@ -52039,6 +52159,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let inner = shared.inner.lock();
@@ -52092,6 +52213,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let timeline = take_reliable_messages(&mailbox)
@@ -52165,6 +52287,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let warnings = take_reliable_messages(&mailbox)
@@ -52219,6 +52342,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n{diagnostic}\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -52244,6 +52368,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let warnings = take_reliable_messages(&mailbox)
@@ -52351,6 +52476,7 @@ set-option -g @alias-mixed-next yes
                 output: "TRIGGER\n".into(),
                 exit_code: 1,
                 stderr: format!("syntax error\n{}:1: syntax error\n", combined.display()),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -52366,6 +52492,7 @@ set-option -g @alias-mixed-next yes
                 output: "TRIGGER\nAFTER\n".into(),
                 exit_code: 1,
                 stderr: "syntax error\nsyntax error\n".to_owned(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -52397,6 +52524,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -52433,6 +52561,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -52490,6 +52619,7 @@ set-option -g @alias-mixed-next yes
                 output: "SOURCE_HOOK_TRIGGER\n".into(),
                 exit_code: 1,
                 stderr: format!("{}:1: syntax error\n", hook_source_child.display()),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -52513,6 +52643,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -52560,6 +52691,7 @@ set-option -g @alias-mixed-next yes
                 output: "HOOK_GROUP_TRIGGER\n".into(),
                 exit_code: 1,
                 stderr: "syntax error\n".to_owned(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(read_global_option(&shared, "@hook-after"), "yes");
@@ -52592,6 +52724,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -52648,6 +52781,7 @@ set-option -g @alias-mixed-next yes
                 output: "HOOK_CONTINUATION_CHILD\n".into(),
                 exit_code: 1,
                 stderr: "syntax error\n".to_owned(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         for marker in [
@@ -52701,6 +52835,7 @@ set-option -g @alias-mixed-next yes
                 output: "AFTER_RUNTIME_ERROR\n".into(),
                 exit_code: 1,
                 stderr: "can't find session: missing-indirect\nsyntax error\n".to_owned(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -52726,6 +52861,7 @@ set-option -g @alias-mixed-next yes
                     "{}:1: syntax error\nsyntax error\n",
                     callback_error.display()
                 ),
+                stdout_claim: StdoutClaim::None,
             }
         );
 
@@ -52773,6 +52909,7 @@ set-option -g @alias-mixed-next yes
                     nested_hook_error.display(),
                     command_error_child.display()
                 ),
+                stdout_claim: StdoutClaim::None,
             }
         );
 
@@ -52826,6 +52963,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr,
+                    stdout_claim: StdoutClaim::None,
                 }
             );
         }
@@ -52960,6 +53098,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -52993,6 +53132,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let held_messages = take_reliable_messages(&mailbox);
@@ -53075,6 +53215,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -53107,6 +53248,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let messages = take_reliable_messages(&mailbox);
@@ -53190,6 +53332,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             let messages = take_reliable_messages(&mailbox);
@@ -53242,6 +53385,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             let messages = take_reliable_messages(&mailbox);
@@ -53322,6 +53466,7 @@ set-option -g @alias-mixed-next yes
                          invalid option: nonexistent-option\n\
                          empty variable name\n"
                     .to_owned(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(read_global_option(&shared, "@runtime-after"), "yes");
@@ -53340,6 +53485,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: "can't find session: missing-inner\n".to_owned(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(read_global_option(&shared, "@inner-after"), "yes");
@@ -53376,6 +53522,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let warnings = take_reliable_messages(&interactive_mailbox)
@@ -53433,6 +53580,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -53475,6 +53623,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: "can't find session: missing\n".to_owned(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(read_global_option(&shared, "@source-alias-after"), "yes");
@@ -53535,6 +53684,7 @@ set-option -g @alias-mixed-next yes
                 .into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert!(read_global_option(&shared, "@after-parse").is_empty());
@@ -53557,6 +53707,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let events = take_reliable_messages(&mailbox)
@@ -53643,6 +53794,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -53718,6 +53870,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -53788,6 +53941,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -53861,6 +54015,7 @@ set-option -g @alias-mixed-next yes
                 output: "HOOK_PARSE_TRIGGER".into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -53923,6 +54078,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let events = take_reliable_messages(&mailbox)
@@ -53977,6 +54133,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
 
@@ -54057,6 +54214,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let events = take_reliable_messages(&mailbox)
@@ -54142,6 +54300,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let events = take_reliable_messages(&mailbox)
@@ -54230,6 +54389,7 @@ set-option -g @alias-mixed-next yes
                 .into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         {
@@ -54259,6 +54419,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -54297,6 +54458,7 @@ set-option -g @alias-mixed-next yes
                 .into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(read_global_option(&shared, "@verbose-order"), "alpha");
@@ -54442,6 +54604,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
     }
@@ -54514,6 +54677,7 @@ set-option -g @alias-mixed-next yes
                 output: expected.clone().into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -54536,6 +54700,7 @@ set-option -g @alias-mixed-next yes
                 output: aggregate_expected.clone().into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -54557,6 +54722,7 @@ set-option -g @alias-mixed-next yes
                 output: aggregate_expected.into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -54593,6 +54759,7 @@ set-option -g @alias-mixed-next yes
                 output: expected.clone().into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         let ProtocolMessage::Event(Event {
@@ -54672,6 +54839,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -54810,6 +54978,7 @@ set-option -g @alias-mixed-next yes
                 output: format!("ALIAS_BEFORE\n{child_output}\nALIAS_AFTER\n").into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -54825,6 +54994,7 @@ set-option -g @alias-mixed-next yes
                 output: format!("CONDITIONAL_BEFORE\n{child_output}\nCONDITIONAL_AFTER\n").into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         shared
@@ -54855,6 +55025,7 @@ set-option -g @alias-mixed-next yes
                 output: "HOOK_TRIGGER\nHOOK_CHILD\nHOOK_LATER\n".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         shared
@@ -54878,6 +55049,7 @@ set-option -g @alias-mixed-next yes
                 output: "ROOT_BEFORE\nBEFORE_CHILD\nAFTER_CHILD\nROOT_AFTER\n".into(),
                 exit_code: 1,
                 stderr: "can't find session: missing-indirect\n".to_owned(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -54896,6 +55068,7 @@ set-option -g @alias-mixed-next yes
                          can't find session: missing-B\n\
                          can't find session: missing-C\n"
                     .to_owned(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         shared
@@ -54926,6 +55099,7 @@ set-option -g @alias-mixed-next yes
                 output: "TERMINAL_HOOK_TRIGGER\n".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         shared
@@ -55182,6 +55356,7 @@ set-option -g @alias-mixed-next yes
                 output: "MIXED_TRIGGER".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -55335,6 +55510,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -55414,6 +55590,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             let events = take_reliable_messages(&mailbox)
@@ -55480,6 +55657,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -55504,6 +55682,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -55532,6 +55711,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -55574,6 +55754,7 @@ set-option -g @alias-mixed-next yes
                 output: "OUTSIDE_REPLAY".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert!(control_command_guards(take_reliable_messages(&mailbox)).is_empty());
@@ -55613,6 +55794,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -55739,6 +55921,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let first_events = take_reliable_messages(&mailbox)
@@ -55829,6 +56012,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -55866,6 +56050,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -55981,6 +56166,7 @@ set-option -g @alias-mixed-next yes
                 output: format!("{direct_verbose}\nROOT_BEFORE\n{diagnostic}\nROOT_AFTER\n").into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -55996,6 +56182,7 @@ set-option -g @alias-mixed-next yes
                 output: format!("ROOT_BEFORE\n{diagnostic}\nROOT_AFTER\n").into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -56026,6 +56213,7 @@ set-option -g @alias-mixed-next yes
                 .into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -56061,6 +56249,7 @@ set-option -g @alias-mixed-next yes
                 .into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -56090,6 +56279,7 @@ set-option -g @alias-mixed-next yes
                 .into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
     }
@@ -56179,6 +56369,7 @@ set-option -g @alias-mixed-next yes
                 .into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -56205,6 +56396,7 @@ set-option -g @alias-mixed-next yes
                 .into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         let inner = shared.inner.lock();
@@ -56289,6 +56481,7 @@ set-option -g @alias-mixed-next yes
                 output: "one\nnested-new\ntwo\n".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         let inner = shared.inner.lock();
@@ -56347,6 +56540,7 @@ set-option -g @alias-mixed-next yes
                 output: "BEFORE\nHOOK\nAFTER\nLIST_s\n".into(),
                 exit_code: 1,
                 stderr: "can't find session: missing-runtime\n".to_owned(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
     }
@@ -56419,6 +56613,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{expected}\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
 
@@ -56436,6 +56631,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
 
@@ -56475,6 +56671,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert!(
@@ -56508,6 +56705,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert!(
@@ -56563,6 +56761,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -56583,6 +56782,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -56603,6 +56803,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let invalid = format!("{}:1: unknown command: wibble", invalid_leaf.display());
@@ -56687,6 +56888,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{missing_a}\n{missing_b}\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
 
@@ -56713,6 +56915,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -56734,6 +56937,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -56758,6 +56962,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let messages = take_reliable_messages(&control_mailbox);
@@ -56810,6 +57015,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert!(matches!(
@@ -56858,6 +57064,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             let messages = take_reliable_messages(&control_mailbox);
@@ -56923,6 +57130,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let warnings = take_reliable_messages(&interactive_mailbox)
@@ -57006,6 +57214,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -57078,6 +57287,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let timeline = take_reliable_messages(&mailbox)
@@ -57193,6 +57403,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -57238,6 +57449,7 @@ set-option -g @alias-mixed-next yes
                 output: "TRIGGER".into(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
         assert_eq!(
@@ -57313,6 +57525,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{expected}\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
 
@@ -57334,6 +57547,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -57377,6 +57591,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(read_global_option(&shared, "@runtime-breadth"), "60");
@@ -57398,6 +57613,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -57484,6 +57700,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -57508,6 +57725,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: format!("{NESTED_SOURCE_LIMIT_ERROR}\n{NESTED_SOURCE_LIMIT_ERROR}\n"),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -57541,6 +57759,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -57570,6 +57789,7 @@ set-option -g @alias-mixed-next yes
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let failures = control_command_guards(take_reliable_messages(&control_mailbox))
@@ -66847,6 +67067,7 @@ set-option -g @alias-mixed-next yes
                     output: RawText::default(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 }
             );
             assert_eq!(
@@ -80177,6 +80398,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         worker.join().expect("direct confirm worker");
@@ -83909,6 +84131,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -84020,6 +84243,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: RawText::default(),
                 exit_code: 1,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(
@@ -84084,6 +84308,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -84523,6 +84748,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
         assert_eq!(read_global_option(&shared, "@sourced-effect"), "yes");
@@ -88538,6 +88764,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: "FIRED-SW".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -88592,6 +88819,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: "OWN-buffer0\nIDX-A\nIDX-B".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -88622,6 +88850,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: "SETOPT-FIRED".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -88650,6 +88879,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: "R-FIRED".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
     }
@@ -89463,6 +89693,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: "NW-FIRST=hooked\nNW-SECOND=hooked".into(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
 
@@ -89483,6 +89714,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: RawText::default(),
                 exit_code: 0,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
             }
         );
 
@@ -89743,6 +89975,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: "before\n'printf before; exit 3' returned 3".into(),
                 exit_code: 3,
                 stderr: String::new(),
+                stdout_claim: StdoutClaim::Print,
             }
         );
     }

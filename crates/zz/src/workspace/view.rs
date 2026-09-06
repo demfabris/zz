@@ -3858,7 +3858,10 @@ mod tests {
         };
         zz_protocol::ChooseTreeState {
             items: vec![
-                item("session", zz_protocol::ChooseTreeTarget::Session(SessionId(0))),
+                item(
+                    "session",
+                    zz_protocol::ChooseTreeTarget::Session(SessionId(0)),
+                ),
                 item("window", zz_protocol::ChooseTreeTarget::Window(WindowId(0))),
             ],
             search: None,
@@ -3977,9 +3980,7 @@ mod tests {
                 },
                 retire: zz_protocol::EventPayload::CommandPrompt { state: None },
                 keystroke: "escape",
-                reaches_daemon: |message| {
-                    matches!(message, InputMessage::CommandPrompt { .. })
-                },
+                reaches_daemon: |message| matches!(message, InputMessage::CommandPrompt { .. }),
             },
             OverlayCase {
                 event: CoreEvent::ChooseTreeChanged,

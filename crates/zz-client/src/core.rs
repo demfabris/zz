@@ -5,7 +5,7 @@ use std::{
 
 use zz_protocol::{
     AgentCommand, AgentPaneWire, BrowserCommand, ChooseBufferSearchState, ChooseBufferState,
-    ChooseTreeSearchState, ChooseTreeState, ClientExitAction, ClientMessageKind,
+    ChooseTreeSearchState, ChooseTreeState, ClientExitAction, ClientMessageKind, ClipboardProducer,
     CommandPromptState, CommandResponse, ConfirmState, DisplayPanesState, Event, EventPayload,
     KeyBindingSnapshot, KeyTableSnapshot, MenuState, MuxOptions, MuxSnapshot, PaneId, PopupState,
     ProtocolMessage, ServerHello, SessionId, StatusLine, TerminalUiCommand,
@@ -154,6 +154,9 @@ pub enum CoreEvent {
         request_id: u64,
         target: ClipboardTarget,
         text: String,
+        /// Which of the pin's two OSC 52 writers produced this selection, which
+        /// is what decides the field a raw client names.
+        producer: ClipboardProducer,
     },
     OpenUri {
         pane: PaneId,
@@ -749,12 +752,14 @@ impl ClientCore {
                 request_id,
                 target,
                 text,
+                producer,
             } => {
                 self.events.push_back(CoreEvent::Clipboard {
                     pane,
                     request_id,
                     target,
                     text,
+                    producer,
                 });
             }
             EventPayload::OpenUri { pane, uri } => {

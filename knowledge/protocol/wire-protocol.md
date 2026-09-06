@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v98)
+title: zz wire protocol (v99)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 98`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 99`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (98) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (99) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -614,9 +614,35 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 98`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 99`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v99 carries three parse-and-ownership facts the pin keeps inside its own server and zz had been
+  inferring. `CommandResponse::Success` gains `stdout_claim: StdoutClaim` appended after `stderr`,
+  where `StdoutClaim` is a new three-variant enum (`None`, `Print`, `Raw`) naming which of the pin's
+  two stdout writers claimed the command client's stream while `output` was produced: `cmdq_print`
+  is `Print` and `file_write` on `-` is `Raw`. The CLI used to read the claim off the bytes — a
+  sourced replay transcript is newline-terminated exactly when a print writer claimed the stream —
+  which mis-reads a raw buffer whose own last byte is a newline. `CommandResponse::Error` is
+  untouched: an error response's output is the pin's error text, which only ever reaches the client
+  through `cmdq_print`. `EventPayload::Clipboard` gains `producer: ClipboardProducer` appended after
+  `text`, where `ClipboardProducer` is a new two-variant enum (`Server`, `Application`) naming which
+  of the pin's two OSC 52 writers produced the selection. `window_copy_copy_buffer`,
+  `cmd-set-buffer -w` and `cmd-load-buffer -w` all write an empty `clip` field and are `Server`;
+  `input_osc_52` forwards the application's own field and is `Application`. Both reached a zz client
+  with `request_id` 0, so a raw client could not tell them apart. `ProtocolMessage` gains two
+  variants appended after `CommandQueueParked`: `EnvironmentRequest { request_id: u64, names:
+  Vec<String> }` and `EnvironmentResponse { request_id: u64, values: Vec<Option<String>> }`, the
+  `$NAME` half of what `HomeDirectoryRequest`/`HomeDirectoryResponse` already do for `~user`. A
+  Control client parses its own lines, so it has to read the daemon's global environment the way the
+  pin's `yylex_token_variable` reads `environ_find(global_environ, name)` while the server parses
+  that line; the request names only the variables one line needs and is pipelined beside the home
+  request, so a line carrying both still costs one round trip. `None` in `values` is an unset name,
+  which the pin expands to nothing. `names` is bounded by `MAX_ENVIRONMENT_NAMES` (1024) and
+  `MAX_ENVIRONMENT_NAME_BYTES` (1024) and each value by `MAX_ENVIRONMENT_VALUE_BYTES` (16 KiB) on
+  deserialization, mirroring the home-directory batch. Nothing is inserted and nothing is removed:
+  two fields are appended inside existing variants and two variants are appended to
+  `ProtocolMessage`, so a v98 peer cannot decode any of them.
 - v98 carries the rest of `mode_tree_key`'s vocabulary over both choosers. `ChooseTreeAction`
   gains ten variants appended after `KillTagged`: `SwapUp`, `SwapDown`, `SortNext`, `SortReverse`,
   `Help`, `CollapseAll`, `ExpandAll`, `Mark`, `MarkClear` and `CommandPrompt`, the actions the

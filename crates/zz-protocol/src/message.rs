@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 98;
+pub const PROTOCOL_VERSION: u16 = 99;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -55,6 +55,15 @@ pub const MAX_HOME_DIRECTORY_USERS: usize = 1024;
 pub const MAX_HOME_DIRECTORY_USER_BYTES: usize = 1024;
 /// Longest home directory the daemon may report for one of those names.
 pub const MAX_HOME_DIRECTORY_BYTES: usize = 16 * 1024;
+/// Most `$NAME` variables one Control line may ask the daemon to read out of
+/// its global environment at once, and the longest name in that batch. The
+/// pin's `yylex_is_var` accepts letters, digits and `_`, so a name is short.
+pub const MAX_ENVIRONMENT_NAMES: usize = 1024;
+pub const MAX_ENVIRONMENT_NAME_BYTES: usize = 1024;
+/// Longest value the daemon may report for one of those names. `environ_set`
+/// takes whatever `set-environment` was given, so this matches the home
+/// directory ceiling rather than a name ceiling.
+pub const MAX_ENVIRONMENT_VALUE_BYTES: usize = 16 * 1024;
 /// Longest absolute path the daemon may hand a client to open for
 /// `load-buffer` or `save-buffer`.
 pub const MAX_CLIENT_FILE_PATH_BYTES: usize = 16 * 1024;
@@ -1751,6 +1760,25 @@ pub enum PreparedCommandResult {
     Error(ServerError),
 }
 
+/// Which of the pin's two stdout writers claimed the command client's stream
+/// while this response's `output` was produced. `cmdq_print` and `file_write`
+/// both `dup` that stream once and then close it, so the first writer owns it:
+/// a `Raw` claim means the bytes are already exactly what the client must put
+/// on stdout, and any later print in the same run was dropped by the server.
+/// Inferring the claim from the bytes cannot work, because a raw buffer whose
+/// own last byte is a newline looks exactly like a print.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StdoutClaim {
+    /// Nothing wrote to the client's stdout, so `output` is empty.
+    #[default]
+    None,
+    /// `cmdq_print`: the server owns line termination and the client adds the
+    /// trailing newline the pin's `file_vprint` would have added.
+    Print,
+    /// `file_write` on `-`: the bytes are the whole write, terminator included.
+    Raw,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandResponse {
     Success {
@@ -1758,6 +1786,9 @@ pub enum CommandResponse {
         output: RawText,
         exit_code: u8,
         stderr: String,
+        /// Appended in v99 so the command client stops inferring the claim from
+        /// whether `output` ends in a newline.
+        stdout_claim: StdoutClaim,
     },
     Error {
         request_id: u64,
@@ -2860,6 +2891,25 @@ where
     deserializer.deserialize_seq(StartupConfigCausesVisitor)
 }
 
+/// Which of the pin's two OSC 52 writers produced one clipboard event.
+///
+/// The pin keeps them apart by construction. `window_copy_copy_buffer`,
+/// `cmd-set-buffer -w` and `cmd-load-buffer -w` all hand the terminal an empty
+/// `clip` field, which asks it for its own default target; `input_osc_52`
+/// forwards whatever field the application named, filtered through
+/// `cpqs01234567`. zz publishes both as one event, so the producer has to ride
+/// the event: every zz publication carried `request_id` 0 except a
+/// client-issued `CopySelection`, and a raw client could not tell the pin's
+/// two writers apart from that alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClipboardProducer {
+    /// The server wrote the selection itself, with the pin's empty field.
+    #[default]
+    Server,
+    /// An application in the pane asked for this write and named the field.
+    Application,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EventPayload {
     Snapshot(MuxSnapshot),
@@ -2886,6 +2936,9 @@ pub enum EventPayload {
         request_id: u64,
         target: ClipboardTarget,
         text: String,
+        /// Appended in v99. Which of the pin's two OSC 52 producers wrote this
+        /// selection, which is what decides the field a raw client names.
+        producer: ClipboardProducer,
     },
     BrowserCommand {
         pane: PaneId,
@@ -3332,6 +3385,70 @@ pub enum ProtocolMessage {
     CommandQueueParked {
         request_id: u64,
     },
+    /// Ask the daemon to read the `$NAME` variables one Control line needs out
+    /// of its global environment, the way the pin's `yylex_token_variable`
+    /// reads them through `environ_find(global_environ, name)` while the server
+    /// parses that line. Appended in v99.
+    EnvironmentRequest {
+        request_id: u64,
+        #[serde(deserialize_with = "deserialize_environment_names")]
+        names: Vec<String>,
+    },
+    /// The answer to exactly one [`ProtocolMessage::EnvironmentRequest`], one
+    /// entry per requested name in the order asked. `None` is an unset name,
+    /// which the pin expands to nothing. Appended in v99.
+    EnvironmentResponse {
+        request_id: u64,
+        #[serde(deserialize_with = "deserialize_environment_values")]
+        values: Vec<Option<String>>,
+    },
+}
+
+fn deserialize_environment_names<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let names = Vec::<String>::deserialize(deserializer)?;
+    if names.len() > MAX_ENVIRONMENT_NAMES {
+        return Err(D::Error::invalid_length(
+            names.len(),
+            &"an environment batch within the wire entry limit",
+        ));
+    }
+    if let Some(name) = names
+        .iter()
+        .find(|name| name.len() > MAX_ENVIRONMENT_NAME_BYTES)
+    {
+        return Err(D::Error::invalid_length(
+            name.len(),
+            &"a variable name within the wire byte limit",
+        ));
+    }
+    Ok(names)
+}
+
+fn deserialize_environment_values<'de, D>(deserializer: D) -> Result<Vec<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let values = Vec::<Option<String>>::deserialize(deserializer)?;
+    if values.len() > MAX_ENVIRONMENT_NAMES {
+        return Err(D::Error::invalid_length(
+            values.len(),
+            &"an environment batch within the wire entry limit",
+        ));
+    }
+    if let Some(value) = values
+        .iter()
+        .flatten()
+        .find(|value| value.len() > MAX_ENVIRONMENT_VALUE_BYTES)
+    {
+        return Err(D::Error::invalid_length(
+            value.len(),
+            &"an environment value within the wire byte limit",
+        ));
+    }
+    Ok(values)
 }
 
 fn deserialize_home_directory_users<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -4341,6 +4458,7 @@ mod tests {
             output: "out".into(),
             exit_code: 1,
             stderr: "err".to_owned(),
+            stdout_claim: super::StdoutClaim::Raw,
         };
         let bytes = postcard::to_stdvec(&success).expect("success");
         let mut legacy = vec![0];
@@ -4583,7 +4701,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 98);
+        assert_eq!(super::PROTOCOL_VERSION, 99);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

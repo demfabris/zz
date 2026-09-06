@@ -67,8 +67,8 @@ use zz_mux::{MuxEngine, format_command};
 #[cfg(not(target_os = "ios"))]
 use zz_protocol::{
     CommandInvocation, MAX_AGENT_SEND_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES, PROTOCOL_VERSION,
-    PreparedCommand, PreparedCommandResult, RawText, ServerError, ServerHello, canonical_command,
-    catalog_command_spec,
+    PreparedCommand, PreparedCommandResult, RawText, ServerError, ServerHello, StdoutClaim,
+    canonical_command, catalog_command_spec,
 };
 use zz_terminal::TerminalColorScheme;
 #[cfg(not(target_os = "ios"))]
@@ -1241,8 +1241,8 @@ fn run_command_mode(
                 execute_prepared_command(&mut client, command.clone())
                     .map_err(|error| (*index, error))
             },
-            |(_, command), outcome| {
-                let raw = raw_command_output(command.canonical_name.as_deref(), &outcome.stdout);
+            |(_, _command), outcome| {
+                let raw = raw_command_output(outcome.stdout_claim);
                 let status = output_writer.print(&outcome.stdout, raw);
                 print_command_error(&outcome.stderr);
                 status
@@ -1266,11 +1266,9 @@ fn run_command_mode(
     match execute_command_chain(
         command_chain,
         |command| client.execute_streams(command.clone()),
-        |command, outcome| {
-            let status = output_writer.print(
-                &outcome.stdout,
-                raw_command_output(Some(canonical_command(&command.name)), &outcome.stdout),
-            );
+        |_command, outcome| {
+            let status =
+                output_writer.print(&outcome.stdout, raw_command_output(outcome.stdout_claim));
             print_command_error(&outcome.stderr);
             status
         },
@@ -1901,16 +1899,13 @@ fn format_local_command_error(path: &Path, error: DaemonError) -> String {
     }
 }
 
+/// Whether the daemon says a `file_write` on `-` claimed this client's stdout
+/// for the run that produced these bytes. The pin's claim is a property of the
+/// writer: `show-buffer` on a buffer whose own last byte is a newline is still
+/// a raw write, and reading the claim off the bytes turned that into a print.
 #[cfg(not(target_os = "ios"))]
-fn raw_command_output(canonical_name: Option<&str>, output: &RawText) -> bool {
-    match canonical_name {
-        Some("save-buffer" | "show-buffer") => true,
-        Some("source-file") => {
-            let bytes = output.as_bytes();
-            !bytes.is_empty() && !bytes.ends_with(b"\n")
-        }
-        _ => false,
-    }
+const fn raw_command_output(claim: StdoutClaim) -> bool {
+    matches!(claim, StdoutClaim::Raw)
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -3603,6 +3598,7 @@ mod tests {
                         stdout: "three out\n".into(),
                         stderr: "three err\n".to_owned(),
                         exit_code: 3,
+                        ..CommandOutcome::default()
                     },
                     "zero" => CommandOutcome {
                         stdout: "zero out\n".into(),

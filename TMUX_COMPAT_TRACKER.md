@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 15 INTEGRATED: CONFIG THEN STATUS; PROTOCOL V98; FROZEN SCOPE 304/304**
+> Campaign delivery: **CYCLE 16 INTEGRATED: DAEMON, DESKTOP, PROOF; PROTOCOL V98; FROZEN SCOPE 304/304**
 >
-> Live work: **4 OPEN + 0 BLOCKED = 4 UNRESOLVED GROUPS (13 POST-FREEZE ITEMS)**
+> Live work: **8 OPEN + 0 BLOCKED = 8 UNRESOLVED GROUPS (14 POST-FREEZE ITEMS)**
 >
-> Ledger settlement: **98.3% (227 of 231 known groups: 185 CLOSED + 42 ACCEPTED); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **96.6% (230 of 238 known groups: 188 CLOSED + 42 ACCEPTED); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **238 SCENARIOS, 2,795 STEPS, 4 REGISTERED KNOWN ROWS; ATTACHED-CLIENT PASS RECORDED AT d59236fc92d2; FOUR OPEN GROUPS KEEP THE PRACTICAL EXIT GATE OPEN**
+> Exit evidence: **249 SCENARIOS, 3,073 STEPS, 4 REGISTERED KNOWN ROWS; ATTACHED-CLIENT PASS RECORDED AT 6edc5c7ec425; EIGHT OPEN GROUPS KEEP THE PRACTICAL EXIT GATE OPEN**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 15 INTEGRATED ON THE UBUNTU BOX, CODEX GPT-6-ASTRA LANES AT MEDIUM REASONING ON THE DEFAULT TIER, CONFIG THEN STATUS, ONE GATE ALONE.**
+> Orchestration: **CYCLE 16 INTEGRATED ON THE UBUNTU BOX, CLAUDE CODE OPUS 5 LANES AT XHIGH, DAEMON THEN DESKTOP THEN PROOF, ONE GATE ALONE.**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,22 +76,22 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | Cycle-15 config `fc4f5ded` and status `d59236fc` pushed to main in that order; full run stamped at `d59236fc92d2` |
+| Published branch | Cycle-16 daemon `b547b29e`, desktop `b6732f05` and proof `6edc5c7e` pushed to main in that order; full run stamped at `6edc5c7ec425` |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Cycle 15: configuration discovery/reload, pane tmux PATH and nested refusal, remaining prefix commands, cached background status jobs, live Control layouts, direct mixed CLI stdout ownership, and platform dead-signal spelling. Protocol remains v98. |
-| Orchestration | Ubuntu, Codex gpt-6-astra lanes at medium reasoning on the default tier; one gate alone, config then status. Reviewer fixes applied before gates. Original campaign branches remain at their reviewed tips; rebased commits landed on main without force pushes. |
+| Delivery | Cycle 16: sourced CLI stdout ownership including nested source frames, command output surviving its search prompt, status jobs keyed by their format loop tag, pinned Control notification order and pause placement, a desktop drag reaching the system clipboard, every daemon overlay payload reaching a desktop consumer, the raw TUI leaving a stock terminal its full pane width, seven plugin runtime paths, the option and hook census, and six harness proof holes. Protocol remains v98. |
+| Orchestration | Ubuntu, Claude Code Opus 5 lanes at xhigh; one gate alone, daemon then desktop then proof. Reviewer must-fixes applied on each branch before its gate, each with the reviewer's own probe re-run. Original campaign branches remain at their reviewed tips; rebased commits landed on main without force pushes. |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
 | Agreed-scope meter | 100.0% (304 of 304 items frozen on 2026-08-31), 65 of 65 groups done, 0 partially burned; park dispositions 15 of 15; `python3 compat/progress.py` |
-| Completed fixed cohort | Cycle 15: 2/2 code lanes integrated; frozen meter remains 100.0% (304/304) |
-| Previous completed cohort | Cycle 14: instrument and 2/2 code lanes integrated; frozen meter 100.0% |
-| Campaign point | The frozen scope is complete; 13 post-freeze items remain in four open groups. The stamped full corpus and attached-client proof pass; the practical exit gate remains open for the recorded differences. |
-| Live registry | 46 active groups, 441 active items, 185 closed records |
-| Active status | 4 open, 0 blocked, 42 accepted |
+| Completed fixed cohort | Cycle 16: 3/3 lanes integrated; frozen meter remains 100.0% (304/304) |
+| Previous completed cohort | Cycle 15: 2/2 code lanes integrated; frozen meter 100.0% |
+| Campaign point | The frozen scope is complete; 14 post-freeze items remain in eight open groups. The stamped full corpus and attached-client proof pass; the practical exit gate remains open for the recorded differences. |
+| Live registry | 50 active groups, 454 active items, 188 closed records |
+| Active status | 8 open, 0 blocked, 42 accepted |
 | Known differentials | 4 registered cases: two GEO-only, one GEO plus OUT, and terminal-runtime with six FMT differences |
 
-Cycles 2 through 15 reached `origin/main` through the board MAIN lock. Resolve the latest
+Cycles 2 through 16 reached `origin/main` through the board MAIN lock. Resolve the latest
 records commit with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md` and remote main with
 `git ls-remote origin refs/heads/main`.
 
@@ -103,15 +103,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 15: 2/2 code lanes integrated; frozen meter remains 100.0% (304/304) |
-| Previous completed cohort | Cycle 14: instrument and 2/2 code lanes integrated; frozen meter 100.0% |
-| New residual groups | 13 live post-freeze items across 4 open groups; sourced stdout ownership, stock command-output prompts, ten Control notification residues, and status loop-tag job identity |
-| Unresolved movement | Cycle 15 closes config discovery, pane PATH, remaining prefix commands, direct mixed queues and signal spelling; four measured groups remain open, none blocked |
-| Live unresolved | 4 open + 0 blocked = 4 (13 post-freeze items) |
-| Practical exit gate | Open for four recorded behavioral groups; the full attached-client evidence now passes with a commit stamp |
-| Latest differential | 238 scenarios / 2,795 steps / 4 registered known rows; attached-client `PASS`, recorded at `d59236fc92d2` |
-| Differential SHA-256 | `f0ac2b7bda5c2bb3c2835aee89e7666ac367429be9cfd0c69c112b3a048f2b56` |
-| Ledger settlement | 227 of 231 known groups = 98.3% |
+| Completed fixed cohort | Cycle 16: 3/3 lanes integrated; frozen meter remains 100.0% (304/304) |
+| Previous completed cohort | Cycle 15: 2/2 code lanes integrated; frozen meter 100.0% |
+| New residual groups | 14 live post-freeze items across 8 open groups; the sourced raw-newline claim, three Control notification residues, the TUI copy-selection OSC 52 field, the rest of the menu mouse policy, the status block's rows and its missing status-left, four plugin runtime measurements, the format census remainder, and harness theme steering |
+| Unresolved movement | Cycle 16 closes sourced stdout ownership, the command-output prompt lifecycle, status loop-tag job identity, five Control notification items, three desktop and TUI chrome items, seven plugin runtime paths, the option and hook census and six harness holes; eight measured groups remain open, none blocked |
+| Live unresolved | 8 open + 0 blocked = 8 (14 post-freeze items) |
+| Practical exit gate | Open for eight recorded behavioral groups; the full attached-client evidence now passes with a commit stamp |
+| Latest differential | 249 scenarios / 3,073 steps / 4 registered known rows; attached-client `PASS`, recorded at `6edc5c7ec425` |
+| Differential SHA-256 | `d1af67b9adcb23a29fcbad655b6282ea68102cae696fa17c8258baaf57f2baa0` |
+| Ledger settlement | 230 of 238 known groups = 96.6% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -171,6 +171,22 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-06 cycle-16 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `b547b29e` daemon open groups, `b6732f05` desktop tmux client, `6edc5c7e` proof debt; each pushed after its own gate |
+| Review actions | All three reviews were approve-with-fixes and every must-fix landed on its branch with the reviewer's own probe re-run. Daemon: the sourced stdout claim was per source-file frame, so a nested source-file re-claimed a stream its parent owned; `note_stdout` now reads the whole transcript stack and both measured cases are byte, stderr and status identical on the two binaries. Desktop: the NOMOUSE menu was derived from `menu_key_cb`'s press half only, and a live pin probe confirms a button-1 release closes the menu with nothing chosen, so the desktop now answers the release with `Cancel`. Proof: the new prose-citation rule tripped on its own bare `compat/.cache` token and broke the tracker on any tree without a generated cache, the census `buffer-limit` step asserted parity of a non-effect because `paste_set` only trims on the unnamed path, and two reasons cited `cmd-display-popup.c`, which the pinned tree does not have, one of them inverting the popup's real pointer policy. |
+| Gate-found reds | Neither code lane ran `cargo test -p zz`. The daemon lane's guarded `%pause`/`%continue` placement contradicted two pre-existing zz tests, and the desktop lane's sidebar threshold broke three `cli_binary` status tests that read the status block at column 30. Both sets were moved onto the pinned behaviour, and the status-left hole the desktop change exposed is registered as `presentation:tui-status-left-needs-the-sidebar` rather than hidden. |
+| Workspace gates | Daemon and desktop: full workspace all-feature suites and clippy with warnings denied both pass; the daemon run needed the known-flake rule for `daemon_native_split_resize_commits_exactly` and `history_request_is_guarded`, which pass exact-solo. The proof branch touches zero files under `crates/`, so its code stages were skipped by rule. Protocol remains 98. |
+| Delta corpus | Daemon 219 scenarios, desktop 185, proof its own 15 plus the negative control; every list taken twice and reconciled. Only the four registered `known/` rows diverge, each at its documented tuple. `smoke/source-replay-diagnostics` ran solo in each gate; `smoke/pane-border-lines` hung twice under four-way shard load and passed solo in 34 seconds. |
+| Full exit evidence | 249 scenarios / 3,073 steps / 4 registered known rows; attached-client PASS at `6edc5c7ec425`. The full run passed without retries and wrote the stamp itself. |
+| Summary SHA-256 | `d1af67b9adcb23a29fcbad655b6282ea68102cae696fa17c8258baaf57f2baa0` |
+| Live registry | 50 active groups holding 454 items: 8 open, 0 blocked, 42 accepted; 188 closed records; 14 unresolved post-freeze items |
+| Remaining work | The sourced raw-newline claim, three Control notification residues, the TUI copy-selection OSC 52 field, the rest of the menu mouse policy, the status block's two rows and its missing status-left below the sidebar threshold, four plugin runtime measurements awaiting owners, the format census remainder, and harness theme steering; the real iTerm2 hour remains a maintainer task |
+| Ledger settlement | 230/238 known groups (96.6%); frozen scope 304/304 items and 65/65 groups |
+| Board | All three lane locks integrated and released; records settlement ledgered under MAIN. Preserve the F-SPLIT-MUX-*-V5 chain. Original campaign branches remain unchanged on origin. |
 
 ### 2026-09-05 cycle-15 integration checkpoint
 

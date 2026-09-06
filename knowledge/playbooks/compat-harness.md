@@ -152,14 +152,13 @@ steps with zero TOPO, GEO, FMT, OUT, or WARN differences. Protocol, snapshots, a
 prior contracts, and GPUI continues to take pane colors from its theme. Mutable tiled order after
 `join-pane`, `swap-pane`, or serialized `select-layout` remains under `F-PANE-BORDER-ZORDER`.
 
-At the 2026-09-05 cycle-15 integration checkpoint, the merged registry has 46 active groups
-holding 440 items: 4 open, 0 blocked, and 42 accepted, plus 185 closed records.
-The frozen meter remains 304/304 items across 65/65 groups; 13 post-freeze items remain
-open across 4 groups. Ledger settlement is 227/231 known groups (98.3%). The full run covers
-238 scenarios / 2,795 steps / 4 registered known rows; attached-client `PASS`, recorded at
-`d59236fc92d2`. Summary SHA-256: `f0ac2b7bda5c2bb3c2835aee89e7666ac367429be9cfd0c69c112b3a048f2b56`.
-The open groups are `clients.cli-output-sourced-mixed-queue`, `clients.command-output-pane-prompt`,
-`control-mode.notifications`, and `status.background-jobs`.
+At the 2026-09-06 cycle-16 integration checkpoint, the merged registry has 50 active groups
+holding 454 items: 8 open, 0 blocked, and 42 accepted, plus 188 closed records.
+The frozen meter remains 304/304 items across 65/65 groups; 14 post-freeze items remain
+open across 8 groups. Ledger settlement is 230/238 known groups (96.6%). The full run covers
+249 scenarios / 3,073 steps / 4 registered known rows; attached-client `PASS`, recorded at
+`6edc5c7ec425`. Summary SHA-256: `d1af67b9adcb23a29fcbad655b6282ea68102cae696fa17c8258baaf57f2baa0`.
+The open groups are `clients.cli-output-sourced-raw-newline-claim`, `control-mode.notifications`, `desktop.drag-to-clipboard`, `desktop.overlay-consumers`, `harness.proof-holes`, `plugins.runtime-paths`, `proofs.census-coverage`, `tui.sidebar-auto-hide`.
 
 The historical `w` forecast required a wider proof. Pinned
 `format_width` handles leading hashes, `#[...]` style spans, malformed markup, controls,

@@ -605,3 +605,65 @@ ten Control notification residues, and status loop-tag job identity. These need 
 replay or mux hook ownership beyond the lanes' zones. macOS signal runtime and a one-hour real
 iTerm2 session remain maintainer validations. Both lane locks were integrated and released;
 MAIN owns the records settlement, and TRIAGE preserves the F-SPLIT-MUX-*-V5 chain.
+
+### 2026-09-06 cycle-16 integration
+
+Claude Code Opus 5 lanes ran at xhigh on Ubuntu. One integration gate ran alone: daemon open
+groups landed at `b547b29e`, the desktop tmux client at `b6732f05`, then proof debt at
+`6edc5c7e`, each after its own gate. Protocol stays 98 and no lane touched the wire. Only
+`knowledge/tmux/gaps.md` conflicted on the rebases, regenerated with `tmux-tracker.py
+write-report` each time; the registry records merged by id without a manual merge. Original
+campaign branches remain at their reviewed tips on origin, and no force push occurred.
+
+All three reviews were approve-with-fixes, and every must-fix landed with the reviewer's probe
+re-run. The daemon's closed record claimed a command client's stdout is claimed exactly once
+while the claim lived on the innermost source-file frame, so a nested `source-file` re-claimed a
+stream its parent owned; `note_stdout` now reads the claimed and written state across the whole
+transcript stack, and both measured cases (a print, a nested raw write and a print; two nested raw
+writes) are now byte, stderr and status identical on the two binaries. The desktop's NOMOUSE menu
+came from the press half of `menu_key_cb` only: a live probe on the pin, an inner mouse-on client
+inside an outer throwaway server with SGR bytes injected through `send-keys -H`, shows the
+button-1 press keeping the menu drawn with nothing chosen and the release closing it with nothing
+chosen, so the desktop now answers the release with `Cancel` and the test asserts the pin instead
+of the divergence. The proof lane's new prose-citation rule tripped on its own bare
+`compat/.cache` token and failed the tracker, `compat/check.sh` and `compat/run.sh` on any tree
+without a generated cache; its census `buffer-limit` step asserted parity of a non-effect, since
+`paste_set` reaches `paste_add` only on the unnamed path, and now evicts through three unnamed
+`set-buffer` calls; and two reasons cited `cmd-display-popup.c`, a file the pinned tree does not
+have, one of them inverting the popup's real pointer policy, which `popup.c:549 popup_key_cb`
+owns through `popup_handle_drag`, a right-click menu and `input_key_get_mouse` into the popup's
+own job.
+
+The gate found two reds the lanes could not have seen, because neither code lane ran
+`cargo test -p zz`. The daemon's guarded `%pause`/`%continue` placement contradicted
+`control_mode`'s blank-and-EOF test and `cli_binary`'s live control test, both of which asserted
+the pre-lane placement outside the guard. The desktop's sidebar threshold broke three `cli_binary`
+status tests that read the status block at column 30, and two of them read `status-left`, which
+the raw TUI paints only inside the sidebar: measured at 80 and 100 columns the merged binary draws
+the window list and `status-right` but never `status-left`, and at 109 and 120 it draws all three.
+Those tests now attach at 120 columns and the hole is registered as
+`presentation:tui-status-left-needs-the-sidebar` rather than hidden.
+
+Both code lanes passed the full workspace suite and clippy with warnings denied. The daemon run
+needed the known-flake rule twice (`daemon_native_split_resize_commits_exactly` and
+`history_request_is_guarded`), both green exact-solo. The proof branch has zero files under
+`crates/`, so its code stages were skipped by rule. Deltas were 219 scenarios for daemon, 185 for
+desktop and the proof lane's own 15 plus its deliberately red negative control; every list was
+taken twice and reconciled. Only the four registered `known/` rows diverge, each at its documented
+tuple. `smoke/source-replay-diagnostics` ran solo in each gate, and `smoke/pane-border-lines` hung
+twice under four-way shard load and passed solo in 34 seconds. `compat/status-row.sh` still
+reports 9 of 9 rows differing, with verdicts identical to the pre-merge main binary.
+
+The final full run passed without retries at clean `6edc5c7ec425`: 249 scenarios, 3,073 steps,
+four registered known rows, and attached-client PASS. The harness wrote the stamp and printed
+summary current. Summary SHA-256:
+`d1af67b9adcb23a29fcbad655b6282ea68102cae696fa17c8258baaf57f2baa0`.
+
+Frozen delivery remains 304/304 items and 65/65 groups. The live registry holds 50 active groups
+and 454 items: 8 open, 0 blocked, 42 accepted, plus 188 closed records; 230/238 settled (96.6%).
+Fourteen post-freeze items remain across eight open groups: the sourced raw-newline claim, three
+Control notification residues, the TUI copy-selection OSC 52 field, the rest of the menu mouse
+policy, the status block's two rows and its missing `status-left`, four plugin runtime
+measurements awaiting owners, the format census remainder, and harness theme steering. A one-hour
+real iTerm2 session remains a maintainer validation. All three lane locks were integrated and
+released; MAIN owns the records settlement, and TRIAGE preserves the F-SPLIT-MUX-*-V5 chain.

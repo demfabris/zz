@@ -9,19 +9,21 @@ last_updated: 2026-09-03
 last_updated_by: Claude
 ---
 
-# Cycle-15 checkpoint
+# Cycle-16 checkpoint
 
-At the 2026-09-05 cycle-15 integration checkpoint, the merged registry has 46 active groups
-holding 440 items: 4 open, 0 blocked, and 42 accepted, plus 185 closed records.
-The frozen meter remains 304/304 items across 65/65 groups; 13 post-freeze items remain
-open across 4 groups. Ledger settlement is 227/231 known groups (98.3%). The full run covers
-238 scenarios / 2,795 steps / 4 registered known rows; attached-client `PASS`, recorded at
-`d59236fc92d2`. Summary SHA-256: `f0ac2b7bda5c2bb3c2835aee89e7666ac367429be9cfd0c69c112b3a048f2b56`.
-The open groups are `clients.cli-output-sourced-mixed-queue`, `clients.command-output-pane-prompt`,
-`control-mode.notifications`, and `status.background-jobs`.
+At the 2026-09-06 cycle-16 integration checkpoint, the merged registry has 50 active groups
+holding 454 items: 8 open, 0 blocked, and 42 accepted, plus 188 closed records.
+The frozen meter remains 304/304 items across 65/65 groups; 14 post-freeze items remain
+open across 8 groups. Ledger settlement is 230/238 known groups (96.6%). The full run covers
+249 scenarios / 3,073 steps / 4 registered known rows; attached-client `PASS`, recorded at
+`6edc5c7ec425`. Summary SHA-256: `d1af67b9adcb23a29fcbad655b6282ea68102cae696fa17c8258baaf57f2baa0`.
+The open groups are `clients.cli-output-sourced-raw-newline-claim`, `control-mode.notifications`, `desktop.drag-to-clipboard`, `desktop.overlay-consumers`, `harness.proof-holes`, `plugins.runtime-paths`, `proofs.census-coverage`, `tui.sidebar-auto-hide`.
 
-Cycle 15 closes direct mixed stdout queues and Linux dead-signal spelling. Sourced mixed
-queues remain open: the pin emits five bytes, hello; zz emits hello followed by LF AFTER LF.
+Cycle 15 closes direct mixed stdout queues and Linux dead-signal spelling, and cycle 16 closes
+the sourced queue: one sourced execution claims the command client's stdout once, however deeply
+source-file nests, so a sourced show-buffer emits hello and a later print is dropped. The residue
+is a raw buffer whose own bytes end with a newline, which the client cannot tell from a print
+claim without a wire change: clients.cli-output-sourced-raw-newline-claim.
 Buffer standard streams, direct CLI byte fidelity, and bare/-S status-job refresh remain adopted.
 The terminal-runtime placeholder and client-owned redraw dispositions remain accepted.
 

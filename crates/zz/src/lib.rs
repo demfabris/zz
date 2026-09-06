@@ -1242,10 +1242,7 @@ fn run_command_mode(
                     .map_err(|error| (*index, error))
             },
             |(_, command), outcome| {
-                let raw = matches!(
-                    command.canonical_name.as_deref(),
-                    Some("save-buffer" | "show-buffer")
-                );
+                let raw = raw_command_output(command.canonical_name.as_deref(), &outcome.stdout);
                 let status = output_writer.print(&outcome.stdout, raw);
                 print_command_error(&outcome.stderr);
                 status
@@ -1272,10 +1269,7 @@ fn run_command_mode(
         |command, outcome| {
             let status = output_writer.print(
                 &outcome.stdout,
-                matches!(
-                    canonical_command(&command.name),
-                    "save-buffer" | "show-buffer"
-                ),
+                raw_command_output(Some(canonical_command(&command.name)), &outcome.stdout),
             );
             print_command_error(&outcome.stderr);
             status
@@ -1904,6 +1898,18 @@ fn format_local_command_error(path: &Path, error: DaemonError) -> String {
             os_error_text(&error)
         ),
         error => format!("zz: {}", format_local_daemon_error(error)),
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn raw_command_output(canonical_name: Option<&str>, output: &RawText) -> bool {
+    match canonical_name {
+        Some("save-buffer" | "show-buffer") => true,
+        Some("source-file") => {
+            let bytes = output.as_bytes();
+            !bytes.is_empty() && !bytes.ends_with(b"\n")
+        }
+        _ => false,
     }
 }
 

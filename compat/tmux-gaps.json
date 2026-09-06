@@ -90,8 +90,8 @@
       "reason": "zz uses native chooser surfaces and the sidebar instead of tmux mode screens. On 2026-09-05 the attached keys-open-prefix-probe.sh refuted the functional part of the old clause \"Native choosers retain tmux command and keyboard semantics without drawing tmux's preview grid.\" for find-window: submitting a matching name opens the pin window tree and selects window 1, but zz find_window returns an empty Execution and remains in window 0. presentation:find-window-native-chooser reserves the native presentation choice only; it does not accept a missing command implementation. Cycle 14 reopened functional prefix f in keys.prefix-stock-commands; cycle 15 closes its attached prompt/filter/selection proof in smoke/keys-prefix-remainder. No presentation item was relocated. The checked-in keys-open-prefix-probe.sh also measures boundaries outside this prefix close: detached find-window returns rc0/empty output on both but the pin changes pane_in_mode|pane_mode from 0| to 1|tree-mode, whereas zz retains 0| because its chooser belongs to an attached client. No detached mode-persistence parity is claimed. The inherited regex engines differ: #{m/r:(a)\\1,aa} returns pin1/zz0 and #{m/r:\\d+,123} returns pin0/zz1; arbitrary POSIX ERE find-window -r parity is not claimed. These measurements do not add a new product acceptance or alter the native presentation item."
     },
     {
-      "id": "clients.cli-output-sourced-mixed-queue",
-      "title": "Preserve stdout stream ownership inside sourced command queues",
+      "id": "clients.cli-output-sourced-raw-newline-claim",
+      "title": "Carry the sourced stdout claim kind to the command client",
       "decision": "adopt",
       "status": "open",
       "priority": "now",
@@ -101,19 +101,21 @@
       ],
       "owner": "daemon",
       "items": [
-        "semantic:cli-output-sourced-stream-ownership"
+        "semantic:cli-output-sourced-raw-newline-claim"
       ],
       "evidence": [
         "scenario:compat/scenarios/smoke/cli-output-bytes.txt",
         "file:compat/scenarios/smoke/fixtures/cli-output-bytes.py",
         "resource:crates/zz/src/lib.rs",
-        "resource:crates/zz-daemon/src/daemon.rs"
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-protocol/src/message.rs"
       ],
       "acceptance": [
-        "A source-file containing show-buffer -b bytes followed by display-message -p AFTER, with buffer bytes equal to hello, emits exactly hello on pinned d77c9dc6 with status 0; preserve that stdout stream ownership across the sourced queue."
+        "With buffer newline holding hello and a newline, source-file of a file containing show-buffer -b newline followed by a top-level display-message -p AFTER emits exactly hello and a newline with status 0 on pinned d77c9dc6: the sourced raw write owns the command client's stdout and the later print is dropped even though the raw bytes end with a newline.",
+        "Keep every claim already proved by clients.cli-output-sourced-mixed-queue: the raw claim, the dropped sourced and top-level prints, the EBADF status and stderr for a second claim, and byte-exact print-only replays."
       ],
       "depends_on": [],
-      "reason": "Measured 2026-09-05 while closing the direct CLI mixed-queue item. The pin emits bytes hello (5 bytes), empty stderr and status 0; zz emits hello LF AFTER LF (12 bytes), empty stderr and status 0. The durable cli-output-bytes fixture explicitly asserts those different bytes rather than calling this parity. The CLI writer can track direct argv commands but source-file returns already aggregated CommandOutcome stdout, so it cannot reconstruct internal file_write versus cmdq_print boundaries. This requires a daemon/source replay fix outside this lane output-writer zone; no protocol change or native decision was made. Direct empty displays and homogeneous sourced print queues remain independently proved, so their closed scope was not relocated."
+      "reason": "Split out 2026-09-06 while closing clients.cli-output-sourced-mixed-queue, and measured on both binaries. Pinned d77c9dc6 on a fresh isolated -f /dev/null server: set-buffer -b nl with hello and a newline, a config file containing show-buffer -b nl, then source-file that file ; display -p AFTER emits hello and a newline with status 0 and empty stderr. zz emits hello, a newline, AFTER and a newline with status 0. The cause is the encoding the closed group chose, not the ownership rule itself. The daemon's sourced replay transcript is newline-terminated exactly when a print writer claimed the client's stdout, and the CLI's raw_command_output reads that back to decide whether the sourced aggregate claimed the stream raw. A raw buffer whose own bytes end with a newline is therefore read as a print claim, so the CLI leaves the stream open and the following top-level display prints where the pin drops it. Every other measured case, including a raw buffer without a trailing newline and both EBADF cases, is unaffected and stays proved. Removing this residue needs the claim kind carried explicitly rather than inferred, which means the daemon reporting per-response stdout stream ownership to the command client; that field would ride CommandResponse and is wire-reachable, so it costs a PROTOCOL_VERSION bump. Nothing was narrowed: compat/scenarios/smoke/fixtures/cli-output-bytes.py asserts both sides' bytes explicitly for this case until it closes."
     },
     {
       "id": "clients.interactive-refresh",
@@ -1908,6 +1910,18 @@
         "resource:crates/zz/src/lib.rs"
       ],
       "resolution": "Closed semantic:cli-output-mixed-queue with the pinned file.c stdout-stream ownership rule. A first show-buffer/save-buffer-to-stdout writes hello without LF and suppresses later printed stdout, including empty and nonempty display output. A printed stream followed by a file write, or a second file write, emits Bad file descriptor: - on stderr and sets exit status 1; later printed output still runs when the printed stream owns stdout. Named file writes do not claim stdout. The cli-output-bytes fixture checks exact bytes, stderr and exit statuses for all those cases while retaining direct and sourced empty-display proofs. lib.rs now retains one output writer per CLI queue and incorporates emission failure into the queue exit status. No wire change. source-file internal mixed streams still arrive aggregated and remain explicitly measured under clients.cli-output-sourced-mixed-queue."
+    },
+    {
+      "id": "clients.cli-output-sourced-mixed-queue",
+      "title": "Preserve stdout stream ownership inside sourced command queues",
+      "closed_on": "2026-09-06",
+      "evidence": [
+        "scenario:compat/scenarios/smoke/cli-output-bytes.txt",
+        "file:compat/scenarios/smoke/fixtures/cli-output-bytes.py",
+        "resource:crates/zz/src/lib.rs",
+        "resource:crates/zz-daemon/src/daemon.rs"
+      ],
+      "resolution": "Proved 2026-09-06 against pinned d77c9dc6. semantic:cli-output-sourced-stream-ownership is closed. Pin derivation read from file.c, cmd-queue.c, server-client.c and cmd-save-buffer.c: a command client's stdout is claimed exactly once. cmdq_print reaches file_vprint, which reuses stream 1 if it already exists and otherwise creates it and sends MSG_WRITE_OPEN with fd STDOUT_FILENO; show-buffer on a command client falls through to file_write(c, \"-\", ...) with a fresh file_next_stream++ stream and the same fd. On the client side file_write_open dups that fd and, because close_received is set, closes the received stdout, so the second claim's dup fails with EBADF. file_write's caller cmd_save_buffer_done reports that error, while file_vprint passes no callback, so a dropped print is silent. Eight isolated -f /dev/null pin measurements fixed the rule: a sourced show-buffer then display-message -p AFTER emits hello with status 0; two sourced show-buffers emit hello with status 1 and stderr 'Bad file descriptor: -'; a sourced print-only file emits its lines with status 0; source-file of a raw-only file followed by a top-level display -p AFTER emits only hello; source-file of a print-only file followed by display -p AFTER continues on stream 1 and appends AFTER; a top-level show-buffer followed by source-file of a print-only file emits only hello; a top-level display -p BEFORE followed by source-file of a raw-only file emits BEFORE and then status 1 with 'Bad file descriptor: -'; a sourced file with one display-message -p line emits line and a newline. zz aggregated the whole sourced queue into one CommandOutcome stdout with append_inserted_output, emitting hello LF AFTER LF for the first case. ConfigStdoutTranscript now carries raw_claimed and note_stdout takes the write's kind: a raw write is refused when anything already wrote to the replay transcript and otherwise appends the buffer bytes verbatim and claims the stream; a print write is dropped once a raw writer holds the stream and otherwise appends and self-terminates with a newline. That self-termination is what lets the command client recover the claim kind without a wire change: a sourced transcript is newline-terminated exactly when a print writer owns the stream. A refused raw write records 'Bad file descriptor: -' on the running command request's stderr and raises its exit status, matching cmd_save_buffer_done. The CLI writer's raw_command_output now classifies a source-file (and its source alias) response as a raw claim when its bytes are non-empty and do not end with a newline, which feeds the unchanged CommandOutputWriter ownership state machine; save-buffer and show-buffer classify by name as before, and a file-target save-buffer still returns empty output and claims nothing. All eight pin measurements were reproduced byte for byte, status for status and stderr line for stderr line on the rebuilt zz. compat/scenarios/smoke/fixtures/cli-output-bytes.py asserts six of them as parity (the mixed queue, raw-then-top-level-print, top-level-raw-then-sourced-print, sourced-print-then-top-level-print, the sourced double show-buffer with its EBADF status and stderr, and the pre-existing print-only replay); the earlier per-side sourced expectation is deleted and the scenario ran clean at this tip with 2 steps and no TOPO, GEO, FMT, OUT or WARN divergences, both sides printing clean:16. One residue was measured and relocated rather than hidden: a sourced raw write whose buffer already ends with a newline is indistinguishable from a print claim under this encoding, so semantic:cli-output-sourced-raw-newline-claim moves to the new group clients.cli-output-sourced-raw-newline-claim with its bytes. No product decision or protocol change was made."
     },
     {
       "id": "clients.command-output-pane-prompt",

@@ -24471,7 +24471,16 @@ impl Shared {
             {
                 report.note_startup_display(&command, &execution.output);
             }
-            report.note_stdout(&captured_output);
+            let raw_stdout = matches!(
+                canonical_command(&routed.name),
+                "save-buffer" | "show-buffer"
+            );
+            if report.note_stdout(&captured_output, raw_stdout) == ReplayStdoutWrite::Denied
+                && let Some(replay_client) = options.replay_client
+            {
+                self.record_command_stderr(replay_client, "Bad file descriptor: -");
+                self.record_command_failure(replay_client);
+            }
             let publish_guard =
                 |output: RawText, error: bool, sticky_failure: bool, captured_events| {
                     if alias_group {
@@ -25558,6 +25567,19 @@ struct ConfigStdoutTranscript {
     top_level_verbose: RawText,
     replay: RawText,
     diagnostics: RawText,
+    raw_claimed: bool,
+}
+
+/// What the pin's client did with one replayed command's stdout. `file_write`
+/// on `-` and `file_vprint` both `dup` the command client's stdout once and
+/// then `close` it, so the first writer owns the stream: a later `file_write`
+/// answers `EBADF` and a later `cmdq_print` is dropped without an error,
+/// because `file_vprint` passes no callback for `file_fire_done` to report to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReplayStdoutWrite {
+    Written,
+    Dropped,
+    Denied,
 }
 
 impl ConfigLoadReport {
@@ -25628,14 +25650,33 @@ impl ConfigLoadReport {
         }
     }
 
-    fn note_stdout(&mut self, output: &RawText) {
-        if let Some(transcript) = self
+    fn note_stdout(&mut self, output: &RawText, raw: bool) -> ReplayStdoutWrite {
+        let Some(transcript) = self
             .stdout_transcript
             .as_mut()
             .and_then(|transcripts| transcripts.last_mut())
-        {
-            append_inserted_output(&mut transcript.replay, output);
+        else {
+            return ReplayStdoutWrite::Written;
+        };
+        if output.as_bytes().is_empty() {
+            return ReplayStdoutWrite::Written;
         }
+        if raw {
+            if transcript.raw_claimed || !transcript.replay.as_bytes().is_empty() {
+                return ReplayStdoutWrite::Denied;
+            }
+            transcript.raw_claimed = true;
+            transcript.replay.push_bytes(output.as_bytes());
+            return ReplayStdoutWrite::Written;
+        }
+        if transcript.raw_claimed {
+            return ReplayStdoutWrite::Dropped;
+        }
+        append_inserted_output(&mut transcript.replay, output);
+        if !transcript.replay.as_bytes().ends_with(b"\n") {
+            transcript.replay.push_bytes(b"\n");
+        }
+        ReplayStdoutWrite::Written
     }
 
     fn note_stdout_line(&mut self, line: &str, top_level: bool) {
@@ -51706,7 +51747,7 @@ set-option -g @alias-mixed-next yes
                         ),
                         CommandResponse::Success {
                             request_id,
-                            output: marker.to_owned().into(),
+                            output: format!("{marker}\n").into(),
                             exit_code: 1,
                             stderr: format!("{diagnostic}\n"),
                         },
@@ -51779,7 +51820,7 @@ set-option -g @alias-mixed-next yes
                 ),
                 CommandResponse::Success {
                     request_id,
-                    output: marker.to_owned().into(),
+                    output: format!("{marker}\n").into(),
                     exit_code: 1,
                     stderr: format!("{diagnostic}\n"),
                 }
@@ -51871,7 +51912,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: "LATER".into(),
+                output: "LATER\n".into(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n"),
             }
@@ -51955,7 +51996,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 4,
-                output: "LATER".into(),
+                output: "LATER\n".into(),
                 exit_code: 1,
                 stderr: format!("{diagnostic}\n{diagnostic}\n"),
             }
@@ -52295,7 +52336,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: "TRIGGER".into(),
+                output: "TRIGGER\n".into(),
                 exit_code: 1,
                 stderr: format!("syntax error\n{}:1: syntax error\n", combined.display()),
             }
@@ -52310,7 +52351,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: "TRIGGER\nAFTER".into(),
+                output: "TRIGGER\nAFTER\n".into(),
                 exit_code: 1,
                 stderr: "syntax error\nsyntax error\n".to_owned(),
             }
@@ -52434,7 +52475,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 7,
-                output: "SOURCE_HOOK_TRIGGER".into(),
+                output: "SOURCE_HOOK_TRIGGER\n".into(),
                 exit_code: 1,
                 stderr: format!("{}:1: syntax error\n", hook_source_child.display()),
             }
@@ -52504,7 +52545,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 10,
-                output: "HOOK_GROUP_TRIGGER".into(),
+                output: "HOOK_GROUP_TRIGGER\n".into(),
                 exit_code: 1,
                 stderr: "syntax error\n".to_owned(),
             }
@@ -52592,7 +52633,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 15,
-                output: "HOOK_CONTINUATION_CHILD".into(),
+                output: "HOOK_CONTINUATION_CHILD\n".into(),
                 exit_code: 1,
                 stderr: "syntax error\n".to_owned(),
             }
@@ -52645,7 +52686,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 13,
-                output: "AFTER_RUNTIME_ERROR".into(),
+                output: "AFTER_RUNTIME_ERROR\n".into(),
                 exit_code: 1,
                 stderr: "can't find session: missing-indirect\nsyntax error\n".to_owned(),
             }
@@ -54442,9 +54483,9 @@ set-option -g @alias-mixed-next yes
         );
         let child_replay = "CHILD_ONE\nCHILD_TWO";
         let root_replay = format!("ROOT_ONE\n{child_verbose}\n{child_replay}\nROOT_TWO");
-        let expected = format!("{root_verbose}\n{root_replay}");
+        let expected = format!("{root_verbose}\n{root_replay}\n");
         let aggregate_expected =
-            format!("{child_verbose}\n{root_verbose}\n{child_replay}\n{root_replay}");
+            format!("{child_verbose}\n{root_verbose}\n{child_replay}\n{root_replay}\n");
         let invocation =
             CommandInvocation::new("source-file", ["-v".to_owned(), root.display().to_string()]);
 
@@ -54754,7 +54795,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: format!("ALIAS_BEFORE\n{child_output}\nALIAS_AFTER").into(),
+                output: format!("ALIAS_BEFORE\n{child_output}\nALIAS_AFTER\n").into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54769,7 +54810,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: format!("CONDITIONAL_BEFORE\n{child_output}\nCONDITIONAL_AFTER").into(),
+                output: format!("CONDITIONAL_BEFORE\n{child_output}\nCONDITIONAL_AFTER\n").into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54799,7 +54840,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 3,
-                output: "HOOK_TRIGGER\nHOOK_CHILD\nHOOK_LATER".into(),
+                output: "HOOK_TRIGGER\nHOOK_CHILD\nHOOK_LATER\n".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -54822,7 +54863,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 4,
-                output: "ROOT_BEFORE\nBEFORE_CHILD\nAFTER_CHILD\nROOT_AFTER".into(),
+                output: "ROOT_BEFORE\nBEFORE_CHILD\nAFTER_CHILD\nROOT_AFTER\n".into(),
                 exit_code: 1,
                 stderr: "can't find session: missing-indirect\n".to_owned(),
             }
@@ -54870,7 +54911,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 6,
-                output: "TERMINAL_HOOK_TRIGGER".into(),
+                output: "TERMINAL_HOOK_TRIGGER\n".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -55925,7 +55966,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: format!("{direct_verbose}\nROOT_BEFORE\n{diagnostic}\nROOT_AFTER").into(),
+                output: format!("{direct_verbose}\nROOT_BEFORE\n{diagnostic}\nROOT_AFTER\n").into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -55940,7 +55981,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 2,
-                output: format!("ROOT_BEFORE\n{diagnostic}\nROOT_AFTER").into(),
+                output: format!("ROOT_BEFORE\n{diagnostic}\nROOT_AFTER\n").into(),
                 exit_code: 1,
                 stderr: String::new(),
             }
@@ -55995,7 +56036,7 @@ set-option -g @alias-mixed-next yes
                      ROOT_BEFORE\n\
                      {}:1: display-message -p GOOD_OUTPUT\n\
                      {}:1: display-message -p LATER_OUTPUT\n\
-                     GOOD_OUTPUT\nLATER_OUTPUT\n{diagnostic}\nROOT_AFTER",
+                     GOOD_OUTPUT\nLATER_OUTPUT\n{diagnostic}\nROOT_AFTER\n",
                     nested_multi.display(),
                     nested_multi.display(),
                     good.display(),
@@ -56027,7 +56068,7 @@ set-option -g @alias-mixed-next yes
                     "{}:1: display-message -p ROOT_BEFORE\n\
                      {}:2: source-file {}\n\
                      {}:3: display-message -p ROOT_AFTER\n\
-                     ROOT_BEFORE\n{}:1: unknown command: wibble\nROOT_AFTER",
+                     ROOT_BEFORE\n{}:1: unknown command: wibble\nROOT_AFTER\n",
                     nested_unknown.display(),
                     nested_unknown.display(),
                     unknown.display(),
@@ -56118,7 +56159,7 @@ set-option -g @alias-mixed-next yes
                      {}:1: set-environment -g SOURCE_REPLAY_FLAG 1\n\
                      {}:4: display-message -p REPLAY_NOT_VISIBLE\n\
                      ASSIGN_VISIBLE\n\
-                     REPLAY_NOT_VISIBLE",
+                     REPLAY_NOT_VISIBLE\n",
                     assignment_branch.display(),
                     replay.display(),
                     replay_branch.display(),
@@ -56233,7 +56274,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: "one\nnested-new\ntwo".into(),
+                output: "one\nnested-new\ntwo\n".into(),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -56291,7 +56332,7 @@ set-option -g @alias-mixed-next yes
             ),
             CommandResponse::Success {
                 request_id: 1,
-                output: "BEFORE\nHOOK\nAFTER\nLIST_s".into(),
+                output: "BEFORE\nHOOK\nAFTER\nLIST_s\n".into(),
                 exit_code: 1,
                 stderr: "can't find session: missing-runtime\n".to_owned(),
             }

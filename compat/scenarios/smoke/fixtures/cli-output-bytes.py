@@ -56,11 +56,33 @@ try:
         observed = subprocess.run(["tmux", *args], capture_output=True, timeout=15)
         if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
             raise AssertionError((args, observed.stdout, observed.stderr, observed.returncode))
+    prints = pathlib.Path(os.environ["HOME"]) / "cli-output-prints.conf"
+    prints.write_text("display-message -p ''\ndisplay-message -p line\ndisplay-message -p ''\n")
+    raw_only = pathlib.Path(os.environ["HOME"]) / "cli-output-raw.conf"
+    raw_only.write_text("show-buffer -b bytes\n")
     path.write_text("show-buffer -b bytes\ndisplay-message -p AFTER\n")
-    sourced = b"hello\nAFTER\n" if os.environ.get("ZZ_SMOKE_ZZ_BIN") else b"hello"
-    require_bytes(["source-file", str(path)], sourced)
-    print("KNOWN DIVERGENCE cli-output-sourced-stream-ownership: pin=hello, zz=hello LF AFTER LF")
-    result = "clean:15"
+    require_bytes(["source-file", str(path)], b"hello")
+    require_bytes(["source-file", str(raw_only), ";", "display", "-p", "AFTER"], b"hello")
+    require_bytes(["show-buffer", "-b", "bytes", ";", "source-file", str(prints)], b"hello")
+    require_bytes(["source-file", str(prints), ";", "display", "-p", "AFTER"], b"\nline\n\nAFTER\n")
+    double = pathlib.Path(os.environ["HOME"]) / "cli-output-double.conf"
+    double.write_text("show-buffer -b bytes\nshow-buffer -b bytes\n")
+    for args, expected in (
+        (["source-file", str(double)], b"hello"),
+        (["display", "-p", "BEFORE", ";", "source-file", str(raw_only)], b"BEFORE\n"),
+    ):
+        observed = subprocess.run(["tmux", *args], capture_output=True, timeout=15)
+        if (observed.stdout, observed.stderr, observed.returncode) != (expected, b"Bad file descriptor: -\n", 1):
+            raise AssertionError((args, observed.stdout, observed.stderr, observed.returncode))
+    print("sourced stdout ownership: raw claim, dropped prints and EBADF match the pin")
+    tmux("set-buffer", "-b", "newline", "hello\n")
+    raw_newline = pathlib.Path(os.environ["HOME"]) / "cli-output-raw-newline.conf"
+    raw_newline.write_text("show-buffer -b newline\n")
+    trailing = b"hello\nAFTER\n" if os.environ.get("ZZ_SMOKE_ZZ_BIN") else b"hello\n"
+    require_bytes(["source-file", str(raw_newline), ";", "display", "-p", "AFTER"], trailing)
+    print("KNOWN DIVERGENCE cli-output-sourced-raw-newline-claim: pin=hello LF, zz=hello LF AFTER LF")
+    tmux("delete-buffer", "-b", "newline")
+    result = "clean:16"
 except Exception as error:
     print(repr(error), flush=True)
 finally:

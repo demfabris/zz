@@ -906,8 +906,15 @@ impl ControlState {
     }
 
     fn mine(&self, variables: &BTreeMap<String, String>) -> bool {
-        self.attached_session
-            .is_some_and(|session| variables.get("hook_session") == Some(&session.to_string()))
+        self.attached_session.is_some_and(|attached| {
+            self.snapshot.sessions.iter().any(|session| {
+                session.id == attached
+                    && session
+                        .windows
+                        .iter()
+                        .any(|window| variables.get("hook_window") == Some(&window.id.to_string()))
+            })
+        })
     }
 
     fn raw_window_flags(
@@ -1066,7 +1073,15 @@ fn render_hook(
             },
             value("hook_window")?
         )),
-        "window-unlinked" => Some(format!("%unlinked-window-close {}", value("hook_window")?)),
+        "window-unlinked" => Some(format!(
+            "{} {}",
+            if state.mine(variables) {
+                "%window-close"
+            } else {
+                "%unlinked-window-close"
+            },
+            value("hook_window")?
+        )),
         "window-renamed" => Some(format!(
             "{} {} {}",
             if state.mine(variables) {
@@ -1083,6 +1098,9 @@ fn render_hook(
             value("hook_pane")?
         )),
         "window-layout-changed" => {
+            if !state.mine(variables) {
+                return None;
+            }
             let window_id = value("hook_window")?;
             let (session, window) = state.window(window_id)?;
             Some(format!(
@@ -3570,38 +3588,42 @@ mod tests {
     }
 
     #[test]
-    fn window_notifications_use_the_owning_session_for_unlinked_prefixes() {
-        let state = ControlState {
-            attached_session: Some(SessionId(1)),
-            ..ControlState::default()
-        };
-        let variables = |session: SessionId| {
-            BTreeMap::from([
-                ("hook_session".to_owned(), session.to_string()),
-                ("hook_window".to_owned(), WindowId(3).to_string()),
-                ("hook_window_name".to_owned(), "shell".to_owned()),
-            ])
-        };
-        assert_eq!(
-            render_hook(&state, "window-linked", &variables(SessionId(1))).as_deref(),
-            Some("%window-add @3")
-        );
-        assert_eq!(
-            render_hook(&state, "window-linked", &variables(SessionId(2))).as_deref(),
-            Some("%unlinked-window-add @3")
-        );
-        assert_eq!(
-            render_hook(&state, "window-unlinked", &variables(SessionId(1))).as_deref(),
-            Some("%unlinked-window-close @3")
-        );
-        assert_eq!(
-            render_hook(&state, "window-unlinked", &variables(SessionId(2))).as_deref(),
-            Some("%unlinked-window-close @3")
-        );
-        assert_eq!(
-            render_hook(&state, "window-renamed", &variables(SessionId(2))).as_deref(),
-            Some("%unlinked-window-renamed @3 shell")
-        );
+    fn window_notifications_use_live_membership_instead_of_the_event_session() {
+        let mut state = layout_notification_state();
+        let variables = BTreeMap::from([
+            ("hook_session".to_owned(), SessionId(2).to_string()),
+            ("hook_window".to_owned(), WindowId(3).to_string()),
+            ("hook_window_name".to_owned(), "shell".to_owned()),
+        ]);
+        for (hook, expected) in [
+            ("window-linked", "%window-add @3"),
+            ("window-unlinked", "%window-close @3"),
+            ("window-renamed", "%window-renamed @3 shell"),
+        ] {
+            assert_eq!(
+                render_hook(&state, hook, &variables).as_deref(),
+                Some(expected)
+            );
+        }
+        state.snapshot.sessions[0].windows.clear();
+        for (hook, expected) in [
+            ("window-linked", "%unlinked-window-add @3"),
+            ("window-unlinked", "%unlinked-window-close @3"),
+            ("window-renamed", "%unlinked-window-renamed @3 shell"),
+        ] {
+            assert_eq!(
+                render_hook(&state, hook, &variables).as_deref(),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn layout_notifications_ignore_windows_only_linked_to_another_session() {
+        let mut state = layout_notification_state();
+        state.attached_session = Some(SessionId(2));
+        let variables = BTreeMap::from([("hook_window".to_owned(), "@3".to_owned())]);
+        assert!(render_hook(&state, "window-layout-changed", &variables).is_none());
     }
 
     #[test]
@@ -3879,8 +3901,7 @@ mod tests {
         assert!(pending.is_empty());
     }
 
-    #[test]
-    fn layout_notifications_use_snapshot_dumps_and_raw_flag_order() {
+    fn layout_notification_state() -> ControlState {
         let pane = zz_protocol::PaneId(5);
         let window = zz_protocol::WindowSnapshot {
             id: WindowId(3),
@@ -3935,6 +3956,12 @@ mod tests {
             },
         );
         state.last_windows.insert(SessionId(1), WindowId(3));
+        state
+    }
+
+    #[test]
+    fn layout_notifications_use_snapshot_dumps_and_raw_flag_order() {
+        let state = layout_notification_state();
         let variables = BTreeMap::from([("hook_window".to_owned(), "@3".to_owned())]);
         assert_eq!(
             render_hook(&state, "window-layout-changed", &variables).as_deref(),

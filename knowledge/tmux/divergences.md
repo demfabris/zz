@@ -1170,10 +1170,34 @@ described above and the separately tracked long key-modifier spelling overaccept
 | --- | --- | --- |
 | Env contract | `$TMUX`, `$TMUX_PANE`, plus server-seeded global and client-updated session overlays | Panes get `$TMUX` in tmux's exact `socket,pid,session` shape plus `TMUX_PANE=%N`. Slice 10ac gives shell-form `run-shell` and `if-shell` clean global-then-session environments and status `#()` a clean global-only environment. Visible modeled `TMUX_PANE` survives, while zz never invents one for jobs. Post-startup TERM identity and the private tmux PATH match the contract above. `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` ride alongside panes. Slice 10af closes positive-delay launch sampling, and the 2026-08-30 shell-job cwd closure aligns command and status paths. Immediate ordering, copy-pipe, and popup jobs remain listed above. |
 | Binary argv | `-L -S -f -2 -C -u -V -N -c -l` | Closed by 7a (2026-08-18): `-V` (`tmux 3.8-zz`), `-L`/`-S`/`-f`/`-c`/`-N`/`-l`/`-2`/`-u`, tmux-shaped usage and unknown-option lines, pin CMD_STARTSERVER autostart. `-C`/`-CC` are the phase-6 control-mode front-end (row below). |
-| Control mode `-CC` | What iTerm2 integration speaks. | SHIPPED (phase 6 complete 2026-08-18): a stdio front-end speaking the full CC protocol — framing, notifications, `%output` with flow control (pause/age-kill/pacing), `refresh-client -A/-B/-C/-f`. Deliberate divergences, all reviewer-endorsed: blocks are COMPLETE (WAIT commands keep output in-block; after-hooks add no extra block; `%pause`/`%continue` land after the triggering block, not inside); per-client monotonic `n`; zz-lax unquoted `%`-words on the control stdin; automatic-rename transients single-fire. |
+| Control mode `-CC` | What iTerm2 integration speaks. | The phase-6 stdio front-end shipped 2026-08-18 with framing, notifications, `%output` flow control, and `refresh-client -A/-B/-C/-f`. Cycle 15 (2026-09-05) supersedes the complete-block claim: both engines emit late bare foreground `run-shell` output and flags-0 after-hook blocks. Notification ordering, unquoted `%`-word parsing, and environment expansion still differ. `control-mode.notifications` in `compat/tmux-gaps.json` owns these measurements; `smoke/control-notify` retains the `%` lines. Full notification parity and a real iTerm2 session remain unproved. |
 | Session groups | `new-session -t`. | Cataloged, rejected. |
 | `StatusLine.customized` | No equivalent — tmux has no wire and no explicit-write ledger. | zz-native v71 field: true while any explicit `status`, `status-*`, or `status-format` write is in force for the recipient's scope (even when the value equals the default); scalar and whole-array unsets clear their mark, an indexed `status-format[N]` unset keeps it. It gates only the TUI's `Ctrl-\ detach` hint. GUI visibility follows sidebar mode: hidden with the sidebar expanded, visible in the title bar when retracted. `customized` has no GUI appearance effect. |
 | Presentation | Status line, prompts, choosers drawn as terminal escapes. | The TUI renders the daemon's personalized `status-format[]` rows through the shared `zz-client` compositor that reproduces `format-draw.c` alignment sections, `fill=`, list focus/truncation, blank-row base style, and hit ranges. It places that authoritative block at `status-position`, replaces the selected `message_line` row with messages or a prompt, and routes window-range clicks. The GUI builds native session, window, Agent, host, update, and clock items from structured state and app settings. It shows the status bar in the title bar when the sidebar is retracted and hides it when the sidebar is expanded. tmux status rows, strings, styles, `customized`, and `status-position` have no GUI presentation authority. Prompts and choosers stay native on both where implemented. Raw zz-tui handles command prompts, confirmations, menus, popups, choose trees, choose buffers, and display-panes. `display-menu.behavior-fidelity` and `display-popup.behavior-fidelity` own the broader behavior classes outside those presentation closures. |
+
+## Control notification remeasurement (2026-09-05)
+
+`compat/scenarios/smoke/fixtures/control-notify.py` retains notification lines and compares
+pinned `d77c9dc6` with zz. For `run-shell` printing `NOTIFY_WAIT`, both engines end the
+command guard before emitting the bare output. Both also emit a flags-0 block for an
+`after-rename-window` hook; the pin emits that block before `%window-renamed`, while zz
+emits it after. The earlier claim that zz keeps WAIT output inside complete blocks and
+omits after-hook blocks no longer describes the implementation.
+
+The pin emits `%pause` and `%continue` inside the triggering guard; zz emits them after
+`%end`. An unquoted `%N:pause` argument yields `parse error: syntax error` on the pin but
+zz accepts it. With `NOTIFY_ENV=EXPANDED` in the server environment, the pin expands
+`$NOTIFY_ENV` to `EXPANDED`; zz returns the literal `$NOTIFY_ENV`. The registry group
+`control-mode.notifications` retains these differences, notification ordering, and zz's
+surplus pane-mode notification. These measurements do not establish full parity.
+
+The pin can emit `%window-close` when a window remains linked in the Control client's
+session and another session unlinks it. zz rejects `link-window` and `unlink-window`, so
+a membership-aware notification renderer alone cannot prove that lifecycle. The baseline
+also omitted `%layout-change` after `refresh-client -C` and emitted an old 80x24 layout on
+`switch-client` while the subsequent query reported 100x30. The fixture compares emitted
+layouts with live queries; the registry records the repair's proof and remaining scope.
+A one-hour session under real iTerm2 on a Mac remains an unperformed maintainer task.
 
 ## Park dispositions (2026-09-01)
 

@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/control-notify.py ~/control-notify.py
+stage: fixtures/control-notify.json ~/control-notify.json
+run-shell 'python3 ~/control-notify.py'
+out: show-environment -g ZZ_CONTROL_NOTIFY

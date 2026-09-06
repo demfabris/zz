@@ -1543,7 +1543,12 @@ fn handle_core_event(
                 .map_err(|error| error.to_string())?;
             Ok(ProtocolOutcome::None)
         }
-        CoreEvent::Clipboard { target, text, .. } => match clipboard::encode(target, &text) {
+        CoreEvent::Clipboard {
+            request_id,
+            target,
+            text,
+            ..
+        } => match clipboard::encode(clipboard::Selection::for_request(request_id, target), &text) {
             Osc52::Empty => Ok(ProtocolOutcome::None),
             Osc52::Encoded(output) => Ok(ProtocolOutcome::QueueControl(output)),
             Osc52::TooLarge => {

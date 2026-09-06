@@ -355,6 +355,7 @@ enum ChromeProfileDiscovery {
 
 #[derive(Clone, PartialEq)]
 struct ChromeState {
+    opacity: f32,
     can_go_back: bool,
     can_go_forward: bool,
     element_pick_active: bool,
@@ -594,6 +595,7 @@ impl BrowserView {
             let browser = cx.entity().downgrade();
             let address = address.clone();
             let state = ChromeState {
+                opacity: 1.0,
                 can_go_back: false,
                 can_go_forward: false,
                 element_pick_active: false,
@@ -3305,7 +3307,14 @@ impl Render for BrowserChromeView {
             }
         });
 
-        BrowserToolbar::new(back, forward, reload, tabs, picker, more)
+        div()
+            .h(BrowserToolbar::HEIGHT)
+            .w_full()
+            .flex_none()
+            .opacity(self.state.opacity)
+            .child(BrowserToolbar::new(
+                back, forward, reload, tabs, picker, more,
+            ))
     }
 }
 
@@ -3320,6 +3329,7 @@ impl Render for BrowserView {
         }
         let (tabs, active_tab_index) = self.tab_strip_state();
         let snapshot = ChromeState {
+            opacity: self.chrome_opacity,
             can_go_back: self.can_go_back,
             can_go_forward: self.can_go_forward,
             element_pick_active: self.element_pick_active,
@@ -3576,21 +3586,7 @@ impl Render for BrowserView {
                                     .w_full()
                                     .flex_none(),
                             ),
-                        )
-                        .when(self.chrome_opacity < 1.0, |chrome| {
-                            chrome.child(round_div_radii(
-                                div().absolute().inset_0().bg(cx
-                                    .theme()
-                                    .background
-                                    .opaque()
-                                    .opacity(1.0 - self.chrome_opacity)),
-                                Corners {
-                                    bottom_left: px(0.0),
-                                    bottom_right: px(0.0),
-                                    ..content_radii
-                                },
-                            ))
-                        }),
+                        ),
                 )
                 .child(content)
                 .children(omnibox_results)

@@ -91,9 +91,8 @@ try:
     tmux("set-buffer", "-b", "newline", "hello\n")
     raw_newline = pathlib.Path(os.environ["HOME"]) / "cli-output-raw-newline.conf"
     raw_newline.write_text("show-buffer -b newline\n")
-    trailing = b"hello\nAFTER\n" if os.environ.get("ZZ_SMOKE_ZZ_BIN") else b"hello\n"
-    require_bytes(["source-file", str(raw_newline), ";", "display", "-p", "AFTER"], trailing)
-    print("KNOWN DIVERGENCE cli-output-sourced-raw-newline-claim: pin=hello LF, zz=hello LF AFTER LF")
+    require_bytes(["source-file", str(raw_newline), ";", "display", "-p", "AFTER"], b"hello\n")
+    print("a raw claim whose own bytes end in a newline still drops the later print")
     tmux("delete-buffer", "-b", "newline")
     result = "clean:18"
 except Exception as error:

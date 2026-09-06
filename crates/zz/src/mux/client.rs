@@ -5208,7 +5208,12 @@ mod tests {
     /// the daemon publishes with `request_id` zero — is left alone.
     #[gpui::test]
     fn a_copy_selection_reaches_the_clipboard_unless_set_clipboard_is_off(cx: &mut TestAppContext) {
-        fn clipboard_write(mux: &mut MuxClient, request_id: u64, text: &str, cx: &mut Context<MuxClient>) {
+        fn clipboard_write(
+            mux: &mut MuxClient,
+            request_id: u64,
+            text: &str,
+            cx: &mut Context<MuxClient>,
+        ) {
             mux.handle_message_for_test(
                 ProtocolMessage::Event(zz_protocol::Event {
                     sequence: 0,
@@ -5217,6 +5222,7 @@ mod tests {
                         request_id,
                         target: ClipboardTarget::Primary,
                         text: text.to_owned(),
+                        producer: zz_protocol::ClipboardProducer::Server,
                     },
                 }),
                 cx,
@@ -5269,7 +5275,9 @@ mod tests {
                 }
                 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
                 assert_eq!(
-                    cx.read_from_primary().and_then(|item| item.text()).as_deref(),
+                    cx.read_from_primary()
+                        .and_then(|item| item.text())
+                        .as_deref(),
                     Some(value),
                     "PRIMARY always takes the drag selection, at every set-clipboard value"
                 );
@@ -5286,14 +5294,18 @@ mod tests {
                 clipboard_write(mux, 0, "application-osc52", cx);
             });
             assert_ne!(
-                cx.read_from_clipboard().and_then(|item| item.text()).as_deref(),
+                cx.read_from_clipboard()
+                    .and_then(|item| item.text())
+                    .as_deref(),
                 Some("application-osc52"),
                 "an application's own OSC 52 keeps the selection field it named, the way \
                  input_osc_52 forwards it"
             );
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             assert_eq!(
-                cx.read_from_primary().and_then(|item| item.text()).as_deref(),
+                cx.read_from_primary()
+                    .and_then(|item| item.text())
+                    .as_deref(),
                 Some("application-osc52"),
                 "an application asking for PRIMARY still gets PRIMARY"
             );
@@ -8381,6 +8393,7 @@ mod tests {
                         output: zz_protocol::RawText::default(),
                         exit_code: 0,
                         stderr: String::new(),
+                        stdout_claim: zz_protocol::StdoutClaim::None,
                     }),
                     cx,
                 );

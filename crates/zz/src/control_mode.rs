@@ -12,7 +12,7 @@ use zz_daemon::InteractiveClient;
 use zz_protocol::{
     CommandInvocation, CommandResponse, ControlSourceFileEvent, EventPayload, MuxSnapshot,
     PreparedCommand, PreparedCommandResult, ProtocolMessage, RawText, ServerError, SessionId,
-    WindowId,
+    StdoutClaim, WindowId,
 };
 
 use super::{
@@ -1375,6 +1375,7 @@ fn close_parked_request<W: Write>(
             output: RawText::default(),
             exit_code: 0,
             stderr: String::new(),
+            stdout_claim: StdoutClaim::None,
         },
     )?;
     if exit_held {
@@ -2281,6 +2282,7 @@ mod tests {
                     output: "one\ntwo\n".into(),
                     exit_code: 7,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap();
@@ -2326,6 +2328,7 @@ mod tests {
                     output: "\n".into(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap();
@@ -2372,6 +2375,7 @@ mod tests {
                         output: RawText::default(),
                         exit_code: 3,
                         stderr: String::new(),
+                        stdout_claim: StdoutClaim::None,
                     },
                 )
                 .unwrap(),
@@ -2386,6 +2390,7 @@ mod tests {
                     output: "fresh".into(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap();
@@ -2420,6 +2425,7 @@ mod tests {
                     output: RawText::from_bytes(b"ZZBYTES=a\xffb\n".to_vec()),
                     stderr: String::new(),
                     exit_code: 0,
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap();
@@ -2448,6 +2454,7 @@ mod tests {
                     output: "outer output".into(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap(),
@@ -2706,6 +2713,7 @@ mod tests {
                     output: RawText::default(),
                     exit_code: 1,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap();
@@ -2752,6 +2760,7 @@ mod tests {
                         output: RawText::default(),
                         exit_code: 0,
                         stderr: String::new(),
+                        stdout_claim: StdoutClaim::None,
                     },
                 )
                 .unwrap(),
@@ -2770,6 +2779,7 @@ mod tests {
             output: RawText::default(),
             exit_code: 3,
             stderr: String::new(),
+            stdout_claim: StdoutClaim::None,
         };
         assert!(!response_aborts_line(&success));
         let mut writer = ControlWriter::new(Vec::new(), false);
@@ -2815,6 +2825,7 @@ mod tests {
             output: RawText::default(),
             exit_code: 3,
             stderr: String::new(),
+            stdout_claim: StdoutClaim::None,
         };
         assert!(!response_sets_return_code(Some("run-shell"), &nonzero));
         assert!(response_sets_return_code(Some("source-file"), &nonzero));
@@ -3054,6 +3065,7 @@ mod tests {
                     output: RawText::default(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap();
@@ -3194,6 +3206,7 @@ mod tests {
                     output: RawText::default(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap();
@@ -3345,6 +3358,7 @@ mod tests {
                     output: "body\n".into(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap();
@@ -3451,6 +3465,7 @@ mod tests {
                         output: "body\n".into(),
                         exit_code: 0,
                         stderr: String::new(),
+                        stdout_claim: StdoutClaim::None,
                     },
                 )
                 .unwrap();
@@ -3526,6 +3541,7 @@ mod tests {
                     output: RawText::default(),
                     exit_code: 3,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap();
@@ -3538,6 +3554,7 @@ mod tests {
                     output: "command mode".into(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap();
@@ -3588,6 +3605,7 @@ mod tests {
                     output: "body\n".into(),
                     exit_code: 0,
                     stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
                 },
             )
             .unwrap();

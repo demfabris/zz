@@ -14,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_ninety_eight() {
-    assert_eq!(PROTOCOL_VERSION, 98);
+fn protocol_version_on_this_commit_is_ninety_nine() {
+    assert_eq!(PROTOCOL_VERSION, 99);
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x62, 0x00, 0x00, 0x62, 0x00, 0x00, 0x00, 0x00,
+            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x63, 0x00, 0x00, 0x63, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00, 0x00, 0x07,
         ]
     );
@@ -334,6 +334,7 @@ fn command_success_round_trips_output_and_exit_code() {
         output: "job output".into(),
         exit_code: 3,
         stderr: "job error".to_owned(),
+        stdout_claim: zz_protocol::StdoutClaim::Print,
     });
     let frame = encode_protocol_message(&message).expect("encode command response");
     assert_eq!(

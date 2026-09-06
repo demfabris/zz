@@ -1660,6 +1660,35 @@
       ],
       "depends_on": [],
       "reason": "The acceptance had asked for one atomic terminal action that trims cursor-derived history, advances the cursor, and no-ops in pane mode. Read against the pin on 2026-09-02: cmd_resize_pane_exec's -T branch returns immediately when the pane holds any mode, then takes `adjust = screen_size_y(&wp->base) - 1 - wp->base.cy` clamped to the history size, calls grid_remove_history(gd, adjust) and adds adjust to wp->base.cy. grid_remove_history frees the last adjust lines of the whole grid, the blank rows below the cursor, and then shrinks hsize by the same count, so the visible window slides up into the scrollback: the screen gains adjust rows of history at the top, loses the blank rows at the bottom, the cursor ends on the last screen row, and history_size drops by adjust. That is grid surgery, not a VT operation. libghostty's terminal API is vt_write, resize, reset, scroll_viewport and readers; scroll_viewport moves what is displayed and never moves a row between the scrollback and the active grid, and nothing else can remove history rows or pull them back in. Resizing the terminal down and up again would come close on ghostty's reflow rules, but the geometry is the mux's to own and the round trip would send the child two spurious SIGWINCHes, so it is not the same operation. zz therefore keeps refusing the flag with `unsupported command: resize-pane -T` rather than accepting it as a no-op, because the pin's -T is visible in capture-pane and a silent no-op would be the worse divergence. Reopen if libghostty grows a scrollback API that can move rows across the active-grid boundary."
+    },
+    {
+      "id": "tui.sidebar-auto-hide",
+      "title": "Leave a stock terminal's pane the width tmux leaves it",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "now",
+      "ease": "easy",
+      "impact": [
+        "daily",
+        "remote"
+      ],
+      "owner": "client",
+      "items": [
+        "presentation:tui-status-block-rows"
+      ],
+      "evidence": [
+        "resource:crates/zz-tui/src/sidebar.rs",
+        "resource:crates/zz-tui/src/state.rs",
+        "file:compat/tui-pane-geometry.sh",
+        "resource:compat/orchestration/CAMPAIGN-REVIEW.md"
+      ],
+      "acceptance": [
+        "Measured on both binaries by compat/tui-pane-geometry.sh, which attaches each side inside an outer pinned tmux at the size under test and runs tput cols and tput lines in the inner pane: at 80x24 both hand the pane 80 columns, and at 100x24 both hand it 100.",
+        "The sidebar appears on its own only from 109 columns — MIN_PANE_COLUMNS 80 plus WIDTH 28 plus BORDER_WIDTH 1 — so the pane beside it is never narrower than the 80 columns a terminal is expected to give. Below that, C-a s still shows it on demand and Visibility::Shown overrides the threshold.",
+        "OPEN: rows. At 80x24 pinned tmux hands the pane 23 rows and zz hands it 22, at every width measured. The pin spends one row of 24 on its status line; zz spends two on its status block. The fixture records the rows and does not assert them."
+      ],
+      "depends_on": [],
+      "reason": "Opened 2026-09-06 from retrospective finding 14. Removed proved item presentation:tui-sidebar-auto-hide-80. Before this cycle crates/zz-tui/src/sidebar.rs had AUTO_HIDE_COLUMNS 80 with Visibility::Auto => columns >= AUTO_HIDE_COLUMNS, so the sidebar was on at exactly the width a stock terminal has. Measured at the previous constant by compat/tui-pane-geometry.sh: ssh -t host zz attach on an 80x24 terminal gave the pane 51 columns where pinned tmux gave 80, and a 100x24 terminal gave 71 where the pin gave 100. PRODUCT DECISION: at 80 columns the sidebar is hidden by default. Old behaviour: AUTO_HIDE_COLUMNS 80, so an 80-column terminal lost 29 columns to chrome it never asked for. Measured pin behaviour: pinned tmux d77c9dc6 hands an 80x24 client's pane the full 80 columns and a 100x24 client's pane 100. New stance: AUTO_HIDE_COLUMNS = MIN_PANE_COLUMNS + WIDTH + BORDER_WIDTH = 80 + 28 + 1 = 109, which is the smallest width at which the sidebar fits beside a pane still 80 columns wide; the constant is derived, not picked, so it follows WIDTH if the sidebar is ever resized. decided 2026-09-06 by the orchestrator under fabrico's cycle-16 instruction; reversible. MEASURED AT THE NEW CONSTANT: 80x24 both 80 columns; 100x24 both 100 columns; 120x24 pin 120 and zz 91, which is 120 minus the 29 the sidebar and its border take. The fixture asserts the first two and records the third, because above the threshold the sidebar is zz's own chrome and the pin has no counterpart for it. The fixture fails on the previous constant with both asserted widths diverging, so the row cannot go quietly green again. ROWS, recorded and left open as presentation:tui-status-block-rows: at every width measured the pin hands the pane 23 rows of 24 and zz hands it 22. The pin draws its status in one row; zz reserves two for its status block. Closing that is a status-block layout change and was out of this lane's budget."
     }
   ],
   "closed": [

@@ -33,7 +33,7 @@ use crate::{
     canonical_command, command_spec,
     copy_actions::pinned_copy_action,
     formats::{
-        CommandHooks, FormatClient, FormatClientRow, FormatContext, FormatEnvironRow,
+        CommandHooks, FormatClient, FormatClientRow, FormatContext, FormatEnvironRow, FormatJobTag,
         FormatOptionRow, FormatType, StatusHooks, expand_format_time_traced,
         expand_format_time_with_hooks, expand_format_with_hooks, format_listing, format_true,
         parse_tmux_colour,
@@ -529,8 +529,8 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
         self.inner.strftime(literal)
     }
 
-    fn shell(&mut self, command: &str) -> String {
-        self.inner.shell(command)
+    fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String {
+        self.inner.shell(command, tag)
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
@@ -1206,7 +1206,7 @@ impl StatusHooks for ConfigConditionHooks<'_> {
         self.inner.strftime(literal)
     }
 
-    fn shell(&mut self, _command: &str) -> String {
+    fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
         String::new()
     }
 
@@ -1237,8 +1237,8 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
         self.inner.strftime(literal)
     }
 
-    fn shell(&mut self, command: &str) -> String {
-        self.inner.shell(command)
+    fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String {
+        self.inner.shell(command, tag)
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
@@ -1303,8 +1303,8 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
         self.inner.strftime(literal)
     }
 
-    fn shell(&mut self, command: &str) -> String {
-        self.inner.shell(command)
+    fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String {
+        self.inner.shell(command, tag)
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
@@ -1358,8 +1358,8 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
         self.inner.strftime(literal)
     }
 
-    fn shell(&mut self, command: &str) -> String {
-        self.inner.shell(command)
+    fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String {
+        self.inner.shell(command, tag)
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
@@ -17108,7 +17108,7 @@ mod tests {
             literal.to_owned()
         }
 
-        fn shell(&mut self, _command: &str) -> String {
+        fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
             String::new()
         }
 
@@ -17480,7 +17480,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 
@@ -18062,7 +18062,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 
@@ -18174,7 +18174,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 
@@ -18284,7 +18284,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 
@@ -19881,7 +19881,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 
@@ -20001,7 +20001,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 
@@ -20243,7 +20243,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 
@@ -22363,7 +22363,7 @@ mod tests {
                 literal.replace("%H:%M %d-%b-%y", "09:41 23-Aug-26")
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
         }
@@ -25869,7 +25869,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 
@@ -27806,7 +27806,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 
@@ -28450,7 +28450,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 
@@ -33931,7 +33931,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 

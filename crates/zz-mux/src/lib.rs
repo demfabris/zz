@@ -59,9 +59,9 @@ pub use parser::{
 pub use sort::{TmuxSort, TmuxSortOrder, WINDOW_BUFFER_ORDER_SEQ, WINDOW_TREE_ORDER_SEQ};
 pub use status::{
     DEFAULT_STATUS_INTERVAL, DEFAULT_STATUS_LEFT, DEFAULT_STATUS_RIGHT, DEFAULT_STATUS_STYLE,
-    DEFAULT_WINDOW_STATUS_FORMAT, FormatUniverse, StatusContext, StatusFormats, StatusHooks,
-    StatusJustify, StatusOption, StatusPosition, WindowStatusFormats, WindowStatusOption,
-    expand_format_bytes, expand_format_values, expand_status,
+    DEFAULT_WINDOW_STATUS_FORMAT, FormatJobTag, FormatUniverse, StatusContext, StatusFormats,
+    StatusHooks, StatusJustify, StatusOption, StatusPosition, WindowStatusFormats,
+    WindowStatusOption, expand_format_bytes, expand_format_values, expand_status,
 };
 pub use terminfo::TtyTerm;
 pub use zz_protocol::{Binding, KeyDecision, KeyEngine, KeyTables, canonical_key};

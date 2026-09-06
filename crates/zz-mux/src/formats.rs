@@ -1475,9 +1475,23 @@ const fn bool_string(value: bool) -> &'static str {
     if value { "1" } else { "0" }
 }
 
+/// `format_create`'s `tag`, which `format_job_cmp` compares ahead of the
+/// command when it looks a `#()` job up in the per-client tree. The status tree
+/// is `FORMAT_NONE`, so `status-left` and `status-right` share one job for one
+/// command; a `#{W:}` body runs under `FORMAT_WINDOW|w->id` and a `#{P:}` body
+/// under `FORMAT_PANE|wp->id`, so each looped window or pane owns its own job.
+/// Session, client, option and environment loops all stay `FORMAT_NONE`.
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub enum FormatJobTag {
+    #[default]
+    None,
+    Window(String),
+    Pane(String),
+}
+
 pub trait StatusHooks {
     fn strftime(&mut self, literal: &str) -> String;
-    fn shell(&mut self, command: &str) -> String;
+    fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String;
 
     fn variable(&mut self, _name: &str, _context: &StatusContext) -> Option<String> {
         None
@@ -1532,6 +1546,18 @@ pub trait StatusHooks {
     }
 }
 
+fn loop_job_tag(
+    inherited: &FormatJobTag,
+    target: LoopTarget,
+    values: &StatusContext,
+) -> FormatJobTag {
+    match target {
+        LoopTarget::Sessions => inherited.clone(),
+        LoopTarget::Windows => FormatJobTag::Window(values.window_id.clone()),
+        LoopTarget::Panes => FormatJobTag::Pane(values.pane_id.clone()),
+    }
+}
+
 pub fn expand_status(
     format: &str,
     context: &StatusContext,
@@ -1541,6 +1567,7 @@ pub fn expand_status(
         context,
         hooks,
         time: true,
+        job_tag: FormatJobTag::None,
         client_row: None,
         trace: None,
     };
@@ -1560,6 +1587,7 @@ pub fn expand_format_bytes(
         context,
         hooks,
         time: false,
+        job_tag: FormatJobTag::None,
         client_row: None,
         trace: None,
     };
@@ -1575,6 +1603,7 @@ pub fn expand_format_values(
         context,
         hooks,
         time: false,
+        job_tag: FormatJobTag::None,
         client_row: None,
         trace: None,
     };
@@ -1600,7 +1629,7 @@ impl StatusHooks for CommandHooks {
             .map_or_else(String::new, |now| format_datetime(&now, literal))
     }
 
-    fn shell(&mut self, _command: &str) -> String {
+    fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
         String::new()
     }
 }
@@ -1810,6 +1839,7 @@ fn expand_format_inner(
         context: &context,
         hooks: &mut hooks,
         time,
+        job_tag: FormatJobTag::None,
         client_row: None,
         trace: trace.then_some(&mut sink),
     };
@@ -1829,8 +1859,8 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
         self.inner.strftime(literal)
     }
 
-    fn shell(&mut self, command: &str) -> String {
-        self.inner.shell(command)
+    fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String {
+        self.inner.shell(command, tag)
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
@@ -1890,6 +1920,7 @@ struct Expander<'a, V: FormatVariables + ?Sized, H: StatusHooks> {
     context: &'a V,
     hooks: &'a mut H,
     time: bool,
+    job_tag: FormatJobTag,
     client_row: Option<&'a FormatClientRow>,
     trace: Option<&'a mut Vec<String>>,
 }
@@ -1987,7 +2018,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                             &format!("found #(): {}", &format[after_next..end]),
                         );
                     }
-                    let out = self.hooks.shell(&format[after_next..end]);
+                    let out = self.hooks.shell(&format[after_next..end], &self.job_tag);
                     if self.tracing() {
                         self.log(depth + 1, &format!("#() result: {out}"));
                     }
@@ -2080,7 +2111,8 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     let Some(end) = find_plain_group_end(body, index + 2, '(', ')') else {
                         break;
                     };
-                    output.push_str(&self.hooks.shell(&body[index + 2..end]));
+                    let out = self.hooks.shell(&body[index + 2..end], &self.job_tag);
+                    output.push_str(&out);
                     index = end + 1;
                 }
                 b'#' | b'}' | b',' => {
@@ -2663,6 +2695,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 context: &variables,
                 hooks: &mut *self.hooks,
                 time: self.time,
+                job_tag: loop_job_tag(&self.job_tag, target, variables.context.values()),
                 client_row: self.client_row,
                 trace: self.trace.as_deref_mut(),
             };
@@ -2699,6 +2732,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 context: &variables,
                 hooks: &mut *self.hooks,
                 time: self.time,
+                job_tag: self.job_tag.clone(),
                 client_row: Some(row),
                 trace: self.trace.as_deref_mut(),
             };
@@ -2740,6 +2774,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 context: &variables,
                 hooks: &mut *self.hooks,
                 time: self.time,
+                job_tag: self.job_tag.clone(),
                 client_row: self.client_row,
                 trace: self.trace.as_deref_mut(),
             };
@@ -2768,6 +2803,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 context: &variables,
                 hooks: &mut *self.hooks,
                 time: self.time,
+                job_tag: self.job_tag.clone(),
                 client_row: self.client_row,
                 trace: self.trace.as_deref_mut(),
             };
@@ -4723,7 +4759,7 @@ mod tests {
             literal.replace("%H:%M", "09:41").replace("%Y", "2026")
         }
 
-        fn shell(&mut self, command: &str) -> String {
+        fn shell(&mut self, command: &str, _tag: &FormatJobTag) -> String {
             format!("<{command}>")
         }
     }
@@ -5777,7 +5813,7 @@ mod tests {
                 literal.to_owned()
             }
 
-            fn shell(&mut self, _command: &str) -> String {
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
 

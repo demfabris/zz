@@ -97,12 +97,26 @@ try:
     tmux("set-option", "-t", session, "status-left", "")
     tmux("set-option", "-t", session, "status-right", "KEY#{W:[#(sh " + shlex.quote(str(tag_script)) + ")]}")
     await_condition(lambda: b"KEY[][]" in screen(), 1.5, "window loop first expansion")
-    await_condition(lambda: tags.exists(), 1, "window loop jobs started")
-    expected_jobs = 1 if side == "zz" else 2
-    actual_jobs = len(tags.read_text().splitlines())
-    if actual_jobs != expected_jobs:
-        raise AssertionError(("window format job keys", actual_jobs, expected_jobs))
-    print("KNOWN DIVERGENCE status-shell-jobs-format-key: two windows start pin=2 jobs, zz=1")
+    await_condition(lambda: tags.exists() and len(tags.read_text().splitlines()) >= 2, 2,
+                    "one job per looped window")
+    window_jobs = len(tags.read_text().splitlines())
+    if window_jobs != 2:
+        raise AssertionError(("one format job per looped window", window_jobs))
+    await_condition(lambda: b"KEY[tag][tag]" in screen(), 8, "both window loop jobs complete")
+    pane_tags = root / "pane-tags"
+    pane_script = root / "pane-job"
+    pane_script.write_text(f"printf 'start\\n' >> {shlex.quote(str(pane_tags))}\nsleep 3\nprintf pane\n")
+    tmux("split-window", "-d", "-t", session + ":0", "sleep 600")
+    tmux("set-option", "-t", session, "status-right",
+         "PKEY#{P:[#(sh " + shlex.quote(str(pane_script)) + ")]}")
+    await_condition(lambda: b"PKEY[][]" in screen(), 2, "pane loop first expansion")
+    await_condition(lambda: pane_tags.exists() and len(pane_tags.read_text().splitlines()) >= 2, 2,
+                    "one job per looped pane")
+    pane_jobs = len(pane_tags.read_text().splitlines())
+    if pane_jobs != 2:
+        raise AssertionError(("one format job per looped pane", pane_jobs))
+    await_condition(lambda: b"PKEY[pane][pane]" in screen(), 8, "both pane loop jobs complete")
+    print("status jobs: window and pane loops each key one job per looped item")
     wide_script = root / "wide-job"
     wide_script.write_text("printf '%05000dTAIL\\n' 0\n")
     tmux("set-option", "-t", session, "status-left-length", "1")

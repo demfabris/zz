@@ -271,8 +271,8 @@
     "split": [
       "%begin T B 1",
       "%end T B 1",
-      "%layout-change @1 eb8f,100x30,0,0{50x30,0,0,1,49x30,51,0,2} eb8f,100x30,0,0{50x30,0,0,1,49x30,51,0,2} *",
-      "%window-pane-changed @1 %2"
+      "%window-pane-changed @1 %2",
+      "%layout-change @1 eb8f,100x30,0,0{50x30,0,0,1,49x30,51,0,2} eb8f,100x30,0,0{50x30,0,0,1,49x30,51,0,2} *"
     ],
     "window-pane-changed": [
       "%begin T B 1",
@@ -292,17 +292,17 @@
     "activity-layout": [
       "%begin T B 1",
       "%end T B 1",
-      "%layout-change @0 acfd,101x31,0,0,0 acfd,101x31,0,0,0 -"
+      "%layout-change @0 acfd,101x31,0,0,0 acfd,101x31,0,0,0 #-"
     ],
     "pause": [
       "%begin T B 1",
-      "%end T B 1",
-      "%pause %1"
+      "%pause %1",
+      "%end T B 1"
     ],
     "continue": [
       "%begin T B 1",
-      "%end T B 1",
-      "%continue %1"
+      "%continue %1",
+      "%end T B 1"
     ],
     "extended-output": [
       "%begin T B 1",
@@ -360,13 +360,13 @@
     ],
     "percent-word": [
       "%begin T B 1",
-      "%end T B 1",
-      "%pause %1"
+      "%pause %1",
+      "%end T B 1"
     ],
     "percent-recover": [
       "%begin T B 1",
-      "%end T B 1",
-      "%continue %1"
+      "%continue %1",
+      "%end T B 1"
     ],
     "message": [
       "%message NOTIFY_MESSAGE"
@@ -389,7 +389,6 @@
     "sessions-changed": [
       "%begin T B 1",
       "%end T B 1",
-      "%pane-mode-changed %1",
       "%unlinked-window-add @2",
       "%sessions-changed"
     ],

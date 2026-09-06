@@ -1,0 +1,11 @@
+corpus: required
+# tmux-continuum's runtime paths. The save trigger is the real one: an attached
+# client with status on and status-interval 1 runs the status-right #() job,
+# which is continuum_save.sh, which runs tmux-resurrect's save.sh and stamps
+# @continuum-save-last-timestamp. The indicator is the plugin's own
+# continuum_status.sh, read at interval 15 and at 0. The pane carries an OSC 2
+# title because a titleless pane's saved record differs between the binaries
+# (semantic:plugin-runtime-resurrect-record-shape).
+stage: fixtures/continuum-runtime.py ~/continuum-runtime.py
+run-shell 'python3 ~/continuum-runtime.py'
+out: show-environment -g ZZ_CONTINUUM_RUNTIME

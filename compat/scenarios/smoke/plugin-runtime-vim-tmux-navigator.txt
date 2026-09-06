@@ -1,0 +1,12 @@
+corpus: required
+# vim-tmux-navigator's runtime path, not its install: the pane under test runs a
+# real process named vim (a python3 symlink), the sibling runs one named pager,
+# and the fixture fires the plugin's OWN installed root C-h binding read back
+# from list-keys. The vim branch is proved by the 0x08 byte the pane's reader
+# writes to a file, the non-vim branch by the active pane moving left and the
+# sibling's byte sink staying empty. The binding is fired with the target pane
+# active, the way a real keypress arrives.
+stage: fixtures/plugin-reader.py ~/plugin-reader.py
+stage: fixtures/vim-tmux-navigator-runtime.py ~/nav-runtime.py
+run-shell 'python3 ~/nav-runtime.py'
+out: show-environment -g ZZ_NAV_RUNTIME

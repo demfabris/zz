@@ -3250,10 +3250,10 @@ mod tests {
         assert!(!output.contains("hidden search"));
         assert!(!output.contains("hidden message"));
 
-        let mut sidebar_model = block_model(80, 10);
+        let mut sidebar_model = block_model(120, 10);
         assert!(sidebar_model.sidebar_visible());
         sidebar_model.confirm = model.confirm;
-        assert!(status_overlay(&sidebar_model, 80).is_none());
+        assert!(status_overlay(&sidebar_model, 120).is_none());
         let lines = sidebar_status_lines(&sidebar_model);
         assert_eq!(lines.len(), 3);
         assert!(lines.last().is_some_and(|line| {
@@ -3361,11 +3361,11 @@ mod tests {
             "/needle"
         );
 
-        let mut sidebar_model = block_model(80, 8);
+        let mut sidebar_model = block_model(120, 8);
         assert!(sidebar_model.sidebar_visible());
         sidebar_model.command_output_search = Some(SearchQuery::literal("visible"));
         assert!(matches!(
-            status_overlay(&sidebar_model, 80),
+            status_overlay(&sidebar_model, 120),
             Some(StatusOverlay::Row(_))
         ));
 
@@ -3378,8 +3378,8 @@ mod tests {
 
     #[test]
     fn command_output_viewport_owns_the_mode_indicator() {
-        let mut model = block_model(80, 8);
-        let mut viewport = TerminalViewport::blank(80, 6, SessionStatus::Running);
+        let mut model = block_model(120, 8);
+        let mut viewport = TerminalViewport::blank(120, 6, SessionStatus::Running);
         viewport.mode = TerminalMode::View {
             position: 3,
             total: 40,
@@ -3387,7 +3387,7 @@ mod tests {
         model.command_output = Some((PaneId(9), viewport));
         assert!(model.sidebar_visible());
         assert!(status_indicators(&model).starts_with("VIEW 3/40"));
-        let Some(StatusOverlay::Right(overlay)) = status_overlay(&model, 80) else {
+        let Some(StatusOverlay::Right(overlay)) = status_overlay(&model, 120) else {
             panic!("command output mode indicator was suppressed with the hidden sidebar");
         };
         assert!(overlay.plain_text().contains("VIEW 3/40"));

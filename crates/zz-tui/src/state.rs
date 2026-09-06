@@ -1465,12 +1465,19 @@ mod tests {
 
     #[test]
     fn the_status_block_spans_only_the_main_columns_beside_the_sidebar() {
-        let model = make_model(100, 30);
+        let model = make_model(130, 30);
         assert!(model.sidebar_visible());
-        assert_eq!(model.status_area(), (29, 71));
+        assert_eq!(model.status_area(), (29, 101));
 
         let narrow = make_model(79, 24);
         assert!(!narrow.sidebar_visible());
         assert_eq!(narrow.status_area(), (0, 79));
+
+        let stock = make_model(80, 24);
+        assert!(
+            !stock.sidebar_visible(),
+            "the sidebar takes no columns from a stock 80-column terminal"
+        );
+        assert_eq!(stock.status_area(), (0, 80));
     }
 }

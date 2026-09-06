@@ -10,7 +10,14 @@ use crate::layout::Rect;
 
 pub(crate) const WIDTH: u16 = 28;
 pub(crate) const BORDER_WIDTH: u16 = 1;
-pub(crate) const AUTO_HIDE_COLUMNS: u16 = 80;
+/// The pane width a terminal is expected to hand a multiplexer. `ssh -t host
+/// zz attach` on the stock 80x24 terminal has to leave the pane as wide as
+/// pinned tmux leaves it, which is the terminal's own width.
+pub(crate) const MIN_PANE_COLUMNS: u16 = 80;
+/// The sidebar appears on its own only once it can sit beside a pane still
+/// [`MIN_PANE_COLUMNS`] wide, so no terminal loses pane width to chrome it did
+/// not ask for. Below this, `C-a s` still shows it on demand.
+pub(crate) const AUTO_HIDE_COLUMNS: u16 = MIN_PANE_COLUMNS + WIDTH + BORDER_WIDTH;
 pub(crate) const MIN_MANUAL_COLUMNS: u16 = 50;
 pub(crate) const STATUS_ROWS: u16 = 3;
 
@@ -561,10 +568,23 @@ mod tests {
     #[test]
     fn visibility_thresholds_and_canvas_arithmetic_match_the_chrome_contract() {
         let mut state = State::default();
-        assert!(state.visible(80));
-        assert!(!state.visible(79));
+        assert_eq!(AUTO_HIDE_COLUMNS, 109);
+        assert!(
+            !state.visible(80),
+            "an 80-column terminal keeps the whole 80 columns for the pane, as pinned tmux does"
+        );
+        assert!(!state.visible(100), "so does a 100-column terminal");
+        assert!(
+            state.visible(AUTO_HIDE_COLUMNS),
+            "the sidebar arrives once the pane beside it is still 80 columns"
+        );
+        assert_eq!(
+            canvas_rect(AUTO_HIDE_COLUMNS, 24, true, 0, false).width,
+            MIN_PANE_COLUMNS
+        );
+        assert!(state.visible(120));
         state.focus(60);
-        assert!(state.visible(60));
+        assert!(state.visible(60), "C-a s still shows it below the threshold");
         state.hide();
         assert!(!state.visible(120));
 

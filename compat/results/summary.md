@@ -90,6 +90,9 @@
 | sessions | 3 | yes | 0 | yes | yes | yes |
 | set-buffer-rename | 12 | yes | 0 | yes | yes | yes |
 | show-options-hooks | 34 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-fpp | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-resurrect-restore | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-tpm-install | 2 | yes | 0 | yes | yes | yes |
 | source-file-current-file | 24 | yes | 0 | yes | yes | yes |
 | source-file-format | 40 | yes | 0 | yes | yes | yes |
 | source-file-output | 12 | yes | 0 | yes | yes | yes |

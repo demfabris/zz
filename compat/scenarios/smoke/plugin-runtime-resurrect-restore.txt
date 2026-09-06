@@ -1,0 +1,10 @@
+corpus: required
+# tmux-resurrect's restore.sh run against a save this same run produced. Two
+# panes with distinct cwds and OSC 2 titles are saved, the session is killed,
+# and restore.sh rebuilds it; the differential is the saved record, the rebuilt
+# window row and the rebuilt panes' index, title and cwd, all daemon facts.
+# The panes carry titles because a titleless pane's saved record differs between
+# the binaries (semantic:plugin-runtime-resurrect-record-shape).
+stage: fixtures/resurrect-restore.py ~/resurrect-restore.py
+run-shell 'python3 ~/resurrect-restore.py'
+out: show-environment -g ZZ_RESURRECT_RESTORE

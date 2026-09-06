@@ -802,7 +802,7 @@ impl Model {
                 if !matches!(pane.kind, PaneKindSnapshot::Terminal) {
                     return None;
                 }
-                let content = entry.rect.content();
+                let content = entry.content();
                 (content.width > 0 && content.height > 0).then_some((
                     entry.pane,
                     (
@@ -849,13 +849,12 @@ impl Model {
         self.layout = self
             .window()
             .map_or_else(ResolvedLayout::default, |window| {
-                let status_at_bottom = window.pane_border_status == PaneBorderStatus::Bottom;
                 if let Some(pane) = window.zoomed_pane {
                     ResolvedLayout {
                         panes: vec![PaneRect {
                             pane,
                             rect: canvas,
-                            status_at_bottom,
+                            border_status: window.pane_border_status,
                         }],
                         dividers: Vec::new(),
                     }

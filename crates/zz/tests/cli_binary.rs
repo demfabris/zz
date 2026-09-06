@@ -237,9 +237,22 @@ mod daemon_autostart {
 
     /// Wide enough for the raw TUI's sidebar, which auto-hides below
     /// `sidebar::AUTO_HIDE_COLUMNS` so that a narrower terminal keeps every
-    /// column for its pane. The sidebar carries `status-left`, so a status
-    /// assertion that reads it has to attach at this width.
+    /// column for its pane. A status assertion that reads the block's own
+    /// geometry, its column origin or its row count, has to attach here,
+    /// because the sidebar moves the block right and owns the columns left of
+    /// it. `status-left` itself is drawn at every width; see
+    /// `stock_eighty_column_attach_draws_the_whole_status_row`.
     const SIDEBAR_COLUMNS: u16 = 120;
+
+    /// What `ssh -t host zz attach` gets from a stock terminal, and the width
+    /// `compat/tui-pane-geometry.sh` measures pinned tmux at.
+    const STOCK_COLUMNS: u16 = 80;
+
+    /// Pinned tmux d77c9dc6 hands an 80x24 client's pane 23 rows: 24 less the
+    /// one row `status on` spends, and nothing for pane chrome while
+    /// `pane-border-status` is off. Measured on both binaries by
+    /// `compat/tui-pane-geometry.sh`.
+    const STOCK_PANE_ROWS: &str = "23";
 
     fn open_pty() -> io::Result<(File, File)> {
         open_pty_sized(80)
@@ -1996,7 +2009,7 @@ mod daemon_autostart {
             [
                 "setw",
                 "-t",
-                "styled:0",
+                "styled",
                 "window-status-current-format",
                 "#[underscore]CUSTOM",
             ]
@@ -2071,6 +2084,96 @@ mod daemon_autostart {
         );
         assert!(!captured.windows(2).any(|window| window == b"#["));
         assert!(!captured.windows(6).any(|window| window == b"0:main"));
+    }
+
+    /// `status.c` draws `status-left`, the window list and `status-right` in
+    /// one row at every width, and `layout_fix_panes` reserves nothing for
+    /// pane chrome while `pane-border-status` is off. A stock 80-column
+    /// terminal, where the raw TUI has no sidebar to keep `status-left` in,
+    /// has to draw all three in the pin's order and leave the pane
+    /// `STOCK_PANE_ROWS` rows. Both numbers come from
+    /// `compat/tui-pane-geometry.sh` and `compat/status-row.sh` measuring
+    /// pinned tmux d77c9dc6 beside zz.
+    #[test]
+    fn stock_eighty_column_attach_draws_the_whole_status_row() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        for arguments in [
+            ["new-session", "-d", "-s", "stock", "-n", "main"].as_slice(),
+            ["set", "-t", "stock", "status-left", "LEFT"].as_slice(),
+            ["set", "-t", "stock", "status-right", "RIGHT"].as_slice(),
+            ["setw", "-t", "stock", "window-status-current-format", "CUSTOM"].as_slice(),
+        ] {
+            let output = fixture.run(arguments);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let Ok((mut master, slave)) = open_pty_sized(STOCK_COLUMNS) else {
+            return;
+        };
+        rustix::io::ioctl_fionbio(&master, true).expect("set pty master nonblocking");
+        let stdin = slave.try_clone().expect("clone pty stdin");
+        let stdout = slave.try_clone().expect("clone pty stdout");
+        let mut child = fixture
+            .command()
+            .args(["attach-session", "-t", "stock"])
+            .stdin(Stdio::from(stdin))
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(slave))
+            .spawn()
+            .expect("spawn stock TUI attach");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut captured = Vec::new();
+        let mut early_status = None;
+        let mut pane_rows = Vec::new();
+        let rendered = loop {
+            let mut buffer = [0_u8; 4096];
+            match master.read(&mut buffer) {
+                Ok(0) => {}
+                Ok(count) => captured.extend_from_slice(&buffer[..count]),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(_) => {}
+            }
+            let text = String::from_utf8_lossy(&captured).into_owned();
+            if let Some(left) = text.find("LEFT")
+                && let Some(custom) = text[left..].find("CUSTOM")
+                && text[left + custom..].contains("RIGHT")
+            {
+                pane_rows = fixture
+                    .run(&["display-message", "-p", "-t", "stock", "#{pane_height}"])
+                    .stdout;
+                if pane_rows == format!("{STOCK_PANE_ROWS}\n").into_bytes() {
+                    break true;
+                }
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            if let Some(status) = child.try_wait().expect("poll stock TUI attach") {
+                early_status = Some(status);
+                break false;
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(master);
+
+        assert!(
+            rendered,
+            "child exited early={early_status:?}; pane_height={}; pty output={}",
+            String::from_utf8_lossy(&pane_rows),
+            String::from_utf8_lossy(&captured),
+        );
     }
 
     fn capture_tui_until(

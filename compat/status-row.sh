@@ -8,7 +8,10 @@
 # the sidebar's auto-hide threshold, where the zz TUI paints the daemon's
 # expanded status rows across the full width, applies the same status options
 # to both, and diffs the bytes of the last row of each pane after every step,
-# escapes included. A divergence is a finding, not a failure of this script:
+# escapes included. It also walks the band the sidebar's auto-hide covers, 80
+# and 100 columns, and diffs the row's TEXT there: status-left, the window
+# list and status-right have to be drawn in the pin's order at a width where
+# the raw TUI has no sidebar to hide status-left in. A divergence is a finding, not a failure of this script:
 # it exits 1 so a caller can gate on it, and prints both rows so the next
 # lane has the measurement.
 set -eEuo pipefail
@@ -147,26 +150,96 @@ write_attach() {
 zz_command -f /dev/null daemon >"$SCRATCH_DIR/zz-daemon.out" 2>"$SCRATCH_DIR/zz-daemon.err" &
 ZZ_PID=$!
 wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
-zz_command new-session -d -s "$INNER_SESSION" -x "$COLUMNS_UNDER_TEST" -y "$ROWS_UNDER_TEST" ||
-  die "could not create the zz session"
-tmux_inner_command -f /dev/null new-session -d -s "$INNER_SESSION" -x "$COLUMNS_UNDER_TEST" -y "$ROWS_UNDER_TEST" ||
-  die "could not create the tmux session"
-
-write_attach zz "$SCRATCH_DIR/attach-zz.sh"
-write_attach tmux "$SCRATCH_DIR/attach-tmux.sh"
-tmux_outer_command -f /dev/null new-session -d -s "$OUTER_SESSION" -n zz \
-  -x "$COLUMNS_UNDER_TEST" -y "$ROWS_UNDER_TEST" "$SCRATCH_DIR/attach-zz.sh" ||
-  die "could not create the outer session"
-tmux_outer_command set-option -g status off
-tmux_outer_command new-window -d -n tmux "$SCRATCH_DIR/attach-tmux.sh"
-wait_for "outer zz pane at ${COLUMNS_UNDER_TEST}x${ROWS_UNDER_TEST}" outer_pane_is "=$OUTER_SESSION:zz" "${COLUMNS_UNDER_TEST}x${ROWS_UNDER_TEST}"
-wait_for "outer tmux pane at ${COLUMNS_UNDER_TEST}x${ROWS_UNDER_TEST}" outer_pane_is "=$OUTER_SESSION:tmux" "${COLUMNS_UNDER_TEST}x${ROWS_UNDER_TEST}"
 client_attached() {
   local side="$1"
   [ "$(side_command "$side" list-clients -F '#{client_session}' 2>/dev/null)" = "$INNER_SESSION" ]
 }
-wait_for "zz client attached" client_attached zz
-wait_for "tmux client attached" client_attached tmux
+
+# Both binaries attached to a session of the given width, inside one outer
+# pinned tmux window each. Called once per width under test.
+attach_both_at() {
+  local columns="$1"
+  tmux_outer_command kill-server >/dev/null 2>&1 || true
+  zz_command kill-session -t "=$INNER_SESSION" >/dev/null 2>&1 || true
+  tmux_inner_command kill-session -t "=$INNER_SESSION" >/dev/null 2>&1 || true
+  zz_command new-session -d -s "$INNER_SESSION" -x "$columns" -y "$ROWS_UNDER_TEST" ||
+    die "could not create the zz session"
+  tmux_inner_command -f /dev/null new-session -d -s "$INNER_SESSION" -x "$columns" -y "$ROWS_UNDER_TEST" ||
+    die "could not create the tmux session"
+  tmux_outer_command -f /dev/null new-session -d -s "$OUTER_SESSION" -n zz \
+    -x "$columns" -y "$ROWS_UNDER_TEST" "$SCRATCH_DIR/attach-zz.sh" ||
+    die "could not create the outer session"
+  tmux_outer_command set-option -g status off
+  tmux_outer_command new-window -d -n tmux "$SCRATCH_DIR/attach-tmux.sh"
+  wait_for "outer zz pane at ${columns}x${ROWS_UNDER_TEST}" outer_pane_is "=$OUTER_SESSION:zz" "${columns}x${ROWS_UNDER_TEST}"
+  wait_for "outer tmux pane at ${columns}x${ROWS_UNDER_TEST}" outer_pane_is "=$OUTER_SESSION:tmux" "${columns}x${ROWS_UNDER_TEST}"
+  wait_for "zz client attached" client_attached zz
+  wait_for "tmux client attached" client_attached tmux
+}
+
+set_on_both() {
+  side_command zz set-option -g "$1" "$2" || die "zz refused set-option -g $1"
+  side_command tmux set-option -g "$1" "$2" || die "tmux refused set-option -g $1"
+}
+
+unset_on_both() {
+  side_command zz set-option -gu "$1" || die "zz refused set-option -gu $1"
+  side_command tmux set-option -gu "$1" || die "tmux refused set-option -gu $1"
+}
+
+write_attach zz "$SCRATCH_DIR/attach-zz.sh"
+write_attach tmux "$SCRATCH_DIR/attach-tmux.sh"
+
+# The band the sidebar's auto-hide covers. status.c draws status-left, the
+# window list and status-right in one row at every width; the raw TUI has no
+# sidebar below 109 columns, so all three have to be in that row there too.
+# Text, not bytes: colour encoding is the corpus's claim below, not this one.
+last_row_text() {
+  tmux_outer_command capture-pane -p -t "=$OUTER_SESSION:$1" | tail -n 1
+}
+compare_band() {
+  local columns="$1"
+  local zz_row tmux_row token
+  sleep 0.3
+  zz_row="$(last_row_text zz)"
+  tmux_row="$(last_row_text tmux)"
+  if [ "$zz_row" != "$tmux_row" ]; then
+    FAILURES=$((FAILURES + 1))
+    printf 'DIFF  status-left band at %s columns\n' "$columns"
+    printf '      tmux: %q\n' "$tmux_row"
+    printf '      zz:   %q\n' "$zz_row"
+    return 0
+  fi
+  for token in LEFT CUSTOM RIGHT; do
+    case "$zz_row" in
+    *"$token"*) ;;
+    *)
+      FAILURES=$((FAILURES + 1))
+      printf 'DIFF  status-left band at %s columns: %s is not drawn\n' "$columns" "$token"
+      printf '      zz:   %q\n' "$zz_row"
+      return 0
+      ;;
+    esac
+  done
+  printf 'ok    status-left band at %s columns\n' "$columns"
+}
+
+printf 'status-left band below the sidebar auto-hide threshold (pin %s)\n' "$(basename -- "$TMUX_BIN")"
+BAND_WIDTHS=(80 100)
+BAND_CHECKS=0
+for band_columns in "${BAND_WIDTHS[@]}"; do
+  attach_both_at "$band_columns"
+  set_on_both status-left LEFT
+  set_on_both status-right RIGHT
+  set_on_both window-status-current-format CUSTOM
+  BAND_CHECKS=$((BAND_CHECKS + 1))
+  compare_band "$band_columns"
+  unset_on_both status-left
+  unset_on_both status-right
+  unset_on_both window-status-current-format
+done
+
+attach_both_at "$COLUMNS_UNDER_TEST"
 
 # The corpus: one status option per step, applied identically to both servers.
 # Each step names the option and the value; the row is captured after both
@@ -206,13 +279,12 @@ compare_step "defaults"
 for entry in "${CORPUS[@]}"; do
   option="${entry%%|*}"
   value="${entry#*|}"
-  side_command zz set-option -g "$option" "$value" || die "zz refused set-option -g $option"
-  side_command tmux set-option -g "$option" "$value" || die "tmux refused set-option -g $option"
+  set_on_both "$option" "$value"
   compare_step "$option = $value"
 done
 
 if [ "$FAILURES" -ne 0 ]; then
-  printf '%s of %s rows differ\n' "$FAILURES" "$((${#CORPUS[@]} + 1))"
+  printf '%s of %s comparisons differ\n' "$FAILURES" "$((${#CORPUS[@]} + 1 + BAND_CHECKS))"
   exit 1
 fi
-printf 'all %s rows identical\n' "$((${#CORPUS[@]} + 1))"
+printf 'all %s comparisons identical\n' "$((${#CORPUS[@]} + 1 + BAND_CHECKS))"

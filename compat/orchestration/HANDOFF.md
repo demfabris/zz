@@ -194,15 +194,45 @@ it for cycle 15, keep the prompts' rules, rewrite the lane batches from the regi
 - The Claude Code harness kills background shell tasks when free memory dips during concurrent
   links; Monitor tasks survive. Three lanes building at once on the 8-core box is the ceiling.
 
-### Cycle 15
+### Cycle 15 (launched 2026-09-05 evening on the ubuntu box)
 
-From the review's "Next cycles" plus the four groups cycle 14 left open. Lane A: config discovery
-and the pane PATH decision (findings 2 and 3), plus the remainder of `keys.prefix-stock-commands`
-(`f` needs find-window to be a real mux verb; `M-n` and `M-p` need next-window -a and
-previous-window -a to honour activity, not only bells). Lane B: background status jobs and the
-control-notify fixture (findings 9 and 12), plus the three measured defects
-`clients.cli-output-mixed-queue`, `clients.command-output-pane-prompt` and
-`formats.dead-signal-platform-name`. Read each open group's reason first; they carry the probes.
+From the review's "Next cycles" plus the four groups cycle 14 left open. Script:
+`compat/orchestration/codex-compat-run-15.py` (same shape as cycle 14: two Codex lanes at
+medium reasoning on the default tier, a reviewer behind each, one serial gate; run dir
+`~/dev/zz-run-15`; worker worktrees `~/dev/zz-lane-config` and `~/dev/zz-lane-status`, created
+fresh at origin/main with cold targets; reviewers get a worktree without a build and
+`CARGO_TARGET_DIR` pointing at their lane's warm worker target). Lock fronts
+`F-CONFIG-ENTRYPOINT` and `F-STATUS-CONTROL-NOTIFY`.
+
+Lane config (`campaign/batch-config-entrypoint`): `config.discovery` (finding 2),
+`pane.tmux-on-path` (finding 3), and the `f`, `M-n`, `M-p` remainder of
+`keys.prefix-stock-commands`. Lane status (`campaign/batch-status-jobs-control-notify`):
+`status.background-jobs` (finding 9), `control-mode.notifications` (finding 12), and the three
+measured defects `clients.cli-output-mixed-queue`, `clients.command-output-pane-prompt`,
+`formats.dead-signal-platform-name`.
+
+Three product decisions fabrico made on 2026-09-05 before launch; the workers record each with
+the sentence "decided 2026-09-05 by fabrico for cycle 15; reversible":
+
+1. Config discovery: with no `-f`, zz reads the tmux candidates in place in the pin's order
+   (`/etc/tmux.conf`, `~/.tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf`,
+   `~/.config/tmux/tmux.conf`, every existing one), then `zz/mux.conf` last so zz-specific
+   settings win. `-f` replaces the tmux candidates; mux.conf still layers on top. The import
+   copy goes away (the entry point stops copying and says so; docs updated). Chosen over
+   "only when no mux.conf exists" and "only under the alias" because it removes the copy-drift
+   problem entirely; the known cost is that a stale `~/.tmux.conf` on a desktop box now loads.
+2. Pane PATH: the daemon's private `tmux` wrapper directory (the one jobs already get) is
+   prepended to every pane's PATH, so `tmux <cmd>` inside a zz pane talks to the enclosing
+   server as `$TMUX` makes it on the pin; bare `tmux` in a pane gives the pin's nested-session
+   refusal. Chosen over a packaging symlink (system-wide side effects) and documented
+   interactive-only (leaves every pane-driven plugin broken).
+3. `#{pane_dead_signal}`: match the platform, decimal on Linux (glibc has no `sys_signame`),
+   the `sys_signame` spelling on macOS, exactly as tmux built on each OS prints.
+
+The box's real `~/.tmux.conf` (the user's dotfiles) means decision 1 has a footgun for every
+probe and gate server started outside the harness: keep HOME scrubbed or pass `-f /dev/null`,
+as the harness does for both sides.
+
 Cycle 16 stays as the review lays it out (the desktop status row and the proof debt).
 
 ### Two things the closing cycles taught

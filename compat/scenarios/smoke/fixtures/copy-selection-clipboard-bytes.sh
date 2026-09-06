@@ -119,22 +119,13 @@ await_clients 1 || { echo "copy-selection-clipboard-bytes-$side: attach"; exit 0
 # set-clipboard is not off. Measured on the pin: external and on each emit one
 # write with an empty field, off emits none.
 #
-# zz agrees on the gating and on the payload and diverges on the field alone:
-# a server-issued copy (send-keys -X copy-selection-and-cancel) reaches the
-# client as EventPayload::Clipboard with request_id 0, which is also what an
-# application's own OSC 52 carries, so the raw TUI cannot tell the pin's two
-# producers apart and keeps the named field. A client-issued CopySelection
-# carries a non-zero request_id and does write the pin's empty field. Recorded
-# under desktop.drag-to-clipboard in compat/tmux-gaps.json; separating the two
-# producers needs a wire change.
-if [ "$side" = zz ]; then
-    field=c
-else
-    field='<empty>'
-fi
+# Both sides write the empty field: EventPayload::Clipboard carries the
+# producer since PROTOCOL_VERSION 99, so the raw TUI writes the pin's empty
+# field for every selection the server wrote itself and keeps the named field
+# only for an application's own OSC 52, which the second phase below measures.
 for spec in \
-    "external|selection=$field payload=alpha-bravo" \
-    "on|selection=$field payload=alpha-bravo" \
+    'external|selection=<empty> payload=alpha-bravo' \
+    'on|selection=<empty> payload=alpha-bravo' \
     'off|'; do
     value="${spec%%|*}"
     want="${spec#*|}"
@@ -160,11 +151,64 @@ for spec in \
     check_equal "selection-field-$value" "$want" "$got"
 done
 
-if [ "$check_count" -ne 3 ]; then
+# Pinned tmux d77c9dc6: input_osc_52_parse returns 0 unless
+# options_get_number(global_options, "set-clipboard") == 2, so an application
+# writing its own ESC ] 52 ; c ; <base64> BEL reaches the outer terminal only
+# under set-clipboard on, and under external and off the pin writes nothing and
+# creates no buffer. Measured on the pin with this fixture: on emits
+# selection=c payload=application and one buffer, external and off emit
+# neither.
+cat >"$work/emitter.sh" <<EOF
+#!/bin/sh
+printf 'emitter-ready\n'
+while :; do
+    if [ -f "$work/emit" ]; then
+        rm -f "$work/emit"
+        printf '\033]52;c;YXBwbGljYXRpb24=\007'
+        printf 'emitted\n'
+    fi
+    sleep 0.05
+done
+EOF
+chmod +x "$work/emitter.sh"
+main_client new-window -n osc -t "=$session" "$work/emitter.sh"
+pane="$(main_client list-panes -t "=$session:osc" -F '#{pane_id}' | head -n 1)"
+await_line emitter-ready || record_failure "emitter-ready"
+for spec in \
+    'external|' \
+    'on|selection=c payload=application' \
+    'off|'; do
+    value="${spec%%|*}"
+    want="${spec#*|}"
+    main_client set-option -g set-clipboard "$value"
+    main_client delete-buffer -b oscapp >/dev/null 2>&1 || true
+    before="$(wc -c <"$work/attach.raw")"
+    buffers_before="$(main_client list-buffers -F x 2>/dev/null | grep -c x || true)"
+    : >"$work/emit"
+    attempt=0
+    got=""
+    while [ "$attempt" -lt 60 ]; do
+        got="$(scan_from "$before")"
+        if [ -n "$got" ] && [ -n "$want" ]; then
+            break
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.05
+    done
+    check_equal "application-osc52-$value" "$want" "$got"
+    buffers_after="$(main_client list-buffers -F x 2>/dev/null | grep -c x || true)"
+    if [ -n "$want" ]; then
+        check_equal "application-osc52-buffer-$value" "$((buffers_before + 1))" "$buffers_after"
+    else
+        check_equal "application-osc52-buffer-$value" "$buffers_before" "$buffers_after"
+    fi
+done
+
+if [ "$check_count" -ne 9 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g COPY_SELECTION_CLIPBOARD_BYTES clean:3
+    main_client set-environment -g COPY_SELECTION_CLIPBOARD_BYTES clean:9
 else
     sed "s/^/copy-selection-clipboard-bytes-$side: /" "$work/failures"
 fi

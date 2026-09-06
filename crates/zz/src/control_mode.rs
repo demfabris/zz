@@ -3461,11 +3461,11 @@ mod tests {
             assert_eq!(
                 writer.output,
                 b"%output %7 before\n\
-                  %begin 21 1 1\nbody\n%end 21 1 1\n\
-                  %pause %7\n%window-add @3\n\
+                  %begin 21 1 1\n%pause %7\n%continue %7\nbody\n%end 21 1 1\n\
+                  %window-add @3\n\
                   %begin 22 2 1\ndiagnostic\n%error 22 2 1\n\
                   %begin 23 3 0\nguard\n%end 23 3 0\n\
-                  source\ncommand\n%continue %7\n%exit\n"
+                  source\ncommand\n%exit\n"
             );
         }
     }

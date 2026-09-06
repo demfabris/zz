@@ -7246,22 +7246,30 @@ mod daemon_autostart {
             assert!(!output_lines.contains("HIDDEN_WHILE_PAUSED"));
             assert!(output_lines.contains("VISIBLE_AFTER_ON"));
             assert!(output_lines.contains("VISIBLE_AFTER_CONTINUE"));
-            assert_eq!(
-                stream
-                    .outside
-                    .iter()
-                    .filter(|line| line.as_str() == format!("%pause {pane}"))
-                    .count(),
-                1
-            );
-            assert_eq!(
-                stream
-                    .outside
-                    .iter()
-                    .filter(|line| line.as_str() == format!("%continue {pane}"))
-                    .count(),
-                1
-            );
+            let guarded = stream
+                .blocks
+                .iter()
+                .flat_map(|block| block.payload.iter())
+                .cloned()
+                .collect::<Vec<_>>();
+            for state in ["pause", "continue"] {
+                let line = format!("%{state} {pane}");
+                assert_eq!(
+                    stream
+                        .outside
+                        .iter()
+                        .filter(|candidate| candidate.as_str() == line)
+                        .count(),
+                    0
+                );
+                assert_eq!(
+                    guarded
+                        .iter()
+                        .filter(|candidate| candidate.as_str() == line)
+                        .count(),
+                    1
+                );
+            }
         }
 
         #[test]

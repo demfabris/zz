@@ -2,11 +2,16 @@
 # expanded by any proof in this repo, plus the single-letter aliases and the
 # e and p modifiers. One display-message per name so a divergence names itself.
 # Twelve names measured on 2026-09-06 diverge or cannot be diffed at all; both
-# sides' values are recorded under semantic:census-formats in
-# proofs.census-coverage instead of being asserted here: buffer_mode_format,
-# client_mode_format, tree_mode_format, cursor_character, cursor_colour,
-# history_limit, pane_bg, pane_fg, pane_key_mode, pane_path, pane_tabs and #T,
-# plus start_time, which is the server's own epoch and differs by construction.
+# sides' values are recorded on the group that owns each of them instead of
+# being asserted here: buffer_mode_format, client_mode_format and
+# tree_mode_format on formats.native-modes, cursor_character, cursor_colour,
+# pane_bg, pane_fg and pane_tabs on formats.terminal-cells, pane_key_mode on
+# formats.pane-runtime, history_limit on presentation.native-status, and
+# pane_path with #T on pane.runtime-facts, which proves both in its own
+# scenario. start_time is the server's own epoch and differs by construction.
+# #P was a census false positive - its only corpus occurrence was the literal
+# prompt text in compat/scenarios/smoke/fixtures/keys-contract.py - and is
+# expanded here with the other aliases.
 new-window -n second
 split-window -h -t w:0
 set-window-option -t w:0 synchronize-panes on
@@ -42,6 +47,7 @@ fmt: #{window_stack_index}
 fmt: #{window_start_flag}
 fmt: #H
 fmt: #h
+fmt: #P
 fmt: #{e|+:2,3}
 fmt: #{e|*|f|2:1.5,2}
 fmt: #{p12:zz}

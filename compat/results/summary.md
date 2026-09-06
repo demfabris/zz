@@ -218,6 +218,9 @@
 | smoke/pane-engine-knobs-input | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-engine-knobs | 3 | yes | 0 | yes | yes | yes |
 | smoke/pane-tmux-path | 3 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-continuum | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-vim-tmux-navigator | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-yank | 2 | yes | 0 | yes | yes | yes |
 | smoke/positional-maximums | 3 | yes | 0 | yes | yes | yes |
 | smoke/positional-minimums | 3 | yes | 0 | yes | yes | yes |
 | smoke/refresh-status | 2 | yes | 0 | yes | yes | yes |

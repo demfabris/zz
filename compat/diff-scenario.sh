@@ -909,6 +909,8 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
     if [ "$key_extract_failed" -eq 1 ]; then
       printf 'SMOKE KEY: expected exactly one %s|%s binding on each side\n' \
         "$key_table" "$key_name" >>"$LOG_FILE"
+      append_stream "zz list-keys rows:" "$zz_key_raw"
+      append_stream "tmux list-keys rows:" "$tmux_key_raw"
       warn_step_diverged=1
     fi
   fi

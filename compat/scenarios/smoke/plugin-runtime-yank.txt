@@ -1,0 +1,15 @@
+corpus: required
+# tmux-yank's copy_line.sh run for real on both binaries, with
+# @override_copy_command pointing at a script that writes the clipboard to a
+# file. The plugin drives copy-mode entry, begin-selection, the -N 150
+# cursor-down, end-of-line, previous-word and next-word-end motions, and
+# copy-pipe-and-cancel. The observables are the clipboard file's bytes, the
+# paste buffer, the pane leaving the mode and display-time being restored.
+# A client is attached on a real pty because zz's copy-mode refuses a clientless
+# target (semantic:copy-mode-headless-target under clients.interactive-refresh),
+# and the window is pinned to 80x24 with window-size manual so the sidebar
+# cannot move the copy-mode geometry.
+stage: fixtures/plugin-reader.py ~/plugin-reader.py
+stage: fixtures/yank-runtime.py ~/yank-runtime.py
+run-shell 'python3 ~/yank-runtime.py'
+out: show-environment -g ZZ_YANK_RUNTIME

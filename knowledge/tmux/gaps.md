@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **47**. Classified items: **438**.
+Tracked gap groups: **48**. Classified items: **444**.
 
-- Status: open: 5, accepted: 42.
-- Decision: adopt: 5, native: 32, never: 10.
-- Priority: now: 5, none: 42.
+- Status: open: 6, accepted: 42.
+- Decision: adopt: 6, native: 32, never: 10.
+- Priority: now: 6, none: 42.
 - Closed history entries: 188.
-- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 47, presentation: 10, protocol: 2.
+- Surface: command: 9, flag: 32, native-command: 22, option: 62, format: 51, key: 77, binding: 41, native-key: 85, semantic: 53, presentation: 10, protocol: 2.
 
 ## Measured surface
 
@@ -55,6 +55,7 @@ structure as proof.
 | `clients.cli-output-sourced-raw-newline-claim` | Carry the sourced stdout claim kind to the command client | adopt | open | medium | daemon | scripts | none |
 | `desktop.drag-to-clipboard` | Land a desktop drag selection where a paste can reach it | adopt | open | medium | client | daily, gui | none |
 | `desktop.overlay-consumers` | Give every daemon overlay payload a desktop consumer | adopt | open | medium | gui | daily, gui | none |
+| `plugins.runtime-paths` | Run the plugins, not only their installers | adopt | open | medium | mux | daily, scripts | none |
 | `control-mode.notifications` | Compare control notification transcripts with pinned tmux | adopt | open | hard | daemon | remote, scripts | none |
 
 ## None
@@ -894,6 +895,33 @@ In the pin a floating pane is a mux object: `new-pane` creates one by default, `
   - `Native floating surfaces stay presentation objects, `new-pane` stays reserved and unimplemented, and the floating `move-pane` and `break-pane` placement flags stay loudly unsupported.`
   - ``pane_floating_flag` keeps the pin's inactive default, and zz's tiled `move-pane` extension stays a recorded superset behavior.`
   - ``editor` keeps the pin's startup seeding from VISUAL or EDITOR and its vi or emacs key-table derivation, and stays store-only beyond that because its only read in the pin spawns a floating pane.`
+
+### `plugins.runtime-paths`: Run the plugins, not only their installers
+
+Registered 2026-09-06 by the proof-debt lane. Apart from cycle 15's plugins.resurrect-save, no plugin RUNTIME path ran on either binary: the nine corpus scenarios (tpm-init, yank, continuum-init, fpp-init, resurrect-init, resurrect-save, oh-my-tmux, sensible, vim-tmux-navigator) proved parse, list-keys and option readback only. This group runs the plugins' own scripts on both binaries and diffs a file the plugin wrote or a daemon fact, never a screen. PROVED 2026-09-06. vim-tmux-navigator: the fixture puts a real process named vim on one pane (a python3 symlink, so /proc/<pid>/comm is vim) and one named pager on its sibling, runs vim-tmux-navigator.tmux with the STOCK @vim_navigator_check, reads the installed root C-h binding back out of list-keys and fires that exact command with the target pane active. Both binaries answer the same binding text `if-shell "ps -o state= -o comm= -t '#{pane_tty}' | grep -iqE '^[^TXZ ]+ +(\\S+/)?g?\\.?(view|l?n?vim?x?|fzf)(diff)?(-wrapped)?$'" "send-keys 'C-h'" "select-pane -L"`, the same ps roster per pane (vim / pager), and the same branch outcome: on the vim pane the pane's reader receives exactly the byte 08 and the active pane does not move; on the pager pane the active pane moves left and no byte reaches the pane. tmux-yank: copy_line.sh itself is executed with @override_copy_command set to a script that writes the clipboard to a file, so the plugin drives get_tmux_copy_mode, send-key C-a, copy-mode, `send -X begin-selection`, `send -X -N 150 cursor-down`, end-of-line, previous-word, next-word-end and `send -X copy-pipe-and-cancel`. Both binaries write the same 16 clipboard bytes 616c70686120626574612067616d6d61 (`alpha beta gamma`), leave the same paste buffer, leave the pane with #{pane_in_mode}=0 and an empty #{pane_mode}, and restore display-time to 750. The fixture attaches a client on a real pty because zz's copy-mode answers `pane is not attached` for a clientless target (semantic:copy-mode-headless-target, clients.interactive-refresh), and pins the window with window-size manual at 80x24 so zz's sidebar cannot move the copy-mode geometry. tmux-continuum: the save trigger is fired the way the plugin fires it, by the status-right #() job on an attached client with status on and status-interval 1. Both binaries run continuum_save.sh from that job, advance @continuum-save-last-timestamp off 0, produce a tmux_resurrect_<YYYYMMDD>T<HHMMSS>.txt save with a `last` symlink, and write the identical pane record for the session under test. continuum_status.sh answers 15 at @continuum-save-interval 15 and off at 0 on both. MEASURED, NOT CLOSED. semantic:plugin-runtime-nested-command-target: the pin does not push an outer -t into the commands that if-shell or `run-shell -C` then run; zz does. Measured 2026-09-06 on throwaway servers with two panes, each running a raw-mode reader, the active pane being pane 1: `run-shell -t <pane0> -C "send-keys -l A"` put 41 in pane 0's sink on zz and in pane 1's sink on the pin, and `if-shell -t <pane0> true "send-keys -l B"` put 42 the same way. Format expansion is NOT affected: a nested `#{pane_tty}` follows -t on both, measured with `if-shell -t <pane0> "test '#{pane_tty}' = <pane0 tty>"` and its run-shell -C wrapper, which both answered match. Pinned d77c9dc6 cmd-if-shell.c:99 and cmd-run-shell.c:236 hand the new item cmdq_get_state(item), which carries the invoking client's CURRENT session, window and pane, not the item's resolved -t target, so cmd_find_target re-resolves each nested command against the current pane. Every plugin binding of the shape `if-shell <probe> <cmd-a> <cmd-b>` therefore only agrees while the target and the current pane are the same pane, which is what a real keypress guarantees and what this group's fixtures reproduce. Needs mux ownership; it is parked here because it was measured here, and should be relocated to the group that owns command target resolution next cycle. semantic:plugin-runtime-resurrect-record-shape: tmux-resurrect's save writes a TAB-delimited record and reads it back with `IFS=<tab> read`, which collapses consecutive tabs, so an empty field shifts every later column. The pin's default #{pane_title} is the short host name (`ubuntu` on this box) and zz's is empty, measured 2026-09-06 on throwaway servers with a pane running `exec sleep 600`: zz answered `pane_title=[]` with `host_short=[ubuntu]`, the pin answered `pane_title=[ubuntu]`. The consequence is a corrupted save file, not a cosmetic diff: for the same session the pin wrote the 11-field record `pane\tcontinuum-runtime\t0\t1\t:*\t0\tubuntu\t:<DIR>\t1\tsleep\t:` and zz wrote a 12-field one, `pane\tcontinuum-runtime\t0\t1\t:*\t0\t\t:<DIR>\t1\tsleep\t1310983\t:`, where the pane pid landed in the full-command column. cycle 15's plugins.resurrect-save never saw it because that fixture sets an OSC 2 title before saving; this group's continuum fixture sets one for the same reason. Reopen against whoever owns pane title defaults. NOT RUN, still open, with what the probe would be. semantic:plugin-runtime-resurrect-restore: restore.sh against a save this run produced. The save half already runs (plugins.resurrect-save); the restore half needs the fixture to kill the saved session and diff the rebuilt session's list-panes rows, cwds and pane commands. Budget ran out before it was written. semantic:plugin-runtime-tpm-install: tpm's prefix I flow against a file:// clone or a pre-populated plugins directory, observing the cloned tree and TMUX_PLUGIN_MANAGER_PATH. The binding text is already proved by smoke/tpm-init; what is missing is running bindings/install_plugins. semantic:plugin-runtime-fpp-launch: prefix f opening fpp in a new window. smoke/fpp-init proves the binding only; the runtime needs an attached pty client and a fake fpp on PATH whose new window is observed through list-windows. semantic:plugin-runtime-oh-my-tmux-prefix-y: oh-my-tmux's prefix y and its status helpers, which need an attached client and a fake clipboard the way the yank fixture does. Harness note from this lane: smoke/vim-tmux-navigator's keys: steps are load-flaky. Under two other lanes building, 2 of 6 runs had zz's list-keys answer no root C-h (and in one run no C-j and no C-k either) where the pin answered one row; 8 of 8 runs were clean when the scenario ran alone. diff-scenario.sh now dumps both sides' raw list-keys rows when the one-row extraction fails, so the next occurrence is diagnosable instead of showing an empty diff side.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `now` / `medium`
+- Owner: `mux`
+- User impact: daily, scripts
+- Items: `semantic:plugin-runtime-fpp-launch`, `semantic:plugin-runtime-nested-command-target`, `semantic:plugin-runtime-oh-my-tmux-prefix-y`, `semantic:plugin-runtime-resurrect-record-shape`, `semantic:plugin-runtime-resurrect-restore`, `semantic:plugin-runtime-tpm-install`
+- Depends on: none
+- Evidence:
+  - `scenario:compat/scenarios/smoke/plugin-runtime-vim-tmux-navigator.txt`
+  - `scenario:compat/scenarios/smoke/plugin-runtime-yank.txt`
+  - `scenario:compat/scenarios/smoke/plugin-runtime-continuum.txt`
+  - `file:compat/scenarios/smoke/fixtures/vim-tmux-navigator-runtime.py`
+  - `file:compat/scenarios/smoke/fixtures/yank-runtime.py`
+  - `file:compat/scenarios/smoke/fixtures/continuum-runtime.py`
+  - `file:compat/scenarios/smoke/fixtures/plugin-reader.py`
+  - `scenario:compat/scenarios/smoke/resurrect-save.txt`
+- Acceptance:
+  - `A plugin runtime path is proved when the plugin's OWN script or binding runs on both binaries and the differential is a file the plugin wrote or a daemon fact, never a screen.`
+  - `vim-tmux-navigator: with a process named vim on the target pane and one named pager on its sibling, the installed root C-h binding read back from list-keys is byte-identical on both sides; firing it on the vim pane delivers exactly 0x08 to that pane and leaves the active pane where it was; firing it on the pager pane moves the active pane left and delivers nothing.`
+  - `tmux-yank: copy_line.sh run with @override_copy_command writes the same clipboard bytes on both sides, leaves the same paste buffer, leaves the pane out of copy mode, and restores display-time.`
+  - `tmux-continuum: the status-right #() job on an attached client runs continuum_save.sh, which advances @continuum-save-last-timestamp and produces a timestamp-named resurrect save whose pane record for the session under test is identical on both sides; continuum_status.sh answers the interval when saving is on and off when the interval is 0.`
+  - `Remaining items are open with the measurement or the probe that would prove them recorded in the reason; semantic:plugin-runtime-nested-command-target and semantic:plugin-runtime-resurrect-record-shape are measured divergences awaiting an owner, not unproved paths.`
 
 ### `presentation.native-status`: Keep native status and lifecycle presentation
 

@@ -43,19 +43,9 @@ struct ShellCacheEntry {
 
 struct ShellJob {
     child: Option<Child>,
-    #[cfg(unix)]
-    stdout: std::process::ChildStdout,
-    #[cfg(unix)]
-    pending: Vec<u8>,
-    #[cfg(unix)]
-    updated: bool,
-    #[cfg(unix)]
-    eof: bool,
-    #[cfg(not(unix))]
     output: Arc<Mutex<ShellOutput>>,
 }
 
-#[cfg(not(unix))]
 #[derive(Default)]
 struct ShellOutput {
     latest: Option<String>,
@@ -84,55 +74,12 @@ impl ShellCacheEntry {
 }
 
 impl ShellJob {
-    #[cfg(unix)]
-    fn poll(&mut self) -> (Option<String>, bool, bool) {
-        let mut latest = None;
-        let mut streamed = false;
-        let mut buffer = [0; 4096];
-        if !self.eof {
-            for _ in 0..16 {
-                match self.stdout.read(&mut buffer) {
-                    Ok(0) => {
-                        if !self.pending.is_empty() || !self.updated {
-                            latest = Some(String::from_utf8_lossy(&self.pending).into_owned());
-                        }
-                        self.eof = true;
-                        break;
-                    }
-                    Ok(length) => {
-                        for byte in &buffer[..length] {
-                            if *byte == b'\n' {
-                                if self.pending.last() == Some(&b'\r') {
-                                    self.pending.pop();
-                                }
-                                latest = Some(String::from_utf8_lossy(&self.pending).into_owned());
-                                self.pending.clear();
-                                self.updated = true;
-                                streamed = true;
-                            } else {
-                                self.pending.push(*byte);
-                            }
-                        }
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
-                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                    Err(_) => {
-                        self.eof = true;
-                        break;
-                    }
-                }
-            }
-        }
-        (latest, self.reaped(self.eof), streamed)
-    }
-
-    #[cfg(not(unix))]
     fn poll(&mut self) -> (Option<String>, bool, bool) {
         let (latest, eof, streamed) = {
             let mut output = self
                 .output
                 .lock()
-                .unwrap_or_else(|error| error.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             (
                 output.latest.take(),
                 output.complete,
@@ -208,6 +155,7 @@ pub(crate) struct StatusRenderer {
     published: BTreeMap<ClientId, StatusLine>,
     tmux_shim: Option<PathBuf>,
     zz_executable: Option<PathBuf>,
+    job_waker: Option<thread::Thread>,
 }
 
 pub(crate) struct StatusRequest {
@@ -586,6 +534,10 @@ pub(crate) struct MessageFormatFacts {
 }
 
 impl StatusRenderer {
+    pub(crate) fn set_job_waker(&mut self, waker: thread::Thread) {
+        self.job_waker = Some(waker);
+    }
+
     pub(crate) fn poll_jobs(&mut self) -> BTreeSet<ClientId> {
         let now = shell_second();
         self.shell_cache
@@ -610,6 +562,7 @@ impl StatusRenderer {
             true,
             self.tmux_shim.as_deref(),
             self.zz_executable.as_deref(),
+            self.job_waker.as_ref(),
         );
         self.published.insert(request.client, status.clone());
         status
@@ -630,6 +583,7 @@ impl StatusRenderer {
                 refresh,
                 self.tmux_shim.as_deref(),
                 self.zz_executable.as_deref(),
+                self.job_waker.as_ref(),
             );
             if self.published.get(&request.client) == Some(&status) {
                 continue;
@@ -653,6 +607,7 @@ impl StatusRenderer {
             false,
             self.tmux_shim.as_deref(),
             self.zz_executable.as_deref(),
+            self.job_waker.as_ref(),
         );
         self.published.insert(request.client, status.clone());
         status
@@ -755,6 +710,7 @@ fn render(
     refresh: bool,
     tmux_shim: Option<&std::path::Path>,
     zz_executable: Option<&std::path::Path>,
+    job_waker: Option<&thread::Thread>,
 ) -> StatusLine {
     let now = Local::now();
     let title = request
@@ -775,6 +731,7 @@ fn render(
                 request.startup,
                 tmux_shim,
                 zz_executable,
+                job_waker,
             );
             clamp_status_text(expand_status(format, &request.context, &mut hooks))
         });
@@ -801,6 +758,7 @@ fn render(
             request.startup,
             tmux_shim,
             zz_executable,
+            job_waker,
         );
         (
             expand_status(&request.formats.left, &request.context, &mut hooks),
@@ -821,6 +779,7 @@ fn render(
         request.startup,
         tmux_shim,
         zz_executable,
+        job_waker,
     );
     let base_style = expand_base_status_style(&request.formats, &request.context, &mut hooks);
     let lines = usize::from(request.formats.lines).min(MAX_STATUS_ROWS);
@@ -1081,6 +1040,7 @@ pub(crate) struct DaemonFormatHooks<'a> {
     startup: bool,
     tmux_shim: Option<&'a std::path::Path>,
     zz_executable: Option<&'a std::path::Path>,
+    job_waker: Option<&'a thread::Thread>,
 }
 
 impl<'a> DaemonFormatHooks<'a> {
@@ -1109,6 +1069,7 @@ impl<'a> DaemonFormatHooks<'a> {
             startup: false,
             tmux_shim: None,
             zz_executable: None,
+            job_waker: None,
         }
     }
 
@@ -1143,6 +1104,7 @@ impl<'a> DaemonFormatHooks<'a> {
         startup: bool,
         tmux_shim: Option<&'a std::path::Path>,
         zz_executable: Option<&'a std::path::Path>,
+        job_waker: Option<&'a thread::Thread>,
     ) -> Self {
         Self {
             status_client: Some(client),
@@ -1161,6 +1123,7 @@ impl<'a> DaemonFormatHooks<'a> {
             startup,
             tmux_shim,
             zz_executable,
+            job_waker,
         }
     }
 }
@@ -1331,6 +1294,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 self.startup,
                 self.tmux_shim,
                 self.zz_executable,
+                self.job_waker.cloned(),
             );
             if entry.job.is_none() {
                 entry.output = Some(format!("<'{command}' didn't start>"));
@@ -1799,6 +1763,7 @@ fn run_shell(
     startup: bool,
     tmux_shim: Option<&std::path::Path>,
     zz_executable: Option<&std::path::Path>,
+    job_waker: Option<thread::Thread>,
 ) -> Option<ShellJob> {
     let mut process = shell_process(command);
     let tmux = format!("{},{},-1", context.socket_path, std::process::id());
@@ -1833,24 +1798,6 @@ fn run_shell(
     };
 
     let stdout = child.stdout.take()?;
-    #[cfg(unix)]
-    {
-        let nonblocking = rustix::fs::fcntl_getfl(&stdout).and_then(|flags| {
-            rustix::fs::fcntl_setfl(&stdout, flags | rustix::fs::OFlags::NONBLOCK)
-        });
-        if nonblocking.is_err() {
-            thread::spawn(move || terminate_shell(&mut child));
-            return None;
-        }
-        Some(ShellJob {
-            child: Some(child),
-            stdout,
-            pending: Vec::new(),
-            updated: false,
-            eof: false,
-        })
-    }
-    #[cfg(not(unix))]
     {
         let mut stdout = stdout;
         let output = Arc::new(Mutex::new(ShellOutput::default()));
@@ -1873,9 +1820,12 @@ fn run_shell(
                                     let line = String::from_utf8_lossy(&pending).into_owned();
                                     let mut output = reader_output
                                         .lock()
-                                        .unwrap_or_else(|error| error.into_inner());
+                                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                                     output.latest = Some(line);
                                     output.streamed = true;
+                                    if let Some(waker) = &job_waker {
+                                        waker.unpark();
+                                    }
                                     pending.clear();
                                     updated = true;
                                 } else {
@@ -1889,21 +1839,23 @@ fn run_shell(
                 }
                 let mut output = reader_output
                     .lock()
-                    .unwrap_or_else(|error| error.into_inner());
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if !pending.is_empty() || !updated {
                     output.latest = Some(String::from_utf8_lossy(&pending).into_owned());
                 }
                 output.complete = true;
+                if let Some(waker) = &job_waker {
+                    waker.unpark();
+                }
             });
-        match reader {
-            Ok(_) => Some(ShellJob {
+        if reader.is_ok() {
+            Some(ShellJob {
                 child: Some(child),
                 output,
-            }),
-            Err(_) => {
-                terminate_shell(&mut child);
-                None
-            }
+            })
+        } else {
+            terminate_shell(&mut child);
+            None
         }
     }
 }
@@ -3118,6 +3070,35 @@ mod tests {
         assert!(
             status.right.is_empty(),
             "a failing command renders as blank"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn status_job_output_wakes_the_renderer_before_the_sampler_tick() {
+        let mut renderer = StatusRenderer::default();
+        renderer.set_job_waker(thread::current());
+        let request = request(1, "#(printf ready)", "");
+        assert!(renderer.render_initial(&request).left.is_empty());
+        let deadline = Instant::now() + Duration::from_millis(750);
+        loop {
+            thread::park_timeout(deadline.saturating_duration_since(Instant::now()));
+            renderer.poll_jobs();
+            if renderer
+                .shell_cache
+                .values()
+                .any(|entry| entry.output.as_deref() == Some("ready"))
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "shell output did not wake the renderer"
+            );
+        }
+        assert!(
+            Instant::now() < deadline,
+            "shell output waited for the sampler tick"
         );
     }
 

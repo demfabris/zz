@@ -430,14 +430,18 @@ Two format rules preserve the status renderer's contract:
 
 The daemon starts `#()` jobs without waiting for their output. The first expansion returns empty;
 a later expansion can show the pin's `<'command' not ready>` placeholder when a running job has
-produced nothing for more than one second. The sampler drains output without blocking, retains the
-latest complete line and final partial line, and publishes changes even with `status-interval 0`.
+produced nothing for more than one second. Shell stdout workers retain the latest complete line and final partial line, then wake the sampler
+immediately to publish changes, including with `status-interval 0`.
 A rerun keeps the previous value visible.
 
-`status-interval` controls each session's periodic expansions. During an expansion, an idle job
-can restart once the wall-clock second differs from its last start or streamed update.
+`status-interval` controls each session's periodic expansions. The sampler wakes at the earliest
+session deadline independently of its maintenance tick, so an interval does not gain an extra
+second from timer rounding. During an expansion, an idle job can restart once the wall-clock
+second differs from its last start or streamed update.
 `refresh-client` bare and `-S` force a restart; changing the expanded command also forces it.
-Identical raw commands in ordinary left and right formats share one job per attached client.
+Identical commands after outer time expansion in ordinary left and right formats share one job
+per attached client. Like the pin, outer time expansion substitutes `%s` even inside `#()`;
+`DATE[#(date +%s%N)]` at interval 2 has drawn-row regression samples at seconds 1, 3, 5 and 7.
 Unattached clients share a global cache. Detach cancels that client's jobs; unused entries expire
 after an hour. Job cancellation and process reaping do not wait under the status mutex.
 

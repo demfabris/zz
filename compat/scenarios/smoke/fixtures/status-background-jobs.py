@@ -1,5 +1,6 @@
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -109,6 +110,28 @@ try:
     tmux("set-option", "-t", session, "status-right", "LIMIT[#{=-4:#{E:status-left}}]")
     await_condition(lambda: b"LIMIT[TAIL]" in screen(), 5, "long cached output retains its tail")
     print("status jobs: long cached output retains TAIL on both binaries")
+    run([*recorder, "kill-server"])
+    started = False
+    tmux("kill-session", "-t", "=" + session)
+    tmux("new-session", "-d", "-s", session, "-n", "date", "sleep 600")
+    for option, setting in (("status", "on"), ("status-interval", "2"),
+                            ("status-left", ""), ("status-right-length", "80"),
+                            ("status-right", "DATE[#(date +%s%N)]")):
+        tmux("set-option", "-t", session, option, setting)
+    date_attached = time.monotonic()
+    run([*recorder, "new-session", "-d", "-x", "120", "-y", "30", "-s", "recorder",
+         shlex.join(command)])
+    started = True
+    previous = 0
+    for offset in (1, 3, 5, 7):
+        await_condition(lambda: time.monotonic() >= date_attached + offset,
+                        offset + 1, "scheduled drawn DATE sample")
+        drawn = screen()
+        values = {int(value) for value in re.findall(rb"DATE\[(\d+)\]", drawn)}
+        if len(values) != 1 or next(iter(values)) <= previous:
+            raise AssertionError(("drawn DATE changes at seconds 1, 3, 5 and 7", offset, previous, drawn))
+        previous, = values
+    print("status jobs: drawn DATE changes at seconds 1, 3, 5 and 7 with interval 2")
     result = "clean:9"
 except Exception as error:
     print(repr(error), flush=True)

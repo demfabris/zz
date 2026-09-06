@@ -1470,10 +1470,14 @@ impl SettingsView {
         let dirty = file.editor.read(cx).value().as_ref() != file.saved;
         let error = file.error.clone();
         let donor = kind.donor_path();
-        let donor_tooltip = donor.as_ref().map_or_else(
-            || format!("No {} configuration was found to import", kind.donor_name()),
-            |path| format!("Import {}", path.display()),
-        );
+        let donor_tooltip = if kind == ConfigFileKind::Mux {
+            "zz reads tmux configuration files in place at daemon startup".to_owned()
+        } else {
+            donor.as_ref().map_or_else(
+                || format!("No {} configuration was found to import", kind.donor_name()),
+                |path| format!("Import {}", path.display()),
+            )
+        };
         let has_config_import = crate::profile::profile(cx).has_config_import;
 
         div()
@@ -1510,7 +1514,9 @@ impl SettingsView {
                                         .small()
                                         .label(kind.import_button_label())
                                         .tooltip(donor_tooltip)
-                                        .disabled(donor.is_none())
+                                        .disabled(
+                                            kind == ConfigFileKind::Terminal && donor.is_none(),
+                                        )
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             this.confirm_config_import(kind, window, cx);
                                         })),
@@ -1785,6 +1791,15 @@ Self::numeric_setting(
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if kind == ConfigFileKind::Mux {
+            toast::push(
+                Notification::info(
+                    "zz reads tmux configuration in place at daemon startup. Put zz-specific overrides in zz/mux.conf; no import is needed.",
+                ),
+                cx,
+            );
+            return;
+        }
         let Some(donor) = kind.donor_path() else {
             toast::push(
                 Notification::info(format!(
@@ -1831,9 +1846,7 @@ Self::numeric_setting(
         cx: &mut Context<Self>,
     ) {
         let result = match kind {
-            ConfigFileKind::Mux => {
-                config::import::import_tmux_config().map(|report| report.mux_path)
-            }
+            ConfigFileKind::Mux => return,
             ConfigFileKind::Terminal => {
                 config::import::import_ghostty_config(import_color_scheme(cx))
                     .map(|report| report.config_path)
@@ -1967,14 +1980,14 @@ impl ConfigFileKind {
 
     const fn import_title(self) -> &'static str {
         match self {
-            Self::Mux => "Import from tmux?",
+            Self::Mux => "tmux configuration",
             Self::Terminal => "Import from Ghostty?",
         }
     }
 
     const fn import_button_label(self) -> &'static str {
         match self {
-            Self::Mux => "Import tmux…",
+            Self::Mux => "tmux configuration…",
             Self::Terminal => "Import Ghostty…",
         }
     }
@@ -2009,7 +2022,7 @@ impl ConfigFileKind {
 
     const fn max_bytes(self) -> usize {
         match self {
-            Self::Mux => zz_daemon::MAX_TMUX_IMPORT_BYTES,
+            Self::Mux => 1024 * 1024,
             Self::Terminal => config::MAX_CONFIG_BYTES,
         }
     }
@@ -2023,18 +2036,14 @@ impl ConfigFileKind {
 
     fn donor_path(self) -> Option<PathBuf> {
         match self {
-            Self::Mux => config::import::discover_tmux_config(),
+            Self::Mux => zz_daemon::discover_tmux_config(),
             Self::Terminal => discover_ghostty_config(),
         }
     }
 
     fn import_description(self, donor: &Path, target: &Path) -> String {
         match self {
-            Self::Mux => format!(
-                "This replaces {} with a verbatim copy of {}. The tmux file is not modified.",
-                target.display(),
-                donor.display(),
-            ),
+            Self::Mux => format!("zz reads {} in place at daemon startup.", donor.display()),
             Self::Terminal => format!(
                 "This rewrites the appearance keys in {} from {}, replacing any you changed \
                  since the last import. The Ghostty file is not modified.",
@@ -2590,20 +2599,16 @@ fn import_color_scheme(cx: &App) -> TerminalColorScheme {
 
 #[cfg(not(target_os = "ios"))]
 pub(crate) fn run_import(cx: &mut App) {
-    match crate::config::import::import_external_config(import_color_scheme(cx)) {
+    match crate::config::import::import_ghostty_config(import_color_scheme(cx)) {
         Ok(report) if report.imported_anything() => {
             log::info!(
                 target: "zz::config",
-                "imported external configuration ghostty_keys={} mux={}",
+                "imported external configuration ghostty_keys={}",
                 report.ghostty_keys,
-                report.mux_path.is_some(),
             );
             let mut copied = Vec::new();
             if let Some(path) = &report.config_path {
                 copied.push(format!("Ghostty appearance into {}", path.display()));
-            }
-            if let Some(path) = &report.mux_path {
-                copied.push(format!("tmux configuration into {}", path.display()));
             }
             toast::push(
                 Notification::success(format!("Imported {}", copied.join(" and "))),
@@ -2613,7 +2618,7 @@ pub(crate) fn run_import(cx: &mut App) {
         }
         Ok(_) => {
             toast::push(
-                Notification::info("Nothing to import: no Ghostty or tmux configuration found"),
+                Notification::info("Nothing to import: no Ghostty configuration found"),
                 cx,
             );
         }

@@ -13,11 +13,17 @@ half-implemented, so you find out at config load, not mid-session.
 
 ## Your config
 
-On first launch zz copies your `~/.tmux.conf` verbatim to
-`~/.config/zz/mux.conf`, the only mux config file the daemon ever reads.
-Your original file is never touched. `set -g prefix`, key bindings,
-`history-limit`, `mode-keys`, and the rest of the supported subset apply
-as-is.
+At daemon startup zz reads each existing file in this order: `/etc/tmux.conf`,
+`~/.tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf`, and `~/.config/tmux/tmux.conf`.
+It then reads your `zz/mux.conf` (normally `~/.config/zz/mux.conf`) so you can
+keep zz-specific overrides there. Duplicate paths load once.
+
+`zz -f <file>` replaces the tmux candidate list with that file; `zz/mux.conf`
+still loads last. Multiple `-f` arguments load in their given order. The
+`import-tmux-config` command now explains this behavior without copying files.
+Your tmux config stays in place, so plugin managers and `source-file ~/.tmux.conf`
+use the same file. `set -g prefix`, key bindings, `history-limit`, `mode-keys`,
+and the rest of the supported subset apply as-is.
 
 ## Copy mode
 

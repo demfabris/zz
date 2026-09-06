@@ -1466,7 +1466,6 @@
         "presentation:status-block-suppression-threshold",
         "semantic:automatic-rename-timing",
         "semantic:bare-launcher-attach-current",
-        "semantic:config-files-native-discovery",
         "semantic:empty-daemon-command-query",
         "semantic:history-limit-product-default",
         "semantic:lifecycle-subscriber-guard",
@@ -1479,10 +1478,10 @@
         "file:compat/packaged-cli.sh"
       ],
       "acceptance": [
-        "The divergence matrix records each product decision and packaged-client tests protect the launcher and lifecycle contract."
+        "The divergence matrix records the remaining native presentation and lifecycle decisions and packaged-client tests protect the launcher and lifecycle contract; startup config discovery moved to config.discovery, which adopts in-place tmux candidates with a final zz mux.conf layer."
       ],
       "depends_on": [],
-      "reason": "Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle."
+      "reason": "Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle. Relocated semantic:config-files-native-discovery to config.discovery. The old clause \"The divergence matrix records each product decision and packaged-client tests protect the launcher and lifecycle contract.\" and reason \"Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle.\" did not justify startup config ownership. Pinned d77c9dc6 Makefile.am TMUX_CONF is \"$(sysconfdir)/tmux.conf:~/.tmux.conf:$XDG_CONFIG_HOME/tmux/tmux.conf:~/.config/tmux/tmux.conf\"; cfg.c start_cfg executes \"for (i = 0; i < cfg_nfiles; i++) load_cfg(cfg_files[i], c, NULL, NULL, flags, NULL)\". tmux.c clears that list on the first -f. The discovery scenarios measure every existing home/XDG candidate in that order and explicit-file replacement. New stance: zz reads tmux candidates in place, then zz/mux.conf last; -f replaces the tmux candidates while mux.conf still layers last; remove the import copy. decided 2026-09-05 by fabrico for cycle 15; reversible."
     },
     {
       "id": "protocol.binary-streams",
@@ -2228,6 +2227,20 @@
         "scenario:compat/scenarios/micro-flags.txt"
       ],
       "resolution": "The pin's outer send-keys grammar is c:FHKlMN:Rt:X. zz removed C, P, and o from the outer catalog and returns the exact unknown-flag error when they appear there; the tracked c, K, and R gaps remain under terminal.key-control, and M remains under mouse.bound-context. The copy-mode parser recognizes -C and -P on the pin's 14 copy-family grammar entries and -o on next-prompt and previous-prompt; -- terminates its flag scan. Invalid local flags, actions, and arity produce no command error or copy action and reset the copy-mode repeat prefix to 1. Existing CopyModeCopy clipboard, paste-buffer, and pipe fields retain their behavior. Execution for copy-line, copy-line-and-cancel, copy-pipe-line, and copy-pipe-line-and-cancel remains under terminal.key-control through semantic:send-keys-copy-command-shape. The pin also redraws the first copy-mode line after a local parser failure; zz has no no-op redraw effect, so that presentation residue stays with the same item."
+    },
+    {
+      "id": "config.discovery",
+      "title": "Discover tmux configuration in place before zz overrides",
+      "closed_on": "2026-09-05",
+      "evidence": [
+        "resource:crates/zz-daemon/src/paths.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/smoke/config-discovery.txt",
+        "scenario:compat/scenarios/smoke/config-discovery-explicit.txt",
+        "scenario:compat/scenarios/smoke/config-discovery-launcher.txt",
+        "file:compat/scenarios/smoke/fixtures/config-discovery-import.sh"
+      ],
+      "resolution": "Relocated semantic:config-files-native-discovery to config.discovery. The old clause \"The divergence matrix records each product decision and packaged-client tests protect the launcher and lifecycle contract.\" and reason \"Native chrome and a persistent daemon need explicit behavior where tmux assumes a terminal client lifecycle.\" did not justify startup config ownership. Pinned d77c9dc6 Makefile.am TMUX_CONF is \"$(sysconfdir)/tmux.conf:~/.tmux.conf:$XDG_CONFIG_HOME/tmux/tmux.conf:~/.config/tmux/tmux.conf\"; cfg.c start_cfg executes \"for (i = 0; i < cfg_nfiles; i++) load_cfg(cfg_files[i], c, NULL, NULL, flags, NULL)\". tmux.c clears that list on the first -f. The discovery scenarios measure every existing home/XDG candidate in that order and explicit-file replacement. New stance: zz reads tmux candidates in place, then zz/mux.conf last; -f replaces the tmux candidates while mux.conf still layers last; remove the import copy. decided 2026-09-05 by fabrico for cycle 15; reversible. Closed semantic:config-files-native-discovery: smoke/config-discovery and smoke/config-discovery-launcher prove home, XDG and fallback options/bindings, HOME-before-XDG and fallback-last precedence, and the final zz mux.conf override. smoke/config-discovery-explicit proves -f excludes all three default user files while mux.conf still wins. All three assert import-tmux-config explains in-place loading and leaves mux.conf byte-identical, then source that unchanged file. Default harness servers retain -f /dev/null on both sides; discovery metadata opts into scratch HOME/XDG files and refuses to run if /etc/tmux.conf exists. config_files retains the pin candidate list including missing paths, with the selected zz layer appended; reload-config remains the existing zz-only reload operation. No wire change."
     },
     {
       "id": "config.non-utf8-file-bytes",

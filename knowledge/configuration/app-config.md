@@ -47,12 +47,12 @@ dispatches mux values through the existing global `set-option` grammar. Appearan
 after `reload-config` and system color-scheme changes; mux overrides replay after every
 `zz/mux.conf` load so a reload cannot revert a GUI choice.
 
-**zz's configuration is authoritative; external configs are read only during an explicit import.**
-A one-time first-run prompt (shown only when a Ghostty or tmux config exists; remembered via a
-marker file in the platform data directory) runs the combined import in
-`crates/zz/src/config/import.rs`. Multiplexer additionally imports tmux (`~/.tmux.conf`, then the
-XDG locations) verbatim into `zz/mux.conf`, the only mux file the daemon sources. Re-importing tmux
-syncs that file again. Neither donor file is ever modified.
+The first-run import copies Ghostty appearance into `zz/config`. The daemon reads tmux
+configuration in place at startup: `/etc/tmux.conf`, `~/.tmux.conf`,
+`$XDG_CONFIG_HOME/tmux/tmux.conf`, then `~/.config/tmux/tmux.conf`, skipping missing files and
+repeated paths. The selected zz-owned `zz/mux.conf` loads last. Explicit `-f` files replace the
+tmux candidate list, in argument order, while `zz/mux.conf` remains the final layer. The tmux
+import entry points now explain discovery without copying or overwriting files.
 
 # Discovery and loading
 
@@ -463,7 +463,7 @@ shows per-key provenance for the rest of its structured appearance controls.
 Mux option state is also daemon-resolved. `ServerHello.mux_options` and `MuxOptionsChanged` carry a
 complete ordered map of the ten effective display strings. Each value has the last-writer tier
 `default`, `tmux-config`, `override`, or `runtime-command`. The `tmux-config` wire tier kept its name
-for compatibility but now means "set by the sourced `zz/mux.conf`". Settings no longer mirrors that
+for compatibility and means "set by sourced tmux or zz mux configuration". Settings no longer mirrors that
 map into option controls; Multiplexer edits `zz/mux.conf` directly.
 
 # Comment-preserving writer
@@ -486,10 +486,8 @@ mistaken for the line's preserved trailing comment.
 
 # Import
 
-`crates/zz/src/config/import.rs` owns the one-shot import. `import_external_config(scheme)`
-discovers donors (Ghostty via `discover_ghostty_config`; tmux via `~/.tmux.conf`, then
-`$XDG_CONFIG_HOME/tmux/tmux.conf`, then `~/.config/tmux/tmux.conf`), parses the Ghostty config
-client-side with the zz-terminal loader, and serializes every key the donor set, directly
+`crates/zz/src/config/import.rs` owns the one-shot import. `import_ghostty_config(scheme)`
+discovers Ghostty through `discover_ghostty_config`, parses that config client-side with the zz-terminal loader, and serializes every key the donor set, directly
 (`Ghostty` provenance) or through its `theme` directive (`ThemeFile`), into concrete
 `zz/config` values. Theme-derived values are flattened for the current color scheme; an import is a
 snapshot.
@@ -501,12 +499,10 @@ remove every prior occurrence and re-append the group at end of file, led by an 
 the result is donor-independent. Palette writes only indices that differ from the built-in palette.
 Both the input and result honor the 64 KiB bound, and the write is the normal atomic writer.
 
-The tmux config is copied to `zz/mux.conf` **verbatim** (bounded at 1 MiB), with no filtering and no
-grammar translation, so bindings, status formats, and options all keep working through the daemon's
-existing tmux-grammar sourcing. Mux options are deliberately *not* written into `zz/config`; they
-live in `zz/mux.conf`'s `tmux-config` tier with `zz/config` overrides layered above, exactly as
-before. After a successful import the client asks the daemon to `reload-config`; when no daemon is
-connected the file is picked up at the next daemon startup.
+The daemon reads tmux files in place through its tmux-grammar loader. `zz/mux.conf` supplies the
+last file layer; `zz/config` mux overrides still layer above sourced values. The old tmux copy
+helper is removed. After a Ghostty import the client asks the daemon to `reload-config`; when no
+daemon is connected the client sends the appearance overrides on its next connection.
 
 # Settings view
 
@@ -533,7 +529,7 @@ always-live inactive-opacity factor.
 | Panes | **Layout** (`pane-gaps`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |
 | System | **Tray** (`tray`, only where the profile has one) · **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`, each row present only with its cargo feature). `auto-restart-stale-daemon` is a file key with no Settings row |
-| Multiplexer | Full-file editor for `zz/mux.conf`, with Save and donor-specific **Import tmux…** |
+| Multiplexer | Full-file editor for `zz/mux.conf`, with Save and tmux discovery information |
 | Terminal | Full-file Ghostty-compatible configuration editor, with Save and **Import Ghostty…** |
 | About | Centered mark (the Dock render at 88pt), name, tagline and version badge · **Updates** (`check-for-updates`, plus a Latest-release row that reads the update state: Check now, or Update / What's new once a newer release is known; desktop only) · **Build** (`CARGO_PKG_VERSION`, OS · arch, the short `ZZ_GPUI_SOURCE` revision, with a copy button on Version that puts all three on one line) · **Project** (repository, releases, new issue, license) |
 
@@ -584,14 +580,13 @@ inset frame . a file surface, not a control. Save uses the
 1 MiB bounded atomic writer; a clean editor reloads when entered, while unsaved text is retained. A
 successful mux save asks the daemon to `reload-config`.
 
-Multiplexer owns the confirmed **Import tmux…** action, which replaces `zz/mux.conf` verbatim and
-warns when it will discard unsaved editor text. Terminal owns the other half: a confirmed **Import
-Ghostty…** row under the page description re-reads the Ghostty donor into `zz/config`, rewriting
-every appearance key that donor sets (a `theme = …` is flattened against the active scheme, so the
-import stores concrete colors) and requesting a daemon reload. The button is disabled when no donor
-exists, and its row names the path that will be read. The one-time first-run prompt
-(`crates/zz/src/config/import_prompt.rs`, marker file `<data-dir>/zz/import-prompted`) retains the
-combined Ghostty-and-tmux import.
+Multiplexer's **tmux configuration…** action explains that the daemon reads tmux files in place
+at startup. It does not overwrite the file or discard the editor buffer. Terminal's confirmed
+**Import Ghostty…** action re-reads the Ghostty donor into `zz/config`, rewriting each appearance
+key that donor sets and requesting a daemon reload. Theme imports store concrete colors for the
+active scheme. The button is disabled when no donor exists and its row names the path to read.
+The first-run prompt (`crates/zz/src/config/import_prompt.rs`, marker
+`<data-dir>/zz/import-prompted`) now offers only Ghostty appearance import.
 
 Shadow strength appears in Interface's Tweaks group beside Widget corner radius. The numeric control
 shows 0–100%, steps by five percentage points, and stores a 0–1 factor. Valid edits save as they are

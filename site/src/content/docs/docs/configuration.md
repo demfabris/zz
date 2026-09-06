@@ -1,26 +1,25 @@
 ---
 title: Configuration
-description: Two config files, imported once, live-reloaded.
+description: Appearance settings and tmux configuration with zz-specific overrides.
 ---
 
-Two files, both plain text:
+Keep zz-specific settings in two plain-text files:
 
 | File | Format | Covers |
 | --- | --- | --- |
 | `~/.config/zz/config` | Ghostty-style `key = value` | appearance: fonts, colors, themes, padding, opacity |
-| `~/.config/zz/mux.conf` | tmux syntax | prefix, key bindings, mux options |
+| `~/.config/zz/mux.conf` | tmux syntax | overrides for prefix, key bindings, mux options |
 
 Both are picked up without a restart.
 
 ## One-shot import
 
-On first launch zz offers to import what you already have:
+On first launch zz offers to import Ghostty appearance keys into `config`.
 
-- `~/.tmux.conf` is copied **verbatim** to `mux.conf`
-- Ghostty appearance keys are parsed into `config`
-
-Donor files are read once and never touched again; zz reads only its own
-files at runtime.
+The daemon reads tmux configuration in place at startup: `/etc/tmux.conf`,
+`~/.tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf`, then `~/.config/tmux/tmux.conf`.
+Your `zz/mux.conf` loads last. `zz -f <file>` replaces the tmux candidate list
+while keeping that final zz layer. See [tmux compatibility](./tmux/) for details.
 
 ## Ghostty compatibility
 

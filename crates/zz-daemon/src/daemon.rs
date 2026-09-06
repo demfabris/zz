@@ -85,10 +85,7 @@ use crate::{
         chooser_prompt_edit, client_key_inputs, input_key_name, send_tokens,
     },
     lifecycle::DaemonIdentityGuard,
-    paths::{
-        copy_tmux_config_into, default_mux_config, discover_tmux_config, home_directory,
-        mux_config_write_path,
-    },
+    paths::{default_mux_config, home_directory, tmux_config_candidates},
     shell_process,
     status::{
         BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
@@ -1160,12 +1157,15 @@ fn partition_config_overrides(
 fn startup_mux_config_files(
     load_user_config: bool,
     explicit: Option<&[PathBuf]>,
+    candidates: impl FnOnce() -> Vec<PathBuf>,
     default: impl FnOnce() -> Option<PathBuf>,
 ) -> Vec<PathBuf> {
     if !load_user_config {
         return Vec::new();
     }
-    explicit.map_or_else(|| default().into_iter().collect(), <[PathBuf]>::to_vec)
+    let mut files = explicit.map_or_else(candidates, <[PathBuf]>::to_vec);
+    files.extend(default());
+    files
 }
 
 fn format_config_files(files: &[PathBuf]) -> String {
@@ -1219,7 +1219,6 @@ impl Daemon {
         self
     }
 
-    /// Skip the user's `zz/mux.conf`, for hermetic embedding and tests.
     #[must_use]
     pub fn without_user_config(mut self) -> Self {
         self.load_user_config = false;
@@ -3994,8 +3993,12 @@ impl Shared {
         self.start_silence_deadline_dispatcher()?;
         self.start_client_message_deadline_dispatcher()?;
         let mut context = ExecutionContext::default();
-        let config_files =
-            startup_mux_config_files(load_user_config, mux_config_files, default_mux_config);
+        let config_files = startup_mux_config_files(
+            load_user_config,
+            mux_config_files,
+            tmux_config_candidates,
+            default_mux_config,
+        );
         self.inner.lock().config_files = format_config_files(&config_files);
         let mut report = ConfigLoadReport::startup();
         let explicit_roots = mux_config_files.is_some();
@@ -8777,9 +8780,10 @@ impl Shared {
         };
 
         if import_tmux_config {
-            let summary = self.import_tmux_config()?;
-            append_inserted_output(&mut execution.output, &summary);
-            reload_config = true;
+            append_inserted_output(
+                &mut execution.output,
+                "zz reads tmux configuration files in place at daemon startup; no import is needed. Put zz-specific overrides in zz/mux.conf.",
+            );
         }
 
         if force_shutdown_requested {
@@ -23331,23 +23335,6 @@ impl Shared {
             appearance: Box::new((*published).clone()),
             provenance,
         });
-    }
-
-    fn import_tmux_config(&self) -> Result<String, DaemonError> {
-        let donor = discover_tmux_config().ok_or_else(|| {
-            DaemonError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "no tmux configuration found",
-            ))
-        })?;
-        let target = mux_config_write_path().ok_or_else(|| {
-            DaemonError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "cannot create zz/mux.conf because neither XDG_CONFIG_HOME nor HOME is available",
-            ))
-        })?;
-        let bytes = copy_tmux_config_into(&donor, &target).map_err(DaemonError::Io)?;
-        Ok(format!("imported {} ({} bytes)", donor.display(), bytes))
     }
 
     fn reload_user_config_with_source_base(
@@ -40202,10 +40189,42 @@ mod tests {
     }
 
     #[test]
+    fn startup_config_layers_mux_after_pinned_candidates_or_explicit_files() {
+        let tmux = vec![
+            PathBuf::from("/etc/tmux.conf"),
+            PathBuf::from("/home/u/.tmux.conf"),
+        ];
+        let mux = PathBuf::from("/home/u/.config/zz/mux.conf");
+        let explicit = vec![PathBuf::from("/tmp/explicit.conf")];
+        assert_eq!(
+            startup_mux_config_files(true, None, || tmux.clone(), || Some(mux.clone())),
+            [tmux[0].clone(), tmux[1].clone(), mux.clone()]
+        );
+        assert_eq!(
+            startup_mux_config_files(
+                true,
+                Some(&explicit),
+                || panic!("discovery with -f"),
+                || Some(mux.clone())
+            ),
+            [explicit[0].clone(), mux]
+        );
+        assert!(
+            startup_mux_config_files(
+                false,
+                Some(&explicit),
+                || panic!("disabled discovery"),
+                || panic!("disabled mux config")
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
     fn config_files_is_empty_when_loading_is_disabled_and_retains_the_default_selection() {
         let default = PathBuf::from("/tmp/default.conf");
         assert_eq!(
-            startup_mux_config_files(true, None, || Some(default.clone())),
+            startup_mux_config_files(true, None, Vec::new, || Some(default.clone())),
             [default]
         );
         let shared = Arc::new(Shared::new(1));

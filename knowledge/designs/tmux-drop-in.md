@@ -2088,9 +2088,9 @@ So:
 - **Your own `mux.conf` is trusted**, like `.bashrc` — tmux itself runs `run-shell` from
   `.tmux.conf` without ceremony, and gating only `run-shell` while `#()` runs free would be
   theater. Exec lines in the user's own config just run, including at daemon start.
-- **The gate guards the import flow**: when zz copies a foreign `tmux.conf` in, the importing
-  client is present — prompt once per import (never per line), show the exec lines, persist
-  the decision into the imported result.
+- **Cycle 15 config discovery (2026-09-05)** reads the host's tmux files in place at startup,
+  followed by `zz/mux.conf`. The tmux copy/import path is removed; sourced exec commands run
+  under the same trust model as explicit startup config files.
 - **Remote hosts need no per-host consent plumbing**: a remote daemon sources *that host's*
   own config (nothing travels over ssh; fleet config writes `host-*` lines only), so each
   host's config sits in that host's trust domain.

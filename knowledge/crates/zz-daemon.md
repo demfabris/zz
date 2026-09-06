@@ -55,7 +55,7 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
 | `daemon.rs` | `Daemon`, `DaemonError`, `agent_send_reads_stdin` | The server itself: local accept loop, `Shared`/`ServerState`, command execution, `OutboundMailbox` fan-out, terminal watching, attach/detach, input routing. It binds exactly one endpoint . the owner-only local socket |
 | `transport.rs` | `default_socket_path` | Platform IPC: wraps `interprocess` into `LocalListener`/`LocalStream`, per-platform endpoint paths, peer-credential capture |
 | `client.rs` | `CommandClient`, `InteractiveClient`, `short_device_name` | Client halves of the protocol: connect + handshake (`connect_endpoint` for an `ssh://` endpoint), endpoint-scoped cwd/tty/size/nested/environment hello facts, framed `ProtocolSender`/`ProtocolReceiver`, request/response and attach/detach/input helpers |
-| `paths.rs` | `default_mux_config`, `mux_config_candidates`, `mux_config_write_path` | Platform discovery of the zz-owned `zz/mux.conf` (the daemon sources this file and no external tmux config) |
+| `paths.rs` | `default_mux_config`, `mux_config_candidates`, `mux_config_write_path` | Ordered tmux config discovery plus the final zz-owned `zz/mux.conf` layer |
 | `endpoint.rs` | `Endpoint`, `SshEndpoint`, `EndpointError` | Client-half endpoint abstraction: `unix://`/bare-path/`ssh://` URI parsing (a `quic://` string is rejected with a pointer at `ssh://`), the probe → auto-start → forward ssh sequence below, a managed `ssh -N -L` child with an RAII tunnel guard, and `EndpointError::ssh_reason` turning each failure into advice for the host row |
 | `askpass.rs` | `SshPrompts`, `AskpassPrompt`, `AskpassPromptKind`, `AskpassReply`, `ASKPASS_SOCKET_ENV`, `run_helper` | ssh's password and host-key prompts: the per-connect Unix socket the GUI answers on, the prompt classifier, and the helper mode `zz` re-enters when ssh runs it as `SSH_ASKPASS` |
 | `lifecycle.rs` | `RecoveredDaemon`, `DaemonRecoveryError`, `terminate_incompatible_daemon` | Single-instance identity file + guarded termination of an incompatible-protocol daemon |
@@ -74,9 +74,11 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
    socket) and a `DaemonIdentityGuard` (writes an atomic `*.identity` file for recovery). New files
    use strict `zz-daemon-identity-v2` records with PID, process start time, and protocol version;
    guarded termination still accepts v1 records that contain only PID and start time.
-3. Resolves [appearance](/terminal/appearance.md) from built-in defaults (external configs are
-   never read; the client's import flow owns those) and sources the zz-owned `zz/mux.conf`
-   [in tmux grammar](/tmux/conf-parser.md). A fresh daemon remains empty and unarmed unless config
+3. Resolves [appearance](/terminal/appearance.md) from built-in defaults and client overrides.
+   It sources existing `/etc/tmux.conf`, `~/.tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf`, and
+   `~/.config/tmux/tmux.conf` in that order, with duplicate paths removed, then the zz-owned
+   `zz/mux.conf` [in tmux grammar](/tmux/conf-parser.md). Explicit `-f` paths replace the tmux
+   candidate list; `zz/mux.conf` still loads last. A fresh daemon remains empty and unarmed unless config
    creates a session. The first default Interactive attach lazily creates the next numeric session.
 4. Loops on a **non-blocking** `accept()`. Unix waits in `poll(2)` for listener readiness, with a
    100 ms timeout bounding shutdown detection; Windows retains the 20 ms fallback poll. Every

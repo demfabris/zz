@@ -66,11 +66,10 @@ This slice deliberately selects one host at a time. It does not reproduce the de
 or aggregate sessions from several daemons. `ZZ_SOCKET` remains the simulator override and bypasses
 saved-host setup for the local development loop.
 
-The first attach to a host offers a one-time tmux config import, mirroring the desktop first-run
-flow: accepting runs the daemon's `import-tmux-config`, which copies the host's `~/.tmux.conf` (then
-`$XDG_CONFIG_HOME/tmux/tmux.conf`, then `~/.config/tmux/tmux.conf`) verbatim into `zz/mux.conf` and
-reloads, so host binds like hjkl pane navigation go live. The offer is remembered per normalized
-endpoint; the Prefix Keys sheet re-runs the import on demand and shows the resulting live table.
+The existing first-attach and Prefix Keys import actions call the daemon's `import-tmux-config`.
+Since cycle 15 (2026-09-05), that command explains that the daemon reads the host's tmux config
+files in place at startup, with `zz/mux.conf` as the final layer; it no longer copies or reloads
+files. The first-attach offer remains remembered per normalized endpoint.
 
 ## Pane overview
 

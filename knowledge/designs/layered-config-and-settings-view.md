@@ -94,28 +94,19 @@ still arrive as overrides against whatever the remote daemon resolves.
 
 # Import, not adoption
 
-The original plan layered zz *above* live donor configs: read the user's Ghostty and `~/.tmux.conf`
-on every derivation, with `zz/config` as the override tier. That is reversed. **`zz/config` is
-always authoritative and self-contained**; donors are read only during an explicit import.
+Appearance remains import-and-own: the Ghostty loader serializes concrete appearance values into
+`zz/config` with donor-wins replacement. The first-run prompt offers this appearance import when a
+Ghostty config exists.
 
-The reasoning: editing a donor file should never silently change zz, and a self-contained file is the
-only one a user can reason about, copy between machines, or hand to a bug report. The fork risk that
-made live adoption attractive . donor edits silently stop reaching zz . is answered by re-importing,
-which syncs again.
+The previous tmux stance said "tmux is copied verbatim to the zz-owned zz/mux.conf". Pinned tmux
+`Makefile.am` defines `/etc/tmux.conf:~/.tmux.conf:$XDG_CONFIG_HOME/tmux/tmux.conf:~/.config/tmux/tmux.conf`,
+and `cfg.c::start_cfg` loops over all expanded candidates. A first-existing-file copy loses those
+layers and drifts from files edited by plugin managers and `source-file` bindings.
 
-The combined import runs from a one-time first-run prompt (shown only when a donor exists,
-remembered by a marker file). Multiplexer additionally offers a tmux-specific re-import button.
-Both paths are entirely client-side:
-
-- **Ghostty** is parsed in-process by the zz-terminal loader, and every key the donor set .
-  directly or through its `theme` directive . is serialized into concrete `zz/config` values with
-  donor-wins replace semantics. Theme-derived values flatten to colors for the current scheme; an
-  import is a snapshot.
-- **tmux** is copied **verbatim** to the zz-owned `zz/mux.conf`, bounded at 1 MiB, with no filtering
-  and no grammar translation, so `bind-key` tables and `status-*` formats keep working through the
-  daemon's existing tmux-grammar sourcing with zero new grammar.
-
-Neither donor file is ever written to.
+zz now reads those tmux files in place in the same order, followed by the selected `zz/mux.conf`.
+Explicit `-f` files replace the tmux candidate list while `zz/mux.conf` still loads last. The tmux
+copy helper is removed; import entry points explain the in-place behavior. This was decided
+2026-09-05 by fabrico for cycle 15; reversible. Neither import flow writes a donor file.
 
 # Settings view
 

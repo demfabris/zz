@@ -1,5 +1,3 @@
-//! One-time first-run prompt offering to import Ghostty/tmux configuration.
-
 use std::path::{Path, PathBuf};
 
 use gpui::{App, Window};
@@ -27,8 +25,6 @@ fn mark_prompted() {
     }
 }
 
-/// Offer the one-time import on first launch, only when a Ghostty or tmux config
-/// exists. Call it after the window's Root dialog layer is mounted.
 pub(crate) fn maybe_prompt(window: &mut Window, cx: &mut App) {
     if marker_path().as_deref().is_some_and(Path::exists) {
         return;
@@ -40,10 +36,9 @@ pub(crate) fn maybe_prompt(window: &mut Window, cx: &mut App) {
     window.open_alert_dialog(cx, |alert, _, _| {
         import_configuration_alert(
             alert,
-            "zz found existing Ghostty or tmux configuration. Import it now? zz reads only its \
-             own files: your Ghostty appearance is copied into zz/config and your tmux \
-             configuration into zz/mux.conf; the originals are never modified. If you skip, zz \
-             starts with its defaults and you can import any time from Settings.",
+            "zz found existing Ghostty configuration. Import its appearance into zz/config? \
+             You can import again from Settings. zz reads your tmux configuration in place at \
+             daemon startup; put zz-specific overrides in zz/mux.conf.",
         )
         .on_ok(|_, _, cx| {
             crate::config::settings::run_import(cx);

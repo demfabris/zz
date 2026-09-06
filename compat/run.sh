@@ -176,7 +176,7 @@ scenario_step_count() {
       sub(/^[[:space:]]+/, "", line)
       sub(/[[:space:]]+$/, "", line)
       if (line == "" || substr(line, 1, 1) == "#") next
-      if (line ~ /^(corpus:|shim:|launcher:|expect-warn:|stage:)/) next
+      if (line ~ /^(corpus:|shim:|launcher:|expect-warn:|stage:|startup-config:)/) next
       count++
     }
     END { print count + 0 }

@@ -189,12 +189,12 @@ tmux_start_command() {
       PATH="$TMUX_SHIM_DIR:$(dirname -- "$TMUX_BIN"):$(dirname -- "$ZZ_BIN"):$HARNESS_PATH" \
       ZZ_SMOKE_CANARY="tmux-side-only" ZZ_SMOKE_TMUX_BIN="$TMUX_BIN" \
       ZZ_SMOKE_TMUX_LABEL="$TMUX_SOCKET_NAME" \
-      "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" -f /dev/null "$@"
+      "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" "${STARTUP_CONFIG_ARGS[@]}" "$@"
   else
     env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
       -u EDITOR -u VISUAL \
       HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
-      "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" -f /dev/null "$@"
+      "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" "${STARTUP_CONFIG_ARGS[@]}" "$@"
   fi
 }
 
@@ -291,6 +291,7 @@ resolve_smoke_path() {
   local argument="$1"
 
   case "$argument" in
+  \$XDG_CONFIG_HOME/*) printf '%s/%s\n' "$ZZ_CONFIG_HOME" "${argument#'$XDG_CONFIG_HOME/'}" ;;
   \~/*) printf '%s/%s\n' "$ZZ_HOME" "${argument#"~/"}" ;;
   /*) printf '%s\n' "$argument" ;;
   *) printf '%s/%s\n' "$(dirname -- "$SCENARIO_FILE")" "$argument" ;;
@@ -304,7 +305,7 @@ stage_smoke_file() {
   destination="$(resolve_smoke_path "$2")"
   [ -f "$source" ] || die "smoke stage source not found: $source"
   case "$destination" in
-  "$ZZ_HOME"/*) ;;
+  "$ZZ_HOME"/* | "$ZZ_CONFIG_HOME"/*) ;;
   *) die "smoke stage destination must be under ~/: $2" ;;
   esac
   mkdir -p "$(dirname -- "$destination")"
@@ -600,15 +601,35 @@ if [ "$SMOKE_MODE" -eq 1 ]; then
   done
 fi
 
+STARTUP_CONFIG_ARGS=(-f /dev/null)
+startup_configs=()
+mapfile -t startup_configs < <(sed -n 's/^[[:space:]]*startup-config:[[:space:]]*//p' "$SCENARIO_FILE")
+[ "${#startup_configs[@]}" -le 1 ] || die "duplicate startup-config metadata"
+if [ "${#startup_configs[@]}" -eq 1 ]; then
+  [ "$SMOKE_MODE" -eq 1 ] || die "startup-config requires a smoke scenario"
+  case "${startup_configs[0]}" in
+  discovery)
+    [ ! -e /etc/tmux.conf ] || die "discovery fixture requires /etc/tmux.conf to be absent"
+    STARTUP_CONFIG_ARGS=()
+    ;;
+  '~/'*)
+    startup_config="$(resolve_smoke_path "${startup_configs[0]}")"
+    [ -f "$startup_config" ] || die "startup config does not exist: $startup_config"
+    STARTUP_CONFIG_ARGS=(-f "$startup_config")
+    ;;
+  *) die "startup-config must be discovery or a staged ~/ file" ;;
+  esac
+fi
+
 if [ "$LAUNCHER_MODE" -eq 1 ]; then
   env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
     -u EDITOR -u VISUAL \
     HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
     XDG_RUNTIME_DIR="$LAUNCHER_RUNTIME" TMUX_TMPDIR="$LAUNCHER_RUNTIME" \
     PATH="$LAUNCHER_BIN:$(dirname -- "$TMUX_BIN"):$HARNESS_PATH" \
-    "$ZZ_BIN" -f /dev/null daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
+    "$ZZ_BIN" "${STARTUP_CONFIG_ARGS[@]}" daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
 else
-  zz_command -f /dev/null daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
+  zz_command "${STARTUP_CONFIG_ARGS[@]}" daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
 fi
 ZZ_PID=$!
 
@@ -672,7 +693,7 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   key_name=""
   command_text="$line"
   case "$line" in
-  corpus:* | shim:* | launcher:* | expect-warn:* | stage:*)
+  corpus:* | shim:* | launcher:* | expect-warn:* | stage:* | startup-config:*)
     continue
     ;;
   conf:*)

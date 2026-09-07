@@ -1,4 +1,5 @@
 pub mod composer;
+pub mod controls;
 
 use std::{
     cell::Cell,

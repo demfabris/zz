@@ -87,6 +87,15 @@ jobs:
           rustup toolchain install nightly --profile minimal --target wasm32-unknown-unknown
           rustup run nightly cargo check --manifest-path examples/ui-showcase/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
 
+      - name: Check browser client
+        if: runner.os == 'Linux'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          cargo fmt --manifest-path clients/web/Cargo.toml -- --check
+          cargo test --manifest-path clients/web/Cargo.toml --lib --locked
+          rustup run nightly cargo check --manifest-path clients/web/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
+
       # Windows is second-class support, so its test failures warn rather than
       # fail the job. Four fail deterministically there today
       # (agent::controller::tests::session_controls_send_the_daemon_every_filter_and_restore_path,

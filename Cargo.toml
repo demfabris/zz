@@ -11,10 +11,12 @@ members = [
     "crates/zz-terminal",
     "crates/zz-tui",
     "crates/zz-ui",
+    "crates/zz-web",
     "crates/zz-xtask",
 ]
 exclude = [
     "examples/ui-showcase",
+    "clients/web",
     "third_party/rust/libghostty-vt-sys",
     "third_party/rust/proc-macro-error2",
 ]
@@ -47,7 +49,7 @@ filedescriptor = "0.8.3"
 env_logger = "0.11.11"
 foldhash = "0.2.0"
 futures-lite = "2.6.1"
-gpui = { git = "https://github.com/zed-industries/zed", features = ["profiler"] }
+gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false, features = ["font-kit", "wayland", "x11"] }
 getrandom = "0.4.3"
 image = "=0.25.10"

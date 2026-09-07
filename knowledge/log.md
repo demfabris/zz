@@ -1,6 +1,8 @@
 # Update Log
 
 ## 2026-09-07
+* **Update**: Desktop and browser clients now share Agent composer controls and history/path picker presentation. Browser choosers use the desktop tree and buffer rows, and Agent controls retain provider capabilities and options.
+* **Creation**: Added the GPUI browser client build, gateway, remote forwarding, and validation playbook.
 * **Update**: Browser popups now keep their Chromium session when the desktop adopts them into a tab, preserving blank-document writes, delayed navigation, named-window reuse, opener messages, and JavaScript closure. Popup tabs display about:blank content and use readback OSR to avoid replacing an authentication session during texture fallback. Closing an opener drains pending children, and shutdown waits for their CEF close callbacks. The browser fixture includes a temporary-profile popup regression and a manual popup page.
 
 ## 2026-09-05

@@ -1,24 +1,28 @@
 use std::{
     collections::{BTreeSet, HashMap},
-    f32::consts::PI,
     ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
-use zz_ui::agent::composer::{COMPOSER_FOOTER_HEIGHT, composer_tail_clearance};
+use zz_ui::agent::composer::composer_tail_clearance;
 #[cfg(test)]
 use zz_ui::agent::composer::{COMPOSER_OUTER_PADDING, composer_total_height};
+use zz_ui::agent::controls::{
+    AgentControlChoice, ComposerAction, agent_chrome_button, agent_config_picker, composer_action,
+    composer_action_button, context_usage_meter, git_summary_footer,
+};
+#[cfg(test)]
+use zz_ui::agent::controls::{context_usage_fraction, context_usage_tooltip, git_file_count_label};
 
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
 use gpui::{
-    Anchor, AnyElement, Context, ElementId, Entity, EntityId, FocusHandle, Focusable, Hsla, Image,
-    IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, PathBuilder,
-    Render, Role, ScrollStrategy, SharedString, Subscription, Transformation,
-    UniformListScrollHandle, Window, canvas, div, ease_in_out, percentage, point, prelude::*, px,
-    relative, uniform_list,
+    Anchor, AnyElement, Context, Entity, EntityId, FocusHandle, Focusable, Hsla, Image,
+    IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render,
+    ScrollStrategy, SharedString, Subscription, Transformation, UniformListScrollHandle, Window,
+    div, ease_in_out, percentage, prelude::*, px, uniform_list,
 };
-use zz_protocol::{AgentDescriptor, AgentGitSummary, AgentProvider, CommandInvocation, PaneId};
+use zz_protocol::{AgentDescriptor, AgentProvider, CommandInvocation, PaneId};
 #[cfg(all(test, not(target_os = "macos")))]
 use zz_ui::agent::DisclosureKind;
 use zz_ui::agent::{
@@ -34,12 +38,10 @@ use zz_ui::{
     Size,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp},
+    input::{IndentInline, InputEvent, InputState, MoveDown, MoveUp},
     menu::{DropdownMenu as _, PopupMenuItem},
     pulse::pulse_phase,
     scroll::Scrollbar,
-    tag::Tag,
-    tooltip::Tooltip,
     v_flex,
 };
 
@@ -61,12 +63,6 @@ const AGENT_KEY_CONTEXT: &str = "Agent";
 const COMPLETION_ROW_HEIGHT: f32 = 52.0;
 const MAX_VISIBLE_COMPLETION_ROWS: u8 = 6;
 const MAX_COMPLETION_RESULTS: usize = 64;
-const HISTORY_ROW_HEIGHT: f32 = 52.0;
-/// Labelled chrome pills sit a step under the square icon buttons: the
-/// label carries them, so the box does not have to.
-const CHROME_PILL_HEIGHT: f32 = 24.0;
-const CONTEXT_USAGE_RING_SIZE: f32 = 16.0;
-const CONTEXT_USAGE_STROKE_WIDTH: f32 = 2.0;
 const SPINNER_PERIOD: Duration = Duration::from_millis(800);
 const MAX_RENDERED_ERROR_BYTES: usize = 1024;
 
@@ -280,209 +276,6 @@ impl TimelineModel {
 
 fn replacement_preserves_folding(previous: &AgentEntry, next: &AgentEntry) -> bool {
     timeline_group_kind(previous) == timeline_group_kind(next)
-}
-
-/// What the composer's single action button does right now. A turn already
-/// running turns Send into Queue — zz dispatches a queued prompt as the next
-/// turn, it never injects into the live one — and an empty composer under a
-/// live turn turns it into Stop.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ComposerAction {
-    Send,
-    Queue,
-    Stop,
-}
-
-const fn composer_action(active_turn: bool, has_content: bool) -> ComposerAction {
-    match (active_turn, has_content) {
-        (false, _) => ComposerAction::Send,
-        (true, true) => ComposerAction::Queue,
-        (true, false) => ComposerAction::Stop,
-    }
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn context_usage_fraction(used: u64, size: u64) -> f64 {
-    if size == 0 {
-        0.0
-    } else {
-        (used.min(size) as f64 / size as f64).clamp(0.0, 1.0)
-    }
-}
-
-fn context_usage_tooltip(used: u64, size: u64) -> String {
-    if size == 0 {
-        "Context window usage unavailable".to_owned()
-    } else {
-        format!(
-            "{used} of {size} context tokens used ({:.0}%)",
-            context_usage_fraction(used, size) * 100.0
-        )
-    }
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn context_usage_meter(pane: PaneId, used: u64, size: u64, cx: &gpui::App) -> AnyElement {
-    let progress = context_usage_fraction(used, size) as f32;
-    let tooltip = context_usage_tooltip(used, size);
-    let track_color = cx.theme().foreground.muted().opacity(0.22);
-    let progress_color = cx.theme().foreground.muted();
-    let ring = canvas(
-        |_, _, _| (),
-        move |bounds, (), window, _| {
-            let stroke = px(CONTEXT_USAGE_STROKE_WIDTH);
-            let radius = px((CONTEXT_USAGE_RING_SIZE - CONTEXT_USAGE_STROKE_WIDTH) / 2.0);
-            let center_x = bounds.origin.x + bounds.size.width / 2.0;
-            let center_y = bounds.origin.y + bounds.size.height / 2.0;
-
-            let mut track = PathBuilder::stroke(stroke);
-            track.move_to(point(center_x + radius, center_y));
-            track.arc_to(
-                point(radius, radius),
-                px(0.0),
-                false,
-                true,
-                point(center_x - radius, center_y),
-            );
-            track.arc_to(
-                point(radius, radius),
-                px(0.0),
-                false,
-                true,
-                point(center_x + radius, center_y),
-            );
-            track.close();
-            if let Ok(path) = track.build() {
-                window.paint_path(path, track_color);
-            }
-
-            if progress <= 0.0 {
-                return;
-            }
-            let mut fill = PathBuilder::stroke(stroke);
-            if progress >= 0.999 {
-                fill.move_to(point(center_x + radius, center_y));
-                fill.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    false,
-                    true,
-                    point(center_x - radius, center_y),
-                );
-                fill.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    false,
-                    true,
-                    point(center_x + radius, center_y),
-                );
-                fill.close();
-            } else {
-                fill.move_to(point(center_x, center_y - radius));
-                let angle = -PI / 2.0 + progress * 2.0 * PI;
-                fill.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    progress > 0.5,
-                    true,
-                    point(
-                        center_x + radius * angle.cos(),
-                        center_y + radius * angle.sin(),
-                    ),
-                );
-            }
-            if let Ok(path) = fill.build() {
-                window.paint_path(path, progress_color);
-            }
-        },
-    )
-    .size(px(CONTEXT_USAGE_RING_SIZE));
-    let aria_value = format!("{:.0}%", f64::from(progress) * 100.0);
-    let hover_tooltip = tooltip.clone();
-
-    div()
-        .id(("agent-context-usage", pane.0))
-        .role(Role::ProgressIndicator)
-        .aria_label(tooltip)
-        .aria_value(aria_value)
-        .flex()
-        .flex_none()
-        .size(px(28.0))
-        .items_center()
-        .justify_center()
-        .tooltip(move |window, cx| Tooltip::new(hover_tooltip.clone()).build(window, cx))
-        .child(ring)
-        .into_any_element()
-}
-
-fn git_file_count_label(count: u32) -> String {
-    if count == 1 {
-        "1 file".to_owned()
-    } else {
-        format!("{count} files")
-    }
-}
-
-fn git_summary_footer(pane: PaneId, git: &AgentGitSummary, cx: &gpui::App) -> AnyElement {
-    let branch = git.branch.clone().map(SharedString::from);
-    let files = git_file_count_label(git.changed_files);
-    let tooltip = match git.branch.as_deref() {
-        Some(branch) => format!(
-            "{branch}: {files}, +{} additions, -{} deletions",
-            git.additions, git.deletions
-        ),
-        None => format!(
-            "Detached HEAD: {files}, +{} additions, -{} deletions",
-            git.additions, git.deletions
-        ),
-    };
-    let hover_tooltip = tooltip.clone();
-
-    h_flex()
-        .id(("agent-git-summary", pane.0))
-        .min_w_0()
-        .h(px(COMPOSER_FOOTER_HEIGHT))
-        .items_center()
-        .gap_2()
-        .text_size(zz_ui::rems_from_px(11.0))
-        .tooltip(move |window, cx| Tooltip::new(hover_tooltip.clone()).build(window, cx))
-        .child(
-            Icon::new(IconName::GitBranch)
-                .xsmall()
-                .flex_none()
-                .text_color(cx.theme().foreground.muted()),
-        )
-        .when_some(branch, |this, branch| {
-            this.child(
-                div()
-                    .min_w_0()
-                    .max_w(px(220.0))
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .whitespace_nowrap()
-                    .text_color(cx.theme().foreground.muted())
-                    .child(branch),
-            )
-        })
-        .child(
-            div()
-                .flex_none()
-                .text_color(cx.theme().foreground.muted())
-                .child(files),
-        )
-        .child(
-            div()
-                .flex_none()
-                .text_color(cx.theme().success)
-                .child(format!("+{}", git.additions)),
-        )
-        .child(
-            div()
-                .flex_none()
-                .text_color(cx.theme().danger)
-                .child(format!("-{}", git.deletions)),
-        )
-        .into_any_element()
 }
 
 /// What a wizard interaction asks the controller to do.
@@ -2016,116 +1809,49 @@ impl AgentView {
                         let delete_view = rows_view.clone();
                         let delete_id: Arc<str> = Arc::from(session.session_id);
                         Some(
-                            h_flex()
-                                .id(format!("agent-history-row-{}-{result_index}", pane.0))
-                                .w_full()
-                                .h(px(HISTORY_ROW_HEIGHT))
-                                .items_center()
-                                .gap_2()
-                                .rounded(cx.theme().radius)
-                                .px_2p5()
-                                .cursor_pointer()
-                                .when(is_selected, |this| this.bg(cx.theme().background.hover()))
-                                .when(!is_selected, |this| {
-                                    this.hover(|this| this.bg(cx.theme().background.hover()))
-                                })
-                                .on_mouse_move(move |_, _, cx| {
-                                    pointer_view.update(cx, |view, cx| {
-                                        if view.history_selected != Some(result_index) {
-                                            view.history_selected = Some(result_index);
-                                            cx.notify();
-                                        }
-                                    });
-                                })
-                                .on_click(move |_, window, cx| {
-                                    click_view.update(cx, |view, cx| {
-                                        view.open_history_result(result_index, window, cx);
-                                    });
-                                    cx.stop_propagation();
-                                })
-                                .child(
-                                    v_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .gap(px(2.0))
-                                        .child(
-                                            div()
-                                                .w_full()
-                                                .min_w_0()
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_size(zz_ui::rems_from_px(12.0))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .child(title),
-                                        )
-                                        .child(
-                                            h_flex()
-                                                .min_w_0()
-                                                .gap_1()
-                                                .text_size(zz_ui::rems_from_px(9.0))
-                                                .text_color(cx.theme().foreground.muted())
-                                                .child(
-                                                    Tag::secondary()
-                                                        .xsmall()
-                                                        .min_w_0()
-                                                        .overflow_hidden()
-                                                        .text_ellipsis()
-                                                        .whitespace_nowrap()
-                                                        .text_size(zz_ui::rems_from_px(9.0))
-                                                        .text_color(cx.theme().foreground.muted())
-                                                        .child(directory),
-                                                )
-                                                .when(is_current, |this| {
-                                                    this.child(
-                                                        div()
-                                                            .flex_none()
-                                                            .rounded(px(999.0))
-                                                            .bg(cx.theme().success.fill())
-                                                            .px_1()
-                                                            .text_size(zz_ui::rems_from_px(8.0))
-                                                            .text_color(cx.theme().success)
-                                                            .child("CURRENT"),
-                                                    )
-                                                })
-                                                .child(div().flex_1())
-                                                .when_some(updated_at, |this, updated_at| {
-                                                    this.child(
-                                                        div()
-                                                            .flex_none()
-                                                            .max_w(px(112.0))
-                                                            .overflow_hidden()
-                                                            .text_ellipsis()
-                                                            .whitespace_nowrap()
-                                                            .child(updated_at),
-                                                    )
-                                                }),
-                                        ),
-                                )
-                                .when(can_delete && !is_current, |this| {
-                                    this.child(
-                                        Button::compact_icon(
-                                            format!(
-                                                "agent-history-delete-{}-{result_index}",
-                                                pane.0
-                                            ),
-                                            IconName::Xmark,
-                                        )
-                                        .tooltip("Delete this session")
-                                        .disabled(loading)
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                let delete_id = delete_id.clone();
-                                                delete_view.update(cx, |view, cx| {
-                                                    view.history_delete_confirmation =
-                                                        Some(delete_id);
-                                                    cx.notify();
-                                                });
-                                                cx.stop_propagation();
-                                            },
-                                        ),
+                            zz_ui::picker::history_row(
+                                format!("agent-history-row-{}-{result_index}", pane.0),
+                                title,
+                                directory,
+                                updated_at.map(Into::into),
+                                is_selected,
+                                is_current,
+                                cx,
+                            )
+                            .on_mouse_move(move |_, _, cx| {
+                                pointer_view.update(cx, |view, cx| {
+                                    if view.history_selected != Some(result_index) {
+                                        view.history_selected = Some(result_index);
+                                        cx.notify();
+                                    }
+                                });
+                            })
+                            .on_click(move |_, window, cx| {
+                                click_view.update(cx, |view, cx| {
+                                    view.open_history_result(result_index, window, cx);
+                                });
+                                cx.stop_propagation();
+                            })
+                            .when(can_delete && !is_current, |this| {
+                                this.child(
+                                    Button::compact_icon(
+                                        format!("agent-history-delete-{}-{result_index}", pane.0),
+                                        IconName::Xmark,
                                     )
-                                }),
+                                    .tooltip("Delete this session")
+                                    .disabled(loading)
+                                    .on_click(
+                                        move |_, _, cx| {
+                                            let delete_id = delete_id.clone();
+                                            delete_view.update(cx, |view, cx| {
+                                                view.history_delete_confirmation = Some(delete_id);
+                                                cx.notify();
+                                            });
+                                            cx.stop_propagation();
+                                        },
+                                    ),
+                                )
+                            }),
                         )
                     })
                     .collect::<Vec<_>>()
@@ -2257,68 +1983,16 @@ impl AgentView {
                 .into_any_element()
         };
 
-        div()
-            .id(("agent-history-overlay", pane.0))
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .p_4()
-            .bg(cx.theme().scrim)
-            .occlude()
+        zz_ui::picker::picker_overlay(("agent-history-overlay", pane.0), cx)
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 backdrop_view.update(cx, |view, cx| view.close_history(window, cx));
                 cx.stop_propagation();
             })
             .child(
-                v_flex()
-                    .id(("agent-history-modal", pane.0))
-                    .relative()
-                    .w(relative(0.92))
-                    .max_w(px(660.0))
-                    .h(relative(0.82))
-                    .min_h(px(240.0))
-                    .max_h(px(720.0))
-                    .overflow_hidden()
-                    .rounded(cx.theme().radius)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background.raised(1))
-                    .shadow_lg()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                zz_ui::picker::picker_modal(("agent-history-modal", pane.0), cx)
                     .child(
-                        v_flex()
-                            .flex_none()
-                            .gap(px(CHROME_GAP))
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .p(px(CHROME_GAP))
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .h(px(32.0))
-                                    .rounded(cx.theme().radius)
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().background.raised(1))
-                                    .px_2p5()
-                                    .child(
-                                        Icon::new(IconName::Search)
-                                            .xsmall()
-                                            .text_color(cx.theme().foreground.muted()),
-                                    )
-                                    .child(
-                                        Input::new(&self.history_input)
-                                            .small()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .text_size(zz_ui::rems_from_px(12.0))
-                                            .appearance(false)
-                                            .bordered(false)
-                                            .focus_bordered(false),
-                                    ),
-                            )
+                        zz_ui::picker::picker_header(cx)
+                            .child(zz_ui::picker::picker_search(&self.history_input, cx))
                             .child(
                                 h_flex()
                                     .w_full()
@@ -2391,68 +2065,33 @@ impl AgentView {
         view: Entity<Self>,
         enabled: bool,
     ) -> gpui::AnyElement {
-        let current_label = option
-            .choices
-            .iter()
-            .find(|choice| choice.value == option.current_value)
-            .map_or_else(|| option.name.clone(), |choice| choice.name.clone());
         let option_id = option.id.clone();
-        let current_value = option.current_value.clone();
-        let choices = option.choices.clone();
-        let description = option
-            .description
-            .clone()
-            .unwrap_or_else(|| option.name.clone());
-        agent_chrome_button(format!("agent-config-picker-{}-{}", self.pane.0, option.id))
-            .icon(icon)
-            .label(current_label)
-            .dropdown_caret(true)
-            .tooltip(description)
-            .disabled(!enabled || choices.is_empty())
-            .dropdown_menu(move |menu, _, _| {
-                choices.iter().fold(menu.min_w(px(250.0)), |menu, choice| {
-                    let choice_name = choice.name.clone();
-                    let choice_description = choice.description.clone();
-                    let value = choice.value.clone();
-                    let config_id = option_id.clone();
-                    let picker_view = view.clone();
-                    menu.item(
-                        PopupMenuItem::element(move |_, cx| {
-                            v_flex()
-                                .min_w_0()
-                                .ml_1()
-                                .py_1()
-                                .child(
-                                    div()
-                                        .text_size(zz_ui::rems_from_px(12.0))
-                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                        .child(choice_name.clone()),
-                                )
-                                .when_some(choice_description.clone(), |this, description| {
-                                    this.child(
-                                        div()
-                                            .max_w(px(300.0))
-                                            .text_size(zz_ui::rems_from_px(10.0))
-                                            .text_color(cx.theme().foreground.muted())
-                                            .child(description),
-                                    )
-                                })
-                        })
-                        .checked(choice.value == current_value)
-                        .on_click(move |_, _, cx| {
-                            picker_view.update(cx, |view, cx| {
-                                let result = view.controller.update(cx, |controller, cx| {
-                                    controller.set_config_option(view.pane, &config_id, &value, cx)
-                                });
-                                view.submission_error = result.err();
-                                cx.notify();
-                            });
-                        }),
-                    )
+        agent_config_picker(
+            format!("agent-config-picker-{}-{}", self.pane.0, option.id),
+            icon,
+            &option.current_value,
+            &option.name,
+            option.description.as_deref().unwrap_or(&option.name),
+            option
+                .choices
+                .iter()
+                .map(|choice| AgentControlChoice {
+                    value: choice.value.clone(),
+                    name: choice.name.clone(),
+                    description: choice.description.clone(),
                 })
-            })
-            .anchor(Anchor::BottomLeft)
-            .into_any_element()
+                .collect(),
+            enabled,
+            move |value, _, cx| {
+                view.update(cx, |view, cx| {
+                    let result = view.controller.update(cx, |controller, cx| {
+                        controller.set_config_option(view.pane, &option_id, value, cx)
+                    });
+                    view.submission_error = result.err();
+                    cx.notify();
+                });
+            },
+        )
     }
 
     fn render_legacy_mode_picker(
@@ -2464,64 +2103,32 @@ impl AgentView {
         if !state.config_options.is_empty() || state.modes.is_empty() {
             return None;
         }
-        let current = state.mode.clone();
-        let current_label = state
-            .modes
-            .iter()
-            .find(|mode| current.as_deref() == Some(mode.id.as_str()))
-            .map_or("Permissions", |mode| mode.name.as_str())
-            .to_owned();
-        let modes = state.modes.clone();
-        Some(
-            agent_chrome_button(("agent-mode-picker", self.pane.0))
-                .icon(IconName::Check)
-                .label(current_label)
-                .dropdown_caret(true)
-                .tooltip("Agent permission mode")
-                .disabled(!enabled)
-                .dropdown_menu(move |menu, _, _| {
-                    modes.iter().fold(menu.min_w(px(250.0)), |menu, mode| {
-                        let mode_name = mode.name.clone();
-                        let mode_description = mode.description.clone();
-                        let mode_id = mode.id.clone();
-                        let mode_view = view.clone();
-                        menu.item(
-                            PopupMenuItem::element(move |_, cx| {
-                                v_flex()
-                                    .ml_1()
-                                    .py_1()
-                                    .child(
-                                        div()
-                                            .text_size(zz_ui::rems_from_px(12.0))
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .child(mode_name.clone()),
-                                    )
-                                    .when_some(mode_description.clone(), |this, description| {
-                                        this.child(
-                                            div()
-                                                .max_w(px(300.0))
-                                                .text_size(zz_ui::rems_from_px(10.0))
-                                                .text_color(cx.theme().foreground.muted())
-                                                .child(description),
-                                        )
-                                    })
-                            })
-                            .checked(current.as_deref() == Some(mode.id.as_str()))
-                            .on_click(move |_, _, cx| {
-                                mode_view.update(cx, |view, cx| {
-                                    let result = view.controller.update(cx, |controller, cx| {
-                                        controller.set_mode(view.pane, &mode_id, cx)
-                                    });
-                                    view.submission_error = result.err();
-                                    cx.notify();
-                                });
-                            }),
-                        )
-                    })
+        Some(agent_config_picker(
+            ("agent-mode-picker", self.pane.0),
+            IconName::Check,
+            state.mode.as_deref().unwrap_or_default(),
+            "Permissions",
+            "Agent permission mode",
+            state
+                .modes
+                .iter()
+                .map(|mode| AgentControlChoice {
+                    value: mode.id.clone(),
+                    name: mode.name.clone(),
+                    description: mode.description.clone(),
                 })
-                .anchor(Anchor::BottomLeft)
-                .into_any_element(),
-        )
+                .collect(),
+            enabled,
+            move |mode_id, _, cx| {
+                view.update(cx, |view, cx| {
+                    let result = view.controller.update(cx, |controller, cx| {
+                        controller.set_mode(view.pane, mode_id, cx)
+                    });
+                    view.submission_error = result.err();
+                    cx.notify();
+                });
+            },
+        ))
     }
 
     fn render_completions(&self, view: &Entity<Self>, cx: &gpui::App) -> Option<gpui::AnyElement> {
@@ -2644,41 +2251,26 @@ impl AgentView {
         cx: &mut gpui::App,
     ) -> impl IntoElement {
         let can_submit = state.connection.accepts_prompt();
-        let action = match composer_action(
+        let action_kind = composer_action(
             state.connection.has_active_turn(),
             self.composer_has_content(),
-        ) {
-            ComposerAction::Send => {
-                let submit_view = view.clone();
-                Button::compact_icon(format!("agent-action-{}", self.pane.0), IconName::ArrowUp)
-                    .primary()
-                    .rounded_full()
-                    .tooltip("Send message")
-                    .disabled(!can_submit || !self.composer_has_content())
-                    .on_click(move |_, window, cx| {
-                        submit_view.update(cx, |view, cx| view.submit(window, cx));
-                    })
-            }
-            ComposerAction::Queue => {
-                let submit_view = view.clone();
-                Button::compact_icon(format!("agent-action-{}", self.pane.0), IconName::Plus)
-                    .secondary()
-                    .rounded_full()
-                    .tooltip("Queue this as the next turn")
-                    .on_click(move |_, window, cx| {
-                        submit_view.update(cx, |view, cx| view.submit(window, cx));
-                    })
-            }
-            ComposerAction::Stop => {
-                let controller = self.controller.clone();
-                let pane = self.pane;
-                Button::compact_icon(format!("agent-action-{}", self.pane.0), IconName::Xmark)
-                    .rounded_full()
-                    .tooltip("Stop the current turn")
-                    .on_click(move |_, _, cx| {
-                        controller.update(cx, |controller, cx| controller.cancel(pane, cx));
-                    })
-            }
+        );
+        let action = composer_action_button(
+            format!("agent-action-{}", self.pane.0),
+            action_kind,
+            action_kind != ComposerAction::Send || (can_submit && self.composer_has_content()),
+        );
+        let action = if action_kind == ComposerAction::Stop {
+            let controller = self.controller.clone();
+            let pane = self.pane;
+            action.on_click(move |_, _, cx| {
+                controller.update(cx, |controller, cx| controller.cancel(pane, cx));
+            })
+        } else {
+            let submit_view = view.clone();
+            action.on_click(move |_, window, cx| {
+                submit_view.update(cx, |view, cx| view.submit(window, cx));
+            })
         };
         let settings_enabled = state.connection.accepts_prompt() && !state.settings_busy;
         let permission_option = state
@@ -2722,13 +2314,19 @@ impl AgentView {
                 settings_enabled,
             ));
         }
-        let usage = state
-            .usage
-            .map(|(used, size)| context_usage_meter(self.pane, used, size, cx));
-        let git = state
-            .git
-            .as_ref()
-            .map(|git| git_summary_footer(self.pane, git, cx));
+        let usage = state.usage.map(|(used, size)| {
+            context_usage_meter(("agent-context-usage", self.pane.0), used, size, cx)
+        });
+        let git = state.git.as_ref().map(|git| {
+            git_summary_footer(
+                ("agent-git-summary", self.pane.0),
+                git.branch.clone().map(Into::into),
+                git.changed_files,
+                git.additions,
+                git.deletions,
+                cx,
+            )
+        });
         let directory = self.render_directory_picker(state, view.clone(), local_host);
         let command_hint = active_command_hint(&self.last_input, &state.available_commands);
         let completions = self.render_completions(view, cx);
@@ -3185,14 +2783,6 @@ fn retained_tool_payload(
     };
     retained.insert(key, next.clone());
     next
-}
-
-fn agent_chrome_button(id: impl Into<ElementId>) -> Button {
-    Button::new(id)
-        .ghost()
-        .xsmall()
-        .h(px(CHROME_PILL_HEIGHT))
-        .px_2()
 }
 
 fn session_directory_label(cwd: &Path) -> String {

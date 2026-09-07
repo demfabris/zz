@@ -91,7 +91,9 @@ Current forks and why:
     profiler feature) — verify `just showcase-build` passes, since `--locked`
     is what catches it.
   - Upstream unified perf tracking under gpui's `profiler` feature: zz must
-    enable it on the workspace `gpui` dep, `set_frame_trace_enabled` became
+    enable it on the desktop crate's `gpui` dependency, not the shared workspace
+    dependency. The profiler uses native timing and crashes on WASM action
+    dispatch if inherited by `zz-ui`. `set_frame_trace_enabled` became
     the shared `set_trace_enabled`, and collectors now yield
     `FrameEvent::{Draw,Present}` instead of bare `FrameTiming`.
 

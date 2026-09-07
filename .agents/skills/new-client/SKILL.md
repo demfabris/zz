@@ -45,7 +45,11 @@ territory. The knowledge bundle is the map; source is ground truth.
    exemplar: reader thread reduces into `Arc<Mutex<ClientCore>>`, the main
    loop reads cached copies. Its dependency list is also the fence — if your
    client needs a dep the TUI doesn't have, question it.
-3. **gpui-based client on a new platform** — reuse the desktop `crates/zz`
+3. **GPUI browser client** - use `clients/web`: it compiles the shared `zz-ui`
+   components and `zz-client` to WASM, with `crates/zz-web` forwarding the unchanged
+   binary protocol over WebSocket. Keep native transport dependencies outside WASM.
+   `just web-build` builds the client; `just web-serve` connects it to an existing daemon.
+4. **gpui-based client on another platform** — reuse the desktop `crates/zz`
    engine only when the platform can support the full desktop surface. The old
    GPUI iOS crates were deleted; native Apple clients belong on
    `zz-client-ffi`, as demonstrated by `clients/ios`.

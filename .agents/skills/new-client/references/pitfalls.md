@@ -21,9 +21,9 @@ while unattached (see `retry_default_after_missing_session` in
 
 ## 2. Scope pane lists to the attached session
 
-The daemon auto-creates a default session at boot, so "iterate every session's
-panes" returns panes your client is not attached to — and those panes never
-receive terminal frames (frame fanout is gated by the client's visible set).
+The snapshot can contain sessions your client is not attached to. Iterating
+every session's panes includes panes that receive no terminal frames because
+the daemon limits frame delivery to the client's visible set.
 The symptom is maddening: the pane "exists" in the snapshot, resize appears to
 succeed, and no content ever arrives. Filter by
 `core.attached_session() == session.id` (the C ABI's
@@ -95,9 +95,10 @@ human-rate and free.
 - Unix socket paths have a low length cap (`sun_path`) — put test sockets
   directly under `/tmp`, short names.
 - A real in-process daemon is cheap and beats mocks:
-  `Daemon::new(&socket).without_user_config()` + a fixture command like
-  `"printf 'ready\r\n'; exec /bin/cat"` gives deterministic, quiescent pane
-  content (`cat` echoes what you type, then sits silent).
+  start `Daemon::new(&socket).without_user_config()`, create a named session
+  with `new-session -d -s fixture "printf 'ready\r\n'; exec /bin/cat"`, and
+  attach to `fixture`. The daemon starts empty without configuration that
+  creates sessions; `cat` echoes your input, then sits silent.
 - Some zz-daemon tests are timing-sensitive under full-workspace parallel
   load; a failure there is only real if it reproduces solo
   (`cargo test -p zz-daemon <name>`).
@@ -124,21 +125,23 @@ external client crate resolves identically to the workspace and builds against
 the warm cache in seconds. (Both independent eval builds of an external client
 hit this wall; the gpui/proc-macro-error2 patches are UI-only and not needed.)
 
-## 12. A fresh daemon starts with session 0, but a live daemon can become session-less
+## 12. A daemon can stay empty until its first default attach
 
-`Shared::initialize` auto-creates session "0" at boot when nothing restores,
-and `attach("")` resolves to that default session. Killing the last session
-after a client attaches can still produce an authoritative zero-session
-snapshot. Three consequences:
+`Shared::initialize_with_mux_config_files` leaves a fresh daemon empty unless
+configuration creates a session. In `Shared::attach_target_with_materialization_observer`,
+an Interactive or Control client calling `attach("")` creates the first numeric
+session only when no sessions exist. On a fresh daemon this is session "0".
+Named attaches and Command clients do not create a missing session.
+The source and its tests live in `crates/zz-daemon/src/daemon.rs`.
 
-- A test that wants exactly one session with a controlled name should
-  **rename the boot session** (`rename-session`) rather than create a second
-  one — otherwise default-attach lands on "0" while your fixture session sits
-  unattached and frameless (see pitfall 2).
-- "Attach to the default session" in a user-facing client means session "0"
-  on a fresh daemon, not the most recently created session.
-- Clients must render and recover from a zero-session snapshot instead of
-  assuming the boot invariant remains true for the daemon's lifetime.
+- Create a named fixture session and attach to that name. If a prior default
+  attach already created "0", account for that existing session instead of
+  assuming your fixture is the only one (see pitfall 2).
+- Default attach uses the daemon's existing default context when sessions
+  exist. Use an explicit target when you need a particular session.
+- Render an empty snapshot both before the first session and after removal
+  of the last session. Handle daemon shutdown too: its `exit-empty` option
+  can stop it after the last session ends.
 
 ## 13. Don't bump `PROTOCOL_VERSION` casually
 

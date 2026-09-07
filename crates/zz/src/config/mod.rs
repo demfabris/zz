@@ -248,7 +248,7 @@ impl ConfigKey {
             "ui-font-family" => Some(Self::UiFontFamily),
             "app-icon" => Some(Self::AppIcon),
             "chrome-preset" => Some(Self::ChromePreset),
-            _ => ChromeColor::from_str(key).map(Self::Chrome),
+            _ => ChromeColor::parse(key).map(Self::Chrome),
         }
     }
 
@@ -1726,7 +1726,7 @@ fn apply_theme_key(
         }
         ConfigKey::ThemeMode => {
             config.theme_mode.provenance = ConfigProvenance::Override;
-            match ThemeModeSetting::from_str(value) {
+            match ThemeModeSetting::parse(value) {
                 Some(mode) => {
                     config.theme_mode.value = mode;
                     return None;
@@ -1746,7 +1746,7 @@ fn apply_theme_key(
         }
         ConfigKey::ChromePreset => {
             config.chrome_preset.provenance = ConfigProvenance::Override;
-            match ChromePresetId::from_str(value) {
+            match ChromePresetId::parse(value) {
                 Some(preset) => {
                     config.chrome_preset.value = Some(preset);
                     return None;
@@ -2235,7 +2235,7 @@ fn write_chrome_preset_at(path: &Path, preset: ChromePresetId) -> io::Result<()>
     let mut without_explicit_roots = String::with_capacity(source.len());
     for line in source.split_inclusive('\n') {
         let is_chrome_root =
-            config_key_for_line(line).is_some_and(|key| ChromeColor::from_str(key).is_some());
+            config_key_for_line(line).is_some_and(|key| ChromeColor::parse(key).is_some());
         if !is_chrome_root {
             without_explicit_roots.push_str(line);
         }

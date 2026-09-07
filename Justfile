@@ -197,6 +197,18 @@ site:
     npm --prefix site install
     npm --prefix site run dev
 
+web:
+    @scripts/web-dev.sh
+
+web-build:
+    @scripts/build-web-wasm.sh
+
+web-build-release:
+    @scripts/build-web-wasm.sh --release
+
+web-serve *args:
+    @cargo run -p zz-web -- --assets clients/web/dist {{ args }}
+
 # Run the zz UI showcase with Cargo watch and Vite live reload.
 showcase:
     @scripts/showcase-dev.sh

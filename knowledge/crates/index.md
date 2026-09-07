@@ -15,5 +15,7 @@
 
 Workspace members without a crate page here: `zz-ui` (maintained gpui-component fork), `zz-tui`
 (`zz attach`). The native Swift iPhone client lives under `clients/ios`, outside the Cargo workspace.
+`zz-web` serves the [browser client](/playbooks/browser-client.md), whose GPUI/WASM frontend lives
+in the separate `clients/web` workspace.
 The map in
 [architecture/overview](/architecture/overview.md) uses the live `zz-*` names.

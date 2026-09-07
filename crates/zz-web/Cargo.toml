@@ -1,0 +1,28 @@
+[package]
+name = "zz-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Loopback HTTP and WebSocket gateway for the zz browser client"
+publish = false
+
+[dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws"] }
+futures-util = { version = "0.3.32", features = ["sink"] }
+interprocess = { workspace = true, features = ["tokio"] }
+percent-encoding = "2.3.2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio-util = { version = "0.7", features = ["io"] }
+zz-daemon = { path = "../zz-daemon", default-features = false }
+zz-protocol = { path = "../zz-protocol" }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio-tungstenite = "0.29"
+zz-client = { path = "../zz-client" }
+zz-daemon = { path = "../zz-daemon" }
+zz-terminal = { path = "../zz-terminal", default-features = false }
+
+[lints]
+workspace = true

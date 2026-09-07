@@ -1,4 +1,6 @@
-use crate::{ActiveTheme as _, Colorize as _, control_shadow, surface_ring, tag::Tag};
+use crate::{
+    ActiveTheme as _, Colorize as _, Sizable as _, control_shadow, surface_ring, tag::Tag,
+};
 use gpui::{
     AnyElement, App, BoxShadow, Corners, CursorStyle, ElementId, FontWeight, Hsla, IntoElement,
     ParentElement as _, Pixels, SharedString, Stateful, Styled as _, div, point, prelude::*, px,
@@ -788,4 +790,65 @@ mod tests {
             assert!(pane_surface_shadow_style(true, cx).is_empty());
         });
     }
+}
+
+pub fn pane_picker_row(
+    id: impl Into<ElementId>,
+    title: &'static str,
+    icon: crate::IconName,
+    shortcut: &'static str,
+    selected: bool,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .flex()
+        .w_full()
+        .h(px(40.0))
+        .flex_none()
+        .items_center()
+        .gap(px(10.0))
+        .px(px(12.0))
+        .rounded(cx.theme().radius)
+        .bg(if selected && enabled {
+            crate::navigation::workspace_row_highlight(cx)
+        } else {
+            cx.theme().background.washed(1)
+        })
+        .when(enabled, gpui::Styled::cursor_pointer)
+        .when(!enabled, |row| row.opacity(0.4))
+        .child(
+            crate::Icon::new(icon)
+                .with_size(px(16.0))
+                .text_color(cx.theme().foreground.muted()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_size(crate::rems_from_px(12.0))
+                .font_weight(FontWeight::MEDIUM)
+                .child(title),
+        )
+        .child(
+            crate::kbd::Kbd::new(
+                gpui::Keystroke::parse(shortcut).expect("static pane picker shortcut"),
+            )
+            .lowercase()
+            .bg(cx.theme().background.raised(4)),
+        )
+}
+
+pub fn pane_picker_choices(rows: impl IntoIterator<Item = AnyElement>) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .max_w(px(360.0))
+        .gap(px(4.0))
+        .children(rows)
 }

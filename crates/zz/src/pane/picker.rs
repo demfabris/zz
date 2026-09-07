@@ -3,14 +3,11 @@ use gpui::{
     Render, Window, div, prelude::*, px,
 };
 use zz_protocol::{CommandInvocation, PaneId};
-use zz_ui::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, kbd::Kbd, navigation::workspace_row_highlight,
-};
+use zz_ui::{ActiveTheme as _, IconName};
 
 use crate::mux::{client::MuxClient, hosts::HostId};
 use crate::window::corners::{WindowCorners, round_div_radii};
 use crate::{browser, config};
-use zz_ui::Colorize as _;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PaneChoice {
@@ -205,55 +202,29 @@ impl PanePickerView {
 
     fn row(&self, index: usize, choice: PaneChoice, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected == index;
-        let rest = cx.theme().background.washed(1);
-        let highlight = workspace_row_highlight(cx);
         let view = cx.entity();
         let hover_view = view.clone();
-        div()
-            .id((choice.element_id(), self.pane.0))
-            .flex()
-            .w_full()
-            .h(px(40.0))
-            .flex_none()
-            .items_center()
-            .gap(px(10.0))
-            .px(px(12.0))
-            .rounded(cx.theme().radius)
-            .bg(if selected { highlight } else { rest })
-            .cursor_pointer()
-            .on_mouse_move(move |_, _, cx| {
-                hover_view.update(cx, |picker, cx| {
-                    if picker.selected != index {
-                        picker.selected = index;
-                        cx.notify();
-                    }
-                });
-            })
-            .child(
-                Icon::new(choice.icon())
-                    .with_size(px(16.0))
-                    .text_color(cx.theme().foreground.muted()),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .text_size(zz_ui::rems_from_px(12.0))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .child(choice.title()),
-            )
-            .child(
-                Kbd::new(Keystroke::parse(choice.shortcut()).expect("static pane picker shortcut"))
-                    .lowercase()
-                    .bg(cx.theme().background.raised(4)),
-            )
-            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                view.update(cx, |picker, cx| picker.activate(choice, cx));
-                cx.stop_propagation();
-            })
+        zz_ui::pane::pane_picker_row(
+            (choice.element_id(), self.pane.0),
+            choice.title(),
+            choice.icon(),
+            choice.shortcut(),
+            selected,
+            true,
+            cx,
+        )
+        .on_mouse_move(move |_, _, cx| {
+            hover_view.update(cx, |picker, cx| {
+                if picker.selected != index {
+                    picker.selected = index;
+                    cx.notify();
+                }
+            });
+        })
+        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+            view.update(cx, |picker, cx| picker.activate(choice, cx));
+            cx.stop_propagation();
+        })
     }
 }
 
@@ -292,15 +263,7 @@ impl Render for PanePickerView {
                 .bg(crate::theme::app_pane_background(cx))
                 .text_color(cx.theme().foreground)
                 .px(px(12.0))
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .w_full()
-                        .max_w(px(360.0))
-                        .gap(px(4.0))
-                        .children(rows),
-                ),
+                .child(zz_ui::pane::pane_picker_choices(rows)),
             config::pane_content_radii(cx, self.window_corners),
         )
     }

@@ -17,6 +17,8 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-chrome-import` — Chrome profile, cookie, and history import
 - `crates/zz-ui` — widget layer: a maintained full fork of gpui-component
 - `crates/zz-tui` — raw-terminal attach client
+- `crates/zz-web` - local HTTP/WebSocket gateway for browser clients
+- `clients/web` - full-page GPUI/WASM client using zz-ui and zz-client, with its own Cargo workspace
 - `clients/ios` — adaptive SwiftUI/UIKit iPhone and iPad app over `zz-client-ffi`
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `compat/` — tmux compat campaign: differential harness (`run.sh`), gap registry (`tmux-gaps.json`), dispatch-board client (`board.py`), progress meter, orchestration handoff (`orchestration/`)
@@ -49,6 +51,7 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `just forks` / `just fork-rebase <name>` | Carried-patch fork status / rebase |
 | `just site` | Docs site dev server with live reload |
 | `just showcase` / `showcase-setup` / `showcase-build[-release]` | wasm UI showcase dev loop / toolchain / assets |
+| `just web` / `web-build[-release]` / `web-serve` | Browser client dev loop / assets / local gateway |
 | `just profile-cpu\|profile-system\|profile-metal\|profile-terminal-diagnostics mac …` | Instruments captures (macOS); read one back with `profile-cpu-summary`, `profile-metal-summary`, or `profile-terminal-summary` (`profile-system` has no summary recipe) |
 | `just profile-build mac` | Release-optimized bundle with dSYMs for profiling |
 | `just dmg` / `zip-windows` / `pacman-package` / `pacman-install` / `deb-package` / `deb-install` | Platform packages |
@@ -64,7 +67,7 @@ Multiple agent sessions often share this checkout in parallel. Never `git stash`
 
 - `gpui`/`gpui_platform` resolve to `demfabris/zed` branch `zz-patches` — a carried-patch fork listed in `scripts/forks.conf`. Bumping upstream means rebasing the patch branch: `just forks` for status, `just fork-rebase zed` to rebase.
 - Strange gpui build errors right after a dependency change usually mean `Cargo.lock` and the fork branch are out of sync.
-- `examples/ui-showcase` is the only consumer of gpui's wasm/WebGPU path and is workspace-excluded, so a bump can break it without failing the main build. Check with `just showcase-build`.
+- `examples/ui-showcase` and `clients/web` consume gpui's WASM renderer in excluded workspaces. Keep their fork revisions and lockfiles in step with the root, and check both `just showcase-build` and `just web-build` after a bump.
 </important>
 
 <important if="a test fails under cargo test --workspace">

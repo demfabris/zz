@@ -49,7 +49,7 @@ base64.workspace = true
 chrono.workspace = true
 env_logger.workspace = true
 futures-lite.workspace = true
-gpui.workspace = true
+gpui = { workspace = true, features = ["profiler"] }
 ignore = { version = "0.4.33", optional = true }
 image.workspace = true
 log.workspace = true

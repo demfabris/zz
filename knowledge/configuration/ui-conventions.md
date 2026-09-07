@@ -146,7 +146,8 @@ an optional paired `chrome-preset`, and the `chrome-*` overrides in `zz/config`,
 terminal.** The mode follows the OS appearance unless `theme-mode` pins one. There is no knob that
 derives chrome from terminal colors, and a Ghostty palette cannot repaint the window.
 
-`crates/zz/src/theme.rs` is small on purpose. It holds the latest immutable
+`crates/zz-ui/src/chrome_palette.rs` owns the shared preset catalog and palette resolver used by
+the desktop and browser clients. `crates/zz/src/theme.rs` applies desktop configuration. It holds the latest immutable
 `TerminalAppearance` and `AppearanceProvenance` as GPUI globals (used by settings badges and the
 detach action, not to color anything). `apply_zz_overrides` layers these values over the zz-ui base:
 

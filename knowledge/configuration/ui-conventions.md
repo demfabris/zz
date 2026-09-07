@@ -96,15 +96,13 @@ interrupt a window . the modal it must answer and the toast it may ignore . spea
 icon is a flex child aligned to the first line, not an absolutely positioned glyph the copy column
 pads around.
 
-**Every toast stacks on the workspace window**, whichever window raised it. Only `AppShell` mounts
-`Root::render_notification_layer`; the Settings window mounts the dialog layer alone, because a
-toast stacked in the corner of a window opened to flip one switch reads as a second, competing
-chrome and disappears with that window. `crates/zz/src/window/toast.rs` holds the workspace
-`WindowHandle<Root>` in a global (named once, as that window opens) and `toast::push` pushes
-through it; Settings . config writes, saves, imports, the About page's copy button . calls that
-instead of `window.push_notification`, which is why none of those paths carry a `&mut Window` they
-would otherwise need. Views already inside the workspace window keep calling
-`window.push_notification`: it reaches the same stack.
+**Every toast stacks at the top center of the workspace window**, whichever view raised it. The
+close button sits in the toast's flex row, vertically centered beside its content. Settings is a route in
+that window, and `AppShell` mounts both the dialog and notification layers for either route.
+`crates/zz/src/window/toast.rs` keeps the workspace `WindowHandle<Root>` in a global and defers its
+update until the current window callback finishes. Updating that handle during its own click
+callback fails because GPUI has temporarily removed the window from its registry. Views that
+already receive the workspace `Window` can call `window.push_notification` directly.
 
 # UI font
 

@@ -128,7 +128,7 @@ fn split_controls_follow_wire_bindings_preserve_drafts_and_keep_renamed_keys(
             assert_eq!(rows[0].key.read(cx).value().as_ref(), "-");
             assert_eq!(rows[1].key.read(cx).value().as_ref(), "|");
             assert_eq!(
-                split_binding_kind(rows[0].binding.as_ref().unwrap()),
+                split_binding_kind(rows[0].binding.as_ref().unwrap(), SplitDirection::Vertical),
                 Some(SplitPaneKind::Terminal)
             );
         });
@@ -231,7 +231,66 @@ fn split_controls_follow_wire_bindings_preserve_drafts_and_keep_renamed_keys(
                 saved
             );
             let row = &settings.mux_split_controls.as_ref().unwrap().rows[0];
-            assert_eq!(split_binding_kind(row.binding.as_ref().unwrap()), None);
+            assert_eq!(
+                split_binding_kind(row.binding.as_ref().unwrap(), SplitDirection::Vertical),
+                None
+            );
+        });
+    });
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+
+    cx.update(|window, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.mux.update(cx, |mux, cx| {
+                mux.handle_message_for_test(
+                    ProtocolMessage::Event(Event {
+                        sequence: 3,
+                        payload: EventPayload::KeyTablesChanged {
+                            tables: key_tables(&saved),
+                        },
+                    }),
+                    cx,
+                );
+            });
+            settings.synchronize_mux_splits(window, cx);
+            settings.commit_mux_split(0, SplitPaneKind::Picker, window, cx);
+            assert!(settings.mux_split_disabled_reason(cx).is_some());
+        });
+    });
+    cx.run_until_parked();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(6));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.synchronize_mux_splits(window, cx);
+            assert!(
+                settings
+                    .mux_split_controls
+                    .as_ref()
+                    .unwrap()
+                    .pending
+                    .as_ref()
+                    .unwrap()
+                    .timed_out
+            );
+            assert_eq!(settings.mux_split_disabled_reason(cx), None);
+            settings
+                .config_file_editor(ConfigFileKind::Mux)
+                .editor
+                .update(cx, |editor, cx| {
+                    editor.set_value(&saved, window, cx);
+                });
+            settings.save_config_editor(ConfigFileKind::Mux, cx);
+            assert!(
+                settings
+                    .mux_split_controls
+                    .as_ref()
+                    .unwrap()
+                    .pending
+                    .is_none()
+            );
+            assert_eq!(settings.mux_split_disabled_reason(cx), None);
         });
     });
     assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);

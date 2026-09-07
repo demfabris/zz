@@ -12,7 +12,7 @@ tags:
 - uikit
 - client
 - ffi
-timestamp: 2026-09-03T00:00:00-03:00
+timestamp: 2026-09-06T00:00:00-03:00
 ---
 
 # Overview
@@ -107,6 +107,11 @@ is the visual fallback before an explicit pane selection exists. The balanced sp
 the material sidebar beside the workspace at regular widths while retaining the native visibility
 control.
 
+The detail header appears only when the sidebar is retracted. With the sidebar open, panes use
+the header's space and the sidebar retains its native visibility control. Retracting the sidebar
+restores the session menu, window picker, and header buttons. Panorama keeps its header hidden
+and restores it on exit only when the sidebar remains retracted.
+
 The C ABI projects every window and pane from `MuxSnapshot` and returns each visible pane's normalized
 rectangle. The rectangle solver lives in `zz-client`; Swift multiplies those values by the detail
 column's current size through a custom `Layout`. A zoomed pane receives the full rectangle while its
@@ -171,8 +176,9 @@ resulting geometry, then flies that surface into the measured window rectangle o
 curve while the session columns cascade in with a short stagger and the scroll surface fades up
 behind them; the grid itself does not scale, so the measured card rectangle stays valid through the
 flight. Leaving fades the surrounding content out fast and grows the fixed surface back to
-fullscreen on an ease-in-out curve after the detail navigation bar returns and the destination
-geometry settles. The target rectangle is locked before movement starts, and the live workspace
+fullscreen on an ease-in-out curve after the destination geometry settles. The detail navigation bar
+returns first when the sidebar is retracted; it stays hidden with the sidebar open.
+The target rectangle is locked before movement starts, and the live workspace
 mounts after the exit completes. Reduce Motion fades the Panorama layer before swapping view
 branches and performs no transform animation.
 
@@ -208,6 +214,9 @@ selector uses the session rail's finger-tracking page transition, so its outgoin
 capsules move, fade, and scale with a horizontal drag before the adjacent pane opens. Leaving
 fullscreen resigns first responder so the software keyboard disappears with it.
 
+Previous and next pane actions use the same daemon-backed selection path as sidebar navigation,
+so the visible pane and mux active pane agree after the next snapshot.
+
 The center control has a second mode instead of installing a UIKit keyboard accessory. Its keyboard
 button replaces the pane selector with a horizontally scrollable row containing Escape, Tab, Shift,
 Control, Alt, four arrows, Prefix, Copy, and Compose while the two circular controls stay in place.
@@ -215,6 +224,9 @@ Shift, Control, and Alt are one-shot after one tap, lock after a double tap, and
 button is tapped again. Compose opens a native multiline editor, preserving IME, paste, and dictation
 before sending the text as one terminal input. Hardware key press, repeat, and release events use the
 same raw-key FFI path. Direct text input remains Unicode and IME aware through `UIKeyInput`.
+The Prefix button enters the connected client's daemon-owned `prefix` key table and acquires terminal
+input for the next key. Hardware F1 through F12 and Insert use the raw-key path, including modifiers
+and press, repeat, and release events.
 
 A press followed by a drag sends semantic selection press, drag, and release actions to the terminal
 engine. Selection arms after 150 milliseconds of stillness or as soon as the finger travels 5 points,

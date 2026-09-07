@@ -1,11 +1,12 @@
 //! Native settings route backed by the application configuration.
 
 mod multiplexer;
+mod sources;
 
 use std::{
     collections::BTreeMap,
     io::{self, ErrorKind},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 use gpui::{
@@ -148,6 +149,7 @@ pub(crate) struct SettingsView {
     chrome_pickers: BTreeMap<ChromeColor, Entity<ColorPickerState>>,
     mux_config_editor: Option<ConfigFileEditor>,
     mux_split_controls: Option<multiplexer::SplitControls>,
+    mux_sources: Option<sources::MuxSources>,
     observed_appearance_overrides: Vec<ConfigOverrideEntry>,
     terminal_config_editor: Option<ConfigFileEditor>,
     hosts_state: Option<HostsSectionState>,
@@ -302,6 +304,7 @@ impl SettingsView {
             chrome_pickers,
             mux_config_editor: None,
             mux_split_controls: None,
+            mux_sources: None,
             observed_appearance_overrides,
             terminal_config_editor: None,
             hosts_state: None,
@@ -434,6 +437,9 @@ impl SettingsView {
             self.reload_config_editor_if_clean(section, window, cx);
         }
         self.section = section;
+        if section == SettingsSection::Multiplexer {
+            self.refresh_mux_sources();
+        }
         cx.notify();
     }
 
@@ -1473,15 +1479,17 @@ impl SettingsView {
         );
         let dirty = file.editor.read(cx).value().as_ref() != file.saved;
         let error = file.error.clone();
-        let donor = kind.donor_path();
-        let donor_tooltip = if kind == ConfigFileKind::Mux {
-            "zz reads tmux configuration files in place at daemon startup".to_owned()
-        } else {
-            donor.as_ref().map_or_else(
-                || format!("No {} configuration was found to import", kind.donor_name()),
-                |path| format!("Import {}", path.display()),
-            )
+        let local = {
+            let mux = self.mux.read(cx);
+            mux.is_connected() && mux.attached_host() == HostId::LOCAL
         };
+        let donor = (kind == ConfigFileKind::Terminal)
+            .then(discover_ghostty_config)
+            .flatten();
+        let donor_tooltip = donor.as_ref().map_or_else(
+            || "No Ghostty configuration was found to import".to_owned(),
+            |path| format!("Import {}", path.display()),
+        );
         let has_config_import = crate::profile::profile(cx).has_config_import;
 
         div()
@@ -1498,7 +1506,8 @@ impl SettingsView {
                     .gap(px(10.0))
                     .child(settings_page_description(kind.section(), cx))
                     .when(kind == ConfigFileKind::Mux, |page| {
-                        page.child(self.mux_splits_section(cx))
+                        page.child(self.mux_sources_section())
+                            .child(self.mux_splits_section(cx))
                     })
                     .child(
                         div()
@@ -1515,20 +1524,39 @@ impl SettingsView {
                                     .text_ellipsis()
                                     .child(path),
                             )
-                            .when(has_config_import, |row| {
+                            .when(kind == ConfigFileKind::Mux, |row| {
                                 row.child(
-                                    Button::new(kind.import_button_id())
+                                    Button::new("settings-reload-mux-config")
                                         .small()
-                                        .label(kind.import_button_label())
-                                        .tooltip(donor_tooltip)
-                                        .disabled(
-                                            kind == ConfigFileKind::Terminal && donor.is_none(),
-                                        )
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.confirm_config_import(kind, window, cx);
+                                        .label("Reload")
+                                        .disabled(dirty || !local)
+                                        .tooltip(if dirty {
+                                            "Save your edits first"
+                                        } else if local {
+                                            "Read every configuration file again"
+                                        } else {
+                                            "Connect to a local session to reload"
+                                        })
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.reload_mux_configuration(cx);
                                         })),
                                 )
                             })
+                            .when(
+                                has_config_import && kind == ConfigFileKind::Terminal,
+                                |row| {
+                                    row.child(
+                                        Button::new("settings-import-ghostty")
+                                            .small()
+                                            .label("Import Ghostty…")
+                                            .tooltip(donor_tooltip)
+                                            .disabled(donor.is_none())
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.confirm_ghostty_import(window, cx);
+                                            })),
+                                    )
+                                },
+                            )
                             .child(
                                 Button::new(kind.save_button_id())
                                     .small()
@@ -1547,6 +1575,9 @@ impl SettingsView {
                                 .text_color(cx.theme().warning)
                                 .child(error),
                         )
+                    })
+                    .when(kind == ConfigFileKind::Mux, |page| {
+                        page.when_some(self.mux_copied_notice(cx), gpui::ParentElement::child)
                     })
                     .child(
                         div()
@@ -1784,7 +1815,11 @@ Self::numeric_setting(
         file.path = Some(path.clone());
         file.saved = source;
         file.error = None;
-        config::request_daemon_reload(cx);
+        if kind == ConfigFileKind::Mux {
+            self.reload_mux_configuration(cx);
+        } else {
+            config::request_daemon_reload(cx);
+        }
         toast::push(
             Notification::success(format!("Saved {}", path.display())),
             cx,
@@ -1792,27 +1827,11 @@ Self::numeric_setting(
         cx.notify();
     }
 
-    fn confirm_config_import(
-        &mut self,
-        kind: ConfigFileKind,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if kind == ConfigFileKind::Mux {
+    fn confirm_ghostty_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let kind = ConfigFileKind::Terminal;
+        let Some(donor) = discover_ghostty_config() else {
             toast::push(
-                Notification::info(
-                    "zz reads tmux configuration in place at daemon startup. Put zz-specific overrides in zz/mux.conf; no import is needed.",
-                ),
-                cx,
-            );
-            return;
-        }
-        let Some(donor) = kind.donor_path() else {
-            toast::push(
-                Notification::info(format!(
-                    "No {} configuration was found to import",
-                    kind.donor_name()
-                )),
+                Notification::info("No Ghostty configuration was found to import"),
                 cx,
             );
             return;
@@ -1827,7 +1846,12 @@ Self::numeric_setting(
                 return;
             }
         };
-        let mut description = kind.import_description(&donor, &target);
+        let mut description = format!(
+            "This rewrites the appearance keys in {} from {}, replacing any you changed \
+             since the last import. The Ghostty file is not modified.",
+            target.display(),
+            donor.display(),
+        );
         let file = self.config_file_editor(kind);
         if file.editor.read(cx).value().as_ref() != file.saved {
             description.push_str(" Unsaved changes in this editor will be discarded.");
@@ -1835,69 +1859,44 @@ Self::numeric_setting(
         let settings = cx.entity();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let settings = settings.clone();
-            import_configuration_file_alert(alert, kind.import_title(), description.clone()).on_ok(
-                move |_, window, cx| {
+            import_configuration_file_alert(alert, "Import from Ghostty?", description.clone())
+                .on_ok(move |_, window, cx| {
                     settings.update(cx, |settings, cx| {
-                        settings.run_config_import(kind, window, cx);
+                        settings.run_ghostty_import(window, cx);
                     });
                     true
-                },
-            )
+                })
         });
     }
 
-    fn run_config_import(
-        &mut self,
-        kind: ConfigFileKind,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let result = match kind {
-            ConfigFileKind::Mux => return,
-            ConfigFileKind::Terminal => {
-                config::import::import_ghostty_config(import_color_scheme(cx))
-                    .map(|report| report.config_path)
-            }
-        };
+    fn run_ghostty_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let result = config::import::import_ghostty_config(import_color_scheme(cx))
+            .map(|report| report.config_path);
         match result {
             Ok(Some(path)) => {
                 log::info!(
                     target: "zz::config",
-                    "imported {} configuration into {}",
-                    kind.donor_name(),
+                    "imported Ghostty configuration into {}",
                     path.display(),
                 );
-                self.reload_config_editor(kind, window, cx);
+                self.reload_config_editor(ConfigFileKind::Terminal, window, cx);
                 config::request_daemon_reload(cx);
                 toast::push(
                     Notification::success(format!(
-                        "Imported {} configuration into {}",
-                        kind.donor_name(),
+                        "Imported Ghostty configuration into {}",
                         path.display()
                     )),
                     cx,
                 );
             }
-            Ok(None) => {
-                toast::push(
-                    Notification::info(format!(
-                        "No {} configuration was found to import",
-                        kind.donor_name()
-                    )),
-                    cx,
-                );
-            }
+            Ok(None) => toast::push(
+                Notification::info("No Ghostty configuration was found to import"),
+                cx,
+            ),
             Err(error) => {
-                log::warn!(
-                    target: "zz::config",
-                    "could not import {} configuration error={error}",
-                    kind.donor_name(),
-                );
+                log::warn!(target: "zz::config", "could not import Ghostty configuration error={error}");
                 toast::push(
-                    Notification::error(format!(
-                        "Could not import {} configuration: {error}",
-                        kind.donor_name()
-                    )),
+                    Notification::error(format!("Could not import Ghostty configuration: {error}")),
                     cx,
                 );
             }
@@ -1979,34 +1978,6 @@ impl ConfigFileKind {
         }
     }
 
-    const fn donor_name(self) -> &'static str {
-        match self {
-            Self::Mux => "tmux",
-            Self::Terminal => "Ghostty",
-        }
-    }
-
-    const fn import_title(self) -> &'static str {
-        match self {
-            Self::Mux => "tmux configuration",
-            Self::Terminal => "Import from Ghostty?",
-        }
-    }
-
-    const fn import_button_label(self) -> &'static str {
-        match self {
-            Self::Mux => "tmux configuration…",
-            Self::Terminal => "Import Ghostty…",
-        }
-    }
-
-    const fn import_button_id(self) -> &'static str {
-        match self {
-            Self::Mux => "settings-import-tmux",
-            Self::Terminal => "settings-import-ghostty",
-        }
-    }
-
     const fn save_button_id(self) -> &'static str {
         match self {
             Self::Mux => "settings-save-mux-config",
@@ -2039,25 +2010,6 @@ impl ConfigFileKind {
         match self {
             Self::Mux => source,
             Self::Terminal => config::appearance_editor_view(&source),
-        }
-    }
-
-    fn donor_path(self) -> Option<PathBuf> {
-        match self {
-            Self::Mux => zz_daemon::discover_tmux_config(),
-            Self::Terminal => discover_ghostty_config(),
-        }
-    }
-
-    fn import_description(self, donor: &Path, target: &Path) -> String {
-        match self {
-            Self::Mux => format!("zz reads {} in place at daemon startup.", donor.display()),
-            Self::Terminal => format!(
-                "This rewrites the appearance keys in {} from {}, replacing any you changed \
-                 since the last import. The Ghostty file is not modified.",
-                target.display(),
-                donor.display(),
-            ),
         }
     }
 }

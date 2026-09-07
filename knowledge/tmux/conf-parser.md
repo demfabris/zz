@@ -18,7 +18,7 @@ discovers tmux configuration roots, then appends the first existing zz-owned pla
 in platform order. Top-level startup `-f` files replace the tmux roots while zz overrides still load
 last. `reload-config` replays the same discovery or explicit roots and the selected zz file;
 `replay_mux_config_files` records that ordered selection in `#{config_files}`. Later `source-file`
-calls do not append to the fact. The GUI's tmux action explains this discovery without copying files. See
+calls do not append to the fact. Settings lists the existing files in that order above the `zz/mux.conf` editor. See
 [Application configuration](/configuration/app-config.md).
 
 The lexer is a single character-by-character state machine (modeled on tmux's `cmd-parse.y` /

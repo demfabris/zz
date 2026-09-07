@@ -135,8 +135,8 @@ Three rules hold the design together:
 Terminal restores the structured five-group appearance surface: effective daemon values,
 per-key provenance, bounded inputs, palette swatches, and Reset controls all write through the
 comment-preserving `zz/config` writer. Multiplexer mounts the bounded `zz/mux.conf` editor with no
-line-number gutter and compact 12px text; it can replace the file verbatim from tmux. A clean mux
-editor reloads when entered, while import confirmation warns before discarding a dirty buffer.
+line-number gutter and compact 12px text, below a list of the files the daemon loads. A clean mux
+editor reloads when entered; a `mux.conf` that still begins with a pre-2026-09-05 tmux copy gets a one-click trim.
 
 Appearance and Terminal are long enough that mounting every off-screen control makes wheel-event
 layout proportional to the whole page. They therefore describe their content as individual rows

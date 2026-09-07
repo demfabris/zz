@@ -113,7 +113,7 @@ impl Root {
                     this.top_0().left_0()
                 })
                 .when(matches!(placement, Anchor::TopCenter), |this| {
-                    this.top_0().mx_auto()
+                    this.top_0().left_0().right_0().flex().justify_center()
                 })
                 .when(matches!(placement, Anchor::BottomRight), |this| {
                     this.bottom_0().right_0()

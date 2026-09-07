@@ -1,5 +1,3 @@
-//! Transient toasts stacked in a corner of the window.
-
 use std::{rc::Rc, time::Duration};
 
 use crate::cubic_ease;
@@ -194,7 +192,7 @@ impl Render for Notification {
             .occlude()
             .relative()
             .w(DEFAULT_WIDTH)
-            .items_start()
+            .items_center()
             .border_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().background.raised(1).opaque())
@@ -202,45 +200,51 @@ impl Render for Notification {
             .shadow_md()
             .p(CONTENT_PADDING)
             .gap_2()
-            .when_some(icon, |this, icon| {
-                this.child(
-                    h_flex()
-                        .h(LINE_HEIGHT)
-                        .flex_shrink_0()
-                        .debug_selector(|| "notification-icon".to_owned())
-                        .child(icon.with_size(Size::Small)),
-                )
-            })
             .child(
-                v_flex()
+                h_flex()
                     .flex_1()
-                    .gap_0p5()
-                    .overflow_hidden()
-                    .line_height(LINE_HEIGHT)
-                    .when_some(self.title.clone(), |this, title| {
+                    .min_w_0()
+                    .items_start()
+                    .gap_2()
+                    .when_some(icon, |this, icon| {
                         this.child(
-                            div()
-                                .text_size(TITLE_TEXT_SIZE)
-                                .font_semibold()
-                                .debug_selector(|| "notification-title".to_owned())
-                                .child(title),
+                            h_flex()
+                                .h(LINE_HEIGHT)
+                                .flex_shrink_0()
+                                .debug_selector(|| "notification-icon".to_owned())
+                                .child(icon.with_size(Size::Small)),
                         )
                     })
-                    .when_some(self.message.clone(), |this, message| {
-                        this.child(
-                            div()
-                                .text_size(DESCRIPTION_TEXT_SIZE)
-                                .debug_selector(|| "notification-message".to_owned())
-                                .child(message),
-                        )
-                    })
-                    .when_some(content, |this, content| this.child(content)),
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .gap_0p5()
+                            .overflow_hidden()
+                            .line_height(LINE_HEIGHT)
+                            .when_some(self.title.clone(), |this, title| {
+                                this.child(
+                                    div()
+                                        .text_size(TITLE_TEXT_SIZE)
+                                        .font_semibold()
+                                        .debug_selector(|| "notification-title".to_owned())
+                                        .child(title),
+                                )
+                            })
+                            .when_some(self.message.clone(), |this, message| {
+                                this.child(
+                                    div()
+                                        .text_size(DESCRIPTION_TEXT_SIZE)
+                                        .debug_selector(|| "notification-message".to_owned())
+                                        .child(message),
+                                )
+                            })
+                            .when_some(content, |this, content| this.child(content)),
+                    ),
             )
             .child(
                 div()
-                    .absolute()
-                    .top_1()
-                    .right_1()
+                    .flex_shrink_0()
+                    .self_center()
                     .invisible()
                     .group_hover("", |this| this.visible())
                     .child(

@@ -31,6 +31,7 @@ pub(super) struct SplitControls {
 struct PendingSplit {
     key: String,
     kind: SplitPaneKind,
+    direction: SplitDirection,
     removed_key: Option<String>,
     timed_out: bool,
 }
@@ -56,7 +57,9 @@ impl SettingsView {
                                 controls.rows[index]
                                     .binding
                                     .as_ref()
-                                    .map_or(Some(SplitPaneKind::Picker), split_binding_kind)
+                                    .map_or(Some(SplitPaneKind::Picker), |binding| {
+                                        split_binding_kind(binding, DIRECTIONS[index])
+                                    })
                             });
                             if let Some(kind) = kind {
                                 this.commit_mux_split(index, kind, window, cx);
@@ -77,7 +80,8 @@ impl SettingsView {
         let controls = self.mux_split_controls.as_mut().unwrap();
         if controls.pending.as_ref().is_some_and(|pending| {
             bindings.iter().any(|binding| {
-                binding.key == pending.key && split_binding_kind(binding) == Some(pending.kind)
+                binding.key == pending.key
+                    && split_binding_kind(binding, pending.direction) == Some(pending.kind)
             }) && pending
                 .removed_key
                 .as_ref()
@@ -88,7 +92,11 @@ impl SettingsView {
             controls.pending = None;
             controls.timeout = None;
         }
-        if controls.pending.is_some() {
+        if controls
+            .pending
+            .as_ref()
+            .is_some_and(|pending| !pending.timed_out)
+        {
             return;
         }
         for (row, direction) in controls.rows.iter_mut().zip(DIRECTIONS) {
@@ -122,16 +130,13 @@ impl SettingsView {
         if !mux.is_connected() || mux.attached_host() != HostId::LOCAL {
             return Some("Connect to a local session to edit split shortcuts.");
         }
-        if let Some(pending) = self
+        if self
             .mux_split_controls
             .as_ref()
             .and_then(|controls| controls.pending.as_ref())
+            .is_some_and(|pending| !pending.timed_out)
         {
-            return Some(if pending.timed_out {
-                "Saved. Reload configuration or reconnect to apply the shortcut."
-            } else {
-                "Applying split shortcut…"
-            });
+            return Some("Applying split shortcut…");
         }
         let file = self.config_file_editor(ConfigFileKind::Mux);
         if file.error.is_some() {
@@ -153,7 +158,10 @@ impl SettingsView {
                 "Choose what a split opens. Edit a shortcut and press Enter to apply it.",
             ));
         for (index, row) in controls.rows.iter().enumerate() {
-            let kind = row.binding.as_ref().and_then(split_binding_kind);
+            let kind = row
+                .binding
+                .as_ref()
+                .and_then(|binding| split_binding_kind(binding, DIRECTIONS[index]));
             let custom = row.binding.is_some() && kind.is_none();
             let disabled = disabled_reason.is_some() || custom;
             let label = kind.map_or(if custom { "Custom" } else { "Unbound" }, |kind| {
@@ -169,7 +177,7 @@ impl SettingsView {
                 "Split right"
             };
             let description = if custom {
-                "This shortcut has a custom command. Edit it in the configuration below."
+                "This shortcut uses another command or direction. Edit it in the overrides below."
             } else if index == 0 {
                 "Open a pane below the current pane."
             } else {
@@ -238,15 +246,15 @@ impl SettingsView {
             stack = stack.child(
                 SettingEntry::new(
                     "Apply saved shortcuts",
-                    "Retry loading the saved configuration.",
+                    "The saved shortcut did not appear. Review the overrides below, edit a shortcut, or retry loading.",
                 )
                 .control(
                     Button::new("settings-retry-split-reload")
                         .small()
                         .label("Reload")
+                        .disabled(disabled_reason.is_some())
                         .on_click(cx.listener(|this, _, _, cx| {
-                            config::request_daemon_reload(cx);
-                            this.wait_for_mux_split(cx);
+                            this.reload_mux_configuration(cx);
                         })),
                 ),
             );
@@ -285,7 +293,7 @@ impl SettingsView {
         let key = row.key.read(cx).value();
         let previous_key = row.binding.as_ref().map(|binding| binding.key.clone());
         if row.binding.as_ref().is_some_and(|binding| {
-            split_binding_kind(binding) == Some(kind)
+            split_binding_kind(binding, DIRECTIONS[index]) == Some(kind)
                 && zz_mux::parse_tmux_key(key.trim()).as_deref() == Some(binding.key.as_str())
         }) {
             return;
@@ -346,6 +354,7 @@ impl SettingsView {
                 removed_key: previous_key.filter(|previous| previous != &key),
                 key,
                 kind,
+                direction: DIRECTIONS[index],
                 timed_out: false,
             });
             self.wait_for_mux_split(cx);
@@ -373,6 +382,13 @@ impl SettingsView {
             });
         }));
         cx.notify();
+    }
+
+    pub(super) fn cancel_pending_mux_split(&mut self) {
+        if let Some(controls) = &mut self.mux_split_controls {
+            controls.pending = None;
+            controls.timeout = None;
+        }
     }
 }
 

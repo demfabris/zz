@@ -1043,6 +1043,27 @@ final class TerminalInteractionTests: XCTestCase {
     }
 
     @MainActor
+    func testHardwareFunctionAndInsertKeysReachTheTerminalContract() {
+        for number in 1...12 {
+            let key = TerminalGridView.map(
+                keyCode: UIKeyboardHIDUsage(rawValue: UIKeyboardHIDUsage.keyboardF1.rawValue + number - 1)!,
+                charactersIgnoringModifiers: "",
+                modifierFlags: [.control, .shift]
+            )
+            XCTAssertEqual(key?.code, UInt32(ZZ_KEY_FUNCTION.rawValue))
+            XCTAssertEqual(key?.scalar, 0)
+            XCTAssertEqual(key?.function, UInt8(number))
+        }
+        let insert = TerminalGridView.map(
+            keyCode: .keyboardInsert,
+            charactersIgnoringModifiers: "",
+            modifierFlags: []
+        )
+        XCTAssertEqual(insert?.code, UInt32(ZZ_KEY_INSERT.rawValue))
+        XCTAssertEqual(insert?.function, 0)
+    }
+
+    @MainActor
     func testSelectionEntryRacesTheScrollPanInsteadOfOutwaitingIt() throws {
         let view = TerminalGridView()
         let recognizers = view.gestureRecognizers ?? []

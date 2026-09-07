@@ -504,7 +504,10 @@ private struct IPadWorkspace: View {
             IPadSessionSidebar()
                 .navigationSplitViewColumnWidth(min: 230, ideal: 290, max: 380)
         } detail: {
-            IPadPaneWorkspace(showSettings: showSettings)
+            IPadPaneWorkspace(
+                showsHeader: columnVisibility == .detailOnly,
+                showSettings: showSettings
+            )
         }
         .navigationSplitViewStyle(.balanced)
         .coordinateSpace(name: IPadPanoramaCoordinateSpace.name)
@@ -911,6 +914,7 @@ private struct IPadPaneWorkspace: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ZZClientSettings.self) private var settings
     @EnvironmentObject private var store: ZZStore
+    let showsHeader: Bool
     let showSettings: () -> Void
     @State private var showsPanorama = true
     @State private var panoramaPhase = IPadPanoramaMotionPhase.entering
@@ -954,7 +958,7 @@ private struct IPadPaneWorkspace: View {
                     )
                     .ignoresSafeArea(
                         .container,
-                        edges: panoramaNavigationBarVisible ? .top : []
+                        edges: showsHeader && panoramaNavigationBarVisible ? .top : []
                     )
 
                     if let session = panoramaTransitionSession,
@@ -1092,7 +1096,7 @@ private struct IPadPaneWorkspace: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarVisibility(
-            showsPanorama && !panoramaNavigationBarVisible ? .hidden : .automatic,
+            showsHeader && (!showsPanorama || panoramaNavigationBarVisible) ? .visible : .hidden,
             for: .navigationBar
         )
         .onGeometryChange(
@@ -2307,7 +2311,7 @@ private struct PaneOverview: View {
                                 namespace: namespace,
                                 onOpen: {
                                     withAnimation(.snappy(duration: 0.32)) {
-                                        store.openPane(pane)
+                                        store.selectPane(pane, in: session)
                                     }
                                 },
                                 onClose: {
@@ -4060,10 +4064,11 @@ private struct FullscreenPane: View {
         .onChange(of: visiblePaneID) { _, paneID in
             guard let paneID,
                   paneID != pane.id,
+                  let session = store.selectedSession,
                   let target = panes.first(where: { $0.id == paneID }) else {
                 return
             }
-            store.openPane(target)
+            store.selectPane(target, in: session)
         }
         .sensoryFeedback(.selection, trigger: visiblePaneID)
         .sheet(isPresented: $showsComposer) {

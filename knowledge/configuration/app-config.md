@@ -51,8 +51,9 @@ The first-run import copies Ghostty appearance into `zz/config`. The daemon read
 configuration in place at startup: `/etc/tmux.conf`, `~/.tmux.conf`,
 `$XDG_CONFIG_HOME/tmux/tmux.conf`, then `~/.config/tmux/tmux.conf`, skipping missing files and
 repeated paths. The selected zz-owned `zz/mux.conf` loads last. Explicit `-f` files replace the
-tmux candidate list, in argument order, while `zz/mux.conf` remains the final layer. The tmux
-import entry points now explain discovery without copying or overwriting files. Settings saves
+tmux candidate list, in argument order, while `zz/mux.conf` remains the final layer. The CLI tmux
+import command explains discovery without copying files. Settings lists the existing files in that
+order above the `zz/mux.conf` editor, with Reload beside Save. Settings saves
 request `reload-config`, which replays the same discovery or explicit roots and the current
 zz mux layer, preserving bindings from tmux files.
 
@@ -239,7 +240,7 @@ runtime) flips the daemon gate directly, though the picker row follows the `zz/c
 the mux option. Panes that already exist keep rendering on reattach when the switch is off;
 flipping it never destroys pane state.
 
-`use-system-titlebar` maps to GPUI server-side decorations for the main and Settings windows on
+`use-system-titlebar` maps to GPUI server-side decorations for the main window on
 Linux. It is applied at window creation and re-requested for every open window after a watched
 configuration change, so switching modes does not require a restart. KDE supports the request on
 both Wayland and X11 in the pinned GPUI backend. A Wayland compositor without server-decoration
@@ -283,7 +284,7 @@ ignored; `window-background-blur` owns the native compositor request.
 Each chrome region paints its tint once; 0.93 over 0.93 becomes 0.995 and hides the
 backdrop. During active blur the workspace root leaves pane rectangles unpainted. The outer margin,
 split gaps, and rounded corner wedges paint chrome around opaque pane interiors. The Settings
-window has no workspace chrome plane and stays opaque.
+route paints an opaque background over the workspace.
 
 Linux window geometry starts from `window-corner-radius` (default 13.5px, targeting the macOS 27
 window radius . ~13.5pt tangent-circle equivalent, measured from a macOS 27 screenshot against the
@@ -531,7 +532,7 @@ always-live inactive-opacity factor.
 | Panes | **Layout** (`pane-gaps`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |
 | System | **Tray** (`tray`, only where the profile has one) · **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`, each row present only with its cargo feature). `auto-restart-stale-daemon` is a file key with no Settings row |
-| Multiplexer | **Split panes** (shortcut and Pane picker / Terminal / Browser for Split below and Split right), followed by the `zz/mux.conf` editor with Save and tmux discovery information |
+| Multiplexer | **Configuration files** (the existing tmux files, then `zz/mux.conf`, in load order) · **Split panes** (shortcut and Pane picker / Terminal / Browser for Split below and Split right) · `zz/mux.conf` editor with Reload and Save, plus a one-click trim when the file still begins with an old tmux copy |
 | Terminal | Full-file Ghostty-compatible configuration editor, with Save and **Import Ghostty…** |
 | About | Centered mark (the Dock render at 88pt), name, tagline and version badge · **Updates** (`check-for-updates`, plus a Latest-release row that reads the update state: Check now, or Update / What's new once a newer release is known; desktop only) · **Build** (`CARGO_PKG_VERSION`, OS · arch, the short `ZZ_GPUI_SOURCE` revision, with a copy button on Version that puts all three on one line) · **Project** (repository, releases, new issue, license) |
 
@@ -592,16 +593,32 @@ Renaming also unbinds the previous key; an occupied destination key is rejected.
 
 `crates/zz/src/config/mux_bindings.rs` preserves unrelated source text and replaces matching overrides
 in the trailing generated split-binding group when users change selections again. Simple direction
-flags and `-c "#{pane_current_path}"` map to the dropdown; other arguments or command chains show
+flags and `-c "#{pane_current_path}"` map to the dropdown only for the matching direction; opposite-direction bindings, other arguments, or command chains show
 **Custom** and remain editable in the text editor. Shortcut changes retain command arguments,
 repeat settings, and notes. Pane-type changes use the corresponding `split-picker`, `split-window`,
 or `split-browser` command; terminal and picker commands inherit the source terminal directory.
 The controls require a connected local session and a clean editor. They check for external file edits
 before saving and wait for the daemon to publish the changed binding before accepting another edit.
-If the daemon does not confirm within five seconds, Settings offers a reload retry.
+If the daemon does not confirm within five seconds, Settings refreshes the rows from the effective
+bindings, permits another edit, and offers a reload retry. Saving a manual editor change or requesting
+a reload cancels the earlier pending shortcut expectation.
 
-Multiplexer's **tmux configuration…** action explains that the daemon reads tmux files in place
-at startup. It does not overwrite the file or discard the editor buffer. Terminal's confirmed
+Multiplexer's **Configuration files** group lists the files the daemon loads, in order: every existing
+tmux candidate from `zz_daemon::tmux_config_candidates`, then the selected `zz/mux.conf`. The list is
+computed in the client from the same path functions the daemon uses, so it does not cover a daemon
+started with explicit `-f` roots; the CLI's `display-message -p "#{config_files}"` remains the full
+answer, and it matches tmux by naming missing implicit candidates too. The list is refreshed when the
+page is entered, after Save, and after **Reload**, which sits beside Save and sends `reload-config`
+to the local daemon. Reload is disabled while the editor has unsaved text or while the active
+connection is remote or disconnected.
+
+Imports before 2026-09-05 copied the whole tmux file into `zz/mux.conf`, and the daemon now reads
+that original first, so such a copy shadows later edits to the tmux file. When the saved `mux.conf`
+begins with the exact contents of a listed tmux file, a notice above the editor names that file and
+**Remove copied lines** replaces the editor buffer with whatever followed the copy. Nothing is written
+until Save, and the notice disappears as soon as the buffer no longer starts with the copy.
+
+Terminal's confirmed
 **Import Ghostty…** action re-reads the Ghostty donor into `zz/config`, rewriting each appearance
 key that donor sets and requesting a daemon reload. Theme imports store concrete colors for the
 active scheme. The button is disabled when no donor exists and its row names the path to read.
@@ -616,7 +633,7 @@ Reset removes the override and restores 100% through the normal config watcher.
 Structured control callbacks, including Terminal, only write `zz/config`; they never mutate the
 GPUI config global directly. Multiplexer writes `zz/mux.conf` and requests a daemon reload. The
 existing 500 ms watcher remains the single `zz/config` apply path, updates effective values and
-provenance, and refreshes the open dialog.
+provenance, and refreshes the open Settings route.
 
 # Examples
 

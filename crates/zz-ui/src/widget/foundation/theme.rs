@@ -45,7 +45,6 @@ pub enum ScrollbarShow {
 /// Where notification toasts stack, and how many.
 #[derive(Debug, Clone)]
 pub struct NotificationSettings {
-    /// The corner toasts stack into. Default: [`Anchor::TopRight`].
     pub placement: Anchor,
     /// Insets from the window edges.
     pub margins: Edges<Pixels>,
@@ -57,7 +56,7 @@ impl Default for NotificationSettings {
     fn default() -> Self {
         let offset = px(16.);
         Self {
-            placement: Anchor::TopRight,
+            placement: Anchor::TopCenter,
             margins: Edges {
                 top: TITLE_BAR_HEIGHT + offset,
                 right: offset,

@@ -96,7 +96,7 @@ impl SettingsSection {
             Self::Editor => "Set the typography and editing behavior used by editor panes.",
             Self::Panes => "Tune pane spacing, borders, corners, and shadows across the workspace.",
             Self::Multiplexer => {
-                "Edit the tmux-compatible configuration used for multiplexer behavior and key bindings."
+                "zz reads your tmux configuration as-is, then mux.conf on top for zz-only settings."
             }
             Self::Hosts => "Manage the ssh machines in the fleet.",
             Self::Advanced => {

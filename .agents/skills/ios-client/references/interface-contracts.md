@@ -51,6 +51,8 @@ Agent panes, settings, reconnect presentation, or accessibility.
   pane focus through the store.
 - `IPadStatusBar` is snapshot-backed and bounded around the active window. Do not imitate custom
   daemon-expanded status text until the FFI exports that payload.
+- Show the detail header only while the sidebar is retracted. Keep the sidebar's native visibility
+  control available and preserve Panorama's hidden header.
 
 ## Panorama
 
@@ -77,8 +79,9 @@ Agent panes, settings, reconnect presentation, or accessibility.
 - Wait for the first real window snapshot before starting the entrance transition.
 - Entrance and exit transform one fixed-size passive capture of the selected window instead of
   resizing live pane views. Lock the destination card rectangle before movement starts. During exit,
-  restore the detail navigation bar before the reverse transform and mount the live workspace only
-  after it completes. Changing that order recreates the visible navigation-bar jump.
+  restore the detail navigation bar before the reverse transform only when the sidebar is retracted,
+  and mount the live workspace only after it completes. Changing that order recreates the visible
+  navigation-bar jump.
 - Preserve Reduce Motion with target alignment and a short crossfade without scale or blur movement.
 
 ## Terminal rendering and input
@@ -92,6 +95,9 @@ Agent panes, settings, reconnect presentation, or accessibility.
   font and reports geometry from its actual UIKit bounds.
 - Direct text uses `UIKeyInput`; hardware keys use raw press, repeat, and release events. Do not fold
   either path into hardcoded Swift shortcuts.
+- The Prefix control uses `switch-client -T prefix` to enter the daemon's key table. `send-prefix`
+  writes a prefix character into the PTY and is for nested multiplexers.
+- Previous and next pane controls use daemon-backed pane selection, just like sidebar navigation.
 - Shift, Control, and Alt are one-shot after one tap, lock after a double tap, and clear when the
   locked control is tapped again. Current reset points are scene transitions, session or pane
   navigation, overview entry, connection teardown, and Prefix dispatch. `releaseTerminalInput()` by

@@ -746,15 +746,16 @@ final class ZZStore: ObservableObject {
     }
 
     func selectAdjacentPane(from pane: UInt64, offset: Int) {
-        guard offset != 0, let panes = selectedSession?.panes,
-              let current = panes.firstIndex(where: { $0.id == pane }) else {
+        guard offset != 0, let session = selectedSession,
+              let current = session.panes.firstIndex(where: { $0.id == pane }) else {
             return
         }
+        let panes = session.panes
         let next = current + offset
         guard panes.indices.contains(next) else {
             return
         }
-        openPane(panes[next])
+        selectPane(panes[next], in: session)
     }
 
     func showOverview() {
@@ -898,7 +899,8 @@ final class ZZStore: ObservableObject {
     }
 
     func sendPrefix(to pane: UInt64) {
-        _ = execute("send-prefix", args: ["-t", "%\(pane)"])
+        requestKeyboard(for: pane)
+        _ = execute("switch-client", args: ["-T", "prefix"])
         terminalModifierState.reset()
     }
 

@@ -69,11 +69,17 @@ pub(crate) fn preferred_split_binding(
         })
 }
 
-pub(crate) fn split_binding_kind(binding: &KeyBindingSnapshot) -> Option<SplitPaneKind> {
+pub(crate) fn split_binding_kind(
+    binding: &KeyBindingSnapshot,
+    direction: SplitDirection,
+) -> Option<SplitPaneKind> {
     let [command] = binding.commands.as_slice() else {
         return None;
     };
     let kind = command_kind(command)?;
+    if command_direction(command) != Some(direction) {
+        return None;
+    }
     let parsed = parse_tmux_command_options(command_spec(&command.name)?, command).ok()?;
     if (parsed.options.contains(&TmuxOption::Flag("-h"))
         && parsed.options.contains(&TmuxOption::Flag("-v")))
@@ -167,7 +173,7 @@ pub(crate) fn update_split_binding(
     }
     let old_kind = original
         .map(|binding| {
-            split_binding_kind(binding)
+            split_binding_kind(binding, direction)
                 .ok_or_else(|| "Edit this custom binding in the configuration editor.".to_owned())
         })
         .transpose()?;
@@ -249,23 +255,26 @@ mod tests {
     #[test]
     fn recognizes_inherited_directory_and_rejects_custom_commands() {
         let mut current = binding("-", "split-window", &["-v", "-c", "#{pane_current_path}"]);
-        assert_eq!(split_binding_kind(&current), Some(SplitPaneKind::Terminal));
+        assert_eq!(
+            split_binding_kind(&current, SplitDirection::Vertical),
+            Some(SplitPaneKind::Terminal)
+        );
         current.commands[0].args.push("htop".into());
-        assert_eq!(split_binding_kind(&current), None);
+        assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
         current = binding("-", "split-window", &["-v", "-c", "/tmp"]);
-        assert_eq!(split_binding_kind(&current), None);
+        assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
         current = binding("-", "split-window", &["-dv"]);
-        assert_eq!(split_binding_kind(&current), None);
+        assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
         for name in ["split-window", "split-picker", "split-browser"] {
             current = binding("-", name, &["-hv"]);
-            assert_eq!(split_binding_kind(&current), None);
+            assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
             current = binding("-", name, &["-h", "-v"]);
-            assert_eq!(split_binding_kind(&current), None);
+            assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
         }
         current
             .commands
             .push(CommandInvocation::new("select-pane", ["-L"]));
-        assert_eq!(split_binding_kind(&current), None);
+        assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
     }
 
     #[test]
@@ -356,6 +365,29 @@ mod tests {
                     SplitDirection::Vertical,
                     key,
                     SplitPaneKind::Picker,
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn opposite_direction_bindings_cannot_be_changed_by_a_split_row() {
+        let current = binding("\"", "split-window", &["-h"]);
+        assert_eq!(split_binding_kind(&current, SplitDirection::Vertical), None);
+        assert_eq!(
+            split_binding_kind(&current, SplitDirection::Horizontal),
+            Some(SplitPaneKind::Terminal)
+        );
+        for kind in [SplitPaneKind::Terminal, SplitPaneKind::Picker] {
+            assert!(
+                update_split_binding(
+                    "",
+                    std::slice::from_ref(&current),
+                    Some(&current),
+                    SplitDirection::Vertical,
+                    "v",
+                    kind,
                 )
                 .is_err()
             );

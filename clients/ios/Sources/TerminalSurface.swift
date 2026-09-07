@@ -236,7 +236,7 @@ final class TerminalGridView: UIView, UIKeyInput {
     }
     var onText: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
-    var onKey: ((UInt32, UInt32, UInt8, UInt8) -> Void)?
+    var onKey: ((UInt32, UInt32, UInt8, UInt8, UInt8) -> Void)?
     var onResize: ((TerminalLayout, Bool) -> Void)?
     var onScroll: ((Int) -> Void)?
     var onFontSizeStep: ((Int) -> Void)?
@@ -330,6 +330,7 @@ final class TerminalGridView: UIView, UIKeyInput {
     func deleteBackward() {
         onKey?(
             UInt32(ZZ_KEY_BACKSPACE.rawValue),
+            0,
             0,
             0,
             UInt8(ZZ_KEY_PRESS.rawValue)
@@ -510,7 +511,7 @@ final class TerminalGridView: UIView, UIKeyInput {
                 continue
             }
             forwarded = true
-            onKey?(mapped.code, mapped.scalar, modifierBits(key.modifierFlags), action)
+            onKey?(mapped.code, mapped.scalar, mapped.function, modifierBits(key.modifierFlags), action)
         }
         return forwarded
     }
@@ -1000,7 +1001,7 @@ final class TerminalGridView: UIView, UIKeyInput {
         return value
     }
 
-    private func map(_ key: UIKey) -> (code: UInt32, scalar: UInt32)? {
+    private func map(_ key: UIKey) -> (code: UInt32, scalar: UInt32, function: UInt8)? {
         Self.map(
             keyCode: key.keyCode,
             charactersIgnoringModifiers: key.charactersIgnoringModifiers,
@@ -1012,7 +1013,15 @@ final class TerminalGridView: UIView, UIKeyInput {
         keyCode: UIKeyboardHIDUsage,
         charactersIgnoringModifiers: String,
         modifierFlags: UIKeyModifierFlags
-    ) -> (code: UInt32, scalar: UInt32)? {
+    ) -> (code: UInt32, scalar: UInt32, function: UInt8)? {
+        if (UIKeyboardHIDUsage.keyboardF1.rawValue...UIKeyboardHIDUsage.keyboardF12.rawValue)
+            .contains(keyCode.rawValue) {
+            return (
+                UInt32(ZZ_KEY_FUNCTION.rawValue),
+                0,
+                UInt8(keyCode.rawValue - UIKeyboardHIDUsage.keyboardF1.rawValue + 1)
+            )
+        }
         let code: UInt32?
         switch keyCode {
         case .keyboardDeleteOrBackspace: code = UInt32(ZZ_KEY_BACKSPACE.rawValue)
@@ -1020,6 +1029,7 @@ final class TerminalGridView: UIView, UIKeyInput {
         case .keyboardTab: code = UInt32(ZZ_KEY_TAB.rawValue)
         case .keyboardEscape: code = UInt32(ZZ_KEY_ESCAPE.rawValue)
         case .keyboardDeleteForward: code = UInt32(ZZ_KEY_DELETE.rawValue)
+        case .keyboardInsert: code = UInt32(ZZ_KEY_INSERT.rawValue)
         case .keyboardHome: code = UInt32(ZZ_KEY_HOME.rawValue)
         case .keyboardEnd: code = UInt32(ZZ_KEY_END.rawValue)
         case .keyboardPageUp: code = UInt32(ZZ_KEY_PAGE_UP.rawValue)
@@ -1031,7 +1041,7 @@ final class TerminalGridView: UIView, UIKeyInput {
         default: code = nil
         }
         if let code {
-            return (code, 0)
+            return (code, 0, 0)
         }
         let hasTerminalModifier = modifierFlags.contains(.control) ||
             modifierFlags.contains(.alternate) ||
@@ -1041,7 +1051,7 @@ final class TerminalGridView: UIView, UIKeyInput {
               let scalar = charactersIgnoringModifiers.unicodeScalars.first else {
             return nil
         }
-        return (UInt32(ZZ_KEY_CHARACTER.rawValue), scalar.value)
+        return (UInt32(ZZ_KEY_CHARACTER.rawValue), scalar.value, 0)
     }
 }
 
@@ -1102,8 +1112,15 @@ struct TerminalSurface: UIViewRepresentable {
         view.pane = pane
         view.onText = { text in store.sendText(text, to: pane) }
         view.onPaste = { text in store.paste(text, to: pane) }
-        view.onKey = { code, scalar, modifiers, action in
-            store.sendKey(code, to: pane, codepoint: scalar, action: UInt32(action), modifiers: modifiers)
+        view.onKey = { code, scalar, function, modifiers, action in
+            store.sendKey(
+                code,
+                to: pane,
+                codepoint: scalar,
+                function: function,
+                action: UInt32(action),
+                modifiers: modifiers
+            )
         }
         view.onResize = { layout, stable in
             store.resize(pane: pane, layout: layout, stable: stable)

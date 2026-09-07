@@ -1,24 +1,25 @@
 ---
 name: zz-worker
-description: Autonomous worker for the zz tmux-compat campaign dispatch board (GitHub issue #7 on demfabris/zz). Use whenever the user says to grab work from the board or issue 7, work a front, act as a campaign worker, "grab a front and do it all the way", or spawn a compat worker. Turns this session into a self-contained worker that claims a front, proves it in an isolated worktree, integrates to main through the MAIN lock, and loops until nothing is claimable.
+description: Implement an agreed batch for the zz tmux-compat campaign using its dispatch board (GitHub issue 7 on demfabris/zz). Use when continuing the campaign, taking a board front, or completing compatibility work. Preserve board ownership, finish implementation before final validation, and publish through MAIN only when authorized.
 ---
 
-# zz campaign worker
+# zz tmux compatibility campaign
 
-You are one worker among several running in parallel on this machine. The board
-(issue #7 on demfabris/zz) hands out bounded fronts; you take one all the way
-through integration, then take another. No human reviews your work: the
-integration gate is the reviewer, so run it honestly or the next worker inherits
-your mess.
+Read `compat/orchestration/HANDOFF.md` and the campaign log's latest entry first.
+Implement the agreed batch directly in the current session. The campaign does
+not prescribe models, reasoning effort, delegation, agent roles, lane counts or
+time budgets. Old run scripts and dated reports are historical references.
 
-The issue body is the protocol's source of truth and may have evolved since this
-skill was written. Read it first (`gh issue view 7 --repo demfabris/zz`) and
-follow it where it disagrees with anything below.
+Finish implementation, fixtures and integration conflicts before running the
+validation harness. Use small pin probes or local unit checks only when needed
+to answer an implementation question. Run the full strict corpus and attached
+fixture once on the completed combined candidate, with the required workspace
+checks. Preserve the strict stamp rule and reuse valid results for unchanged
+inputs, including documentation updates and publication of tested history.
 
-This skill is the single-worker mode. Since 2026-08-31 the campaign has mostly
-run as orchestrated cycles (three Opus lanes, a Fable reviewer each, a Fable
-integration gate) driven from one session; if you are that orchestrator, start
-from `compat/orchestration/HANDOFF.md` instead of claiming a front yourself.
+Read the issue body (`gh issue view 7 --repo demfabris/zz`) for board verbs,
+states, leases and zones. Current user instructions and the handoff govern work
+scope and validation sequencing.
 
 ## Identity, once
 
@@ -34,10 +35,8 @@ your tool copy is `/tmp/zz-board-<name>.py` (the name only: the id's slash
 would make it a bogus path). Write both down in your first message and never
 change them: the board tracks your claims and leases by the exact id string.
 
-If you fan work out to subagents (parallel oracle probes, test shards, code
-mining), they inherit your holder id and never speak on the board: no claims,
-no comments, no work outside your claimed zones and reserved paths. One
-holder, one voice.
+Keep one board identity for this session. Record ownership of claimed zones and
+reserved paths, and keep board writes under that identity.
 
 Shell state does not persist between your Bash calls, so an `export` is gone by
 the next command. Prefix every board invocation instead:
@@ -60,7 +59,7 @@ git show origin/main:compat/board.py > /tmp/zz-board-<name>.py 2>/dev/null \
 The issue may show a simpler bootstrap with a shared `/tmp/zz-board.py`; the
 per-worker filename and trying origin/main first are deliberate refinements for
 parallel workers on one machine, not a protocol conflict. "The issue wins"
-applies to the protocol itself: verbs, states, zones, the gate.
+applies to the protocol itself: verbs, states, zones and leases.
 
 The tool folds the issue's comments into board state. Always act through it:
 `status` shows everything, `pick` names your next front, `claim` adjudicates the
@@ -70,10 +69,10 @@ never edit an issue comment; an edited comment is void by protocol.
 Run board commands from inside the repo checkout: `claim` resolves the base
 commit with `git ls-remote origin`, which fails elsewhere.
 
-## The loop
+## Implement and validate a batch
 
-1. `pick`, then `claim <front-id>`. On `LOST`, pick again; losing a race costs
-   nothing.
+1. Select fronts within the user's agreed scope, then `claim <front-id>`.
+   On `LOST`, inspect the board and choose available work in that scope.
 2. Make an isolated worktree for the front and work only there:
    `git worktree add ../zz-<front-id> origin/main`. The primary checkout at
    `~/dev/zz` usually holds other sessions' uncommitted work: read it, add
@@ -83,31 +82,30 @@ commit with `git ls-remote origin`, which fails elsewhere.
    pinned tmux source and binary (`compat/fetch-tmux.sh` builds it), not memory.
    Stay inside your claimed zones (`zones` subcommand maps them to paths); if
    you need one more, `renew <front-id> --zones <zone>` and stop if refused.
-4. Prove it focused: package tests plus a differential scenario at the path your
-   front reserves. `compat/run.sh <scenario-name>` runs one scenario against
-   both engines. The first corpus run builds the pinned tmux and is slow; that
-   is normal.
-5. One commit, no attribution trailers, then
-   `git push origin HEAD:campaign/<front-id>` and post `candidate` with your
-   proof lines. A repaired or rebased repost never moves a published branch:
-   push a fresh immutable branch (`campaign/<front-id>-<short-sha>`) and post
-   a new candidate record. Never force-update any campaign branch.
-6. Integrate it yourself: `claim MAIN --lease 2h`. Holding MAIN, rebase onto
-   fresh origin/main, run the full gate from the issue (workspace tests, clippy,
-   the DELTA corpus per the issue's gate rules — `compat/run.sh --delta
-   <base>..HEAD --commands <touched> --strict-geometry`, full corpus only for
-   harness-touching or wide candidates; nightly CI runs the full corpus —
-   registry close + tracker check/write-report, rollup counts),
-   `git push origin HEAD:main`, post `integrated`, `release MAIN`. Only ever push `campaign/*` branches, plus
-   main while holding MAIN, and never force-push anything.
-   Gate stages are long and verdicts land while they run: re-read your front's
-   comments between stages (after the workspace tests, before the corpus, and
-   always immediately before push). A standing DO-NOT-INTEGRATE found at any
-   of those checkpoints means stop the gate, release MAIN, and repair; do not
-   finish a gate you already know cannot be pushed.
-   If `compat/board.py` is not on origin/main yet, merge
-   `origin/campaign/board` as part of your first integration.
-7. Remove the worktree (`git worktree remove ../zz-<front-id>`) and go to 1.
+4. Finish the batch's implementation and fixtures. Reserve each scenario path
+   on its front. Use small probes or local unit checks for concrete questions;
+   defer corpus and attached-client runs until implementation is complete.
+5. When the batch is ready, `claim MAIN --lease 2h`, combine its changes on
+   fresh origin/main and resolve conflicts. Inspect the diff and commit the
+   final code when authorized, without attribution trailers. Freeze source
+   and harness inputs during validation.
+6. Run the required workspace tests, clippy and registry/document checks, then
+   one `just compat --strict-geometry --attached-client` for the combined batch.
+   Confirm full counts, registered known rows and a clean PASS stamp with
+   `just compat --check-summary`. Fix failures before retrying affected checks;
+   a failed or invalidated full run needs a successful full run before a current
+   PASS can be recorded. Partial runs cannot replace it. Documentation-only
+   changes and publication of unchanged tested history reuse the existing proof.
+7. Update the registry, generated report, tracker and log from actual results.
+   When publication is authorized, push the batch's branch and main while
+   holding MAIN, record `candidate` and `integrated` for its fronts with the
+   tested commit and proof, then release MAIN and completed claims. Never
+   force-push. For an already published campaign branch, use a fresh immutable
+   name such as `campaign/<front-id>-<short-sha>` when its history changes.
+8. Re-read front comments before publication and resolve confirmed blockers.
+   Preserve unfinished work and release MAIN if repairs will take more than a
+   few minutes. Remove only this task's delivered worktrees when appropriate.
+   Continue with another batch only within the user's requested scope.
 
 A lone `zz-daemon` test failure in the workspace run is often load flake:
 re-run that test alone before treating it as red (AGENTS.md has the list).
@@ -135,25 +133,15 @@ anything: if someone claimed your front, stop and let them have it.
   under the front claim, and re-claim MAIN when candidate-ready. A held MAIN
   starves every queued candidate. If the repair is wrong-shaped, post
   `rejected` on your own front instead and release both.
-- Push of main rejected as non-fast-forward: check who moved it before
-  assuming a lock violation. Owner-authored commits landing mid-gate are
-  normal; follow the issue's "Owner pushes during a gate" rule (conflict-free
-  rebase + disjoint paths = bounded rerun of your package tests and reserved
-  scenario, then push). A non-owner push means the lock was violated: never
-  force; re-rebase, re-gate, push again.
-- `pick` says `NOTHING-CLAIMABLE`: claim TRIAGE, mint fronts from open registry
-  groups per the issue's triage section (bounded to one 6h lease each, unique
-  scenario path, deps where needed), release, and continue. Mint for the
-  future, not just for now: a front blocked behind an active claim still
-  counts, because it becomes claimable the moment that claim integrates. Never
-  release TRIAGE with nothing minted while open registry groups remain, and
-  pair every withdrawal of a real contract with a corrected re-mint, or a
-  residual saying exactly what must change before re-minting. If the registry
-  itself has nothing left to mint, you are done.
-- `NOTHING-CLAIMABLE` while another worker holds TRIAGE: do not stop and do
-  not camp the lock. Re-check `status` every few minutes; their mints or an
-  integration will free work. Spend the wait on review (below).
-- A front is in `CANDIDATE` and you are idle or blocked: review it. Fetch its
+- Push of main rejected as non-fast-forward: inspect the new commits and
+  reconcile the candidate without force-pushing. Reuse checks only where their
+  inputs stayed unchanged. The final `--check-summary` must pass; changes that
+  invalidate the stamped proof require another full run before publication.
+- `pick` says `NOTHING-CLAIMABLE`: inspect whether the agreed work needs a new
+  front or is held elsewhere. Use TRIAGE to mint only work within that scope,
+  with unique scenario paths and dependencies. Record blockers and preserve
+  unfinished work instead of expanding into an unrequested campaign loop.
+- If inspecting an existing `CANDIDATE`, fetch its
   `campaign/*` branch, read the diff against the front's contract, and probe
   the pinned oracle where behavior is in doubt. File each confirmed
   in-contract failure as a `residual` on that front, then post a `note` with
@@ -198,7 +186,7 @@ expensive misbehavior on this board.
 
 ## Stopping
 
-Stop only when nothing is claimable and triage has nothing to mint, or the user
-interrupts. Close with a short report: fronts integrated with their merge
+Stop when the agreed work is complete, blocked, or the user interrupts. Close
+with a short report: fronts integrated with their merge
 commits, fronts released and why, residuals filed, and what the board looked
 like when you left.

@@ -11,6 +11,8 @@
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
 > Orchestration: **CYCLE 13 INTEGRATED; THE AGREED-SCOPE REGISTRY IS CLOSED. THE INSTRUMENT PASS IS COMPLETE ON LOCAL `codex/attached-client-instrument`. DELIVERY AND THE RETROSPECTIVE WORK IN CYCLES 14 TO 16 REMAIN; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+>
+> Workflow (2026-09-05): **IMPLEMENT THE AGREED BATCH FIRST, THEN VALIDATE THE COMBINED CANDIDATE ONCE. NO PRESCRIBED MODELS, DELEGATION, AGENT ROLES, LANE COUNTS OR TIME BUDGETS.**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -286,6 +288,10 @@ campaign decision.
 
 When sources disagree, use this order and correct stale documentation in the same slice:
 
+Current user instructions and the workflow in `compat/orchestration/HANDOFF.md` govern how work is
+executed. The order below governs behavior and evidence. Dated execution plans and run scripts are
+historical references.
+
 1. Current zz source and tests plus measured behavior from the clean pinned tmux checkout.
 2. [`compat/tmux-gaps.json`](compat/tmux-gaps.json) for live gap IDs, decisions, status,
    dependencies, evidence, acceptance, and closed history.
@@ -310,18 +316,12 @@ old drop-in plan are not live status.
 
 ## Resume contract
 
-Two modes continue the campaign; both start from published `origin/main` and speak through issue #7.
+Read [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) for the current state,
+remaining work, machine checklist and board rules. Implement the agreed batch directly; use
+issue #7 for ownership and publication coordination. The `zz-worker` skill describes the board
+operations without requiring a particular model or delegation workflow.
 
-1. Orchestrated cycles, the mode since 2026-08-31: one Claude Code session runs the Workflow
-   script in [`compat/orchestration/`](compat/orchestration/) (three Opus implementor lanes, one
-   Fable reviewer per lane, one Fable integration gate). Read
-   [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) first; it holds the pause
-   state, the census of what is left, the checklist for resuming on another machine, and the board
-   tool quirks.
-2. A single autonomous worker: the `zz-worker` skill in `.agents/skills/zz-worker/` claims a front
-   from the board, proves it in a worktree, and integrates through the MAIN lock.
-
-Either way, begin here:
+Begin here:
 
 ```sh
 cd "$HOME/dev/zz"
@@ -331,12 +331,13 @@ git fetch https://github.com/demfabris/zz.git main:refs/remotes/origin/main
 git rev-parse HEAD origin/main
 ```
 
-Preserve unrelated changes in the standard checkout. Never work in it directly; create a fresh
-dedicated worktree from the verified `origin/main`:
+Preserve unrelated changes in the standard checkout. Reuse this task's existing worktree when it
+holds unfinished or validated work. For new work, create a dedicated worktree from verified
+`origin/main`:
 
 ```sh
-git worktree add "$HOME/dev/zz-<lane-or-front>" origin/main
-cd "$HOME/dev/zz-<lane-or-front>"
+git worktree add "$HOME/dev/zz-<batch-or-front>" origin/main
+cd "$HOME/dev/zz-<batch-or-front>"
 ```
 
 If that path already exists, inspect and reuse it safely rather than overwriting it. From the
@@ -346,35 +347,38 @@ selected clean worktree, run:
 python3 compat/tmux-tracker.py check
 compat/run.sh --check-summary
 python3 compat/progress.py
-just compat-check
 ```
+
+Run `just compat-check` with the final validation below, not as a routine startup step.
+`--check-summary` only inspects the saved proof; a stale result identifies validation still owed
+and does not require rerunning the harness before implementation.
 
 Compare live output with the checkpoint above. If HEAD or tracker counts moved, update this file
 before implementing. Regenerate and re-rank the whole active registry before freezing a batch
 because a newly exposed daily, script, remote, or silent mismatch may outrank the forecast.
 
-Each lane or front works one bounded milestone at a time:
+Work on one agreed batch at a time:
 
 1. Read `AGENTS.md`, this file, the live gap record, the cohort playbook, the harness playbook, and
    the relevant knowledge and source owners.
 2. Probe the pinned tmux source and binary. Record the smallest acceptance contract that can prove
    the behavior wrong.
-3. Freeze the exact tracker items and exclusions. Assign disjoint paths when several agents work in
-   parallel.
-4. Implement one production path. Put unrelated discoveries into their own tracker group or later
-   slice.
-5. Run focused tests and the smallest differential or attached-client proof that exercises the
-   changed behavior.
-6. Move completed adopt work into `closed`, regenerate the report, and update every knowledge page
-   whose status or evidence changed.
-7. Obtain an independent code and evidence review.
-8. Run the slice gates, update this file and issue #7, then create one milestone commit only when the
-   current task authorizes commits.
-9. Push only through the board's MAIN lock: the integration gate, or the worker holding MAIN.
+3. Freeze the tracker items and exclusions and record file ownership on the board.
+4. Finish the implementation and its fixtures. Use small oracle probes or local unit checks to
+   answer specific questions. Record unrelated discoveries for later work.
+5. Combine the batch's changes, resolve conflicts and inspect the result. Commit the final code
+   when authorized so the full harness stamp can name the tested revision.
+6. Run final validation once on the completed candidate. Fix failures before retrying; a failed or
+   invalidated full run must pass in full before claiming a current PASS.
+7. Close only proven items, regenerate the report and update affected knowledge, tracker and log
+   records. Reuse valid runtime results when only documentation or records changed.
+8. Publish the validated batch together when authorized, holding MAIN. Separate implementation
+   commits do not require separate full runs or publication gates.
 
 The 2026-08-29 request resumed the campaign through slices 10w to 10ag (commit `562b950c`). The
 dispatch board took over on 2026-08-30, and the orchestrated cycles 2 through 4 on 2026-09-01
-carried `origin/main` to `8dd47505`, where the campaign is paused for a machine move.
+carried `origin/main` to `8dd47505`, where it paused at that time for a machine move. Those execution
+plans are historical; the current workflow above supersedes their agent and gate instructions.
 
 ## Persisted acceptance evidence for 10ag
 
@@ -1414,7 +1418,11 @@ every other channel clean. Its SHA-256 digest is
 
 ## Validation and closure gates
 
-Run the cheapest focused proof first. Before closing a normal slice, require:
+Finish the agreed implementation batch before running these validation stages. During development,
+use only the small probes or local tests needed to answer an implementation question. Defer the
+corpus, attached-client fixture and workspace-wide checks until the combined candidate is ready.
+
+For a completed code batch, run:
 
 ```sh
 python3 compat/tmux-tracker.py write-report
@@ -1426,17 +1434,22 @@ cargo test --workspace --all-features
 bash -n compat/attached-client.sh
 python3 .agents/skills/okf/scripts/okf.py validate knowledge
 git diff --check
+just compat --strict-geometry --attached-client
 compat/run.sh --check-summary
 ```
 
-Run the equivalent syntax check for every other shell file changed by the slice.
+Run the equivalent syntax check for every other changed shell file. Keep the code and harness
+fixed during the full run. Run the full corpus once for the combined batch, then publish that
+tested history when authorized.
 
 When a full workspace daemon test fails with the exact headless or parallel-load behavior described
 in `AGENTS.md`, rerun that exact test alone before classifying it. Record both results.
 
-A checkpoint that changes or invalidates the accepted corpus must also complete the full strict and
-attached run. A partial run, reduced scenario count, skip, interrupted run, or headless-only run
-cannot replace the persisted summary.
+If validation fails, complete the repairs before rerunning affected checks. Code or fixture changes
+that invalidate the PASS require a new successful full run. A partial run, reduced scenario count,
+skip, interrupted run, or headless-only run cannot replace the persisted summary. Documentation-only
+changes and publication of unchanged tested history reuse the existing proof; run only the relevant
+document checks and `--check-summary` for those updates.
 
 ## Practical exit gate
 
@@ -1480,6 +1493,6 @@ Never hand-edit `knowledge/tmux/gaps.md`. Change the JSON registry and run
 - Never stash, hard-reset, clean, or discard work you did not author.
 - Stage exact paths or hunks, never the entire tree.
 - Do not add attribution trailers.
-- One reviewed, proven, documented slice maps to one milestone commit.
+- Keep commits scoped; validate the completed batch as a whole before publication.
 - Commit only with current authorization. Push only through the board's MAIN lock.
 - Keep issue #7 open until the practical exit gate passes.

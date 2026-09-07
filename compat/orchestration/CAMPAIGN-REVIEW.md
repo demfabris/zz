@@ -2,6 +2,10 @@
 
 Written 2026-09-04 from eight lens reports and their long-form notes in this directory, with the disputed claims re-checked against the registry, the pinned C, the scenarios and the zz source at HEAD. Read-only: no build, no harness run, no board writes. Numbers below are stated only where I verified them myself; counts a reviewer produced by census are attributed to that lens.
 
+The findings below are a dated snapshot. The "Next cycles" section was updated on 2026-09-05
+to follow fabrico's implementation-first workflow in `HANDOFF.md`; older execution recommendations
+in the review and its source reports are historical.
+
 ## Headline
 
 The registry is closed against its own list: `compat/progress.py` reports 99.7% (303 of 304 frozen items), 64 of 65 groups done, one open group (`clients.byte-clean-consumers`, 3 items), 173 closed records, 215 scenarios (100 plain, 115 smoke). The method held: a pinned tmux as the truth, a differential harness, a registry whose acceptance clauses are the contract, adversarial reviewers who re-probe the pin, and hard per-group budgets. Keep all of that.
@@ -90,33 +94,64 @@ Two sub-lenses fold into it:
 
 ## Next cycles
 
-The campaign's shape stays: two lanes per cycle, Opus 5 at xhigh for workers, reviewers and gate, hard per-group budgets in minutes, one lane owning any protocol bump, pairwise-disjoint board zones (`python3 compat/board.py zones`: mux-command, mux-model, mux-formats, mux-options, config-parser, daemon-core, daemon-status, control-client, client-core, raw-tui, terminal-engine, protocol-message, protocol-key, protocol-catalog, desktop-gpui). Where a lane needs a few lines outside its zones it declares them one by one in notes, as cycle 13 did for `daemon.rs` regions.
+Workflow updated by fabrico on 2026-09-05: implement the agreed batch directly, then validate the
+completed combined candidate. The scopes below do not prescribe agents, models, reasoning effort,
+lane counts, time budgets, or separate publication gates. Use board zones for ownership and
+reconcile any protocol change across the batch. Small pin probes and local unit checks can resolve
+implementation questions; reserve corpus and attached-client validation for the finished batch.
+Follow `HANDOFF.md`'s "Current workflow" for the final full run and strict PASS stamp.
 
-### Before cycle 14: an instrument pass, not a cycle
+### Before cycle 14: instrument pass completed locally
 
-The three biggest structural gaps are not lane-shaped. One owner, hours each, no reviewers:
+The instrument branch completed these prerequisites on 2026-09-05. The full run records PASS at
+`f80405390af4`; delivery to main remains pending. See `HANDOFF.md` and the campaign log for proof.
 
-1. Fix the attached-client fixture on this box (`probe_command_output_navigation`, `probe_command_prompt`) and make `--check-summary` refuse a `PASS` footer that carries no commit stamp or predates the tip. Until this is done every attached-only close is unverified here.
-2. A launcher mode in `compat/diff-scenario.sh`: the zz side runs the installed layout (`cli` beside `zz`), no `--socket`, `ZZ_SOCKET` unset, a scrubbed PATH with the pin tmux first. Finding 3 cannot be proved without it; `compat/packaged-cli.sh` exits 2 off macOS and is not called.
-3. A row-level TUI differential: run zz-tui below 50 columns or with the sidebar toggled off, `status off` on the recorder, and diff the last row's `capture-pane -p -e` bytes over a small format corpus. Without it no status rendering claim has a differential guard.
-4. Write the cycle 12 and 13 entries into CAMPAIGN-LOG.md and refresh HANDOFF.md from the registry.
+1. Fixed attached-client readiness, command-output search and cancellation. `--check-summary`
+   rejects missing or dirty stamps, unrelated history, and changes to the fixture or crates after
+   the stamped revision.
+2. Added launcher mode in `compat/diff-scenario.sh`, exercising default socket discovery and the
+   installed executable layout. Findings 2 and 3 now have a suitable test path.
+3. Added `compat/status-row.sh` to measure the rendered status row. Its observed differences remain
+   work for the desktop status batch.
+4. Recorded cycles 12 and 13 and refreshed the handoff from the registry.
 
-### Cycle 14: the first hour
+### Cycle 14: keys, buffers and terminal state
 
-- Lane A, branch `campaign/batch-keys-contract`, zones protocol-key, raw-tui, client-core; declared excursion: `daemon.rs:12659` (`switch-client -T` storage). Budgets: split `keys.default-prefix` 90 min, `keys.shift-modifier` 120 min, `keys.table-lifecycle` 90 min. Closes findings 4, 5, 10.
-- Lane B, branch `campaign/batch-buffers-vt-facts`, zones daemon-core, terminal-engine, mux-formats, desktop-gpui limited to `crates/zz/src/lib.rs` CLI read and print paths, protocol-message only if a bump is unavoidable. Budgets: `save-buffer -` and `load-buffer -` 120 min, the four terminal facts 150 min, CLI output bytes 45 min, `refresh-client -S` 45 min, resurrect save fixture 60 min. Closes findings 6, 7, 13, 15 and lands the resurrect save scenario.
+- **Keys:** split `keys.default-prefix`, fix `keys.shift-modifier` and `keys.table-lifecycle`.
+  Touches protocol-key, raw-tui, client-core, and daemon storage for `switch-client -T`.
+  Covers findings 4, 5 and 10.
+- **Buffers and terminal state:** support `save-buffer -` and `load-buffer -`, expose the four
+  terminal facts, preserve CLI output bytes, implement `refresh-client -S`, and add a resurrect
+  save fixture. Touches daemon-core, terminal-engine, mux-formats and the CLI read/print paths in
+  `crates/zz/src/lib.rs`; change protocol-message only if necessary. Covers findings 6, 7, 13 and 15.
 
 ### Cycle 15: entrypoint and status
 
-- Lane A, branch `campaign/batch-config-discovery`, zones daemon-core (`paths.rs`, `lib.rs`, the startup and import paths of `daemon.rs`), protocol-catalog, desktop-gpui limited to `crates/zz/src/config/import*.rs` and `lib.rs` argv. Budgets: `config.discovery` 150 min, pane PATH or launcher symlink decision 90 min, CLI oracle section with the `$TMUX` refusal and `-V` recorded 60 min, import overwrite guard 30 min. Closes finding 2, finding 3 (product side), the CLI surface, the migration refusal.
-- Lane B, branch `campaign/batch-status-jobs-control-notify`, zones daemon-status, control-client. Budgets: background `#()` with cached output 150 min, control-notify fixture and registered divergences 120 min, `%layout-change` from the live layout 60 min. Closes findings 9 and 12 (the fixture; the iTerm2 hour stays a maintainer task).
+- **Config discovery:** implement `config.discovery`, settle pane PATH or launcher links, record
+  CLI behavior for the `$TMUX` refusal and `-V`, and guard import overwrites. Touches daemon startup
+  and import paths, protocol-catalog, `crates/zz/src/config/import*.rs` and CLI argv handling.
+  Covers finding 2, finding 3's product behavior, the CLI surface and migration refusal.
+- **Status jobs and notifications:** run `#()` in the background with cached output, add a
+  control-notification fixture and register divergences, and derive `%layout-change` from the live
+  layout. Touches daemon-status and control-client. Covers findings 9 and 12's fixture;
+  the interactive iTerm2 check remains a maintainer task.
 
 ### Cycle 16: the desktop as a tmux client, and the proof debt
 
-- Lane A, branch `campaign/batch-desktop-status-row`, zones desktop-gpui, client-core, raw-tui. Budgets: GUI status row when `StatusLine.customized` 180 min (after the product decision is written into the registry first), Linux drag-to-CLIPBOARD 60 min, a `#[gpui::test]` matrix feeding every daemon overlay payload kind into the workspace 90 min, sidebar auto-hide threshold 45 min. Closes findings 1, 8, 14 and the cycle-11 class of "daemon state with no desktop consumer".
-- Lane B, branch `campaign/batch-proof-debt`, zones none (compat/, the registry, knowledge/ only; declared). Budgets: per-plugin runtime fixtures 120 min, the census scenarios for options, hooks and formats 90 min, the harness holes (`err:` query kind, stdout-shape fixtures, underlay focus item, evidence drift rule in `compat/check.sh`) 90 min, slugs for the prose-only divergences and pin citations for the 18 thin reasons 90 min. Closes the second tier's proof items and finding 11's registry half.
+- **Desktop behavior:** record the product decision for a GUI status row when
+  `StatusLine.customized`, implement it, add Linux drag-to-CLIPBOARD, cover every daemon overlay
+  payload with `#[gpui::test]`, and set the sidebar auto-hide threshold. Touches desktop-gpui,
+  client-core and raw-tui. Covers findings 1, 8 and 14 and daemon states with no desktop consumer.
+- **Proof coverage:** add per-plugin runtime fixtures and census scenarios for options, hooks and
+  formats; close harness holes (`err:` queries, stdout-shape fixtures, underlay focus, and evidence
+  drift in `compat/check.sh`); give prose-only divergences slugs and add pin citations for the 18
+  thin reasons. Touches compat/, the registry and knowledge/. Covers the second-tier proof items
+  and finding 11's registry work.
 
-Left over after cycle 16, each hours in one zone: detached pane geometry (daemon-core, terminal-engine), initial `pane_title` (mux-model), `clock-mode` and `choose-client` (desktop-gpui, raw-tui), `new-session -t` attach form (protocol-catalog, daemon-core), `history-limit` cap, signals, resize coalescing. Fold them into whichever lane has budget left, or a fourth cycle if the first three land clean.
+Remaining after cycle 16: detached pane geometry (daemon-core, terminal-engine), initial
+`pane_title` (mux-model), `clock-mode` and `choose-client` (desktop-gpui, raw-tui), `new-session -t`
+attach form (protocol-catalog, daemon-core), `history-limit` cap, signals and resize coalescing.
+Choose subsequent batches from the remaining measured gaps.
 
 ## The tail
 

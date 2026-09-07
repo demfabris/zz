@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-09-05
+* **Update**: Simplified the tmux campaign to implement agreed batches before final validation, removed prescribed agent models and roles, and marked earlier execution plans as historical.
+
 ## 2026-09-02
 * **Update**: Added a native iOS preview release path that compiles the shared Icon Composer document and uploads uniquely numbered builds as TestFlight Internal Only.
 * **Update**: Refined the native iPad toolbar layout and Panorama entrance to prevent clipping and navigation-bar animation.

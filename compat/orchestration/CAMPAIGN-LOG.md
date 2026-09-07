@@ -526,3 +526,19 @@ The fix and proof records are local and await delivery; published main still car
 unstamped summary. Once these commits reach main, the next work is cycle 14 from the retrospective's
 "Next cycles" section, then cycles 15 and 16. A stamped fixture completes the instrument pass;
 the daily-use findings still prevent calling the whole campaign complete.
+
+Workflow simplified, 2026-09-05, at fabrico's request. Implement the agreed batch directly in the
+current session, finish its fixtures and integration conflicts, then run final validation on the
+combined candidate. The campaign no longer prescribes models, reasoning effort, delegated roles,
+lane counts, orchestration tools or per-group time budgets. Cycles 14 to 16 retain their work
+scopes; the old scripts and dated execution plans are historical references.
+
+Use small pin probes or local unit checks when needed during implementation. Reserve corpus,
+attached-client and workspace-wide validation for the completed batch, with one full strict run
+before recording its PASS. Keep the stamp rule unchanged. Repair failures before retrying;
+reuse valid evidence for unchanged inputs, including documentation updates and publication of
+tested history. Publish the validated batch together when authorized, holding MAIN.
+
+These instruction edits sit on `codex/attached-client-instrument` after `3a2429a1`; the existing
+runtime proof remains the full PASS at `f80405390af4` (221 scenarios / 2,655 steps). This update
+changes documentation only and does not run the validation harness or start cycle 14.

@@ -5,7 +5,7 @@ description: How to run the pinned tmux differential corpus, read topology, geom
 resource: compat/run.sh
 tags: [tmux, compatibility, differential-testing, geometry, playbook]
 timestamp: 2026-08-26T00:00:00-03:00
-last_updated: 2026-08-31
+last_updated: 2026-09-05
 last_updated_by: Codex
 ---
 
@@ -17,6 +17,11 @@ with matching explicit `list-sessions`, `list-windows`, and `list-panes` formats
 runner compares command exit classes and topology as strict results. It also compares `fmt:` format
 queries and generic `out:` command stdout as separate byte-exact strict channels. Geometry
 differences fail under `--strict-geometry`, which is how CI runs the harness.
+
+For campaign work, finish and combine the agreed implementation batch before running the full
+strict corpus, attached-client fixture, and required workspace checks. During unfinished work,
+use small probes or focused local unit tests as needed, without recurring full gates. The commands
+below document the available checks; `compat/orchestration/HANDOFF.md` owns the current workflow.
 
 `compat/run.sh` builds `target/debug/zz` with your normal environment before the scenario
 runner creates its scratch `HOME` and `XDG_CONFIG_HOME`. The tmux fetcher clones and builds
@@ -37,7 +42,7 @@ active gaps, stores the manifest date in `updated_on`, and keeps completed work 
 generated [tmux compatibility gap report](/tmux/gaps.md) is the readable view. Do not maintain
 counts or open-item rosters in the philosophy, roadmap, divergence matrix, or research snapshots.
 
-Run the fast gate before choosing or landing a compatibility slice:
+Include the registry and manifest gate in the completed batch's final checks:
 
 ```sh
 just compat-check
@@ -477,13 +482,11 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted acceptance artifact. It records 220 scenarios and 2,648
-steps against pinned tmux `d77c9dc6`. Every ordinary row is clean and exactly three registered
-`known/` rows carry GEO differences, one of them an approved OUT difference as well. Its SHA-256 is
-`5bef958b6945d2d07d39ab0409e47589e486e43695a458392fbae2957bfb4c1c`. The file also ends with an
-attached-client `Status: PASS` footer that nothing regenerates: `compat/attached-client.sh` does not
-complete on the ubuntu box, and `compat/run.sh --check-summary` passes on that stale line, so treat
-the footer as unverified until the fixture has an owner.
+`compat/results/summary.md` is the persisted acceptance artifact. Read its scenario counts, results,
+and `Recorded at` commit from the current checkout. A full passing run with `--attached-client`
+records the stamp. `compat/run.sh --check-summary` rejects a missing or dirty stamp, a commit that
+is unavailable or not an ancestor of HEAD, and changes to `compat/attached-client.sh` or `crates/`
+since that commit. An old PASS footer alone does not prove the current batch.
 
 Slice 10ag extends `compat/startup-diagnostics.sh` to eight cases. Its startup-client-cwd case builds
 distinct initial-client, top-level-config, containing-directory, runtime-client, and glob-decoy
@@ -766,8 +769,8 @@ The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
 
 `compat/run.sh --check-summary` compares the exact current scenario paths, static step counts, and
 all seven stored row cells against the ordinary clean tuple or each registered known tuple. It also
-requires its persisted attached-client status to be `PASS`. The check passes for the 2026-08-31
-accepted checkpoint and exits before building or running either server. Linux CI first asserts that
+requires its persisted attached-client status to be `PASS` and validates the commit stamp described
+above. It exits before building or running either server. Linux CI first asserts that
 `compat/results/summary.md` is tracked, then runs
 the inventory and result check after checkout. A named partial run, a headless-only full run, a failed
 run, or a run with a SKIP cannot overwrite the canonical report. After a complete strict run with
@@ -785,7 +788,8 @@ user's passwd entry, and reports a located syntax error only when the required l
 
 # Running the corpus
 
-Run the strict corpus and attached-client contract from the repository root:
+After combining the completed batch, run the strict corpus and attached-client contract once from
+the repository root:
 
 ```sh
 just compat --strict-geometry --attached-client
@@ -1040,14 +1044,15 @@ Register a gap before implementing it:
    `known/` scenario only for an accepted exact mismatch. Its first metadata comment must be
    `# gap: <stable-gap-id>`, and the registry entry must declare the expected
    `TOPO GEO FMT OUT WARN` tuple.
-4. Run `just compat-check`. Fix unclassified structural gaps, stale manifest entries, broken
-   evidence, and tuple mismatches before changing behavior.
-5. Implement the slice and run its focused evidence. Run the full strict corpus when the change can
-   affect shared command, topology, geometry, format, output, config, or attached-client behavior.
-6. If the implementation closes an adopt gap, pass its acceptance checks, then move the ID from
-   `gaps` to `closed`. Record its title, `closed_on`, evidence, and resolution. If work remains,
-   update the same active ID and its evidence. Regenerate `knowledge/tmux/gaps.md`, then run
-   `just compat-check` again.
+4. Implement the agreed batch. Use small probes or focused local unit tests when needed to resolve
+   a concrete uncertainty; keep full corpus, attached-client, and workspace checks for the end.
+5. Combine the completed changes and run the full strict corpus with `--attached-client` plus the
+   required workspace and registry checks. Resolve failed checks and refresh affected evidence
+   before claiming PASS.
+6. Close an adopt gap only when the final evidence proves its acceptance checks. Move the ID from
+   `gaps` to `closed` and record its title, `closed_on`, evidence, and resolution. If work remains,
+   update the same active ID and its evidence. Regenerate `knowledge/tmux/gaps.md` and validate
+   these final records without repeating unchanged runtime proof.
 
 When the user resumes the campaign, use the generated report to rerank and choose a slice. The
 roadmap supplies dependency order, and the divergence matrix supplies detailed rationale; neither

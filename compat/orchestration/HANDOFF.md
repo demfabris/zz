@@ -14,10 +14,33 @@ The instrument pass now provides a current attached-client proof on this branch.
 commits comes next, followed by cycle 14 from the report's "Next cycles" section. Cycles 14 to 16
 have not started, and the practical exit gate still requires their daily-use findings to be settled.
 
-THE CYCLE SHAPE CHANGED ON 2026-09-03 and this overrides every older script. Fabrico's instruction
-is TWO work lanes per cycle, not three, and every agent is Opus 5 at `effort: 'xhigh'`: workers,
-reviewers and the gate alike. The Fable reviewers and Fable gates of cycles 6 to 10 are history.
-Copy `opus-compat-run-13.js` for the next cycle.
+## Current workflow (2026-09-05)
+
+Fabrico's instruction is to implement the agreed work, then run validation after it is done.
+Work directly in the current session. The campaign does not prescribe a model, reasoning effort,
+delegation, agent roles, lane count, orchestration tool, or time budget. The old run scripts and
+dated reports describe previous runs; they are historical references, not templates for new work.
+
+1. Read the current checkpoint and choose a bounded implementation batch from "Next cycles" in
+   `CAMPAIGN-REVIEW.md`. Keep its acceptance criteria and board ownership explicit.
+2. Finish the batch, including fixtures and any integration conflicts. Use small pin probes or
+   local unit checks when needed to resolve a concrete implementation question. Defer corpus,
+   attached-client, and workspace-wide validation until the batch is complete.
+3. Combine all changes for the batch into one candidate and inspect the diff. Commit the code
+   before the final harness run so its stamp names the tested revision. Keep the code and harness
+   fixed while validation runs.
+4. Run the required workspace checks and one full `just compat --strict-geometry --attached-client`
+   on that completed candidate. Confirm full scenario counts, the registered known rows, a clean
+   attached-client PASS stamp, and `just compat --check-summary` before declaring it validated.
+5. If validation fails, finish the repairs before rerunning the affected checks. A failed or
+   invalidated full run still requires a successful full run before recording a current PASS.
+   Preserve valid results for unchanged inputs; documentation-only changes and publishing the
+   unchanged tested history do not require another full run.
+6. Update the registry, summary, tracker and log with the actual results. Publish the completed
+   batch together when authorized, holding MAIN. Separate commits within the batch do not each
+   need a full run or a separate publication gate.
+
+The stamp rule stays strict. A partial run or stale PASS cannot stand in for final validation.
 
 The standing instruction from fabrico (2026-09-02) is "turn on the goal and go all the way": run
 cycles until the registry is closed, taking the product decisions the earlier handoff had parked
@@ -50,11 +73,8 @@ The pieces, in the order a new reader meets them:
 - **The board**, GitHub issue #7 driven by `compat/board.py`, is the work ledger: fronts are
   minted, claimed, gated and integrated as comments, with zone locks so parallel agents do not
   collide. `TMUX_COMPAT_TRACKER.md` at the repo root is the human-readable checkpoint.
-- **The cycles**: each one runs two implementor agents in parallel worktrees, one adversarial
-  reviewer per lane that tries to disprove the closes against the pin, and one gate that rebases,
-  runs the workspace tests, clippy and the differential corpus, pushes main and ledgers the board.
-  An orchestrator session writes each cycle's script from a fresh census. `CAMPAIGN-LOG.md` has
-  the history; the `opus-compat-run-N.js` files beside it are the scripts.
+- **The cycles** group related implementation work. Finish the chosen batch before running its
+  final validation. `CAMPAIGN-LOG.md` and the old run scripts preserve previous runs.
 
 What gets compared is the daemon, not the screen. Both binaries receive the same commands and
 their observable answers are diffed (`list-panes`, `capture-pane`, `display-message` formats,
@@ -121,7 +141,7 @@ DONE. `compat/run.sh` stamps the summary footer with `Recorded at: <commit>` on 
 ancestor of HEAD, or a stamp behind which `compat/attached-client.sh` or `crates/` changed. The
 stored footer on this branch records PASS at `f80405390af4` after a full strict corpus plus fixture
 run on the macbook. `--check-summary` passes. Main remains red until this branch is delivered.
-Every gate that merges code must re-record the full run (`compat/run.sh --attached-client`).
+Record one full run for the completed batch whose code will be published.
 `ZZ_COMPAT_ZZ=<path to a built zz>` skips `run.sh`'s own build.
 
 DONE. `compat/diff-scenario.sh` has a `launcher:` header: the zz side runs the `zz_cli` launcher
@@ -173,47 +193,36 @@ pending; after these commits reach main, resume cycle 14. Do not repeat the old 
 Keep failed fixture cleanup scoped: identify any surviving `/tmp/zza-*.sock` daemon by its exact
 socket and PID, then reap that PID. Never use `pgrep` or `pkill -f` with a pattern in your own shell.
 
-### Then three two-lane cycles
+### Remaining implementation batches
 
-The review lays them out with branch names, zones, budgets and what each closes: cycle 14 (the
+The review lays them out by scope and what each closes: cycle 14 (the
 keys contract: prefix table split, shift modifier, table lifecycle; buffers and VT facts:
 `save-buffer -`, the four terminal formats, CLI bytes, `refresh-client -S`), cycle 15 (config
 discovery and the pane PATH decision; background status jobs and the control-notify fixture), cycle
 16 (the desktop status row and drag-to-CLIPBOARD; the proof debt: per-plugin runtime fixtures, the
 census scenarios, the harness holes, slugs for the prose-only divergences). Read the report's
-"Next cycles" section before writing `opus-compat-run-14.js`; copy `opus-compat-run-13.js` for the
-shape. Same rules: two lanes, Opus 5 at xhigh throughout, hard budgets in minutes, the FOREGROUND
-rule, exactly one lane owning any protocol bump unless both must, in which case say so and let the
-gate reconcile as cycles 10 and 12 did.
+"Next cycles" section before implementing. The groupings express dependencies and ownership;
+they do not require separate agents or separate full runs. Reconcile any protocol change across
+the completed batch before validation.
 
 ### Two things the closing cycles taught
 
 A measurement beats a narrowing. The orchestrator narrowed the geometry item from prose on
 2026-09-03 and got the direction wrong; the probe scheduled instead of a decision found `pane_width`
 is one of a tiled family, so the PTY follows the layout, not the format the PTY. When an item
-resists a decision, write the probe into the prompt and say "measure first".
+resists a decision, write a small probe and measure first.
 
 A gate may spend meter points to stay honest. Cycle 12's gate moved an item out of an accepted
 group because its own cycle had falsified the acceptance clause, and said so in its report rather
 than banking 99.7%. Keep telling gates that a falsified premise under an accepted group is a
-finding, and keep the reviewer rule that a divergence disclosed only in a worker's notes is a
-must-fix until it has a slug.
+finding. Record every discovered divergence in the registry with a slug and evidence.
 
-### If the gate dies mid-cycle
+### Resuming interrupted work
 
-It happened in cycle 11: the gate agent hit a network timeout at 20:17Z on 2026-09-03 while
-sharding the second lane's corpus, after it had already merged the first lane, rebased the second
-onto main, applied both must-fixes and cleared the workspace suite and clippy. Recovery took about
-an hour and rebuilt nothing. The order that worked, and the order to repeat:
-
-1. Read `origin/main` and every `zz-gate-*` worktree before touching anything. The worktree holds
-   the gate's fix commits and they are usually the expensive part.
-2. Push the rebased tip as `campaign/<name>-gated` FIRST, as insurance, before running anything.
-3. Verify the reviewer's must-fixes are actually present at that tip. The gate never reported, so
-   its claims do not exist; check the code and the registry yourself.
-4. Re-run the stages the gate had not finished, plus any stage whose inputs changed after it ran
-   (cycle 11's clippy predated two fix commits, so clippy was re-run).
-5. Then push, ledger, recompute, release, exactly as the gate's own steps say.
+Inspect the existing worktree, commits, board notes and logs before rebuilding anything. Preserve
+completed implementation and verify which checks actually finished. Resume unfinished work;
+rerun validation only when it is incomplete, failed, or its inputs changed. An interrupted full
+corpus cannot produce a PASS stamp. Record the tested revision and remaining work in the handoff.
 
 ## Pages that carry live checkpoint numbers
 
@@ -221,10 +230,8 @@ An audit on 2026-09-03 found 47 stale facts across the bundle, a third of them t
 paragraph copied into several pages and left five cycles behind. They are hand-written prose, not
 generated, so nothing refreshes them: `compat/tmux-tracker.py write-report` regenerates only
 `knowledge/tmux/gaps.md`. Fencing them for a generator was considered and rejected: the numbers sit
-mid-paragraph in bespoke sentences, so a fence would mean restructuring eight pages to suit a tool,
-and the campaign has one or two cycles left to amortise it. The cheap fix instead: the GATE already
-recomputes `TMUX_COMPAT_TRACKER.md` from the merged registry in its step 7, so give it this list
-and let it refresh these in the same pass.
+mid-paragraph in bespoke sentences. Refresh them when updating `TMUX_COMPAT_TRACKER.md` from the
+completed batch's registry and validation results.
 
 Present-tense registry, corpus or partition numbers live in `knowledge/tmux/tmux-compat.md`,
 `knowledge/tmux/status-line.md`, `knowledge/tmux/key-tables.md`, `knowledge/tmux/copy-mode.md`,
@@ -233,23 +240,13 @@ Present-tense registry, corpus or partition numbers live in `knowledge/tmux/tmux
 dated historical sentences alone ("at that checkpoint the tracker had ..."): they are correct about
 the past and are not drift.
 
-## The cycle, in general
+## Coordination
 
-If a run dies mid-way in the SAME session, `Workflow({scriptPath, resumeFromRunId})` replays
-finished agents from the journal cache (`subagents/workflows/<runId>/journal.jsonl`, result key
-`result`); across machines or sessions, export the cached reports into the script as constants the
-way `opus-compat-run-6-continue.js` and `opus-compat-run-10b.js` do, and skip the agents they
-replace with a stage switch in `args`. If the gate died after pushing some lanes, finishing the
-rest by hand is often cheaper: the gate's fix commits sit in its `zz-gate-*` worktrees, and a
-rebased tip should be pushed as `campaign/<name>-gated` before anything is removed.
-
-Orchestrator loop per cycle: claim the three lock fronts under your holder identity (6h leases,
-renew them and MAIN while the gate runs), launch, verify `origin/main`, the board records, and
-`compat/progress.py` when the gate finishes, then write the next script from a fresh registry census
-(protocol version, lock names, group lists, the mooted fronts for TRIAGE; the census is
-`compat/tmux-gaps.json` gaps with status open or blocked, read every reason), mint the next lock
-fronts under TRIAGE, commit the orchestration records under MAIN (a records-only push is ledgered as
-`integrated MAIN --merge <sha>`), and repeat.
+Use the board for claims, ownership and delivery records. Claim only the fronts needed for the
+agreed batch, renew their leases while working, and hold MAIN for final integration and publication.
+Use TRIAGE when minting or withdrawing fronts. After delivery, verify the remote revision and
+record the batch's results, remaining work and released claims. Choose further work from the live
+registry and retrospective findings within the user's requested scope.
 
 ## Resuming on another machine
 
@@ -257,28 +254,18 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
    are missing). Toolchain per `mise.toml`; the campaign only needs debug builds, `cargo test`, and
    `cargo clippy`.
 2. Populate the caches once: `compat/fetch-tmux.sh` builds the pinned tmux, `compat/fetch-corpus.sh`
-   clones the plugin corpus, and any scenario through `compat/run.sh` triggers both. The readiness
-   check is the `formats` scenario running clean:
+   clones the plugin corpus. At the start of final validation, check this machine with `formats`:
    `ZZ_COMPAT_TMUX=<checkout>/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=<checkout>/compat/.cache/plugins compat/run.sh --strict-geometry formats`
-   (cold build, several minutes). Those two variables are preset in every prompt so sharded runs
-   never race the clone.
-3. `gh auth login -h github.com --insecure-storage` IN A SHELL ON THAT MACHINE (a login run on
-   another machine authenticates that machine's gh; over SSH, `--insecure-storage` keeps the token
-   in `hosts.yml` where a non-desktop shell finds it). `gh api user` must answer and
+   (cold build, several minutes). Populate caches before running concurrent commands against them.
+3. Check `gh api user` on this machine and use `gh auth login -h github.com` if needed. Authentication
+   on another machine does not authenticate this one. `gh api user` must answer and
    `python3 compat/board.py status` must list the fronts. Pick a holder identity like
-   `<host>/orchestrator` and use it for every board call (`ZZ_BOARD_HOLDER=<host>/orchestrator`).
-4. Claude Code settings for an unattended run, in `~/.claude/settings.json`: the allow rule
-   `"Bash(rm:*)"` under `permissions.allow`, and a PreToolUse hook on `Bash` running
-   `python3 <checkout>/compat/orchestration/guard-rm-home.py` with a 10 s timeout. The hook denies
-   the `rm -rf $HOME` shape with a rewrite hint, because Claude Code's built-in critical-path guard
-   prompts on it and no allow rule bypasses that. Open `/hooks` once after editing so the session
-   reloads the file.
-5. Keep the machine awake for the gate: `caffeinate -is -w <claude pid>` on macOS; on Linux check
-   `gsettings get org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type` is `nothing`
-   (`systemd-inhibit` from a non-tty shell did not stay up on the ubuntu box).
-6. Optional: carry the orchestrator's memory over as described under "Moving the Claude Code
-   session itself". The repository and the board are the durable state.
-7. First task: the census below; the client gate that used to stand here is done.
+   `<host>/<name>` and use it for every board call (`ZZ_BOARD_HOLDER=<host>/<name>`).
+4. Identify and protect existing tmux and zz servers. Use short isolated test socket paths under
+   `/tmp`; never kill a process by a command-line pattern that matches the invoking shell.
+5. Keep the machine awake during final validation when needed, for example
+   `caffeinate -is -w <validation-pid>` on macOS.
+6. Resume from the repository, board and saved worktree. Prior chat transcripts are optional.
 
 ## Machine notes
 
@@ -294,18 +281,18 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
   `smoke/remain-on-exit-format` (the fixture wants `term` where Linux answers signal 15),
   `smoke/format-modifier-interrogate` (the harness's outer TERM carries `smxx`),
   `smoke/pane-engine-knobs-input` (pin-side flake under load). The first two need a Linux-aware
-  literal or a TERM-scrubbed harness. The allow rule and the hook (pointing at the checkout's
-  `guard-rm-home.py`) are in place. No user tmux server or zz daemon was running during cycle 10.
+  literal or a TERM-scrubbed harness. No user tmux server or zz daemon was running during cycle 10;
+  inspect the current processes before testing.
 - **macbook** (16 cores, 48 GB, macOS 27): ran cycles 6 (second half) to 9. `origin` is HTTPS
   through gh's credential helper (SSH security keys unavailable since cycle 7). `/bin/bash` is 3.2
   (no `mapfile`; helpers use `/opt/homebrew/bin/bash` or python3). APFS refuses non-UTF-8 file
   names (`smoke/client-non-utf8-cwd` guards for it). The user has a live tmux server (sessions
   `clairvo`, `home`, `zz`) and a live `/Applications/zz.app` daemon that no worker may kill.
   Worktrees `~/dev/zz-opus-dint`, `~/dev/zz-opus-panes`, `~/dev/zz-opus-termopts` are warm at the
-  cycle-9 tips. The `boxNote` and `gitNote` args for it: bash 3.2 and APFS traps, HTTPS origin,
-  never switch to SSH. Use `workerJobs: 8, workerThreads: 4, gateJobs: 16, gateThreads: 8, shards: 8`.
-- **A worker's prompt** carries the box traps through `M.boxNote` and `M.gitNote`; a new machine
-  with a new trap gets it in `args`, not in the script.
+  cycle-9 tips. Preserve the HTTPS origin. Use the machine's available resources and cap
+  workspace test concurrency at eight threads on this box to avoid timing failures under load.
+- Record new machine constraints in the handoff. Keep machine-specific paths and concurrency
+  settings outside reusable test logic.
 
 ## Board tool quirks
 
@@ -318,7 +305,7 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
   is the comment time plus the lease, so a short renew can shorten a long lease. A renew on a
   front the holder does not hold posts a harmless RENEW comment.
 - One zone, one claim, even for the same holder: mint the lock fronts with pairwise-disjoint zones
-  and let the prompts carry the real file ownership. READY fronts whose zones overlap a claimed
+  and record the actual file ownership. READY fronts whose zones overlap a claimed
   lock read `zones-busy` until the release; that is expected.
 - `withdraw` and `front` need TRIAGE held; `integrated`, `repair`, and `rejected` need MAIN held.
   A records-only push (ledger, docs) is ledgered as `integrated MAIN --merge <sha>`.
@@ -329,18 +316,7 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
 - Unknown zone names only warn; `python3 compat/board.py zones` lists the real ones.
 - `python3 compat/board_test.py` is part of every gate; it leaves `compat/__pycache__/` behind.
 
-## Moving the Claude Code session itself
-
-The repository and the board are the durable state. If you also want the old session's transcript
-and memory, Claude Code keeps them under `~/.claude/projects/<checkout path with slashes as
-dashes>/`: the session's `.jsonl`, a same-named directory with subagent transcripts and workflow
-journals, and `memory/` with the project's auto-memory. Copy them into the matching project
-directory on the new machine (clone at the same absolute path or rename the directory to match),
-then `claude --resume <session-id>` from that checkout. Workflow journal replay depends on the old
-scratchpad paths, so launch the next script fresh rather than resuming an old run; the 10b script
-already carries everything the client gate needs.
-
-## Lore the prompts already encode
+## Historical lessons
 
 Two lessons from the 10b gate, both cheap to avoid and expensive to hit. A review's probes must
 live in the repo or on a branch: 10b's reviewer left eight ready-made probe scripts in a session

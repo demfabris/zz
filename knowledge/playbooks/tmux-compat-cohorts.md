@@ -1,18 +1,36 @@
 ---
 type: Playbook
 title: Running tmux compatibility cohorts
-description: A bounded, parallel workflow for closing the practical alias tmux=zz gap without letting new oracle findings extend one campaign forever.
+description: Implementation-first batches for closing the practical alias tmux=zz gap, with combined final proof and historical campaign records.
 tags: [tmux, compatibility, campaign, workflow, agents]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-01
+last_updated: 2026-09-05
 last_updated_by: Claude
 ---
 
-# Outcome
+# Current campaign workflow
 
-Close the practical `alias tmux=zz` gate through bounded slices. Each slice starts with a fixed
-acceptance contract, ends with one reviewed commit, and leaves later discoveries in the
-[live tracker](/tmux/gaps.md).
+Follow `compat/orchestration/HANDOFF.md` for the current batch and machine state. Finish the agreed
+implementation batch first. Use small pinned-tmux probes or focused local unit tests when they
+answer a concrete question; do not run recurring corpus, attached-client, or full workspace gates
+while that batch is unfinished.
+
+Combine the completed changes, then run one full strict corpus with the attached-client fixture
+(`just compat --strict-geometry --attached-client`) and the required workspace checks before
+claiming PASS. Keep the commit-stamp requirement in `compat/run.sh --check-summary`: a missing,
+dirty, unavailable, unrelated, or outdated stamp cannot prove the combined code. If a final check
+finds a defect, fix it and refresh the affected evidence before claiming completion.
+
+This workflow prescribes no model, effort level, agent role or count, per-group time budget,
+orchestrator tool, or per-lane publishing. Check board ownership before editing shared campaign
+work, stay within the claimed scope, and preserve other sessions' changes. Record acceptance and
+remaining findings in `compat/tmux-gaps.json`; retain the board's ownership rules when integrating.
+
+# Historical campaign records
+
+The sections below retain the earlier cohorts, execution rules, validation ladders, and launch
+prompts as history. Their staffing, model, budget, review, publishing, and repeated-gate instructions
+are superseded by the current workflow above and `compat/orchestration/HANDOFF.md`.
 
 The Alert cohort completed in commit `2e4ccf3b9b6706e44215d74ca147643e6baa3d2e`. The dedicated
 campaign branch then closed session cwd in

@@ -11,10 +11,15 @@ tags:
 - control-mode
 - roadmap
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-31
+last_updated: 2026-09-05
 ---
 
 # Overview
+
+The dated execution plans and model-specific review loops below are historical. Current campaign
+work follows `compat/orchestration/HANDOFF.md`: finish the agreed implementation batch, combine its
+changes, then run final validation. Earlier staffing, budget, publishing, and repeated-gate rules
+do not prescribe that workflow. This page retains the architectural and product decision history.
 
 Original goal: `alias tmux=zz` works for a tmux user's invocations, config, scripts, and common
 key habits, while zz-only power lives in superset verbs that never collide with tmux names. The

@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; cycle 10 fully integrated 2026-09-03 with protocol v96, the agreed-scope meter at 97.4% (296 of 304 items, 59 of 65 groups done); cycle 11 is running two lanes, the format monitors with the -v trace and the chooser vocabulary with the copy-mode tail; six open groups and eight items remain, resume from compat/orchestration/HANDOFF.md
+status: Implementation and delivery history; current campaign state and workflow live in compat/orchestration/HANDOFF.md
 tags:
 - tmux
 - compatibility
@@ -11,11 +11,16 @@ tags:
 - fleet
 - native-superset
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-31
+last_updated: 2026-09-05
 last_updated_by: Codex
 ---
 
 # Outcome
+
+The dated execution plans below are historical. For current campaign work, follow
+`compat/orchestration/HANDOFF.md`: finish the agreed implementation batch, combine the changes,
+then run the final validation. Earlier model, staffing, review, budget, and repeated-gate rules do
+not prescribe the current workflow. The architectural and product decisions remain recorded here.
 
 Build a zz CLI that is compatible with the tmux workloads people actually carry, then add native
 commands that make the GUI better than tmux:
@@ -69,10 +74,10 @@ named and caret forms, exact function-key bounds, and the pin's prefix-consuming
 grammar. It rejects invalid names before state changes and keeps printable ASCII hex keys distinct
 from literal keys. Wave 2 then closes `keys.literal-delete-identity`: raw DEL, caret plus DEL, and
 textual `0x7f` retain distinct identities, pinned rendering, and literal transport behavior.
-The three-front trial is positive: all three bounded chunks reached `main`, their changed paths did
-not intersect, and integration had no merge conflicts. Six independent review repairs were needed,
-so the next wave uses two active editors, one permanent oracle and reviewer, and the root as
-coordinator. Full corpus and workspace gates remain centralized in one warm integration lane.
+The three-front trial delivered all three bounded chunks to `main`, with disjoint changed paths,
+no merge conflicts, and six independent review repairs. For current work, agree on the scope first,
+implement the batch, and combine its changes before final corpus, attached-client, and workspace
+validation. Small probes and local unit tests remain available during implementation as needed.
 Wave 2 froze Control exit pane-output discard, shell-job cwd, and literal DEL identity as three
 independent chunks and closed all three. Shell-job cwd passed its three-step differential and
 coordinator-owned attached-client proof. The DEL candidate passed independent review after repairs
@@ -80,9 +85,9 @@ for failures in prefix and configured-backspace transport, then passed its 40-st
 196 fixture checks per engine.
 Wave 3 assigned typed Control config diagnostics to one protocol, daemon, and app editor; the
 copy-action vocabulary inventory to one mux and oracle editor; and the remaining context-producer
-and modifier split to a read-only reviewer. The two editors have disjoint write zones. Issue #7 owns
+and modifier split to a read-only reviewer. The two editors had disjoint write zones. Issue #7 owns
 the later dispatch-board claims against each published base; workers must not reuse those historical
-READY labels. The coordinator retains the registry, generated report, shared knowledge pages,
+READY labels. The coordinator retained the registry, generated report, shared knowledge pages,
 accepted summary, review, and integration.
 The final workspace run passed every non-daemon package. Two daemon tests failed only under the
 parallel load and each passed when rerun alone, matching the repository's documented load-flake

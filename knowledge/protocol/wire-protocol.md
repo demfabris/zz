@@ -290,8 +290,10 @@ since v92 its `~` lookups do not. A line containing a tilde is walked once with 
 the names it needs cross as one `HomeDirectoryRequest`, and the line is re-parsed with the answers,
 so source, startup, alias, callback, and direct Control parsing all read the same daemon-global
 `HOME` and the same daemon-host passwd database. The round trip is invisible: no guard, no frame, no
-command number. Variable expansion is unaffected, so `$NAME` stays literal in direct Control input
-where the pin's lexer expands it.
+command number. Since v99 the same round trip also names the `$NAME` variables a line needs: the
+recording context collects them beside the `~` lookups, an `EnvironmentRequest` crosses pipelined
+next to the home request, and the re-parse expands each name from the daemon's global environment
+the way `yylex_token_variable` does, with an unset name expanding to nothing.
 
 v76 introduced `SourcedCommandGuard { output, error, client_failure }` at `EventPayload` tail tag 47.
 It gave parser-owned source replay and synchronous foreground inserted lists one flags-1 command

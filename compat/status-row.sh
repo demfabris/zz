@@ -47,6 +47,7 @@ INNER_SOCKET_NAME="zzsri-$TOKEN"
 ZZ_SOCKET="/tmp/zzsr-$TOKEN.sock"
 OUTER_SESSION="driver"
 INNER_SESSION="rows"
+PANE_TITLE="rowtitle"
 ZZ_HOME="$SCRATCH_DIR/zz-home"
 TMUX_HOME="$SCRATCH_DIR/tmux-home"
 OUTER_HOME="$SCRATCH_DIR/outer-home"
@@ -175,6 +176,16 @@ attach_both_at() {
   wait_for "outer tmux pane at ${columns}x${ROWS_UNDER_TEST}" outer_pane_is "=$OUTER_SESSION:tmux" "${columns}x${ROWS_UNDER_TEST}"
   wait_for "zz client attached" client_attached zz
   wait_for "tmux client attached" client_attached tmux
+  # The default status-right ends in #{=21:pane_title}. window.c:1141 seeds a
+  # pane's title from gethostname, while a zz pane with the default shell
+  # reports its shell name through zz's shell integration - the recorded
+  # pane.runtime-facts decision, not a divergence of this row. Pinning the
+  # title on both sides takes that one token out of the comparison so the
+  # WHOLE row can be asserted.
+  side_command zz select-pane -t "=$INNER_SESSION:0.0" -T "$PANE_TITLE" ||
+    die "zz refused select-pane -T"
+  side_command tmux select-pane -t "=$INNER_SESSION:0.0" -T "$PANE_TITLE" ||
+    die "tmux refused select-pane -T"
 }
 
 set_on_both() {

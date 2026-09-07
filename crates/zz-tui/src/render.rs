@@ -442,6 +442,17 @@ impl Renderer {
         self.writer.submit(std::mem::take(&mut self.output))
     }
 
+    /// Throws away whatever the writer has not painted yet.
+    ///
+    /// The client calls this when its event loop ends, before the terminal is
+    /// restored: a paint still in the queue belongs to a pane that is about to
+    /// disappear, and writing it after the alternate screen is gone would put
+    /// pane bytes on the user's shell.
+    pub fn discard_queued_paints(&mut self) {
+        self.output.clear();
+        self.writer.abandon();
+    }
+
     fn paint_workspace(&mut self, model: &Model, force: bool) {
         let lines = model.pane_border_lines();
         let indicators = model.pane_border_indicators();

@@ -943,6 +943,7 @@ pub(crate) fn run(
     };
 
     browser.close_all();
+    renderer.discard_queued_paints();
     drop(terminal);
     match outcome {
         Ok(TuiExit::Exec { command, shell }) => {

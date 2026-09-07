@@ -101,6 +101,25 @@ impl TerminalWriter {
         Ok(())
     }
 
+    /// Drops every paint still waiting so a teardown cannot repaint the
+    /// screen after the terminal has been restored.
+    ///
+    /// A queued paint is stale the moment the event loop stops: the client is
+    /// leaving the alternate screen, so the bytes would land on the user's
+    /// shell instead of the pane they were painted for.
+    pub fn abandon(&self) {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        state.queue.clear();
+        state.queued = 0;
+        state.closed = true;
+        self.shared.room.notify_all();
+        self.shared.work.notify_all();
+    }
+
     #[cfg(test)]
     pub fn queued(&self) -> usize {
         self.shared
@@ -227,6 +246,38 @@ mod tests {
         let error = reported.expect("the failed write surfaces on a later paint");
         assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
         assert!(error.to_string().contains("terminal went away"));
+    }
+
+    #[test]
+    fn an_abandoned_queue_never_reaches_the_terminal() {
+        let (release, blocked) = mpsc::channel::<()>();
+        let (wrote, written) = mpsc::channel::<usize>();
+        let writer = TerminalWriter::spawn(Box::new(move |bytes| {
+            wrote.send(bytes.len()).ok();
+            blocked.recv().ok();
+            Ok(())
+        }));
+
+        writer.submit(vec![b'x'; 1]).expect("the first paint queues");
+        assert_eq!(
+            written
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the first paint reaches the sink"),
+            1
+        );
+        for _ in 0..8 {
+            writer
+                .submit(vec![b'x'; 4096])
+                .expect("the stale paints queue");
+        }
+
+        writer.abandon();
+        release.send(()).expect("release the write in flight");
+
+        assert!(
+            written.recv_timeout(Duration::from_millis(500)).is_err(),
+            "a paint queued before the teardown still reached the terminal"
+        );
     }
 
     #[test]

@@ -24,6 +24,7 @@ use crate::{
     },
     picker, sidebar,
     state::Model,
+    writer::{Sink, TerminalWriter},
 };
 
 pub(crate) use zz_client::ViewportDamage as FrameDamage;
@@ -186,10 +187,15 @@ pub(crate) struct Renderer {
     last_title: String,
     border_chrome: Option<(PaneBorderStatus, PaneBorderLines, PaneBorderIndicators)>,
     kitty: KittyBridge,
+    writer: TerminalWriter,
 }
 
 impl Renderer {
     pub fn new() -> Self {
+        Self::with_sink(crate::writer::stdout_sink())
+    }
+
+    fn with_sink(sink: Sink) -> Self {
         Self {
             output: Vec::with_capacity(64 * 1024),
             queued_control: Vec::new(),
@@ -206,6 +212,7 @@ impl Renderer {
             last_title: String::new(),
             border_chrome: None,
             kitty: KittyBridge::default(),
+            writer: TerminalWriter::spawn(sink),
         }
     }
 
@@ -426,10 +433,13 @@ impl Renderer {
         self.flush_output()
     }
 
+    /// Hands the painted bytes to the writer thread.
+    ///
+    /// The terminal is written from a thread of its own so a viewer that has
+    /// stopped reading its pty costs the client queued bytes and never costs
+    /// it the next keystroke: tty.c does the same with a libevent buffer.
     fn flush_output(&mut self) -> io::Result<()> {
-        let mut stdout = io::stdout().lock();
-        stdout.write_all(&self.output)?;
-        stdout.flush()
+        self.writer.submit(std::mem::take(&mut self.output))
     }
 
     fn paint_workspace(&mut self, model: &Model, force: bool) {

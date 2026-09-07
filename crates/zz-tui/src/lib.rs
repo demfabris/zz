@@ -12,6 +12,7 @@ mod sidebar;
 mod state;
 mod terminal_event;
 mod tty;
+mod writer;
 
 use std::{
     error::Error as StdError,

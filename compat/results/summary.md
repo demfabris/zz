@@ -251,6 +251,7 @@
 | smoke/status-keys-editor-default | 2 | yes | 0 | yes | yes | yes |
 | smoke/terminal-facts | 2 | yes | 0 | yes | yes | yes |
 | smoke/tpm-init | 5 | yes | 0 | yes | yes | yes |
+| smoke/tui-client-input-backpressure | 2 | yes | 0 | yes | yes | yes |
 | smoke/vim-tmux-navigator | 8 | yes | 0 | yes | yes | yes |
 | smoke/yank | 3 | yes | 0 | yes | yes | yes |
 

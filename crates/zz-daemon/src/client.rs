@@ -227,6 +227,10 @@ impl CommandClient {
         &self.hello
     }
 
+    pub fn wait_for_disconnect(mut self) {
+        while self.reader.recv().is_ok() {}
+    }
+
     /// Run one command and keep only its stdout, folding a nonzero exit into
     /// `DaemonError::CommandExit`. Callers that need the command's stderr or
     /// that must treat a nonzero exit as a completed command use

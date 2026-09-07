@@ -1271,6 +1271,13 @@ impl Daemon {
 
     /// Run the persistent listener on the current thread until shutdown.
     pub fn run_foreground(&self) -> Result<(), DaemonError> {
+        self.run_foreground_with_ready(|_| ())
+    }
+
+    pub fn run_foreground_with_ready<R>(
+        &self,
+        ready: impl FnOnce(u64) -> R,
+    ) -> Result<(), DaemonError> {
         prepare_socket(&self.socket_path)?;
         let listener = LocalTransport::bind(&self.socket_path).map_err(|error| {
             if error.kind() == ErrorKind::AddrInUse {
@@ -1284,18 +1291,20 @@ impl Daemon {
         let socket_guard = SocketGuard::new(self.socket_path.clone());
         let identity_guard = DaemonIdentityGuard::install(&self.socket_path)?;
 
-        self.run_foreground_listener::<LocalTransport>(
+        self.run_foreground_listener::<LocalTransport, R>(
             listener,
             (socket_guard, identity_guard),
             self.socket_path.display(),
+            ready,
         )
     }
 
-    fn run_foreground_listener<T: Transport>(
+    fn run_foreground_listener<T: Transport, R>(
         &self,
         listener: T::Listener,
         socket_guards: (SocketGuard, DaemonIdentityGuard),
         endpoint: impl std::fmt::Display,
+        ready: impl FnOnce(u64) -> R,
     ) -> Result<(), DaemonError>
     where
         T::Listener: Send + 'static,
@@ -1347,11 +1356,13 @@ impl Daemon {
             log::info!("zz daemon listening at {endpoint}");
             Ok::<(), DaemonError>(())
         })();
-        if startup_result.is_ok() {
+        let _ready_guard = if startup_result.is_ok() {
             shared.finish_startup();
+            Some(ready(shared.server_id))
         } else {
             shared.request_shutdown();
-        }
+            None
+        };
         let Ok((accept_result, listener)) = accept_thread.join() else {
             socket_guard.disarm();
             return Err(DaemonError::Thread(
@@ -94149,6 +94160,49 @@ bind - split-window -v -c "#{pane_current_path}"
         drop(interactive);
         reader.join().unwrap();
         daemon_thread.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn ready_guard_ends_with_the_daemon_despite_a_passive_command_client() {
+        struct ReadyGuard(std::sync::mpsc::Sender<()>);
+
+        impl Drop for ReadyGuard {
+            fn drop(&mut self) {
+                let _ = self.0.send(());
+            }
+        }
+
+        let socket = daemon_test_endpoint("tray-lifetime");
+        let daemon = Daemon::new(&socket).without_user_config();
+        let (ready, started) = std::sync::mpsc::channel();
+        let (finished, dropped) = std::sync::mpsc::channel();
+        let daemon_thread = thread::spawn(move || {
+            daemon.run_foreground_with_ready(|server_id| {
+                ready.send(server_id).expect("daemon ready");
+                ReadyGuard(finished)
+            })
+        });
+        let server_id = started
+            .recv_timeout(Duration::from_secs(10))
+            .expect("ready callback");
+        let passive = connect_command_retry(&socket);
+        assert_eq!(passive.server_hello().server_id, server_id);
+        let mut commands = connect_command_retry(&socket);
+        commands
+            .execute(CommandInvocation::new("new-session", ["-d"]))
+            .expect("session");
+        assert!(dropped.try_recv().is_err());
+        commands
+            .execute(CommandInvocation::new("kill-session", ["-t", "0"]))
+            .expect("last session");
+        dropped
+            .recv_timeout(Duration::from_secs(10))
+            .expect("passive client must not keep daemon alive");
+        daemon_thread
+            .join()
+            .expect("daemon thread")
+            .expect("daemon shutdown");
+        drop(passive);
     }
 
     #[test]

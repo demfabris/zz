@@ -11157,6 +11157,7 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "zed-sum-tree",
+ "zz-terminal",
 ]
 
 [[package]]

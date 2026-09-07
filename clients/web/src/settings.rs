@@ -35,6 +35,10 @@ pub(super) struct Preferences {
     pub colors: [Option<String>; 6],
     pub zoom: f32,
     pub radius: f32,
+    pub pane_inactive_opacity: f32,
+    pub pane_margin: f32,
+    pub pane_radius: f32,
+    pub pane_border_width: f32,
 }
 
 impl Default for Preferences {
@@ -48,6 +52,10 @@ impl Default for Preferences {
             colors: Default::default(),
             zoom: 1.0,
             radius: 6.0,
+            pane_inactive_opacity: 0.7,
+            pane_margin: 6.0,
+            pane_radius: 13.5,
+            pane_border_width: 0.5,
         }
     }
 }
@@ -60,21 +68,21 @@ impl Preferences {
             .and_then(|storage| storage.get_item("zz-web-preferences").ok().flatten())
             .and_then(|value| serde_json::from_str::<Self>(&value).ok())
         {
-            return Self {
-                zoom: if value.zoom.is_finite() {
-                    value.zoom.clamp(0.5, 3.0)
-                } else {
-                    1.0
-                },
-                radius: if value.radius.is_finite() {
-                    value.radius.clamp(0.0, 24.0)
-                } else {
-                    6.0
-                },
-                ..value
-            };
+            return value.sanitized();
         }
-        Self::default()
+        Self::default().sanitized()
+    }
+
+    fn sanitized(mut self) -> Self {
+        self.zoom = bounded(self.zoom, 0.5, 3.0, 1.0);
+        self.radius = bounded(self.radius, 0.0, 24.0, 6.0);
+        for control in PaneControl::ALL {
+            let (min, max, _) = control.limits();
+            let fallback = *control.value(&mut Self::default());
+            let value = control.value(&mut self);
+            *value = bounded(*value, min, max, fallback);
+        }
+        self
     }
 
     pub(super) fn save(&self) {
@@ -134,6 +142,7 @@ impl Preferences {
 pub(super) struct Controls {
     zoom: Entity<InputState>,
     radius: Entity<InputState>,
+    panes: [Entity<InputState>; 4],
     colors: Vec<Entity<ColorPickerState>>,
     search_engine: Entity<SelectState<Vec<SettingsSelectItem>>>,
     _subscriptions: Vec<Subscription>,
@@ -201,6 +210,55 @@ impl Controls {
                 },
             ));
         }
+        let pane_values = [
+            preferences.pane_inactive_opacity,
+            preferences.pane_margin,
+            preferences.pane_radius,
+            preferences.pane_border_width,
+        ];
+        let panes = PaneControl::ALL.map(|control| {
+            let (min, max, step) = control.limits();
+            let value = pane_values[control as usize];
+            let input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .default_value(value.to_string())
+                    .min(f64::from(min))
+                    .max(f64::from(max))
+                    .step(step)
+            });
+            subscriptions.push(cx.subscribe_in(
+                &input,
+                window,
+                move |this, input, event, window, cx| {
+                    let commit = matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. });
+                    if !commit && !matches!(event, InputEvent::Change) {
+                        return;
+                    }
+                    let parsed = input
+                        .read(cx)
+                        .value()
+                        .parse::<f32>()
+                        .ok()
+                        .filter(|value| value.is_finite());
+                    let previous = *control.value(&mut this.preferences);
+                    let value = match parsed {
+                        Some(value) if commit => value.clamp(min, max),
+                        Some(value) if (min..=max).contains(&value) => value,
+                        _ if commit => previous,
+                        _ => return,
+                    };
+                    *control.value(&mut this.preferences) = value;
+                    if commit {
+                        input.update(cx, |input, cx| {
+                            input.set_value(value.to_string(), window, cx);
+                        });
+                    }
+                    this.preferences.save();
+                    cx.notify();
+                },
+            ));
+            input
+        });
         let colors = preferences
             .colors
             .iter()
@@ -226,6 +284,7 @@ impl Controls {
         Self {
             zoom,
             radius,
+            panes,
             colors,
             search_engine: cx.new(|cx| SelectState::new(Vec::new(), None, window, cx)),
             _subscriptions: subscriptions,
@@ -381,7 +440,7 @@ impl WebClient {
                 rows.push(
                     SettingEntry::new(
                         "Widget corner radius",
-                        "Round buttons, fields, and pane corners.",
+                        "Round buttons, fields, and other interface controls.",
                     )
                     .control(
                         div().w(px(120.0)).flex_none().child(
@@ -431,40 +490,35 @@ impl WebClient {
                 );
             }
             SettingsSection::Panes => {
-                rows.push(
-                    SettingEntry::new(
-                        "Pane gaps",
-                        "Separate panes with space and rounded corners.",
-                    )
-                    .control(
-                        Switch::new("web-pane-gaps")
-                            .checked(self.preferences.gaps)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.preferences.gaps = !this.preferences.gaps;
-                                this.preferences.save();
-                                cx.notify();
-                            })),
-                    ),
-                );
-                rows.push(
-                    SettingEntry::new(
-                        "Terminal panes",
-                        "Run shells and terminal applications on the daemon host.",
-                    )
-                    .control("Available"),
-                );
-                rows.push(
-                    SettingEntry::new(
-                        "Agent panes",
-                        "Send prompts and answer permission requests through the daemon.",
-                    )
-                    .control("Available"),
-                );
-                rows.push(unavailable("Browser panes", "Embedded Chromium runs in the desktop app. Existing URLs can open in browser tabs."));
-                rows.push(unavailable(
-                    "Editor panes",
-                    "The current wire protocol does not publish file contents to browser clients.",
-                ));
+                let gaps =
+                    SettingEntry::new("Pane gaps", "Separate panes with spacing and borders.")
+                        .control(
+                            Switch::new("web-pane-gaps")
+                                .checked(self.preferences.gaps)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.preferences.gaps = !this.preferences.gaps;
+                                    this.preferences.save();
+                                    cx.notify();
+                                })),
+                        );
+                let [opacity, margin, radius, border] = PaneControl::ALL.map(|control| {
+                    SettingEntry::new(control.title(), control.description())
+                        .disabled(control != PaneControl::Opacity && !self.preferences.gaps)
+                        .control(
+                            div().w(px(120.0)).flex_none().child(
+                                NumberInput::new(&self.settings_controls.panes[control as usize])
+                                    .small()
+                                    .bg(settings_control_fill(cx)),
+                            ),
+                        )
+                });
+                return div()
+                    .size_full()
+                    .bg(cx.theme().background)
+                    .child(zz_ui::settings::panes_page(
+                        gaps, opacity, margin, radius, border, cx,
+                    ))
+                    .into_any_element();
             }
             SettingsSection::Multiplexer => {
                 rows.push(
@@ -650,4 +704,91 @@ fn unavailable(title: &str, reason: &str) -> SettingEntry {
                 .label("Unavailable")
                 .disabled(true),
         )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PaneControl {
+    Opacity,
+    Margin,
+    Radius,
+    Border,
+}
+
+impl PaneControl {
+    const ALL: [Self; 4] = [Self::Opacity, Self::Margin, Self::Radius, Self::Border];
+
+    fn value(self, preferences: &mut Preferences) -> &mut f32 {
+        match self {
+            Self::Opacity => &mut preferences.pane_inactive_opacity,
+            Self::Margin => &mut preferences.pane_margin,
+            Self::Radius => &mut preferences.pane_radius,
+            Self::Border => &mut preferences.pane_border_width,
+        }
+    }
+
+    fn limits(self) -> (f32, f32, f64) {
+        match self {
+            Self::Opacity => (0.0, 1.0, 0.05),
+            Self::Margin | Self::Radius => (0.0, 32.0, 0.5),
+            Self::Border => (0.0, 8.0, 0.5),
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Opacity => "Inactive pane opacity",
+            Self::Margin => "Pane margin",
+            Self::Radius => "Pane corner radius",
+            Self::Border => "Pane border width",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::Opacity => {
+                "Visible strength of inactive pane content and chrome (0–1). Set to 1 to disable dimming."
+            }
+            Self::Margin => "Space around each pane, in logical pixels (0–32).",
+            Self::Radius => "Rounds every pane corner, in logical pixels (0–32).",
+            Self::Border => {
+                "Border width for gapped panes, in logical pixels (0–8). Set to 0 to disable."
+            }
+        }
+    }
+}
+
+fn bounded(value: f32, min: f32, max: f32, fallback: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(min, max)
+    } else {
+        fallback
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Preferences;
+
+    #[test]
+    fn older_preferences_gain_pane_controls_and_values_remain_bounded() {
+        let preferences = serde_json::from_str::<Preferences>(r#"{"gaps":true,"radius":8}"#)
+            .unwrap()
+            .sanitized();
+        assert!(preferences.gaps);
+        assert_eq!(preferences.radius, 8.0);
+        assert_eq!(preferences.pane_margin, 6.0);
+        assert_eq!(preferences.pane_radius, 13.5);
+        let preferences = Preferences {
+            pane_margin: -1.0,
+            pane_radius: 200.0,
+            pane_border_width: f32::NAN,
+            pane_inactive_opacity: 2.0,
+            ..preferences
+        }
+        .sanitized();
+        assert_eq!(preferences.pane_margin, 0.0);
+        assert_eq!(preferences.pane_radius, 32.0);
+        assert_eq!(preferences.pane_border_width, 0.5);
+        assert_eq!(preferences.pane_inactive_opacity, 1.0);
+    }
 }

@@ -1,9 +1,7 @@
 use std::{
     collections::{BTreeSet, HashMap},
-    ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
 };
 use zz_ui::agent::composer::composer_tail_clearance;
 #[cfg(test)]
@@ -14,13 +12,21 @@ use zz_ui::agent::controls::{
 };
 #[cfg(test)]
 use zz_ui::agent::controls::{context_usage_fraction, context_usage_tooltip, git_file_count_label};
+#[cfg(test)]
+use zz_ui::agent::presentation::MAX_RENDERED_ERROR_BYTES;
+use zz_ui::agent::presentation::{
+    empty_state, error_card, permission_card, permission_option, rendered_error,
+};
 
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
 use gpui::{
-    Anchor, AnyElement, Context, Entity, EntityId, FocusHandle, Focusable, Hsla, Image,
-    IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render,
-    ScrollStrategy, SharedString, Subscription, Transformation, UniformListScrollHandle, Window,
-    div, ease_in_out, percentage, prelude::*, px, uniform_list,
+    Anchor, AnyElement, Context, Entity, EntityId, FocusHandle, Focusable, Image, IntoElement,
+    KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render, ScrollStrategy,
+    SharedString, Subscription, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
+};
+use zz_client::agent_completion::{
+    CommandCompletion, active_command_hint, bare_command_name, completion_query, completion_score,
+    meaningful_command_description, ranked_completions,
 };
 use zz_protocol::{AgentDescriptor, AgentProvider, CommandInvocation, PaneId};
 #[cfg(all(test, not(target_os = "macos")))]
@@ -34,15 +40,12 @@ use zz_ui::agent::{
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
-    ActiveTheme as _, CHROME_GAP, Colorize as _, Disableable as _, Icon, IconName, Sizable as _,
-    Size,
+    ActiveTheme as _, CHROME_GAP, Colorize as _, Disableable as _, IconName, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{IndentInline, InputEvent, InputState, MoveDown, MoveUp},
     menu::{DropdownMenu as _, PopupMenuItem},
-    pulse::pulse_phase,
     scroll::Scrollbar,
-    v_flex,
 };
 
 use crate::{
@@ -60,20 +63,6 @@ use crate::{
 };
 
 const AGENT_KEY_CONTEXT: &str = "Agent";
-const COMPLETION_ROW_HEIGHT: f32 = 52.0;
-const MAX_VISIBLE_COMPLETION_ROWS: u8 = 6;
-const MAX_COMPLETION_RESULTS: usize = 64;
-const SPINNER_PERIOD: Duration = Duration::from_millis(800);
-const MAX_RENDERED_ERROR_BYTES: usize = 1024;
-
-fn agent_spinner(size: Size, color: Hsla, view: EntityId, cx: &mut gpui::App) -> AnyElement {
-    let phase = ease_in_out(pulse_phase(SPINNER_PERIOD, view, cx));
-    Icon::new(IconName::Loader)
-        .with_size(size)
-        .text_color(color)
-        .transform(Transformation::rotate(percentage(phase)))
-        .into_any_element()
-}
 
 /// Whether the pane shows busy chrome. This reads the connection phase and
 /// nothing else: an adapter that never sends a final tool update leaves rows
@@ -95,12 +84,6 @@ const fn directory_picker_enabled(
     local_host: bool,
 ) -> bool {
     local_host && connection.accepts_prompt() && !pending_permission
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct CommandCompletion {
-    command: AgentCommand,
-    replacement: Range<usize>,
 }
 
 enum TimelineStoreUpdate {
@@ -1109,11 +1092,11 @@ impl AgentView {
         let Some(completion) = self.completions.get(index).cloned() else {
             return;
         };
-        let name = bare_command_name(&completion.command.name);
+        let insertion = completion.insertion();
         self.completion_dismissed = true;
         self.input.update(cx, |input, cx| {
             input.set_selected_range(completion.replacement, cx);
-            input.replace(format!("/{name} "), window, cx);
+            input.replace(insertion, window, cx);
         });
         self.completions = Arc::from([]);
         self.completion_selected = None;
@@ -1309,23 +1292,7 @@ impl AgentView {
             AgentConnectionState::Failed => "The agent could not start this session.".into(),
             AgentConnectionState::Disconnected => "The ACP agent is offline.".into(),
         };
-        let busy = pane_is_busy(state.connection);
-        v_flex()
-            .w_full()
-            .py(px(48.0))
-            .items_center()
-            .gap_2()
-            .text_size(zz_ui::rems_from_px(12.0))
-            .text_color(cx.theme().foreground.muted())
-            .when(busy, |this| {
-                this.child(agent_spinner(
-                    Size::Small,
-                    cx.theme().foreground.muted(),
-                    view,
-                    cx,
-                ))
-            })
-            .child(message)
+        empty_state(message, pane_is_busy(state.connection), view, cx)
     }
 
     /// One pending permission request at a time, with its page counter, its
@@ -1369,112 +1336,48 @@ impl AgentView {
                         button.danger()
                     }
                 };
-                h_flex()
-                    .id(format!(
+                permission_option(
+                    format!(
                         "agent-permission-option-{}-{request_id}-{index}",
                         self.pane.0
-                    ))
-                    .w_full()
-                    .items_center()
-                    .gap_2()
-                    .rounded(cx.theme().radius)
-                    .px_1()
-                    .py(px(2.0))
-                    .when(index == highlighted, |this| {
-                        this.bg(cx.theme().background.hover())
-                    })
-                    .on_hover(move |hovered, _, cx| {
-                        if *hovered {
-                            hover_view.update(cx, |view, cx| {
-                                if view.permission_wizard.highlight(index) {
-                                    cx.notify();
-                                }
-                            });
-                        }
-                    })
-                    .when(index < 9, |this| {
-                        this.child(
-                            div()
-                                .flex_none()
-                                .rounded(cx.theme().radius)
-                                .bg(cx.theme().background.raised(2))
-                                .px_2()
-                                .py(px(2.0))
-                                .text_size(zz_ui::rems_from_px(9.0))
-                                .text_color(cx.theme().foreground.muted())
-                                .child(format!("{}", index + 1)),
-                        )
-                    })
-                    .child(button)
+                    ),
+                    index,
+                    index == highlighted,
+                    button,
+                    cx,
+                )
+                .on_hover(move |hovered, _, cx| {
+                    if *hovered {
+                        hover_view.update(cx, |view, cx| {
+                            if view.permission_wizard.highlight(index) {
+                                cx.notify();
+                            }
+                        });
+                    }
+                })
+                .into_any_element()
             })
             .collect::<Vec<_>>();
         let cancel_view = view.clone();
         Some(
-            v_flex()
-                .w_full()
-                .gap_2()
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().warning.outline())
-                .bg(cx.theme().warning.fill())
-                .p_3()
-                .child(
-                    h_flex()
-                        .w_full()
-                        .items_center()
-                        .gap_2()
-                        .text_size(zz_ui::rems_from_px(12.0))
-                        .child(
-                            Icon::new(IconName::TriangleAlert)
-                                .small()
-                                .flex_none()
-                                .text_color(cx.theme().warning),
-                        )
-                        .child(div().min_w_0().flex_1().child(permission.title.clone()))
-                        .when_some(counter, |this, counter| {
-                            this.child(
-                                div()
-                                    .flex_none()
-                                    .rounded(cx.theme().radius)
-                                    .bg(cx.theme().background.raised(2))
-                                    .px_2()
-                                    .py(px(2.0))
-                                    .text_size(zz_ui::rems_from_px(9.0))
-                                    .text_color(cx.theme().foreground.muted())
-                                    .child(counter),
-                            )
-                        }),
-                )
-                .child(v_flex().w_full().gap_1().children(options))
-                .child(
-                    h_flex()
-                        .w_full()
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_size(zz_ui::rems_from_px(9.0))
-                                .text_color(cx.theme().foreground.muted())
-                                .child("1-9 picks · enter confirms · esc cancels"),
-                        )
-                        .child(
-                            Button::new(format!(
-                                "agent-permission-cancel-{}-{request_id}",
-                                self.pane.0
-                            ))
-                            .ghost()
-                            .small()
-                            .label("Cancel request")
-                            .on_click(move |_, _, cx| {
-                                cancel_view.update(cx, |view, cx| {
-                                    view.cancel_permission(cx);
-                                });
-                                cx.stop_propagation();
-                            }),
-                        ),
-                )
-                .into_any_element(),
+            permission_card(
+                permission.title.clone(),
+                counter.map(Into::into),
+                options,
+                Button::new(format!(
+                    "agent-permission-cancel-{}-{request_id}",
+                    self.pane.0
+                ))
+                .ghost()
+                .small()
+                .label("Cancel request")
+                .on_click(move |_, _, cx| {
+                    cancel_view.update(cx, Self::cancel_permission);
+                    cx.stop_propagation();
+                }),
+                cx,
+            )
+            .into_any_element(),
         )
     }
 
@@ -1529,71 +1432,57 @@ impl AgentView {
             .or_else(|| self.submission_error.clone())?;
         let retry_controller = self.controller.clone();
         let pane = self.pane;
-        Some(
-            v_flex()
-                .w_full()
-                .gap_2()
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().danger.outline())
-                .bg(cx.theme().danger.fill())
-                .p_3()
-                .text_size(zz_ui::rems_from_px(11.0))
-                .child(rendered_error(&error))
-                .when(
-                    runtime_error.is_some() && state.connection == AgentConnectionState::Failed,
-                    |this| {
-                        let auth_buttons =
-                            state
-                                .auth_methods
-                                .iter()
-                                .enumerate()
-                                .map(|(index, method)| {
-                                    let controller = self.controller.clone();
-                                    let method_id = method.id.clone();
-                                    Button::new(format!("agent-auth-{}-{index}", self.pane.0))
-                                        .secondary()
-                                        .small()
-                                        .label(method.name.clone())
-                                        .tooltip(method.description.clone().unwrap_or_else(|| {
-                                            "Authenticate with the agent".to_owned()
-                                        }))
-                                        .on_click(move |_, _, cx| {
-                                            controller.update(cx, |controller, cx| {
-                                                controller.authenticate(
-                                                    pane,
-                                                    method_id.clone(),
-                                                    cx,
-                                                );
-                                            });
-                                        })
+        Some(error_card(&error, cx).when(
+            runtime_error.is_some() && state.connection == AgentConnectionState::Failed,
+            |this| {
+                let auth_buttons = state
+                    .auth_methods
+                    .iter()
+                    .enumerate()
+                    .map(|(index, method)| {
+                        let controller = self.controller.clone();
+                        let method_id = method.id.clone();
+                        Button::new(format!("agent-auth-{}-{index}", self.pane.0))
+                            .secondary()
+                            .small()
+                            .label(method.name.clone())
+                            .tooltip(
+                                method
+                                    .description
+                                    .clone()
+                                    .unwrap_or_else(|| "Authenticate with the agent".to_owned()),
+                            )
+                            .on_click(move |_, _, cx| {
+                                controller.update(cx, |controller, cx| {
+                                    controller.authenticate(pane, method_id.clone(), cx);
                                 });
-                        this.child(
-                            h_flex()
-                                .flex_wrap()
-                                .gap_2()
-                                .child(
-                                    Button::new(format!("agent-retry-{}", self.pane.0))
-                                        .primary()
-                                        .small()
-                                        .icon(IconName::Redo2)
-                                        .label(if state.lifecycle_pending {
-                                            "Restarting…"
-                                        } else {
-                                            "Try again"
-                                        })
-                                        .disabled(state.lifecycle_pending)
-                                        .on_click(move |_, _, cx| {
-                                            retry_controller.update(cx, |controller, cx| {
-                                                controller.retry(pane, cx);
-                                            });
-                                        }),
-                                )
-                                .children(auth_buttons),
+                            })
+                    });
+                this.child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(
+                            Button::new(format!("agent-retry-{}", self.pane.0))
+                                .primary()
+                                .small()
+                                .icon(IconName::Redo2)
+                                .label(if state.lifecycle_pending {
+                                    "Restarting…"
+                                } else {
+                                    "Try again"
+                                })
+                                .disabled(state.lifecycle_pending)
+                                .on_click(move |_, _, cx| {
+                                    retry_controller.update(cx, |controller, cx| {
+                                        controller.retry(pane, cx);
+                                    });
+                                }),
                         )
-                    },
-                ),
-        )
+                        .children(auth_buttons),
+                )
+            },
+        ))
     }
 
     fn render_agent_picker(&self, state: &AgentPaneState, view: Entity<Self>) -> impl IntoElement {
@@ -2136,12 +2025,6 @@ impl AgentView {
             return None;
         }
         let selected = self.completion_selected;
-        let visible_rows = self
-            .completions
-            .len()
-            .min(usize::from(MAX_VISIBLE_COMPLETION_ROWS));
-        let visible_rows =
-            f32::from(u8::try_from(visible_rows).unwrap_or(MAX_VISIBLE_COMPLETION_ROWS));
         let pane = self.pane;
         let completions = Arc::clone(&self.completions);
         let rows_view = view.clone();
@@ -2160,86 +2043,40 @@ impl AgentView {
                         let hover_view = rows_view.clone();
                         let click_view = rows_view.clone();
                         Some(
-                            h_flex()
-                                .id(format!("agent-completion-{}-{index}", pane.0))
-                                .w_full()
-                                .h(px(COMPLETION_ROW_HEIGHT))
-                                .items_center()
-                                .gap_3()
-                                .rounded(cx.theme().radius)
-                                .px_3()
-                                .cursor_pointer()
-                                .when(is_selected, |this| this.bg(cx.theme().background.hover()))
-                                .when(!is_selected, |this| {
-                                    this.hover(|this| this.bg(cx.theme().background.hover()))
-                                })
-                                .on_hover(move |hovered, _, cx| {
-                                    if *hovered {
-                                        hover_view.update(cx, |view, cx| {
-                                            if view.completion_selected != Some(index) {
-                                                view.completion_selected = Some(index);
-                                                cx.notify();
-                                            }
-                                        });
-                                    }
-                                })
-                                .on_click(move |_, window, cx| {
-                                    click_view.update(cx, |view, cx| {
-                                        view.accept_completion(index, window, cx);
+                            zz_ui::agent::slash::suggestion_row(
+                                format!("agent-completion-{}-{index}", pane.0),
+                                name,
+                                description.map(Into::into),
+                                is_selected,
+                                cx,
+                            )
+                            .on_hover(move |hovered, _, cx| {
+                                if *hovered {
+                                    hover_view.update(cx, |view, cx| {
+                                        if view.completion_selected != Some(index) {
+                                            view.completion_selected = Some(index);
+                                            cx.notify();
+                                        }
                                     });
-                                    cx.stop_propagation();
-                                })
-                                .child(
-                                    v_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .gap(px(2.0))
-                                        .child(
-                                            div()
-                                                .w_full()
-                                                .min_w_0()
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_size(zz_ui::rems_from_px(12.0))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .child(format!("/{name}")),
-                                        )
-                                        .when_some(description, |this, description| {
-                                            this.child(
-                                                div()
-                                                    .w_full()
-                                                    .min_w_0()
-                                                    .overflow_hidden()
-                                                    .text_ellipsis()
-                                                    .whitespace_nowrap()
-                                                    .text_size(zz_ui::rems_from_px(10.0))
-                                                    .text_color(cx.theme().foreground.muted())
-                                                    .child(description),
-                                            )
-                                        }),
-                                ),
+                                }
+                            })
+                            .on_click(move |_, window, cx| {
+                                click_view.update(cx, |view, cx| {
+                                    view.accept_completion(index, window, cx);
+                                });
+                                cx.stop_propagation();
+                            }),
                         )
                     })
                     .collect::<Vec<_>>()
             },
         )
         .w_full()
-        .h(px(COMPLETION_ROW_HEIGHT * visible_rows))
+        .h(zz_ui::agent::slash::suggestion_list_height(
+            self.completions.len(),
+        ))
         .track_scroll(&self.completion_scroll);
-        Some(
-            v_flex()
-                .w_full()
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().border)
-                .bg(cx.theme().background.raised(1))
-                .p_1()
-                .shadow_md()
-                .overflow_hidden()
-                .child(rows)
-                .into_any_element(),
-        )
+        Some(zz_ui::agent::slash::suggestion_list(rows, cx).into_any_element())
     }
 
     #[allow(clippy::redundant_closure_for_method_calls)]
@@ -2520,27 +2357,6 @@ impl Render for AgentView {
             });
         round_div_radii(root, pane_content_radii(cx, self.window_corners))
     }
-}
-
-fn rendered_error(error: &str) -> String {
-    let mut rendered = String::with_capacity(MAX_RENDERED_ERROR_BYTES);
-    let mut truncated = false;
-    for character in error.trim().chars() {
-        let character = if character.is_control() && !matches!(character, '\n' | '\t') {
-            '�'
-        } else {
-            character
-        };
-        if rendered.len().saturating_add(character.len_utf8()) > MAX_RENDERED_ERROR_BYTES - 3 {
-            truncated = true;
-            break;
-        }
-        rendered.push(character);
-    }
-    if truncated {
-        rendered.push('…');
-    }
-    rendered
 }
 
 fn disconnected_pane_state() -> AgentPaneState {
@@ -2859,119 +2675,11 @@ fn history_result_index_for_session(
     })
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct CompletionQuery {
-    needle: String,
-    replacement: Range<usize>,
-}
-
 const fn provider_icon(provider: AgentProvider) -> IconName {
     match provider {
         AgentProvider::Codex => IconName::Openai,
         AgentProvider::ClaudeCode => IconName::Claude,
     }
-}
-
-fn completion_query(value: &str, cursor: usize) -> Option<CompletionQuery> {
-    if cursor > value.len() || !value.is_char_boundary(cursor) {
-        return None;
-    }
-    let before_cursor = &value[..cursor];
-    let line_start = before_cursor.rfind('\n').map_or(0, |index| index + 1);
-    let sigil_index = before_cursor[line_start..].rfind('/')? + line_start;
-    if sigil_index > line_start
-        && !value[..sigil_index]
-            .chars()
-            .next_back()
-            .is_some_and(char::is_whitespace)
-    {
-        return None;
-    }
-    let tail = &value[sigil_index + 1..cursor];
-    if tail.chars().any(char::is_whitespace) {
-        return None;
-    }
-    Some(CompletionQuery {
-        needle: tail.to_owned(),
-        replacement: sigil_index..cursor,
-    })
-}
-
-fn bare_command_name(name: &str) -> &str {
-    name.trim_start_matches('/')
-}
-
-fn completion_score(candidate: &str, needle: &str) -> Option<u8> {
-    if needle.is_empty() {
-        return Some(3);
-    }
-    if candidate == needle {
-        return Some(0);
-    }
-    if candidate.starts_with(needle) {
-        return Some(1);
-    }
-    if candidate.contains(needle) {
-        return Some(2);
-    }
-    let mut characters = candidate.chars();
-    needle
-        .chars()
-        .all(|needle| characters.by_ref().any(|candidate| candidate == needle))
-        .then_some(3)
-}
-
-fn ranked_completions(
-    commands: &[AgentCommand],
-    query: &CompletionQuery,
-) -> Vec<CommandCompletion> {
-    let needle = query.needle.to_ascii_lowercase();
-    let mut ranked = commands
-        .iter()
-        .filter_map(|command| {
-            let searchable = bare_command_name(&command.name).to_ascii_lowercase();
-            completion_score(&searchable, &needle).map(|score| {
-                (
-                    score,
-                    searchable,
-                    CommandCompletion {
-                        command: command.clone(),
-                        replacement: query.replacement.clone(),
-                    },
-                )
-            })
-        })
-        .collect::<Vec<_>>();
-    ranked.sort_by(|left, right| (left.0, &left.1).cmp(&(right.0, &right.1)));
-    ranked
-        .into_iter()
-        .take(MAX_COMPLETION_RESULTS)
-        .map(|(_, _, completion)| completion)
-        .collect()
-}
-
-fn meaningful_command_description(description: &str) -> Option<&str> {
-    let description = description.trim();
-    (!description.is_empty()
-        && description
-            .chars()
-            .any(|character| character != '.' && character != '…'))
-    .then_some(description)
-}
-
-fn active_command_hint(value: &str, commands: &[AgentCommand]) -> Option<String> {
-    let command = value.trim_start().strip_prefix('/')?;
-    let (name, arguments) = command
-        .split_once(char::is_whitespace)
-        .map_or((command, ""), |(name, arguments)| (name, arguments));
-    if !arguments.trim().is_empty() {
-        return None;
-    }
-    commands
-        .iter()
-        .find(|command| bare_command_name(&command.name).eq_ignore_ascii_case(name))
-        .and_then(|command| command.input_hint.as_deref())
-        .map(|hint| format!("Argument · {hint}"))
 }
 
 #[cfg(test)]
@@ -2987,14 +2695,6 @@ mod completion_tests {
     use zz_ui::Root;
 
     use super::*;
-
-    fn command(name: &str) -> AgentCommand {
-        AgentCommand {
-            name: name.to_owned(),
-            description: format!("Run {name}"),
-            input_hint: None,
-        }
-    }
 
     fn permission(request_id: u64) -> AgentPermissionRequest {
         use crate::agent::controller::AgentPermissionOption;
@@ -3234,62 +2934,6 @@ mod completion_tests {
         );
     }
 
-    #[test]
-    fn available_commands_use_standard_slash_semantics() {
-        assert_eq!(bare_command_name("/review"), "review");
-        assert_eq!(bare_command_name("$brainstorm"), "$brainstorm");
-        assert_eq!(
-            completion_query("/rev", 4),
-            Some(CompletionQuery {
-                needle: "rev".to_owned(),
-                replacement: 0..4,
-            })
-        );
-        assert_eq!(
-            completion_query("please /rev", 11),
-            Some(CompletionQuery {
-                needle: "rev".to_owned(),
-                replacement: 7..11,
-            })
-        );
-        assert!(completion_query("$rev", 4).is_none());
-        assert!(completion_query("https://zed.dev", 15).is_none());
-        assert!(completion_query("/review branch", 14).is_none());
-    }
-
-    #[test]
-    fn completion_matching_supports_bare_command_names() {
-        assert_eq!(completion_score("brainstorm", "brain"), Some(1));
-        assert_eq!(completion_score("gh-address-comments", "gac"), Some(3));
-        assert_eq!(completion_score("review", "xyz"), None);
-    }
-
-    #[test]
-    fn completion_results_keep_every_available_command() {
-        let commands = (0..16)
-            .map(|index| command(&format!("command-{index:02}")))
-            .collect::<Vec<_>>();
-        let query = completion_query("/", 1).expect("command completion query");
-
-        let completions = ranked_completions(&commands, &query);
-
-        assert_eq!(completions.len(), commands.len());
-    }
-
-    #[test]
-    fn command_hints_follow_standard_slash_semantics() {
-        let command = AgentCommand {
-            input_hint: Some("optional context".to_owned()),
-            ..command("review")
-        };
-
-        assert_eq!(
-            active_command_hint("/review ", std::slice::from_ref(&command)),
-            Some("Argument · optional context".to_owned())
-        );
-        assert_eq!(active_command_hint("$review ", &[command]), None);
-    }
-
     #[cfg(not(target_os = "macos"))]
     #[gpui::test]
     fn non_append_timeline_rebuild_clears_retained_store(cx: &mut TestAppContext) {
@@ -3483,16 +3127,6 @@ mod completion_tests {
             "/first "
         );
         assert!(cx.update(|_, cx| view.read(cx).completions.is_empty()));
-    }
-
-    #[test]
-    fn placeholder_only_command_descriptions_are_hidden() {
-        assert_eq!(meaningful_command_description("..."), None);
-        assert_eq!(meaningful_command_description(" … "), None);
-        assert_eq!(
-            meaningful_command_description(" Review the current diff "),
-            Some("Review the current diff")
-        );
     }
 }
 

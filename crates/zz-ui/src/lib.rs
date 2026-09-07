@@ -61,3 +61,4 @@ pub mod picker;
 pub mod pulse;
 pub mod settings;
 pub mod shell;
+pub mod terminal;

@@ -7,7 +7,7 @@ use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
     CommandSpec, MAX_STATUS_TEXT_BYTES, PaneBorderStatus, PaneId, RawText, SessionId, WindowId,
 };
-pub use zz_protocol::{TmuxColour, parse_tmux_colour};
+pub use zz_protocol::{TmuxColour, display_width, indexed_colour_rgb, parse_tmux_colour};
 
 use crate::{
     MuxEngine, PaneKind, WindowSize, command::TmuxOptionTarget, layout::CellLayout,
@@ -106,13 +106,6 @@ pub(crate) fn derived_format_context_families() -> impl Iterator<
     ),
 > {
     DERIVED_FORMAT_CONTEXT_FAMILIES.iter().copied()
-}
-
-pub fn display_width(value: &str) -> usize {
-    value
-        .chars()
-        .map(|character| character.width().unwrap_or_default())
-        .sum()
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -3583,33 +3576,6 @@ fn colour_escape(colour: TmuxColour, background: bool) -> Option<String> {
         TmuxColour::Default | TmuxColour::Terminal => format!("\u{1b}[{}m", base + 9),
         TmuxColour::Theme(_) => return None,
     })
-}
-
-pub fn indexed_colour_rgb(index: u8) -> u32 {
-    const BASIC: [u32; 16] = [
-        0x00_00_00, 0x80_00_00, 0x00_80_00, 0x80_80_00, 0x00_00_80, 0x80_00_80, 0x00_80_80,
-        0xc0_c0_c0, 0x80_80_80, 0xff_00_00, 0x00_ff_00, 0xff_ff_00, 0x00_00_ff, 0xff_00_ff,
-        0x00_ff_ff, 0xff_ff_ff,
-    ];
-    if index < 16 {
-        return BASIC[usize::from(index)];
-    }
-    if index < 232 {
-        let offset = index - 16;
-        let red = offset / 36;
-        let green = offset % 36 / 6;
-        let blue = offset % 6;
-        let level = |value: u8| {
-            if value == 0 {
-                0
-            } else {
-                55 + 40 * u32::from(value)
-            }
-        };
-        return level(red) << 16 | level(green) << 8 | level(blue);
-    }
-    let value = 8 + 10 * u32::from(index - 232);
-    value << 16 | value << 8 | value
 }
 
 fn shorthand(character: char) -> Option<&'static str> {

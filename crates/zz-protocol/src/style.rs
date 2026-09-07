@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
+use unicode_width::UnicodeWidthChar as _;
 use zz_terminal::parse_x11_color;
 
 pub const MAX_RGB_COLOUR: u32 = 0x00ff_ffff;
@@ -25,6 +26,40 @@ where
         ));
     }
     Ok(colour)
+}
+
+pub fn display_width(value: &str) -> usize {
+    value
+        .chars()
+        .map(|character| character.width().unwrap_or_default())
+        .sum()
+}
+
+pub fn indexed_colour_rgb(index: u8) -> u32 {
+    const BASIC: [u32; 16] = [
+        0x00_00_00, 0x80_00_00, 0x00_80_00, 0x80_80_00, 0x00_00_80, 0x80_00_80, 0x00_80_80,
+        0xc0_c0_c0, 0x80_80_80, 0xff_00_00, 0x00_ff_00, 0xff_ff_00, 0x00_00_ff, 0xff_00_ff,
+        0x00_ff_ff, 0xff_ff_ff,
+    ];
+    if index < 16 {
+        return BASIC[usize::from(index)];
+    }
+    if index < 232 {
+        let offset = index - 16;
+        let red = offset / 36;
+        let green = offset % 36 / 6;
+        let blue = offset % 6;
+        let level = |value: u8| {
+            if value == 0 {
+                0
+            } else {
+                55 + 40 * u32::from(value)
+            }
+        };
+        return level(red) << 16 | level(green) << 8 | level(blue);
+    }
+    let value = 8 + 10 * u32::from(index - 232);
+    value << 16 | value << 8 | value
 }
 
 pub fn parse_tmux_colour(value: &str) -> Option<TmuxColour> {

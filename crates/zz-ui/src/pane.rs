@@ -1,10 +1,11 @@
 use crate::{
-    ActiveTheme as _, Colorize as _, Sizable as _, control_shadow, surface_ring, tag::Tag,
+    ActiveTheme as _, Colorize as _, ElementExt as _, Sizable as _, control_shadow, surface_ring,
+    tag::Tag,
 };
 use gpui::{
-    AnyElement, App, BoxShadow, Corners, CursorStyle, ElementId, FontWeight, Hsla, IntoElement,
-    ParentElement as _, Pixels, SharedString, Stateful, Styled as _, div, point, prelude::*, px,
-    relative,
+    AnyElement, App, Bounds, BoxShadow, Corners, CursorStyle, ElementId, FontWeight, Hsla,
+    IntoElement, ParentElement as _, Pixels, SharedString, Stateful, Styled as _, StyledText,
+    Window, div, point, prelude::*, px, relative, size,
 };
 
 const PANE_DRAG_SOURCE_FADE: f32 = 0.3;
@@ -727,13 +728,32 @@ pub fn terminal_mode_indicator(
 
 /// The find prompt, shown as a focused status tag in the pane's bottom-right
 /// overlay stack. Borrows the focus ring so it reads as the active input.
-pub fn terminal_search_prompt(message: impl IntoElement, cx: &App) -> Tag {
+pub fn terminal_search_prompt(
+    message: impl Into<SharedString>,
+    caret: usize,
+    on_caret: impl FnOnce(Bounds<Pixels>, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Tag {
+    let text = StyledText::new(message);
+    let layout = text.layout().clone();
     Tag::secondary()
         .max_w(px(560.0))
         .border_color(cx.theme().foreground)
         .text_color(cx.theme().foreground)
         .text_size(crate::rems_from_px(11.0))
-        .child(message)
+        .child(text)
+        .on_prepaint(move |_, window, cx| {
+            if let Some(position) = layout.position_for_index(caret) {
+                on_caret(
+                    Bounds::new(
+                        position,
+                        size(px(1.0 / window.scale_factor()), layout.line_height()),
+                    ),
+                    window,
+                    cx,
+                );
+            }
+        })
 }
 
 /// A transient status line (copy confirmations, search errors) for the pane's
@@ -755,41 +775,6 @@ pub fn terminal_link_popup(uri: impl IntoElement, cx: &App) -> Tag {
         .text_color(cx.theme().foreground)
         .text_size(crate::rems_from_px(11.0))
         .child(uri)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn inactive_opacity_one_disables_surface_dimming() {
-        let chrome = PaneChrome::new(
-            Corners::default(),
-            px(0.0),
-            gpui::transparent_black(),
-            gpui::transparent_black(),
-            false,
-        );
-
-        assert_eq!(chrome.dimmed(true, 1.0).inactive_opacity, 1.0);
-        assert_eq!(chrome.dimmed(false, 0.0).inactive_opacity, 1.0);
-        assert_eq!(chrome.dimmed(true, 0.7).inactive_opacity, 0.7);
-    }
-
-    #[gpui::test]
-    fn gapped_panes_use_soft_outer_shadows(cx: &mut gpui::TestAppContext) {
-        cx.update(crate::init);
-        cx.update(|cx| {
-            assert!(pane_surface_shadow_style(false, cx).is_empty());
-
-            let expected = control_shadow(cx);
-            assert_eq!(pane_surface_shadow_style(true, cx), expected);
-            assert!(!expected[0].inset);
-
-            crate::Theme::global_mut(cx).shadow = false;
-            assert!(pane_surface_shadow_style(true, cx).is_empty());
-        });
-    }
 }
 
 pub fn pane_picker_row(
@@ -851,4 +836,39 @@ pub fn pane_picker_choices(rows: impl IntoIterator<Item = AnyElement>) -> gpui::
         .max_w(px(360.0))
         .gap(px(4.0))
         .children(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inactive_opacity_one_disables_surface_dimming() {
+        let chrome = PaneChrome::new(
+            Corners::default(),
+            px(0.0),
+            gpui::transparent_black(),
+            gpui::transparent_black(),
+            false,
+        );
+
+        assert_eq!(chrome.dimmed(true, 1.0).inactive_opacity, 1.0);
+        assert_eq!(chrome.dimmed(false, 0.0).inactive_opacity, 1.0);
+        assert_eq!(chrome.dimmed(true, 0.7).inactive_opacity, 0.7);
+    }
+
+    #[gpui::test]
+    fn gapped_panes_use_soft_outer_shadows(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        cx.update(|cx| {
+            assert!(pane_surface_shadow_style(false, cx).is_empty());
+
+            let expected = control_shadow(cx);
+            assert_eq!(pane_surface_shadow_style(true, cx), expected);
+            assert!(!expected[0].inset);
+
+            crate::Theme::global_mut(cx).shadow = false;
+            assert!(pane_surface_shadow_style(true, cx).is_empty());
+        });
+    }
 }

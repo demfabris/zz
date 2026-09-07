@@ -1,7 +1,9 @@
 mod app;
 mod attachments;
+mod command_palette;
 mod connection;
 mod terminal;
+mod terminal_images;
 
 use std::borrow::Cow;
 

@@ -9,7 +9,7 @@ tags:
 - client
 - websocket
 - gpui
-timestamp: 2026-09-07T19:55:35Z
+timestamp: 2026-09-07T22:26:00Z
 ---
 
 # Overview
@@ -62,13 +62,15 @@ The page uses the same `zz-ui` shell, navigation, pane borders, browser toolbar,
 composer, settings groups, and overlays as the desktop client. GPUI selects WebGPU when available
 and falls back to WebGL2. The page fills the viewport and reacts to browser resizing and zoom.
 
-Terminal panes receive full frames and patches through `ClientCore`. The painter caches shaped
-rows and resolves the shared style and grapheme dictionaries. Keyboard input, text composition,
+Terminal panes receive full frames and patches through `ClientCore`. Both clients use the
+`zz-ui` terminal painter, which caches shaped rows and resolves shared style and grapheme
+dictionaries. Scrollbars, selection autoscroll, cursor blinking, inactive cursor outlines, and
+Kitty image placement use the shared rendering rules. Keyboard input, text composition,
 selection, scrolling, search, and paste reach the daemon through its existing input messages.
 Reconnects attach to the remembered session and replay focus and Agent transcript state.
 Agent replay includes submitted prompts when the provider emits `user_message_chunk` updates;
-the daemon does not journal a separate copy of submitted prompt text. The terminal painter
-currently renders text and selection overlays, without Kitty image graphics.
+the daemon does not journal a separate copy of submitted prompt text. Browser image transfers
+are assembled in a bounded cache and retired textures are released from GPUI.
 
 Session and window selection, terminal splits and divider dragging, pane zoom, daemon command
 prompts, choosers, menus, confirmations, popups, command output, and Agent prompt/permission
@@ -80,8 +82,23 @@ The working-directory picker lists known Agent directories and accepts an absolu
 daemon host; recursive filesystem discovery remains desktop-only. Appearance preferences for the
 browser live in local storage: system/light/dark mode, all eleven desktop chrome presets, six
 editable palette roots, zoom, and corner radius. Numeric fields, color pickers, theme previews, and
-pane-picker rows use the desktop components. Sidebar rows expose expand/collapse, add, split,
-and close controls. The bundled fonts include CJK and color emoji fallback.
+pane-picker rows use the desktop components. Panes settings use the shared Layout, Focus, and
+Frame groups for gaps, inactive opacity, margins, pane radius, and border width. These settings are
+saved independently from widget radius. Sidebar rows share desktop labels, markers, layout and
+rename menus, add/split/close actions, and keyboard navigation. The window strip shares tabs,
+overflow, rename/close menus, session selection, agent count, and clock presentation. The bundled
+fonts include CJK and color emoji fallback.
+
+The command palette shares its input, result rows, and keyboard hints with desktop. Both clients
+use `zz-client` completion for commands, options, recent commands, and live session/window/pane
+targets. Menus and confirmations share floating frames and rows, while pane indicators and
+terminal search use the desktop overlays. Popup terminals also use the desktop cell geometry,
+style colors, border rules, title, and content insets. Dead, waiting, and synchronized panes share
+the desktop badges. Agent permission, error, and empty-state cards share
+their presentation; provider switching, retry, image replay, and jump-to-bottom are available.
+Agent slash-command suggestions share desktop rows and `zz-client` matching and replacement
+rules, including argument hints. The browser retains the provider command catalog independently
+of transcript limits so older replay entries can be discarded without losing completion.
 
 Unsupported controls stay visible and disabled. Native window behavior, OS fonts and credentials,
 native file dialogs, desktop notifications, local file editing, Chromium execution inside a pane, and
@@ -109,15 +126,28 @@ reject foreign origins, invalid frames, and asset paths outside the served direc
 
 - `clients/web/src/lib.rs`: GPUI initialization, portable fonts, and browser entrypoint.
 - `clients/web/src/connection.rs`: protocol reduction, bounded receive queue, reconnect, and replay.
-- `clients/web/src/terminal.rs`: terminal painter, input, selection, and search.
+- `clients/web/src/terminal.rs`: browser terminal input, selection, search, and shared-renderer adapter.
+- `clients/web/src/terminal_images.rs`: bounded image transfer assembly and GPU texture retirement.
+- `crates/zz-ui/src/terminal.rs`: shared terminal painting, metrics, scrollbars, cursor, and image placement.
 - `clients/web/src/app.rs`: workspace, navigation, and daemon overlays.
+- `clients/web/src/command_palette.rs`: command prompt input and completion interaction over the shared palette.
+- `clients/web/src/floating.rs`: daemon menu and confirmation interaction over shared floating surfaces.
+- `crates/zz-ui/src/command/`: shared palette, menu, confirmation, and frame presentation.
+- `crates/zz-client/src/completion.rs`: shared command, option, history, and live-target completion.
 - `clients/web/src/agent_pane.rs`: Agent timeline, composer, and conversation history.
 - `clients/web/src/settings.rs`: local preferences and shared appearance controls.
-- `clients/web/src/sidebar.rs`: session tree, disclosure controls, and row actions.
+- `clients/web/src/sidebar.rs`: session tree, keyboard focus, disclosure controls, and row actions.
+- `clients/web/src/status_bar.rs`: live status model and command callbacks for the shared strip.
+- `crates/zz-ui/src/navigation/status.rs`: shared window tabs, overflow, session chip, and status items.
+- `crates/zz-ui/src/navigation/sidebar.rs`: shared tree markers, menus, action strips, and keyboard navigation.
+- `crates/zz-client/src/navigation.rs`: shared tree labels, layout order, and rename command construction.
+- `crates/zz-client/src/agent_completion.rs`: shared provider command matching, query replacement, and hints.
+- `crates/zz-ui/src/agent/slash.rs`: shared Agent command suggestion rows and list.
 - `clients/web/src/picker.rs`: pane-picker interaction over shared desktop rows.
 - `crates/zz-ui/src/chrome_palette.rs`: shared presets and palette resolution.
 - `crates/zz-ui/src/picker.rs`: shared history and path picker layout and rows.
 - `crates/zz-ui/src/agent/controls.rs`: shared composer actions, option menus, Git counts, and context usage.
+- `crates/zz-ui/src/agent/presentation.rs`: shared permission, error, and empty-state cards.
 - `clients/web/src/attachments.rs`: browser image selection and protocol limits.
 - `crates/zz-web/src/lib.rs`: `Gateway`, asset serving, and the binary WebSocket bridge.
 - `scripts/build-web-wasm.sh`: build and static distribution assembly.

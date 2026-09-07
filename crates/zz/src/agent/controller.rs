@@ -212,12 +212,7 @@ pub(crate) struct AgentAuthMethod {
     pub(crate) description: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AgentCommand {
-    pub(crate) name: String,
-    pub(crate) description: String,
-    pub(crate) input_hint: Option<String>,
-}
+pub(crate) use zz_client::agent_completion::AgentCommand;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AgentConfigCategory {

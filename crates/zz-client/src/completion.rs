@@ -1,10 +1,18 @@
 use std::{collections::BTreeSet, ops::Range};
 
-use zz_mux::LayoutPreset;
 use zz_protocol::MuxSnapshot;
 use zz_protocol::{CommandSpec, CommandValueKind, catalog_command_spec, command_specs};
 
 const MAX_COMPLETIONS: usize = 64;
+const LAYOUTS: &[&str] = &[
+    "even-horizontal",
+    "even-vertical",
+    "main-horizontal",
+    "main-horizontal-mirrored",
+    "main-vertical",
+    "main-vertical-mirrored",
+    "tiled",
+];
 const KEY_TABLES: &[&str] = &[
     "prefix",
     "root",
@@ -45,7 +53,7 @@ const SET_OPTIONS: &[&str] = &[
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum CompletionKind {
+pub enum CompletionKind {
     History,
     Command,
     Option,
@@ -53,12 +61,12 @@ pub(crate) enum CompletionKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CompletionSuggestion {
-    pub(crate) kind: CompletionKind,
-    pub(crate) label: String,
-    pub(crate) detail: String,
-    pub(crate) replacement: Range<usize>,
-    pub(crate) insertion: String,
+pub struct CompletionSuggestion {
+    pub kind: CompletionKind,
+    pub label: String,
+    pub detail: String,
+    pub replacement: Range<usize>,
+    pub insertion: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,7 +83,7 @@ struct Rank {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct PaneKindAvailability {
+pub struct PaneKindAvailability {
     pub browser: bool,
     pub agent: bool,
     pub editor: bool,
@@ -91,7 +99,7 @@ impl Default for PaneKindAvailability {
     }
 }
 
-pub(crate) fn complete_command(
+pub fn complete_command(
     input: &str,
     cursor: usize,
     history: &[String],
@@ -187,7 +195,7 @@ pub(crate) fn complete_command(
     finish(ranked)
 }
 
-pub(crate) fn apply_completion(input: &str, suggestion: &CompletionSuggestion) -> (String, usize) {
+pub fn apply_completion(input: &str, suggestion: &CompletionSuggestion) -> (String, usize) {
     let start = floor_char_boundary(input, suggestion.replacement.start.min(input.len()));
     let end = floor_char_boundary(input, suggestion.replacement.end.clamp(start, input.len()));
     let insertion = completion_insertion(input, suggestion);
@@ -199,7 +207,7 @@ pub(crate) fn apply_completion(input: &str, suggestion: &CompletionSuggestion) -
     (completed, cursor)
 }
 
-pub(crate) fn completion_insertion(input: &str, suggestion: &CompletionSuggestion) -> String {
+pub fn completion_insertion(input: &str, suggestion: &CompletionSuggestion) -> String {
     let suffix_starts_with_space = input
         .get(suggestion.replacement.end..)
         .and_then(|suffix| suffix.chars().next())
@@ -407,10 +415,10 @@ fn values_for_kind(
                 })
             })
             .collect(),
-        CommandValueKind::Layout => LayoutPreset::ALL
-            .into_iter()
+        CommandValueKind::Layout => LAYOUTS
+            .iter()
             .map(|layout| {
-                let name = layout.name().to_owned();
+                let name = (*layout).to_owned();
                 (name.clone(), name, "Layout".to_owned())
             })
             .collect(),

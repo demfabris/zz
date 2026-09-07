@@ -50,14 +50,15 @@ pub use message::{
     MAX_CHOOSE_ITEM_TEXT_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES, MAX_CLIENT_ENVIRONMENT_BYTES,
     MAX_CLIENT_ENVIRONMENT_ENTRIES, MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_FILE_BYTES,
     MAX_CLIENT_FILE_PATH_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_COMMAND_PROMPT_BYTES,
-    MAX_GUI_TEXT_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES, MAX_PASTE_UPLOAD_BYTES,
-    MAX_PASTE_UPLOAD_CHUNK_BYTES, MAX_PASTE_UPLOAD_EXTENSION_BYTES, MAX_STATUS_ROWS,
-    MAX_STATUS_TEXT_BYTES, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource,
-    MuxOptionValue, MuxOptions, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneIndicator,
-    PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer,
-    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolMessage,
-    RawText, SPLIT_RATIO_BASIS, ServerError, ServerHello, SourceSpan, StatusLine, StatusPosition,
-    StdoutClaim, TerminalUiCommand, agent_update_batch_bytes, paste_upload_extension_is_valid,
+    MAX_GUI_TEXT_BYTES, MAX_KITTY_IMAGE_BYTES, MAX_KITTY_IMAGE_CHUNK_BYTES,
+    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_PASTE_UPLOAD_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES,
+    MAX_PASTE_UPLOAD_EXTENSION_BYTES, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MenuAction, MenuItem,
+    MenuState, MuxOptionKey, MuxOptionSource, MuxOptionValue, MuxOptions,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneIndicator, PasteUploadPurpose,
+    PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer, PopupPointerButton, PopupState,
+    PreparedCommand, PreparedCommandResult, ProtocolMessage, RawText, SPLIT_RATIO_BASIS,
+    ServerError, ServerHello, SourceSpan, StatusLine, StatusPosition, StdoutClaim,
+    TerminalUiCommand, agent_update_batch_bytes, paste_upload_extension_is_valid,
     split_command_words,
 };
 pub use message::{
@@ -72,8 +73,8 @@ pub use snapshot::{
 };
 pub use style::{
     StyledSegment, TmuxAlign, TmuxAttributeState, TmuxAttributes, TmuxColour, TmuxDefaultType,
-    TmuxList, TmuxRange, TmuxStyle, TmuxWidth, apply_style, parse_style, parse_styled_segments,
-    parse_tmux_colour, valid_style,
+    TmuxList, TmuxRange, TmuxStyle, TmuxWidth, apply_style, display_width, indexed_colour_rgb,
+    parse_style, parse_styled_segments, parse_tmux_colour, valid_style,
 };
 pub use terminal_codec::{
     decode_protocol_frame, encode_protocol_message, encode_protocol_message_into,

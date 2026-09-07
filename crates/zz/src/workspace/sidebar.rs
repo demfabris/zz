@@ -7,33 +7,33 @@ use gpui::{
     AnyElement, App, AppContext as _, Context, CursorStyle, Entity, EventEmitter, FocusHandle,
     Hsla, InteractiveElement as _, IntoElement, KeyBinding, ListSizingBehavior, MouseButton,
     ParentElement as _, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
-    Styled as _, UniformListScrollHandle, Window, WindowControlArea, div, img,
+    Styled as _, UniformListScrollHandle, Window, WindowControlArea, div,
     prelude::FluentBuilder as _, px, uniform_list,
 };
 use zz_client::{ChromeAction, SIDEBAR_TABLE};
 use zz_protocol::{Axis, CommandInvocation, MuxSnapshot, PaneId, SessionId, WindowId};
-use zz_ui::menu::DropdownMenu as _;
 use zz_ui::navigation::{
     WORKSPACE_SIDEBAR_DEFAULT_WIDTH as SIDEBAR_DEFAULT_WIDTH,
     WORKSPACE_TREE_CONTENT_INSET as TREE_CONTENT_INSET,
     WORKSPACE_TREE_INDENT_WIDTH as TREE_INDENT_WIDTH,
     WORKSPACE_TREE_MARKER_SLOT_WIDTH as TREE_MARKER_SLOT_WIDTH,
-    WORKSPACE_TREE_NODE_ICON_SIZE as TREE_NODE_ICON_SIZE, workspace_chrome_controls,
-    workspace_layout_button, workspace_settings_button, workspace_sidebar_divider,
-    workspace_sidebar_surface, workspace_sidebar_titlebar, workspace_tree_action_button,
-    workspace_tree_action_row, workspace_tree_disclosure, workspace_tree_marker,
+    WORKSPACE_TREE_NODE_ICON_SIZE as TREE_NODE_ICON_SIZE,
+    sidebar::{
+        TreeNavigation, TreeNavigationResult, TreeNavigationRow, tree_action_strip,
+        tree_host_indicator, tree_host_marker, tree_navigation, tree_node_marker,
+        tree_row_rename_menu, tree_window_layout_button,
+    },
+    workspace_chrome_controls, workspace_layout_button, workspace_settings_button,
+    workspace_sidebar_divider, workspace_sidebar_surface, workspace_sidebar_titlebar,
+    workspace_tree_action_button, workspace_tree_action_row, workspace_tree_disclosure,
     workspace_tree_row,
 };
 use zz_ui::{
-    ActiveTheme as _, Colorize as _, Icon, IconName, Sizable as _, WindowExt as _,
+    ActiveTheme as _, Colorize as _, Icon, IconName, Sizable as _,
     button::{Button, ButtonVariants as _},
-    menu::{ContextMenuExt as _, PopupMenuItem},
-    notification::Notification,
     rems_from_px,
     scroll::ScrollableElement as _,
     settings::{settings_navigation_button, settings_navigation_group_label},
-    spinner::Spinner,
-    tooltip::Tooltip,
 };
 
 use crate::{
@@ -427,38 +427,46 @@ impl WorkspaceSidebar {
         cx.notify();
     }
 
-    fn on_select_up(&mut self, _: &TreeSelectUp, _: &mut Window, cx: &mut Context<Self>) {
-        if self.visible_entries.is_empty() {
-            return;
-        }
-        let current = self
+    fn navigate_tree(&mut self, direction: TreeNavigation, cx: &mut Context<Self>) {
+        let rows = self
+            .visible_entries
+            .iter()
+            .map(|entry| TreeNavigationRow {
+                depth: entry.depth,
+                parent: entry
+                    .parent
+                    .and_then(|node| self.visible_indices.get(&node).copied()),
+                expandable: entry.expandable,
+                expanded: entry.expanded,
+            })
+            .collect::<Vec<_>>();
+        let selected = self
             .selected
-            .and_then(|node| self.visible_indices.get(&node).copied())
-            .unwrap_or(0);
-        self.select_index(current.saturating_sub(1), cx);
+            .and_then(|node| self.visible_indices.get(&node).copied());
+        match tree_navigation(&rows, selected, direction) {
+            TreeNavigationResult::Select(index) => self.select_index(index, cx),
+            TreeNavigationResult::Toggle(index) => {
+                self.selection_from_pointer = false;
+                self.toggle_expanded(self.visible_entries[index].node, cx);
+            }
+            TreeNavigationResult::None => {}
+        }
+    }
+
+    fn on_select_up(&mut self, _: &TreeSelectUp, _: &mut Window, cx: &mut Context<Self>) {
+        self.navigate_tree(TreeNavigation::Up, cx);
     }
 
     fn on_select_down(&mut self, _: &TreeSelectDown, _: &mut Window, cx: &mut Context<Self>) {
-        if self.visible_entries.is_empty() {
-            return;
-        }
-        let current = self
-            .selected
-            .and_then(|node| self.visible_indices.get(&node).copied())
-            .unwrap_or(0);
-        self.select_index((current + 1).min(self.visible_entries.len() - 1), cx);
+        self.navigate_tree(TreeNavigation::Down, cx);
     }
 
     fn on_select_first(&mut self, _: &TreeSelectFirst, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.visible_entries.is_empty() {
-            self.select_index(0, cx);
-        }
+        self.navigate_tree(TreeNavigation::First, cx);
     }
 
     fn on_select_last(&mut self, _: &TreeSelectLast, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.visible_entries.is_empty() {
-            self.select_index(self.visible_entries.len() - 1, cx);
-        }
+        self.navigate_tree(TreeNavigation::Last, cx);
     }
 
     fn on_cancel(&mut self, _: &TreeCancel, _: &mut Window, cx: &mut Context<Self>) {
@@ -468,45 +476,11 @@ impl WorkspaceSidebar {
     }
 
     fn on_select_left(&mut self, _: &TreeSelectLeft, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(selected) = self.selected else {
-            return;
-        };
-        if self.expanded.contains(&selected) && self.tree_model.is_expandable(selected) {
-            self.selection_from_pointer = false;
-            self.toggle_expanded(selected, cx);
-            return;
-        }
-        if let Some(parent) = self
-            .visible_indices
-            .get(&selected)
-            .and_then(|index| self.visible_entries.get(*index))
-            .and_then(|entry| entry.parent)
-            && let Some(index) = self.visible_indices.get(&parent).copied()
-        {
-            self.select_index(index, cx);
-        }
+        self.navigate_tree(TreeNavigation::Left, cx);
     }
 
     fn on_select_right(&mut self, _: &TreeSelectRight, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(selected) = self.selected else {
-            return;
-        };
-        if self.tree_model.is_expandable(selected) && !self.expanded.contains(&selected) {
-            self.selection_from_pointer = false;
-            self.toggle_expanded(selected, cx);
-            return;
-        }
-        let Some(index) = self.visible_indices.get(&selected).copied() else {
-            return;
-        };
-        let depth = self.visible_entries[index].depth;
-        if self
-            .visible_entries
-            .get(index + 1)
-            .is_some_and(|entry| entry.depth == depth + 1)
-        {
-            self.select_index(index + 1, cx);
-        }
+        self.navigate_tree(TreeNavigation::Right, cx);
     }
 
     fn on_confirm(&mut self, _: &TreeConfirm, _: &mut Window, cx: &mut Context<Self>) {
@@ -749,14 +723,6 @@ fn agent_badge_color(badge: AgentBadge, cx: &App) -> Hsla {
         AgentBadge::Working => cx.theme().foreground.muted(),
         AgentBadge::Finished => cx.theme().success,
     }
-}
-
-fn agent_badge_dot(badge: AgentBadge, cx: &App) -> gpui::Div {
-    div()
-        .flex_none()
-        .size(px(5.0))
-        .rounded_full()
-        .bg(agent_badge_color(badge, cx))
 }
 
 fn expand_new_hosts(
@@ -1312,27 +1278,16 @@ fn render_add_host_row(cx: &mut App) -> AnyElement {
 }
 
 fn render_host_indicator(index: usize, indicator: HostIndicator, cx: &mut App) -> AnyElement {
-    match indicator {
-        HostIndicator::Connecting => Spinner::new()
-            .xsmall()
-            .color(cx.theme().foreground.muted())
-            .into_any_element(),
-        HostIndicator::Failed { detail } => div()
-            .id(("workspace-tree-host-indicator", index))
-            .flex()
-            .flex_none()
-            .when_some(detail, |this, detail| {
-                let toast_detail = detail.clone();
-                this.cursor_pointer()
-                    .tooltip(move |window, cx| Tooltip::new(detail.clone()).build(window, cx))
-                    .on_click(move |_, window, cx| {
-                        cx.stop_propagation();
-                        window.push_notification(Notification::warning(toast_detail.clone()), cx);
-                    })
-            })
-            .child(Icon::new(IconName::Xmark).xsmall())
-            .into_any_element(),
-    }
+    let (connecting, detail) = match indicator {
+        HostIndicator::Connecting => (true, None),
+        HostIndicator::Failed { detail } => (false, detail),
+    };
+    tree_host_indicator(
+        ("workspace-tree-host-indicator", index),
+        connecting,
+        detail,
+        cx,
+    )
 }
 
 fn render_tree_row_context_menu(
@@ -1349,14 +1304,9 @@ fn render_tree_row_context_menu(
         return row.into_any_element();
     };
     let rename_mux = runtime.mux.clone();
-    row.context_menu(move |menu, _, _| {
-        let rename_mux = rename_mux.clone();
-        let activation = activation.clone();
-        menu.item(PopupMenuItem::new(menu_label).on_click(move |_, _, cx| {
-            activate_sidebar(&rename_mux, activation.clone(), cx);
-        }))
+    tree_row_rename_menu(row, menu_label.into(), move |_, cx| {
+        activate_sidebar(&rename_mux, activation.clone(), cx);
     })
-    .into_any_element()
 }
 
 const fn pane_kind_icon(kind: MuxTreePaneKind) -> IconName {
@@ -1378,74 +1328,24 @@ fn render_node_marker(
 ) -> AnyElement {
     let icon = match &entry.kind {
         TreeNodeKind::Host => {
-            return workspace_tree_marker(
-                div()
-                    .relative()
-                    .flex_none()
-                    .child(
-                        img(crate::app_icon::sidebar_logo())
-                            .size(rems_from_px(TREE_NODE_ICON_SIZE)),
-                    )
-                    .when(belled, |this| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .top(px(-1.0))
-                                .right(px(-1.0))
-                                .size(px(5.0))
-                                .rounded_full()
-                                .bg(cx.theme().warning),
-                        )
-                    })
-                    .when_some(badge, |this, badge| {
-                        this.child(
-                            agent_badge_dot(badge, cx)
-                                .absolute()
-                                .bottom(px(-1.0))
-                                .right(px(-1.0)),
-                        )
-                    }),
-            )
-            .into_any_element();
+            return tree_host_marker(belled, badge.map(|badge| agent_badge_color(badge, cx)), cx);
         }
         TreeNodeKind::Session => IconName::Layers,
         TreeNodeKind::Window { .. } => IconName::AppWindow,
         TreeNodeKind::Pane { kind } => pane_kind_icon(*kind),
     };
-
-    let icon = Icon::new(icon)
-        .size(rems_from_px(TREE_NODE_ICON_SIZE))
-        .text_color(if on_active_path {
-            cx.theme().foreground
-        } else {
-            cx.theme().foreground.muted()
-        });
-    workspace_tree_marker(
-        div()
-            .relative()
-            .flex_none()
-            .child(icon)
-            .when(belled, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .top(px(-1.0))
-                        .right(px(-1.0))
-                        .size(px(5.0))
-                        .rounded_full()
-                        .bg(cx.theme().warning),
-                )
-            })
-            .when_some(badge, |this, badge| {
-                this.child(
-                    agent_badge_dot(badge, cx)
-                        .absolute()
-                        .bottom(px(-1.0))
-                        .right(px(-1.0)),
-                )
+    tree_node_marker(
+        Icon::new(icon)
+            .size(rems_from_px(TREE_NODE_ICON_SIZE))
+            .text_color(if on_active_path {
+                cx.theme().foreground
+            } else {
+                cx.theme().foreground.muted()
             }),
+        belled,
+        badge.map(|badge| agent_badge_color(badge, cx)),
+        cx,
     )
-    .into_any_element()
 }
 
 fn sidebar_hostname(hostname: Option<&str>) -> SharedString {
@@ -1507,17 +1407,10 @@ fn render_node_actions(
         })
         .collect::<Vec<_>>();
 
-    div()
-        .id(format!("workspace-tree-actions-{}", entry.node.tree_id()))
-        .h_full()
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .on_click(|_, _, cx| cx.stop_propagation())
-        .children(actions)
-        .into_any_element()
+    tree_action_strip(
+        format!("workspace-tree-actions-{}", entry.node.tree_id()),
+        actions,
+    )
 }
 
 fn render_new_session_action(host: HostId, runtime: &TreeRowRuntime, cx: &App) -> AnyElement {
@@ -1591,47 +1484,28 @@ fn render_window_layout_action(
         .tree_model
         .host(host)
         .is_some_and(MuxTreeHost::connected);
-    let split_right_mux = runtime.mux.clone();
-    let split_bottom_mux = runtime.mux.clone();
-    workspace_tree_action_button(
+    let mux = runtime.mux.clone();
+    tree_window_layout_button(
         format!(
             "sidebar-window-layout-{}",
             TreeNode::Target(host, TreeTarget::Window(window)).tree_id()
         ),
-        IconName::LayoutColumns,
-        "Window layout",
         !connected,
+        move |horizontal, _, cx| {
+            mux.read(cx).execute_on_host(
+                host,
+                split_picker_command(
+                    active_pane,
+                    if horizontal {
+                        Axis::Horizontal
+                    } else {
+                        Axis::Vertical
+                    },
+                ),
+            );
+        },
         cx,
     )
-    .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-        menu.item(
-            PopupMenuItem::new("Split right")
-                .icon(IconName::PanelRight)
-                .on_click({
-                    let mux = split_right_mux.clone();
-                    move |_, _, cx| {
-                        mux.read(cx).execute_on_host(
-                            host,
-                            split_picker_command(active_pane, Axis::Horizontal),
-                        );
-                    }
-                }),
-        )
-        .item(
-            PopupMenuItem::new("Split bottom")
-                .icon(IconName::PanelBottom)
-                .on_click({
-                    let mux = split_bottom_mux.clone();
-                    move |_, _, cx| {
-                        mux.read(cx).execute_on_host(
-                            host,
-                            split_picker_command(active_pane, Axis::Vertical),
-                        );
-                    }
-                }),
-        )
-    })
-    .into_any_element()
 }
 
 fn render_delete_action(

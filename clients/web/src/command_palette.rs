@@ -21,16 +21,14 @@ use zz_ui::{
     input::{IndentInline, InputEvent, InputState},
 };
 
-use crate::{
-    mux::{client::MuxClient, prefix::terminal_key_input},
-    terminal::view::TERMINAL_FONT,
-};
+use crate::connection::Connection;
 use zz_ui::Colorize as _;
 
 const MAX_VISIBLE_ROWS: usize = 8;
 
 pub(crate) struct CommandPaletteView {
-    mux: Entity<MuxClient>,
+    connection: Entity<Connection>,
+    pane: Option<zz_protocol::PaneId>,
     input: Entity<InputState>,
     prompt: String,
     kind: CommandPromptKind,
@@ -50,7 +48,8 @@ pub(crate) struct CommandPaletteView {
 
 impl CommandPaletteView {
     pub(crate) fn new(
-        mux: Entity<MuxClient>,
+        connection: Entity<Connection>,
+        pane: Option<zz_protocol::PaneId>,
         state: &CommandPromptState,
         revision: u64,
         snapshot: Arc<MuxSnapshot>,
@@ -90,7 +89,8 @@ impl CommandPaletteView {
         .detach();
 
         let mut palette = Self {
-            mux,
+            connection,
+            pane,
             input,
             prompt: state.prompt.clone(),
             kind: state.kind,
@@ -106,9 +106,9 @@ impl CommandPaletteView {
             last_cursor: initial_cursor,
             finishing: false,
             availability: PaneKindAvailability {
-                browser: crate::browser::controller::is_available(cx),
-                agent: crate::config::agent_pane_enabled(cx),
-                editor: crate::config::editor_pane_enabled(cx),
+                browser: false,
+                agent: true,
+                editor: false,
             },
         };
         palette.recompute_suggestions();
@@ -124,9 +124,11 @@ impl CommandPaletteView {
         state: &CommandPromptState,
         revision: u64,
         snapshot: &Arc<MuxSnapshot>,
+        pane: Option<zz_protocol::PaneId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.pane = pane;
         let snapshot_changed = self.snapshot.generation != snapshot.generation;
         if snapshot_changed {
             self.snapshot = Arc::clone(snapshot);
@@ -204,10 +206,13 @@ impl CommandPaletteView {
         );
     }
 
-    fn send(&self, action: CommandPromptAction, cx: &App) {
-        self.mux
-            .read(cx)
-            .send_input(InputMessage::CommandPrompt { action });
+    fn send(&self, action: CommandPromptAction, cx: &mut Context<Self>) {
+        self.connection.update(cx, |connection, cx| {
+            connection.send(
+                zz_protocol::ProtocolMessage::Input(InputMessage::CommandPrompt { action }),
+                cx,
+            );
+        });
     }
 
     fn navigate(&mut self, direction: isize, cx: &mut Context<Self>) {
@@ -310,11 +315,6 @@ impl CommandPaletteView {
         cx.stop_propagation();
     }
 
-    /// `-1`, `-N` and `-k` are decided key by key inside the daemon, so the
-    /// palette stops being a text field and becomes a relay: the keystroke
-    /// travels on the pane-targeted key path and never reaches the input
-    /// widget. `-e` needs the same interception for exactly one key, because a
-    /// backspace on an empty field edits nothing and would otherwise be silent.
     fn on_raw_key(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         if self.finishing {
             return;
@@ -329,12 +329,16 @@ impl CommandPaletteView {
         if !Self::relays_keys(self.mode) {
             return;
         }
-        let mux = self.mux.read(cx);
-        if let Some(pane) = mux.active_pane() {
-            mux.send_input(InputMessage::Key {
-                pane,
-                input: terminal_key_input(&event.keystroke, zz_terminal::KeyAction::Press),
-                text_follows: false,
+        if let Some(pane) = self.pane {
+            self.connection.update(cx, |connection, cx| {
+                connection.send(
+                    zz_protocol::ProtocolMessage::Input(InputMessage::Key {
+                        pane,
+                        input: crate::terminal::key_input(event),
+                        text_follows: false,
+                    }),
+                    cx,
+                );
             });
         }
         cx.stop_propagation();
@@ -347,10 +351,6 @@ impl CommandPaletteView {
         )
     }
 
-    /// A prompt that reads keys has no text for the completion engine to work
-    /// with, and an incremental prompt runs its template on every edit, so a
-    /// tab-completion that rewrites the buffer would fire a command nobody asked
-    /// for.
     const fn completes(&self) -> bool {
         matches!(
             self.mode,
@@ -374,6 +374,7 @@ impl CommandPaletteView {
         muted: gpui::Hsla,
         selection_background: gpui::Hsla,
         palette: Entity<Self>,
+        font: gpui::SharedString,
     ) -> impl IntoElement {
         let hover_palette = palette.clone();
         let click_palette = palette;
@@ -382,11 +383,11 @@ impl CommandPaletteView {
             ("command-palette-suggestion", index),
             suggestion.label,
             suggestion.detail,
-            command_kind_badge(Self::kind_label(kind), TERMINAL_FONT),
+            command_kind_badge(Self::kind_label(kind), font.clone()),
             selected,
             selection_background,
             muted,
-            TERMINAL_FONT,
+            font,
         )
         .on_mouse_enter(move |_, _, cx| {
             hover_palette.update(cx, |palette, cx| {
@@ -424,6 +425,7 @@ impl Render for CommandPaletteView {
         let suggestions: Arc<[CompletionSuggestion]> = self.suggestions.clone().into();
         let palette = cx.entity();
         let rows_palette = palette.clone();
+        let font = cx.theme().mono_font_family.clone();
         let rows = uniform_list(
             "command-palette-suggestions",
             suggestions.len(),
@@ -438,6 +440,7 @@ impl Render for CommandPaletteView {
                                 muted,
                                 selection_background,
                                 rows_palette.clone(),
+                                font.clone(),
                             )
                         })
                     })
@@ -447,7 +450,12 @@ impl Render for CommandPaletteView {
         .h(px(COMMAND_PALETTE_ROW_HEIGHT * row_count))
         .track_scroll(&self.scroll_handle);
 
-        let input = command_palette_input(&self.input, self.prompt.clone(), TERMINAL_FONT, cx);
+        let input = command_palette_input(
+            &self.input,
+            self.prompt.clone(),
+            cx.theme().mono_font_family.clone(),
+            cx,
+        );
         let mut hints = Vec::with_capacity(3);
         if Self::relays_keys(self.mode) {
             hints.push(PaletteHint {
@@ -485,7 +493,6 @@ impl Render for CommandPaletteView {
         let focus = self.focus(cx);
         div()
             .id("command-palette-overlay")
-            .debug_selector(|| "command-palette-overlay".to_owned())
             .absolute()
             .inset_0()
             .flex()
@@ -517,259 +524,14 @@ fn byte_index_for_char(value: &str, cursor: u32) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(not(target_os = "macos"))]
-    use std::{cell::RefCell, rc::Rc};
-
-    #[cfg(not(target_os = "macos"))]
-    use gpui::{TestAppContext, VisualTestContext};
-    #[cfg(not(target_os = "macos"))]
-    use zz_daemon::DaemonError;
-    #[cfg(not(target_os = "macos"))]
-    use zz_protocol::{CommandPromptMode, CommandPromptType};
-    #[cfg(not(target_os = "macos"))]
-    use zz_ui::Root;
-
-    use super::*;
-
-    #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
-    fn palette_keeps_local_edits_for_the_same_revision_and_disables_value_completions(
-        cx: &mut TestAppContext,
-    ) {
-        cx.update(zz_ui::init);
-        let palette_slot = Rc::new(RefCell::new(None));
-        let captured = Rc::clone(&palette_slot);
-        let initial = CommandPromptState {
-            prompt: ":".to_owned(),
-            input: String::new(),
-            cursor: 0,
-            kind: CommandPromptKind::Command,
-            history: vec!["list-panes".to_owned()],
-            prompt_type: CommandPromptType::Command,
-            mode: CommandPromptMode::Text,
-            no_freeze: false,
-        };
-        let stale = initial.clone();
-        let (_, cx) = cx.add_window_view(move |window, cx| {
-            let mux = cx.new(|cx| {
-                MuxClient::new(
-                    Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
-                    cx,
-                )
-            });
-            let palette = cx.new(|cx| {
-                CommandPaletteView::new(
-                    mux,
-                    &initial,
-                    1,
-                    Arc::new(MuxSnapshot::default()),
-                    window,
-                    cx,
-                )
-            });
-            palette.read(cx).focus(cx).focus(window, cx);
-            captured.replace(Some(palette.clone()));
-            Root::new(palette, window, cx)
-        });
-        let cx: &mut VisualTestContext = cx;
-        let palette = palette_slot.borrow().clone().expect("captured palette");
-
-        cx.update(|window, cx| {
-            assert!(palette.read(cx).focus(cx).is_focused(window));
-            let input = palette.read(cx).input.clone();
-            input.update(cx, |input, cx| input.insert("ren", window, cx));
-        });
-        cx.run_until_parked();
-        assert_eq!(
-            cx.update(|_, cx| palette.read(cx).last_input.clone()),
-            "ren"
-        );
-        assert!(cx.update(|_, cx| !palette.read(cx).suggestions.is_empty()));
-
-        cx.update(|window, cx| {
-            palette.update(cx, |palette, cx| {
-                palette.synchronize(&stale, 1, &Arc::new(MuxSnapshot::default()), window, cx);
-            });
-        });
-        assert_eq!(
-            cx.update(|_, cx| palette.read(cx).input.read(cx).value().to_string()),
-            "ren"
-        );
-
-        let value = CommandPromptState {
-            prompt: "rename-window: ".to_owned(),
-            input: "notes".to_owned(),
-            cursor: 5,
-            kind: CommandPromptKind::Value,
-            history: Vec::new(),
-            prompt_type: CommandPromptType::Command,
-            mode: CommandPromptMode::Text,
-            no_freeze: false,
-        };
-        cx.update(|window, cx| {
-            palette.update(cx, |palette, cx| {
-                palette.synchronize(&value, 2, &Arc::new(MuxSnapshot::default()), window, cx);
-            });
-        });
-        assert!(cx.update(|_, cx| palette.read(cx).suggestions.is_empty()));
-        assert_eq!(
-            cx.update(|_, cx| palette.read(cx).input.read(cx).value().to_string()),
-            "notes"
-        );
-    }
-
-    /// The daemon owns `-1`, `-N` and `-k` key by key, so the palette relays
-    /// their presses instead of editing, and it offers no completion for a
-    /// prompt whose buffer it is not allowed to rewrite.
-    #[test]
-    fn key_reading_prompts_relay_instead_of_editing() {
-        for mode in [
-            zz_protocol::CommandPromptMode::Single,
-            zz_protocol::CommandPromptMode::Numeric,
-            zz_protocol::CommandPromptMode::Key,
-        ] {
-            assert!(CommandPaletteView::relays_keys(mode), "{mode:?}");
-        }
-        for mode in [
-            zz_protocol::CommandPromptMode::Text,
-            zz_protocol::CommandPromptMode::Incremental,
-            zz_protocol::CommandPromptMode::BackspaceExit,
-        ] {
-            assert!(!CommandPaletteView::relays_keys(mode), "{mode:?}");
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
-    fn a_key_reading_prompt_drops_the_completion_list(cx: &mut TestAppContext) {
-        cx.update(zz_ui::init);
-        let palette_slot = Rc::new(RefCell::new(None));
-        let captured = Rc::clone(&palette_slot);
-        let initial = CommandPromptState {
-            prompt: ":".to_owned(),
-            input: "ren".to_owned(),
-            cursor: 3,
-            kind: CommandPromptKind::Command,
-            history: Vec::new(),
-            prompt_type: CommandPromptType::Command,
-            mode: CommandPromptMode::Text,
-            no_freeze: false,
-        };
-        let (_, cx) = cx.add_window_view(move |window, cx| {
-            let mux = cx.new(|cx| {
-                MuxClient::new(
-                    Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
-                    cx,
-                )
-            });
-            let palette = cx.new(|cx| {
-                CommandPaletteView::new(
-                    mux,
-                    &initial,
-                    1,
-                    Arc::new(MuxSnapshot::default()),
-                    window,
-                    cx,
-                )
-            });
-            captured.replace(Some(palette.clone()));
-            Root::new(palette, window, cx)
-        });
-        let cx: &mut VisualTestContext = cx;
-        let palette = palette_slot.borrow().clone().expect("captured palette");
-        assert!(cx.update(|_, cx| !palette.read(cx).suggestions.is_empty()));
-
-        for (revision, mode) in [
-            (2, CommandPromptMode::Key),
-            (3, CommandPromptMode::Numeric),
-            (4, CommandPromptMode::Incremental),
-        ] {
-            let state = CommandPromptState {
-                prompt: ":".to_owned(),
-                input: "ren".to_owned(),
-                cursor: 3,
-                kind: CommandPromptKind::Command,
-                history: Vec::new(),
-                prompt_type: CommandPromptType::Command,
-                mode,
-                no_freeze: false,
-            };
-            cx.update(|window, cx| {
-                palette.update(cx, |palette, cx| {
-                    palette.synchronize(
-                        &state,
-                        revision,
-                        &Arc::new(MuxSnapshot::default()),
-                        window,
-                        cx,
-                    );
-                });
-            });
-            assert_eq!(cx.update(|_, cx| palette.read(cx).mode), mode);
-            assert!(
-                cx.update(|_, cx| palette.read(cx).suggestions.is_empty()),
-                "{mode:?}"
-            );
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
-    fn tab_accepts_completion_without_leaving_the_palette(cx: &mut TestAppContext) {
-        cx.update(zz_ui::init);
-        let palette_slot = Rc::new(RefCell::new(None));
-        let captured = Rc::clone(&palette_slot);
-        let initial = CommandPromptState {
-            prompt: ":".to_owned(),
-            input: "new-w".to_owned(),
-            cursor: 5,
-            kind: CommandPromptKind::Command,
-            history: Vec::new(),
-            prompt_type: CommandPromptType::Command,
-            mode: CommandPromptMode::Text,
-            no_freeze: false,
-        };
-        let (_, cx) = cx.add_window_view(move |window, cx| {
-            let mux = cx.new(|cx| {
-                MuxClient::new(
-                    Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
-                    cx,
-                )
-            });
-            let palette = cx.new(|cx| {
-                CommandPaletteView::new(
-                    mux,
-                    &initial,
-                    1,
-                    Arc::new(MuxSnapshot::default()),
-                    window,
-                    cx,
-                )
-            });
-            palette.read(cx).focus(cx).focus(window, cx);
-            captured.replace(Some(palette.clone()));
-            Root::new(palette, window, cx)
-        });
-        let cx: &mut VisualTestContext = cx;
-        let palette = palette_slot.borrow().clone().expect("captured palette");
-
-        cx.simulate_keystrokes("tab");
-
-        assert_eq!(
-            cx.update(|_, cx| palette.read(cx).input.read(cx).value().to_string()),
-            "new-window "
-        );
-        assert!(cx.update(|window, cx| palette.read(cx).focus(cx).is_focused(window)));
-    }
+    use super::byte_index_for_char;
 
     #[test]
-    fn unicode_scalar_cursor_conversion_is_boundary_safe() {
-        assert_eq!(byte_index_for_char("aα界", 0), Some(0));
-        assert_eq!(byte_index_for_char("aα界", 2), Some(3));
-        assert_eq!(byte_index_for_char("aα界", 3), Some(6));
-        assert_eq!(byte_index_for_char("aα界", 4), None);
+    fn daemon_scalar_cursor_maps_to_utf8_for_completion() {
+        let value = "a🦀日本";
+        assert_eq!(byte_index_for_char(value, 0), Some(0));
+        assert_eq!(byte_index_for_char(value, 2), Some(5));
+        assert_eq!(byte_index_for_char(value, 4), Some(value.len()));
+        assert_eq!(byte_index_for_char(value, 5), None);
     }
 }

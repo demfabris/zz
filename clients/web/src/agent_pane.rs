@@ -2,14 +2,19 @@ use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
     sync::Arc,
+    time::Duration,
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use gpui::{
-    AnyElement, App, Context, Corners, Entity, FocusHandle, Focusable, IntoElement, ListAlignment,
-    ListState, MouseButton, Render, Subscription, Window, div, prelude::*, px,
+    Anchor, AnyElement, App, Context, Corners, Entity, FocusHandle, Focusable, IntoElement,
+    ListAlignment, ListState, MouseButton, Render, Subscription, Window, div, prelude::*, px,
 };
 use serde_json::Value;
+use zz_client::agent_completion::{
+    AgentCommand, CommandCompletion, active_command_hint, bare_command_name, completion_query,
+    meaningful_command_description, ranked_completions,
+};
 use zz_protocol::{
     AgentConnectionPhase, AgentDescriptor, AgentImage, AgentSessionOpKind, PaneId, ProtocolMessage,
 };
@@ -17,7 +22,8 @@ use zz_ui::{
     ActiveTheme as _, Colorize as _, Disableable as _, IconName, Sizable as _,
     agent::{
         AgentEntry, AgentMarkdown, AgentTimeline, AgentTimelineStore, AgentToolEntry,
-        AgentToolKind, AgentToolPayload, AgentToolStatus, MarkdownSlot, TimelineRow,
+        AgentToolKind, AgentToolPayload, AgentToolStatus, COMPOSER_ATTACHMENT, MarkdownSlot,
+        TimelineRow, TimelineStick, agent_attachment_thumbnail, agent_jump_to_bottom_button,
         agent_pane_header,
         composer::{AgentComposer, composer_tail_clearance},
         controls::{
@@ -25,9 +31,12 @@ use zz_ui::{
             composer_action, composer_action_button, context_usage_meter, git_summary_footer,
         },
         fold_timeline_rows,
+        presentation::{empty_state, error_card, permission_card, permission_option},
     },
     button::{Button, ButtonVariants as _},
-    input::{InputEvent, InputState},
+    input::{IndentInline, InputEvent, InputState, MoveDown, MoveUp},
+    menu::{DropdownMenu as _, PopupMenuItem},
+    scroll::Scrollbar,
 };
 
 use crate::connection::Connection;
@@ -38,16 +47,29 @@ pub(super) struct AgentPane {
     connection: Entity<Connection>,
     connected: bool,
     input: Entity<InputState>,
+    commands: Arc<[AgentCommand]>,
+    completions: Arc<[CommandCompletion]>,
+    completion_selected: Option<usize>,
+    completion_dismissed: bool,
+    completion_scroll: gpui::UniformListScrollHandle,
+    last_input: String,
+    last_cursor: usize,
     transcript: Transcript,
     timeline: Entity<AgentTimelineStore>,
     rows: Arc<Vec<TimelineRow>>,
     scroll: ListState,
+    stick: TimelineStick,
     last_sequence: u64,
     last_reclaim_id: u64,
     attachments: Vec<AgentImage>,
     choosing_images: bool,
     draft_error: Option<String>,
     settings_busy: bool,
+    lifecycle_pending: bool,
+    lifecycle_generation: u64,
+    permission_request_id: Option<u64>,
+    permission_selected: usize,
+    permission_answered: bool,
     usage: Option<(u64, u64)>,
     history_open: bool,
     history_all_projects: bool,
@@ -78,8 +100,10 @@ impl AgentPane {
     ) -> Self {
         let input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Ask anything…")
+                .placeholder("Ask the agent…")
                 .auto_grow(2, 8)
+                .submit_on_enter(true)
+                .context_menu(true)
         });
         let history_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search by title or project…"));
@@ -103,6 +127,8 @@ impl AgentPane {
             if this.connected != connected {
                 this.connected = connected;
                 this.settings_busy = false;
+                this.lifecycle_pending = false;
+                this.permission_answered = false;
                 cx.notify();
             }
         });
@@ -115,10 +141,12 @@ impl AgentPane {
                 ) {
                     this.transcript = Transcript::default();
                     this.settings_busy = false;
+                    this.lifecycle_pending = false;
                     this.usage = None;
                     this.last_sequence = 0;
                     this.rows = Arc::new(Vec::new());
                     this.scroll.reset(0);
+                    this.stick.engage_now(&this.scroll, cx.reduce_motion());
                     this.timeline.update(cx, |timeline, cx| {
                         timeline.clear(cx);
                     });
@@ -137,16 +165,40 @@ impl AgentPane {
                 zz_client::CoreEvent::AgentUpdates { pane: changed, .. }
                 | zz_client::CoreEvent::AgentStateChanged { pane: changed, .. } if *changed == pane)
                 {
+                    if matches!(event, zz_client::CoreEvent::AgentStateChanged { .. }) {
+                        this.lifecycle_pending = false;
+                    }
                     cx.notify();
                 }
             },
         );
         let subscription = cx.subscribe_in(&input, window, |this, _, event, window, cx| {
             if matches!(event, InputEvent::PressEnter { shift: false }) {
-                this.submit(window, cx);
+                this.enter(window, cx);
             } else if matches!(event, InputEvent::Change) {
+                this.draft_error = None;
                 cx.notify();
             }
+        });
+        let input_observer = cx.observe(&input, |this, _, cx| {
+            if this.synchronize_completions(cx) {
+                cx.notify();
+            }
+        });
+        let timeline = cx.new(|_| AgentTimelineStore::default());
+        let timeline_observer = cx.observe(&timeline, |_, _, cx| cx.notify());
+        let scroll = ListState::new(0, ListAlignment::Top, px(1_200.0));
+        let stick = TimelineStick::new(&scroll, cx.reduce_motion());
+        let scroll_view = cx.weak_entity();
+        scroll.set_scroll_handler(move |_, _, cx| {
+            let view = scroll_view.clone();
+            cx.defer(move |cx| {
+                let _ = view.update(cx, |this: &mut Self, cx| {
+                    if this.stick.on_user_scroll(&this.scroll, cx.reduce_motion()) {
+                        cx.notify();
+                    }
+                });
+            });
         });
         Self {
             pane,
@@ -154,16 +206,29 @@ impl AgentPane {
             connection,
             connected: false,
             input,
+            commands: Arc::from([]),
+            completions: Arc::from([]),
+            completion_selected: None,
+            completion_dismissed: false,
+            completion_scroll: gpui::UniformListScrollHandle::new(),
+            last_input: String::new(),
+            last_cursor: 0,
             transcript: Transcript::default(),
-            timeline: cx.new(|_| AgentTimelineStore::default()),
+            timeline,
             rows: Arc::new(Vec::new()),
-            scroll: ListState::new(0, ListAlignment::Bottom, px(300.0)),
+            scroll,
+            stick,
             last_sequence: 0,
             last_reclaim_id: 0,
             attachments: Vec::new(),
             choosing_images: false,
             draft_error: None,
             settings_busy: false,
+            lifecycle_pending: false,
+            lifecycle_generation: 0,
+            permission_request_id: None,
+            permission_selected: 0,
+            permission_answered: false,
             usage: None,
             history_open: false,
             history_all_projects: false,
@@ -187,8 +252,176 @@ impl AgentPane {
                 subscription,
                 history_changes,
                 directory_changes,
+                timeline_observer,
+                input_observer,
             ],
         }
+    }
+
+    pub(super) fn update_descriptor(
+        &mut self,
+        descriptor: &AgentDescriptor,
+        cx: &mut Context<Self>,
+    ) {
+        if self.descriptor != *descriptor {
+            self.descriptor = descriptor.clone();
+            cx.notify();
+        }
+    }
+
+    fn synchronize_completions(&mut self, cx: &mut Context<Self>) -> bool {
+        let input = self.input.read(cx);
+        let value = input.value().to_string();
+        let cursor = input.cursor();
+        let commands = self.connection.read(cx).agent_commands(self.pane);
+        let input_changed = value != self.last_input || cursor != self.last_cursor;
+        if !input_changed && self.commands == commands {
+            return false;
+        }
+        if input_changed {
+            self.last_input = value;
+            self.last_cursor = cursor;
+            self.completion_dismissed = false;
+        }
+        self.commands = commands;
+        self.completions = if self.completion_dismissed || self.history_open || self.directory_open
+        {
+            Arc::from([])
+        } else {
+            completion_query(&self.last_input, self.last_cursor).map_or_else(
+                || Arc::from([]),
+                |query| ranked_completions(&self.commands, &query).into(),
+            )
+        };
+        self.completion_selected = (!self.completions.is_empty()).then_some(
+            self.completion_selected
+                .unwrap_or_default()
+                .min(self.completions.len().saturating_sub(1)),
+        );
+        if let Some(selected) = self.completion_selected {
+            self.completion_scroll
+                .scroll_to_item(selected, gpui::ScrollStrategy::Nearest);
+        }
+        true
+    }
+
+    fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.synchronize_completions(cx);
+        if let Some(index) = self.completion_selected {
+            self.accept_completion(index, window, cx);
+        } else {
+            self.submit(window, cx);
+        }
+    }
+
+    fn accept_completion(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(completion) = self.completions.get(index).cloned() else {
+            return;
+        };
+        let insertion = completion.insertion();
+        self.completion_dismissed = true;
+        self.input.update(cx, |input, cx| {
+            input.set_selected_range(completion.replacement, cx);
+            input.replace(insertion, window, cx);
+        });
+        self.completions = Arc::from([]);
+        self.completion_selected = None;
+        self.input.read(cx).focus_handle(cx).focus(window, cx);
+        cx.notify();
+    }
+
+    fn complete(&mut self, _: &IndentInline, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = self.completion_selected {
+            self.accept_completion(index, window, cx);
+            cx.stop_propagation();
+        }
+    }
+
+    fn navigate_completion(&mut self, direction: isize, cx: &mut Context<Self>) {
+        if self.completions.is_empty() {
+            return;
+        }
+        let count = self.completions.len();
+        let current = self.completion_selected.unwrap_or_default();
+        let selected = if direction < 0 {
+            current.checked_sub(1).unwrap_or(count - 1)
+        } else {
+            (current + 1) % count
+        };
+        self.completion_selected = Some(selected);
+        self.completion_scroll
+            .scroll_to_item(selected, gpui::ScrollStrategy::Nearest);
+        cx.notify();
+    }
+
+    fn move_completion_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.completions.is_empty() {
+            self.navigate_completion(-1, cx);
+            cx.stop_propagation();
+        }
+    }
+
+    fn move_completion_down(&mut self, _: &MoveDown, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.completions.is_empty() {
+            self.navigate_completion(1, cx);
+            cx.stop_propagation();
+        }
+    }
+
+    fn render_completions(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        if self.completions.is_empty() {
+            return None;
+        }
+        let completions = self.completions.clone();
+        let selected = self.completion_selected;
+        let view = cx.entity();
+        let pane = self.pane;
+        let rows = gpui::uniform_list(
+            ("web-agent-completion-rows", pane.0),
+            completions.len(),
+            move |range, _, cx| {
+                range
+                    .filter_map(|index| {
+                        let completion = completions.get(index)?;
+                        let command = &completion.command;
+                        let hover = view.clone();
+                        let click = view.clone();
+                        Some(
+                            zz_ui::agent::slash::suggestion_row(
+                                format!("web-agent-completion-{}-{index}", pane.0),
+                                bare_command_name(&command.name),
+                                meaningful_command_description(&command.description)
+                                    .map(|description| description.to_owned().into()),
+                                selected == Some(index),
+                                cx,
+                            )
+                            .on_hover(move |hovered, _, cx| {
+                                if *hovered {
+                                    hover.update(cx, |this, cx| {
+                                        if this.completion_selected != Some(index) {
+                                            this.completion_selected = Some(index);
+                                            cx.notify();
+                                        }
+                                    });
+                                }
+                            })
+                            .on_click(move |_, window, cx| {
+                                click.update(cx, |this, cx| {
+                                    this.accept_completion(index, window, cx);
+                                });
+                                cx.stop_propagation();
+                            }),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            },
+        )
+        .w_full()
+        .h(zz_ui::agent::slash::suggestion_list_height(
+            self.completions.len(),
+        ))
+        .track_scroll(&self.completion_scroll);
+        Some(zz_ui::agent::slash::suggestion_list(rows, cx).into_any_element())
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -231,6 +464,7 @@ impl AgentPane {
         self.draft_error = None;
         self.input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.stick.engage(&self.scroll, cx.reduce_motion());
         cx.notify();
     }
 
@@ -244,8 +478,10 @@ impl AgentPane {
                     .and_then(Value::as_str)
                     .map(ToOwned::to_owned);
             }
+            Some("ready" | "sessionReady") => self.lifecycle_pending = false,
             Some("sessionReset" | "sessionSwitched") => {
                 self.settings_busy = false;
+                self.lifecycle_pending = false;
                 self.usage = None;
                 for update in update
                     .get("replay")
@@ -360,7 +596,6 @@ impl AgentPane {
         }
         let old_first = self.transcript.entries.first().map(AgentEntry::id);
         let old_count = self.rows.len();
-        let following = self.scroll.is_scrolled_to_end().unwrap_or(true);
         let journal = self.connection.read(cx).agent_events.get(&self.pane);
         let updates: Vec<_> = journal
             .map(|journal| {
@@ -395,6 +630,7 @@ impl AgentPane {
             || self.rows.len() < old_count
         {
             self.scroll.reset(self.rows.len());
+            self.stick.engage_now(&self.scroll, cx.reduce_motion());
         } else {
             self.scroll.remeasure_items(0..old_count);
             if self.rows.len() > old_count {
@@ -402,9 +638,7 @@ impl AgentPane {
                     .splice(old_count..old_count, self.rows.len() - old_count);
             }
         }
-        if following {
-            self.scroll.scroll_to_end();
-        }
+        self.stick.wake();
         self.timeline.update(cx, |timeline, cx| {
             for entry in &self.transcript.entries {
                 match entry {
@@ -522,6 +756,8 @@ impl AgentPane {
         }
         self.directory_open = false;
         self.history_open = true;
+        self.completions = Arc::from([]);
+        self.completion_selected = None;
         self.history_delete = None;
         if replace {
             self.history_selected = 0;
@@ -941,8 +1177,9 @@ impl AgentPane {
                 .to_lowercase()
                 .contains(&query.to_lowercase())
         });
-        let typed = PathBuf::from(query.trim());
-        if typed.is_absolute() && !paths.contains(&typed) {
+        if let Some(typed) = absolute_daemon_directory(&query)
+            && !paths.contains(&typed)
+        {
             paths.insert(0, typed);
         }
         paths
@@ -954,6 +1191,8 @@ impl AgentPane {
         }
         self.history_open = false;
         self.directory_open = true;
+        self.completions = Arc::from([]);
+        self.completion_selected = None;
         self.directory_selected = 0;
         self.directory_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -1062,6 +1301,27 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         if !self.history_open && !self.directory_open {
+            if !self.completions.is_empty() {
+                let modifiers = event.keystroke.modifiers;
+                match event.keystroke.key.as_str() {
+                    "up" if !modifiers.platform && !modifiers.alt => {
+                        self.navigate_completion(-1, cx);
+                    }
+                    "down" if !modifiers.platform && !modifiers.alt => {
+                        self.navigate_completion(1, cx);
+                    }
+                    "escape" => {
+                        self.completion_dismissed = true;
+                        self.completions = Arc::from([]);
+                        self.completion_selected = None;
+                        cx.notify();
+                    }
+                    _ => return,
+                }
+                cx.stop_propagation();
+                return;
+            }
+            self.permission_key_down(event, window, cx);
             return;
         }
         match event.keystroke.key.as_str() {
@@ -1112,7 +1372,8 @@ impl AgentPane {
 
     fn permissions(&self, payload: &str, request_id: u64, cx: &mut Context<Self>) -> AnyElement {
         let writable = self.connection.read(cx).connected
-            && !self.connection.read(cx).core.attached_read_only();
+            && !self.connection.read(cx).core.attached_read_only()
+            && !self.permission_answered;
         let payload = serde_json::from_str::<Value>(payload).unwrap_or_default();
         let title = payload
             .pointer("/tool_call/title")
@@ -1120,81 +1381,301 @@ impl AgentPane {
             .and_then(Value::as_str)
             .unwrap_or("This agent needs your permission")
             .to_owned();
-        let mut choices = Vec::new();
-        for (index, option) in payload
-            .get("options")
-            .and_then(Value::as_array)
+        let options = permission_choices(&payload)
+            .into_iter()
+            .enumerate()
+            .map(|(index, option)| {
+                let id = option.id;
+                let button = Button::new(format!(
+                    "web-agent-permission-{}-{request_id}-{index}",
+                    self.pane.0
+                ))
+                .small()
+                .label(option.name)
+                .disabled(!writable)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.respond_permission(request_id, Some(id.clone()), cx);
+                    cx.stop_propagation();
+                }));
+                let button = match option.allow {
+                    Some(true) => button.primary(),
+                    Some(false) => button.danger(),
+                    None => button,
+                };
+                permission_option(
+                    format!(
+                        "web-agent-permission-option-{}-{request_id}-{index}",
+                        self.pane.0
+                    ),
+                    index,
+                    index == self.permission_selected,
+                    button,
+                    cx,
+                )
+                .on_hover(cx.listener(move |this, hovered, _, cx| {
+                    if *hovered && this.permission_selected != index {
+                        this.permission_selected = index;
+                        cx.notify();
+                    }
+                }))
+                .into_any_element()
+            })
+            .collect();
+        permission_card(
+            title,
+            None,
+            options,
+            Button::new(format!(
+                "web-agent-permission-cancel-{}-{request_id}",
+                self.pane.0
+            ))
+            .small()
+            .ghost()
+            .disabled(!writable)
+            .label("Cancel request")
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.respond_permission(request_id, None, cx);
+                cx.stop_propagation();
+            })),
+            cx,
+        )
+        .into_any_element()
+    }
+
+    fn respond_permission(
+        &mut self,
+        request_id: u64,
+        option_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let connection = self.connection.read(cx);
+        if !connection.connected
+            || connection.core.attached_read_only()
+            || self.permission_answered
+            || connection
+                .core
+                .agent_state(self.pane)
+                .and_then(|state| state.pending_permission.as_ref())
+                .is_none_or(|permission| permission.request_id != request_id)
+        {
+            return;
+        }
+        self.permission_answered = true;
+        self.connection.update(cx, |connection, cx| {
+            connection.send(
+                ProtocolMessage::AgentRespondPermission {
+                    pane: self.pane,
+                    request_id,
+                    option_id,
+                },
+                cx,
+            );
+        });
+        cx.notify();
+    }
+
+    fn permission_key_down(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.platform
+            || modifiers.alt
+            || modifiers.control
+            || modifiers.function
+            || self.permission_answered
+        {
+            return;
+        }
+        let input = self.input.read(cx);
+        if !input.value().trim().is_empty() && input.focus_handle(cx).is_focused(window) {
+            return;
+        }
+        let Some(permission) = self
+            .connection
+            .read(cx)
+            .core
+            .agent_state(self.pane)
+            .and_then(|state| state.pending_permission.clone())
+        else {
+            return;
+        };
+        let payload = serde_json::from_str(&permission.payload).unwrap_or_default();
+        let options = permission_choices(&payload);
+        match event.keystroke.key.as_str() {
+            "escape" => self.respond_permission(permission.request_id, None, cx),
+            "up" if !options.is_empty() => {
+                self.permission_selected = self
+                    .permission_selected
+                    .checked_sub(1)
+                    .unwrap_or(options.len() - 1);
+            }
+            "down" if !options.is_empty() => {
+                self.permission_selected = (self.permission_selected + 1) % options.len();
+            }
+            key => {
+                let index = if key == "enter" {
+                    Some(self.permission_selected)
+                } else {
+                    key.parse::<usize>()
+                        .ok()
+                        .filter(|digit| (1..=9).contains(digit))
+                        .map(|digit| digit - 1)
+                };
+                let Some(option) = index.and_then(|index| options.get(index)) else {
+                    return;
+                };
+                self.respond_permission(permission.request_id, Some(option.id.clone()), cx);
+            }
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn lifecycle_command(
+        &mut self,
+        provider: Option<zz_protocol::AgentProvider>,
+        cx: &mut Context<Self>,
+    ) {
+        let connection = self.connection.read(cx);
+        if !connection.connected
+            || connection.core.attached_read_only()
+            || self.lifecycle_pending
+            || connection.core.agent_state(self.pane).is_some_and(|state| {
+                matches!(
+                    state.phase,
+                    AgentConnectionPhase::Running | AgentConnectionPhase::AwaitingPermission
+                )
+            })
+            || provider == Some(self.descriptor.provider)
+        {
+            return;
+        }
+        self.lifecycle_pending = true;
+        self.lifecycle_generation = self.lifecycle_generation.wrapping_add(1);
+        let generation = self.lifecycle_generation;
+        let mut args = vec!["-t".to_owned(), self.pane.to_string()];
+        let command = if let Some(provider) = provider {
+            args.push(provider.as_str().to_owned());
+            "set-agent-provider"
+        } else {
+            "restart-agent-pane"
+        };
+        self.connection
+            .update(cx, |connection, cx| connection.command(command, args, cx));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_secs(30))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.lifecycle_generation == generation && this.lifecycle_pending {
+                    this.lifecycle_pending = false;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn render_error(
+        &self,
+        state: &zz_protocol::AgentPaneWire,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let error = state
+            .error
+            .as_deref()
+            .or(match &state.phase {
+                AgentConnectionPhase::Failed { message } => Some(message.as_str()),
+                _ => None,
+            })
+            .or(self.draft_error.as_deref())?;
+        let writable = self.connection.read(cx).connected
+            && !self.connection.read(cx).core.attached_read_only();
+        let failed = matches!(state.phase, AgentConnectionPhase::Failed { .. });
+        let methods = serde_json::from_str::<Value>(&state.auth_methods).unwrap_or_default();
+        let auth = methods
+            .as_array()
             .into_iter()
             .flatten()
             .enumerate()
-        {
-            let Some(id) = option
-                .get("optionId")
-                .or_else(|| option.get("id"))
-                .and_then(Value::as_str)
-            else {
-                continue;
-            };
-            let id = id.to_owned();
-            let label = option
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or(&id)
-                .to_owned();
-            let connection = self.connection.clone();
-            let pane = self.pane;
-            choices.push(
-                Button::new(("web-agent-permission", index))
-                    .small()
-                    .label(label)
-                    .disabled(!writable)
-                    .on_click(move |_, _, cx| {
-                        connection.update(cx, |connection, cx| {
-                            connection.send(
-                                ProtocolMessage::AgentRespondPermission {
-                                    pane,
-                                    request_id,
-                                    option_id: Some(id.clone()),
-                                },
-                                cx,
-                            );
-                        });
-                    })
-                    .into_any_element(),
-            );
-        }
-        let connection = self.connection.clone();
-        let pane = self.pane;
-        choices.push(
-            Button::new("web-agent-permission-cancel")
-                .small()
-                .ghost()
-                .disabled(!writable)
-                .label("Cancel")
-                .on_click(move |_, _, cx| {
-                    connection.update(cx, |connection, cx| {
-                        connection.send(
-                            ProtocolMessage::AgentRespondPermission {
-                                pane,
-                                request_id,
-                                option_id: None,
-                            },
-                            cx,
-                        );
-                    });
+            .filter_map(|(index, method)| {
+                let id = method.get("id")?.as_str()?.to_owned();
+                let name = method
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&id)
+                    .to_owned();
+                let description = method
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Authenticate with the agent")
+                    .to_owned();
+                Some(
+                    Button::new(format!("web-agent-authenticate-{}-{index}", self.pane.0))
+                        .secondary()
+                        .small()
+                        .label(name)
+                        .tooltip(description)
+                        .disabled(!writable || self.lifecycle_pending)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.connection.update(cx, |connection, cx| {
+                                connection.send(
+                                    ProtocolMessage::AgentAuthenticate {
+                                        pane: this.pane,
+                                        method_id: id.clone(),
+                                    },
+                                    cx,
+                                );
+                            });
+                        })),
+                )
+            });
+        Some(
+            error_card(error, cx)
+                .when(failed, |card| {
+                    card.child(
+                        zz_ui::h_flex()
+                            .flex_wrap()
+                            .gap_2()
+                            .child(
+                                Button::new(("web-agent-retry", self.pane.0))
+                                    .primary()
+                                    .small()
+                                    .icon(IconName::Redo2)
+                                    .label(if self.lifecycle_pending {
+                                        "Restarting…"
+                                    } else {
+                                        "Try again"
+                                    })
+                                    .disabled(!writable || self.lifecycle_pending)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.lifecycle_command(None, cx);
+                                    })),
+                            )
+                            .children(auth),
+                    )
                 })
                 .into_any_element(),
-        );
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .p(px(12.0))
-            .rounded(cx.theme().radius)
-            .bg(cx.theme().background.raised(2))
-            .child(div().text_size(px(12.0)).child(title))
-            .child(div().flex().flex_wrap().gap(px(6.0)).children(choices))
-            .into_any_element()
+        )
+    }
+
+    fn drive_stick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if cx.reduce_motion() || !self.stick.wants_frame(&self.scroll) {
+            return;
+        }
+        self.stick.arm();
+        let view = cx.weak_entity();
+        window.on_next_frame(move |_, cx| {
+            let _ = view.update(cx, |this: &mut Self, cx| {
+                if this.stick.step(&this.scroll) {
+                    cx.notify();
+                }
+            });
+        });
     }
 }
 
@@ -1207,6 +1688,7 @@ impl Focusable for AgentPane {
 impl Render for AgentPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.synchronize(window, cx);
+        self.synchronize_completions(cx);
         let state = self
             .connection
             .read(cx)
@@ -1225,68 +1707,24 @@ impl Render for AgentPane {
                 state.phase,
                 AgentConnectionPhase::Ready | AgentConnectionPhase::Running
             );
-        let label = match self.descriptor.provider {
-            zz_protocol::AgentProvider::Codex => "Codex",
-            zz_protocol::AgentProvider::ClaudeCode => "Claude Code",
-        };
-        let icon = match self.descriptor.provider {
-            zz_protocol::AgentProvider::Codex => IconName::Openai,
-            zz_protocol::AgentProvider::ClaudeCode => IconName::Claude,
-        };
-        let mut prefix = Vec::new();
-        let methods = serde_json::from_str::<Value>(&state.auth_methods).unwrap_or_default();
-        for (index, method) in methods.as_array().into_iter().flatten().enumerate() {
-            let Some(id) = method.get("id").and_then(Value::as_str) else {
-                continue;
-            };
-            let id = id.to_owned();
-            let name = method
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or(&id)
-                .to_owned();
-            let connection = self.connection.clone();
-            let pane = self.pane;
-            prefix.push(
-                Button::new(("web-agent-authenticate", index))
-                    .small()
-                    .label(format!("Sign in: {name}"))
-                    .disabled(!writable || running)
-                    .on_click(move |_, _, cx| {
-                        connection.update(cx, |connection, cx| {
-                            connection.send(
-                                ProtocolMessage::AgentAuthenticate {
-                                    pane,
-                                    method_id: id.clone(),
-                                },
-                                cx,
-                            );
-                        });
-                    })
-                    .into_any_element(),
-            );
+        let permission_id = state
+            .pending_permission
+            .as_ref()
+            .map(|permission| permission.request_id);
+        if self.permission_request_id != permission_id {
+            self.permission_request_id = permission_id;
+            self.permission_selected = 0;
+            self.permission_answered = false;
         }
+        self.stick.set_bottom_padding(composer_tail_clearance());
+        self.drive_stick(window, cx);
+        let show_jump = !self.rows.is_empty() && self.stick.shows_jump_button();
+        let mut prefix = Vec::new();
         if let Some(permission) = &state.pending_permission {
             prefix.push(self.permissions(&permission.payload, permission.request_id, cx));
         }
-        if let Some(error) = &self.draft_error {
-            prefix.push(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(cx.theme().danger)
-                    .child(error.clone())
-                    .into_any_element(),
-            );
-        }
-        if let AgentConnectionPhase::Failed { message } = &state.phase {
-            prefix.push(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(cx.theme().danger)
-                    .child(message.clone())
-                    .into_any_element(),
-            );
-        }
+        prefix.extend(self.render_error(&state, cx));
+        prefix.extend(self.render_completions(cx));
         let has_content =
             !self.input.read(cx).value().trim().is_empty() || !self.attachments.is_empty();
         let action_kind = composer_action(running, has_content);
@@ -1345,91 +1783,81 @@ impl Render for AgentPane {
         } else {
             None
         };
-        let composer = AgentComposer {
-            input: self.input.clone(),
-            action: action.into_any_element(),
-            settings,
-            usage,
-            git: state.git.as_ref().map(|git| {
-                git_summary_footer(
-                    ("agent-git-summary", self.pane.0),
-                    git.branch.clone().map(Into::into),
-                    git.changed_files,
-                    git.additions,
-                    git.deletions,
-                    cx,
-                )
-            }),
-            directory: agent_chrome_button("web-agent-directory")
-                .icon(IconName::Folder)
-                .label(self.descriptor.cwd.as_ref().map_or_else(
-                    || "Daemon working directory".to_owned(),
-                    |path| directory_label(path),
-                ))
-                .disabled(!self.can_change_session(cx))
-                .tooltip(self.descriptor.cwd.as_ref().map_or_else(
-                    || "Agent working directory".to_owned(),
-                    |path| path.to_string_lossy().into_owned(),
-                ))
-                .on_click(cx.listener(|this, _, window, cx| this.open_directory(window, cx)))
-                .into_any_element(),
-            command_hint: None,
-            prefix,
-            attachments: (!self.attachments.is_empty()).then(|| {
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(6.0))
-                    .p(px(8.0))
-                    .children(self.attachments.iter().enumerate().map(|(index, image)| {
-                        let preview = preview_image(image);
-                        div()
-                            .relative()
-                            .w(px(72.0))
-                            .h(px(64.0))
-                            .children(preview.map(|preview| {
-                                let expanded = preview.clone();
-                                div()
-                                    .id(("web-agent-image", index))
-                                    .size_full()
-                                    .cursor_pointer()
-                                    .child(
-                                        gpui::img(preview)
-                                            .size_full()
-                                            .object_fit(gpui::ObjectFit::Contain),
-                                    )
-                                    .on_click(move |_, window, cx| {
-                                        zz_ui::attachment::open_attachment_preview(
-                                            expanded.clone(),
-                                            window,
+        let composer =
+            AgentComposer {
+                input: self.input.clone(),
+                action: action.into_any_element(),
+                settings,
+                usage,
+                git: state.git.as_ref().map(|git| {
+                    git_summary_footer(
+                        ("agent-git-summary", self.pane.0),
+                        git.branch.clone().map(Into::into),
+                        git.changed_files,
+                        git.additions,
+                        git.deletions,
+                        cx,
+                    )
+                }),
+                directory: agent_chrome_button("web-agent-directory")
+                    .icon(IconName::Folder)
+                    .label(self.descriptor.cwd.as_ref().map_or_else(
+                        || "Daemon working directory".to_owned(),
+                        |path| directory_label(path),
+                    ))
+                    .disabled(!self.can_change_session(cx))
+                    .tooltip(self.descriptor.cwd.as_ref().map_or_else(
+                        || "Agent working directory".to_owned(),
+                        |path| path.to_string_lossy().into_owned(),
+                    ))
+                    .on_click(cx.listener(|this, _, window, cx| this.open_directory(window, cx)))
+                    .into_any_element(),
+                command_hint: active_command_hint(&self.last_input, &self.commands).map(Into::into),
+                prefix,
+                attachments: (!self.attachments.is_empty()).then(|| {
+                    zz_ui::h_flex()
+                        .w_full()
+                        .flex_wrap()
+                        .gap_2()
+                        .px_3()
+                        .pt_2()
+                        .children(self.attachments.iter().enumerate().filter_map(
+                            |(index, image)| {
+                                let preview = preview_image(image)?;
+                                Some(
+                                    div()
+                                        .relative()
+                                        .child(agent_attachment_thumbnail(
+                                            ("web-agent-image", index),
+                                            preview,
+                                            COMPOSER_ATTACHMENT,
                                             cx,
-                                        );
-                                    })
-                            }))
-                            .child(
-                                div().absolute().right_0().top_0().child(
-                                    Button::compact_icon(
-                                        ("web-agent-remove-image", index),
-                                        IconName::Xmark,
-                                    )
-                                    .tooltip("Remove image")
-                                    .on_click(cx.listener(
-                                        move |this, _, _, cx| {
-                                            if index < this.attachments.len() {
-                                                this.attachments.remove(index);
-                                            }
-                                            this.draft_error = None;
-                                            cx.notify();
-                                        },
-                                    )),
-                                ),
-                            )
-                    }))
-                    .into_any_element()
-            }),
-            radii: Corners::all(px(0.0)),
-            background: cx.theme().background.opaque(),
-        };
+                                        ))
+                                        .child(
+                                            div().absolute().top(px(-6.0)).right(px(-6.0)).child(
+                                                Button::compact_icon(
+                                                    ("web-agent-remove-image", index),
+                                                    IconName::Xmark,
+                                                )
+                                                .tooltip("Remove this image")
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    if index < this.attachments.len() {
+                                                        this.attachments.remove(index);
+                                                    }
+                                                    this.draft_error = None;
+                                                    cx.notify();
+                                                    cx.stop_propagation();
+                                                })),
+                                            ),
+                                        ),
+                                )
+                            },
+                        ))
+                        .into_any_element()
+                }),
+                radii: Corners::all(px(0.0)),
+                background: cx.theme().background.opaque(),
+            };
         let pane = self.pane;
         let connection = self.connection.clone();
         let cwd = self.descriptor.cwd.clone();
@@ -1449,15 +1877,79 @@ impl Render for AgentPane {
                     });
                 }
             });
-        let history = Button::compact_icon("web-agent-history-button", IconName::Clock)
+        let history = Button::compact_icon("web-agent-history-button", IconName::History)
             .tooltip(if self.history_supported {
-                "Conversation history"
+                "Browse sessions stored by this agent"
             } else {
                 "This agent does not support conversation history"
             })
             .disabled(!ready || running || !self.history_supported)
             .on_click(cx.listener(|this, _, window, cx| this.list_sessions(true, window, cx)));
-        let _ = window;
+        let provider = self.descriptor.provider;
+        let provider_view = cx.entity();
+        let provider_picker = agent_chrome_button(("web-agent-provider", self.pane.0))
+            .icon(provider_icon(provider))
+            .label(provider.label())
+            .dropdown_caret(true)
+            .disabled(!writable || running || self.lifecycle_pending)
+            .tooltip(if self.lifecycle_pending {
+                "Waiting for the daemon to switch agents"
+            } else if running {
+                "Finish or cancel the current turn before switching agents"
+            } else {
+                "Choose an ACP agent"
+            })
+            .dropdown_menu(move |menu, _, _| {
+                zz_protocol::AgentProvider::ALL.iter().fold(
+                    menu.min_w(px(190.0)),
+                    |menu, choice| {
+                        let choice = *choice;
+                        let view = provider_view.clone();
+                        menu.item(
+                            PopupMenuItem::new(choice.label())
+                                .icon(provider_icon(choice))
+                                .checked(choice == provider)
+                                .on_click(move |_, _, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.lifecycle_command(Some(choice), cx);
+                                    });
+                                }),
+                        )
+                    },
+                )
+            })
+            .anchor(Anchor::TopLeft);
+        let empty_message = if connected {
+            match state.phase {
+                AgentConnectionPhase::Starting => format!("Starting {}…", provider.label()),
+                AgentConnectionPhase::Ready => {
+                    "Ask the agent to work in this workspace.".to_owned()
+                }
+                AgentConnectionPhase::Running => {
+                    format!("Waiting for {}’s first update…", provider.label())
+                }
+                AgentConnectionPhase::AwaitingPermission => {
+                    "The agent needs your permission.".to_owned()
+                }
+                AgentConnectionPhase::Failed { .. } => {
+                    "The agent could not start this session.".to_owned()
+                }
+            }
+        } else {
+            "The ACP agent is offline.".to_owned()
+        };
+        let empty = self.rows.is_empty().then(|| {
+            empty_state(
+                empty_message,
+                connected
+                    && matches!(
+                        state.phase,
+                        AgentConnectionPhase::Starting | AgentConnectionPhase::Running
+                    ),
+                cx.entity_id(),
+                cx,
+            )
+        });
         div()
             .relative()
             .flex()
@@ -1466,38 +1958,68 @@ impl Render for AgentPane {
             .overflow_hidden()
             .bg(cx.theme().background.opaque())
             .child(agent_pane_header(
-                Button::new("web-agent-provider")
-                    .ghost()
-                    .small()
-                    .icon(icon)
-                    .label(label)
-                    .disabled(true),
+                provider_picker,
                 div().flex().gap(px(4.0)).child(new_session).child(history),
                 cx,
             ))
             .child(
                 div()
                     .id("web-agent-timeline")
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .child(
-                        AgentTimeline::new(
-                            self.rows.clone(),
-                            self.scroll.clone(),
-                            self.timeline.clone(),
+                    .children(empty)
+                    .when(!self.rows.is_empty(), |area| {
+                        area.child(
+                            AgentTimeline::new(
+                                self.rows.clone(),
+                                self.scroll.clone(),
+                                self.timeline.clone(),
+                            )
+                            .active_turn(running)
+                            .bottom_padding(composer_tail_clearance()),
                         )
-                        .active_turn(running)
-                        .bottom_padding(composer_tail_clearance()),
-                    ),
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .bottom(px(composer_tail_clearance()))
+                                .child(Scrollbar::vertical(&self.scroll)),
+                        )
+                    }),
             )
             .child(composer)
+            .when(show_jump, |pane| {
+                pane.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom(px(composer_tail_clearance()))
+                        .flex()
+                        .justify_center()
+                        .child(
+                            agent_jump_to_bottom_button(("web-agent-jump-to-end", self.pane.0), cx)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.stick.engage(&this.scroll, cx.reduce_motion());
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                })),
+                        ),
+                )
+            })
             .when(self.history_open, |pane| {
                 pane.child(self.history(ready && !running, cx))
             })
             .when(self.directory_open, |pane| {
                 pane.child(self.directory_picker(cx))
             })
+            .capture_action(cx.listener(Self::complete))
+            .capture_action(cx.listener(Self::move_completion_up))
+            .capture_action(cx.listener(Self::move_completion_down))
             .capture_key_down(cx.listener(Self::picker_key_down))
     }
 }
@@ -1517,6 +2039,67 @@ struct SessionSummary {
 struct LocalPrompt {
     text: String,
     echoed: usize,
+    images: Vec<AgentImage>,
+    echoed_images: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PermissionChoice {
+    id: String,
+    name: String,
+    allow: Option<bool>,
+}
+
+fn permission_choices(payload: &Value) -> Vec<PermissionChoice> {
+    payload
+        .get("options")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|option| {
+            let id = option
+                .get("optionId")
+                .or_else(|| option.get("id"))?
+                .as_str()?
+                .to_owned();
+            Some(PermissionChoice {
+                name: option
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&id)
+                    .to_owned(),
+                allow: match option.get("kind").and_then(Value::as_str) {
+                    Some("allow_once" | "allow_always") => Some(true),
+                    Some("reject_once" | "reject_always") => Some(false),
+                    _ => None,
+                },
+                id,
+            })
+        })
+        .collect()
+}
+
+const fn provider_icon(provider: zz_protocol::AgentProvider) -> IconName {
+    match provider {
+        zz_protocol::AgentProvider::Codex => IconName::Openai,
+        zz_protocol::AgentProvider::ClaudeCode => IconName::Claude,
+    }
+}
+
+fn inbound_image(content: &Value) -> Option<AgentImage> {
+    if content.get("type").and_then(Value::as_str) != Some("image") {
+        return None;
+    }
+    let data = content.get("data")?.as_str()?;
+    if data.len() > zz_protocol::MAX_AGENT_PROMPT_BYTES.div_ceil(3) * 4 {
+        return None;
+    }
+    let image = AgentImage {
+        format: content.get("mimeType")?.as_str()?.to_owned(),
+        data: BASE64.decode(data).ok()?,
+    };
+    crate::attachments::validate_images("", std::slice::from_ref(&image)).ok()?;
+    Some(image)
 }
 
 fn preview_image(image: &AgentImage) -> Option<Arc<gpui::Image>> {
@@ -1590,6 +2173,8 @@ impl Transcript {
         self.local_prompts.push_back(LocalPrompt {
             text: text.to_owned(),
             echoed: 0,
+            images: images.to_vec(),
+            echoed_images: 0,
         });
     }
 
@@ -1670,19 +2255,57 @@ impl Transcript {
             .unwrap_or_default();
         match kind {
             "agent_message_chunk" | "user_message_chunk" | "agent_thought_chunk" => {
-                let Some(text) = update.pointer("/content/text").and_then(Value::as_str) else {
+                let Some(content) = update.get("content") else {
+                    return;
+                };
+                let image = (kind == "user_message_chunk")
+                    .then(|| inbound_image(content))
+                    .flatten();
+                let text = if let Some(text) = content.get("text").and_then(Value::as_str) {
+                    text.to_owned()
+                } else if content.get("type").and_then(Value::as_str) == Some("image") {
+                    if image.is_some() {
+                        String::new()
+                    } else {
+                        format!(
+                            "*[Image: {}]*",
+                            content
+                                .get("mimeType")
+                                .and_then(Value::as_str)
+                                .unwrap_or("unknown")
+                        )
+                    }
+                } else {
                     return;
                 };
                 if kind == "user_message_chunk"
                     && let Some(local) = self.local_prompts.front_mut()
-                    && local
+                {
+                    if let Some(image) = &image {
+                        if local
+                            .images
+                            .get(local.echoed_images)
+                            .is_some_and(|expected| {
+                                expected.format == image.format && expected.data == image.data
+                            })
+                        {
+                            local.echoed_images += 1;
+                            return;
+                        }
+                    } else if local
                         .text
                         .get(local.echoed..)
-                        .is_some_and(|remaining| remaining.starts_with(text))
-                {
-                    local.echoed += text.len();
-                    return;
+                        .is_some_and(|remaining| remaining.starts_with(&text))
+                    {
+                        local.echoed += text.len();
+                        return;
+                    }
                 }
+                let images = image
+                    .as_ref()
+                    .and_then(preview_image)
+                    .into_iter()
+                    .collect::<Vec<_>>();
                 let key = update
                     .get("messageId")
                     .and_then(Value::as_str)
@@ -1701,17 +2324,29 @@ impl Transcript {
                             .flatten()
                     });
                 if let Some(index) = previous {
-                    let (AgentEntry::User { markdown, .. }
-                    | AgentEntry::Assistant { markdown, .. }
-                    | AgentEntry::Reasoning { markdown, .. }) = &self.entries[index]
-                    else {
-                        return;
+                    let markdown = match &mut self.entries[index] {
+                        AgentEntry::User {
+                            markdown,
+                            images: existing,
+                            ..
+                        } => {
+                            if !images.is_empty() {
+                                let mut combined = existing.to_vec();
+                                combined.extend(images);
+                                combined.truncate(zz_protocol::MAX_AGENT_PROMPT_IMAGES);
+                                *existing = combined.into();
+                            }
+                            markdown
+                        }
+                        AgentEntry::Assistant { markdown, .. }
+                        | AgentEntry::Reasoning { markdown, .. } => markdown,
+                        _ => return,
                     };
                     let mut combined = markdown.full_text();
                     if combined.len() >= 256 * 1024 {
                         return;
                     }
-                    combined.push_str(text);
+                    combined.push_str(&text);
                     let mut end = combined.len().min(256 * 1024);
                     while !combined.is_char_boundary(end) {
                         end -= 1;
@@ -1725,7 +2360,7 @@ impl Transcript {
                     "user_message_chunk" => AgentEntry::User {
                         id: sequence,
                         markdown,
-                        images: Arc::from([]),
+                        images: images.into(),
                     },
                     "agent_thought_chunk" => AgentEntry::Reasoning {
                         id: sequence,
@@ -1868,8 +2503,81 @@ impl Transcript {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn directory_queries_use_daemon_paths_without_browser_filesystem_support() {
+        use super::absolute_daemon_directory;
+        assert_eq!(
+            absolute_daemon_directory(" /tmp/project "),
+            Some(std::path::PathBuf::from("/tmp/project"))
+        );
+        assert_eq!(
+            absolute_daemon_directory("/"),
+            Some(std::path::PathBuf::from("/"))
+        );
+        for query in ["", "tmp", "~/dev", "/tmp\0project"] {
+            assert_eq!(absolute_daemon_directory(query), None);
+        }
+        assert_eq!(
+            absolute_daemon_directory(&format!("/{}", "x".repeat(64 * 1024))),
+            None
+        );
+    }
+
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn replayed_image_only_messages_and_text_chunks_share_the_user_row() {
+        let content =
+            json!({"type":"image","mimeType":"image/png","data":BASE64.encode([1, 2, 3])});
+        let mut transcript = Transcript::default();
+        transcript.apply(1, &json!({"item":"sessionSwitched","replay":[
+            {"sessionUpdate":"user_message_chunk","messageId":"a","content":content},
+            {"sessionUpdate":"user_message_chunk","messageId":"a","content":{"type":"text","text":"Look at this"}},
+            {"sessionUpdate":"user_message_chunk","messageId":"b","content":content}
+        ]}));
+        assert_eq!(transcript.entries.len(), 2);
+        let AgentEntry::User {
+            markdown, images, ..
+        } = &transcript.entries[0]
+        else {
+            panic!()
+        };
+        assert_eq!(markdown.full_text(), "Look at this");
+        assert_eq!(images.len(), 1);
+        let AgentEntry::User {
+            markdown, images, ..
+        } = &transcript.entries[1]
+        else {
+            panic!()
+        };
+        assert!(markdown.trim_is_empty());
+        assert_eq!(images.len(), 1);
+    }
+
+    #[test]
+    fn local_image_echo_is_suppressed_but_a_later_clients_image_is_kept() {
+        let image = AgentImage {
+            format: "image/png".into(),
+            data: vec![1, 2, 3],
+        };
+        let content =
+            json!({"type":"image","mimeType":image.format,"data":BASE64.encode(&image.data)});
+        let mut transcript = Transcript::default();
+        transcript.local_prompt(u64::MAX, "", &[image]);
+        transcript.apply(1, &json!({"item":"turnStarted"}));
+        transcript.apply(2, &json!({"item":"update","update":{"sessionUpdate":"user_message_chunk","content":content}}));
+        assert_eq!(transcript.entries.len(), 1);
+        transcript.apply(3, &json!({"item":"promptFinished"}));
+        transcript.apply(4, &json!({"item":"update","update":{"sessionUpdate":"user_message_chunk","content":content}}));
+        assert_eq!(transcript.entries.len(), 2);
+        for entry in &transcript.entries {
+            let AgentEntry::User { images, .. } = entry else {
+                panic!()
+            };
+            assert_eq!(images.len(), 1);
+        }
+    }
 
     #[test]
     fn config_controls_preserve_grouped_values_and_composer_order() {
@@ -2129,6 +2837,12 @@ fn config_controls(config_options: &str, modes: &str) -> Vec<ConfigControl> {
         }
     }
     controls
+}
+
+fn absolute_daemon_directory(query: &str) -> Option<PathBuf> {
+    let query = query.trim();
+    (query.starts_with('/') && query.len() <= 64 * 1024 && !query.contains('\0'))
+        .then(|| PathBuf::from(query))
 }
 
 fn directory_label(path: &std::path::Path) -> String {

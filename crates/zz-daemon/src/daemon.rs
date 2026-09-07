@@ -31572,18 +31572,13 @@ fn popup_client_geometry(
     if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
         return Ok(control_client_geometry(inner, client, window_id));
     }
-    let window = inner
+    inner
         .engine
         .state
         .windows
         .get(&window_id)
         .ok_or_else(|| ServerError::MissingTarget(window_id.to_string()))?;
-    let pane = window.active_pane;
-    let measured = inner
-        .terminal_geometries
-        .get(&pane)
-        .and_then(|geometries| geometries.get(&client))
-        .copied();
+    let measured = client_format_geometry(inner, client, window_id);
     let columns = inner
         .engine
         .window_extent(window_id, zz_protocol::Axis::Horizontal)
@@ -38724,6 +38719,80 @@ mod tests {
             Err(ServerError::CommandParse(message))
                 if message == "unsupported command: display-popup -Z"
         ));
+    }
+
+    #[test]
+    fn popup_geometry_uses_the_clients_terminal_metrics_when_an_agent_is_active() {
+        let shared = Shared::new(1);
+        let mut inner = shared.inner.lock();
+        let (session, window, terminal) =
+            inner.engine.state.create_session("popup-metrics").unwrap();
+        let agent = inner
+            .engine
+            .state
+            .split_pane(
+                terminal,
+                zz_protocol::Axis::Horizontal,
+                PaneKind::Agent(zz_protocol::AgentDescriptor::default()),
+            )
+            .unwrap();
+        inner
+            .engine
+            .set_manual_window_extent(window, 120, 40)
+            .unwrap();
+        let retina = ClientId(1);
+        let other = ClientId(2);
+        inner
+            .attached
+            .insert(session, BTreeSet::from([retina, other]));
+        inner.client_kinds.insert(retina, ClientKind::Interactive);
+        inner.client_kinds.insert(other, ClientKind::Interactive);
+        let measured = TerminalGeometry {
+            columns: 59,
+            rows: 40,
+            cell_width_px: 16,
+            cell_height_px: 36,
+        };
+        let other_measured = TerminalGeometry {
+            cell_width_px: 9,
+            cell_height_px: 20,
+            ..measured
+        };
+        inner.terminal_geometries.insert(
+            terminal,
+            BTreeMap::from([(retina, measured), (other, other_measured)]),
+        );
+        assert_eq!(inner.engine.state.windows[&window].active_pane, agent);
+        assert_eq!(
+            popup_client_geometry(&inner, retina).unwrap(),
+            Some(TerminalGeometry {
+                columns: 120,
+                rows: 40,
+                ..measured
+            }),
+        );
+        assert_eq!(
+            popup_client_geometry(&inner, other).unwrap(),
+            Some(TerminalGeometry {
+                columns: 120,
+                rows: 40,
+                ..other_measured
+            }),
+        );
+        inner
+            .terminal_geometries
+            .get_mut(&terminal)
+            .unwrap()
+            .remove(&retina);
+        assert_eq!(
+            popup_client_geometry(&inner, retina).unwrap(),
+            Some(TerminalGeometry {
+                columns: 120,
+                rows: 40,
+                cell_width_px: CONTROL_CELL_WIDTH_PX,
+                cell_height_px: CONTROL_CELL_HEIGHT_PX,
+            }),
+        );
     }
 
     #[test]

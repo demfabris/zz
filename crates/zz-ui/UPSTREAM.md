@@ -145,3 +145,14 @@ Checked against this fork and deliberately **not** taken:
 The desktop and browser clients share chrome preset definitions and palette resolution in
 `src/chrome_palette.rs`, and pane-picker rows in `src/pane.rs`. WebAssembly text fields accept
 both Control and Command editing shortcuts so browser clients work on either desktop platform.
+
+The shared workspace components also include window tabs and overflow menus in
+`src/navigation/status.rs`, sidebar markers, actions, and keyboard navigation in
+`src/navigation/sidebar.rs`, and command palette/menu/confirmation presentation in
+`src/command/`. `src/agent/slash.rs` renders provider command suggestions; the matching and
+replacement rules live in `zz-client`. Desktop and browser both use these components.
+
+`src/terminal.rs` contains the portable GPUI terminal painter, including retained row shaping,
+selection, cursor, scrollbar, and image placement. It consumes `zz-terminal` view data with the
+engine features disabled. Each client owns its input, focus, image delivery, and connection
+lifecycle; native daemon and operating-system dependencies stay outside `zz-ui`.

@@ -1,8 +1,9 @@
 #![cfg_attr(not(target_family = "wasm"), allow(dead_code))]
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use gpui::{Context, EventEmitter};
+use zz_client::agent_completion::AgentCommand;
 use zz_client::{ClientCore, CoreEvent, Outbound};
 use zz_protocol::{
     CommandInvocation, CommandRequest, CommandResponse, InputMessage, PaneId, ProtocolMessage,
@@ -20,6 +21,8 @@ struct AgentCursor {
     history_supported: bool,
     session_load_supported: bool,
     session_delete_supported: bool,
+    commands: Arc<[AgentCommand]>,
+    command_session_reset: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -31,6 +34,18 @@ struct AgentEnvelope<'a> {
     restoring: bool,
     #[serde(default)]
     capabilities: AgentCapabilities,
+    #[serde(default)]
+    update: Option<AgentCommandUpdate>,
+    #[serde(default)]
+    replay: Vec<AgentCommandUpdate>,
+}
+
+#[derive(serde::Deserialize)]
+struct AgentCommandUpdate {
+    #[serde(default, rename = "sessionUpdate")]
+    kind: serde_json::Value,
+    #[serde(default, rename = "availableCommands")]
+    commands: serde_json::Value,
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -83,6 +98,41 @@ impl AgentCursor {
             if item.item == "sessionReset" {
                 journal.clear();
                 self.bytes = 0;
+                self.commands = Arc::from([]);
+                self.command_session_reset = true;
+            } else if item.item == "sessionReady" {
+                self.command_session_reset = false;
+            } else if item.item == "sessionSwitched" {
+                if !self.command_session_reset {
+                    self.commands = Arc::from([]);
+                }
+                self.command_session_reset = false;
+            }
+            for update in item.update.iter().chain(&item.replay) {
+                if update.kind.as_str() == Some("available_commands_update") {
+                    self.commands = update
+                        .commands
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .take(zz_protocol::MAX_AGENT_AVAILABLE_COMMANDS)
+                        .filter_map(|command| {
+                            Some(AgentCommand {
+                                name: command.get("name")?.as_str()?.to_owned(),
+                                description: command
+                                    .get("description")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or_default()
+                                    .to_owned(),
+                                input_hint: command
+                                    .pointer("/input/hint")
+                                    .and_then(serde_json::Value::as_str)
+                                    .map(ToOwned::to_owned),
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                        .into();
+                }
             }
             journal.push((item.seq, bytes.clone()));
             self.bytes = self.bytes.saturating_add(bytes.len());
@@ -119,6 +169,7 @@ pub struct Connection {
     pub connected: bool,
     pub agent_events: HashMap<PaneId, Vec<(u64, Vec<u8>)>>,
     agent_cursors: HashMap<PaneId, AgentCursor>,
+    terminal_images: crate::terminal_images::TerminalImages,
     request_id: u64,
     remembered_session: Option<SessionId>,
     attaching: bool,
@@ -142,6 +193,7 @@ impl Connection {
             connected: false,
             agent_events: HashMap::new(),
             agent_cursors: HashMap::new(),
+            terminal_images: crate::terminal_images::TerminalImages::default(),
             request_id: 1,
             remembered_session: None,
             attaching: false,
@@ -172,6 +224,20 @@ impl Connection {
         self.agent_cursors
             .get(&pane)
             .is_some_and(|cursor| cursor.session_delete_supported)
+    }
+
+    pub fn agent_commands(&self, pane: PaneId) -> Arc<[AgentCommand]> {
+        self.agent_cursors
+            .get(&pane)
+            .map_or_else(|| Arc::from([]), |cursor| cursor.commands.clone())
+    }
+
+    pub fn terminal_images(&self, pane: PaneId) -> Option<&crate::terminal_images::PaneImages> {
+        self.terminal_images.pane(pane)
+    }
+
+    pub fn take_retired_terminal_images(&mut self) -> Vec<Arc<gpui::RenderImage>> {
+        self.terminal_images.take_retired()
     }
 
     pub fn start(&mut self, cx: &mut Context<Self>) {
@@ -295,6 +361,7 @@ impl Connection {
             self.send(ProtocolMessage::RequestFull { pane }, cx);
         }
         while let Some(event) = self.core.poll_event() {
+            self.terminal_images.apply(&event);
             match &event {
                 CoreEvent::HelloReceived => {
                     self.connected = true;
@@ -798,6 +865,55 @@ mod tests {
 
     fn reset(seq: u64, restoring: bool) -> Vec<u8> {
         format!(r#"{{"seq":{seq},"item":"sessionReset","restoring":{restoring}}}"#).into_bytes()
+    }
+
+    #[test]
+    fn agent_commands_survive_history_trimming_and_follow_session_replays() {
+        let catalog = |name| {
+            serde_json::json!({
+                "sessionUpdate":"available_commands_update",
+                "availableCommands":[{"name":name,"description":"Review changes","input":{"hint":"branch or files"}}]
+            })
+        };
+        let message = |seq, update| {
+            serde_json::to_vec(&serde_json::json!({"seq":seq,"item":"update","update":update}))
+                .unwrap()
+        };
+        let mut cursor = AgentCursor::default();
+        let mut journal = Vec::new();
+        let initial = message(1, catalog("review"));
+        assert_eq!(
+            cursor.apply(&mut journal, 1, std::slice::from_ref(&initial)),
+            (None, false)
+        );
+        assert_eq!(cursor.commands[0].name, "review");
+        assert_eq!(
+            cursor.commands[0].input_hint.as_deref(),
+            Some("branch or files")
+        );
+        assert!(cursor.trim(&mut journal, 0, 0));
+        assert!(journal.is_empty());
+        assert_eq!(cursor.commands[0].name, "review");
+        cursor.apply(&mut journal, 2, &[reset(2, true)]);
+        assert!(cursor.commands.is_empty());
+        cursor.apply(&mut journal, 3, &[message(3, catalog("explain"))]);
+        cursor.apply(
+            &mut journal,
+            4,
+            &[br#"{"seq":4,"item":"sessionSwitched","replay":[]}"#.to_vec()],
+        );
+        assert_eq!(cursor.commands[0].name, "explain");
+        cursor.apply(&mut journal, 1, &[initial]);
+        assert_eq!(cursor.commands[0].name, "explain");
+        let switched = serde_json::to_vec(
+            &serde_json::json!({"seq":5,"item":"sessionSwitched","replay":[catalog("test")]}),
+        )
+        .unwrap();
+        cursor.apply(&mut journal, 5, &[switched]);
+        assert_eq!(cursor.commands.len(), 1);
+        assert_eq!(cursor.commands[0].name, "test");
+        cursor.apply(&mut journal, 6, &[message(6, serde_json::json!({"sessionUpdate":"available_commands_update","availableCommands":[]}))]);
+        assert!(cursor.commands.is_empty());
     }
 
     fn ready<T>(future: impl Future<Output = T>) -> T {

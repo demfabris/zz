@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::rc::Rc;
 
 use chrono::Local;
 use gpui::{
@@ -7,12 +7,15 @@ use gpui::{
 };
 use zz_client::{StatusBarAlignment, StatusBarClock, StatusBarModel, StatusBarWindow};
 use zz_ui::{
-    ActiveTheme as _, Disableable as _, IconName, Sizable as _, StyledExt as _,
-    button::{Button, ButtonVariants as _},
-    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
+    ActiveTheme as _, IconName, StyledExt as _,
     navigation::{
-        WorkspaceStatusWindowState, workspace_controls_leading_inset, workspace_row_highlight,
-        workspace_status_item, workspace_status_window, workspace_tree_action_button,
+        WorkspaceStatusWindowState,
+        status::{
+            MAX_VISIBLE_WINDOWS, StatusWindowActions, StatusWindowEntry, status_agent_count,
+            status_clock, status_session, status_window, status_window_overflow,
+            visible_window_range,
+        },
+        workspace_controls_leading_inset, workspace_row_highlight, workspace_status_item,
     },
     tooltip::Tooltip,
 };
@@ -29,8 +32,6 @@ use crate::{
     theme::chrome_background,
     workspace::sidebar::WorkspaceSidebar,
 };
-
-const MAX_VISIBLE_WINDOWS: usize = 5;
 
 use zz_ui::shell::{WorkspaceStatusSlots, workspace_status_bar};
 
@@ -101,51 +102,21 @@ pub(crate) fn render_gui_status_bar(
 }
 
 fn render_session(name: &str, sidebar: &Entity<WorkspaceSidebar>, cx: &App) -> AnyElement {
-    let foreground = cx.theme().foreground;
-    let highlight = workspace_row_highlight(cx);
-    let focus_sidebar = sidebar.clone();
-    workspace_status_item(
+    let sidebar = sidebar.clone();
+    status_session(
         "gui-status-session",
-        Some(IconName::Layers),
         name.to_owned().into(),
+        move |window, cx| {
+            sidebar.update(cx, |sidebar, cx| sidebar.focus(window, cx));
+        },
         cx,
     )
-    .flex_none()
-    .px(px(8.0))
-    .rounded(cx.theme().radius)
-    .when(cx.theme().shadow, |item| {
-        item.border(px(0.5)).border_color(gpui::transparent_white())
-    })
-    .text_color(foreground)
-    .cursor_pointer()
-    .hover(move |item| {
-        let item = item.bg(highlight).text_color(foreground);
-        if cx.theme().shadow {
-            item.control_highlight(cx)
-        } else {
-            item
-        }
-    })
-    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-    .on_click(move |_, window, cx| {
-        cx.stop_propagation();
-        focus_sidebar.update(cx, |sidebar, cx| sidebar.focus(window, cx));
-    })
-    .into_any_element()
 }
 
 fn render_right_items(model: &StatusBarModel, cx: &App) -> Vec<AnyElement> {
     let mut items = Vec::new();
     if let Some(count) = model.agent_count {
-        let label = if count == 1 {
-            "1 agent".to_owned()
-        } else {
-            format!("{count} agents")
-        };
-        items.push(
-            workspace_status_item("gui-status-agents", Some(IconName::Bot), label.into(), cx)
-                .into_any_element(),
-        );
+        items.push(status_agent_count("gui-status-agents", count, cx));
     }
     if let Some(host) = &model.host_name {
         items.push(
@@ -225,10 +196,7 @@ fn render_clock(clock: StatusBarClock, cx: &App) -> Option<AnyElement> {
         StatusBarClock::TimeAndDate => now.format("%H:%M · %b %d").to_string(),
         StatusBarClock::Off => return None,
     };
-    Some(
-        workspace_status_item("gui-status-clock", Some(IconName::Clock), label.into(), cx)
-            .into_any_element(),
-    )
+    Some(status_clock("gui-status-clock", label.into(), cx))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -240,22 +208,27 @@ fn render_status_window(
     mux: &Entity<MuxClient>,
     cx: &App,
 ) -> AnyElement {
-    let tooltip: SharedString = format!("{}:{}", window.index, window.name).into();
     let id = window.id;
     let select_mux = mux.clone();
-    let rename = model.rename_activation_for_node(
-        TreeNode::Target(attached_host, TreeTarget::Window(id)),
-        attached_host,
-    );
-    let rename_mux = mux.clone();
     let close_mux = mux.clone();
-    let button_mux = mux.clone();
-    let hover_group: SharedString = format!("gui-status-window-{}", id.0).into();
-    let item = workspace_status_window(
+    let rename = model
+        .rename_activation_for_node(
+            TreeNode::Target(attached_host, TreeTarget::Window(id)),
+            attached_host,
+        )
+        .map(|(label, activation)| {
+            let mux = mux.clone();
+            (
+                label.into(),
+                Rc::new(move |_: &mut Window, cx: &mut App| {
+                    activate_nav(&mux, activation.clone(), cx);
+                }) as zz_ui::navigation::status::StatusAction,
+            )
+        });
+    status_window(
         ("gui-status-window", id.0),
         window.index.to_string().into(),
         window.name.clone().into(),
-        tooltip,
         WorkspaceStatusWindowState {
             connected,
             active: window.active,
@@ -263,62 +236,19 @@ fn render_status_window(
             activity: window.activity,
             agent: window.agent,
         },
+        StatusWindowActions {
+            select: Rc::new(move |_, cx| {
+                select_mux.read(cx).execute(select_window_command(id));
+            }),
+            close: Some(Rc::new(move |_, cx| {
+                close_mux
+                    .read(cx)
+                    .execute(kill_target_command(TreeTarget::Window(id)));
+            })),
+            rename,
+        },
         cx,
     )
-    .group(hover_group.clone())
-    .pr(px(0.0))
-    .child(
-        div()
-            .flex_none()
-            .invisible()
-            .group_hover(hover_group, gpui::Styled::visible)
-            .child(
-                workspace_tree_action_button(
-                    ("gui-status-window-close", id.0),
-                    IconName::Xmark,
-                    "Close window",
-                    !connected,
-                    cx,
-                )
-                .on_click(move |_, _, cx| {
-                    cx.stop_propagation();
-                    button_mux
-                        .read(cx)
-                        .execute(kill_target_command(TreeTarget::Window(id)));
-                }),
-            ),
-    )
-    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-    .on_click(move |_, _, cx| {
-        cx.stop_propagation();
-        if connected {
-            select_mux.read(cx).execute(select_window_command(id));
-        }
-    });
-    if !connected {
-        return item.into_any_element();
-    }
-    item.context_menu(move |menu, _, _| {
-        let menu = if let Some((label, activation)) = rename.clone() {
-            let rename_mux = rename_mux.clone();
-            menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
-                activate_nav(&rename_mux, activation.clone(), cx);
-            }))
-        } else {
-            menu
-        };
-        let close_mux = close_mux.clone();
-        menu.item(
-            PopupMenuItem::new("Close Window")
-                .icon(IconName::Xmark)
-                .on_click(move |_, _, cx| {
-                    close_mux
-                        .read(cx)
-                        .execute(kill_target_command(TreeTarget::Window(id)));
-                }),
-        )
-    })
-    .into_any_element()
 }
 
 fn render_window_overflow(
@@ -327,47 +257,21 @@ fn render_window_overflow(
     mux: &Entity<MuxClient>,
     cx: &App,
 ) -> AnyElement {
-    let windows = windows.to_vec();
-    let menu_mux = mux.clone();
-    Button::new("gui-status-window-overflow")
-        .ghost()
-        .xsmall()
-        .compact()
-        .icon(IconName::Ellipsis)
-        .hover_bg(workspace_row_highlight(cx))
-        .tooltip("All windows")
-        .disabled(!connected)
-        .dropdown_menu(move |menu, _, _| {
-            windows.iter().fold(menu, |menu, window| {
-                let id = window.id;
-                let select_mux = menu_mux.clone();
-                menu.item(
-                    PopupMenuItem::new(native_window_label(window))
-                        .icon(if window.active {
-                            IconName::Check
-                        } else {
-                            IconName::AppWindow
-                        })
-                        .on_click(move |_, _, cx| {
-                            select_mux.read(cx).execute(select_window_command(id));
-                        }),
-                )
-            })
+    let entries = windows
+        .iter()
+        .map(|window| {
+            let id = window.id;
+            let mux = mux.clone();
+            StatusWindowEntry {
+                label: format!("{} {}", window.index, window.name).into(),
+                active: window.active,
+                select: Rc::new(move |_, cx| {
+                    mux.read(cx).execute(select_window_command(id));
+                }),
+            }
         })
-        .into_any_element()
-}
-
-fn visible_window_range(total: usize, active: usize, limit: usize) -> Range<usize> {
-    if total <= limit || limit == 0 {
-        return 0..total;
-    }
-    let mut start = active.saturating_sub(limit / 2);
-    start = start.min(total - limit);
-    start..start + limit
-}
-
-fn native_window_label(window: &StatusBarWindow) -> SharedString {
-    format!("{} {}", window.index, window.name).into()
+        .collect();
+    status_window_overflow("gui-status-window-overflow", entries, connected, cx)
 }
 
 #[cfg(test)]

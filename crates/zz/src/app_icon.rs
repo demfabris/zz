@@ -5,6 +5,7 @@ use image::{Frame, RgbaImage, imageops::FilterType};
 use smallvec::smallvec;
 use zz_ui::ThemeMode;
 
+#[cfg(any(target_os = "linux", test))]
 const APP_ICON_PNG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../assets/linux/hicolor/256x256/apps/zz.png"
@@ -136,12 +137,6 @@ pub(crate) fn about_logo(variant: ThemeMode) -> Arc<RenderImage> {
     });
 
     Arc::clone(&LOGOS[usize::from(variant.is_dark())])
-}
-
-pub(crate) fn sidebar_logo() -> Arc<RenderImage> {
-    static LOGO: LazyLock<Arc<RenderImage>> =
-        LazyLock::new(|| render_image(decode_png(APP_ICON_PNG)));
-    Arc::clone(&LOGO)
 }
 
 #[cfg(any(target_os = "linux", test))]

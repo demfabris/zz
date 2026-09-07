@@ -1,3 +1,5 @@
+pub mod floating;
+
 use std::time::Duration;
 
 use crate::{

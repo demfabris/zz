@@ -8525,6 +8525,7 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "zed-sum-tree",
+ "zz-terminal",
 ]
 
 [[package]]
@@ -8535,6 +8536,7 @@ dependencies = [
  "base64",
  "gpui",
  "gpui_platform",
+ "image",
  "js-sys",
  "rust-embed",
  "serde",

@@ -1,5 +1,21 @@
 use std::process::Command;
 
+/// A `zz` that cannot see the developer's own `~/.config/zz/mux.conf`: an
+/// explicit `-f` still layers it, the accepted
+/// semantic:explicit-config-keeps-mux-conf-layer, and cycle 17 watched it
+/// reach the tests that never said where home is.
+fn isolated_zz() -> (tempfile::TempDir, Command) {
+    let directory = tempfile::Builder::new()
+        .prefix("zz-cli-env-")
+        .tempdir_in("/tmp")
+        .expect("temporary CLI home");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_zz"));
+    command
+        .env("HOME", directory.path())
+        .env("XDG_CONFIG_HOME", directory.path());
+    (directory, command)
+}
+
 const TMUX_USAGE: &str = concat!(
     "usage: zz [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name]\n",
     "            [-S socket-path] [-T features] [command [flags]]\n"
@@ -7,7 +23,8 @@ const TMUX_USAGE: &str = concat!(
 
 #[test]
 fn tmux_version_is_exact() {
-    let output = Command::new(env!("CARGO_BIN_EXE_zz"))
+    let (_home, mut zz) = isolated_zz();
+    let output = zz
         .args(["-2uV", "ignored"])
         .output()
         .expect("run zz -V");
@@ -18,7 +35,8 @@ fn tmux_version_is_exact() {
 
 #[test]
 fn unknown_tmux_flag_uses_tmux_usage_shape() {
-    let output = Command::new(env!("CARGO_BIN_EXE_zz"))
+    let (_home, mut zz) = isolated_zz();
+    let output = zz
         .arg("-8")
         .output()
         .expect("run zz with an unknown tmux flag");
@@ -33,7 +51,8 @@ fn unknown_tmux_flag_uses_tmux_usage_shape() {
 #[cfg(unix)]
 #[test]
 fn tmux_without_a_zz_socket_fails_before_dialing_a_foreign_server() {
-    let output = Command::new(env!("CARGO_BIN_EXE_zz"))
+    let (_home, mut zz) = isolated_zz();
+    let output = zz
         .env("TMUX", "/tmp/real-tmux.sock,123,0")
         .env_remove("ZZ_SOCKET")
         .arg("list-sessions")
@@ -66,6 +85,7 @@ mod daemon_autostart {
         _directory: tempfile::TempDir,
         socket: PathBuf,
         config: PathBuf,
+        home: PathBuf,
     }
 
     struct CargoLauncher {
@@ -82,16 +102,25 @@ mod daemon_autostart {
             let socket = directory.path().join("daemon.sock");
             let config = directory.path().join("empty.conf");
             std::fs::write(&config, b"").expect("empty mux config");
+            let home = directory.path().join("home");
+            std::fs::create_dir_all(&home).expect("scratch CLI home");
             Self {
                 _directory: directory,
                 socket,
                 config,
+                home,
             }
         }
 
+        /// An explicit `-f` still layers `zz/mux.conf` on top, the accepted
+        /// semantic:explicit-config-keeps-mux-conf-layer, so a developer's own
+        /// `~/.config/zz/mux.conf` reaches any test that does not say where
+        /// home is. Every command a fixture builds says.
         fn command_from(&self, executable: &Path) -> Command {
             let mut command = Command::new(executable);
             command
+                .env("HOME", &self.home)
+                .env("XDG_CONFIG_HOME", &self.home)
                 .arg("-f")
                 .arg(&self.config)
                 .arg("-S")
@@ -112,6 +141,9 @@ mod daemon_autostart {
 
         fn run_with_configs(&self, configs: &[&Path], arguments: &[&str]) -> Output {
             let mut command = Command::new(Path::new(env!("CARGO_BIN_EXE_zz")));
+            command
+                .env("HOME", &self.home)
+                .env("XDG_CONFIG_HOME", &self.home);
             for config in configs {
                 command.arg("-f").arg(config);
             }
@@ -198,11 +230,10 @@ mod daemon_autostart {
 
         fn command(&self, fixture: &Fixture) -> Command {
             let mut command = Command::new(&self.path);
-            let home = fixture.config.parent().expect("fixture config directory");
             command
                 .env("ZZ_SOCKET", &fixture.socket)
-                .env("XDG_CONFIG_HOME", home)
-                .env("HOME", home);
+                .env("XDG_CONFIG_HOME", &fixture.home)
+                .env("HOME", &fixture.home);
             command
         }
     }
@@ -3446,6 +3477,8 @@ mod daemon_autostart {
                 "\"$ZZ_BIN\" -f \"$ZZ_CONF\" -S \"$ZZ_TEST_SOCKET\" attach || ",
                 "exec \"$ZZ_BIN\" -f \"$ZZ_CONF\" -S \"$ZZ_TEST_SOCKET\" new-session -s fallback"
             ))
+            .env("HOME", &fixture.home)
+            .env("XDG_CONFIG_HOME", &fixture.home)
             .env("ZZ_BIN", env!("CARGO_BIN_EXE_zz"))
             .env("ZZ_CONF", &fixture.config)
             .env("ZZ_TEST_SOCKET", &fixture.socket);
@@ -3892,6 +3925,8 @@ mod daemon_autostart {
             return;
         }
         let output = Command::new("/bin/sh")
+            .env("HOME", &fixture.home)
+            .env("XDG_CONFIG_HOME", &fixture.home)
             .arg("-c")
             .arg(r#""$1" -f "$2" -S "$3" ls || "$1" -f "$2" -S "$3" new-session -d"#)
             .arg("zz-ls-or-new")
@@ -3940,6 +3975,8 @@ mod daemon_autostart {
         let socket = base.join("a/b");
         let run = |label: &str, arguments: &[&str]| {
             Command::new(env!("CARGO_BIN_EXE_zz"))
+                .env("HOME", directory.path())
+                .env("XDG_CONFIG_HOME", directory.path())
                 .env("TMUX_TMPDIR", directory.path())
                 .arg("-f")
                 .arg(&config)

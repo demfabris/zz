@@ -9,7 +9,9 @@ corpus: none
 # Spawn path: format_cb_current_path answers the pane's directory the first
 # time the pane's own first command asks. pane_path: format.c:2331 reads
 # wp->base.path, which only OSC 7 sets, so it is empty until the pane's program
-# reports one and the reported payload verbatim afterwards.
+# reports one and the reported payload verbatim afterwards. A dead pane answers
+# an empty current path on both binaries: format_cb_current_path reads
+# osdep_get_cwd(ft->wp->fd) and wp->fd is -1 once the child has exited.
 stage: fixtures/plugin-reader.py ~/plugin-reader.py
 stage: fixtures/pane-runtime-facts.py ~/pane-runtime-facts.py
 run-shell 'python3 ~/pane-runtime-facts.py'

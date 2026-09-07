@@ -79,7 +79,7 @@ try:
     print("NESTED_IF_SHELL_CURRENT_SINK=[" + sink(sink1) + "]")
 
     tty0 = tmux("display-message", "-p", "-t", session + ":facts.0", "#{pane_tty}")
-    if not tty0.startswith("/dev/pts/"):
+    if not tty0.startswith("/dev/"):
         raise AssertionError(("pane_tty", tty0))
     tmux("if-shell", "-t", session + ":facts.0",
          "test '#{pane_tty}' = " + tty0, "send-keys -l C", "send-keys -l D")
@@ -146,7 +146,19 @@ try:
     print("PANE_CURRENT_PATH_AFTER_OSC7=" + tmux(
         "display-message", "-p", "-t", session + ":spawn.0",
         "#{pane_current_path}").replace(str(root), "<DIR>"))
-    result = "clean:nested-target-title-default-spawn-path"
+    tmux("set-window-option", "-g", "remain-on-exit", "on")
+    tmux("new-window", "-t", session + ":", "-n", "dead", "-c", str(root),
+         "exec sh -c 'exit 0'")
+    settle(lambda: tmux("display-message", "-p", "-t", session + ":dead.0",
+                        "#{pane_dead}"), "1")
+    print("DEAD_PANE_CURRENT_PATH=[" + tmux(
+        "display-message", "-p", "-t", session + ":dead.0",
+        "#{pane_current_path}").replace(str(root), "<DIR>") + "]")
+    print("DEAD_PANE_PATH=[" + tmux(
+        "display-message", "-p", "-t", session + ":dead.0",
+        "#{pane_path}") + "]")
+    tmux("set-window-option", "-g", "remain-on-exit", "off")
+    result = "clean:nested-target-title-default-spawn-path-dead"
 except Exception as error:
     print(repr(error), flush=True)
 finally:

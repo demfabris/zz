@@ -1261,7 +1261,11 @@ impl MuxEngine {
             context
                 .pane_current_command
                 .clone_from(&facts.current_command);
-            context.pane_current_path.clone_from(&facts.current_path);
+            if pane.dead {
+                context.pane_current_path.clear();
+            } else {
+                context.pane_current_path.clone_from(&facts.current_path);
+            }
             context.pane_path.clone_from(&facts.reported_path);
             context.pane_start_path.clone_from(&facts.start_path);
             context.pane_pid = facts.pid;

@@ -331,15 +331,17 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             "$ZZ_ZIP" "$ZZ_ZIP.sha256" "$ZZ_SETUP" "$ZZ_SETUP.sha256" --clobber
 
-  # The one gate that makes the release real. Every platform has uploaded by
-  # the time this runs, so the moment the draft flips, install.sh resolves the
-  # new version and finds every asset it names. A failed platform leg leaves
-  # the draft a draft: nothing is half-published, and rerunning that leg
-  # finishes the release.
+  # The one gate that makes the release real. It still waits for every platform
+  # leg to finish, so their assets are attached before the draft flips, but only
+  # macOS and Linux can hold it back. Windows is second-class support: a broken
+  # Windows leg ships the release without its zip and installer rather than
+  # stranding every other platform in a draft nobody can install. macOS gates
+  # this transitively, since a failed macOS leg skips Linux.
   publish:
     name: Publish
     runs-on: ubuntu-24.04
     needs: [linux, windows]
+    if: ${{ !cancelled() && needs.linux.result == 'success' }}
     permissions:
       contents: write
 

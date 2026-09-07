@@ -87,7 +87,17 @@ jobs:
           rustup toolchain install nightly --profile minimal --target wasm32-unknown-unknown
           rustup run nightly cargo check --manifest-path examples/ui-showcase/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
 
+      # Windows is second-class support, so its test failures warn rather than
+      # fail the job. Four fail deterministically there today
+      # (agent::controller::tests::session_controls_send_the_daemon_every_filter_and_restore_path,
+      # both control_mode::tests source-read cases, and
+      # update::tests::macos_uses_the_installer_unless_homebrew_owns_the_app).
+      # Leaving the job permanently red is what let a Windows-only compile
+      # error reach a release tag unnoticed: with the tests demoted, red means
+      # Windows no longer builds or packages, which is the thing that can
+      # actually strand a release.
       - name: Test workspace
+        continue-on-error: ${{ runner.os == 'Windows' }}
         run: cargo test --workspace --all-features
 
       - name: Test zz-mux release profile

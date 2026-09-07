@@ -198,6 +198,22 @@ unset_on_both() {
   side_command tmux set-option -gu "$1" || die "tmux refused set-option -gu $1"
 }
 
+# Server options. status-style defaults to bg=themegreen,fg=themeblack, and
+# server_client_update_theme_colours expands the dark-theme-* or light-theme-*
+# option for each client from the `theme` option and the theme the client
+# reported (server-client.c:3085). Both binaries' clients run inside the same
+# outer pinned tmux, so both are answered the same way and the resolved set has
+# to be the same on both sides.
+set_server_on_both() {
+  side_command zz set-option -s "$1" "$2" || die "zz refused set-option -s $1"
+  side_command tmux set-option -s "$1" "$2" || die "tmux refused set-option -s $1"
+}
+
+unset_server_on_both() {
+  side_command zz set-option -su "$1" || die "zz refused set-option -su $1"
+  side_command tmux set-option -su "$1" || die "tmux refused set-option -su $1"
+}
+
 write_attach zz "$SCRATCH_DIR/attach-zz.sh"
 write_attach tmux "$SCRATCH_DIR/attach-tmux.sh"
 
@@ -256,6 +272,17 @@ attach_both_at "$COLUMNS_UNDER_TEST"
 # Each step names the option and the value; the row is captured after both
 # sides have repainted at least once. Keep the values free of clocks and of
 # anything host-specific so the bytes can be equal at all.
+# Recorded, not asserted, while presentation:tui-status-row-theme-colours-per-
+# client is open: the daemon does not publish the ten resolved theme colours,
+# so the raw TUI resolves themeX from the pin's dark defaults and cannot follow
+# a user-set dark-theme-* or a forced `theme`. The rows print both sides so the
+# lane that closes the item has the bytes without re-deriving them.
+SERVER_CORPUS=(
+  "dark-theme-green|colour124"
+  "dark-theme-black|colour231"
+  "theme|light"
+)
+
 CORPUS=(
   "status-left|[#{session_name}]"
   "status-right|#{window_width}x#{window_height} #{client_width}"
@@ -267,16 +294,38 @@ CORPUS=(
   "status-position|bottom"
 )
 
-compare_step() {
+# The registered-divergence twin of compare_step: prints both rows and never
+# raises FAILURES, so an open item stays visible without turning the tool red.
+record_step() {
   local step="$1"
   local zz_row tmux_row
   sleep 0.3
   zz_row="$(last_row_bytes zz)"
   tmux_row="$(last_row_bytes tmux)"
   if [ "$zz_row" = "$tmux_row" ]; then
-    printf 'ok    %s\n' "$step"
+    printf 'note  %s: identical, presentation:tui-status-row-theme-colours-per-client may be closed\n' "$step"
     return 0
   fi
+  printf 'note  %s: presentation:tui-status-row-theme-colours-per-client, open\n' "$step"
+  printf '      tmux: %q\n' "$tmux_row"
+  printf '      zz:   %q\n' "$zz_row"
+}
+
+# The default status-right carries a clock, and the two sides are captured one
+# after the other, so a minute boundary between the captures is a difference
+# that says nothing. Retry a bounded number of times before reporting one.
+compare_step() {
+  local step="$1"
+  local zz_row tmux_row attempt
+  for ((attempt = 0; attempt < 8; attempt++)); do
+    sleep 0.3
+    zz_row="$(last_row_bytes zz)"
+    tmux_row="$(last_row_bytes tmux)"
+    if [ "$zz_row" = "$tmux_row" ]; then
+      printf 'ok    %s\n' "$step"
+      return 0
+    fi
+  done
   FAILURES=$((FAILURES + 1))
   printf 'DIFF  %s\n' "$step"
   printf '      tmux: %s\n' "$(printf '%s' "$tmux_row" | od -An -c | tr -s ' \n' ' ')"
@@ -287,6 +336,15 @@ compare_step() {
 
 printf 'status row differential at %sx%s (pin %s)\n' "$COLUMNS_UNDER_TEST" "$ROWS_UNDER_TEST" "$(basename -- "$TMUX_BIN")"
 compare_step "defaults"
+for entry in "${SERVER_CORPUS[@]}"; do
+  option="${entry%%|*}"
+  value="${entry#*|}"
+  set_server_on_both "$option" "$value"
+  record_step "-s $option = $value"
+done
+for entry in "${SERVER_CORPUS[@]}"; do
+  unset_server_on_both "${entry%%|*}"
+done
 for entry in "${CORPUS[@]}"; do
   option="${entry%%|*}"
   value="${entry#*|}"
@@ -298,4 +356,4 @@ if [ "$FAILURES" -ne 0 ]; then
   printf '%s of %s comparisons differ\n' "$FAILURES" "$((${#CORPUS[@]} + 1 + BAND_CHECKS))"
   exit 1
 fi
-printf 'all %s comparisons identical\n' "$((${#CORPUS[@]} + 1 + BAND_CHECKS))"
+printf 'all %s comparisons identical, %s rows recorded not asserted\n' "$((${#CORPUS[@]} + 1 + BAND_CHECKS))" "${#SERVER_CORPUS[@]}"

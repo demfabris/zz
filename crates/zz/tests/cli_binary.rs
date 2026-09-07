@@ -24,10 +24,7 @@ const TMUX_USAGE: &str = concat!(
 #[test]
 fn tmux_version_is_exact() {
     let (_home, mut zz) = isolated_zz();
-    let output = zz
-        .args(["-2uV", "ignored"])
-        .output()
-        .expect("run zz -V");
+    let output = zz.args(["-2uV", "ignored"]).output().expect("run zz -V");
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stdout, b"tmux 3.8-zz\n");
     assert!(output.stderr.is_empty());
@@ -2398,12 +2395,11 @@ mod daemon_autostart {
             );
         }
 
-        let (rendered, captured, early_status) =
-            capture_tui_until_beside_the_sidebar(
-                &fixture,
-                &["attach-session", "-t", "toppos"],
-                &[b"TOPMARK"],
-            );
+        let (rendered, captured, early_status) = capture_tui_until_beside_the_sidebar(
+            &fixture,
+            &["attach-session", "-t", "toppos"],
+            &[b"TOPMARK"],
+        );
         assert!(
             rendered,
             "child exited early={early_status:?}; pty output={}",
@@ -3482,7 +3478,8 @@ mod daemon_autostart {
             .env("ZZ_BIN", env!("CARGO_BIN_EXE_zz"))
             .env("ZZ_CONF", &fixture.config)
             .env("ZZ_TEST_SOCKET", &fixture.socket);
-        let (rendered, captured, early_status) = capture_command_until(command, &[b"\x1b[?1049h"], 80);
+        let (rendered, captured, early_status) =
+            capture_command_until(command, &[b"\x1b[?1049h"], 80);
         assert!(
             rendered,
             "child exited early={early_status:?}; pty output={}",

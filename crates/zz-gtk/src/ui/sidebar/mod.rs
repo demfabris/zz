@@ -11,7 +11,7 @@ use std::{
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib, graphene};
-use zz_client::{ChromeAction, ChromeKeymap, SIDEBAR_TABLE, UI_TABLE};
+use zz_client::{ChromeAction, ChromeKeymap, SIDEBAR_TABLE};
 use zz_protocol::{Axis, CommandInvocation};
 use zz_terminal::{KeyAction, KeyInput};
 
@@ -30,8 +30,8 @@ use model::{
 /// of the window and offers no handle; pinning both bounds is what makes the
 /// width a constant rather than something that drifts as the window moves.
 const SIDEBAR_WIDTH: f64 = 280.0;
-/// Under this, the sidebar stops taking width from the panes and overlays them
-/// instead — a window can then be dragged as narrow as the terminal allows.
+/// Under this scaled width, the sidebar stops taking room from the panes and
+/// overlays them instead.
 const COLLAPSE_WIDTH: f64 = 640.0;
 /// How far each level of the tree is inset, in pixels.
 const INDENT: i32 = 16;
@@ -53,6 +53,7 @@ pub struct Sidebar {
     host: String,
     split: adw::OverlaySplitView,
     root: adw::ToolbarView,
+    primary_menu: gtk::MenuButton,
     scroller: gtk::ScrolledWindow,
     list: gtk::ListBox,
     menu: gtk::PopoverMenu,
@@ -74,7 +75,7 @@ pub struct Sidebar {
 }
 
 impl Sidebar {
-    pub fn build(engine: Arc<Engine>) -> Rc<Self> {
+    pub fn build(engine: Arc<Engine>, primary_menu: &impl IsA<gio::MenuModel>) -> Rc<Self> {
         let list = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::Single)
             .build();
@@ -92,6 +93,13 @@ impl Sidebar {
             .show_end_title_buttons(false)
             .build();
         header.set_title_widget(Some(&adw::WindowTitle::new("Sessions", "")));
+        let primary_menu = gtk::MenuButton::builder()
+            .icon_name("open-menu-symbolic")
+            .tooltip_text("Main Menu")
+            .menu_model(primary_menu)
+            .primary(true)
+            .build();
+        header.pack_start(&primary_menu);
         header.pack_end(
             &gtk::Button::builder()
                 .icon_name("list-add-symbolic")
@@ -125,6 +133,7 @@ impl Sidebar {
             host: host_name(),
             split,
             root,
+            primary_menu,
             scroller,
             list,
             menu,
@@ -159,14 +168,20 @@ impl Sidebar {
     /// narrower hits a floor the compositor keeps fighting, and the tree jitters
     /// against the panes at every size near it. The breakpoint restores both
     /// properties on the way back out, so widening returns the pinned sidebar.
-    pub fn install_breakpoint(&self, window: &adw::ApplicationWindow) {
+    pub fn install_breakpoint(
+        &self,
+        window: &adw::ApplicationWindow,
+        content_menu: &gtk::MenuButton,
+    ) {
         let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
             adw::BreakpointConditionLengthType::MaxWidth,
             COLLAPSE_WIDTH,
-            adw::LengthUnit::Px,
+            adw::LengthUnit::Sp,
         ));
         breakpoint.add_setter(&self.split, "collapsed", Some(&true.into()));
         breakpoint.add_setter(&self.split, "show-sidebar", Some(&false.into()));
+        breakpoint.add_setter(&self.primary_menu, "visible", Some(&false.into()));
+        breakpoint.add_setter(content_menu, "visible", Some(&true.into()));
         window.add_breakpoint(breakpoint);
     }
 
@@ -425,7 +440,7 @@ impl Sidebar {
                 return glib::Propagation::Proceed;
             }
             let input = keys::key_input(KeyAction::Press, keyval, modifiers, None);
-            let Some(action) = resolve_chrome(sidebar.engine.chrome(), &input) else {
+            let Some(action) = resolve_chrome(&sidebar.engine.chrome(), &input) else {
                 return glib::Propagation::Proceed;
             };
             sidebar.perform(action);
@@ -518,6 +533,9 @@ impl Sidebar {
             return;
         };
         self.perform_activation(node.host(), activation);
+        if self.split.is_collapsed() {
+            self.split.set_show_sidebar(false);
+        }
         if release {
             self.blur();
         }
@@ -746,9 +764,7 @@ impl Sidebar {
 }
 
 fn resolve_chrome(chrome: &ChromeKeymap, input: &KeyInput) -> Option<ChromeAction> {
-    chrome
-        .resolve(UI_TABLE, input)
-        .or_else(|| chrome.resolve(SIDEBAR_TABLE, input))
+    chrome.resolve(SIDEBAR_TABLE, input)
 }
 
 fn build_status() -> (gtk::Box, gtk::Label, gtk::Label) {
@@ -773,7 +789,7 @@ fn build_status() -> (gtk::Box, gtk::Label, gtk::Label) {
 }
 
 /// One row is a widget tree rather than an `adw::ActionRow` so the disclosure,
-/// the kind marker and the hover gutter sit where the desktop puts them.
+/// the kind marker and the action gutter sit where the desktop puts them.
 fn build_row(row: &Row, tree: &Tree) -> gtk::ListBoxRow {
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     content.set_margin_start(i32::from(row.depth) * INDENT);
@@ -781,12 +797,18 @@ fn build_row(row: &Row, tree: &Tree) -> gtk::ListBoxRow {
 
     let target = row.node.to_string().to_variant();
     if row.expandable {
+        let disclosure_label = format!(
+            "{} {}",
+            if row.expanded { "Collapse" } else { "Expand" },
+            row.label
+        );
         let disclosure = gtk::Button::builder()
             .icon_name(if row.expanded {
                 "pan-down-symbolic"
             } else {
                 "pan-end-symbolic"
             })
+            .tooltip_text(disclosure_label)
             .has_frame(false)
             .action_name("sidebar.toggle")
             .action_target(&target)
@@ -825,6 +847,7 @@ fn build_row(row: &Row, tree: &Tree) -> gtk::ListBoxRow {
         let bell = gtk::Label::new(Some("●"));
         bell.add_css_class("zz-bell");
         bell.set_tooltip_text(Some("A bell rang here"));
+        bell.update_property(&[gtk::accessible::Property::Label("Unread Activity")]);
         content.append(&bell);
     }
 
@@ -832,6 +855,15 @@ fn build_row(row: &Row, tree: &Tree) -> gtk::ListBoxRow {
     content.append(&gutter);
 
     let list_row = gtk::ListBoxRow::builder().child(&content).build();
+    let mut accessible_label = row.label.clone();
+    if row.active {
+        accessible_label.push_str(", Active");
+    }
+    if let Some(detail) = &row.detail {
+        accessible_label.push_str(", ");
+        accessible_label.push_str(detail);
+    }
+    list_row.update_property(&[gtk::accessible::Property::Label(&accessible_label)]);
     if let Some(hint) = &row.hint {
         list_row.set_tooltip_text(Some(hint));
     }
@@ -839,18 +871,43 @@ fn build_row(row: &Row, tree: &Tree) -> gtk::ListBoxRow {
         list_row.add_css_class("zz-sidebar-active");
     }
     if !matches!(row.kind, RowKind::Host) {
+        let hovered = Rc::new(Cell::new(false));
+        let focused = Rc::new(Cell::new(false));
         let motion = gtk::EventControllerMotion::new();
         let shown = gutter.clone();
-        motion.connect_enter(move |_, _, _| shown.set_visible(true));
-        let hidden = gutter;
-        motion.connect_leave(move |_| hidden.set_visible(false));
+        let entered = Rc::clone(&hovered);
+        motion.connect_enter(move |_, _, _| {
+            entered.set(true);
+            shown.set_visible(true);
+        });
+        let hidden = gutter.clone();
+        let left = Rc::clone(&hovered);
+        let focus_state = Rc::clone(&focused);
+        motion.connect_leave(move |_| {
+            left.set(false);
+            hidden.set_visible(focus_state.get());
+        });
         list_row.add_controller(motion);
+
+        let focus = gtk::EventControllerFocus::new();
+        let shown = gutter.clone();
+        let entered = Rc::clone(&focused);
+        focus.connect_enter(move |_| {
+            entered.set(true);
+            shown.set_visible(true);
+        });
+        let hidden = gutter;
+        focus.connect_leave(move |_| {
+            focused.set(false);
+            hidden.set_visible(hovered.get());
+        });
+        list_row.add_controller(focus);
     }
     list_row
 }
 
-/// The hover gutter: what a row can do without a menu. The host keeps its menu
-/// button visible; everything else appears under the pointer.
+/// The action gutter: what a row can do without a menu. The host keeps its menu
+/// button visible; everything else appears while the row has pointer or key focus.
 fn build_gutter(row: &Row, target: &glib::Variant, tree: &Tree) -> gtk::Box {
     let gutter = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     gutter.set_valign(gtk::Align::Center);

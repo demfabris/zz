@@ -4,7 +4,7 @@ title: zz-gtk crate . GTK4/libadwaita GNOME client
 description: A functionally equivalent GNOME port of the desktop client built entirely on ClientCore - engine/ui split, per-host reconnect supervisor, sidebar, settings, palette, fleet hosts over ssh - workspace-excluded because it needs system GTK.
 resource: crates/zz-gtk/src/lib.rs
 tags: [gtk, gnome, client, libadwaita, fleet, crate]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-08-15T00:00:00Z
 ---
 
 # Overview
@@ -31,14 +31,25 @@ distilled lessons live in the `new-client` skill
   re-attach with `MissingTarget` fallback, and geometry replay.
 - `src/ui/` is the libadwaita shell: a custom `TerminalView` widget painting
   resolved cells with per-row cached render nodes and style-run Pango
-  layouts, IM handled via manual `filter_keypress`; a fixed-width
+  layouts, with `EventControllerLegacy` preserving hardware-keycode
+  press/repeat/release pairing while IM commits are handled through manual
+  `filter_keypress`; a window capture controller that claims the shared `ui`
+  `ChromeKeymap` before focus-specific surfaces, while yielding to daemon-owned
+  modal overlays; the custom terminal also implements `GtkAccessibleText` from
+  a lazily cached visible-grid snapshot, exposing Unicode-character content,
+  caret, and selection ranges without taxing the frame path until assistive
+  technology queries it; a fixed-width
   `AdwOverlaySplitView` sidebar (session tree ported from the desktop's
-  `MuxTreeModel`) that an `AdwBreakpoint` collapses to an overlay under 640px;
+  `MuxTreeModel`) that a scale-aware `AdwBreakpoint` collapses to an overlay
+  under 640sp;
   the focused zz window's `PaneGrid` alone as the workspace, with no tab strip
-  — windows are switched from the tree; an `AdwPreferencesDialog` sharing the
-  desktop's `zz/config` file through a comment-preserving writer and a 500ms
-  poller as the single apply path, offering only the keys this shell or the
-  daemon behind it acts on;
+  — windows are switched from the tree; an adaptive `AdwDialog` preferences
+  shell using `AdwSidebar` and `AdwNavigationSplitView`, collapsing to
+  single-page navigation at narrow widths, while its `AdwPreferencesPage`
+  content shares the desktop's `zz/config` file through a comment-preserving
+  writer and a 500ms poller as the single apply path; a native
+  `AdwShortcutsDialog` generated from the live `ChromeKeymap`, rebuilt from
+  the ordered `chrome-keybind` and `chrome-unbind` entries on every config poll;
   daemon-driven overlays (choosers, display-panes, command palette with the
   desktop's completion ranker); prefix-claim capture interceptor
   (`EventControllerLegacy`, hardware-keycode pairing); search strip, output

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>zz popup fixture ready</title>
+<style>
+  body { margin: 20px; font: 18px system-ui, sans-serif; background: #eef3fa; color: #172033; }
+  button { width: 200px; height: 48px; margin: 0 16px 16px 0; font: inherit; }
+  output { display: block; margin: 20px 0; }
+</style>
+<button id="run">Run popup checks</button><button id="close">Ask popup to close</button>
+<h1>Popup fixture</h1>
+<p>The checks open a blank popup, write its document, reuse its name, navigate after a delay, and exchange messages with its opener.</p>
+<output id="status">Ready</output>
+<button id="blank">Open blank popup</button>
+<button id="delayed">Delayed navigation</button>
+<button id="written">Write blank document</button>
+<button id="named">Open or reuse named</button>
+<script>
+  let popup;
+  let checking = false;
+  const status = document.querySelector('#status');
+  function report(message) {
+    status.textContent = message;
+    document.title = message;
+  }
+  function writePopup(child) {
+    child.document.write('<!doctype html><title>zz popup written</title><body style="background:#187c76;color:white;font:28px system-ui;padding:40px"><h1>Blank document write passed</h1></body>');
+    child.document.close();
+  }
+  document.querySelector('#run').onclick = () => {
+    checking = true;
+    popup = window.open('', 'zz-popup-regression', 'popup,width=640,height=480');
+    if (!popup) return report('zz popup failed: window.open returned null');
+    writePopup(popup);
+    if (window.open('', 'zz-popup-regression') !== popup) {
+      return report('zz popup failed: named window was not reused');
+    }
+    report('Waiting for popup message');
+    setTimeout(() => { popup.location.href = '/popup-child'; }, 700);
+  };
+  document.querySelector('#close').onclick = () => popup?.postMessage('zz-close', location.origin);
+  document.querySelector('#blank').onclick = () => { popup = window.open('', '_blank', 'popup'); };
+  document.querySelector('#delayed').onclick = () => {
+    popup = window.open('', '_blank', 'popup');
+    const child = popup;
+    setTimeout(() => { child.location.href = '/popup-child'; }, 700);
+  };
+  document.querySelector('#written').onclick = () => {
+    popup = window.open('', '_blank', 'popup');
+    writePopup(popup);
+  };
+  document.querySelector('#named').onclick = () => { popup = window.open('/popup-child', 'zz-popup-manual', 'popup'); };
+  window.addEventListener('message', event => {
+    if (event.origin !== location.origin || event.source !== popup) return;
+    if (event.data === 'zz-popup-ready') popup.postMessage('zz-opener-ack', location.origin);
+    if (event.data === 'zz-popup-ack') report('zz popup handshake passed');
+  });
+  setInterval(() => {
+    if (checking && popup?.closed) {
+      checking = false;
+      report('zz popup fixture passed');
+    }
+  }, 50);
+</script>
+</html>

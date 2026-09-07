@@ -108,6 +108,12 @@ pub enum BrowserEvent {
         session: SessionId,
         request: ContextMenuRequest,
     },
+    PopupCreated {
+        session: SessionId,
+        popup: SessionId,
+        url: Arc<str>,
+        foreground: bool,
+    },
     PopupRequested {
         session: SessionId,
         url: Arc<str>,
@@ -139,6 +145,7 @@ impl BrowserEvent {
             | Self::ElementPickCancelled { session }
             | Self::ElementPickFailed { session }
             | Self::ContextMenuRequested { session, .. }
+            | Self::PopupCreated { session, .. }
             | Self::PopupRequested { session, .. }
             | Self::RenderProcessTerminated { session, .. }
             | Self::Closed { session } => *session,

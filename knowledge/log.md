@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-09-07
+* **Update**: Browser popups now keep their Chromium session when the desktop adopts them into a tab, preserving blank-document writes, delayed navigation, named-window reuse, opener messages, and JavaScript closure. Popup tabs display about:blank content and use readback OSR to avoid replacing an authentication session during texture fallback. Closing an opener drains pending children, and shutdown waits for their CEF close callbacks. The browser fixture includes a temporary-profile popup regression and a manual popup page.
+
 ## 2026-09-05
 * **Update**: Moved desktop daemon startup and handshake to a background task, with connection completion driving the existing startup prompts. Added Metal launch captures that measure attributed displayed frames separately from CPU render milestones. Terminal blink tasks now stop on focus loss, window deactivation, and layout hiding. The macOS daemon retention sweep found terminal page mappings and libc live allocations returning to baseline after pane closure, with bounded allocator capacity accounting for much of the remaining footprint.
 * **Update**: Added macOS physical-footprint and RSS sampling for isolated or running desktop processes, documented capture limits, and corrected the CEF runtime page to describe deferred initialization.

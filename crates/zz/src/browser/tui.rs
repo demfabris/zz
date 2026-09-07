@@ -255,9 +255,22 @@ impl TuiBrowserProvider {
                         }
                     }
                     BrowserEvent::PopupRequested {
-                        url, foreground, ..
+                        ref url,
+                        foreground,
+                        ..
+                    }
+                    | BrowserEvent::PopupCreated {
+                        ref url,
+                        foreground,
+                        ..
                     } => {
-                        let url = browser_url(&url);
+                        if let BrowserEvent::PopupCreated { popup, .. } = event
+                            && let Some(mut child) = session.browser.take_popup(popup)
+                        {
+                            child.close(true);
+                            self.closing.push(LiveSession::new(child, Instant::now()));
+                        }
+                        let url = browser_url(url);
                         append_popup(&mut surface.descriptor, url.clone(), foreground);
                         if foreground {
                             session.browser.navigate(&url);
@@ -360,7 +373,8 @@ impl TuiBrowserProvider {
                     | BrowserEvent::ElementPickCancelled { .. }
                     | BrowserEvent::ElementPickFailed { .. }
                     | BrowserEvent::ContextMenuRequested { .. }
-                    | BrowserEvent::PopupRequested { .. } => {}
+                    | BrowserEvent::PopupRequested { .. }
+                    | BrowserEvent::PopupCreated { .. } => {}
                 }
             }
             if let Some(OsrFrame::OwnedBgra(frame)) = session.browser.take_frame() {

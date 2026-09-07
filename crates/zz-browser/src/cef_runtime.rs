@@ -7,7 +7,7 @@ use std::{
     ptr,
     rc::Rc,
     sync::{
-        Arc, Mutex as StdMutex,
+        Arc, Mutex as StdMutex, Weak,
         atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering},
     },
     time::Instant,
@@ -491,7 +491,7 @@ pub struct BrowserRuntime {
     sandbox_info: *mut u8,
     profile_paths: BrowserProfilePaths,
     profile_contexts: BTreeMap<String, ProfileContext>,
-    next_session: u64,
+    next_session: Arc<AtomicU64>,
     active_sessions: Arc<AtomicU64>,
     active_data_operations: Arc<AtomicU64>,
     windowless_frame_rate: i32,
@@ -937,78 +937,20 @@ impl BrowserRuntime {
             .ok_or(BrowserError::RequestContext)?;
         let request_context = profile_context.context.clone();
 
-        self.next_session = self.next_session.wrapping_add(1).max(1);
-        let id = SessionId(self.next_session);
-        let viewport = Arc::new(Mutex::new(viewport.sanitized()));
-        let page_zoom_factor = Arc::new(Mutex::new(sanitized_page_zoom_factor(page_zoom_factor)));
-        let mailbox = FrameMailbox::default();
-        let (events, event_rx) = async_channel::unbounded();
-        let element_pick = ElementPickState::default();
-        let pending_capture = PendingCapture::default();
-        let accelerated_paint = AcceleratedPaintTracker::default();
-        let active_session = ActiveCountGuard::new(Arc::clone(&self.active_sessions));
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        let accelerated_frames = AcceleratedFrameProducer::new(gpu_context, *viewport.lock());
-        #[cfg(target_os = "windows")]
-        let d3d11_frames = D3d11FrameProducer::new(gpu_context, *viewport.lock());
+        let config = SessionConfig {
+            profile: Arc::from(profile),
+            request_context,
+            next_session: Arc::clone(&self.next_session),
+            active_sessions: Arc::clone(&self.active_sessions),
+            active_data_operations: Arc::clone(&self.active_data_operations),
+            #[cfg(not(target_os = "macos"))]
+            gpu_context,
+            external_begin_frame_enabled: self.external_begin_frame_enabled,
+        };
         #[cfg(target_os = "macos")]
         let _ = gpu_context;
-        #[cfg(target_os = "macos")]
-        let metal_frames = MetalFrameProducer::new(*viewport.lock());
-        let bridge = SessionBridge {
-            id,
-            events,
-            viewport: Arc::clone(&viewport),
-            page_zoom_factor: Arc::clone(&page_zoom_factor),
-            mailbox: mailbox.clone(),
-            invalid_frames: Arc::new(AtomicU64::new(0)),
-            accelerated_paint: accelerated_paint.clone(),
-            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-            accelerated_frames: accelerated_frames.clone(),
-            #[cfg(target_os = "macos")]
-            metal_frames: metal_frames.clone(),
-            #[cfg(target_os = "windows")]
-            d3d11_frames: d3d11_frames.clone(),
-            shared_texture_fallback_notified: Arc::new(AtomicBool::new(false)),
-            element_pick: element_pick.clone(),
-            pending_capture: Arc::clone(&pending_capture),
-            active_session: active_session.clone(),
-        };
-        let message_router = BrowserSideRouter::new(element_picker_router_config());
-        let picker_available = message_router
-            .add_handler(
-                Arc::new(ElementPickerQueryHandler {
-                    bridge: bridge.clone(),
-                }),
-                false,
-            )
-            .is_some();
-        if !picker_available {
-            log::error!("could not register the CEF element picker query handler");
-        }
-
-        let render_handler = RenderHandlerBuilder::new(bridge.clone());
-        let display_handler = DisplayHandlerBuilder::new(bridge.clone());
-        let life_span_handler =
-            LifeSpanHandlerBuilder::new(bridge.clone(), Arc::clone(&message_router));
-        let load_handler = LoadHandlerBuilder::new(bridge.clone());
-        let context_menu_handler = BridgedContextMenuHandler::new(bridge.clone());
-        let request_handler = RequestHandlerBuilder::new(bridge, Arc::clone(&message_router));
-        let dialog_handler = DeniedDialogHandler::new();
-        let download_handler = DeniedDownloadHandler::new();
-        let permission_handler = DeniedPermissionHandler::new();
-        let mut client = BrowserClient::new(
-            render_handler,
-            display_handler,
-            life_span_handler,
-            load_handler,
-            request_handler,
-            context_menu_handler,
-            dialog_handler,
-            download_handler,
-            permission_handler,
-            message_router,
-        );
+        let prepared = config.prepare(viewport, page_zoom_factor);
+        let mut client = prepared.client(None);
 
         let window_info = WindowInfo {
             shared_texture_enabled: i32::from(self.shared_texture_enabled && allow_shared_texture),
@@ -1023,7 +965,7 @@ impl BrowserRuntime {
             ..Default::default()
         };
         let url = CefString::from(initial_url);
-        let mut context = request_context.clone();
+        let mut context = prepared.config.request_context.clone();
         let Some(browser) = browser_host_create_browser_sync(
             Some(&window_info),
             Some(&mut client),
@@ -1035,35 +977,7 @@ impl BrowserRuntime {
             return Err(BrowserError::CreateBrowser);
         };
 
-        let initial_viewport = *viewport.lock();
-        let mut session = BrowserSession {
-            id,
-            profile: Arc::from(profile),
-            phase: SessionPhase::Creating,
-            browser,
-            viewport: Arc::clone(&viewport),
-            page_zoom_factor,
-            mailbox,
-            events: event_rx,
-            element_pick,
-            picker_available,
-            pending_capture,
-            pending_site_data_clears: BTreeMap::new(),
-            _request_context: request_context,
-            active_session,
-            active_data_operations: Arc::clone(&self.active_data_operations),
-            accelerated_paint,
-            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-            accelerated_frames,
-            #[cfg(target_os = "macos")]
-            metal_frames,
-            #[cfg(target_os = "windows")]
-            d3d11_frames,
-        };
-        // CEF builds the OSR surface before consuming our screen info, so force one
-        // ordered screen/resize sync.
-        session.apply_viewport(initial_viewport, true);
-        Ok(session)
+        Ok(prepared.into_session(browser))
     }
 
     /// Release the request context and shut CEF down exactly once.
@@ -1285,6 +1199,171 @@ impl BrowserCommandSink {
     }
 }
 
+type PendingPopups = Arc<Mutex<BTreeMap<u64, BrowserSession>>>;
+
+fn close_pending_popups(popups: &PendingPopups) {
+    let pending = std::mem::take(&mut *popups.lock());
+    for mut popup in pending.into_values() {
+        popup.close(true);
+    }
+}
+
+#[derive(Clone)]
+struct SessionConfig {
+    profile: Arc<str>,
+    request_context: RequestContext,
+    next_session: Arc<AtomicU64>,
+    active_sessions: Arc<AtomicU64>,
+    active_data_operations: Arc<AtomicU64>,
+    #[cfg(not(target_os = "macos"))]
+    gpu_context: Option<BrowserGpuContext>,
+    external_begin_frame_enabled: bool,
+}
+
+#[derive(Clone)]
+struct PreparedSession {
+    config: SessionConfig,
+    bridge: SessionBridge,
+    events: Receiver<BrowserEvent>,
+    popups: PendingPopups,
+    picker_available: Arc<AtomicBool>,
+}
+
+impl SessionConfig {
+    fn prepare(&self, viewport: Viewport, page_zoom_factor: f64) -> PreparedSession {
+        let id = SessionId(self.next_session.fetch_add(1, Ordering::Relaxed) + 1);
+        let viewport = Arc::new(Mutex::new(viewport.sanitized()));
+        let page_zoom_factor = Arc::new(Mutex::new(sanitized_page_zoom_factor(page_zoom_factor)));
+        let mailbox = FrameMailbox::default();
+        let (events, event_rx) = async_channel::unbounded();
+        let element_pick = ElementPickState::default();
+        let pending_capture = PendingCapture::default();
+        let accelerated_paint = AcceleratedPaintTracker::default();
+        let active_session = ActiveCountGuard::new(Arc::clone(&self.active_sessions));
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let accelerated_frames =
+            AcceleratedFrameProducer::new(self.gpu_context.clone(), *viewport.lock());
+        #[cfg(target_os = "windows")]
+        let d3d11_frames = D3d11FrameProducer::new(self.gpu_context.clone(), *viewport.lock());
+        #[cfg(target_os = "macos")]
+        let metal_frames = MetalFrameProducer::new(*viewport.lock());
+        let bridge = SessionBridge {
+            id,
+            events,
+            viewport: Arc::clone(&viewport),
+            page_zoom_factor: Arc::clone(&page_zoom_factor),
+            mailbox: mailbox.clone(),
+            invalid_frames: Arc::new(AtomicU64::new(0)),
+            accelerated_paint: accelerated_paint.clone(),
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            accelerated_frames: accelerated_frames.clone(),
+            #[cfg(target_os = "macos")]
+            metal_frames: metal_frames.clone(),
+            #[cfg(target_os = "windows")]
+            d3d11_frames: d3d11_frames.clone(),
+            shared_texture_fallback_notified: Arc::new(AtomicBool::new(false)),
+            element_pick: element_pick.clone(),
+            pending_capture: Arc::clone(&pending_capture),
+            active_session: active_session.clone(),
+            closing: Arc::new(AtomicBool::new(false)),
+        };
+        PreparedSession {
+            config: self.clone(),
+            bridge,
+            events: event_rx,
+            popups: Arc::new(Mutex::new(BTreeMap::new())),
+            picker_available: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl PreparedSession {
+    fn client(&self, popup: Option<PopupCompletion>) -> Client {
+        let message_router = BrowserSideRouter::new(element_picker_router_config());
+        let picker_available = message_router
+            .add_handler(
+                Arc::new(ElementPickerQueryHandler {
+                    bridge: self.bridge.clone(),
+                }),
+                false,
+            )
+            .is_some();
+        self.picker_available
+            .store(picker_available, Ordering::Release);
+        if !picker_available {
+            log::error!("could not register the CEF element picker query handler");
+        }
+        let render_handler = RenderHandlerBuilder::new(self.bridge.clone());
+        let display_handler = DisplayHandlerBuilder::new(self.bridge.clone());
+        let life_span_handler = LifeSpanHandlerBuilder::new(
+            self.bridge.clone(),
+            Arc::clone(&message_router),
+            self.config.clone(),
+            Arc::downgrade(&self.popups),
+            Arc::new(Mutex::new(popup)),
+        );
+        let load_handler = LoadHandlerBuilder::new(self.bridge.clone());
+        let context_menu_handler = BridgedContextMenuHandler::new(self.bridge.clone());
+        let request_handler =
+            RequestHandlerBuilder::new(self.bridge.clone(), Arc::clone(&message_router));
+        let dialog_handler = DeniedDialogHandler::new();
+        let download_handler = DeniedDownloadHandler::new();
+        let permission_handler = DeniedPermissionHandler::new();
+        BrowserClient::new(
+            render_handler,
+            display_handler,
+            life_span_handler,
+            load_handler,
+            request_handler,
+            context_menu_handler,
+            dialog_handler,
+            download_handler,
+            permission_handler,
+            message_router,
+        )
+    }
+
+    fn into_session(self, browser: Browser) -> BrowserSession {
+        let initial_viewport = *self.bridge.viewport.lock();
+        let mut session = BrowserSession {
+            id: self.bridge.id,
+            profile: self.config.profile,
+            phase: SessionPhase::Creating,
+            browser,
+            viewport: self.bridge.viewport,
+            page_zoom_factor: self.bridge.page_zoom_factor,
+            mailbox: self.bridge.mailbox,
+            events: self.events,
+            element_pick: self.bridge.element_pick,
+            picker_available: self.picker_available.load(Ordering::Acquire),
+            pending_capture: self.bridge.pending_capture,
+            pending_site_data_clears: BTreeMap::new(),
+            _request_context: self.config.request_context,
+            active_session: self.bridge.active_session,
+            closing: self.bridge.closing,
+            active_data_operations: self.config.active_data_operations,
+            accelerated_paint: self.bridge.accelerated_paint,
+            popups: self.popups,
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            accelerated_frames: self.bridge.accelerated_frames,
+            #[cfg(target_os = "macos")]
+            metal_frames: self.bridge.metal_frames,
+            #[cfg(target_os = "windows")]
+            d3d11_frames: self.bridge.d3d11_frames,
+        };
+        session.apply_viewport(initial_viewport, true);
+        session
+    }
+}
+
+struct PopupCompletion {
+    prepared: PreparedSession,
+    opener: SessionBridge,
+    destination: Weak<Mutex<BTreeMap<u64, BrowserSession>>>,
+    url: Arc<str>,
+    foreground: bool,
+}
+
 pub struct BrowserSession {
     id: SessionId,
     profile: Arc<str>,
@@ -1294,12 +1373,14 @@ pub struct BrowserSession {
     page_zoom_factor: Arc<Mutex<f64>>,
     mailbox: FrameMailbox,
     events: Receiver<BrowserEvent>,
+    popups: PendingPopups,
     element_pick: ElementPickState,
     picker_available: bool,
     pending_capture: PendingCapture,
     pending_site_data_clears: BTreeMap<i32, Registration>,
     _request_context: RequestContext,
     active_session: ActiveCountGuard,
+    closing: Arc<AtomicBool>,
     active_data_operations: Arc<AtomicU64>,
     accelerated_paint: AcceleratedPaintTracker,
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -1311,6 +1392,15 @@ pub struct BrowserSession {
 }
 
 impl BrowserSession {
+    pub fn take_popup(&mut self, popup: SessionId) -> Option<Self> {
+        let mut session = self.popups.lock().remove(&popup.0)?;
+        if session.active_session.0.finished.load(Ordering::Acquire) {
+            session.mark_closed();
+            return None;
+        }
+        Some(session)
+    }
+
     #[must_use]
     pub fn id(&self) -> SessionId {
         self.id
@@ -1464,6 +1554,7 @@ impl BrowserSession {
     }
 
     pub fn mark_closed(&mut self) {
+        self.closing.store(true, Ordering::Release);
         self.phase = SessionPhase::Closed;
         self.active_session.finish();
         self.mailbox.clear();
@@ -1727,11 +1818,17 @@ impl BrowserSession {
     }
 
     pub fn close(&mut self, force: bool) {
+        self.closing.store(true, Ordering::Release);
+        if self.active_session.0.finished.load(Ordering::Acquire) {
+            self.mark_closed();
+            return;
+        }
         if matches!(self.phase, SessionPhase::Closing | SessionPhase::Closed) {
             return;
         }
         self.element_pick.cancel();
         self.phase = SessionPhase::Closing;
+        close_pending_popups(&self.popups);
         if let Some(host) = self.browser.host() {
             host.close_browser(i32::from(force));
         }
@@ -1740,7 +1837,11 @@ impl BrowserSession {
 
 impl Drop for BrowserSession {
     fn drop(&mut self) {
-        if !matches!(self.phase, SessionPhase::Closed | SessionPhase::Closing) {
+        self.closing.store(true, Ordering::Release);
+        close_pending_popups(&self.popups);
+        if !matches!(self.phase, SessionPhase::Closed | SessionPhase::Closing)
+            && !self.active_session.0.finished.load(Ordering::Acquire)
+        {
             log::warn!(
                 "forcing CEF browser closure while dropping session {}",
                 self.id.0
@@ -1868,7 +1969,7 @@ fn bootstrap_args_with_paths(
         sandbox_info,
         profile_paths,
         profile_contexts: BTreeMap::new(),
-        next_session: 0,
+        next_session: Arc::new(AtomicU64::new(0)),
         active_sessions,
         active_data_operations: Arc::new(AtomicU64::new(0)),
         windowless_frame_rate,
@@ -3142,6 +3243,7 @@ struct SessionBridge {
     element_pick: ElementPickState,
     pending_capture: PendingCapture,
     active_session: ActiveCountGuard,
+    closing: Arc<AtomicBool>,
 }
 
 type PendingCapture = Arc<Mutex<Option<Registration>>>;
@@ -4139,6 +4241,9 @@ cef::wrap_life_span_handler! {
     struct LifeSpanHandlerBuilder {
         bridge: SessionBridge,
         message_router: Arc<BrowserSideRouter>,
+        config: SessionConfig,
+        popups: Weak<Mutex<BTreeMap<u64, BrowserSession>>>,
+        popup: Arc<Mutex<Option<PopupCompletion>>>,
     }
 
     impl LifeSpanHandler {
@@ -4152,25 +4257,61 @@ cef::wrap_life_span_handler! {
             target_disposition: WindowOpenDisposition,
             _user_gesture: i32,
             _popup_features: Option<&PopupFeatures>,
-            _window_info: Option<&mut WindowInfo>,
-            _client: Option<&mut Option<Client>>,
+            window_info: Option<&mut WindowInfo>,
+            client: Option<&mut Option<Client>>,
             _settings: Option<&mut BrowserSettings>,
             _extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
-            if let Some(target_url) = target_url {
-                self.bridge.emit(BrowserEvent::PopupRequested {
-                    session: self.bridge.id,
-                    url: Arc::from(target_url.to_string()),
-                    foreground: popup_opens_in_foreground(target_disposition),
-                });
+            let (Some(window_info), Some(client)) = (window_info, client) else {
+                return 1;
+            };
+            if self.popups.upgrade().is_none()
+                || self.bridge.closing.load(Ordering::Acquire)
+            {
+                return 1;
             }
-            1
+            let mut viewport = *self.bridge.viewport.lock();
+            viewport.visible = false;
+            let prepared = self.config.prepare(viewport, *self.bridge.page_zoom_factor.lock());
+            let popup = PopupCompletion {
+                prepared: prepared.clone(),
+                opener: self.bridge.clone(),
+                destination: self.popups.clone(),
+                url: Arc::from(target_url.map(ToString::to_string).filter(|url| !url.is_empty())
+                    .unwrap_or_else(|| "about:blank".to_owned())),
+                foreground: popup_opens_in_foreground(target_disposition),
+            };
+            *window_info = WindowInfo {
+                shared_texture_enabled: 0,
+                external_begin_frame_enabled: i32::from(self.config.external_begin_frame_enabled),
+                ..WindowInfo::default().set_as_windowless(Default::default())
+            };
+            *client = Some(prepared.client(Some(popup)));
+            0
         }
 
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             if let Some(browser) = browser {
                 self.bridge.apply_page_zoom(browser);
+                let completion = self.popup.lock().take();
+                if let Some(completion) = completion {
+                    let mut session = completion.prepared.into_session(browser.clone());
+                    if let Some(destination) = completion.destination.upgrade()
+                        && !completion.opener.closing.load(Ordering::Acquire)
+                    {
+                        let popup = session.id();
+                        destination.lock().insert(popup.0, session);
+                        completion.opener.emit(BrowserEvent::PopupCreated {
+                            session: completion.opener.id,
+                            popup,
+                            url: completion.url,
+                            foreground: completion.foreground,
+                        });
+                    } else {
+                        session.close(true);
+                    }
+                }
             }
             self.bridge.emit(BrowserEvent::Created {
                 session: self.bridge.id,
@@ -4178,6 +4319,10 @@ cef::wrap_life_span_handler! {
         }
 
         fn on_before_close(&self, browser: Option<&mut Browser>) {
+            self.bridge.closing.store(true, Ordering::Release);
+            if let Some(popups) = self.popups.upgrade() {
+                close_pending_popups(&popups);
+            }
             self.message_router
                 .on_before_close(browser.as_deref().cloned());
             self.bridge.cancel_element_pick();
@@ -5134,6 +5279,7 @@ mod tests {
             element_pick: ElementPickState::default(),
             pending_capture: PendingCapture::default(),
             active_session: ActiveCountGuard::new(Arc::new(AtomicU64::new(0))),
+            closing: Arc::new(AtomicBool::new(false)),
         };
 
         assert!(!bridge.shared_texture_fallback_requested());

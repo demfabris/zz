@@ -4,7 +4,7 @@ title: CEF runtime & subprocess dispatch
 description: CEF Alloy OSR bootstrap with deferred initialization, single-binary subprocess dispatch, frame-rate policy, external BeginFrames, message pumping, and safe foreground command dispatch.
 resource: crates/zz-browser/src/cef_runtime.rs
 tags: [browser, cef, runtime, subprocess, begin-frame, frame-pacing]
-timestamp: 2026-09-05T00:00:00Z
+timestamp: 2026-09-07T00:00:00Z
 ---
 
 # Overview
@@ -260,7 +260,7 @@ context for that name and builds a `BrowserClient` aggregating handlers wrapped 
 | --- | --- |
 | `RenderHandlerBuilder` | `view_rect`/`screen_info`/`screen_point`, readback `on_paint`, and accelerated `on_accelerated_paint`. |
 | `DisplayHandlerBuilder` | Address, title, and cursor change → `BrowserEvent`. |
-| `LifeSpanHandlerBuilder` | `on_after_created`/`on_before_close`, popup cancel → `PopupRequested` event. |
+| `LifeSpanHandlerBuilder` | `on_after_created`/`on_before_close`, windowless popup creation → `PopupCreated` for adoption into a tab. |
 | `LoadHandlerBuilder` | Loading-state and load-error events. |
 | `RequestHandlerBuilder` | `on_before_browse`, open-URL-from-tab → `PopupRequested` event, renderer-terminated event. |
 | `Denied{ContextMenu,Dialog,Download,Permission}Handler` | Cancel/deny privileged operations instead of falling through to an engine default. |

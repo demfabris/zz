@@ -317,6 +317,7 @@ struct BrowserTab {
     page_zoom_percent: u16,
     error: Option<Arc<str>>,
     started: bool,
+    popup: bool,
 }
 
 impl BrowserTab {
@@ -332,6 +333,7 @@ impl BrowserTab {
             page_zoom_percent: 100,
             error: None,
             started: true,
+            popup: false,
         }
     }
 
@@ -802,7 +804,9 @@ impl BrowserView {
     }
 
     fn shows_empty_state(&self) -> bool {
-        self.error.is_none() && is_blank_url(&self.current_url)
+        self.error.is_none()
+            && is_blank_url(&self.current_url)
+            && !self.tabs[self.active_tab_index()].popup
     }
 
     fn set_address_editing(&mut self, editing: bool, cx: &mut Context<Self>) {
@@ -1179,6 +1183,31 @@ impl BrowserView {
                 self.recoverable =
                     controller.read(cx).runtime_phase() == Some(RuntimePhase::Running);
             }
+            ControllerEvent::Browser {
+                pane,
+                tab,
+                event:
+                    BrowserEvent::PopupCreated {
+                        popup,
+                        url,
+                        foreground,
+                        ..
+                    },
+            } if *pane == self.pane => {
+                self.adopt_popup(*tab, *popup, url, *foreground, window, cx);
+            }
+            ControllerEvent::TabClosed { pane, tab } if *pane == self.pane => {
+                if self
+                    .tabs
+                    .iter()
+                    .any(|entry| entry.id == *tab && entry.popup)
+                {
+                    if self.tabs.len() == 1 {
+                        self.open_tab(None, true, window, cx);
+                    }
+                    self.close_tab_by_id(*tab, window, cx);
+                }
+            }
             ControllerEvent::Browser { pane, tab, event }
                 if *pane == self.pane && *tab != self.active_tab =>
             {
@@ -1299,6 +1328,7 @@ impl BrowserView {
                 } => {
                     self.open_tab(Some(url), *foreground, window, cx);
                 }
+                BrowserEvent::PopupCreated { .. } => return,
                 BrowserEvent::Closed { .. } => {
                     self.pending_history_uses.remove(&self.active_tab);
                     self.element_pick_active = false;
@@ -1323,6 +1353,7 @@ impl BrowserView {
                 self.recoverable = true;
             }
             ControllerEvent::Browser { .. }
+            | ControllerEvent::TabClosed { .. }
             | ControllerEvent::CookiesImported { .. }
             | ControllerEvent::SiteDataCleared { .. }
             | ControllerEvent::BrowserDataFailed { .. }
@@ -1764,6 +1795,44 @@ impl BrowserView {
         });
         if foreground && self.shows_empty_state() {
             self.address.read(cx).focus_handle(cx).focus(window, cx);
+        }
+        self.publish_tabs(cx);
+        cx.notify();
+    }
+
+    fn adopt_popup(
+        &mut self,
+        opener: TabId,
+        popup: SessionId,
+        url: &str,
+        foreground: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(opener_tab) = self.tabs.iter().find(|entry| entry.id == opener) else {
+            return;
+        };
+        let (page_zoom_factor, page_zoom_percent) = if opener == self.active_tab {
+            (self.page_zoom_factor, self.page_zoom_percent)
+        } else {
+            (opener_tab.page_zoom_factor, opener_tab.page_zoom_percent)
+        };
+        let id = TabId(self.next_tab_id);
+        if !self.controller.update(cx, |controller, cx| {
+            controller.adopt_popup(self.pane, opener, popup, id, cx)
+        }) {
+            return;
+        }
+        self.next_tab_id += 1;
+        self.tabs.push(BrowserTab {
+            page_zoom_factor,
+            page_zoom_percent,
+            popup: true,
+            ..BrowserTab::new(id, url.to_owned())
+        });
+        if foreground {
+            self.activate_tab(id, window, cx);
+            self.focus_page(window, cx);
         }
         self.publish_tabs(cx);
         cx.notify();
@@ -4489,6 +4558,95 @@ mod tests {
                 Some(&SelectTab { index }),
             );
         }
+    }
+
+    #[gpui::test]
+    fn popup_tabs_render_blank_documents_and_follow_script_closure(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let view_slot = Rc::new(RefCell::new(None));
+        let captured_view = Rc::clone(&view_slot);
+        let pane = PaneId(7);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let controller =
+                cx.new(|cx| BrowserController::new(Err(BrowserError::AlreadyShutdown), cx));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let view = cx.new(|cx| {
+                BrowserView::new(
+                    pane,
+                    &BrowserDescriptor::single(
+                        DEFAULT_URL.to_owned(),
+                        zz_browser::DEFAULT_BROWSER_PROFILE.to_owned(),
+                    ),
+                    controller,
+                    mux,
+                    window,
+                    cx,
+                )
+            });
+            captured_view.replace(Some(view.clone()));
+            Root::new(view, window, cx)
+        });
+        let view = view_slot.borrow().clone().expect("captured browser view");
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.error = None;
+                assert!(view.shows_empty_state());
+                let popup = TabId(view.next_tab_id);
+                view.next_tab_id += 1;
+                view.tabs.push(BrowserTab {
+                    popup: true,
+                    ..BrowserTab::new(popup, DEFAULT_URL.to_owned())
+                });
+                view.activate_tab(popup, window, cx);
+                assert!(!view.shows_empty_state());
+                let controller = view.controller.clone();
+                view.handle_controller_event(
+                    &controller,
+                    &ControllerEvent::Browser {
+                        pane,
+                        tab: popup,
+                        event: BrowserEvent::Closed {
+                            session: SessionId(1),
+                        },
+                    },
+                    window,
+                    cx,
+                );
+                assert_eq!(view.tabs.len(), 2);
+                view.handle_controller_event(
+                    &controller,
+                    &ControllerEvent::TabClosed { pane, tab: popup },
+                    window,
+                    cx,
+                );
+                assert_eq!(view.tabs.len(), 1);
+                assert_eq!(view.active_tab, TAB_ID);
+                assert!(view.shows_empty_state());
+                view.handle_controller_event(
+                    &controller,
+                    &ControllerEvent::TabClosed { pane, tab: TAB_ID },
+                    window,
+                    cx,
+                );
+                assert_eq!(view.tabs.len(), 1);
+                view.tabs[0].popup = true;
+                view.handle_controller_event(
+                    &controller,
+                    &ControllerEvent::TabClosed { pane, tab: TAB_ID },
+                    window,
+                    cx,
+                );
+                assert_eq!(view.tabs.len(), 1);
+                assert_ne!(view.active_tab, TAB_ID);
+                assert!(!view.tabs[0].popup);
+            });
+        });
     }
 
     #[gpui::test]

@@ -4,7 +4,7 @@ title: Browser runtime & session lifecycle
 description: Runtime/profile-context/session state machines and the browser-neutral events that CEF callbacks translate into.
 resource: crates/zz-browser/src/lifecycle.rs
 tags: [browser, lifecycle, events, state-machine]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-09-07T00:00:00Z
 ---
 
 # Overview
@@ -54,8 +54,9 @@ only when CEF never initialized; a failure after successful init still follows
 
 `Drop for BrowserRuntime` logs an error if dropped while still initialized:
 `cef::shutdown` ordering must be explicit. `active_sessions` is an
-`Arc<AtomicU64>` incremented at `create_session` and decremented in
-`mark_closed`.
+`Arc<AtomicU64>` incremented when preparing ordinary sessions or popups. An
+`ActiveCountGuard` releases each count once through `on_before_close`,
+`mark_closed`, or destruction of an aborted creation's state.
 
 A remote pane uses a local composite request context named
 `<profile>@egress-<hash8>`. Once that context becomes ready, the controller points
@@ -94,7 +95,8 @@ CEF handlers noted:
 | `LoadFailed` | `code`, `description: Arc<str>`, `url: Arc<str>` | `LoadHandler::on_load_error` (ignores `ABORTED`, non-main frames) |
 | `CursorChanged` | `cursor: BrowserCursor` | `DisplayHandler::on_cursor_change` |
 | `ElementPicked` / `ElementPickCancelled` / `ElementPickFailed` | `text?` | [element picker](/browser/element-picker.md) query handler |
-| `PopupRequested` | `url: Arc<str>`, `foreground: bool` | `LifeSpanHandler::on_before_popup`, `RequestHandler::on_open_urlfrom_tab` (native popup cancelled; `foreground` is false only for `NEW_BACKGROUND_TAB` dispositions) |
+| `PopupCreated` | opener `session`, child `popup: SessionId`, `url: Arc<str>`, `foreground: bool` | Child `LifeSpanHandler::on_after_created`; app adopts the existing child through the opener's `take_popup` |
+| `PopupRequested` | `url: Arc<str>`, `foreground: bool` | `RequestHandler::on_open_urlfrom_tab`; app opens a new tab for the requested URL |
 | `RenderProcessTerminated` | `status: Arc<str>`, `error_code` | `RequestHandler::on_render_process_terminated` |
 | `Closed` | `session` | `LifeSpanHandler::on_before_close` |
 
@@ -110,12 +112,30 @@ CEF handlers noted:
 - **Resize** flows through `set_viewport` → `apply_viewport`, which drives
   `was_hidden`, `notify_screen_info_changed`, and `was_resized` in CEF's reference
   order (see [OSR rendering](/browser/osr-rendering.md)).
-- **Popups / new windows** never open a native surface: `on_before_popup` and
-  `on_open_urlfrom_tab` cancel the popup and emit `BrowserEvent::PopupRequested`;
-  the app opens the URL as a new tab in the same pane (a tab is one
-  `BrowserSession`, keyed `(PaneId, TabId)` in the app's controller, with only
-  the pane's active tab visible). Privileged operations are denied by the
-  `Denied*` handlers.
+- **Popups / new windows:** `on_before_popup` allows Chromium to create a
+  windowless child with its own handlers, mailbox, and session ID. The app adopts
+  that child into a tab through `PopupCreated` and `BrowserSession::take_popup`,
+  preserving Chromium's opener relationship, named-window reuse, and delayed
+  navigation from an initially blank document. Chromium retains control over
+  JavaScript access between the windows. Popups use readback OSR with the opener's
+  external BeginFrame setting; this avoids texture-fallback recreation discarding
+  the live opener relationship. GPU page acceleration remains available.
+  The app displays popup content even at `about:blank`, and removes a popup tab
+  when its browser closes itself. Closing an opener also closes any children still
+  waiting for adoption. Adopted children have independent tab lifetimes.
+  `on_open_urlfrom_tab` still emits `PopupRequested` for ordinary URL tab requests.
+  Only `NEW_BACKGROUND_TAB` dispositions open in the background. The `Denied*`
+  handlers continue to deny privileged operations.
+
+# Popup regression
+
+Run `zz_browser_fixture --popup-regression` from a CEF-capable fixture bundle.
+The fixture uses a temporary `zz-default` profile and a loopback server to check
+blank-document pixels, delayed navigation, named-window reuse, opener messages,
+and JavaScript closure. On macOS the profile directory must differ from Chromium's
+`Default` directory, including case. The fixture waits for the opener's rendered
+page before clicking its controls. For manual checks, serve the fixture and visit
+`/popup-fixture` in a browser pane.
 
 # Key files
 

@@ -27,8 +27,9 @@ use parking_lot::Mutex;
 #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
 use zz_browser::FrameTier;
 use zz_browser::{
-    AcceleratedPaintDiagnostics, BrowserBootstrap, BrowserEvent, BrowserRuntime, BrowserSession,
-    FrameMailboxDiagnostics, RuntimePhase, RuntimeSignal, SessionPhase, Viewport,
+    AcceleratedPaintDiagnostics, BrowserBootstrap, BrowserEvent, BrowserProfilePaths,
+    BrowserRuntime, BrowserSession, FrameMailboxDiagnostics, Modifiers, PointerButton,
+    PointerEvent, PointerPhase, RuntimePhase, RuntimeSignal, SessionPhase, Viewport,
 };
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use zz_browser::{BrowserGpuContext, OsrFrame, SessionId};
@@ -38,7 +39,6 @@ const DEFAULT_SPIKE_SECONDS: u64 = 10;
 const MAX_REQUEST_BYTES: usize = 16 * 1024;
 const SHARED_TEXTURE_SPIKE_FLAG: &str = "--shared-texture-spike";
 const INTERNAL_SHARED_TEXTURE_SPIKE_FLAG: &str = "--run-shared-texture-spike";
-#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
 const PUMP_INTERVAL: Duration = Duration::from_millis(4);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -78,6 +78,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
       <p>Input received: <output id="typed">nothing yet</output></p>
       <button id="mutate" type="button">Mutate title</button>
       <a id="navigate" href="/next">Navigate to page two</a>
+      <a href="/popup-fixture">Check popups and opener messages</a>
     </section>
     <section class="card">
       <strong>Persistent cookie:</strong> <code id="cookie"></code><br>
@@ -186,6 +187,7 @@ fn main() -> ExitCode {
             run_shared_texture_spike(seconds, port)
         }
         FixtureMode::ProbeEgressPref => probe_egress_pref(),
+        FixtureMode::PopupRegression => run_popup_regression(),
     }
 }
 
@@ -195,6 +197,7 @@ enum FixtureMode {
     SharedTextureSpike { seconds: u64, port: u16 },
     RunSharedTextureSpike { seconds: u64, port: u16 },
     ProbeEgressPref,
+    PopupRegression,
 }
 
 fn parse_mode(mut args: impl Iterator<Item = String>) -> Result<FixtureMode, String> {
@@ -203,6 +206,12 @@ fn parse_mode(mut args: impl Iterator<Item = String>) -> Result<FixtureMode, Str
     };
     if first == "--help" || first == "-h" {
         return Err(usage());
+    }
+    if first == "--popup-regression" {
+        if args.next().is_some() {
+            return Err("unexpected argument after --popup-regression".to_owned());
+        }
+        return Ok(FixtureMode::PopupRegression);
     }
     if first == "--probe-egress-pref" {
         if args.next().is_some() {
@@ -255,7 +264,7 @@ fn parse_mode(mut args: impl Iterator<Item = String>) -> Result<FixtureMode, Str
 
 fn usage() -> String {
     format!(
-        "usage: zz_browser_fixture [PORT]\n       zz_browser_fixture {SHARED_TEXTURE_SPIKE_FLAG} [--seconds N] [--port PORT]\ndefault port: {DEFAULT_PORT}; default spike duration: {DEFAULT_SPIKE_SECONDS} seconds"
+        "usage: zz_browser_fixture [PORT]\n       zz_browser_fixture --popup-regression\n       zz_browser_fixture {SHARED_TEXTURE_SPIKE_FLAG} [--seconds N] [--port PORT]\ndefault port: {DEFAULT_PORT}; default spike duration: {DEFAULT_SPIKE_SECONDS} seconds"
     )
 }
 
@@ -304,6 +313,245 @@ fn parse_port(mut args: impl Iterator<Item = String>) -> Result<u16, String> {
         return Err("expected at most one port argument".to_owned());
     }
     parse_port_value(&argument)
+}
+
+fn run_popup_regression() -> ExitCode {
+    let _ = Builder::from_env(Env::default().default_filter_or("zz_browser=info,cef=warn"))
+        .write_style(WriteStyle::Never)
+        .try_init();
+    match run_popup_regression_inner() {
+        Ok(()) => {
+            println!(
+                "popup regression passed: document.write paint, named reuse, delayed navigation, opener messages, window.close, and unadopted popup cleanup"
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("popup regression failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_popup_regression_inner() -> Result<(), String> {
+    let (address, _server) = start_background_server(0).map_err(|error| error.to_string())?;
+    let profile = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let profile_root = profile
+        .path()
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let paths = BrowserProfilePaths {
+        profile: profile_root.join("zz-default"),
+        root: profile_root,
+    };
+    let mut runtime =
+        match zz_browser::bootstrap_with_profile_paths(paths).map_err(|error| error.to_string())? {
+            BrowserBootstrap::SubprocessExit(code) => {
+                return Err(format!("unexpected CEF subprocess exit {code}"));
+            }
+            BrowserBootstrap::Runtime(runtime) => runtime,
+        };
+    initialize_runtime(&mut runtime)?;
+    let viewport = Viewport {
+        width: 800,
+        height: 600,
+        scale_factor: 1.0,
+        window_zoom: 1.0,
+        screen_x: 0,
+        screen_y: 0,
+        visible: true,
+    };
+    let mut opener = runtime
+        .create_session(
+            "default",
+            &format!("http://{address}/popup-fixture"),
+            viewport,
+            1.0,
+            None,
+            None,
+            false,
+        )
+        .map_err(|error| error.to_string())?;
+    let signals = runtime.signals();
+    let events = opener.events();
+    let mut popup: Option<BrowserSession> = None;
+    let mut started = false;
+    let mut written = false;
+    let mut written_painted = false;
+    let mut handshake = false;
+    let mut handshake_painted = false;
+    let mut close_requested = false;
+    let mut opener_passed = false;
+    let deadline = Instant::now() + STARTUP_TIMEOUT;
+    let result = (|| {
+        loop {
+            pump_runtime(&mut runtime, &signals)?;
+            opener.send_external_begin_frame();
+            while let Ok(event) = events.try_recv() {
+                match event {
+                    BrowserEvent::Created { .. } => opener.mark_ready(),
+                    BrowserEvent::PopupCreated { popup: id, .. } => {
+                        let mut child = opener
+                            .take_popup(id)
+                            .ok_or_else(|| "popup event had no child session".to_owned())?;
+                        child.set_viewport(viewport);
+                        if popup.is_some() {
+                            child.close(true);
+                            return Err("named reuse created a second popup".to_owned());
+                        }
+                        popup = Some(child);
+                    }
+                    BrowserEvent::TitleChanged { title, .. } => {
+                        if title.starts_with("zz popup failed:") {
+                            return Err(title.to_string());
+                        }
+                        opener_passed |= title.as_ref() == "zz popup fixture passed";
+                    }
+                    BrowserEvent::FrameReady { .. } => {
+                        if let Some(zz_browser::OsrFrame::OwnedBgra(frame)) = opener.take_frame()
+                            && !started
+                            && frame
+                                .bgra
+                                .chunks_exact(4)
+                                .any(|pixel| pixel[..3] == [0xfa, 0xf3, 0xee])
+                        {
+                            started = true;
+                            click_fixture(&opener, 100, 44);
+                        }
+                    }
+                    BrowserEvent::LoadFailed { description, .. }
+                    | BrowserEvent::RenderProcessTerminated {
+                        status: description,
+                        ..
+                    } => {
+                        return Err(description.to_string());
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(child) = popup.as_mut() {
+                child.send_external_begin_frame();
+                while let Ok(event) = child.events().try_recv() {
+                    match event {
+                        BrowserEvent::Created { .. } => child.mark_ready(),
+                        BrowserEvent::TitleChanged { title, .. } => {
+                            written |= title.as_ref() == "zz popup written";
+                            handshake |= title.as_ref() == "zz popup handshake passed";
+                        }
+                        BrowserEvent::FrameReady { .. } => {
+                            if let Some(zz_browser::OsrFrame::OwnedBgra(frame)) = child.take_frame()
+                            {
+                                written_painted |= written
+                                    && frame
+                                        .bgra
+                                        .chunks_exact(4)
+                                        .any(|pixel| pixel[..3] == [0x76, 0x7c, 0x18]);
+                                handshake_painted |= handshake
+                                    && frame
+                                        .bgra
+                                        .chunks_exact(4)
+                                        .any(|pixel| pixel[..3] == [0xaa, 0x5b, 0x30]);
+                            }
+                        }
+                        BrowserEvent::Closed { .. } => child.mark_closed(),
+                        BrowserEvent::LoadFailed { description, .. }
+                        | BrowserEvent::RenderProcessTerminated {
+                            status: description,
+                            ..
+                        } => {
+                            return Err(description.to_string());
+                        }
+                        _ => {}
+                    }
+                }
+                if written_painted && handshake_painted && !close_requested {
+                    close_requested = true;
+                    click_fixture(&opener, 320, 44);
+                }
+                if child.phase() == SessionPhase::Closed && opener_passed && close_requested {
+                    return Ok(());
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "timeout: started={started} popup={} document_painted={written_painted} handshake={handshake} handshake_painted={handshake_painted} close_requested={close_requested} opener_passed={opener_passed}",
+                    popup.is_some(),
+                ));
+            }
+            thread::sleep(PUMP_INTERVAL);
+        }
+    })();
+    let result = result.and_then(|()| {
+        click_fixture(&opener, 100, 44);
+        let deadline = Instant::now() + STARTUP_TIMEOUT;
+        loop {
+            pump_runtime(&mut runtime, &signals)?;
+            opener.send_external_begin_frame();
+            while let Ok(event) = events.try_recv() {
+                if matches!(event, BrowserEvent::PopupCreated { .. }) {
+                    return Ok(());
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err("timeout creating the unadopted cleanup popup".to_owned());
+            }
+            thread::sleep(PUMP_INTERVAL);
+        }
+    });
+    opener.close(true);
+    if let Some(child) = popup.as_mut() {
+        child.close(true);
+    }
+    let close_deadline = Instant::now() + CLOSE_TIMEOUT;
+    while Instant::now() < close_deadline {
+        pump_runtime(&mut runtime, &signals)?;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, BrowserEvent::Closed { .. }) {
+                opener.mark_closed();
+            }
+        }
+        if let Some(child) = popup.as_mut() {
+            while let Ok(event) = child.events().try_recv() {
+                if matches!(event, BrowserEvent::Closed { .. }) {
+                    child.mark_closed();
+                }
+            }
+        }
+        if opener.phase() == SessionPhase::Closed
+            && runtime.active_session_count() == 0
+            && popup
+                .as_ref()
+                .is_none_or(|child| child.phase() == SessionPhase::Closed)
+        {
+            break;
+        }
+        thread::sleep(PUMP_INTERVAL);
+    }
+    drop(popup);
+    drop(opener);
+    let result = result.and_then(|()| {
+        if runtime.active_session_count() == 0 {
+            Ok(())
+        } else {
+            Err("timeout closing the opener and its unadopted popup".to_owned())
+        }
+    });
+    let shutdown = runtime.shutdown().map_err(|error| error.to_string());
+    result.and(shutdown)
+}
+
+fn click_fixture(session: &BrowserSession, x: i32, y: i32) {
+    session.set_focus(true);
+    for phase in [PointerPhase::Down, PointerPhase::Up] {
+        session.send_pointer(PointerEvent {
+            x,
+            y,
+            phase,
+            button: Some(PointerButton::Left),
+            click_count: 1,
+            modifiers: Modifiers::default(),
+        });
+    }
 }
 
 fn launch_shared_texture_spike(seconds: u64, port: u16) -> ExitCode {
@@ -701,7 +949,8 @@ impl SharedTextureSpikeView {
                 | BrowserEvent::ElementPickCancelled { .. }
                 | BrowserEvent::ElementPickFailed { .. }
                 | BrowserEvent::ContextMenuRequested { .. }
-                | BrowserEvent::PopupRequested { .. } => {}
+                | BrowserEvent::PopupRequested { .. }
+                | BrowserEvent::PopupCreated { .. } => {}
             }
         }
     }
@@ -1028,7 +1277,6 @@ fn probe_egress_pref_inner() -> Result<(), String> {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
 fn initialize_runtime(runtime: &mut BrowserRuntime) -> Result<(), String> {
     runtime
         .start()
@@ -1045,7 +1293,6 @@ fn initialize_runtime(runtime: &mut BrowserRuntime) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
 fn pump_runtime(
     runtime: &mut BrowserRuntime,
     signals: &async_channel::Receiver<RuntimeSignal>,
@@ -1115,7 +1362,8 @@ fn handle_session_events(
             | BrowserEvent::ElementPickCancelled { .. }
             | BrowserEvent::ElementPickFailed { .. }
             | BrowserEvent::ContextMenuRequested { .. }
-            | BrowserEvent::PopupRequested { .. } => {}
+            | BrowserEvent::PopupRequested { .. }
+            | BrowserEvent::PopupCreated { .. } => {}
         }
     }
 }
@@ -1327,6 +1575,10 @@ impl Drop for BackgroundServer {
 fn start_background_server(port: u16) -> std::io::Result<(SocketAddrV4, BackgroundServer)> {
     let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
     let listener = TcpListener::bind(address)?;
+    let address = match listener.local_addr()? {
+        std::net::SocketAddr::V4(address) => address,
+        std::net::SocketAddr::V6(_) => unreachable!(),
+    };
     listener.set_nonblocking(true)?;
     let (stop, stopped) = mpsc::channel();
     let worker = thread::Builder::new()
@@ -1427,6 +1679,16 @@ fn response_for(path: &str) -> Response {
             status: "200 OK",
             content_type: "text/html; charset=utf-8",
             body: NEXT_HTML,
+        },
+        "/popup-fixture" => Response {
+            status: "200 OK",
+            content_type: "text/html; charset=utf-8",
+            body: include_str!("fixtures/popup.html"),
+        },
+        "/popup-child" => Response {
+            status: "200 OK",
+            content_type: "text/html; charset=utf-8",
+            body: include_str!("fixtures/popup-child.html"),
         },
         "/shared-texture-spike" => Response {
             status: "200 OK",

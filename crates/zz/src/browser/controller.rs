@@ -391,6 +391,10 @@ pub(crate) enum ControllerEvent {
         tab: TabId,
         event: BrowserEvent,
     },
+    TabClosed {
+        pane: PaneId,
+        tab: TabId,
+    },
     CookiesImported {
         pane: PaneId,
         result: CookieImportResult,
@@ -1091,6 +1095,48 @@ impl BrowserController {
             return;
         }
         self.try_create_browsers(cx);
+    }
+
+    pub(crate) fn adopt_popup(
+        &mut self,
+        pane: PaneId,
+        opener: TabId,
+        popup: SessionId,
+        tab: TabId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let key = (pane, tab);
+        if self.shutting_down
+            || self.sessions.contains_key(&key)
+            || self.pending_browsers.contains_key(&key)
+        {
+            return false;
+        }
+        let opener_key = (pane, opener);
+        let Some(mut session) = self
+            .sessions
+            .get_mut(&opener_key)
+            .and_then(|opener| opener.take_popup(popup))
+        else {
+            return false;
+        };
+        let mut viewport = self
+            .pane_viewports
+            .get(&pane)
+            .copied()
+            .unwrap_or_else(|| session.viewport());
+        viewport.visible &= self.active_tab(pane) == Some(tab);
+        session.set_viewport(viewport);
+        if let Some(gpu_context) = self.gpu_contexts.get(&opener_key).cloned() {
+            self.gpu_contexts.insert(key, gpu_context);
+        }
+        if let Some(egress) = self.browser_egress.get(&opener_key).cloned() {
+            self.browser_egress.insert(key, egress);
+        }
+        self.forced_readback.insert(key);
+        self.register_session(key, session, false, cx);
+        self.schedule_pump(0, cx);
+        true
     }
 
     pub(crate) fn retry(
@@ -1825,13 +1871,10 @@ impl BrowserController {
         self.first_frame_watchdogs.clear();
         self.recreate_after_close.clear();
         self.browser_egress.clear();
-        let data_operations_active = self
-            .runtime
-            .as_ref()
-            .is_some_and(|runtime| runtime.active_data_operation_count() > 0);
-        if self.sessions.is_empty()
-            && !data_operations_active
-            && self.detached_runtime_phase.is_none()
+        let runtime_work_active = self.runtime.as_ref().is_some_and(|runtime| {
+            runtime.active_data_operation_count() > 0 || runtime.active_session_count() > 0
+        });
+        if self.sessions.is_empty() && !runtime_work_active && self.detached_runtime_phase.is_none()
         {
             self.shutdown_runtime();
             return Task::ready(self.is_shutdown_complete());
@@ -1867,12 +1910,12 @@ impl BrowserController {
                         .sessions
                         .values()
                         .all(|session| session.phase() == SessionPhase::Closed);
-                    let data_operations_finished = controller
-                        .runtime
-                        .as_ref()
-                        .is_none_or(|runtime| runtime.active_data_operation_count() == 0);
+                    let runtime_work_finished = controller.runtime.as_ref().is_none_or(|runtime| {
+                        runtime.active_data_operation_count() == 0
+                            && runtime.active_session_count() == 0
+                    });
                     if sessions_closed
-                        && data_operations_finished
+                        && runtime_work_finished
                         && controller.detached_runtime_phase.is_none()
                     {
                         controller.sessions.clear();
@@ -2308,17 +2351,27 @@ impl BrowserController {
                 self.browser_egress.remove(&key);
             }
         }
+        self.register_session(key, session, spec.watch_first_frame, cx);
+    }
+
+    fn register_session(
+        &mut self,
+        key: BrowserKey,
+        session: BrowserSession,
+        watch_first_frame: bool,
+        cx: &mut Context<Self>,
+    ) {
         let session_id = session.id();
         let events = session.events();
-        let focused = self.focused_panes.contains(&key.0);
+        let focused = self.active_tab(key.0) == Some(key.1) && self.focused_panes.contains(&key.0);
         session.set_focus(focused);
         session.set_frame_rate(effective_pane_frame_rate(
-            spec.frame_rate_ceiling,
+            self.frame_rate_ceiling(),
             focused,
             self.wheel_decay_generations.contains_key(&key),
         ));
         self.sessions.insert(key, session);
-        if spec.watch_first_frame {
+        if watch_first_frame {
             self.first_frame_watchdogs
                 .insert(key, FirstFrameWatchdog::new(session_id));
         }
@@ -2391,6 +2444,7 @@ impl BrowserController {
                 | BrowserEvent::ElementPickFailed { .. }
                 | BrowserEvent::ContextMenuRequested { .. }
                 | BrowserEvent::PopupRequested { .. }
+                | BrowserEvent::PopupCreated { .. }
                 | BrowserEvent::SharedTextureFailed { .. }
                 | BrowserEvent::RenderProcessTerminated { .. }
                 | BrowserEvent::Closed { .. } => {}
@@ -2456,6 +2510,9 @@ impl BrowserController {
             }
         }
         cx.emit(ControllerEvent::Browser { pane, tab, event });
+        if closed && !recreate && !self.shutting_down {
+            cx.emit(ControllerEvent::TabClosed { pane, tab });
+        }
         log::trace!(
             target: "zz::diagnostics::browser",
             "handle_event end pane={pane} tab={} sessions={} latest_frames={} elapsed_us={}",

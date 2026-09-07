@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>zz popup child</title>
+<style>body { background: #305baa; color: white; font: 28px system-ui, sans-serif; padding: 40px; }</style>
+<h1>Popup navigation passed</h1>
+<p id="status">Waiting for opener</p>
+<button onclick="window.close()">Close popup</button>
+<script>
+  window.addEventListener('message', event => {
+    if (event.origin !== location.origin || event.source !== window.opener) return;
+    if (event.data === 'zz-opener-ack') {
+      document.querySelector('#status').textContent = 'Opener message round-trip passed';
+      document.title = 'zz popup handshake passed';
+      window.opener.postMessage('zz-popup-ack', location.origin);
+    }
+    if (event.data === 'zz-close') window.close();
+  });
+  window.opener?.postMessage('zz-popup-ready', location.origin);
+</script>
+</html>

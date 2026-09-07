@@ -7,5 +7,4 @@ shim:
 # `paste-buffer` with no -b and no top buffer exits 0 in silence.
 stage: fixtures/buffer-missing-target-error.sh ~/buffer-missing-target-error.sh
 run-shell 'sh ~/buffer-missing-target-error.sh'
-load-buffer -b transcript '~/buffer-missing-target-error.txt'
 out: show-buffer -b transcript

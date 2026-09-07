@@ -16,7 +16,7 @@ else
 fi
 
 work="$HOME/buffer-missing-target-error-work-$side"
-transcript="$HOME/buffer-missing-target-error.txt"
+transcript="$HOME/buffer-missing-target-error-$side.txt"
 rm -rf "$work"
 mkdir -p "$work"
 : >"$transcript"
@@ -68,3 +68,5 @@ probe stocked-rename-top set-buffer -n newname
 
 drop_every_buffer
 rm -rf "$work"
+
+main_client load-buffer -b transcript "$transcript"

@@ -9,5 +9,4 @@ shim:
 # after the ones that beat it.
 stage: fixtures/if-shell-background-order.sh ~/if-shell-background-order.sh
 run-shell 'sh ~/if-shell-background-order.sh'
-load-buffer -b order-transcript '~/if-shell-background-order.txt'
 out: show-buffer -b order-transcript

@@ -16,7 +16,7 @@ else
 fi
 
 work="$HOME/if-shell-background-order-work-$side"
-transcript="$HOME/if-shell-background-order.txt"
+transcript="$HOME/if-shell-background-order-$side.txt"
 rm -rf "$work"
 mkdir -p "$work"
 : >"$transcript"
@@ -58,3 +58,5 @@ round slow-first "'sleep 0.3'"
 
 main_client set -gu @order >/dev/null 2>&1 || true
 rm -rf "$work"
+
+main_client load-buffer -b order-transcript "$transcript"

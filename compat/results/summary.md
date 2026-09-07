@@ -11,7 +11,7 @@
 | break-pane | 30 | yes | 0 | yes | yes | yes |
 | buffer-client-file-load | 3 | yes | 0 | yes | yes | yes |
 | buffer-client-file-save | 3 | yes | 0 | yes | yes | yes |
-| buffer-missing-target-error | 3 | yes | 0 | yes | yes | yes |
+| buffer-missing-target-error | 2 | yes | 0 | yes | yes | yes |
 | buffer-path-format | 36 | yes | 0 | yes | yes | yes |
 | capture-pane | 23 | yes | 0 | yes | yes | yes |
 | census-formats | 40 | yes | 0 | yes | yes | yes |
@@ -49,7 +49,7 @@
 | honest-knobs-c1-readback | 21 | yes | 0 | yes | yes | yes |
 | honest-knobs-c2 | 27 | yes | 0 | yes | yes | yes |
 | hooks-pane-clipboard | 3 | yes | 0 | yes | yes | yes |
-| if-shell-background-order | 3 | yes | 0 | yes | yes | yes |
+| if-shell-background-order | 2 | yes | 0 | yes | yes | yes |
 | jobs-environment | 3 | yes | 0 | yes | yes | yes |
 | jobs-run-shell-order | 3 | yes | 0 | yes | yes | yes |
 | join-pane-size | 11 | yes | 0 | yes | yes | yes |

@@ -14534,7 +14534,8 @@ impl Shared {
                 require_no_positionals(name, &parsed)?;
                 let (buffer_name, data, utf8) = {
                     let inner = self.inner.lock();
-                    let buffer = resolve_buffer(&inner, parsed.value('b'))?;
+                    let buffer =
+                        resolve_buffer(&inner, parsed.value('b'), BufferMissing::NoBuffer)?;
                     (buffer.name.clone(), Arc::clone(&buffer.data), buffer.utf8)
                 };
                 if !utf8 {
@@ -14677,7 +14678,9 @@ impl Shared {
                 let path = require_one_positional(name, &parsed)?;
                 let (data, path) = {
                     let mut inner = self.inner.lock();
-                    let data = Arc::clone(&resolve_buffer(&inner, parsed.value('b'))?.data);
+                    let data = Arc::clone(
+                        &resolve_buffer(&inner, parsed.value('b'), BufferMissing::NoBuffer)?.data,
+                    );
                     let path =
                         expand_buffer_path(&mut inner, invoking_client, context, None, name, path);
                     (data, path)
@@ -14709,7 +14712,9 @@ impl Shared {
                 let parsed = parse_buffer_command_args(name, args, &['b'], &[])?;
                 require_no_positionals(name, &parsed)?;
                 let mut inner = self.inner.lock();
-                let name = resolve_buffer(&inner, parsed.value('b'))?.name.clone();
+                let name = resolve_buffer(&inner, parsed.value('b'), BufferMissing::UnknownBuffer)?
+                    .name
+                    .clone();
                 inner.paste_buffers.retain(|buffer| buffer.name != name);
                 drop(inner);
                 if !context.no_hooks {
@@ -14775,8 +14780,8 @@ impl Shared {
         let (client, sinks, buffer_name, data) = {
             let inner = self.inner.lock();
             let Some(buffer) = find_buffer(&inner, requested_name) else {
-                if let Some(name) = requested_name {
-                    return Err(ServerError::MissingTarget(name.to_owned()).into());
+                if requested_name.is_some() {
+                    return Err(BufferMissing::NoBuffer.error(requested_name).into());
                 }
                 return Ok(());
             };
@@ -34588,16 +34593,29 @@ fn expand_buffer_path(
     expand_format_values(path, &format_context, &mut hooks)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BufferMissing {
+    NoBuffer,
+    UnknownBuffer,
+}
+
+impl BufferMissing {
+    fn error(self, name: Option<&str>) -> ServerError {
+        ServerError::InvalidCommand(match (self, name) {
+            (Self::NoBuffer, Some(name)) => format!("no buffer {name}"),
+            (Self::NoBuffer, None) => "no buffers".to_owned(),
+            (Self::UnknownBuffer, Some(name)) => format!("unknown buffer: {name}"),
+            (Self::UnknownBuffer, None) => "no buffer".to_owned(),
+        })
+    }
+}
+
 fn resolve_buffer<'a>(
     inner: &'a ServerState,
     name: Option<&str>,
+    missing: BufferMissing,
 ) -> Result<&'a PasteBuffer, ServerError> {
-    find_buffer(inner, name).ok_or_else(|| {
-        name.map_or_else(
-            || ServerError::MissingTarget("paste buffer".to_owned()),
-            |name| ServerError::MissingTarget(name.to_owned()),
-        )
-    })
+    find_buffer(inner, name).ok_or_else(|| missing.error(name))
 }
 
 const WAIT_FOR_USAGE: &str = "usage: wait-for [-L|-S|-U] channel";
@@ -67825,7 +67843,8 @@ set-option -g @alias-mixed-next yes
             .expect("load binary buffer");
         {
             let inner = shared.inner.lock();
-            let buffer = resolve_buffer(&inner, Some("binary")).expect("named buffer");
+            let buffer = resolve_buffer(&inner, Some("binary"), BufferMissing::NoBuffer)
+                .expect("named buffer");
             assert_eq!(buffer.data.as_ref(), bytes);
             assert!(!buffer.automatic);
         }
@@ -68031,7 +68050,7 @@ set-option -g @alias-mixed-next yes
             let inner = shared.inner.lock();
             for tag in ["canonical", "alias", "prefix", "user-alias"] {
                 assert_eq!(
-                    resolve_buffer(&inner, Some(tag))
+                    resolve_buffer(&inner, Some(tag), BufferMissing::NoBuffer)
                         .expect("loaded formatted buffer")
                         .data
                         .as_ref(),
@@ -68163,7 +68182,7 @@ set-option -g @alias-mixed-next yes
                 ),
             )
             .expect("formatted empty load");
-        assert!(resolve_buffer(&shared.inner.lock(), Some("")).is_err());
+        assert!(resolve_buffer(&shared.inner.lock(), Some(""), BufferMissing::NoBuffer).is_err());
 
         let missing_path = directory.path().join("missing-target-session");
         let error = shared
@@ -68378,9 +68397,69 @@ set-option -g @alias-mixed-next yes
         assert_eq!(inner.paste_buffers.len(), 3);
         assert_eq!(inner.paste_buffers[0].data.as_ref(), b"new automatic");
         assert!(inner.paste_buffers[0].automatic);
-        let named = resolve_buffer(&inner, Some("named")).expect("named buffer");
+        let named =
+            resolve_buffer(&inner, Some("named"), BufferMissing::NoBuffer).expect("named buffer");
         assert_eq!(named.data.as_ref(), b"alpha-omega");
         assert!(!named.automatic);
+    }
+
+    #[test]
+    fn a_missing_buffer_is_worded_per_verb_the_way_the_pin_words_it() {
+        let shared = Arc::new(Shared::new(1));
+        let context = ExecutionContext::default();
+
+        let message = |command: &str, arguments: &[&str]| {
+            let arguments = arguments
+                .iter()
+                .copied()
+                .map(RawText::from)
+                .collect::<Vec<_>>();
+            let error = shared
+                .buffer_command(&context, command, &arguments)
+                .expect_err("missing buffer");
+            match error {
+                DaemonError::Server(error) => error.tmux_message(),
+                other => panic!("unexpected error: {other:?}"),
+            }
+        };
+
+        for (command, arguments) in [
+            ("show-buffer", vec!["-b", "nosuch"]),
+            ("save-buffer", vec!["-b", "nosuch", "/dev/null"]),
+        ] {
+            assert_eq!(message(command, &arguments), "no buffer nosuch");
+        }
+        for (command, arguments) in [("show-buffer", vec![]), ("save-buffer", vec!["/dev/null"])] {
+            assert_eq!(message(command, &arguments), "no buffers");
+        }
+        assert_eq!(
+            message("delete-buffer", &["-b", "nosuch"]),
+            "unknown buffer: nosuch"
+        );
+        assert_eq!(
+            message("set-buffer", &["-n", "newname", "-b", "nosuch"]),
+            "unknown buffer: nosuch"
+        );
+        assert_eq!(message("delete-buffer", &[]), "no buffer");
+        assert_eq!(message("set-buffer", &["-n", "newname"]), "no buffer");
+
+        shared
+            .buffer_command(
+                &context,
+                "set-buffer",
+                &["-b", "present", "payload"].map(RawText::from),
+            )
+            .expect("set buffer");
+        assert_eq!(
+            message("show-buffer", &["-b", "nosuch"]),
+            "no buffer nosuch"
+        );
+        assert_eq!(
+            message("delete-buffer", &["-b", "nosuch"]),
+            "unknown buffer: nosuch"
+        );
+        assert_eq!(message("show-buffer", &[]), "no buffers");
+        assert_eq!(message("delete-buffer", &[]), "no buffer");
     }
 
     #[test]
@@ -68417,8 +68496,9 @@ set-option -g @alias-mixed-next yes
             .expect("rename over destination");
         {
             let inner = shared.inner.lock();
-            assert!(resolve_buffer(&inner, Some("source")).is_err());
-            let renamed = resolve_buffer(&inner, Some("destination")).expect("renamed buffer");
+            assert!(resolve_buffer(&inner, Some("source"), BufferMissing::NoBuffer).is_err());
+            let renamed = resolve_buffer(&inner, Some("destination"), BufferMissing::NoBuffer)
+                .expect("renamed buffer");
             assert_eq!(renamed.data.as_ref(), b"alpha");
             assert_eq!(inner.paste_buffers.len(), 2);
         }
@@ -68432,7 +68512,8 @@ set-option -g @alias-mixed-next yes
             .expect("rename top automatic");
         {
             let inner = shared.inner.lock();
-            let renamed = resolve_buffer(&inner, Some("named-top")).expect("named top buffer");
+            let renamed = resolve_buffer(&inner, Some("named-top"), BufferMissing::NoBuffer)
+                .expect("named top buffer");
             assert_eq!(renamed.data.as_ref(), b"top automatic");
             assert!(!renamed.automatic);
             assert!(!inner.paste_buffers.iter().any(|buffer| buffer.automatic));

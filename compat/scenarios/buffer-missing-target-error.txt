@@ -1,0 +1,11 @@
+shim:
+# Pinned d77c9dc6 words a missing buffer per verb, not through one generic
+# target resolver: cmd-paste-buffer.c:82 and cmd-save-buffer.c:92 answer
+# `no buffer NAME`, cmd-save-buffer.c:86 answers `no buffers` when nothing
+# automatic sits on top, and cmd-set-buffer.c:79/88 answer `unknown buffer:
+# NAME` with `no buffer` for the empty top. Every one of them exits 1, and
+# `paste-buffer` with no -b and no top buffer exits 0 in silence.
+stage: fixtures/buffer-missing-target-error.sh ~/buffer-missing-target-error.sh
+run-shell 'sh ~/buffer-missing-target-error.sh'
+load-buffer -b transcript '~/buffer-missing-target-error.txt'
+out: show-buffer -b transcript

@@ -11,6 +11,7 @@
 | break-pane | 30 | yes | 0 | yes | yes | yes |
 | buffer-client-file-load | 3 | yes | 0 | yes | yes | yes |
 | buffer-client-file-save | 3 | yes | 0 | yes | yes | yes |
+| buffer-missing-target-error | 3 | yes | 0 | yes | yes | yes |
 | buffer-path-format | 36 | yes | 0 | yes | yes | yes |
 | capture-pane | 23 | yes | 0 | yes | yes | yes |
 | census-formats | 40 | yes | 0 | yes | yes | yes |

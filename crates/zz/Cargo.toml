@@ -71,9 +71,13 @@ libc.workspace = true
 rustix.workspace = true
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
+crossbeam-channel.workspace = true
 gpui_platform.workspace = true
+interprocess.workspace = true
 mimalloc.workspace = true
+notify = "8.2.0"
 semver = "1"
+sha2.workspace = true
 ureq = "3"
 wgpu.workspace = true
 zz-browser = { path = "../zz-browser" }
@@ -89,8 +93,9 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Gd
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation.workspace = true
 core-video.workspace = true
+dispatch2 = "0.3.0"
 objc2.workspace = true
-objc2-app-kit = { workspace = true, features = ["NSButton", "NSControl", "NSEvent", "NSGraphics", "NSImage", "NSMenu", "NSMenuItem", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "objc2-core-foundation"] }
+objc2-app-kit = { workspace = true, features = ["NSButton", "NSControl", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSMenu", "NSMenuItem", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "objc2-core-foundation"] }
 objc2-foundation = { workspace = true, features = ["NSBundle", "NSData", "NSPathUtilities", "NSString"] }
 raw-window-handle.workspace = true
 

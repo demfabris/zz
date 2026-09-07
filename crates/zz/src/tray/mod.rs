@@ -7,11 +7,15 @@ mod windows;
 
 use async_channel::Sender;
 
+pub(crate) use desktop::{DesktopTray, focused, init_desktop};
+pub(crate) use host::{run_if_requested, start_daemon_helper};
+
 /// What a tray interaction asks of the app.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TrayEvent {
     Toggle,
     Quit,
+    Available(bool),
 }
 
 /// A live tray icon. Dropping it removes the icon.
@@ -84,3 +88,7 @@ mod tests {
         assert_eq!(toggle_action(false, true), ToggleAction::Show);
     }
 }
+mod desktop;
+mod host;
+mod ipc;
+mod settings;

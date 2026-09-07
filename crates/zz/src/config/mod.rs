@@ -750,7 +750,6 @@ pub(crate) fn check_for_updates(cx: &App) -> bool {
     resolved_config(cx).check_for_updates.value
 }
 
-/// Whether to put zz in the system tray. Read once at startup.
 #[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn tray_enabled(cx: &App) -> bool {
     resolved_config(cx).tray.value
@@ -1186,7 +1185,7 @@ fn current_config_platform() -> ConfigPlatform {
     }
 }
 
-fn config_candidates() -> Vec<PathBuf> {
+pub(crate) fn config_candidates() -> Vec<PathBuf> {
     let xdg_config_home = nonempty_env("XDG_CONFIG_HOME");
     let home = nonempty_env("HOME");
     #[cfg(any(test, target_os = "windows"))]
@@ -1315,6 +1314,13 @@ fn nonempty_env(name: &str) -> Option<PathBuf> {
 
 fn load_config(path: &Path) -> io::Result<ParsedConfig> {
     read_config_source(path).map(|source| parse_config(&source))
+}
+
+#[cfg(not(target_os = "ios"))]
+pub(crate) fn tray_enabled_from_files(candidates: &[PathBuf]) -> bool {
+    discover_config_path(candidates)
+        .and_then(|path| load_config(&path).ok())
+        .map_or(DEFAULT_TRAY, |parsed| parsed.config.tray.value)
 }
 
 fn read_config_source(path: &Path) -> io::Result<String> {

@@ -25,7 +25,7 @@ pub(super) fn spawn(sender: Sender<TrayEvent>) -> Option<Service> {
         sender,
         icon: tray_icon(),
     };
-    match tray.spawn() {
+    match tray.assume_sni_available(true).spawn() {
         Ok(handle) => Some(Service { handle }),
         Err(error) => {
             log::warn!(target: "zz::tray", "no system tray host: {error}");
@@ -48,6 +48,15 @@ impl SniTray {
 }
 
 impl ksni::Tray for SniTray {
+    fn watcher_online(&self) {
+        self.send(TrayEvent::Available(true));
+    }
+
+    fn watcher_offline(&self, _reason: ksni::OfflineReason) -> bool {
+        self.send(TrayEvent::Available(false));
+        true
+    }
+
     fn id(&self) -> String {
         "zz".into()
     }

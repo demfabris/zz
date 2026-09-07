@@ -243,7 +243,9 @@ unsafe extern "system" fn window_procedure(
                 return LRESULT(0);
             }
             message if message == state.taskbar_created => {
-                if !Shell_NotifyIconW(NIM_ADD, &state.notify_icon_data(hwnd)).as_bool() {
+                let available = Shell_NotifyIconW(NIM_ADD, &state.notify_icon_data(hwnd)).as_bool();
+                state.send(TrayEvent::Available(available));
+                if !available {
                     log::warn!(target: "zz::tray", "could not restore the icon after a shell restart");
                 }
             }

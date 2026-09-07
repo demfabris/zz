@@ -346,6 +346,9 @@ fn configure_application_working_directory() {
 #[cfg(not(any(target_os = "windows", target_os = "ios")))]
 #[must_use]
 pub fn run() -> ExitCode {
+    if let Some(exit) = tray::run_if_requested() {
+        return exit;
+    }
     #[cfg(unix)]
     if let Some(exit) = run_askpass_mode() {
         return exit;
@@ -377,6 +380,9 @@ pub fn run() -> ExitCode {
 #[cfg(target_os = "windows")]
 #[must_use]
 pub fn run() -> ExitCode {
+    if let Some(exit) = tray::run_if_requested() {
+        return exit;
+    }
     if let Some(exit) = run_askpass_mode() {
         return exit;
     }
@@ -409,6 +415,9 @@ pub extern "C" fn RunWinMain(
     sandbox_info: *mut core::ffi::c_void,
     _version_info: *mut core::ffi::c_void,
 ) -> i32 {
+    if let Some(exit) = tray::run_if_requested() {
+        return if exit == ExitCode::SUCCESS { 0 } else { 1 };
+    }
     if let Some(exit) = run_askpass_mode() {
         return if exit == ExitCode::SUCCESS { 0 } else { 1 };
     }
@@ -875,13 +884,17 @@ fn run_command_mode(
         if let Some(client_working_directory) = bootstrap.client_working_directory {
             daemon = daemon.with_initial_client_working_directory(client_working_directory);
         }
-        return Some(match daemon.run_foreground() {
-            Ok(()) | Err(DaemonError::AlreadyRunning(_)) => ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("zz daemon: {error}");
-                ExitCode::FAILURE
-            }
-        });
+        return Some(
+            match daemon.run_foreground_with_ready(|server_id| {
+                tray::start_daemon_helper(socket_path, server_id)
+            }) {
+                Ok(()) | Err(DaemonError::AlreadyRunning(_)) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("zz daemon: {error}");
+                    ExitCode::FAILURE
+                }
+            },
+        );
     }
 
     if command == "proxy" {
@@ -2379,6 +2392,7 @@ fn run_app(
             #[cfg(target_os = "macos")]
             cx.activate(true);
             config::init(cx);
+            cx.set_global(tray::DesktopTray::default());
             window::background::detect_compositor_support(cx);
             browser::recent_pages::init(cx);
             zz_ui::init(cx);
@@ -2403,14 +2417,6 @@ fn run_app(
                 }
             })
             .detach();
-
-            let tray = if config::tray_enabled(cx) {
-                let (sender, receiver) = async_channel::unbounded();
-                tray::spawn(sender).map(|tray| (tray, receiver))
-            } else {
-                None
-            };
-            let close_to_tray = tray.is_some();
 
             let minimum_window_size = size(px(480.0), px(320.0));
             let restored_window = window_state.restored_window(
@@ -2448,6 +2454,7 @@ fn run_app(
                             cx,
                         )
                     });
+                    tray::init_desktop(&mux, socket_path.clone(), window.window_handle(), cx);
 
                     diagnostics::start_app_state_sampler(controller.clone(), mux.clone(), cx);
                     diagnostics::init_debug_mark(controller.clone(), mux.clone(), cx);
@@ -2477,7 +2484,9 @@ fn run_app(
                                 .read(cx)
                                 .log_diagnostic_snapshot("shutdown");
                         }
-                        if config::quit_daemon_on_exit(cx) {
+                        if config::quit_daemon_on_exit(cx)
+                            && !cx.global::<tray::DesktopTray>().stopping_daemon
+                        {
                             shutdown_mux
                                 .read(cx)
                                 .execute(CommandInvocation::new("kill-server", [] as [&str; 0]));
@@ -2518,7 +2527,7 @@ fn run_app(
                     let close_window_state = window_state.clone();
                     window.on_window_should_close(cx, move |window, cx| {
                         close_window_state.capture_and_flush(window, cx);
-                        if close_to_tray {
+                        if config::tray_enabled(cx) && cx.global::<tray::DesktopTray>().available() {
                             #[cfg(target_os = "macos")]
                             cx.hide();
                             #[cfg(not(target_os = "macos"))]
@@ -2559,6 +2568,11 @@ fn run_app(
                         .detach();
                     cx.new(|cx| {
                         let root = build_root(shell, window, cx);
+                        cx.observe_window_activation(window, |_, window, cx| {
+                            if window.is_window_active() {
+                                tray::focused(cx);
+                            }
+                        }).detach();
                         window::state::observe(observed_window_state, window, cx);
                         root
                     })
@@ -2566,34 +2580,12 @@ fn run_app(
             )
             .expect("failed to open zz window");
             window::toast::set_host(main_window, cx);
-            if let Some((tray, receiver)) = tray {
-                drain_tray(tray, receiver, main_window, cx);
-            }
             cx.activate(true);
         });
 }
 
 #[cfg(not(target_os = "ios"))]
-fn drain_tray(
-    tray: tray::Tray,
-    receiver: async_channel::Receiver<tray::TrayEvent>,
-    main_window: gpui::WindowHandle<Root>,
-    cx: &mut App,
-) {
-    cx.spawn(async move |cx| {
-        let _tray = tray;
-        while let Ok(event) = receiver.recv().await {
-            cx.update(|cx| match event {
-                tray::TrayEvent::Toggle => toggle_from_tray(main_window, cx),
-                tray::TrayEvent::Quit => cx.quit(),
-            });
-        }
-    })
-    .detach();
-}
-
-#[cfg(not(target_os = "ios"))]
-fn toggle_from_tray(main_window: gpui::WindowHandle<Root>, cx: &mut App) {
+fn toggle_from_tray(main_window: gpui::AnyWindowHandle, cx: &mut App) {
     let (visible, active) = main_window
         .update(cx, |_, window, _| {
             (window.is_window_visible(), window.is_window_active())

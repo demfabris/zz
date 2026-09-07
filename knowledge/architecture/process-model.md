@@ -4,7 +4,7 @@ title: Process & threading model
 description: How zz splits work across the persistent daemon, GUI and CLI clients, CEF subprocesses, ACP agents, and per-PTY worker threads.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [architecture, process-model, daemon, threading, ipc]
-timestamp: 2026-08-19T00:00:00Z
+timestamp: 2026-09-07T00:00:00-03:00
 ---
 
 # Overview
@@ -22,6 +22,7 @@ survive GUI detach while keeping the mux state a single source of truth.
 |---------|------|----------|
 | Daemon ([server](/crates/zz-daemon.md)) | mux state, PTYs, terminal frame fanout, IPC listener | persistent; survives GUI detach; exits on `kill-server`, or once it has **zero sessions and zero interactive clients**; dies on crash, logout, reboot |
 | GUI client ([app](/crates/zz.md)) | GPUI windows, rendering, local CEF sessions, ACP controller/session reducers | attached to at most one session; a session takes as many clients as devices attach |
+| Tray helper | native tray icon, live tray setting, GUI show/hide and daemon quit actions | follows the local daemon; survives GUI quit and exits when the daemon stops |
 | CLI client | one short-lived command (`list-sessions`, `send-keys`, …) | request/response, then exits |
 | CEF browser process | Chromium main/GPU/renderer/utility (zygote) tree | spawned inside a GUI process; not kept alive without a GUI |
 | ACP agent process | Codex or Claude Code reached over stdio JSON-RPC; one process and ACP session belong to one Agent pane | spawned when the pane appears; replaced on provider/config changes; stopped with the pane or daemon |
@@ -53,6 +54,26 @@ clients wait at the handshake until config finishes. A shell job that the starti
 a one-daemon re-entry token, `ZZ_SOCKET`, and a private `tmux` shim on its `PATH`. Foreground
 `run-shell` and `if-shell` config entries can call `tmux` back into zz without deadlocking or exposing
 half-loaded config to other clients.
+
+# Tray helper
+
+`crates/zz/src/tray/host.rs` runs the native tray loop in a separate invocation of the zz executable,
+before GPUI or CEF starts. The daemon starts it after becoming ready and holds its stdin pipe open;
+EOF ends the helper, including after a daemon crash. A blocking supervisor restarts a crashed helper.
+A daemon started without a desktop session skips this step. A later GUI attach can start the helper
+with its desktop environment and a passive command connection to observe daemon shutdown. That
+connection does not keep an empty daemon alive.
+
+`tray/settings.rs` watches config paths through native filesystem notifications and uses the normal
+config parser and precedence. The helper remains idle with the icon disabled so file edits can turn
+it back on without opening the GUI. `tray/ipc.rs` gives each daemon instance an owner-only local
+endpoint and an exclusive lock, preventing duplicate icons. GUI clients register there, report focus,
+and receive availability, toggle, and quit events. Losing tray availability brings a hidden GUI back.
+
+The icon toggles the latest focused GUI, or launches `zz app` against the same `ZZ_SOCKET` if no GUI
+remains. On macOS, reopening the app from Finder also brings up the GUI through the helper.
+Tray **Quit** closes the connected GUIs and sends `kill-server` to that daemon, ending all its
+sessions regardless of `quit-daemon-on-exit`. Ordinary GUI quit retains the configured daemon policy.
 
 # IPC transport
 

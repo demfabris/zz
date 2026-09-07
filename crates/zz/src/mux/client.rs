@@ -997,6 +997,15 @@ pub struct MuxClient {
 }
 
 impl MuxClient {
+    #[cfg(not(target_os = "ios"))]
+    pub(crate) fn local_server_id(&self) -> Option<u64> {
+        self.connections
+            .get(&HostId::LOCAL)?
+            .client
+            .as_ref()
+            .map(|client| client.server_hello().server_id)
+    }
+
     #[cfg(test)]
     pub(crate) fn new(
         client: Result<InteractiveClient, DaemonError>,

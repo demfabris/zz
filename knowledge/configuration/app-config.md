@@ -9,7 +9,7 @@ tags:
 - window
 - appearance
 - mux
-timestamp: 2026-09-06T00:00:00-03:00
+timestamp: 2026-09-07T00:00:00-03:00
 ---
 
 # Overview
@@ -95,7 +95,7 @@ The client-local schema includes these scalar settings and chrome colors.
 | `window-corner-radius` | `13.5` | `0..=32` | The app-drawn window frame's corner, visible only under Linux client-side decorations |
 | `window-background-blur` | `false` | `true` or `false` | Whether the desktop shows through the window chrome, blurred |
 | `animations` | `true` | `true` or `false` | Whether interface transitions, loading indicators, scrollbar fades, and animated UI images move |
-| `tray` | `true` | `true` or `false` | Whether zz puts an icon in the system tray (macOS status item, Windows notification icon, Linux StatusNotifierItem), toggling the window on click with a menu carrying Show/Hide and Quit. A live tray turns the close button into hide-to-tray on every platform (macOS hides the app); without a tray host (bare GNOME) close quits as before. Surfaced in Settings under Advanced; read once at startup |
+| `tray` | `true` | `true` or `false` | Shows a native tray icon while the local daemon runs; applies live from Settings → System or file edits, including while the GUI is closed. Show/Hide toggles the latest focused GUI or reopens it on the same daemon. Tray Quit closes connected GUIs and stops the daemon and all sessions. A live tray makes the close button hide the window (the app on macOS); without a working tray host, close quits as before |
 | `show-fps` | `false` | `true` or `false` | Whether the titlebar GPUI meter **and** each browser pane's CEF meter are shown |
 | `quit-daemon-on-exit` | `false` | `true` or `false` | Whether quitting the app stops the daemon even while sessions are live |
 | `auto-restart-stale-daemon` | `false` | `true` or `false` | Whether a protocol-mismatched local daemon is terminated and replaced on connect. Off by default because it ends every running session |

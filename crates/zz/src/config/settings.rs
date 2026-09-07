@@ -1246,11 +1246,9 @@ impl SettingsView {
                 column.child(SettingsStack::titled("Tray").child(Self::boolean_setting(
                     ConfigKey::Tray,
                     "Tray icon",
-                    "Keep zz in the system tray: clicking the icon toggles the \
-                     window, and closing the window hides it there while the \
-                     daemon keeps running. Turning this off removes the icon \
-                     entirely and makes closing the window quit again. Takes \
-                     effect at the next launch.",
+                    "Show an icon while the local daemon runs, even after the app quits. \
+                     Click to show or hide the window, or reopen the app. \
+                     Quit zz in the tray menu stops the daemon and all sessions.",
                     resolved.tray,
                     cx,
                 )))

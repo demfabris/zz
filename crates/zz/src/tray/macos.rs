@@ -2,14 +2,14 @@ use std::io::Cursor;
 
 use async_channel::Sender;
 use image::{ImageFormat, imageops::FilterType};
-use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, Sel};
+use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject, Sel};
 use objc2::{
     AnyThread as _, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::Retained, sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSEventMask, NSEventModifierFlags, NSEventType, NSImage, NSMenu, NSMenuItem,
-    NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+    NSApplication, NSApplicationDelegate, NSEventMask, NSEventModifierFlags, NSEventType, NSImage,
+    NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
 };
 use objc2_foundation::{NSData, NSSize, NSString, ns_string};
 
@@ -51,6 +51,7 @@ pub(super) fn spawn(sender: Sender<TrayEvent>) -> Option<StatusItem> {
     };
     button.setImage(Some(&image));
 
+    let _ = sender.try_send(TrayEvent::Available(true));
     let target = TrayTarget::new(sender, item.clone(), mtm);
     let any_target: &AnyObject = &target;
     #[allow(
@@ -70,6 +71,91 @@ pub(super) fn spawn(sender: Sender<TrayEvent>) -> Option<StatusItem> {
         item,
         _target: target,
     })
+}
+
+thread_local! {
+    static HELPER: std::cell::RefCell<Option<super::host::Host>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn run_helper(
+    host: super::host::Host,
+    events: async_channel::Receiver<super::host::HostEvent>,
+) -> std::io::Result<()> {
+    let mtm = MainThreadMarker::new()
+        .ok_or_else(|| std::io::Error::other("tray needs the main thread"))?;
+    let app = NSApplication::sharedApplication(mtm);
+    let delegate = HelperDelegate::new(mtm);
+    app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+    app.setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Accessory);
+    HELPER.with(|state| *state.borrow_mut() = Some(host));
+    std::thread::Builder::new()
+        .name("zz-tray-main".into())
+        .spawn(move || {
+            while let Ok(event) = events.recv_blocking() {
+                dispatch2::DispatchQueue::main().exec_async(move || handle_helper_event(event));
+            }
+        })?;
+    dispatch2::DispatchQueue::main().exec_async(|| {
+        let mtm = MainThreadMarker::new().expect("main dispatch queue");
+        NSApplication::sharedApplication(mtm)
+            .setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Accessory);
+        handle_helper_event(super::host::HostEvent::ConfigChanged);
+    });
+    app.run();
+    app.setDelegate(None);
+    HELPER.with(|state| state.borrow_mut().take());
+    Ok(())
+}
+
+fn handle_helper_event(event: super::host::HostEvent) {
+    let stopped = HELPER.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.as_mut().is_some_and(|host| !host.handle(event)) {
+            state.take();
+            true
+        } else {
+            false
+        }
+    });
+    if stopped {
+        let mtm = MainThreadMarker::new().expect("main dispatch queue");
+        let app = NSApplication::sharedApplication(mtm);
+        app.stop(None);
+        if let Some(event) = objc2_app_kit::NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
+            NSEventType::ApplicationDefined,
+            objc2_foundation::NSPoint::new(0.0, 0.0),
+            NSEventModifierFlags::empty(), 0.0, 0, None, 0, 0, 0,
+        ) {
+            app.postEvent_atStart(&event, true);
+        }
+    }
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = ()]
+    struct HelperDelegate;
+
+    unsafe impl NSObjectProtocol for HelperDelegate {}
+
+    unsafe impl NSApplicationDelegate for HelperDelegate {
+        #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
+        fn should_handle_reopen(&self, _app: &NSApplication, _has_visible_windows: bool) -> bool {
+            dispatch2::DispatchQueue::main().exec_async(|| {
+                handle_helper_event(super::host::HostEvent::Reopen);
+            });
+            false
+        }
+    }
+);
+
+impl HelperDelegate {
+    #[allow(unsafe_code, reason = "initializing the NSObject superclass")]
+    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(());
+        unsafe { msg_send![super(this), init] }
+    }
 }
 
 fn tray_image() -> Option<Retained<NSImage>> {

@@ -2017,13 +2017,7 @@ fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
         line.push_segment(&padded_segment(&message.text, width, ' '), style);
         return Some(StatusOverlay::Row(line));
     }
-    let mut right = status_indicators(model);
-    if !model.status.customized {
-        if !right.is_empty() {
-            right.push_str("  ");
-        }
-        right.push_str("Ctrl-\\ detach");
-    }
+    let right = status_indicators(model);
     if right.is_empty() {
         return None;
     }
@@ -3259,20 +3253,34 @@ mod tests {
     }
 
     #[test]
-    fn the_detach_hint_overlays_default_status_but_not_customized_status() {
-        let mut model = block_model(40, 10);
-        model.set_status(block_status(vec!["ROW"], false));
+    fn the_detach_hint_is_sidebar_chrome_and_never_covers_the_status_row() {
+        for customized in [false, true] {
+            let mut model = block_model(40, 10);
+            assert!(!model.sidebar_visible());
+            model.set_status(block_status(vec!["[rows] 0:bash*   \"ubuntu\" 11:11"], customized));
+            let mut renderer = Renderer::new();
+            renderer.paint_status_block(&model, true);
+            let output = String::from_utf8(renderer.output).unwrap();
+            assert!(!output.contains("Ctrl-\\ detach"), "{output:?}");
+            assert!(output.contains("[rows] 0:bash*   \"ubuntu\" 11:11"), "{output:?}");
+        }
+
+        let mut sidebar_model = block_model(120, 10);
+        assert!(sidebar_model.sidebar_visible());
+        sidebar_model.set_status(block_status(vec!["ROW"], false));
         let mut renderer = Renderer::new();
-        renderer.paint_status_block(&model, true);
+        renderer.paint_sidebar(&sidebar_model, true);
+        renderer.paint_status_block(&sidebar_model, true);
         let output = String::from_utf8(renderer.output).unwrap();
         assert!(output.contains("Ctrl-\\ detach"), "{output:?}");
+        assert!(output.contains("ROW"), "{output:?}");
 
-        model.set_status(block_status(vec!["ROW"], true));
+        sidebar_model.set_status(block_status(vec!["ROW"], true));
         let mut renderer = Renderer::new();
-        renderer.paint_status_block(&model, true);
+        renderer.paint_sidebar(&sidebar_model, true);
+        renderer.paint_status_block(&sidebar_model, true);
         let output = String::from_utf8(renderer.output).unwrap();
         assert!(!output.contains("Ctrl-\\ detach"), "{output:?}");
-        assert!(output.contains("ROW"));
     }
 
     #[test]

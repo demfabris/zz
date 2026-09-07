@@ -66,12 +66,13 @@ session = "omt-runtime"
 result = "failed:" + os.environ.get("ZZ_SMOKE_CANARY", "unknown")
 
 clipboard = root / "clipboard.txt"
-argv = root / "xsel.argv"
+argv = root / "clipboard.argv"
 username = root / "username.txt"
-fake_xsel = root / "bin/xsel"
-fake_xsel.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" > "
+tool = "pbcopy" if shutil.which("pbcopy") else "xsel"
+fake_tool = root / "bin" / tool
+fake_tool.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" > "
                      + str(argv) + "\ncat >> " + str(clipboard) + "\n")
-fake_xsel.chmod(0o755)
+fake_tool.chmod(0o755)
 
 
 def normalise(text):
@@ -124,7 +125,7 @@ try:
                  if row.split("\t", 1)[0] == "y"]
         return found[0] if len(found) == 1 else ""
 
-    settle(lambda: "xsel" in prefix_y(), True)
+    settle(lambda: tool in prefix_y(), True)
     print("OMT_PREFIX_Y_BINDING=" + normalise(prefix_y()))
 
     tmux("new-session", "-d", "-s", session, "-n", "omt", "-x", "80", "-y", "24",
@@ -147,7 +148,8 @@ try:
     settle(lambda: clipboard.exists() and clipboard.stat().st_size > 0, True)
     print("OMT_CLIPBOARD_HEX=" + clipboard.read_bytes().hex())
     print("OMT_CLIPBOARD_TEXT=" + clipboard.read_text())
-    print("OMT_XSEL_ARGV=" + argv.read_text().strip())
+    print("OMT_CLIPBOARD_TOOL=" + tool)
+    print("OMT_CLIPBOARD_ARGV=" + argv.read_text().strip())
     print("OMT_BUFFER_AFTER=" + tmux("list-buffers", "-F", "#{buffer_sample}"))
     print("OMT_PANE_MODE=" + tmux("display-message", "-p", "-t", pane,
                                   "#{pane_in_mode},#{pane_mode}"))
@@ -169,7 +171,7 @@ try:
          "'#{b:pane_tty}' false '#D' > " + str(replayed))
     settle(lambda: replayed.exists() and replayed.stat().st_size > 0, True)
     print("OMT_RUN_SHELL_USERNAME=" + replayed.read_text().strip())
-    result = "clean:prefix-y-xsel"
+    result = "clean:prefix-y-clipboard"
 except Exception as error:
     print(repr(error), flush=True)
 finally:

@@ -2,10 +2,16 @@ corpus: required
 # Oh My Tmux's prefix y run for real on both binaries. The config binds it at
 # .tmux.conf:131 behind `if -b 'command -v xsel'`, to
 # `run -b "\"$TMUX_PROGRAM\" ${TMUX_SOCKET:+-S \"$TMUX_SOCKET\"} save-buffer - | xsel -i -b"`,
-# so the fixture puts a fake xsel first on the server PATH, pins
-# XDG_SESSION_TYPE away from wayland so the .tmux.conf:134 wl-copy branch cannot
-# win the race between the async `if -b` jobs, re-sources the corpus config, and
-# reads the installed binding back out of list-keys before firing it. The
+# so the fixture puts a fake clipboard tool first on the server PATH and pins
+# XDG_SESSION_TYPE away from wayland, leaving exactly ONE of the six ordered
+# `if -b` branches able to match: xsel where no pbcopy exists, and pbcopy on
+# macOS, where /usr/bin/pbcopy would otherwise make the .tmux.conf:136 branch
+# match as well. That single-branch pinning is deliberate. When two branches
+# match, the two binaries disagree about which bind survives - the pin keeps the
+# first branch's and zz keeps the last - and that ordering fact is registered on
+# its own as config.background-if-shell-order rather than being asserted here.
+# The fixture re-sources the corpus config and reads the installed binding back
+# out of list-keys before firing it. The
 # keypress is a real C-b y on an attached pty client; the observables are the
 # bytes the fake clipboard received, its argv, the paste buffer and the pane
 # mode. The status half asserts the config's own status-left and status-right

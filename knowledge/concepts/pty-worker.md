@@ -4,7 +4,7 @@ title: Daemon-owned PTY worker model
 description: How the daemon spawns and owns one PTY-backed terminal session per pane, the thread/ownership boundary between zz-daemon and the zz-terminal worker, and the paths that carry terminal frames out and send-keys in.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [pty, daemon, terminal, threading, send-keys]
-timestamp: 2026-08-06T00:00:00Z
+timestamp: 2026-09-06T00:00:00Z
 ---
 
 # Overview
@@ -131,6 +131,14 @@ for (view, viewport) in current {                     // latest_viewports(), sor
 }
 previous.retain(|view, _| active.contains(view));     // a view that went away drops its diff base
 ```
+
+Before diffing, the watcher calls `synchronize_pane_runtime` to update pane facts. Its
+`terminal_working_directory` lookup queries the foreground PID on each publication: a shell can
+change directory without changing PID. On macOS it calls `proc_pidinfo(PROC_PIDVNODEPATHINFO)` and
+reads the physical cwd from the returned vnode data. This avoids a system-wide process scan and
+Rayon scheduling for each terminal frame. Linux keeps the sysinfo lookup. The physical cwd remains
+separate from the path reported through OSC 7. These functions live in
+`crates/zz-daemon/src/daemon.rs`.
 
 Title sync and exit detection ride whichever frames exist. Each frame's title goes through
 `synchronize_pane_title`, and an `Exited` status on any of them closes the pane through

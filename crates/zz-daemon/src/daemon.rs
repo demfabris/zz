@@ -371,7 +371,43 @@ fn tmux_environment(socket_path: &Path, session: Option<SessionId>) -> String {
     format!("{},{},{session}", socket_path.display(), std::process::id())
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
+    use std::{ffi::CStr, mem::MaybeUninit, os::unix::ffi::OsStrExt as _};
+
+    let process_id = libc::pid_t::try_from(terminal.foreground_process_id()?)
+        .ok()
+        .filter(|pid| *pid > 0)?;
+    let mut info = MaybeUninit::<libc::proc_vnodepathinfo>::zeroed();
+    let size = i32::try_from(std::mem::size_of::<libc::proc_vnodepathinfo>()).ok()?;
+    let result = unsafe {
+        libc::proc_pidinfo(
+            process_id,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if result != size {
+        return None;
+    }
+    let cwd = unsafe { info.assume_init() }.pvi_cdir;
+    if cwd.vip_vi.vi_stat.vst_dev == 0 {
+        return None;
+    }
+    let path = unsafe {
+        std::slice::from_raw_parts(
+            cwd.vip_path.as_ptr().cast::<u8>(),
+            std::mem::size_of_val(&cwd.vip_path),
+        )
+    };
+    let path = CStr::from_bytes_until_nul(path).ok()?;
+    Some(PathBuf::from(OsStr::from_bytes(path.to_bytes())))
+}
+
+#[cfg(target_os = "linux")]
 fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
     let process_id = terminal.foreground_process_id().filter(|pid| *pid != 0)?;
     let process_id = Pid::from_u32(process_id);

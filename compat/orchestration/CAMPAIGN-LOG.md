@@ -606,6 +606,69 @@ replay or mux hook ownership beyond the lanes' zones. macOS signal runtime and a
 iTerm2 session remain maintainer validations. Both lane locks were integrated and released;
 MAIN owns the records settlement, and TRIAGE preserves the F-SPLIT-MUX-*-V5 chain.
 
+### 2026-09-07 cycle-17 integration
+
+Claude Code Opus 5 lanes ran at xhigh on Ubuntu and were frozen mid-flight before the gate; one
+integration gate resumed them alone on the macbook. Wire control claims landed at `eee64c47`, pane
+runtime facts at `50e785de`, the TUI status and menu work at `8ad2e633`, then the census close at
+`6fa9ef58`, each after its own gate. The wire lane bumped the protocol 98 to 99 with three pure
+appends - `stdout_claim` on `CommandResponse::Success`, `producer` on `EventPayload::Clipboard`, and
+the `EnvironmentRequest`/`EnvironmentResponse` pair - and no other lane touched the wire, so the
+three later rebases landed on a changed tree without a single compile break. `knowledge/tmux/gaps.md`
+conflicted on every rebase and was regenerated with `tmux-tracker.py write-report` each time;
+`compat/tmux-gaps.json` conflicted only on the proof lane and merged by record id with
+`gaps-merge.py`. Original campaign branches remain at their reviewed tips on origin, and no force
+push occurred.
+
+All four reviews were approve-with-fixes and every must-fix landed with the reviewer's probe re-run.
+The wire lane's own protocol page still carried the v92 sentence its change refutes, that `$NAME`
+stays literal in direct Control input. The client lane had a duplicate `#[test]` attribute that
+would have made CI's workspace clippy a hard error on main and ran the test twice. The proof lane
+had buried two measured divergences in closed-record prose with no slug and no owner, where neither
+the tracker nor the meter can ever surface them again; both are now open groups,
+`tui.client-input-backpressure` and `buffers.target-error-message`.
+
+The panes lane needed the most gate work. Its differential guarded `pane_tty` with `/dev/pts/`,
+which no macOS pty satisfies, so the whole fixture aborted on the gating machine and proved three of
+its four items nowhere; relaxing that guard to `/dev/` turned the scenario green end to end. The
+reviewer had also found an undisclosed regression, a dead pane answering its start directory where
+the pin answers empty, and proposed guarding `synchronize_pane_runtime`. That does not reach it: the
+runtime facts are a stored snapshot and nothing recomputes them once the pane is dead, so the guard
+still measured `[<DIR>]` against the pin's `[]`. The fix went where the pin's own read is, at
+expansion in `crates/zz-mux/src/formats.rs`, since `format_cb_current_path` reads
+`osdep_get_cwd(ft->wp->fd)` and `wp->fd` is -1 after the child exits. A committed dead-pane row now
+proves it.
+
+The gate found one divergence of its own. The proof lane's new oh-my-tmux differential was red on
+macOS, and not for anything the closed item covers: the config picks its clipboard tool with six
+ordered `if -b` branches, the fixture stages a fake `xsel` to pin the choice, and on macOS
+`/usr/bin/pbcopy` makes a second branch match too. Reproduced on throwaway sockets outside the
+harness, with both branches matching the pin's prefix `y` ends as the first branch's `xsel` bind and
+zz's ends as the last branch's `pbcopy` bind, while `command -v pbcopy` answers `/usr/bin/pbcopy` on
+both - so the binaries agree on what exists and disagree only on which inserted bind survives. It
+reproduces on `origin/main` and is nobody's regression; it is invisible on Linux, which is why nine
+cycles of corpus runs never saw it. Registered as `config.background-if-shell-order`, and the
+fixture now stages whichever single tool its platform lets match.
+
+The stamped full run is the one thing this cycle did not deliver. It covers 251 scenarios and 3,080
+steps, and the attached-client fixture PASSED at the merged tip `6fa9ef581e06`, but eleven corpus
+rows diverge on the macbook - the keys fixtures that press keys on an attached client, `census-hooks`,
+`smoke/pane-tmux-path`, `smoke/source-file-byte-name` on an APFS volume that refuses non-UTF-8 names,
+and three plugin runtimes - and every one of them diverges identically in a baseline worktree built
+at the pre-merge `origin/main`. `check_summary` therefore refused the write and the canonical summary
+keeps the Ubuntu stamp `6edc5c7ec425`. No PASS was hand-edited. The first attempt also died at
+scenario 79 when the machine ran out of disk with 1.0 GiB free; reclaiming the shared target's
+12 GiB incremental cache and restarting from zero was enough.
+
+One of those eleven rows deserves its own note, because it is the same behaviour the proof lane
+measured and the gate registered: `compat/tui-pane-geometry.sh` never finishes on this box. It sends
+`tput cols; tput lines` into an attached zz pane and waits ten seconds, and the wait expires at both
+the baseline and the merged tip - yet the answer file is complete and correct once the script tears
+the client down. So the keystroke is delivered late rather than lost, and the campaign's only
+drawn-geometry differential cannot assert here. The gate read its values by hand instead: the
+baseline hands the pane 80x22 and the merged tip 80x23 against the pin's 80x23, which is exactly the
+row the client lane claimed to fix.
+
 ### 2026-09-06 cycle-16 integration
 
 Claude Code Opus 5 lanes ran at xhigh on Ubuntu. One integration gate ran alone: daemon open

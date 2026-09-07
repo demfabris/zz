@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 16 INTEGRATED: DAEMON, DESKTOP, PROOF; PROTOCOL V98; FROZEN SCOPE 304/304**
+> Campaign delivery: **CYCLE 17 INTEGRATED: WIRE, PANES, CLIENT, PROOF; PROTOCOL V99; FROZEN SCOPE 304/304**
 >
-> Live work: **8 OPEN + 0 BLOCKED = 8 UNRESOLVED GROUPS (14 POST-FREEZE ITEMS)**
+> Live work: **5 OPEN + 0 BLOCKED = 5 UNRESOLVED GROUPS (5 POST-FREEZE ITEMS)**
 >
-> Ledger settlement: **96.6% (230 of 238 known groups: 188 CLOSED + 42 ACCEPTED); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **97.9% (238 of 243 known groups: 196 CLOSED + 42 ACCEPTED); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **249 SCENARIOS, 3,073 STEPS, 4 REGISTERED KNOWN ROWS; ATTACHED-CLIENT PASS RECORDED AT 6edc5c7ec425; EIGHT OPEN GROUPS KEEP THE PRACTICAL EXIT GATE OPEN**
+> Exit evidence: **251 SCENARIOS, 3,080 STEPS, 4 REGISTERED KNOWN ROWS PLUS 11 MACBOOK ENVIRONMENT ROWS; ATTACHED-CLIENT PASS AT THE MERGED TIP 6fa9ef581e06 BUT NOT PERSISTED, SO THE STAMP STAYS 6edc5c7ec425; FIVE OPEN GROUPS KEEP THE PRACTICAL EXIT GATE OPEN**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 16 INTEGRATED ON THE UBUNTU BOX, CLAUDE CODE OPUS 5 LANES AT XHIGH, DAEMON THEN DESKTOP THEN PROOF, ONE GATE ALONE.**
+> Orchestration: **CYCLE 17 INTEGRATED ON THE UBUNTU BOX ON CLAUDE CODE OPUS 5 LANES AT XHIGH, WIRE THEN PANES THEN CLIENT THEN PROOF, ONE GATE ALONE ON THE MACBOOK.**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,20 +76,20 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | Cycle-16 daemon `b547b29e`, desktop `b6732f05` and proof `6edc5c7e` pushed to main in that order; full run stamped at `6edc5c7ec425` |
+| Published branch | Cycle-17 wire `eee64c47`, panes `50e785de`, client `8ad2e633` and proof `6fa9ef58` pushed to main in that order; the full run's attached fixture passed at `6fa9ef581e06` but the corpus stamp stays `6edc5c7ec425` |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Cycle 16: sourced CLI stdout ownership including nested source frames, command output surviving its search prompt, status jobs keyed by their format loop tag, pinned Control notification order and pause placement, a desktop drag reaching the system clipboard, every daemon overlay payload reaching a desktop consumer, the raw TUI leaving a stock terminal its full pane width, seven plugin runtime paths, the option and hook census, and six harness proof holes. Protocol remains v98. |
-| Orchestration | Ubuntu, Claude Code Opus 5 lanes at xhigh; one gate alone, daemon then desktop then proof. Reviewer must-fixes applied on each branch before its gate, each with the reviewer's own probe re-run. Original campaign branches remain at their reviewed tips; rebased commits landed on main without force pushes. |
+| Delivery | Cycle 17: the sourced raw-newline stdout claim, the OSC 52 producer and its set-clipboard gate, the last three Control notification residues, the four pane runtime facts a plugin's own script reads, the raw TUI's pane rows and status-row colour and theme encoding, the desktop menu's whole mouse policy, oh-my-tmux's prefix y run for real, the format census lens, and the harness theme hole. Protocol bumped to v99: `stdout_claim` on `CommandResponse::Success`, `producer` on `EventPayload::Clipboard`, and the `EnvironmentRequest`/`EnvironmentResponse` pair, all appends. |
+| Orchestration | Lanes ran on Ubuntu on Claude Code Opus 5 at xhigh and were frozen mid-flight; one gate alone resumed them on the macbook, wire then panes then client then proof. Every review was approve-with-fixes and every must-fix landed on its branch before its gate with the reviewer's own probe re-run. Original campaign branches remain at their reviewed tips; rebased commits landed on main without force pushes. |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
 | Agreed-scope meter | 100.0% (304 of 304 items frozen on 2026-08-31), 65 of 65 groups done, 0 partially burned; park dispositions 15 of 15; `python3 compat/progress.py` |
-| Completed fixed cohort | Cycle 16: 3/3 lanes integrated; frozen meter remains 100.0% (304/304) |
-| Previous completed cohort | Cycle 15: 2/2 code lanes integrated; frozen meter 100.0% |
-| Campaign point | The frozen scope is complete; 14 post-freeze items remain in eight open groups. The stamped full corpus and attached-client proof pass; the practical exit gate remains open for the recorded differences. |
-| Live registry | 50 active groups, 454 active items, 188 closed records |
-| Active status | 8 open, 0 blocked, 42 accepted |
-| Known differentials | 4 registered cases: two GEO-only, one GEO plus OUT, and terminal-runtime with six FMT differences |
+| Completed fixed cohort | Cycle 17: 4/4 lanes integrated; frozen meter remains 100.0% (304/304) |
+| Previous completed cohort | Cycle 16: 3/3 lanes integrated; frozen meter 100.0% |
+| Campaign point | The frozen scope is complete; 5 post-freeze items remain in five open groups, three of them opened by this gate from findings the lanes measured but had not registered. The attached-client proof passes at the merged tip; the corpus stamp could not be re-recorded on the gating machine, so the practical exit gate remains open for the recorded differences. |
+| Live registry | 47 active groups, 446 active items, 196 closed records |
+| Active status | 5 open, 0 blocked, 42 accepted |
+| Known differentials | 4 registered cases: two GEO-only, one GEO plus OUT, and terminal-runtime with six FMT differences. Separately, 11 corpus rows diverge only on the macbook and diverge identically at the pre-merge baseline; they are this box's environment, not campaign state |
 
 Cycles 2 through 16 reached `origin/main` through the board MAIN lock. Resolve the latest
 records commit with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md` and remote main with
@@ -103,15 +103,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 16: 3/3 lanes integrated; frozen meter remains 100.0% (304/304) |
-| Previous completed cohort | Cycle 15: 2/2 code lanes integrated; frozen meter 100.0% |
-| New residual groups | 14 live post-freeze items across 8 open groups; the sourced raw-newline claim, three Control notification residues, the TUI copy-selection OSC 52 field, the rest of the menu mouse policy, the status block's rows and its missing status-left, four plugin runtime measurements, the format census remainder, and harness theme steering |
-| Unresolved movement | Cycle 16 closes sourced stdout ownership, the command-output prompt lifecycle, status loop-tag job identity, five Control notification items, three desktop and TUI chrome items, seven plugin runtime paths, the option and hook census and six harness holes; eight measured groups remain open, none blocked |
-| Live unresolved | 8 open + 0 blocked = 8 (14 post-freeze items) |
-| Practical exit gate | Open for eight recorded behavioral groups; the full attached-client evidence now passes with a commit stamp |
-| Latest differential | 249 scenarios / 3,073 steps / 4 registered known rows; attached-client `PASS`, recorded at `6edc5c7ec425` |
-| Differential SHA-256 | `d1af67b9adcb23a29fcbad655b6282ea68102cae696fa17c8258baaf57f2baa0` |
-| Ledger settlement | 230 of 238 known groups = 96.6% |
+| Completed fixed cohort | Cycle 17: 4/4 lanes integrated; frozen meter remains 100.0% (304/304) |
+| Previous completed cohort | Cycle 16: 3/3 lanes integrated; frozen meter 100.0% |
+| New residual groups | 5 live post-freeze items across 5 open groups: the raw TUI's detach hint, the rest of the desktop menu's mouse modality, and three the gate opened from measurements the lanes left in prose - the TUI client's stdin stall under its own pty backpressure, the buffer-target error wording, and the order several background `if -b` jobs apply their inserted commands in |
+| Unresolved movement | Cycle 17 closes eight groups - the sourced raw-newline claim, the Control notification residues, the desktop drag clipboard field, the four pane runtime facts, the TUI sidebar rows, the plugin runtime paths, the census coverage lens and the harness proof holes - and opens four: one the client lane registered and three the gate did; five measured groups remain open, none blocked |
+| Live unresolved | 5 open + 0 blocked = 5 (5 post-freeze items) |
+| Practical exit gate | Open for five recorded behavioral groups; the attached-client fixture passes at the merged tip, but the corpus stamp stays at the last Ubuntu run |
+| Latest differential | 251 scenarios / 3,080 steps / 4 registered known rows plus 11 macbook environment rows; attached-client `PASS` at the merged tip `6fa9ef581e06`, not persisted; the stamp stays `6edc5c7ec425` |
+| Differential SHA-256 | `ec8f868aead7855a0fab58f94da6535d2a4a80c834b45886d70169e1d95d10d8` |
+| Ledger settlement | 238 of 243 known groups = 97.9% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -171,6 +171,23 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-07 cycle-17 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `eee64c47` wire control claims, `50e785de` pane runtime facts, `8ad2e633` TUI status and menu, `6fa9ef58` census close; each pushed after its own gate, in that order |
+| Protocol | Bumped 98 to 99 by the wire lane, three pure appends: `stdout_claim` on `CommandResponse::Success`, `producer` on `EventPayload::Clipboard`, and `EnvironmentRequest`/`EnvironmentResponse`. One constant, one `hunt_claims` fixture at `0x63`, one changelog. No other lane touched the wire; `include/zz-client.h` is unchanged. |
+| Review actions | All four reviews were approve-with-fixes and every must-fix landed with the reviewer's probe re-run. Wire: a v92 paragraph in the protocol page still said `$NAME` stays literal in direct Control input, which the branch itself refutes, and a five-line derivation comment sat in `cli_binary.rs` against the no-comments rule. Panes: the differential's `pane_tty` guard demanded `/dev/pts/`, so the whole fixture aborted on macOS and proved three of its four items nowhere; a dead pane answered its start directory where the pin answers empty; and the resolution claimed a red-without-the-fix row for an item that has none. Client: a duplicate `#[test]` attribute would have broken CI's workspace clippy on main and ran the test twice. Proof: two measured divergences were buried in closed-record prose with no slug and no owner. |
+| Gate-found reds | The reviewer's suggested site for the dead-pane fix does not reach it: the runtime facts are a stored snapshot and nothing recomputes them after the pane dies, so a guard in `synchronize_pane_runtime` still measured `[<DIR>]` against the pin's `[]`. The guard went where the pin's live read is instead, at expansion in `crates/zz-mux/src/formats.rs`, with a committed dead-pane row. Separately the proof lane's new oh-my-tmux differential was red on macOS: `/usr/bin/pbcopy` makes a second `if -b` clipboard branch match, and with two matching the pin keeps the first branch's bind while zz keeps the last. Registered as `config.background-if-shell-order` rather than hidden, and the fixture now pins the one branch its platform allows. |
+| Workspace gates | Wire, panes and client each passed `cargo test --workspace --all-features` and `cargo clippy --workspace --all-targets --all-features -D warnings`. The panes lane's group-5 hygiene makes `cargo clippy -p zz-tui --all-targets --all-features -D warnings` green, so that second invocation is a standing gate stage from this cycle on; it was red on the wire branch for ten pre-existing `zz-daemon` dead-code errors that no lane had caused. The proof branch touches zero files under `crates/`, so its code stages were skipped by rule. |
+| Delta corpus | Wire 224 scenarios, panes 224, client 214, each sharded eight ways over disjoint subsets with `smoke/source-replay-diagnostics` and `smoke/pane-border-lines` run solo afterward; the proof lane ran its own changed scenarios plus the attached fixture. Every list was taken twice and reconciled against the diff. Every red row was re-run alone and then settled against a baseline worktree built at the pre-merge `origin/main`; all of them diverge identically there. |
+| Full exit evidence | 251 scenarios / 3,080 steps / 4 registered known rows plus 11 macbook environment rows. The attached-client fixture PASSED at the merged tip `6fa9ef581e06`, but `check_summary` refused the write because those 11 rows are not clean, so the canonical summary keeps the Ubuntu stamp `6edc5c7ec425`. No PASS was hand-edited. The first attempt died at scenario 79 when the machine ran out of disk with 1.0 GiB free; the run was restarted from zero after reclaiming the shared target's incremental cache. |
+| Summary SHA-256 | `ec8f868aead7855a0fab58f94da6535d2a4a80c834b45886d70169e1d95d10d8` |
+| Live registry | 47 active groups holding 446 items: 5 open, 0 blocked, 42 accepted; 196 closed records; 5 unresolved post-freeze items |
+| Remaining work | The raw TUI's detach hint over the pin's default status-right, the desktop menu's mouse modality (which needs a capture-phase move and wheel hook in the carried gpui fork), the TUI client's stdin stall under its own pty backpressure, the buffer-target error wording, and background `if -b` insertion order. The real iTerm2 hour remains a maintainer task. |
+| Ledger settlement | 238/243 known groups (97.9%); frozen scope 304/304 items and 65/65 groups |
+| Board | All four lane locks integrated and released; records settlement ledgered under MAIN. Preserve the F-SPLIT-MUX-*-V5 chain. Original campaign branches remain unchanged on origin. |
 
 ### 2026-09-06 cycle-16 integration checkpoint
 

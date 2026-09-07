@@ -9,13 +9,16 @@ timestamp: 2026-08-26T00:00:00-03:00
 
 # Cycle-16 checkpoint
 
-At the 2026-09-06 cycle-16 integration checkpoint, the merged registry has 50 active groups
-holding 454 items: 8 open, 0 blocked, and 42 accepted, plus 188 closed records.
-The frozen meter remains 304/304 items across 65/65 groups; 14 post-freeze items remain
-open across 8 groups. Ledger settlement is 230/238 known groups (96.6%). The full run covers
-249 scenarios / 3,073 steps / 4 registered known rows; attached-client `PASS`, recorded at
-`6edc5c7ec425`. Summary SHA-256: `d1af67b9adcb23a29fcbad655b6282ea68102cae696fa17c8258baaf57f2baa0`.
-The open groups are `clients.cli-output-sourced-raw-newline-claim`, `control-mode.notifications`, `desktop.drag-to-clipboard`, `desktop.overlay-consumers`, `harness.proof-holes`, `plugins.runtime-paths`, `proofs.census-coverage`, `tui.sidebar-auto-hide`.
+At the 2026-09-07 cycle-17 integration checkpoint, the merged registry has 47 active groups
+holding 446 items: 5 open, 0 blocked, and 42 accepted, plus 196 closed records.
+The frozen meter remains 304/304 items across 65/65 groups; 5 post-freeze items remain
+open across 5 groups. Ledger settlement is 238/243 known groups (97.9%). The full run covers
+251 scenarios / 3,080 steps / 4 registered known rows; the attached-client fixture passed at the
+merged tip `6fa9ef581e06`, but the canonical summary was NOT re-stamped, because eleven corpus rows
+diverge on the macbook that gated this cycle and diverge identically at the pre-merge baseline.
+The persisted summary therefore still carries the Ubuntu stamp `6edc5c7ec425`. Summary SHA-256:
+`ec8f868aead7855a0fab58f94da6535d2a4a80c834b45886d70169e1d95d10d8`.
+The open groups are `buffers.target-error-message`, `config.background-if-shell-order`, `desktop.overlay-consumers`, `tui.client-input-backpressure`, `tui.status-row`.
 
 The attached fixture preserves the stock-search discrepancy as open work: stock vi `/`
 discards zz command output when its prompt opens. The fixture separately proves navigation

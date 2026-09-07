@@ -2759,7 +2759,6 @@ mod tests {
         assert_eq!(wide_fill, "a界 ");
     }
 
-    #[test]
     /// `tty_colours_fg` sends a named or indexed colour as the `setaf`
     /// capability for that index and only an RGB colour as truecolor, so the
     /// viewer's palette decides what red is. On `xterm-256color` that expands

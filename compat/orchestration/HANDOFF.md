@@ -1,4 +1,98 @@
-# Current handoff: cycle 17 FROZEN mid-flight (2026-09-06 23:44Z), resume it on any machine
+# Current handoff: cycle 17 integrated on the macbook (2026-09-07 07:00Z)
+
+Cycle 17 was frozen on the ubuntu box at 23:44Z and resumed on the macbook two hours later with
+`opus-compat-run-17b.js` (workflow run `wf_8b3416e0-5d5`, 6.8 hours, four agents: the wire lane's
+resume pass, the wire and panes reviews, one gate). All four lanes merged, in order: wire `eee64c47`
+(protocol 98 to 99 in three pure appends: `stdout_claim` on `CommandResponse::Success`, `producer` on
+`EventPayload::Clipboard`, the `EnvironmentRequest`/`EnvironmentResponse` pair), panes `50e785de`,
+client `8ad2e633`, proof `6fa9ef58`, then the records commit `aaf77cdc`. Every review came back
+approve-with-fixes and every must-fix landed at the gate with its probe re-run. `CAMPAIGN-LOG.md`
+carries the full cycle-17 entry: what the reviews caught, the dead-pane guard the reviewer put in the
+wrong place, and the macOS-only `if -b` ordering divergence the gate found on its own.
+
+| Fact | Value |
+| --- | --- |
+| `origin/main` | `aaf77cdc` (21 gate commits over `3bd920e3`, all unsigned; see "as it actually went") |
+| Agreed-scope meter | 100.0% (304/304 items), 65/65 groups; post-freeze scope 5 items / 5 groups (15 / 9 at launch) |
+| Live registry | 47 active groups / 446 items; 5 open, 0 blocked, 42 accepted; 196 closed records |
+| Corpus | 251 scenarios / 3,080 steps; attached-client fixture PASS at `6fa9ef581e06`; the stamp stays `6edc5c7ec425` (ubuntu) because eleven rows are red on the macbook at baseline too |
+| `PROTOCOL_VERSION` | 99 (0x63) |
+| Board | the four lane locks INTEGRATED and released; MAIN and TRIAGE free; two residuals on TRIAGE (5566260127 the open items, 5566262686 the unprovable clause and the macbook rows) |
+| Ledger settlement | 238/243 (97.9%) |
+
+## What is open, by owner
+
+Five items, every one registered during this cycle, none left from the original census:
+
+1. `presentation:tui-status-row-detach-hint` (client). `status_overlay` writes ` Ctrl-\ detach` over
+   the tail of the pin's default status-right below 109 columns, so a stock attach shows no clock.
+   A product call: keep the hint somewhere else or drop it. Everything else `compat/status-row.sh`
+   measures is at parity (all nine colour and theme rows byte-identical; the remaining pane_title row
+   is the shell-integration decision, not a divergence).
+2. `presentation:gui-menu-mouse-modality` (gui). gpui exposes capture-phase hooks for mouse down and
+   up only; motion and wheel outside an open menu still reach the pane under it. Needs a capture-phase
+   move/wheel hook in the carried gpui fork or a mouse layer above the panes: a fork question first.
+3. `semantic:tui-client-stdin-stalls-under-pty-backpressure` (client). The raw TUI client stops
+   reading stdin once its own pty output fills the buffer; keys arrive late, unblocked by teardown.
+   It voids every fixture that presses keys on a zz client without draining the master, and it is
+   why the four keys fixtures and `compat/tui-pane-geometry.sh` cannot assert on the macbook. The
+   most valuable of the five.
+4. `semantic:buffer-target-error-message` (mux). `target not found: X` where the pin says
+   `no buffer X`, for `paste-buffer -b` and `save-buffer -b`. Wording only, cheap.
+5. `semantic:background-if-shell-insertion-order` (mux). Several `if -b` in one sourced file whose
+   conditions all pass: the pin keeps the FIRST matching branch's inserted command, zz keeps the
+   LAST (`cmdq_insert_after`). Invisible on Linux; oh-my-tmux's clipboard picker hits it on macOS.
+
+Unregistered findings that need a slug before the next census: `startup_mux_config_files` appends
+default discovery even under an explicit `-f`, which is how the box's real `~/.config/zz/mux.conf`
+reached the `cli_binary` tests that do not pin HOME (the wire review's diagnosis; those tests should
+pin HOME as well); `ClipboardProducer` is not surfaced through the C ABI, so an FFI client cannot tell
+the pin's two OSC 52 producers apart (no C client emits OSC 52 today); the underline colour (`us=`)
+still resolves through zz's palette in the raw TUI (a client-side residue the review left as a
+non-defect); `b0d69603` gates the desktop clipboard mirror on `request_id != 0` where the v99
+`producer` field now carries that distinction directly (a follow-up, not a hazard).
+
+## Next cycle, if there is one
+
+The five items fit two lanes with disjoint zones: client (items 1 and 3; `crates/zz-tui`,
+`crates/zz-client`) and mux (items 4 and 5; `crates/zz-mux`, the daemon's if-shell insertion). Item 2
+goes to a design front, not a lane. Copy `opus-compat-run-17.js` (not 17b, which inlines the frozen
+constants), keep its reviewer and gate prompts, and fold in the flake and machine lore below. The
+corpus cannot stamp on the macbook (eleven environment rows, listed in the machine notes), so a cycle
+that merges code needs either the ubuntu box for its gate or those rows fixed first; three of the
+eleven have identified causes (an APFS non-UTF-8 name, a `/dev/pts/` guard at
+`vim-tmux-navigator-runtime.py:72`, the stdin stall). The eleven-row baseline recipe the gate used is
+the right one for any box with local reds: rebuild `origin/main` into the shared target, re-run the
+red rows there, and only a row green at baseline is a lane's.
+
+## Resuming after a freeze, as it actually went
+
+The frozen-cycle recipe below worked as written: the macbook already had the checkout and both
+caches, gh was logged in, the hook was in place, four `claim --lease 14h --branch --base e0987ace`,
+then one `Workflow` call with every `M` argument. Three cold builds (lane, review and gate targets)
+took the first hour. What the recipe did not say and the next freeze should:
+
+- The machine needs about 60 GB free before launch: three cold targets (21, 15 and 19 GB) plus the
+  full run. The first stamped run died at scenario 79 on a full disk; the gate reclaimed the shared
+  target's incremental cache and restarted from zero, since `run.sh` has no resume.
+- Unattended commits on the macbook must run with `git -c commit.gpgsign=false` from the start, or
+  the Secretive signer hangs waiting for Touch ID. The gate lost five minutes inside a
+  `rebase --continue` before it found this, and every cycle-17 commit on main is unsigned as a result.
+- `PATH=/opt/homebrew/bin:$PATH` in front of every `compat/run.sh`, or bash 3.2 turns every scenario
+  red with `mapfile: command not found` and it looks like a real divergence.
+- A shared `CARGO_TARGET_DIR` swapped between worktrees needs
+  `find crates -name '*.rs' -o -name 'Cargo.toml' | xargs touch && touch Cargo.toml Cargo.lock`
+  before each build: cargo judges path-dependency freshness by mtime, and a worktree created before
+  the last build reads as fresh. It was loud once (ten v99 symbol errors) and would be silent the next
+  time; verify a binary by grepping for a symbol only the tip has before trusting a run against it.
+- A reviewer's `suggested_fix` is a hypothesis: the panes review located the dead-pane guard in
+  `synchronize_pane_runtime`, the gate applied it, measured that it did not reach the bug, and moved
+  it to expansion in `formats.rs`. Re-run the probe after every prescribed fix.
+- Agents leave pin servers behind. The wire reviewer's two `-L zzprobe-rev2-*` servers outlived the
+  run by six hours and were reaped by pid afterwards; the orchestrator should sweep
+  `pgrep -fl zzprobe` after every run.
+
+# Earlier handoff: cycle 17 frozen mid-flight (2026-09-06 23:44Z); resumed and integrated on the macbook 2026-09-07
 
 Fabrico had to shut the ubuntu box down two and a half hours into cycle 17. Nothing is lost and
 nothing is merged: all four lane branches are on origin, three lanes' reports and two reviews are
@@ -498,7 +592,19 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
   `clairvo`, `home`, `zz`) and a live `/Applications/zz.app` daemon that no worker may kill.
   Worktrees `~/dev/zz-opus-dint`, `~/dev/zz-opus-panes`, `~/dev/zz-opus-termopts` are warm at the
   cycle-9 tips. The `boxNote` and `gitNote` args for it: bash 3.2 and APFS traps, HTTPS origin,
-  never switch to SSH. Use `workerJobs: 8, workerThreads: 4, gateJobs: 16, gateThreads: 8, shards: 8`.
+  never switch to SSH. Use `workerJobs: 8, workerThreads: 4, gateJobs: 16, gateThreads: 8, shards: 8`. Cycle 17's gate ran here on 2026-09-07 with exactly those values;
+  its leftovers are `~/dev/zz-lane-daemon` (the wire lane's worktree at `711040e6`, 21 GB target, incremental cache
+  removed), `~/dev/zz-review-daemon` and `~/dev/zz-review-panes` (review scratch, no build of their own),
+  `~/dev/zz-review-target` (15 GB, the shared reviewer build directory the 17b script falls back to) and
+  `~/dev/zz-gate-target` (19 GB, warm at `aaf77cdc`'s code); the gate's own `zz-gate-*` worktrees are gone. The
+  disk was at 13 GB free when the cycle ended; the user's own `~/dev/zz/target` is 87 GB. Eleven corpus rows are
+  red here at baseline and at every tip, so the summary cannot stamp on this box: `census-hooks`,
+  `smoke/pane-tmux-path`, `smoke/resurrect-save`, `smoke/source-file-byte-name` (APFS), `smoke/status-background-jobs`,
+  `smoke/plugin-runtime-continuum`, `smoke/plugin-runtime-vim-tmux-navigator` (the `/dev/pts/` guard), and the four
+  keys fixtures `keys-prefix-attached`, `keys-prefix-remainder`, `keys-shift-attached`, `keys-table-lifecycle` (the
+  stdin stall; the last one is flaky rather than deterministic). Unattended commits need `-c commit.gpgsign=false`
+  and every `compat/run.sh` needs `PATH=/opt/homebrew/bin:$PATH`; the box's real `~/.config/zz/mux.conf` reaches
+  any test that does not pin HOME.
 - **A worker's prompt** carries the box traps through `M.boxNote` and `M.gitNote`; a new machine
   with a new trap gets it in `args`, not in the script.
 
@@ -560,7 +666,7 @@ cli_binary runs), `concurrent_default_interactive_attaches_atomically_share_sess
 terminal", may be misattributed), `smoke/source-replay-diagnostics` (pin-side crash under
 concurrent scenario load; run it solo after sharded gates), `smoke/pane-engine-knobs-input`
 (pin-side under shard load), `behavior-options` (one TOPO row under shard load), and
-`smoke/client-non-utf8-cwd` on APFS.
+`smoke/client-non-utf8-cwd` on APFS, `daemon::tests::a_plain_prompt_freezes_publication_and_its_clear_resumes_it` (red once under eight threads and green three times solo in cycle 17, hit independently by the wire reviewer and the gate), and `smoke/keys-table-lifecycle` under shard load.
 
 Registry grammar: closing = removing the slug from the group's items (an emptied group moves to
 `closed[]`); native decisions = relocate the slug into an accepted-native group with the measured

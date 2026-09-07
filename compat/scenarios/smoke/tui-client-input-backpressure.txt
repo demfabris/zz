@@ -1,0 +1,10 @@
+corpus: none
+# An attached client must keep acting on keys while its own terminal is not
+# being read. The pin's client writes its frames into a libevent buffer and
+# never blocks its event loop on the tty, so a key pressed with 200000 lines of
+# unread output sitting in the pty acts as fast as one pressed on an idle
+# client. The fixture presses the same F5 binding twice, once with the master
+# drained (the canary) and once with it untouched, and reports both.
+stage: fixtures/tui-client-input-backpressure.py ~/tui-client-input-backpressure.py
+run-shell 'python3 ~/tui-client-input-backpressure.py'
+out: show-environment -g ZZ_TUI_BACKPRESSURE

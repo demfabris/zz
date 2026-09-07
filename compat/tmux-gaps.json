@@ -30,30 +30,6 @@
       "reason": "Settled 2026-09-02 as a native decision rather than a gap, because the clause it carried describes a zz-only surface with no pinned counterpart. The pin has no remote client at all: pinned tmux d77c9dc6 talks to one local socket, `-L` and `-S` name a path on this machine, and there is no host argument, no forwarding and nothing to preflight, so there is no pin behaviour this slug could be measured against. On the zz side the routing is a design decision the ssh-only consolidation already made: `--host` resolves statically to an ssh lifecycle, because the only forward constructor starts one, and the local CLI already does the part that has a tmux analogue, preparing a whole command vector against an already-running compatible daemon before it commits. An existing-only remote discovery pass would mean a second, connectionless probe channel over ssh purely to classify a vector, which is infrastructure zz does not want to carry for a classification step; the cost of the static route is that a `--host` vector that would have been refused locally is refused after the ssh lifecycle starts instead of before. Reopen only if zz grows a cheap existing-only remote probe for another reason and this classification can ride it."
     },
     {
-      "id": "buffers.target-error-message",
-      "title": "Answer a missing buffer the way the pin words it",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "easy",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "mux",
-      "items": [
-        "semantic:buffer-target-error-message"
-      ],
-      "evidence": [
-        "resource:crates/zz-mux/src/command.rs",
-        "scenario:compat/scenarios/buffer-client-file-save.txt"
-      ],
-      "acceptance": [
-        "OPEN: a buffer command naming a buffer that does not exist answers the pin's wording on stderr with the pin's exit status. Measured on both binaries: zz answers `target not found: nosuchbuffer` where the pin answers `no buffer nosuchbuffer`, for both `paste-buffer -b` and `save-buffer -b`."
-      ],
-      "depends_on": [],
-      "reason": "Opened 2026-09-07 by the cycle-17 integration gate, relocating a divergence that had sat in an open group's reason on origin/main and would have been buried by the close of harness.proof-holes. The measurement, verbatim from that record: zz answers `target not found: nosuchbuffer` where the pin answers `no buffer nosuchbuffer`, for both `paste-buffer -b` and `save-buffer -b`. It is a wording divergence only, in zz's generic target resolver rather than a buffer-specific message, so a script that greps stderr for the pin's text does not match. Cheap to fix and it needs a mux owner, which is why it is registered rather than carried in prose."
-    },
-    {
       "id": "capture.rich-transports",
       "title": "Add rich capture transports",
       "decision": "native",
@@ -1852,6 +1828,17 @@
         "resource:crates/zz/src/lib.rs"
       ],
       "resolution": "Closed semantic:buffer-standard-streams, relocated from protocol.binary-streams. Pinned d77c9dc6 cmd-load-buffer.c and cmd-save-buffer.c plus smoke/buffer-standard-streams prove binary stdin/stdout (61 00 62 ff), named -b loads, save-buffer -a - without byte modification, file append, empty-input preservation, built-in aliases and compact options. Literal load-buffer - on the command CLI reads at most 1,048,576 bytes through read_stdin_payload and transports one RawText payload after the validated path arguments; oversized stdin is refused, while the pin is unbounded. save-buffer stdout skips the CLI line terminator; file append keeps its existing path. No wire type changes. Config/Control load-buffer - without a command client's payload and paths that only expand to '-' still refuse rather than reading the daemon's stdin; binary stdin through a multi-command alias body remains outside this bounded literal-CLI proof."
+    },
+    {
+      "id": "buffers.target-error-message",
+      "title": "Answer a missing buffer the way the pin words it",
+      "closed_on": "2026-09-07",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/buffer-missing-target-error.txt",
+        "file:compat/scenarios/fixtures/buffer-missing-target-error.sh"
+      ],
+      "resolution": "Opened 2026-09-07 by the cycle-17 integration gate, relocating a wording divergence that had sat in an open group's reason on origin/main; closed 2026-09-07 with semantic:buffer-target-error-message proved. The old record said zz answers `target not found: nosuchbuffer` where the pin answers `no buffer nosuchbuffer`, for `paste-buffer -b` and `save-buffer -b`. Measured this cycle on this box, both binaries on throwaway `-L zzprobe-$$ -f /dev/null` sockets, twenty rows: every buffer verb with the buffer list empty and again with one named buffer `present` in it. The pin's wording is per verb, from two different source files, not one generic message. `paste-buffer -b nosuch`, `save-buffer -b nosuch FILE` and `show-buffer -b nosuch` answer `no buffer nosuch` and exit 1 (cmd-paste-buffer.c:82, cmd-save-buffer.c:92). `save-buffer FILE` and `show-buffer` with no automatic buffer on top answer `no buffers` and exit 1 (cmd-save-buffer.c:86). `delete-buffer -b nosuch` and `set-buffer -n newname -b nosuch` answer `unknown buffer: nosuch` and exit 1 (cmd-set-buffer.c:79 and :88). `delete-buffer` and `set-buffer -n newname` with no automatic buffer answer `no buffer` and exit 1 (cmd-set-buffer.c:83 and :92). `paste-buffer` with no -b and no automatic buffer exits 0 in silence on both. zz answered `target not found: nosuch` for all four named cases and `target not found: paste buffer` for the three empty-top cases; only the two `set-buffer -n` rows already matched, through rename_paste_buffer. TWO CORRECTIONS the measurement forced on the record. First, the resolver is `resolve_buffer` in crates/zz-daemon/src/daemon.rs, not crates/zz-mux/src/command.rs, which the old evidence list named; crates/zz-mux has no buffer target resolver at all. Second, `delete-buffer -b nosuch` answers `unknown buffer: nosuch`, NOT the `no buffer nosuch` that paste.c:232 suggests: cmd-set-buffer.c:79 catches the missing name and errors before paste_rename_buffer is ever called, so paste.c:232's wording is unreachable from the CLI. THE FIX: `resolve_buffer` now takes a `BufferMissing` wording chosen by the caller - `NoBuffer` for show-buffer/save-buffer/paste-buffer, matching cmd-paste-buffer.c and cmd-save-buffer.c, and `UnknownBuffer` for delete-buffer, matching cmd-set-buffer.c - and raises `ServerError::InvalidCommand`, which `tmux_message()` renders verbatim, so nothing wire-reachable changed and PROTOCOL_VERSION stayed at 99. `find_buffer(inner, None)` matching only automatic buffers was left alone: it is what the pin's paste_get_top does, and a buffer list holding only named buffers still answers `no buffers` on both sides, which is why the twenty rows read the same with the list empty and with `present` in it. PROVED BY compat/scenarios/buffer-missing-target-error.txt, whose fixture compat/scenarios/fixtures/buffer-missing-target-error.sh runs all twenty rows against whichever binary the harness handed it and writes the transcript into a paste buffer the scenario reads back with `out: show-buffer`, so the harness compares every message and exit status byte for byte; the transcripts are identical. crates/zz-daemon/src/daemon.rs carries the same rows as daemon::tests::a_missing_buffer_is_worded_per_verb_the_way_the_pin_words_it."
     },
     {
       "id": "choosers.command-flags",

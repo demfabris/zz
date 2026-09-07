@@ -32811,7 +32811,7 @@ fn run_shell_job(
     command: &str,
     cwd: &Path,
     tmux: &str,
-    environment: &[(String, Option<String>)],
+    environment: &[(RawText, Option<RawText>)],
     default_terminal: &str,
     zz_socket: &Path,
     startup_reentry: Option<&str>,

@@ -10,8 +10,9 @@ timestamp: 2026-08-26T00:00:00-03:00
 # Cycle-16 checkpoint
 
 At the 2026-09-07 cycle-17 integration checkpoint, the merged registry has 47 active groups
-holding 446 items: 5 open, 0 blocked, and 42 accepted, plus 196 closed records.
-The frozen meter remains 304/304 items across 65/65 groups; 5 post-freeze items remain
+holding 448 items: 5 open, 0 blocked, and 42 accepted, plus 196 closed records (two items
+registered by the 2026-09-07 census).
+The frozen meter remains 304/304 items across 65/65 groups; 6 post-freeze items remain
 open across 5 groups. Ledger settlement is 238/243 known groups (97.9%). The full run covers
 251 scenarios / 3,080 steps / 4 registered known rows; the attached-client fixture passed at the
 merged tip `6fa9ef581e06`, but the canonical summary was NOT re-stamped, because eleven corpus rows

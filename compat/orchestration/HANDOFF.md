@@ -1,4 +1,92 @@
-# Current handoff: cycle 17 integrated on the macbook (2026-09-07 07:00Z)
+# Current handoff: cycle 18 written and minted on the macbook (2026-09-07 15:45Z); launch it on the ubuntu box
+
+Cycle 17 closed the campaign's frozen scope for good and left five post-freeze items. The census
+after it registered two more, so that no divergence lives only in prose: one accepted (an explicit
+`-f` keeps the zz/mux.conf layer, fabrico's 2026-09-05 stance) and one open (the raw TUI's theme
+colours never reach the client, so a user-set `dark-theme-green` is not honoured). Cycle 18 is the
+runner that closes the six open items in two lanes; the seventh, the desktop menu's mouse
+modality, is a design question and sits on the board as `F-GUI-MENU-MOUSE-MODALITY`, not in a lane.
+
+| Fact | Value |
+| --- | --- |
+| `origin/main` | this records commit over fabrico's `5c1cec7e` (cycle 17's gate commits below it, all unsigned) |
+| Agreed-scope meter | 100.0% (304/304), 65/65 groups; post-freeze scope 6 items / 5 open groups |
+| Live registry | 47 active groups / 448 items; 5 open, 0 blocked, 42 accepted; 196 closed records |
+| Corpus | 251 scenarios / 3,080 steps; stamp `6edc5c7ec425` (ubuntu, cycle 16); cycle 17 changed `crates/` after it, so `--check-summary` prints "summary current" with a drift warning until cycle 18's gate re-stamps on the ubuntu box |
+| `PROTOCOL_VERSION` | 99 (0x63); cycle 18's client lane may take it to 100 for one group |
+| Board | `F-TUI-CLIENT-CLOSE` (lock, client lane), `F-MUX-BUFFER-IFSHELL` (lock, mux lane), `F-GUI-MENU-MOUSE-MODALITY` (p4 design front) READY; MAIN and TRIAGE free |
+| Runner | `compat/orchestration/opus-compat-run-18.js` (ubuntu defaults; every box fact is an `args` override) |
+| The macbook | cleaned 2026-09-07: every cycle worktree and build directory removed; nothing of the campaign remains here but the user's checkout |
+
+## What cycle 18 does
+
+Client lane (`zz-lane-desktop`; zones raw-tui, client-core, protocol-message, daemon-status, plus
+`crates/zz/tests` and one declared clipboard arm), in this order:
+
+1. `semantic:tui-client-stdin-stalls-under-pty-backpressure`: measure first, fix the read loop,
+   prove with `smoke/tui-client-input-backpressure`, make `compat/tui-pane-geometry.sh` assert again.
+2. `presentation:tui-status-row-detach-hint`, decision handed to the lane: below 109 columns the
+   row is the pin's row and the hint goes; from 109 columns it stays on the sidebar.
+   `compat/status-row.sh` must exit 0 (both panes get the same title first, because the pane title
+   is a recorded decision, not a divergence).
+3. Hygiene: `cli_binary` tests pin HOME and XDG_CONFIG_HOME; the desktop clipboard mirror reads
+   the v99 `producer` field instead of `request_id != 0`.
+4. `presentation:tui-status-row-theme-colours-per-client`, last, the only place a wire bump (99
+   to 100) is allowed, and only if the measurement says the field is needed and it fits the budget;
+   otherwise the lane records the measurement and leaves the item open.
+
+Mux lane (`zz-lane-panes`; zones mux-command and daemon-core limited to the if-shell and run-shell
+insertion path):
+
+1. `semantic:buffer-target-error-message`: the pin's `no buffer X` wording and exit status per verb
+   (`cmd-paste-buffer.c:82`, `cmd-save-buffer.c:86,92`, `cmd-set-buffer.c:79`, `paste.c:213,232`).
+2. `semantic:background-if-shell-insertion-order`: match `cmdq_insert_after` (`cmd-queue.c:325`,
+   `cmd-if-shell.c:100`, `cmd-run-shell.c:237`); measure the instant and the delayed-first-job
+   cases before coding, prove both.
+
+Then the usual shape: one adversarial reviewer per lane, one fix pass on a reject, one gate (client
+first, mux second), the stamped full run, records, board.
+
+## Launching it (ubuntu box)
+
+1. `git -C ~/dev/zz fetch origin && git -C ~/dev/zz log -1 origin/main` shows this commit or later.
+   The worktrees `~/dev/zz-lane-desktop` and `~/dev/zz-lane-panes` sit at the cycle-17 branch tips
+   with warm targets; the script checks out `origin/main` in them itself. `~/dev/zz-gate-target` is
+   the gate's build directory (the `gateZz` default). If any of them is gone, `git worktree add` it
+   from `origin/main` and expect a cold build.
+2. Preflight per "Resuming on another machine" (gh auth, the rm-home hook, sleep off). Check for
+   leftover campaign servers with `pgrep -fl zzprobe`; reap by pid only.
+3. Claim the locks as the orchestrator, 14h:
+   `ZZ_BOARD_HOLDER=ubuntu/orchestrator python3 compat/board.py claim F-TUI-CLIENT-CLOSE --lease 14h`
+   and the same for `F-MUX-BUFFER-IFSHELL`. Do not claim MAIN; the gate does.
+4. Launch from a Claude Code session in `~/dev/zz`:
+   `Workflow({ scriptPath: '/home/demfabris/dev/zz/compat/orchestration/opus-compat-run-18.js', args: { date: '<today>', protected: '<what runs on the default sockets right now>' } })`
+   Every other default is the ubuntu box. Keep the session alive for the whole run (about five to
+   seven hours: workers two to three, reviews one, the gate two to three including the 70-minute
+   stamped run). Renew the two locks and MAIN if the run passes six hours.
+5. When the gate reports: verify `origin/main`, `python3 compat/progress.py`,
+   `compat/run.sh --check-summary` ("summary current"; no drift warning if the stamp moved),
+   `python3 compat/board.py status` (both locks INTEGRATED, MAIN and TRIAGE free). Then write the
+   close-out (a head section here, the memory note) under MAIN as a records commit, ledgered
+   `integrated MAIN --merge <sha>`.
+6. If the gate leaves anything open, the next census is one paragraph: the item, its owner, what
+   the merged tip measures. If it leaves nothing open, the post-freeze registry is empty and the
+   campaign's implementation phase is done; what remains is the design front and the accepted
+   groups' reopen conditions.
+
+## Decisions this handoff makes (reversible; each lane records its own with the cycle's DECIDED sentence)
+
+- The detach hint leaves the status row below 109 columns. `prefix d` detaches a zz raw client
+  (its failure to do so under load is the stall's own symptom in the backpressure record), so the
+  hint duplicates tmux muscle memory and costs the clock on every stock attach.
+- The explicit `-f` stance is registered as accepted, not reopened: fabrico decided on 2026-09-05
+  that `zz/mux.conf` layers last. A script that wants a clean zz server pins HOME (and
+  XDG_CONFIG_HOME) as the harness does. Reopen if a corpus config relies on `-f` alone.
+- The theme-colours item goes to the client lane with a budget rather than to a decision, because
+  its close is mechanical once measured and a bump is a known shape (cycle 17 did one); if it does
+  not fit, the lane leaves it measured and open.
+
+# Earlier handoff: cycle 17 integrated on the macbook (2026-09-07 07:00Z)
 
 Cycle 17 was frozen on the ubuntu box at 23:44Z and resumed on the macbook two hours later with
 `opus-compat-run-17b.js` (workflow run `wf_8b3416e0-5d5`, 6.8 hours, four agents: the wire lane's
@@ -568,7 +656,7 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
    (`systemd-inhibit` from a non-tty shell did not stay up on the ubuntu box).
 6. Optional: carry the orchestrator's memory over as described under "Moving the Claude Code
    session itself". The repository and the board are the durable state.
-7. First task: the census below; the client gate that used to stand here is done.
+7. First task: launch cycle 18 as the head section says; the census is done and its fronts are minted.
 
 ## Historical machine notes (through cycle 13)
 
@@ -593,11 +681,11 @@ fronts under TRIAGE, commit the orchestration records under MAIN (a records-only
   Worktrees `~/dev/zz-opus-dint`, `~/dev/zz-opus-panes`, `~/dev/zz-opus-termopts` are warm at the
   cycle-9 tips. The `boxNote` and `gitNote` args for it: bash 3.2 and APFS traps, HTTPS origin,
   never switch to SSH. Use `workerJobs: 8, workerThreads: 4, gateJobs: 16, gateThreads: 8, shards: 8`. Cycle 17's gate ran here on 2026-09-07 with exactly those values;
-  its leftovers are `~/dev/zz-lane-daemon` (the wire lane's worktree at `711040e6`, 21 GB target, incremental cache
-  removed), `~/dev/zz-review-daemon` and `~/dev/zz-review-panes` (review scratch, no build of their own),
-  `~/dev/zz-review-target` (15 GB, the shared reviewer build directory the 17b script falls back to) and
-  `~/dev/zz-gate-target` (19 GB, warm at `aaf77cdc`'s code); the gate's own `zz-gate-*` worktrees are gone. The
-  disk was at 13 GB free when the cycle ended; the user's own `~/dev/zz/target` is 87 GB. Eleven corpus rows are
+  its leftovers (`~/dev/zz-lane-daemon`, `~/dev/zz-review-daemon`, `~/dev/zz-review-panes`,
+  `~/dev/zz-review-target`, `~/dev/zz-gate-target`, about 60 GB) were removed on 2026-09-07, as was the
+  Codex-era `~/dev/zz-attached-instrument` worktree after its five unpushed commits and uncommitted docs
+  diff went to origin as `codex/attached-client-instrument` at `ad29bc84`; nothing of the campaign remains
+  on the box but the user's checkout, and the disk is at about 250 GB free. Eleven corpus rows are
   red here at baseline and at every tip, so the summary cannot stamp on this box: `census-hooks`,
   `smoke/pane-tmux-path`, `smoke/resurrect-save`, `smoke/source-file-byte-name` (APFS), `smoke/status-background-jobs`,
   `smoke/plugin-runtime-continuum`, `smoke/plugin-runtime-vim-tmux-navigator` (the `/dev/pts/` guard), and the four

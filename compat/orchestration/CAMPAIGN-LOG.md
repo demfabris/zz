@@ -792,3 +792,28 @@ journal is the only place a finished worker's report lives, so export it before 
 A worker's own push is the last thing it does, after every proof at tip, so a lane that is "done"
 in git is still an hour from reporting when its proofs include the attached fixture and the zz
 suite twice; the next runner could push a `-wip` tip before the proofs and the real name after.
+
+## 2026-09-07: cycle 18 written and minted on the macbook, not launched
+
+After cycle 17's close-out, fabrico asked for the docs to carry the next machine through the last
+five items and for the macbook to be cleaned. The census registered two prose-only divergences as
+items first: `semantic:explicit-config-keeps-mux-conf-layer` (accepted under fabrico's 2026-09-05
+config.discovery stance; an explicit `-f` keeps the zz/mux.conf layer, which is how the macbook's
+real mux.conf reached `cli_binary` tests that do not pin HOME) and
+`presentation:tui-status-row-theme-colours-per-client` (open; the acceptance clause had said "OPEN,
+and it needs the wire" with no slug). Six open items across five groups; the meter stays 304/304;
+`cargo test -p zz-mux` and `tmux-tracker.py check` green on the records commit.
+
+`opus-compat-run-18.js` is `opus-compat-run-17.js` with two lanes and the cycle-17 lore folded in:
+client (the stdin stall, the detach hint decision, HOME pinning and the producer arm, the theme
+colours with the cycle's only possible bump 99 to 100, last and budgeted) and mux (buffer error
+wording, background if-shell insertion order after `cmdq_insert_after`). The desktop menu's mouse
+modality is a design front, `F-GUI-MENU-MOUSE-MODALITY`, not a lane. Board: `F-TUI-CLIENT-CLOSE`
+and `F-MUX-BUFFER-IFSHELL` minted as locks under TRIAGE, released.
+
+The macbook: the `zz-lane-daemon`, `zz-review-daemon` and `zz-review-panes` worktrees and the
+`zz-review-target` and `zz-gate-target` build directories were removed (about 60 GB). The Codex-era
+`codex/attached-client-instrument` worktree carried five unpushed commits and an uncommitted docs
+diff from 2026-09-04/05, so it was committed as WIP and pushed to origin at `ad29bc84` before
+removal (`git cherry` says none of its commits is on main by patch; the cycle-14 instrument lane
+landed the same instruments separately). HANDOFF.md's head is the launch recipe.

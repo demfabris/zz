@@ -2,7 +2,7 @@
 
 > Campaign delivery: **CYCLE 17 INTEGRATED: WIRE, PANES, CLIENT, PROOF; PROTOCOL V99; FROZEN SCOPE 304/304**
 >
-> Live work: **5 OPEN + 0 BLOCKED = 5 UNRESOLVED GROUPS (5 POST-FREEZE ITEMS)**
+> Live work: **5 OPEN + 0 BLOCKED = 5 UNRESOLVED GROUPS (6 POST-FREEZE ITEMS AFTER THE 2026-09-07 CENSUS)**
 >
 > Ledger settlement: **97.9% (238 of 243 known groups: 196 CLOSED + 42 ACCEPTED); SECONDARY DIAGNOSTIC**
 >
@@ -10,7 +10,7 @@
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **CYCLE 17 INTEGRATED ON THE UBUNTU BOX ON CLAUDE CODE OPUS 5 LANES AT XHIGH, WIRE THEN PANES THEN CLIENT THEN PROOF, ONE GATE ALONE ON THE MACBOOK.**
+> Orchestration: **CYCLE 17 INTEGRATED (LANES ON THE UBUNTU BOX, THE GATE ON THE MACBOOK); CYCLE 18 WRITTEN AND MINTED 2026-09-07 AS `compat/orchestration/opus-compat-run-18.js` (CLIENT THEN MUX, ONE GATE ALONE), TO BE LAUNCHED ON THE UBUNTU BOX PER `compat/orchestration/HANDOFF.md`.**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -86,8 +86,8 @@ percentage is a ledger health metric, not a compatibility claim.
 | Agreed-scope meter | 100.0% (304 of 304 items frozen on 2026-08-31), 65 of 65 groups done, 0 partially burned; park dispositions 15 of 15; `python3 compat/progress.py` |
 | Completed fixed cohort | Cycle 17: 4/4 lanes integrated; frozen meter remains 100.0% (304/304) |
 | Previous completed cohort | Cycle 16: 3/3 lanes integrated; frozen meter 100.0% |
-| Campaign point | The frozen scope is complete; 5 post-freeze items remain in five open groups, three of them opened by this gate from findings the lanes measured but had not registered. The attached-client proof passes at the merged tip; the corpus stamp could not be re-recorded on the gating machine, so the practical exit gate remains open for the recorded differences. |
-| Live registry | 47 active groups, 446 active items, 196 closed records |
+| Campaign point | The frozen scope is complete; 6 post-freeze items remain in five open groups after the 2026-09-07 census registered two prose-only divergences, three of them opened by this gate from findings the lanes measured but had not registered. The attached-client proof passes at the merged tip; the corpus stamp could not be re-recorded on the gating machine, so the practical exit gate remains open for the recorded differences. |
+| Live registry | 47 active groups, 448 active items, 196 closed records |
 | Active status | 5 open, 0 blocked, 42 accepted |
 | Known differentials | 4 registered cases: two GEO-only, one GEO plus OUT, and terminal-runtime with six FMT differences. Separately, 11 corpus rows diverge only on the macbook and diverge identically at the pre-merge baseline; they are this box's environment, not campaign state |
 
@@ -107,7 +107,7 @@ found during that wave.
 | Previous completed cohort | Cycle 16: 3/3 lanes integrated; frozen meter 100.0% |
 | New residual groups | 5 live post-freeze items across 5 open groups: the raw TUI's detach hint, the rest of the desktop menu's mouse modality, and three the gate opened from measurements the lanes left in prose - the TUI client's stdin stall under its own pty backpressure, the buffer-target error wording, and the order several background `if -b` jobs apply their inserted commands in |
 | Unresolved movement | Cycle 17 closes eight groups - the sourced raw-newline claim, the Control notification residues, the desktop drag clipboard field, the four pane runtime facts, the TUI sidebar rows, the plugin runtime paths, the census coverage lens and the harness proof holes - and opens four: one the client lane registered and three the gate did; five measured groups remain open, none blocked |
-| Live unresolved | 5 open + 0 blocked = 5 (5 post-freeze items) |
+| Live unresolved | 5 open + 0 blocked = 5 (6 post-freeze items) |
 | Practical exit gate | Open for five recorded behavioral groups; the attached-client fixture passes at the merged tip, but the corpus stamp stays at the last Ubuntu run |
 | Latest differential | 251 scenarios / 3,080 steps / 4 registered known rows plus 11 macbook environment rows; attached-client `PASS` at the merged tip `6fa9ef581e06`, not persisted; the stamp stays `6edc5c7ec425` |
 | Differential SHA-256 | `ec8f868aead7855a0fab58f94da6535d2a4a80c834b45886d70169e1d95d10d8` |

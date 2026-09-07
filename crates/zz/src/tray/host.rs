@@ -234,7 +234,7 @@ fn run(socket: PathBuf, server_id: u64, observe: bool) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     super::macos::run_helper(host, receiver)?;
     #[cfg(not(target_os = "macos"))]
-    run_events(host, receiver);
+    run_events(host, &receiver);
     drop(listener);
     Ok(())
 }
@@ -252,7 +252,7 @@ fn wait_for_daemon(mut lifetime: impl io::Read) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn run_events(mut host: Host, receiver: Receiver<HostEvent>) {
+fn run_events(mut host: Host, receiver: &Receiver<HostEvent>) {
     host.handle(HostEvent::ConfigChanged);
     while let Ok(event) = receiver.recv_blocking() {
         if !host.handle(event) {

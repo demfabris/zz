@@ -2888,6 +2888,12 @@ fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
         .find_map(|(candidate, dispatch)| (*candidate == name).then_some(*dispatch))
 }
 
+#[derive(Default)]
+struct BackgroundInsertions {
+    pending: BTreeMap<u64, Box<dyn FnOnce() + Send>>,
+    draining: bool,
+}
+
 struct Shared {
     inner: Mutex<ServerState>,
     client_writers: Mutex<BTreeMap<ClientId, Arc<OutboundMailbox>>>,
@@ -2900,6 +2906,8 @@ struct Shared {
     default_attach_effects: Mutex<()>,
     pipe_effects: Mutex<()>,
     prompt_history_effects: Mutex<()>,
+    background_insertions: Mutex<BackgroundInsertions>,
+    next_background_insertion: AtomicU64,
     /// Built on the first agent pane rather than at startup: a daemon that
     /// never opens one never touches the journal directory.
     #[cfg(feature = "agent")]
@@ -3972,6 +3980,8 @@ impl Shared {
             default_attach_effects: Mutex::new(()),
             pipe_effects: Mutex::new(()),
             prompt_history_effects: Mutex::new(()),
+            background_insertions: Mutex::new(BackgroundInsertions::default()),
+            next_background_insertion: AtomicU64::new(0),
             #[cfg(feature = "agent")]
             agent: Mutex::new(None),
             #[cfg(feature = "agent")]
@@ -10925,10 +10935,11 @@ impl Shared {
                             .yield_queue();
                     }
                     let shared = Arc::clone(self);
+                    let ticket = self.background_insertion_ticket();
                     let background_command = command.clone();
                     let worker_context = command_context.clone();
                     let policy = ShellJobSpawnPolicy {
-                        wait_for_start: draining && !parsed.background && delay.is_zero(),
+                        wait_for_start: delay.is_zero(),
                         shutdown_blocking: draining && !parsed.background && delay.is_zero(),
                         detached,
                     };
@@ -10937,7 +10948,11 @@ impl Shared {
                             return;
                         }
                         if let Ok(result) = result {
-                            let _ = shared.finish_run_shell(route, &background_command, &result);
+                            let applier = Arc::clone(&shared);
+                            applier.apply_background_insertion(ticket, move || {
+                                let _ =
+                                    shared.finish_run_shell(route, &background_command, &result);
+                            });
                         } else {
                             let error = ServerError::InvalidCommand(format!(
                                 "failed to run command: {background_command}"
@@ -11171,6 +11186,7 @@ impl Shared {
                     .yield_queue();
             }
             let shared = Arc::clone(self);
+            let ticket = self.background_insertion_ticket();
             let condition_for_error = condition.clone();
             let mut command_context = command_context;
             let control_target = command_context
@@ -11190,7 +11206,7 @@ impl Shared {
                 false,
                 Duration::ZERO,
                 ShellJobSpawnPolicy {
-                    wait_for_start: draining,
+                    wait_for_start: true,
                     shutdown_blocking: draining && !parsed.background,
                     detached,
                 },
@@ -11206,43 +11222,46 @@ impl Shared {
                     }
                     if let Ok(result) = result {
                         let Some(source) =
-                            select_if_shell_branch(&branches, result.status.success())
+                            select_if_shell_branch(&branches, result.status.success()).cloned()
                         else {
                             return;
                         };
-                        let mut context = command_context;
-                        context.retarget(&inserted_target);
-                        match shared.execute_inserted_commands_with_control_target(
-                            client,
-                            kind,
-                            &mut context,
-                            source,
-                            "<if-shell>",
-                            control_target,
-                        ) {
-                            Ok(result) => shared.route_background_inserted_output(
+                        let applier = Arc::clone(&shared);
+                        applier.apply_background_insertion(ticket, move || {
+                            let mut context = command_context;
+                            context.retarget(&inserted_target);
+                            match shared.execute_inserted_commands_with_control_target(
                                 client,
                                 kind,
-                                &context,
-                                "if-shell".to_owned(),
-                                &result.output,
-                            ),
-                            Err(_) if control_target.is_some() => {}
-                            Err(error) => {
-                                if let Some(output) = daemon_error_output(&error) {
-                                    shared.route_background_inserted_output(
-                                        client,
-                                        kind,
-                                        &context,
-                                        "if-shell".to_owned(),
-                                        output,
+                                &mut context,
+                                &source,
+                                "<if-shell>",
+                                control_target,
+                            ) {
+                                Ok(result) => shared.route_background_inserted_output(
+                                    client,
+                                    kind,
+                                    &context,
+                                    "if-shell".to_owned(),
+                                    &result.output,
+                                ),
+                                Err(_) if control_target.is_some() => {}
+                                Err(error) => {
+                                    if let Some(output) = daemon_error_output(&error) {
+                                        shared.route_background_inserted_output(
+                                            client,
+                                            kind,
+                                            &context,
+                                            "if-shell".to_owned(),
+                                            output,
+                                        );
+                                    }
+                                    shared.publish_background_command_error(
+                                        client, &context, &error, true,
                                     );
                                 }
-                                shared.publish_background_command_error(
-                                    client, &context, &error, true,
-                                );
                             }
-                        }
+                        });
                     } else if !draining {
                         let error = ServerError::InvalidCommand(format!(
                             "failed to run command: {condition_for_error}"
@@ -12282,6 +12301,35 @@ impl Shared {
             })
             .map(|_| ())
             .map_err(|error| DaemonError::Thread(error.to_string()))
+    }
+
+    fn background_insertion_ticket(&self) -> u64 {
+        self.next_background_insertion
+            .fetch_add(1, Ordering::AcqRel)
+    }
+
+    fn apply_background_insertion(&self, ticket: u64, work: impl FnOnce() + Send + 'static) {
+        {
+            let mut insertions = self.background_insertions.lock();
+            insertions.pending.insert(ticket, Box::new(work));
+            if insertions.draining {
+                return;
+            }
+            insertions.draining = true;
+        }
+        loop {
+            let Some((_, work)) = ({
+                let mut insertions = self.background_insertions.lock();
+                let next = insertions.pending.pop_first();
+                if next.is_none() {
+                    insertions.draining = false;
+                }
+                next
+            }) else {
+                return;
+            };
+            work();
+        }
     }
 
     fn spawn_shell_job(
@@ -68383,8 +68431,8 @@ set-option -g @alias-mixed-next yes
                 "save-buffer",
                 &["-".into()],
             ),
-            Err(DaemonError::Server(ServerError::MissingTarget(target)))
-                if target == "paste buffer"
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "no buffers"
         ));
     }
 
@@ -68412,6 +68460,40 @@ set-option -g @alias-mixed-next yes
             resolve_buffer(&inner, Some("named"), BufferMissing::NoBuffer).expect("named buffer");
         assert_eq!(named.data.as_ref(), b"alpha-omega");
         assert!(!named.automatic);
+    }
+
+    #[test]
+    fn background_insertions_drain_in_job_start_order_not_arrival_order() {
+        let shared = Arc::new(Shared::new(1));
+        let applied = Arc::new(Mutex::new(Vec::new()));
+
+        let tickets = (0..6)
+            .map(|_| shared.background_insertion_ticket())
+            .collect::<Vec<_>>();
+        assert_eq!(tickets, vec![0, 1, 2, 3, 4, 5]);
+
+        let recorder = |applied: &Arc<Mutex<Vec<u64>>>, label: u64| {
+            let applied = Arc::clone(applied);
+            move || applied.lock().push(label)
+        };
+
+        let nested_shared = Arc::clone(&shared);
+        let nested_applied = Arc::clone(&applied);
+        let nested_tickets = tickets.clone();
+        shared.apply_background_insertion(tickets[5], move || {
+            nested_applied.lock().push(5);
+            for ticket in [4_usize, 1, 3, 2] {
+                nested_shared.apply_background_insertion(
+                    nested_tickets[ticket],
+                    recorder(&nested_applied, ticket as u64),
+                );
+            }
+        });
+        assert_eq!(*applied.lock(), vec![5, 1, 2, 3, 4]);
+
+        applied.lock().clear();
+        shared.apply_background_insertion(tickets[0], recorder(&applied, 0));
+        assert_eq!(*applied.lock(), vec![0]);
     }
 
     #[test]
@@ -68680,8 +68762,8 @@ set-option -g @alias-mixed-next yes
         drop(inner);
         assert!(matches!(
             shared.buffer_command(&context, "show-buffer", &[]),
-            Err(DaemonError::Server(ServerError::MissingTarget(target)))
-                if target == "paste buffer"
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "no buffers"
         ));
     }
 

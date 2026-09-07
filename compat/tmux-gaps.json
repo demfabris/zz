@@ -239,33 +239,6 @@
       "reason": "The GUI superset needs its own names so tmux spellings can keep frozen tmux meaning. Pin citation added 2026-09-06. The pin's whole command namespace is one array, cmd_table in cmd.c, which holds 92 entries at d77c9dc6 and is what compat/tmux-oracle.json's commands list is derived from; a name that is not in it is not a tmux command, and tmux has no vendor-prefix convention that would let a superset hide inside it. Measured: every one of zz's 22 native command names is absent from that array and from every entry's alias list, which crates/zz-mux/src/compat_manifest_tests.rs re-checks against the oracle on every registry edit. The product stance is that the superset is additive and audited: a zz-native name may never equal a tmux exact spelling or alias, so a config written for tmux keeps tmux meaning and a zz name can never be shadowed into one."
     },
     {
-      "id": "config.background-if-shell-order",
-      "title": "Apply commands inserted by background if-shell jobs in the pin's order",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "now",
-      "ease": "medium",
-      "impact": [
-        "daily",
-        "scripts"
-      ],
-      "owner": "mux",
-      "items": [
-        "semantic:background-if-shell-insertion-order"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz-mux/src/command.rs",
-        "scenario:compat/scenarios/smoke/plugin-runtime-oh-my-tmux.txt",
-        "file:compat/scenarios/smoke/fixtures/oh-my-tmux-runtime.py"
-      ],
-      "acceptance": [
-        "OPEN: when one sourced file runs several `if -b` jobs whose conditions all succeed and whose commands write the same thing, both binaries end on the same value. Measured on this box outside the harness, both binaries on throwaway sockets with a fake xsel first on PATH, XDG_SESSION_TYPE pinned to x11 and oh-my-tmux's .tmux.conf sourced: the pin's prefix y ends as the .tmux.conf:131 xsel binding and zz's ends as the .tmux.conf:136 pbcopy binding, while `run-shell 'command -v pbcopy'` answers /usr/bin/pbcopy on BOTH, so the two binaries agree about what exists and disagree only about which of the two matching `if -b` branches leaves the surviving bind. The pin keeps the FIRST matching branch's command, zz keeps the LAST."
-      ],
-      "depends_on": [],
-      "reason": "Opened 2026-09-07 by the cycle-17 integration gate, which hit it while gating the proof lane's new oh-my-tmux differential on macOS. Measured on this box outside the harness, both binaries on throwaway sockets with a fake xsel first on PATH, XDG_SESSION_TYPE pinned to x11 and oh-my-tmux's .tmux.conf sourced: the pin's prefix y ends as the .tmux.conf:131 xsel binding and zz's ends as the .tmux.conf:136 pbcopy binding, while `run-shell 'command -v pbcopy'` answers /usr/bin/pbcopy on BOTH, so the two binaries agree about what exists and disagree only about which of the two matching `if -b` branches leaves the surviving bind. The pin keeps the FIRST matching branch's command, zz keeps the LAST. The fact is invisible on Linux, where only the xsel branch can match, which is why nine cycles of corpus runs never saw it; it takes a platform where two of the config's six ordered clipboard branches are both true. cmdq_insert_after is the pin's mechanism and the likely source of the reversal, so this is the same family as the inserted-command work pane.runtime-facts closed, but a distinct fact: that group settled which CONTEXT an inserted command runs in, this one is the ORDER several of them are applied in. It is nobody's regression - it reproduces on origin/main - and it matters to any plugin that picks a tool by racing feature tests, which is a common config idiom. The oh-my-tmux differential deliberately pins itself to a single matching branch so that it proves the plugin's own binding fires rather than silently re-asserting this ordering."
-    },
-    {
       "id": "desktop.overlay-consumers",
       "title": "Give every daemon overlay payload a desktop consumer",
       "decision": "adopt",
@@ -2334,6 +2307,20 @@
         "scenario:compat/scenarios/micro-flags.txt"
       ],
       "resolution": "The pin's outer send-keys grammar is c:FHKlMN:Rt:X. zz removed C, P, and o from the outer catalog and returns the exact unknown-flag error when they appear there; the tracked c, K, and R gaps remain under terminal.key-control, and M remains under mouse.bound-context. The copy-mode parser recognizes -C and -P on the pin's 14 copy-family grammar entries and -o on next-prompt and previous-prompt; -- terminates its flag scan. Invalid local flags, actions, and arity produce no command error or copy action and reset the copy-mode repeat prefix to 1. Existing CopyModeCopy clipboard, paste-buffer, and pipe fields retain their behavior. Execution for copy-line, copy-line-and-cancel, copy-pipe-line, and copy-pipe-line-and-cancel remains under terminal.key-control through semantic:send-keys-copy-command-shape. The pin also redraws the first copy-mode line after a local parser failure; zz has no no-op redraw effect, so that presentation residue stays with the same item."
+    },
+    {
+      "id": "config.background-if-shell-order",
+      "title": "Apply commands inserted by background if-shell jobs in the pin's order",
+      "closed_on": "2026-09-07",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/if-shell-background-order.txt",
+        "file:compat/scenarios/fixtures/if-shell-background-order.sh",
+        "scenario:compat/scenarios/smoke/plugin-runtime-oh-my-tmux.txt",
+        "file:compat/scenarios/smoke/fixtures/oh-my-tmux-runtime.py",
+        "scenario:compat/scenarios/jobs-run-shell-order.txt"
+      ],
+      "resolution": "Opened 2026-09-07 by the cycle-17 integration gate while gating the proof lane's oh-my-tmux differential on macOS; closed 2026-09-07 with semantic:background-if-shell-insertion-order proved. THE OLD CLAUSE, quoted: `the pin's prefix y ends as the .tmux.conf:131 xsel binding and zz's ends as the .tmux.conf:136 pbcopy binding ... The pin keeps the FIRST matching branch's command, zz keeps the LAST.` IT DOES NOT REPRODUCE ON THIS BOX. Re-run three times per binary outside the harness, both on throwaway `-L zzprobe-$$ -f /dev/null` sockets, with a fake xsel and a fake pbcopy first on PATH, XDG_SESSION_TYPE=x11 and oh-my-tmux's .tmux.conf sourced: BOTH binaries end on the .tmux.conf:136 pbcopy binding, 3/3 each. The stated mechanism does not hold either. cmd-if-shell.c sets cdata->item only when the command waits, so for `if -b` it stays NULL and cmd_if_shell_callback takes cmdq_append, appending the branch's command to the tail of the queue; cmdq_insert_after is the FOREGROUND if-shell path and the -F path, not the background one. The pin's rule for a background branch is therefore completion order, not file order and not insert-after. WHAT IS ACTUALLY DIVERGENT, measured this cycle. One config holding six `if -b true 'set -ag @order N'` lines, N = 1..6, loaded at server start with -f and read back with `display -p '#{@order}'` on a bounded poll: the pin answers 123456 on 8 of 8 runs, and 123 on 8 of 8 with three lines. Pre-change zz answered a different permutation on 8 of 8 at six lines (461532, 462135, 153426, 241536, 234165, 642513, 426513, 615243) and on 1 of 8 at three; through `source-file` from a command client at six lines it answered a scrambled order on 4 of 8. The cause is NOT the jobs. With each branch's condition changed to `echo N >> FILE`, that file reads 123456 on 6 of 6 runs on BOTH binaries, so the shell jobs start and finish in file order on both, and only the step that APPLIES each finished branch's command diverged: the pin applies them on its one command queue, zz applied each on the job's own worker thread, so six applies ran concurrently and landed in whatever order the threads were scheduled. THE FIX, in crates/zz-daemon/src/daemon.rs. A background `if -b` or `run-shell -b` takes a ticket from `background_insertion_ticket` on the command queue, in queue order, before its job is spawned. When the job finishes, the callback hands its work to `apply_background_insertion` instead of running it: the first arrival becomes the drainer and every later arrival parks its work in a BTreeMap keyed by ticket, so the drainer always runs the LOWEST-ticketed work that is currently ready. That is libevent's collect-then-dispatch, which is what makes the pin deterministic. Background jobs are also now forked inline on the command queue (wait_for_start on a zero-delay background job), the way the pin's job_run forks inside cmd_if_shell_exec, so the jobs start in queue order too. Nothing wire-reachable changed and PROTOCOL_VERSION stayed at 99. AFTER THE FIX zz answers 123456 on 8 of 8 at six lines and 123 on 8 of 8 at three, at server start and through source-file, matching the pin; and a genuinely slower first branch still lands LAST on both, which is the check that the fix follows the pin's completion-order rule rather than forcing file order: with `if -b 'sleep 0.3'` on line one and `true` on lines two to six, both binaries answer 234561, 4 of 4 each. RESIDUAL, recorded rather than claimed: the two binaries part company on how slow a condition has to be before it reorders. With the first branch's condition at `sleep 0.001` through `sleep 0.02` the pin already answers 234561 while zz answers 123456 (0.001 and 0.005) or 213456/231456 (0.02), because zz's per-job start costs roughly 5 to 20 ms more than the pin's, so a condition only a millisecond slower is still noise on zz. That is job start latency, not insertion order, and it is a separate fact from this group's; at 0.1 s and above the two agree. PROVED BY compat/scenarios/if-shell-background-order.txt, whose fixture compat/scenarios/fixtures/if-shell-background-order.sh sources three equal-cost rounds and one slow-first round on whichever binary the harness handed it and writes the four answers into a paste buffer the scenario reads back with `out: show-buffer`; both sides print equal-cost-a/b/c=123456 and slow-first=234561. daemon::tests::background_insertions_drain_in_job_start_order_not_arrival_order pins the drain rule itself. Every smoke/plugin-runtime-* scenario stays green, oh-my-tmux included, as do jobs-run-shell-order, jobs-environment, the config-*, source-file* and args-parse-if-shell/run-shell scenarios."
     },
     {
       "id": "config.discovery",

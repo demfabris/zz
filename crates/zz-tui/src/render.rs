@@ -3268,12 +3268,18 @@ mod tests {
         for customized in [false, true] {
             let mut model = block_model(40, 10);
             assert!(!model.sidebar_visible());
-            model.set_status(block_status(vec!["[rows] 0:bash*   \"ubuntu\" 11:11"], customized));
+            model.set_status(block_status(
+                vec!["[rows] 0:bash*   \"ubuntu\" 11:11"],
+                customized,
+            ));
             let mut renderer = Renderer::new();
             renderer.paint_status_block(&model, true);
             let output = String::from_utf8(renderer.output).unwrap();
             assert!(!output.contains("Ctrl-\\ detach"), "{output:?}");
-            assert!(output.contains("[rows] 0:bash*   \"ubuntu\" 11:11"), "{output:?}");
+            assert!(
+                output.contains("[rows] 0:bash*   \"ubuntu\" 11:11"),
+                "{output:?}"
+            );
         }
 
         let mut sidebar_model = block_model(120, 10);

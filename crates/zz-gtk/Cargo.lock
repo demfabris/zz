@@ -2619,7 +2619,6 @@ dependencies = [
  "gpui_macros",
  "gpui_shared_string",
  "gpui_util",
- "hdrhistogram",
  "heapless 0.9.3",
  "http_client",
  "image",
@@ -2865,16 +2864,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "foldhash",
-]
-
-[[package]]
-name = "hdrhistogram"
-version = "7.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f49d1053f4708f0af3cf9fc5bffc7e68a914a3c45becb231c80068c9c3f78bea"
-dependencies = [
- "byteorder",
- "num-traits",
 ]
 
 [[package]]
@@ -8142,7 +8131,7 @@ dependencies = [
 
 [[package]]
 name = "zz-browser"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "async-channel",
  "base64 0.22.1",
@@ -8162,21 +8151,29 @@ dependencies = [
  "thiserror 2.0.20",
  "url",
  "wgpu",
+ "zz-client",
  "zz-protocol",
+ "zz-terminal",
 ]
 
 [[package]]
 name = "zz-client"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
+ "agent-client-protocol-schema",
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
  "unicode-width",
+ "url",
  "zz-protocol",
  "zz-terminal",
 ]
 
 [[package]]
 name = "zz-daemon"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "agent-client-protocol",
  "async-channel",
@@ -8236,7 +8233,7 @@ dependencies = [
 
 [[package]]
 name = "zz-mux"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "glob",
@@ -8250,10 +8247,12 @@ dependencies = [
 
 [[package]]
 name = "zz-protocol"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
+ "base64 0.22.1",
  "postcard",
  "serde",
+ "serde_json",
  "smallvec",
  "thiserror 2.0.20",
  "unicode-width",
@@ -8262,7 +8261,7 @@ dependencies = [
 
 [[package]]
 name = "zz-terminal"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "async-channel",
  "crossbeam-channel",

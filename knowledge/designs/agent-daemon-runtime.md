@@ -105,11 +105,14 @@ hundreds of updates, so agent streams get their own `OutboundState` lane, preced
   frames per second, not one per token.
 - Each pane also keeps a `MAX_REPLAY_RING_BYTES` (2 × 9 MiB = 18 MiB) in-memory ring of encoded items. A
   replay inside the ring is served straight to the asking client and nothing else moves. A
-  replay older than the ring falls back to the journal. The lane emits cached adapter `Ready`,
+  replay older than the ring falls back to the journal when the journal can vouch for the whole
+  session (`AgentJournal::is_complete_for`). The lane emits cached adapter `Ready`,
   `SessionReset { restoring: true }`, the journalled updates, and `SessionReady` with the current
   session/configuration as freshly numbered items, followed by an ordered `StateSynced` snapshot.
   The client rebuilds the transcript, then returns to the daemon's current Running, Failed,
-  permission, or Ready phase even though reliable state frames drain first.
+  permission, or Ready phase even though reliable state frames drain first. Without a trustworthy
+  journal the reset stays private to the asking client (stamped with the evicted sequence and
+  followed by the ring's contents); only the closing metadata is stamped live for every viewer.
 - Drain order: `reliable` → `command_output` → `agent` (round-robin) → `terminals`.
 - Overflow does NOT close the connection: the pane's lane is cleared and a tiny
   `AgentLagged { pane, next_seq }` marker queued; the client re-requests `AgentReplay` from its

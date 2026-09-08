@@ -1,9 +1,16 @@
 # Update Log
 
+## 2026-09-08
+* **Update**: Corrected the architecture data-flow page to describe daemon startup config precedence: explicit files or discovered tmux candidates, followed by zz/mux.conf.
+
 ## 2026-09-07
 * **Update**: Refreshed GTK preferences against the current desktop: Status Bar, Browser and Agent settings, live font and animation preferences, shared split-binding edits, config editors with draft preservation, and Ghostty-only import.
 * **Fix**: GTK now starts a compatible local daemon when the socket is absent and creates the default session in the launch directory. The development launcher builds and selects the matching zz executable.
 * **Update**: Rebased the GTK client onto 04d28cb1 and refreshed terminal workflows, daemon-owned Agent panes, native CEF Browser panes, host routing, focus replay, and GNOME navigation.
+* **Update**: Moved terminal painting, popup geometry and styling, status tabs, sidebar interactions, and Agent slash-command rows into shared components used by desktop and browser. Browser terminals now support Kitty images, scrollbars, cursor blinking, and selection autoscroll; pane appearance settings use the desktop groups.
+* **Update**: Desktop and browser now share command-palette presentation and completion, floating menus and confirmations, terminal search overlays, and Agent cards. Recorded remaining browser differences in popup styling, status and sidebar controls, pane settings, and terminal painting.
+* **Update**: Desktop and browser clients now share Agent composer controls and history/path picker presentation. Browser choosers use the desktop tree and buffer rows, and Agent controls retain provider capabilities and options.
+* **Creation**: Added the GPUI browser client build, gateway, remote forwarding, and validation playbook.
 * **Update**: Browser popups now keep their Chromium session when the desktop adopts them into a tab, preserving blank-document writes, delayed navigation, named-window reuse, opener messages, and JavaScript closure. Popup tabs display about:blank content and use readback OSR to avoid replacing an authentication session during texture fallback. Closing an opener drains pending children, and shutdown waits for their CEF close callbacks. The browser fixture includes a temporary-profile popup regression and a manual popup page.
 
 ## 2026-09-05

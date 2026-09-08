@@ -1,24 +1,34 @@
 use std::{
     collections::{BTreeSet, HashMap},
-    f32::consts::PI,
-    ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
 };
-use zz_ui::agent::composer::{COMPOSER_FOOTER_HEIGHT, composer_tail_clearance};
+use zz_ui::agent::composer::composer_tail_clearance;
 #[cfg(test)]
 use zz_ui::agent::composer::{COMPOSER_OUTER_PADDING, composer_total_height};
+use zz_ui::agent::controls::{
+    AgentControlChoice, ComposerAction, agent_chrome_button, agent_config_picker, composer_action,
+    composer_action_button, context_usage_meter, git_summary_footer,
+};
+#[cfg(test)]
+use zz_ui::agent::controls::{context_usage_fraction, context_usage_tooltip, git_file_count_label};
+#[cfg(test)]
+use zz_ui::agent::presentation::MAX_RENDERED_ERROR_BYTES;
+use zz_ui::agent::presentation::{
+    empty_state, error_card, permission_card, permission_option, rendered_error,
+};
 
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
 use gpui::{
-    Anchor, AnyElement, Context, ElementId, Entity, EntityId, FocusHandle, Focusable, Hsla, Image,
-    IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, PathBuilder,
-    Render, Role, ScrollStrategy, SharedString, Subscription, Transformation,
-    UniformListScrollHandle, Window, canvas, div, ease_in_out, percentage, point, prelude::*, px,
-    relative, uniform_list,
+    Anchor, AnyElement, Context, Entity, EntityId, FocusHandle, Focusable, Image, IntoElement,
+    KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render, ScrollStrategy,
+    SharedString, Subscription, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
-use zz_protocol::{AgentDescriptor, AgentGitSummary, AgentProvider, CommandInvocation, PaneId};
+use zz_client::agent_completion::{
+    CommandCompletion, active_command_hint, bare_command_name, completion_query, completion_score,
+    meaningful_command_description, ranked_completions,
+};
+use zz_protocol::{AgentDescriptor, AgentProvider, CommandInvocation, PaneId};
 #[cfg(all(test, not(target_os = "macos")))]
 use zz_ui::agent::DisclosureKind;
 use zz_ui::agent::{
@@ -30,17 +40,12 @@ use zz_ui::agent::{
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
-    ActiveTheme as _, CHROME_GAP, Colorize as _, Disableable as _, Icon, IconName, Sizable as _,
-    Size,
+    ActiveTheme as _, CHROME_GAP, Colorize as _, Disableable as _, IconName, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp},
+    input::{IndentInline, InputEvent, InputState, MoveDown, MoveUp},
     menu::{DropdownMenu as _, PopupMenuItem},
-    pulse::pulse_phase,
     scroll::Scrollbar,
-    tag::Tag,
-    tooltip::Tooltip,
-    v_flex,
 };
 
 use crate::{
@@ -58,26 +63,6 @@ use crate::{
 };
 
 const AGENT_KEY_CONTEXT: &str = "Agent";
-const COMPLETION_ROW_HEIGHT: f32 = 52.0;
-const MAX_VISIBLE_COMPLETION_ROWS: u8 = 6;
-const MAX_COMPLETION_RESULTS: usize = 64;
-const HISTORY_ROW_HEIGHT: f32 = 52.0;
-/// Labelled chrome pills sit a step under the square icon buttons: the
-/// label carries them, so the box does not have to.
-const CHROME_PILL_HEIGHT: f32 = 24.0;
-const CONTEXT_USAGE_RING_SIZE: f32 = 16.0;
-const CONTEXT_USAGE_STROKE_WIDTH: f32 = 2.0;
-const SPINNER_PERIOD: Duration = Duration::from_millis(800);
-const MAX_RENDERED_ERROR_BYTES: usize = 1024;
-
-fn agent_spinner(size: Size, color: Hsla, view: EntityId, cx: &mut gpui::App) -> AnyElement {
-    let phase = ease_in_out(pulse_phase(SPINNER_PERIOD, view, cx));
-    Icon::new(IconName::Loader)
-        .with_size(size)
-        .text_color(color)
-        .transform(Transformation::rotate(percentage(phase)))
-        .into_any_element()
-}
 
 /// Whether the pane shows busy chrome. This reads the connection phase and
 /// nothing else: an adapter that never sends a final tool update leaves rows
@@ -99,12 +84,6 @@ const fn directory_picker_enabled(
     local_host: bool,
 ) -> bool {
     local_host && connection.accepts_prompt() && !pending_permission
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct CommandCompletion {
-    command: AgentCommand,
-    replacement: Range<usize>,
 }
 
 enum TimelineStoreUpdate {
@@ -280,209 +259,6 @@ impl TimelineModel {
 
 fn replacement_preserves_folding(previous: &AgentEntry, next: &AgentEntry) -> bool {
     timeline_group_kind(previous) == timeline_group_kind(next)
-}
-
-/// What the composer's single action button does right now. A turn already
-/// running turns Send into Queue — zz dispatches a queued prompt as the next
-/// turn, it never injects into the live one — and an empty composer under a
-/// live turn turns it into Stop.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ComposerAction {
-    Send,
-    Queue,
-    Stop,
-}
-
-const fn composer_action(active_turn: bool, has_content: bool) -> ComposerAction {
-    match (active_turn, has_content) {
-        (false, _) => ComposerAction::Send,
-        (true, true) => ComposerAction::Queue,
-        (true, false) => ComposerAction::Stop,
-    }
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn context_usage_fraction(used: u64, size: u64) -> f64 {
-    if size == 0 {
-        0.0
-    } else {
-        (used.min(size) as f64 / size as f64).clamp(0.0, 1.0)
-    }
-}
-
-fn context_usage_tooltip(used: u64, size: u64) -> String {
-    if size == 0 {
-        "Context window usage unavailable".to_owned()
-    } else {
-        format!(
-            "{used} of {size} context tokens used ({:.0}%)",
-            context_usage_fraction(used, size) * 100.0
-        )
-    }
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn context_usage_meter(pane: PaneId, used: u64, size: u64, cx: &gpui::App) -> AnyElement {
-    let progress = context_usage_fraction(used, size) as f32;
-    let tooltip = context_usage_tooltip(used, size);
-    let track_color = cx.theme().foreground.muted().opacity(0.22);
-    let progress_color = cx.theme().foreground.muted();
-    let ring = canvas(
-        |_, _, _| (),
-        move |bounds, (), window, _| {
-            let stroke = px(CONTEXT_USAGE_STROKE_WIDTH);
-            let radius = px((CONTEXT_USAGE_RING_SIZE - CONTEXT_USAGE_STROKE_WIDTH) / 2.0);
-            let center_x = bounds.origin.x + bounds.size.width / 2.0;
-            let center_y = bounds.origin.y + bounds.size.height / 2.0;
-
-            let mut track = PathBuilder::stroke(stroke);
-            track.move_to(point(center_x + radius, center_y));
-            track.arc_to(
-                point(radius, radius),
-                px(0.0),
-                false,
-                true,
-                point(center_x - radius, center_y),
-            );
-            track.arc_to(
-                point(radius, radius),
-                px(0.0),
-                false,
-                true,
-                point(center_x + radius, center_y),
-            );
-            track.close();
-            if let Ok(path) = track.build() {
-                window.paint_path(path, track_color);
-            }
-
-            if progress <= 0.0 {
-                return;
-            }
-            let mut fill = PathBuilder::stroke(stroke);
-            if progress >= 0.999 {
-                fill.move_to(point(center_x + radius, center_y));
-                fill.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    false,
-                    true,
-                    point(center_x - radius, center_y),
-                );
-                fill.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    false,
-                    true,
-                    point(center_x + radius, center_y),
-                );
-                fill.close();
-            } else {
-                fill.move_to(point(center_x, center_y - radius));
-                let angle = -PI / 2.0 + progress * 2.0 * PI;
-                fill.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    progress > 0.5,
-                    true,
-                    point(
-                        center_x + radius * angle.cos(),
-                        center_y + radius * angle.sin(),
-                    ),
-                );
-            }
-            if let Ok(path) = fill.build() {
-                window.paint_path(path, progress_color);
-            }
-        },
-    )
-    .size(px(CONTEXT_USAGE_RING_SIZE));
-    let aria_value = format!("{:.0}%", f64::from(progress) * 100.0);
-    let hover_tooltip = tooltip.clone();
-
-    div()
-        .id(("agent-context-usage", pane.0))
-        .role(Role::ProgressIndicator)
-        .aria_label(tooltip)
-        .aria_value(aria_value)
-        .flex()
-        .flex_none()
-        .size(px(28.0))
-        .items_center()
-        .justify_center()
-        .tooltip(move |window, cx| Tooltip::new(hover_tooltip.clone()).build(window, cx))
-        .child(ring)
-        .into_any_element()
-}
-
-fn git_file_count_label(count: u32) -> String {
-    if count == 1 {
-        "1 file".to_owned()
-    } else {
-        format!("{count} files")
-    }
-}
-
-fn git_summary_footer(pane: PaneId, git: &AgentGitSummary, cx: &gpui::App) -> AnyElement {
-    let branch = git.branch.clone().map(SharedString::from);
-    let files = git_file_count_label(git.changed_files);
-    let tooltip = match git.branch.as_deref() {
-        Some(branch) => format!(
-            "{branch}: {files}, +{} additions, -{} deletions",
-            git.additions, git.deletions
-        ),
-        None => format!(
-            "Detached HEAD: {files}, +{} additions, -{} deletions",
-            git.additions, git.deletions
-        ),
-    };
-    let hover_tooltip = tooltip.clone();
-
-    h_flex()
-        .id(("agent-git-summary", pane.0))
-        .min_w_0()
-        .h(px(COMPOSER_FOOTER_HEIGHT))
-        .items_center()
-        .gap_2()
-        .text_size(zz_ui::rems_from_px(11.0))
-        .tooltip(move |window, cx| Tooltip::new(hover_tooltip.clone()).build(window, cx))
-        .child(
-            Icon::new(IconName::GitBranch)
-                .xsmall()
-                .flex_none()
-                .text_color(cx.theme().foreground.muted()),
-        )
-        .when_some(branch, |this, branch| {
-            this.child(
-                div()
-                    .min_w_0()
-                    .max_w(px(220.0))
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .whitespace_nowrap()
-                    .text_color(cx.theme().foreground.muted())
-                    .child(branch),
-            )
-        })
-        .child(
-            div()
-                .flex_none()
-                .text_color(cx.theme().foreground.muted())
-                .child(files),
-        )
-        .child(
-            div()
-                .flex_none()
-                .text_color(cx.theme().success)
-                .child(format!("+{}", git.additions)),
-        )
-        .child(
-            div()
-                .flex_none()
-                .text_color(cx.theme().danger)
-                .child(format!("-{}", git.deletions)),
-        )
-        .into_any_element()
 }
 
 /// What a wizard interaction asks the controller to do.
@@ -1316,11 +1092,11 @@ impl AgentView {
         let Some(completion) = self.completions.get(index).cloned() else {
             return;
         };
-        let name = bare_command_name(&completion.command.name);
+        let insertion = completion.insertion();
         self.completion_dismissed = true;
         self.input.update(cx, |input, cx| {
             input.set_selected_range(completion.replacement, cx);
-            input.replace(format!("/{name} "), window, cx);
+            input.replace(insertion, window, cx);
         });
         self.completions = Arc::from([]);
         self.completion_selected = None;
@@ -1516,23 +1292,7 @@ impl AgentView {
             AgentConnectionState::Failed => "The agent could not start this session.".into(),
             AgentConnectionState::Disconnected => "The ACP agent is offline.".into(),
         };
-        let busy = pane_is_busy(state.connection);
-        v_flex()
-            .w_full()
-            .py(px(48.0))
-            .items_center()
-            .gap_2()
-            .text_size(zz_ui::rems_from_px(12.0))
-            .text_color(cx.theme().foreground.muted())
-            .when(busy, |this| {
-                this.child(agent_spinner(
-                    Size::Small,
-                    cx.theme().foreground.muted(),
-                    view,
-                    cx,
-                ))
-            })
-            .child(message)
+        empty_state(message, pane_is_busy(state.connection), view, cx)
     }
 
     /// One pending permission request at a time, with its page counter, its
@@ -1576,112 +1336,48 @@ impl AgentView {
                         button.danger()
                     }
                 };
-                h_flex()
-                    .id(format!(
+                permission_option(
+                    format!(
                         "agent-permission-option-{}-{request_id}-{index}",
                         self.pane.0
-                    ))
-                    .w_full()
-                    .items_center()
-                    .gap_2()
-                    .rounded(cx.theme().radius)
-                    .px_1()
-                    .py(px(2.0))
-                    .when(index == highlighted, |this| {
-                        this.bg(cx.theme().background.hover())
-                    })
-                    .on_hover(move |hovered, _, cx| {
-                        if *hovered {
-                            hover_view.update(cx, |view, cx| {
-                                if view.permission_wizard.highlight(index) {
-                                    cx.notify();
-                                }
-                            });
-                        }
-                    })
-                    .when(index < 9, |this| {
-                        this.child(
-                            div()
-                                .flex_none()
-                                .rounded(cx.theme().radius)
-                                .bg(cx.theme().background.raised(2))
-                                .px_2()
-                                .py(px(2.0))
-                                .text_size(zz_ui::rems_from_px(9.0))
-                                .text_color(cx.theme().foreground.muted())
-                                .child(format!("{}", index + 1)),
-                        )
-                    })
-                    .child(button)
+                    ),
+                    index,
+                    index == highlighted,
+                    button,
+                    cx,
+                )
+                .on_hover(move |hovered, _, cx| {
+                    if *hovered {
+                        hover_view.update(cx, |view, cx| {
+                            if view.permission_wizard.highlight(index) {
+                                cx.notify();
+                            }
+                        });
+                    }
+                })
+                .into_any_element()
             })
             .collect::<Vec<_>>();
         let cancel_view = view.clone();
         Some(
-            v_flex()
-                .w_full()
-                .gap_2()
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().warning.outline())
-                .bg(cx.theme().warning.fill())
-                .p_3()
-                .child(
-                    h_flex()
-                        .w_full()
-                        .items_center()
-                        .gap_2()
-                        .text_size(zz_ui::rems_from_px(12.0))
-                        .child(
-                            Icon::new(IconName::TriangleAlert)
-                                .small()
-                                .flex_none()
-                                .text_color(cx.theme().warning),
-                        )
-                        .child(div().min_w_0().flex_1().child(permission.title.clone()))
-                        .when_some(counter, |this, counter| {
-                            this.child(
-                                div()
-                                    .flex_none()
-                                    .rounded(cx.theme().radius)
-                                    .bg(cx.theme().background.raised(2))
-                                    .px_2()
-                                    .py(px(2.0))
-                                    .text_size(zz_ui::rems_from_px(9.0))
-                                    .text_color(cx.theme().foreground.muted())
-                                    .child(counter),
-                            )
-                        }),
-                )
-                .child(v_flex().w_full().gap_1().children(options))
-                .child(
-                    h_flex()
-                        .w_full()
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_size(zz_ui::rems_from_px(9.0))
-                                .text_color(cx.theme().foreground.muted())
-                                .child("1-9 picks · enter confirms · esc cancels"),
-                        )
-                        .child(
-                            Button::new(format!(
-                                "agent-permission-cancel-{}-{request_id}",
-                                self.pane.0
-                            ))
-                            .ghost()
-                            .small()
-                            .label("Cancel request")
-                            .on_click(move |_, _, cx| {
-                                cancel_view.update(cx, |view, cx| {
-                                    view.cancel_permission(cx);
-                                });
-                                cx.stop_propagation();
-                            }),
-                        ),
-                )
-                .into_any_element(),
+            permission_card(
+                permission.title.clone(),
+                counter.map(Into::into),
+                options,
+                Button::new(format!(
+                    "agent-permission-cancel-{}-{request_id}",
+                    self.pane.0
+                ))
+                .ghost()
+                .small()
+                .label("Cancel request")
+                .on_click(move |_, _, cx| {
+                    cancel_view.update(cx, Self::cancel_permission);
+                    cx.stop_propagation();
+                }),
+                cx,
+            )
+            .into_any_element(),
         )
     }
 
@@ -1736,71 +1432,57 @@ impl AgentView {
             .or_else(|| self.submission_error.clone())?;
         let retry_controller = self.controller.clone();
         let pane = self.pane;
-        Some(
-            v_flex()
-                .w_full()
-                .gap_2()
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().danger.outline())
-                .bg(cx.theme().danger.fill())
-                .p_3()
-                .text_size(zz_ui::rems_from_px(11.0))
-                .child(rendered_error(&error))
-                .when(
-                    runtime_error.is_some() && state.connection == AgentConnectionState::Failed,
-                    |this| {
-                        let auth_buttons =
-                            state
-                                .auth_methods
-                                .iter()
-                                .enumerate()
-                                .map(|(index, method)| {
-                                    let controller = self.controller.clone();
-                                    let method_id = method.id.clone();
-                                    Button::new(format!("agent-auth-{}-{index}", self.pane.0))
-                                        .secondary()
-                                        .small()
-                                        .label(method.name.clone())
-                                        .tooltip(method.description.clone().unwrap_or_else(|| {
-                                            "Authenticate with the agent".to_owned()
-                                        }))
-                                        .on_click(move |_, _, cx| {
-                                            controller.update(cx, |controller, cx| {
-                                                controller.authenticate(
-                                                    pane,
-                                                    method_id.clone(),
-                                                    cx,
-                                                );
-                                            });
-                                        })
+        Some(error_card(&error, cx).when(
+            runtime_error.is_some() && state.connection == AgentConnectionState::Failed,
+            |this| {
+                let auth_buttons = state
+                    .auth_methods
+                    .iter()
+                    .enumerate()
+                    .map(|(index, method)| {
+                        let controller = self.controller.clone();
+                        let method_id = method.id.clone();
+                        Button::new(format!("agent-auth-{}-{index}", self.pane.0))
+                            .secondary()
+                            .small()
+                            .label(method.name.clone())
+                            .tooltip(
+                                method
+                                    .description
+                                    .clone()
+                                    .unwrap_or_else(|| "Authenticate with the agent".to_owned()),
+                            )
+                            .on_click(move |_, _, cx| {
+                                controller.update(cx, |controller, cx| {
+                                    controller.authenticate(pane, method_id.clone(), cx);
                                 });
-                        this.child(
-                            h_flex()
-                                .flex_wrap()
-                                .gap_2()
-                                .child(
-                                    Button::new(format!("agent-retry-{}", self.pane.0))
-                                        .primary()
-                                        .small()
-                                        .icon(IconName::Redo2)
-                                        .label(if state.lifecycle_pending {
-                                            "Restarting…"
-                                        } else {
-                                            "Try again"
-                                        })
-                                        .disabled(state.lifecycle_pending)
-                                        .on_click(move |_, _, cx| {
-                                            retry_controller.update(cx, |controller, cx| {
-                                                controller.retry(pane, cx);
-                                            });
-                                        }),
-                                )
-                                .children(auth_buttons),
+                            })
+                    });
+                this.child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(
+                            Button::new(format!("agent-retry-{}", self.pane.0))
+                                .primary()
+                                .small()
+                                .icon(IconName::Redo2)
+                                .label(if state.lifecycle_pending {
+                                    "Restarting…"
+                                } else {
+                                    "Try again"
+                                })
+                                .disabled(state.lifecycle_pending)
+                                .on_click(move |_, _, cx| {
+                                    retry_controller.update(cx, |controller, cx| {
+                                        controller.retry(pane, cx);
+                                    });
+                                }),
                         )
-                    },
-                ),
-        )
+                        .children(auth_buttons),
+                )
+            },
+        ))
     }
 
     fn render_agent_picker(&self, state: &AgentPaneState, view: Entity<Self>) -> impl IntoElement {
@@ -2016,116 +1698,49 @@ impl AgentView {
                         let delete_view = rows_view.clone();
                         let delete_id: Arc<str> = Arc::from(session.session_id);
                         Some(
-                            h_flex()
-                                .id(format!("agent-history-row-{}-{result_index}", pane.0))
-                                .w_full()
-                                .h(px(HISTORY_ROW_HEIGHT))
-                                .items_center()
-                                .gap_2()
-                                .rounded(cx.theme().radius)
-                                .px_2p5()
-                                .cursor_pointer()
-                                .when(is_selected, |this| this.bg(cx.theme().background.hover()))
-                                .when(!is_selected, |this| {
-                                    this.hover(|this| this.bg(cx.theme().background.hover()))
-                                })
-                                .on_mouse_move(move |_, _, cx| {
-                                    pointer_view.update(cx, |view, cx| {
-                                        if view.history_selected != Some(result_index) {
-                                            view.history_selected = Some(result_index);
-                                            cx.notify();
-                                        }
-                                    });
-                                })
-                                .on_click(move |_, window, cx| {
-                                    click_view.update(cx, |view, cx| {
-                                        view.open_history_result(result_index, window, cx);
-                                    });
-                                    cx.stop_propagation();
-                                })
-                                .child(
-                                    v_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .gap(px(2.0))
-                                        .child(
-                                            div()
-                                                .w_full()
-                                                .min_w_0()
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_size(zz_ui::rems_from_px(12.0))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .child(title),
-                                        )
-                                        .child(
-                                            h_flex()
-                                                .min_w_0()
-                                                .gap_1()
-                                                .text_size(zz_ui::rems_from_px(9.0))
-                                                .text_color(cx.theme().foreground.muted())
-                                                .child(
-                                                    Tag::secondary()
-                                                        .xsmall()
-                                                        .min_w_0()
-                                                        .overflow_hidden()
-                                                        .text_ellipsis()
-                                                        .whitespace_nowrap()
-                                                        .text_size(zz_ui::rems_from_px(9.0))
-                                                        .text_color(cx.theme().foreground.muted())
-                                                        .child(directory),
-                                                )
-                                                .when(is_current, |this| {
-                                                    this.child(
-                                                        div()
-                                                            .flex_none()
-                                                            .rounded(px(999.0))
-                                                            .bg(cx.theme().success.fill())
-                                                            .px_1()
-                                                            .text_size(zz_ui::rems_from_px(8.0))
-                                                            .text_color(cx.theme().success)
-                                                            .child("CURRENT"),
-                                                    )
-                                                })
-                                                .child(div().flex_1())
-                                                .when_some(updated_at, |this, updated_at| {
-                                                    this.child(
-                                                        div()
-                                                            .flex_none()
-                                                            .max_w(px(112.0))
-                                                            .overflow_hidden()
-                                                            .text_ellipsis()
-                                                            .whitespace_nowrap()
-                                                            .child(updated_at),
-                                                    )
-                                                }),
-                                        ),
-                                )
-                                .when(can_delete && !is_current, |this| {
-                                    this.child(
-                                        Button::compact_icon(
-                                            format!(
-                                                "agent-history-delete-{}-{result_index}",
-                                                pane.0
-                                            ),
-                                            IconName::Xmark,
-                                        )
-                                        .tooltip("Delete this session")
-                                        .disabled(loading)
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                let delete_id = delete_id.clone();
-                                                delete_view.update(cx, |view, cx| {
-                                                    view.history_delete_confirmation =
-                                                        Some(delete_id);
-                                                    cx.notify();
-                                                });
-                                                cx.stop_propagation();
-                                            },
-                                        ),
+                            zz_ui::picker::history_row(
+                                format!("agent-history-row-{}-{result_index}", pane.0),
+                                title,
+                                directory,
+                                updated_at.map(Into::into),
+                                is_selected,
+                                is_current,
+                                cx,
+                            )
+                            .on_mouse_move(move |_, _, cx| {
+                                pointer_view.update(cx, |view, cx| {
+                                    if view.history_selected != Some(result_index) {
+                                        view.history_selected = Some(result_index);
+                                        cx.notify();
+                                    }
+                                });
+                            })
+                            .on_click(move |_, window, cx| {
+                                click_view.update(cx, |view, cx| {
+                                    view.open_history_result(result_index, window, cx);
+                                });
+                                cx.stop_propagation();
+                            })
+                            .when(can_delete && !is_current, |this| {
+                                this.child(
+                                    Button::compact_icon(
+                                        format!("agent-history-delete-{}-{result_index}", pane.0),
+                                        IconName::Xmark,
                                     )
-                                }),
+                                    .tooltip("Delete this session")
+                                    .disabled(loading)
+                                    .on_click(
+                                        move |_, _, cx| {
+                                            let delete_id = delete_id.clone();
+                                            delete_view.update(cx, |view, cx| {
+                                                view.history_delete_confirmation = Some(delete_id);
+                                                cx.notify();
+                                            });
+                                            cx.stop_propagation();
+                                        },
+                                    ),
+                                )
+                            }),
                         )
                     })
                     .collect::<Vec<_>>()
@@ -2257,68 +1872,16 @@ impl AgentView {
                 .into_any_element()
         };
 
-        div()
-            .id(("agent-history-overlay", pane.0))
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .p_4()
-            .bg(cx.theme().scrim)
-            .occlude()
+        zz_ui::picker::picker_overlay(("agent-history-overlay", pane.0), cx)
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 backdrop_view.update(cx, |view, cx| view.close_history(window, cx));
                 cx.stop_propagation();
             })
             .child(
-                v_flex()
-                    .id(("agent-history-modal", pane.0))
-                    .relative()
-                    .w(relative(0.92))
-                    .max_w(px(660.0))
-                    .h(relative(0.82))
-                    .min_h(px(240.0))
-                    .max_h(px(720.0))
-                    .overflow_hidden()
-                    .rounded(cx.theme().radius)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background.raised(1))
-                    .shadow_lg()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                zz_ui::picker::picker_modal(("agent-history-modal", pane.0), cx)
                     .child(
-                        v_flex()
-                            .flex_none()
-                            .gap(px(CHROME_GAP))
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .p(px(CHROME_GAP))
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .h(px(32.0))
-                                    .rounded(cx.theme().radius)
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().background.raised(1))
-                                    .px_2p5()
-                                    .child(
-                                        Icon::new(IconName::Search)
-                                            .xsmall()
-                                            .text_color(cx.theme().foreground.muted()),
-                                    )
-                                    .child(
-                                        Input::new(&self.history_input)
-                                            .small()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .text_size(zz_ui::rems_from_px(12.0))
-                                            .appearance(false)
-                                            .bordered(false)
-                                            .focus_bordered(false),
-                                    ),
-                            )
+                        zz_ui::picker::picker_header(cx)
+                            .child(zz_ui::picker::picker_search(&self.history_input, cx))
                             .child(
                                 h_flex()
                                     .w_full()
@@ -2391,68 +1954,33 @@ impl AgentView {
         view: Entity<Self>,
         enabled: bool,
     ) -> gpui::AnyElement {
-        let current_label = option
-            .choices
-            .iter()
-            .find(|choice| choice.value == option.current_value)
-            .map_or_else(|| option.name.clone(), |choice| choice.name.clone());
         let option_id = option.id.clone();
-        let current_value = option.current_value.clone();
-        let choices = option.choices.clone();
-        let description = option
-            .description
-            .clone()
-            .unwrap_or_else(|| option.name.clone());
-        agent_chrome_button(format!("agent-config-picker-{}-{}", self.pane.0, option.id))
-            .icon(icon)
-            .label(current_label)
-            .dropdown_caret(true)
-            .tooltip(description)
-            .disabled(!enabled || choices.is_empty())
-            .dropdown_menu(move |menu, _, _| {
-                choices.iter().fold(menu.min_w(px(250.0)), |menu, choice| {
-                    let choice_name = choice.name.clone();
-                    let choice_description = choice.description.clone();
-                    let value = choice.value.clone();
-                    let config_id = option_id.clone();
-                    let picker_view = view.clone();
-                    menu.item(
-                        PopupMenuItem::element(move |_, cx| {
-                            v_flex()
-                                .min_w_0()
-                                .ml_1()
-                                .py_1()
-                                .child(
-                                    div()
-                                        .text_size(zz_ui::rems_from_px(12.0))
-                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                        .child(choice_name.clone()),
-                                )
-                                .when_some(choice_description.clone(), |this, description| {
-                                    this.child(
-                                        div()
-                                            .max_w(px(300.0))
-                                            .text_size(zz_ui::rems_from_px(10.0))
-                                            .text_color(cx.theme().foreground.muted())
-                                            .child(description),
-                                    )
-                                })
-                        })
-                        .checked(choice.value == current_value)
-                        .on_click(move |_, _, cx| {
-                            picker_view.update(cx, |view, cx| {
-                                let result = view.controller.update(cx, |controller, cx| {
-                                    controller.set_config_option(view.pane, &config_id, &value, cx)
-                                });
-                                view.submission_error = result.err();
-                                cx.notify();
-                            });
-                        }),
-                    )
+        agent_config_picker(
+            format!("agent-config-picker-{}-{}", self.pane.0, option.id),
+            icon,
+            &option.current_value,
+            &option.name,
+            option.description.as_deref().unwrap_or(&option.name),
+            option
+                .choices
+                .iter()
+                .map(|choice| AgentControlChoice {
+                    value: choice.value.clone(),
+                    name: choice.name.clone(),
+                    description: choice.description.clone(),
                 })
-            })
-            .anchor(Anchor::BottomLeft)
-            .into_any_element()
+                .collect(),
+            enabled,
+            move |value, _, cx| {
+                view.update(cx, |view, cx| {
+                    let result = view.controller.update(cx, |controller, cx| {
+                        controller.set_config_option(view.pane, &option_id, value, cx)
+                    });
+                    view.submission_error = result.err();
+                    cx.notify();
+                });
+            },
+        )
     }
 
     fn render_legacy_mode_picker(
@@ -2464,64 +1992,32 @@ impl AgentView {
         if !state.config_options.is_empty() || state.modes.is_empty() {
             return None;
         }
-        let current = state.mode.clone();
-        let current_label = state
-            .modes
-            .iter()
-            .find(|mode| current.as_deref() == Some(mode.id.as_str()))
-            .map_or("Permissions", |mode| mode.name.as_str())
-            .to_owned();
-        let modes = state.modes.clone();
-        Some(
-            agent_chrome_button(("agent-mode-picker", self.pane.0))
-                .icon(IconName::Check)
-                .label(current_label)
-                .dropdown_caret(true)
-                .tooltip("Agent permission mode")
-                .disabled(!enabled)
-                .dropdown_menu(move |menu, _, _| {
-                    modes.iter().fold(menu.min_w(px(250.0)), |menu, mode| {
-                        let mode_name = mode.name.clone();
-                        let mode_description = mode.description.clone();
-                        let mode_id = mode.id.clone();
-                        let mode_view = view.clone();
-                        menu.item(
-                            PopupMenuItem::element(move |_, cx| {
-                                v_flex()
-                                    .ml_1()
-                                    .py_1()
-                                    .child(
-                                        div()
-                                            .text_size(zz_ui::rems_from_px(12.0))
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .child(mode_name.clone()),
-                                    )
-                                    .when_some(mode_description.clone(), |this, description| {
-                                        this.child(
-                                            div()
-                                                .max_w(px(300.0))
-                                                .text_size(zz_ui::rems_from_px(10.0))
-                                                .text_color(cx.theme().foreground.muted())
-                                                .child(description),
-                                        )
-                                    })
-                            })
-                            .checked(current.as_deref() == Some(mode.id.as_str()))
-                            .on_click(move |_, _, cx| {
-                                mode_view.update(cx, |view, cx| {
-                                    let result = view.controller.update(cx, |controller, cx| {
-                                        controller.set_mode(view.pane, &mode_id, cx)
-                                    });
-                                    view.submission_error = result.err();
-                                    cx.notify();
-                                });
-                            }),
-                        )
-                    })
+        Some(agent_config_picker(
+            ("agent-mode-picker", self.pane.0),
+            IconName::Check,
+            state.mode.as_deref().unwrap_or_default(),
+            "Permissions",
+            "Agent permission mode",
+            state
+                .modes
+                .iter()
+                .map(|mode| AgentControlChoice {
+                    value: mode.id.clone(),
+                    name: mode.name.clone(),
+                    description: mode.description.clone(),
                 })
-                .anchor(Anchor::BottomLeft)
-                .into_any_element(),
-        )
+                .collect(),
+            enabled,
+            move |mode_id, _, cx| {
+                view.update(cx, |view, cx| {
+                    let result = view.controller.update(cx, |controller, cx| {
+                        controller.set_mode(view.pane, mode_id, cx)
+                    });
+                    view.submission_error = result.err();
+                    cx.notify();
+                });
+            },
+        ))
     }
 
     fn render_completions(&self, view: &Entity<Self>, cx: &gpui::App) -> Option<gpui::AnyElement> {
@@ -2529,12 +2025,6 @@ impl AgentView {
             return None;
         }
         let selected = self.completion_selected;
-        let visible_rows = self
-            .completions
-            .len()
-            .min(usize::from(MAX_VISIBLE_COMPLETION_ROWS));
-        let visible_rows =
-            f32::from(u8::try_from(visible_rows).unwrap_or(MAX_VISIBLE_COMPLETION_ROWS));
         let pane = self.pane;
         let completions = Arc::clone(&self.completions);
         let rows_view = view.clone();
@@ -2553,86 +2043,40 @@ impl AgentView {
                         let hover_view = rows_view.clone();
                         let click_view = rows_view.clone();
                         Some(
-                            h_flex()
-                                .id(format!("agent-completion-{}-{index}", pane.0))
-                                .w_full()
-                                .h(px(COMPLETION_ROW_HEIGHT))
-                                .items_center()
-                                .gap_3()
-                                .rounded(cx.theme().radius)
-                                .px_3()
-                                .cursor_pointer()
-                                .when(is_selected, |this| this.bg(cx.theme().background.hover()))
-                                .when(!is_selected, |this| {
-                                    this.hover(|this| this.bg(cx.theme().background.hover()))
-                                })
-                                .on_hover(move |hovered, _, cx| {
-                                    if *hovered {
-                                        hover_view.update(cx, |view, cx| {
-                                            if view.completion_selected != Some(index) {
-                                                view.completion_selected = Some(index);
-                                                cx.notify();
-                                            }
-                                        });
-                                    }
-                                })
-                                .on_click(move |_, window, cx| {
-                                    click_view.update(cx, |view, cx| {
-                                        view.accept_completion(index, window, cx);
+                            zz_ui::agent::slash::suggestion_row(
+                                format!("agent-completion-{}-{index}", pane.0),
+                                name,
+                                description.map(Into::into),
+                                is_selected,
+                                cx,
+                            )
+                            .on_hover(move |hovered, _, cx| {
+                                if *hovered {
+                                    hover_view.update(cx, |view, cx| {
+                                        if view.completion_selected != Some(index) {
+                                            view.completion_selected = Some(index);
+                                            cx.notify();
+                                        }
                                     });
-                                    cx.stop_propagation();
-                                })
-                                .child(
-                                    v_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .gap(px(2.0))
-                                        .child(
-                                            div()
-                                                .w_full()
-                                                .min_w_0()
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_size(zz_ui::rems_from_px(12.0))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .child(format!("/{name}")),
-                                        )
-                                        .when_some(description, |this, description| {
-                                            this.child(
-                                                div()
-                                                    .w_full()
-                                                    .min_w_0()
-                                                    .overflow_hidden()
-                                                    .text_ellipsis()
-                                                    .whitespace_nowrap()
-                                                    .text_size(zz_ui::rems_from_px(10.0))
-                                                    .text_color(cx.theme().foreground.muted())
-                                                    .child(description),
-                                            )
-                                        }),
-                                ),
+                                }
+                            })
+                            .on_click(move |_, window, cx| {
+                                click_view.update(cx, |view, cx| {
+                                    view.accept_completion(index, window, cx);
+                                });
+                                cx.stop_propagation();
+                            }),
                         )
                     })
                     .collect::<Vec<_>>()
             },
         )
         .w_full()
-        .h(px(COMPLETION_ROW_HEIGHT * visible_rows))
+        .h(zz_ui::agent::slash::suggestion_list_height(
+            self.completions.len(),
+        ))
         .track_scroll(&self.completion_scroll);
-        Some(
-            v_flex()
-                .w_full()
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().border)
-                .bg(cx.theme().background.raised(1))
-                .p_1()
-                .shadow_md()
-                .overflow_hidden()
-                .child(rows)
-                .into_any_element(),
-        )
+        Some(zz_ui::agent::slash::suggestion_list(rows, cx).into_any_element())
     }
 
     #[allow(clippy::redundant_closure_for_method_calls)]
@@ -2644,41 +2088,26 @@ impl AgentView {
         cx: &mut gpui::App,
     ) -> impl IntoElement {
         let can_submit = state.connection.accepts_prompt();
-        let action = match composer_action(
+        let action_kind = composer_action(
             state.connection.has_active_turn(),
             self.composer_has_content(),
-        ) {
-            ComposerAction::Send => {
-                let submit_view = view.clone();
-                Button::compact_icon(format!("agent-action-{}", self.pane.0), IconName::ArrowUp)
-                    .primary()
-                    .rounded_full()
-                    .tooltip("Send message")
-                    .disabled(!can_submit || !self.composer_has_content())
-                    .on_click(move |_, window, cx| {
-                        submit_view.update(cx, |view, cx| view.submit(window, cx));
-                    })
-            }
-            ComposerAction::Queue => {
-                let submit_view = view.clone();
-                Button::compact_icon(format!("agent-action-{}", self.pane.0), IconName::Plus)
-                    .secondary()
-                    .rounded_full()
-                    .tooltip("Queue this as the next turn")
-                    .on_click(move |_, window, cx| {
-                        submit_view.update(cx, |view, cx| view.submit(window, cx));
-                    })
-            }
-            ComposerAction::Stop => {
-                let controller = self.controller.clone();
-                let pane = self.pane;
-                Button::compact_icon(format!("agent-action-{}", self.pane.0), IconName::Xmark)
-                    .rounded_full()
-                    .tooltip("Stop the current turn")
-                    .on_click(move |_, _, cx| {
-                        controller.update(cx, |controller, cx| controller.cancel(pane, cx));
-                    })
-            }
+        );
+        let action = composer_action_button(
+            format!("agent-action-{}", self.pane.0),
+            action_kind,
+            action_kind != ComposerAction::Send || (can_submit && self.composer_has_content()),
+        );
+        let action = if action_kind == ComposerAction::Stop {
+            let controller = self.controller.clone();
+            let pane = self.pane;
+            action.on_click(move |_, _, cx| {
+                controller.update(cx, |controller, cx| controller.cancel(pane, cx));
+            })
+        } else {
+            let submit_view = view.clone();
+            action.on_click(move |_, window, cx| {
+                submit_view.update(cx, |view, cx| view.submit(window, cx));
+            })
         };
         let settings_enabled = state.connection.accepts_prompt() && !state.settings_busy;
         let permission_option = state
@@ -2722,13 +2151,19 @@ impl AgentView {
                 settings_enabled,
             ));
         }
-        let usage = state
-            .usage
-            .map(|(used, size)| context_usage_meter(self.pane, used, size, cx));
-        let git = state
-            .git
-            .as_ref()
-            .map(|git| git_summary_footer(self.pane, git, cx));
+        let usage = state.usage.map(|(used, size)| {
+            context_usage_meter(("agent-context-usage", self.pane.0), used, size, cx)
+        });
+        let git = state.git.as_ref().map(|git| {
+            git_summary_footer(
+                ("agent-git-summary", self.pane.0),
+                git.branch.clone().map(Into::into),
+                git.changed_files,
+                git.additions,
+                git.deletions,
+                cx,
+            )
+        });
         let directory = self.render_directory_picker(state, view.clone(), local_host);
         let command_hint = active_command_hint(&self.last_input, &state.available_commands);
         let completions = self.render_completions(view, cx);
@@ -2922,27 +2357,6 @@ impl Render for AgentView {
             });
         round_div_radii(root, pane_content_radii(cx, self.window_corners))
     }
-}
-
-fn rendered_error(error: &str) -> String {
-    let mut rendered = String::with_capacity(MAX_RENDERED_ERROR_BYTES);
-    let mut truncated = false;
-    for character in error.trim().chars() {
-        let character = if character.is_control() && !matches!(character, '\n' | '\t') {
-            '�'
-        } else {
-            character
-        };
-        if rendered.len().saturating_add(character.len_utf8()) > MAX_RENDERED_ERROR_BYTES - 3 {
-            truncated = true;
-            break;
-        }
-        rendered.push(character);
-    }
-    if truncated {
-        rendered.push('…');
-    }
-    rendered
 }
 
 fn disconnected_pane_state() -> AgentPaneState {
@@ -3187,14 +2601,6 @@ fn retained_tool_payload(
     next
 }
 
-fn agent_chrome_button(id: impl Into<ElementId>) -> Button {
-    Button::new(id)
-        .ghost()
-        .xsmall()
-        .h(px(CHROME_PILL_HEIGHT))
-        .px_2()
-}
-
 fn session_directory_label(cwd: &Path) -> String {
     cwd.file_name()
         .and_then(|name| name.to_str())
@@ -3269,119 +2675,11 @@ fn history_result_index_for_session(
     })
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct CompletionQuery {
-    needle: String,
-    replacement: Range<usize>,
-}
-
 const fn provider_icon(provider: AgentProvider) -> IconName {
     match provider {
         AgentProvider::Codex => IconName::Openai,
         AgentProvider::ClaudeCode => IconName::Claude,
     }
-}
-
-fn completion_query(value: &str, cursor: usize) -> Option<CompletionQuery> {
-    if cursor > value.len() || !value.is_char_boundary(cursor) {
-        return None;
-    }
-    let before_cursor = &value[..cursor];
-    let line_start = before_cursor.rfind('\n').map_or(0, |index| index + 1);
-    let sigil_index = before_cursor[line_start..].rfind('/')? + line_start;
-    if sigil_index > line_start
-        && !value[..sigil_index]
-            .chars()
-            .next_back()
-            .is_some_and(char::is_whitespace)
-    {
-        return None;
-    }
-    let tail = &value[sigil_index + 1..cursor];
-    if tail.chars().any(char::is_whitespace) {
-        return None;
-    }
-    Some(CompletionQuery {
-        needle: tail.to_owned(),
-        replacement: sigil_index..cursor,
-    })
-}
-
-fn bare_command_name(name: &str) -> &str {
-    name.trim_start_matches('/')
-}
-
-fn completion_score(candidate: &str, needle: &str) -> Option<u8> {
-    if needle.is_empty() {
-        return Some(3);
-    }
-    if candidate == needle {
-        return Some(0);
-    }
-    if candidate.starts_with(needle) {
-        return Some(1);
-    }
-    if candidate.contains(needle) {
-        return Some(2);
-    }
-    let mut characters = candidate.chars();
-    needle
-        .chars()
-        .all(|needle| characters.by_ref().any(|candidate| candidate == needle))
-        .then_some(3)
-}
-
-fn ranked_completions(
-    commands: &[AgentCommand],
-    query: &CompletionQuery,
-) -> Vec<CommandCompletion> {
-    let needle = query.needle.to_ascii_lowercase();
-    let mut ranked = commands
-        .iter()
-        .filter_map(|command| {
-            let searchable = bare_command_name(&command.name).to_ascii_lowercase();
-            completion_score(&searchable, &needle).map(|score| {
-                (
-                    score,
-                    searchable,
-                    CommandCompletion {
-                        command: command.clone(),
-                        replacement: query.replacement.clone(),
-                    },
-                )
-            })
-        })
-        .collect::<Vec<_>>();
-    ranked.sort_by(|left, right| (left.0, &left.1).cmp(&(right.0, &right.1)));
-    ranked
-        .into_iter()
-        .take(MAX_COMPLETION_RESULTS)
-        .map(|(_, _, completion)| completion)
-        .collect()
-}
-
-fn meaningful_command_description(description: &str) -> Option<&str> {
-    let description = description.trim();
-    (!description.is_empty()
-        && description
-            .chars()
-            .any(|character| character != '.' && character != '…'))
-    .then_some(description)
-}
-
-fn active_command_hint(value: &str, commands: &[AgentCommand]) -> Option<String> {
-    let command = value.trim_start().strip_prefix('/')?;
-    let (name, arguments) = command
-        .split_once(char::is_whitespace)
-        .map_or((command, ""), |(name, arguments)| (name, arguments));
-    if !arguments.trim().is_empty() {
-        return None;
-    }
-    commands
-        .iter()
-        .find(|command| bare_command_name(&command.name).eq_ignore_ascii_case(name))
-        .and_then(|command| command.input_hint.as_deref())
-        .map(|hint| format!("Argument · {hint}"))
 }
 
 #[cfg(test)]
@@ -3644,62 +2942,6 @@ mod completion_tests {
         );
     }
 
-    #[test]
-    fn available_commands_use_standard_slash_semantics() {
-        assert_eq!(bare_command_name("/review"), "review");
-        assert_eq!(bare_command_name("$brainstorm"), "$brainstorm");
-        assert_eq!(
-            completion_query("/rev", 4),
-            Some(CompletionQuery {
-                needle: "rev".to_owned(),
-                replacement: 0..4,
-            })
-        );
-        assert_eq!(
-            completion_query("please /rev", 11),
-            Some(CompletionQuery {
-                needle: "rev".to_owned(),
-                replacement: 7..11,
-            })
-        );
-        assert!(completion_query("$rev", 4).is_none());
-        assert!(completion_query("https://zed.dev", 15).is_none());
-        assert!(completion_query("/review branch", 14).is_none());
-    }
-
-    #[test]
-    fn completion_matching_supports_bare_command_names() {
-        assert_eq!(completion_score("brainstorm", "brain"), Some(1));
-        assert_eq!(completion_score("gh-address-comments", "gac"), Some(3));
-        assert_eq!(completion_score("review", "xyz"), None);
-    }
-
-    #[test]
-    fn completion_results_keep_every_available_command() {
-        let commands = (0..16)
-            .map(|index| command(&format!("command-{index:02}")))
-            .collect::<Vec<_>>();
-        let query = completion_query("/", 1).expect("command completion query");
-
-        let completions = ranked_completions(&commands, &query);
-
-        assert_eq!(completions.len(), commands.len());
-    }
-
-    #[test]
-    fn command_hints_follow_standard_slash_semantics() {
-        let command = AgentCommand {
-            input_hint: Some("optional context".to_owned()),
-            ..command("review")
-        };
-
-        assert_eq!(
-            active_command_hint("/review ", std::slice::from_ref(&command)),
-            Some("Argument · optional context".to_owned())
-        );
-        assert_eq!(active_command_hint("$review ", &[command]), None);
-    }
-
     #[cfg(not(target_os = "macos"))]
     #[gpui::test]
     fn non_append_timeline_rebuild_clears_retained_store(cx: &mut TestAppContext) {
@@ -3893,16 +3135,6 @@ mod completion_tests {
             "/first "
         );
         assert!(cx.update(|_, cx| view.read(cx).completions.is_empty()));
-    }
-
-    #[test]
-    fn placeholder_only_command_descriptions_are_hidden() {
-        assert_eq!(meaningful_command_description("..."), None);
-        assert_eq!(meaningful_command_description(" … "), None);
-        assert_eq!(
-            meaningful_command_description(" Review the current diff "),
-            Some("Review the current diff")
-        );
     }
 }
 

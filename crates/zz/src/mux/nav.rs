@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use gpui::{App, Entity, SharedString};
 use zz_protocol::{
     Axis, CommandInvocation, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, SessionId,
-    WindowId, WindowSnapshot,
+    WindowId,
 };
 
 use super::{
@@ -218,6 +218,19 @@ impl MuxTreeModel {
         }
     }
 
+    fn window_for_target(&self, host: HostId, target: TreeTarget) -> Option<WindowId> {
+        self.host(host)?
+            .sessions
+            .iter()
+            .flat_map(|session| &session.windows)
+            .find(|window| match target {
+                TreeTarget::Window(id) => window.id == id,
+                TreeTarget::Pane(id) => window.panes.iter().any(|pane| pane.id == id),
+                TreeTarget::Session(_) => false,
+            })
+            .map(|window| window.id)
+    }
+
     /// The current name a rename prompt would prefill, or `None` where the
     /// target cannot be renamed.
     #[must_use]
@@ -271,12 +284,15 @@ impl MuxTreeModel {
         }
         let (label, command) = rename_prompt_command(target, self.renameable_name(host, target)?)?;
         let activation = if host == attached_host {
-            NavActivation::Execute { host, command }
+            NavActivation::Execute {
+                host,
+                commands: vec![command],
+            }
         } else {
             NavActivation::AttachThenExecute {
                 host,
                 session: self.session_for_target(host, target)?,
-                command,
+                commands: vec![command],
             }
         };
         Some((label, activation))
@@ -341,6 +357,7 @@ impl MuxTreeModel {
                 id,
                 target,
                 self.session_for_target(id, target),
+                self.window_for_target(id, target),
                 attached_host,
                 attached_session,
                 host.connected(),
@@ -508,44 +525,7 @@ impl MuxTreePane {
     }
 }
 
-#[must_use]
-pub fn ordered_panes(window: &WindowSnapshot) -> Vec<&PaneSnapshot> {
-    let mut layout_order = Vec::with_capacity(window.panes.len());
-    window.layout.panes(&mut layout_order);
-    let mut seen = BTreeSet::new();
-    let mut panes = Vec::with_capacity(window.panes.len());
-    for id in layout_order {
-        if seen.insert(id)
-            && let Some(pane) = window.panes.get(&id)
-        {
-            panes.push(pane);
-        }
-    }
-    for (id, pane) in &window.panes {
-        if seen.insert(*id) {
-            panes.push(pane);
-        }
-    }
-    panes
-}
-
-#[must_use]
-pub fn pane_label(pane: &PaneSnapshot) -> String {
-    let title = pane.title.trim();
-    if !title.is_empty() {
-        return title.to_owned();
-    }
-    match &pane.kind {
-        PaneKindSnapshot::Picker => "new pane".to_owned(),
-        PaneKindSnapshot::Terminal => "terminal".to_owned(),
-        PaneKindSnapshot::Browser(browser) if !browser.url().trim().is_empty() => {
-            browser.url().trim().to_owned()
-        }
-        PaneKindSnapshot::Browser(_) => "browser".to_owned(),
-        PaneKindSnapshot::Agent(_) => "agent".to_owned(),
-        PaneKindSnapshot::Editor(_) => "editor".to_owned(),
-    }
-}
+pub use zz_client::navigation::{ordered_panes, pane_label};
 
 #[derive(Clone, Debug)]
 pub enum TreeNodeKind {
@@ -581,14 +561,7 @@ pub fn active_tree_target(
 
 /// A session's label as every navigation surface writes it: its name, or a
 /// stand-in when the daemon has none.
-#[must_use]
-pub fn session_label(name: &str, id: SessionId) -> String {
-    if name.trim().is_empty() {
-        format!("session {id}")
-    } else {
-        name.to_owned()
-    }
-}
+pub use zz_client::navigation::session_label;
 
 /// Open every ancestor of `node`, so attaching anywhere in the fleet reveals
 /// the row the mux moved to.
@@ -625,14 +598,18 @@ pub enum NavActivation {
         host: HostId,
         session: SessionId,
     },
+    AttachAt {
+        host: HostId,
+        target: String,
+    },
     Execute {
         host: HostId,
-        command: CommandInvocation,
+        commands: Vec<CommandInvocation>,
     },
     AttachThenExecute {
         host: HostId,
         session: SessionId,
-        command: CommandInvocation,
+        commands: Vec<CommandInvocation>,
     },
     Reconnect(HostId),
 }
@@ -642,6 +619,7 @@ pub fn activation_for_target(
     host: HostId,
     target: TreeTarget,
     owner_session: Option<SessionId>,
+    owner_window: Option<WindowId>,
     attached_host: HostId,
     attached_session: Option<SessionId>,
     connected: bool,
@@ -650,42 +628,30 @@ pub fn activation_for_target(
         return None;
     }
 
+    if !matches!(target, TreeTarget::Session(_))
+        && let Some(session) = owner_session
+        && (host != attached_host || Some(session) != attached_session)
+    {
+        let window = owner_window?;
+        return Some(NavActivation::AttachAt {
+            host,
+            target: match target {
+                TreeTarget::Pane(pane) => format!("{session}:{window}.{pane}"),
+                _ => format!("{session}:{window}"),
+            },
+        });
+    }
+
     match target {
         TreeTarget::Session(session) => Some(NavActivation::Attach { host, session }),
-        TreeTarget::Window(window) => Some(select_target_activation(
+        TreeTarget::Window(window) => Some(NavActivation::Execute {
             host,
-            owner_session,
-            attached_host,
-            attached_session,
-            select_window_command(window),
-        )),
-        TreeTarget::Pane(pane) => Some(select_target_activation(
+            commands: vec![select_window_command(window)],
+        }),
+        TreeTarget::Pane(pane) => Some(NavActivation::Execute {
             host,
-            owner_session,
-            attached_host,
-            attached_session,
-            select_pane_command(pane),
-        )),
-    }
-}
-
-#[must_use]
-pub fn select_target_activation(
-    host: HostId,
-    owner_session: Option<SessionId>,
-    attached_host: HostId,
-    attached_session: Option<SessionId>,
-    command: CommandInvocation,
-) -> NavActivation {
-    match owner_session {
-        Some(session) if host != attached_host || Some(session) != attached_session => {
-            NavActivation::AttachThenExecute {
-                host,
-                session,
-                command,
-            }
-        }
-        _ => NavActivation::Execute { host, command },
+            commands: select_pane_commands(pane),
+        }),
     }
 }
 
@@ -697,14 +663,23 @@ pub fn activate_nav(mux: &Entity<MuxClient>, activation: NavActivation, cx: &mut
         NavActivation::Attach { host, session } => {
             mux.attach_to_host(host, session, cx);
         }
-        NavActivation::Execute { host, command } => mux.execute_on_host(host, command),
+        NavActivation::AttachAt { host, target } => {
+            mux.attach_to_host_at(host, target, cx);
+        }
+        NavActivation::Execute { host, commands } => {
+            for command in commands {
+                mux.execute_on_host(host, command);
+            }
+        }
         NavActivation::AttachThenExecute {
             host,
             session,
-            command,
+            commands,
         } => {
             if mux.attach_to_host(host, session, cx) {
-                mux.execute_on_host(host, command);
+                for command in commands {
+                    mux.execute_on_host(host, command);
+                }
             }
         }
         NavActivation::Reconnect(host) => mux.retry_host_now(host, cx),
@@ -722,8 +697,11 @@ pub fn select_window_command(window: WindowId) -> CommandInvocation {
 }
 
 #[must_use]
-pub fn select_pane_command(pane: PaneId) -> CommandInvocation {
-    CommandInvocation::new("select-pane", vec!["-t".to_owned(), pane.to_string()])
+pub fn select_pane_commands(pane: PaneId) -> Vec<CommandInvocation> {
+    vec![
+        CommandInvocation::new("select-window", ["-t".to_owned(), pane.to_string()]),
+        CommandInvocation::new("select-pane", ["-t".to_owned(), pane.to_string()]),
+    ]
 }
 
 #[must_use]
@@ -731,25 +709,14 @@ pub fn rename_prompt_command(
     target: TreeTarget,
     current_name: &str,
 ) -> Option<(&'static str, CommandInvocation)> {
-    let (menu_label, prompt, template) = match target {
-        TreeTarget::Session(session) => (
-            "Rename Session…",
-            "rename-session: ",
-            format!("rename-session -t '{session}' -- '%%'"),
-        ),
-        TreeTarget::Window(window) => (
-            "Rename Window…",
-            "rename-window: ",
-            format!("rename-window -t '{window}' -- '%%'"),
-        ),
+    let target = match target {
+        TreeTarget::Session(id) => zz_client::navigation::RenameTarget::Session(id),
+        TreeTarget::Window(id) => zz_client::navigation::RenameTarget::Window(id),
         TreeTarget::Pane(_) => return None,
     };
-    Some((
-        menu_label,
-        CommandInvocation::new(
-            "command-prompt",
-            ["-p", prompt, "-I", current_name, template.as_str()],
-        ),
+    Some(zz_client::navigation::rename_prompt_command(
+        target,
+        current_name,
     ))
 }
 

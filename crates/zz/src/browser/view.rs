@@ -28,19 +28,17 @@ use gpui::{ObjectFit, external_texture, wgpu};
 use zz_browser::WinGpuTexture;
 use zz_browser::{
     BrowserCursor, BrowserEvent, BrowserGpuContext, BrowserKey, ContextMenuRequest,
-    CookieImportBatch, EditCommand, ElementPickerAppearance, KeyAction, KeyInput,
-    MAX_COOKIE_IMPORT_BYTES, Modifiers, PointerButton, PointerEvent, PointerPhase, RuntimePhase,
-    SessionId, Viewport, WheelEvent, diagnostic_url, normalize_browser_profile_name, normalize_url,
-    parse_cookie_import, resolve_address,
+    CookieImportBatch, EditCommand, ElementPickerAppearance, KeyInput, MAX_COOKIE_IMPORT_BYTES,
+    Modifiers, PointerButton, PointerEvent, PointerPhase, RuntimePhase, SessionId, Viewport,
+    WheelEvent, diagnostic_url, normalize_browser_profile_name, normalize_url, parse_cookie_import,
+    resolve_address,
 };
 use zz_client::{BROWSER_TABLE, ChromeAction};
 use zz_protocol::{
     BrowserCommand, BrowserDescriptor, ClientMessageKind, CommandInvocation, GuiResponse,
     InputMessage, KeyToken, MAX_BROWSER_KEY_REPEAT, PaneId,
 };
-use zz_terminal::{
-    KeyAction as TerminalKeyAction, KeyCode as TerminalKeyCode, KeyInput as TerminalKeyInput,
-};
+use zz_terminal::{KeyAction as TerminalKeyAction, KeyInput as TerminalKeyInput};
 use zz_ui::browser::{
     BrowserActionMenuState, BrowserEmptyHint, BrowserErrorPanel, BrowserMenuActions,
     BrowserMenuProfile, BrowserPickStatus, BrowserProfileDiscoveryState, BrowserTabInfo,
@@ -3785,39 +3783,7 @@ fn rounded_coordinate(value: Pixels) -> i32 {
 }
 
 fn browser_input_from_terminal(input: &TerminalKeyInput) -> KeyInput {
-    let key = match input.key {
-        TerminalKeyCode::Character(character) => BrowserKey::Character(character),
-        TerminalKeyCode::Backspace => BrowserKey::Backspace,
-        TerminalKeyCode::Enter => BrowserKey::Enter,
-        TerminalKeyCode::Tab => BrowserKey::Tab,
-        TerminalKeyCode::Escape => BrowserKey::Escape,
-        TerminalKeyCode::Delete => BrowserKey::Delete,
-        TerminalKeyCode::Insert => BrowserKey::Insert,
-        TerminalKeyCode::Home => BrowserKey::Home,
-        TerminalKeyCode::End => BrowserKey::End,
-        TerminalKeyCode::PageUp => BrowserKey::PageUp,
-        TerminalKeyCode::PageDown => BrowserKey::PageDown,
-        TerminalKeyCode::ArrowUp => BrowserKey::ArrowUp,
-        TerminalKeyCode::ArrowDown => BrowserKey::ArrowDown,
-        TerminalKeyCode::ArrowLeft => BrowserKey::ArrowLeft,
-        TerminalKeyCode::ArrowRight => BrowserKey::ArrowRight,
-        TerminalKeyCode::Function(number) => BrowserKey::Function(number),
-        TerminalKeyCode::Unidentified => BrowserKey::Unidentified,
-    };
-    KeyInput {
-        action: match input.action {
-            TerminalKeyAction::Press | TerminalKeyAction::Repeat => KeyAction::Press,
-            TerminalKeyAction::Release => KeyAction::Release,
-        },
-        key,
-        modifiers: Modifiers::new(
-            input.modifiers.shift(),
-            input.modifiers.control(),
-            input.modifiers.alt(),
-            input.modifiers.platform(),
-        )
-        .with_repeat(input.action == TerminalKeyAction::Repeat),
-    }
+    zz_browser::terminal_key_input(input)
 }
 
 fn browser_modifiers(
@@ -3866,50 +3832,7 @@ fn browser_key(key: &str) -> BrowserKey {
 }
 
 fn browser_named_key(name: &str) -> Option<KeyInput> {
-    let mut modifiers = Modifiers::default();
-    let mut name = name;
-    loop {
-        if let Some(rest) = name.strip_prefix("C-") {
-            modifiers.set_control(true);
-            name = rest;
-        } else if let Some(rest) = name.strip_prefix("M-") {
-            modifiers.set_alt(true);
-            name = rest;
-        } else {
-            break;
-        }
-    }
-    let gpui_name = match name {
-        "Enter" => "enter",
-        "Escape" => "escape",
-        "Space" => "space",
-        "Tab" => "tab",
-        "BSpace" => "backspace",
-        "Up" => "up",
-        "Down" => "down",
-        "Left" => "left",
-        "Right" => "right",
-        "Home" => "home",
-        "End" => "end",
-        "PPage" => "pageup",
-        "NPage" => "pagedown",
-        "DC" => "delete",
-        "IC" => "insert",
-        value if value.chars().count() == 1 => value,
-        value if value.strip_prefix('F').is_some() => {
-            return Some(KeyInput {
-                action: KeyAction::Press,
-                key: BrowserKey::Function(value.strip_prefix('F')?.parse().ok()?),
-                modifiers,
-            });
-        }
-        _ => return None,
-    };
-    Some(KeyInput {
-        action: KeyAction::Press,
-        key: browser_key(gpui_name),
-        modifiers,
-    })
+    zz_browser::named_key_input(name)
 }
 
 fn allows_text_input(key: BrowserKey, modifiers: gpui::Modifiers) -> bool {

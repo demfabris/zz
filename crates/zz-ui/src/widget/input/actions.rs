@@ -145,10 +145,17 @@ pub(super) fn init(cx: &mut App) {
         KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, Some(CONTEXT)),
     ]);
     cx.bind_keys(edit_key_bindings());
+    #[cfg(target_family = "wasm")]
+    cx.bind_keys(apple_edit_key_bindings());
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 fn edit_key_bindings() -> Vec<KeyBinding> {
+    apple_edit_key_bindings()
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios", target_family = "wasm"))]
+fn apple_edit_key_bindings() -> Vec<KeyBinding> {
     vec![
         KeyBinding::new("cmd-z", Undo, Some(CONTEXT)),
         KeyBinding::new("cmd-shift-z", Redo, Some(CONTEXT)),

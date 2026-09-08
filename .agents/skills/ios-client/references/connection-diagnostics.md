@@ -186,7 +186,9 @@ The FFI's `classify_connect_error` controls retry behavior.
 | Authentication, rejected host key, invalid endpoint or socket, missing remote `zz`, protocol mismatch | Stop automatic retry and return to setup or failure UI |
 | DNS, TCP or SSH transport, probe, daemon startup timeout, proxy startup or channel failure | Retry with retained presentation |
 
-The mobile backoff is 1, 2, 4, 8, then 16 seconds and remains capped at 16. Network restoration starts
+The mobile backoff is 1, 2, 4, 8, then 16 seconds for five attempts, then 30, 60, 120, 300, and 600
+seconds, capped at 600. A rejected attach to the remembered session (a request-id-zero reply) falls
+back to the daemon's default session and reports the rejection. Network restoration starts
 the next attempt without waiting. The reconnect page and retained-workspace banner preserve the last
 error while the next attempt runs.
 

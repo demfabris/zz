@@ -43,13 +43,14 @@ path = "src/bin/zz_external_texture_fixture.rs"
 required-features = ["desktop"]
 
 [dependencies]
+zz-config = { path = "../zz-config" }
 agent-client-protocol = { workspace = true, optional = true }
 async-channel.workspace = true
 base64.workspace = true
 chrono.workspace = true
 env_logger.workspace = true
 futures-lite.workspace = true
-gpui.workspace = true
+gpui = { workspace = true, features = ["profiler"] }
 ignore = { version = "0.4.33", optional = true }
 image.workspace = true
 log.workspace = true
@@ -78,7 +79,6 @@ mimalloc.workspace = true
 notify = "8.2.0"
 semver = "1"
 sha2.workspace = true
-ureq = "3"
 wgpu.workspace = true
 zz-browser = { path = "../zz-browser" }
 zz-chrome-import = { path = "../zz-chrome-import" }

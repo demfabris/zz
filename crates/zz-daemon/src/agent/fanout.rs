@@ -868,13 +868,49 @@ impl AgentFanout {
             publisher.send_agent_replay(client, pane, frames);
             return;
         }
-        lane.take_batch();
-        let session_id = lane.session_id.clone();
-        let replay = session_id
+        let replay = lane
+            .session_id
             .as_deref()
             .zip(self.journal.as_ref())
-            .and_then(|(session_id, journal)| journal.replay_for(lane.provider, session_id).ok())
-            .unwrap_or_default();
+            .filter(|(session_id, journal)| journal.is_complete_for(lane.provider, session_id))
+            .and_then(|(session_id, journal)| journal.replay_for(lane.provider, session_id).ok());
+        let Some(replay) = replay else {
+            for (first_seq, items) in lane.take_batch() {
+                publisher.publish_agent_updates(pane, first_seq, items, None);
+            }
+            log::warn!(
+                target: "zz::agent",
+                "replaying pane {pane} for client {client} from memory alone: \
+                 asked for {from_seq}, memory starts at {}, and the journal cannot vouch for the rest",
+                lane.evicted_seq.saturating_add(1),
+            );
+            let first_seq = lane.evicted_seq;
+            let reset = AgentStreamItem {
+                seq: first_seq,
+                payload: AgentStreamPayload::SessionReset { restoring: true },
+            };
+            let Ok(reset) = serde_json::to_vec(&reset) else {
+                return;
+            };
+            let mut items = vec![reset];
+            items.extend(
+                lane.ring
+                    .iter()
+                    .filter(|(seq, _)| *seq > first_seq)
+                    .map(|(_, encoded)| encoded.clone()),
+            );
+            let mut metadata = Vec::new();
+            metadata.extend(lane.ready.clone());
+            metadata.extend(lane.recovery_metadata());
+            for payload in metadata {
+                lane.stamp_recovery(pane, payload, &mut items, true);
+            }
+            publisher.send_agent_replay(client, pane, split_frames(first_seq, items));
+            drop(lanes);
+            self.wake.notify_all();
+            return;
+        };
+        lane.take_batch();
         log::info!(
             target: "zz::agent",
             "replaying pane {pane} for client {client} out of the journal: \
@@ -884,63 +920,23 @@ impl AgentFanout {
         );
         let first_seq = lane.next_seq;
         let mut synthesized = Vec::new();
-        lane.synthesize(
+        lane.stamp_recovery(
             pane,
             AgentStreamPayload::SessionReset { restoring: true },
             &mut synthesized,
+            false,
         );
         if let Some(ready) = lane.ready.clone() {
-            lane.synthesize(pane, ready, &mut synthesized);
+            lane.stamp_recovery(pane, ready, &mut synthesized, false);
         }
         for (_, entry) in replay {
             let payload = match entry {
                 JournalEntry::Update(update) => AgentStreamPayload::Update { update },
             };
-            lane.synthesize(pane, payload, &mut synthesized);
+            lane.stamp_recovery(pane, payload, &mut synthesized, false);
         }
-        if let Some(session_id) = session_id {
-            lane.synthesize(
-                pane,
-                AgentStreamPayload::SessionReady {
-                    session_id,
-                    modes: lane.modes_value.clone(),
-                    config_options: lane.config_options_value.clone(),
-                },
-                &mut synthesized,
-            );
-        }
-        if let Some(turn_id) = lane.turn_id {
-            lane.synthesize(
-                pane,
-                AgentStreamPayload::TurnStarted { turn_id },
-                &mut synthesized,
-            );
-        }
-        for reclaimed in lane.reclaimed.clone() {
-            let seq = lane.synthesize_with_seq(
-                pane,
-                AgentStreamPayload::PromptsRestored {
-                    reclaim_id: reclaimed.reclaim_id,
-                    prompts: vec![reclaimed.prompt],
-                },
-                &mut synthesized,
-            );
-            if let Some(seq) = seq
-                && let Some(cached) = lane
-                    .reclaimed
-                    .iter_mut()
-                    .find(|cached| cached.reclaim_id == reclaimed.reclaim_id)
-            {
-                cached.last_seq = seq;
-            }
-        }
-        let state = lane.state.clone();
-        if let Some(state) = state {
-            lane.synthesize(
-                pane,
-                AgentStreamPayload::StateSynced { state },
-                &mut synthesized,
-            );
+        for payload in lane.recovery_metadata() {
+            lane.stamp_recovery(pane, payload, &mut synthesized, false);
         }
         let frames = split_frames(first_seq, synthesized);
         publisher.publish_agent_replay(pane, frames, Some(client));
@@ -1052,20 +1048,59 @@ impl PaneLane {
         Some(seq)
     }
 
-    fn synthesize(&mut self, pane: PaneId, payload: AgentStreamPayload, items: &mut Vec<Vec<u8>>) {
-        _ = self.synthesize_with_seq(pane, payload, items);
+    fn recovery_metadata(&self) -> Vec<AgentStreamPayload> {
+        let mut payloads = Vec::new();
+        if let Some(session_id) = self.session_id.clone() {
+            payloads.push(AgentStreamPayload::SessionReady {
+                session_id,
+                modes: self.modes_value.clone(),
+                config_options: self.config_options_value.clone(),
+            });
+        }
+        if let Some(turn_id) = self.turn_id {
+            payloads.push(AgentStreamPayload::TurnStarted { turn_id });
+        }
+        payloads.extend(self.reclaimed.iter().map(|reclaimed| {
+            AgentStreamPayload::PromptsRestored {
+                reclaim_id: reclaimed.reclaim_id,
+                prompts: vec![reclaimed.prompt.clone()],
+            }
+        }));
+        payloads.extend(
+            self.state
+                .clone()
+                .map(|state| AgentStreamPayload::StateSynced { state }),
+        );
+        payloads
     }
 
-    fn synthesize_with_seq(
+    fn stamp_recovery(
         &mut self,
         pane: PaneId,
         payload: AgentStreamPayload,
         items: &mut Vec<Vec<u8>>,
-    ) -> Option<u64> {
-        let (seq, encoded) = self.stamp(pane, payload)?;
-        self.push_ring(seq, encoded.clone());
+        live: bool,
+    ) {
+        let reclaim_id = match &payload {
+            AgentStreamPayload::PromptsRestored { reclaim_id, .. } => Some(*reclaim_id),
+            _ => None,
+        };
+        let Some((seq, encoded)) = self.stamp(pane, payload) else {
+            return;
+        };
+        if live {
+            self.push(seq, encoded.clone());
+        } else {
+            self.push_ring(seq, encoded.clone());
+        }
         items.push(encoded);
-        Some(seq)
+        if let Some(cached) = reclaim_id.and_then(|reclaim_id| {
+            self.reclaimed
+                .iter_mut()
+                .find(|cached| cached.reclaim_id == reclaim_id)
+        }) {
+            cached.last_seq = seq;
+        }
     }
 
     fn stamp(&mut self, pane: PaneId, payload: AgentStreamPayload) -> Option<(u64, Vec<u8>)> {
@@ -1821,6 +1856,110 @@ mod tests {
     }
 
     #[test]
+    fn a_replay_older_than_the_ring_without_a_complete_journal_resets_only_the_asker() {
+        let directory = tempfile::tempdir().expect("journal directory");
+        let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
+        let refused = (0..10_000).any(|index| {
+            journal
+                .append(
+                    "s-1",
+                    &json!({
+                        "sessionUpdate": "agent_message_chunk",
+                        "messageId": index.to_string(),
+                        "content": { "text": "x" }
+                    }),
+                )
+                .is_err()
+        });
+        assert!(refused, "the journal should hit its record cap");
+        let fixture = Fixture::open(Some(journal), Some("s-1"));
+        fixture.accept(AgentStreamPayload::Ready {
+            agent_name: "Codex".to_owned(),
+            agent_key: "codex".to_owned(),
+            auth_methods: Vec::new(),
+            capabilities: AgentSessionCapabilities::default(),
+        });
+        fixture.accept(AgentStreamPayload::SessionReady {
+            session_id: "s-1".to_owned(),
+            modes: None,
+            config_options: None,
+        });
+        for text in ["one", "two", "three"] {
+            fixture.chunk(text);
+        }
+        fixture.recorder.wait_for_items(5);
+        {
+            let mut lanes = fixture.fanout.lanes.lock();
+            let lane = lanes.get_mut(&fixture.pane).expect("pane lane");
+            while lane.ring.front().is_some_and(|(seq, _)| *seq <= 3) {
+                let (seq, dropped) = lane.ring.pop_front().expect("ring item");
+                lane.ring_bytes -= dropped.len();
+                lane.evicted_seq = seq;
+            }
+            assert_eq!(lane.evicted_seq, 3);
+        }
+        let broadcast_before = fixture.recorder.broadcast.lock().len();
+
+        fixture.fanout.replay(ClientId(3), fixture.pane, 1);
+
+        let decode =
+            |item: &Vec<u8>| serde_json::from_slice::<AgentStreamItem>(item).expect("decode");
+        let replayed = fixture
+            .recorder
+            .direct
+            .lock()
+            .iter()
+            .filter(|(client, ..)| *client == ClientId(3))
+            .flat_map(|(_, _, _, items)| items.clone())
+            .map(|item| decode(&item))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            replayed.iter().map(|item| item.seq).collect::<Vec<_>>(),
+            (3..=8).collect::<Vec<_>>(),
+            "the reset borrows the evicted sequence and the rest stays contiguous: {replayed:?}"
+        );
+        assert!(matches!(
+            replayed[0].payload,
+            AgentStreamPayload::SessionReset { restoring: true }
+        ));
+        assert_eq!(
+            replayed.iter().filter_map(text_of).collect::<Vec<_>>(),
+            ["two", "three"]
+        );
+        assert!(matches!(
+            replayed.last().map(|item| &item.payload),
+            Some(AgentStreamPayload::StateSynced { .. })
+        ));
+        {
+            let lanes = fixture.fanout.lanes.lock();
+            let lane = &lanes[&fixture.pane];
+            assert_eq!(lane.next_seq, 9);
+            assert!(lane.ring.iter().all(|(seq, _)| *seq > 3));
+        }
+
+        fixture.recorder.wait_for_items(14);
+        let broadcast = fixture.recorder.broadcast.lock();
+        let later = broadcast[broadcast_before..]
+            .iter()
+            .flat_map(|(_, _, items, _)| items.clone())
+            .map(|item| decode(&item))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            later.iter().map(|item| item.seq).collect::<Vec<_>>(),
+            [6, 7, 8],
+            "other viewers get only the live metadata, in sequence"
+        );
+        assert!(
+            broadcast
+                .iter()
+                .flat_map(|(_, _, items, _)| items.iter())
+                .map(decode)
+                .all(|item| !matches!(item.payload, AgentStreamPayload::SessionReset { .. })),
+            "no viewer that did not ask is reset"
+        );
+    }
+
+    #[test]
     fn restarting_a_lane_keeps_sequences_monotonic_and_drops_the_old_runtime_tail() {
         let fixture = Fixture::open(None, None);
         fixture.chunk("before");
@@ -2083,7 +2222,9 @@ mod tests {
 
     #[test]
     fn journal_replay_restores_the_latest_mode_and_live_state() {
-        let fixture = Fixture::open(None, Some("s-1"));
+        let directory = tempfile::tempdir().expect("journal directory");
+        let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
+        let fixture = Fixture::open(Some(journal), Some("s-1"));
         fixture.accept(AgentStreamPayload::SessionReady {
             session_id: "s-1".to_owned(),
             modes: Some(json!({
@@ -2152,7 +2293,9 @@ mod tests {
     fn journal_replay_restores_raw_config_option_updates() {
         use agent_client_protocol::schema::v1::{ConfigOptionUpdate, SessionConfigOption};
 
-        let fixture = Fixture::open(None, Some("s-1"));
+        let directory = tempfile::tempdir().expect("journal directory");
+        let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
+        let fixture = Fixture::open(Some(journal), Some("s-1"));
         fixture.accept(AgentStreamPayload::SessionReady {
             session_id: "s-1".to_owned(),
             modes: None,

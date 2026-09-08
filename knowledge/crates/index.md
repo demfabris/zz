@@ -3,7 +3,7 @@
 
 * [zz-browser crate](zz-browser.md) - Browser-neutral abstraction over CEF Alloy off-screen rendering. Owns CEF init, named private request contexts, page zoom, input, lifecycle, and frame mailboxes.
 * [zz-chrome-import crate](zz-chrome-import.md) - Store-agnostic Google Chrome data import - profile discovery, cookie snapshot/decryption, and read-only history extraction - isolating the app's only sqlite/crypto/keychain dependencies.
-* [zz-client-ffi crate](zz-client-ffi.md) - Unix C ABI over zz-client for native shells, with interactive SSH, Agent supervision, pollable events, mux snapshots, semantic terminal actions, and caller-owned styled viewports.
+* [zz-client-ffi crate](zz-client-ffi.md) - Native client C ABI for transport, terminal viewports, Agent transcripts, settings, chrome bindings, and optional CEF browsers.
 * [zz-client crate](zz-client.md) - Renderer-free client state, effects, chrome keymaps, and normalized pane geometry shared by native and terminal skins.
 * [zz-daemon crate](zz-daemon.md) - The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 * [zz-gtk crate . GTK4/libadwaita GNOME client](zz-gtk.md) - Native GTK4/libadwaita client for terminal, daemon-owned Agent, and CEF Browser panes, with shared client state, fleet connections, and GNOME navigation.
@@ -16,5 +16,7 @@
 
 Workspace members without a crate page here: `zz-ui` (maintained gpui-component fork), `zz-tui`
 (`zz attach`). The native Swift iPhone client lives under `clients/ios`, outside the Cargo workspace.
+`zz-web` serves the [browser client](/playbooks/browser-client.md), whose GPUI/WASM frontend lives
+in the separate `clients/web` workspace.
 The map in
 [architecture/overview](/architecture/overview.md) uses the live `zz-*` names.

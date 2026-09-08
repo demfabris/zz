@@ -21,9 +21,9 @@ while unattached (see `retry_default_after_missing_session` in
 
 ## 2. Scope pane lists to the attached session
 
-The daemon auto-creates a default session at boot, so "iterate every session's
-panes" returns panes your client is not attached to — and those panes never
-receive terminal frames (frame fanout is gated by the client's visible set).
+The snapshot can contain sessions your client is not attached to. Iterating
+every session's panes includes panes that receive no terminal frames because
+the daemon limits frame delivery to the client's visible set.
 The symptom is maddening: the pane "exists" in the snapshot, resize appears to
 succeed, and no content ever arrives. Filter by
 `core.attached_session() == session.id` (the C ABI's
@@ -95,9 +95,10 @@ human-rate and free.
 - Unix socket paths have a low length cap (`sun_path`) — put test sockets
   directly under `/tmp`, short names.
 - A real in-process daemon is cheap and beats mocks:
-  `Daemon::new(&socket).without_user_config()` + a fixture command like
-  `"printf 'ready\r\n'; exec /bin/cat"` gives deterministic, quiescent pane
-  content (`cat` echoes what you type, then sits silent).
+  start `Daemon::new(&socket).without_user_config()`, create a named session
+  with `new-session -d -s fixture "printf 'ready\r\n'; exec /bin/cat"`, and
+  attach to `fixture`. The daemon starts empty without configuration that
+  creates sessions; `cat` echoes your input, then sits silent.
 - Some zz-daemon tests are timing-sensitive under full-workspace parallel
   load; a failure there is only real if it reproduces solo
   (`cargo test -p zz-daemon <name>`).
@@ -116,7 +117,7 @@ workspace `Cargo.toml`:
 
 ```toml
 [patch."https://github.com/uzaaft/libghostty-rs"]
-libghostty-vt-sys = { path = "/home/demfabris/dev/zz/third_party/rust/libghostty-vt-sys" }
+libghostty-vt-sys = { path = "<repo>/third_party/rust/libghostty-vt-sys" }
 ```
 
 With that line plus `CARGO_TARGET_DIR` pointed at the repo's `target/`, an
@@ -124,14 +125,23 @@ external client crate resolves identically to the workspace and builds against
 the warm cache in seconds. (Both independent eval builds of an external client
 hit this wall; the gpui/proc-macro-error2 patches are UI-only and not needed.)
 
-## 12. A daemon can start and remain without sessions
+## 12. A daemon can stay empty until its first default attach
 
-As of 2026-09-07, starting a daemon through a command client need not create
-session "0". Explicitly create the session required by a fixture; do not kill
-or rename an assumed boot session. The GUI's default interactive attachment
-can create its initial session through the current attach contract. A named
-attachment and a command-client snapshot do not imply that creation happened.
-Clients must also render and recover after the last session disappears.
+`Shared::initialize_with_mux_config_files` leaves a fresh daemon empty unless
+configuration creates a session. In `Shared::attach_target_with_materialization_observer`,
+an Interactive or Control client calling `attach("")` creates the first numeric
+session only when no sessions exist. On a fresh daemon this is session "0".
+Named attaches and Command clients do not create a missing session.
+The source and its tests live in `crates/zz-daemon/src/daemon.rs`.
+
+- Create a named fixture session and attach to that name. If a prior default
+  attach already created "0", account for that existing session instead of
+  assuming your fixture is the only one (see pitfall 2).
+- Default attach uses the daemon's existing default context when sessions
+  exist. Use an explicit target when you need a particular session.
+- Render an empty snapshot both before the first session and after removal
+  of the last session. Handle daemon shutdown too: its `exit-empty` option
+  can stop it after the last session ends.
 
 ## 13. Don't bump `PROTOCOL_VERSION` casually
 
@@ -168,16 +178,15 @@ a cuttable transport: a ~70-line unix-socket relay with `cut()`/`restore()`
 (see `Relay` in `crates/zz-gtk/tests/engine.rs`). Two corollaries: wait for
 the old socket file to vanish before rebinding (the dying listener removes the
 path on the way out, deleting a replacement's socket underneath it), and
-rebuild a replacement session *out of* the boot session (`rename-session` +
-`split-window` + `kill-pane`) rather than beside it, or a client retrying
-mid-rebuild lands on the session you are about to kill.
+create the replacement fixture session explicitly before restoring the relay,
+so a reconnect cannot attach midway through fixture setup (see pitfall 12).
 
 ## 17. The `MissingTarget` fallback is the normal reconnect path
 
 Session ids start at `$0` and a restarted daemon renumbers from scratch, so a
-remembered id usually does not exist after a restart. `attach("")` resolves to
-the LOWEST session id, which makes a useful test discriminator: attach to a
-non-boot session and a client that forgot its attachment provably lands wrong.
+remembered id may refer to a missing or different session after a restart.
+`attach("")` uses the daemon's default context, so fixtures should create two
+sessions and attach explicitly to the non-default one to detect lost targets.
 
 ## 18. Replay geometry after a reconnect, don't just clear it
 
@@ -295,7 +304,7 @@ A `host-<name> = unix:///tmp/…` config line pointing at a second local daemon
 is a complete fleet fixture — every layer above the transport (host rows,
 per-host reconnect, frozen frames, host removal) is testable without ssh.
 
-## 29. An "isolated" XDG_CONFIG_HOME is not isolated until you seed it
+## 31. An "isolated" XDG_CONFIG_HOME is not isolated until you seed it
 
 `zz`'s config candidate resolution falls back to the real
 `~/.config/zz/config` when the isolated directory holds no config file — so a

@@ -8,6 +8,12 @@ description = "Renderer-free client core: sans-IO protocol reduction shared by e
 publish = false
 
 [dependencies]
+url.workspace = true
+thiserror.workspace = true
+agent-client-protocol-schema = "1.5.0"
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 unicode-width = "0.2.2"
 zz-protocol = { path = "../zz-protocol" }
 zz-terminal = { path = "../zz-terminal", default-features = false }

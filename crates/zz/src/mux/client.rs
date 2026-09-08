@@ -2110,6 +2110,10 @@ impl MuxClient {
         Arc::clone(self.core.snapshot())
     }
 
+    pub(crate) fn claims_prefix_input(&self, input: &zz_terminal::KeyInput) -> bool {
+        self.attached_connection().client.is_some() && self.core.claims_prefix_input(input)
+    }
+
     /// The daemon-published prefix in the form a keystroke is compared
     /// against, or `None` while disconnected.
     #[must_use]
@@ -2118,18 +2122,6 @@ impl MuxClient {
         self.core
             .mux_options()
             .get(MuxOptionKey::Prefix)
-            .map(|option| zz_protocol::canonical_key(&option.value))
-    }
-
-    /// The daemon-published secondary prefix in the same form, or `None`
-    /// while disconnected or while `prefix2` is unset.
-    #[must_use]
-    pub(crate) fn canonical_prefix2(&self) -> Option<String> {
-        self.attached_connection().client.as_ref()?;
-        self.core
-            .mux_options()
-            .get(MuxOptionKey::Prefix2)
-            .filter(|option| !option.value.eq_ignore_ascii_case("none"))
             .map(|option| zz_protocol::canonical_key(&option.value))
     }
 
@@ -2803,13 +2795,22 @@ impl MuxClient {
         session: SessionId,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.attach_to_host_target(host, Some(session), cx)
+        self.attach_to_host_target(host, Some(session), None, cx)
+    }
+
+    pub fn attach_to_host_at(
+        &mut self,
+        host: HostId,
+        target: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.attach_to_host_target(host, None, Some(target), cx)
     }
 
     /// Switch to a machine and let its daemon select the default session. The
     /// sidebar uses this for machine rows, which name no session of their own.
     pub fn attach_to_host_default(&mut self, host: HostId, cx: &mut Context<Self>) -> bool {
-        self.attach_to_host_target(host, None, cx)
+        self.attach_to_host_target(host, None, None, cx)
     }
 
     /// Step off `host` so that removing it from the fleet actually ends its
@@ -2840,10 +2841,16 @@ impl MuxClient {
         &mut self,
         host: HostId,
         session: Option<SessionId>,
+        target: Option<String>,
         cx: &mut Context<Self>,
     ) -> bool {
         if host == self.attached_host {
-            if let Some(session) = session {
+            if let Some(target) = target {
+                self.execute_on_host(
+                    host,
+                    CommandInvocation::new("attach-session", ["-t", &target]),
+                );
+            } else if let Some(session) = session {
                 self.attach(session);
             }
             return true;
@@ -2891,8 +2898,19 @@ impl MuxClient {
         self.error_after_next_attach = None;
         self.attached_host = host;
         self.ingest_server_hello(hello, cx);
+        if let Some(client) = &client {
+            crate::config::register_config_override_client(client, host != HostId::LOCAL, cx);
+        }
+        if let Some(target) = target {
+            self.execute_on_host(
+                host,
+                CommandInvocation::new("attach-session", ["-t", &target]),
+            );
+            self.reconcile_hosts(cx);
+            cx.notify();
+            return true;
+        }
         let attach_result = if let Some(client) = client {
-            crate::config::register_config_override_client(&client, host != HostId::LOCAL, cx);
             client.attach(session.map_or_else(String::new, |session| session.to_string()))
         } else {
             #[cfg(test)]
@@ -5869,6 +5887,54 @@ mod tests {
     }
 
     #[gpui::test]
+    fn sidebar_target_attachment_sends_one_request_on_local_and_remote_hosts(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(
+                vec![test_host("remote", "unix:///tmp/zz-sidebar-target.sock")],
+                cx,
+            );
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("sidebar target fixture".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let remote = mux.read(cx).registry.get_by_name("remote").unwrap().0;
+            let (local_client, remote_client) = mux.update(cx, |mux, _| {
+                let local = install_fake_connection(mux, HostId::LOCAL);
+                let remote = install_fake_connection(mux, remote);
+                seed_attachment(mux, SessionId(1), MuxSnapshot::default());
+                (local, remote)
+            });
+
+            for (host, client) in [(HostId::LOCAL, local_client), (remote, remote_client)] {
+                crate::mux::nav::activate_nav(
+                    &mux,
+                    crate::mux::nav::NavActivation::AttachAt {
+                        host,
+                        target: "$2:@13.%21".to_owned(),
+                    },
+                    cx,
+                );
+
+                assert_eq!(mux.read(cx).attached_host(), host);
+                assert_eq!(client.attached_session.get(), None);
+                assert!(!client.attached_default.get());
+                assert_eq!(
+                    *client.commands.borrow(),
+                    [CommandInvocation::new(
+                        "attach-session",
+                        ["-t", "$2:@13.%21"]
+                    )],
+                );
+            }
+        });
+    }
+
+    #[gpui::test]
     fn client_window_focus_replays_latest_pending_state_after_host_switch(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -6332,7 +6398,7 @@ mod tests {
                 mux.handle_host_disconnected(remote, cx);
                 let armed_generation = mux.connections.get(&remote).unwrap().reconnect_generation;
 
-                assert!(mux.attach_to_host_target(HostId::LOCAL, None, cx));
+                assert!(mux.attach_to_host_target(HostId::LOCAL, None, None, cx));
 
                 let connection = mux.connections.get(&remote).unwrap();
                 assert_eq!(

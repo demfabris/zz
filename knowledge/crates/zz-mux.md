@@ -39,10 +39,11 @@ window-scoped `set-window-option`, and emits `MuxEffect::MuxOptionChanged` so th
 `browser-egress`; both were deleted with the QUIC transport on 2026-08-01, as were the `pair` command
 and the `listen` option.
 
-`lib.rs` is a thin facade over five private modules: `command` (the `MuxEngine` executor +
+`lib.rs` is a thin facade over private modules including `command` (the `MuxEngine` executor +
 `MuxEffect`), `model` (`MuxState`, the sessions/windows/panes/splits tree), `parser`
-(`parse_config` for `.tmux.conf`), `formats` (the FORMATS engine behind the `StatusHooks` seam),
-and `status` (the `status-*` option state).
+(`parse_config` for `.tmux.conf`), `formats` (the FORMATS engine using `StatusHooks`),
+and `status` (the `status-*` option state). Supporting modules cover cell layouts, copy actions,
+option definitions, sorting, and terminfo.
 It re-exports the shared command catalog and key model from `zz-protocol`, while the daemon remains
 the runtime authority that mutates and resolves those tables.
 
@@ -85,7 +86,7 @@ that the prediction matches the mutation.
 
 | File | Role |
 | --- | --- |
-| `crates/zz-mux/src/lib.rs` | Crate facade; declares four private modules and re-exports the shared catalog and key contract from `zz-protocol`. |
+| `crates/zz-mux/src/lib.rs` | Crate facade; declares private implementation and test modules and re-exports the shared catalog and key contract from `zz-protocol`. |
 | `crates/zz-protocol/src/catalog.rs` | Canonical commands, aliases, descriptions, accepted options, and completion value kinds. |
 | `crates/zz-mux/src/model.rs` | `MuxState`: sessions/windows/panes, the recursive `LayoutNode` split tree, target resolution, layout presets, zoom, swap/rotate/break/join, `validate()`, and the free `swapped_layout`/`joined_layout` predictors. See [split-pane layout](/concepts/split-pane-layout.md). |
 | `crates/zz-mux/src/command.rs` | `MuxEngine`: executes tmux-style commands, parses options/`-t` targets, emits `MuxEffect`s, and holds server/session/window options including `history-trickle`. See [commands](/tmux/commands.md). |

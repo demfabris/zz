@@ -18,6 +18,8 @@ typedef struct zz_mux_snapshot zz_mux_snapshot;
 typedef struct zz_viewport zz_viewport;
 typedef struct zz_agent_state zz_agent_state;
 typedef struct zz_clipboard zz_clipboard;
+typedef struct zz_chrome_keymap zz_chrome_keymap;
+typedef struct zz_json zz_json;
 
 #define ZZ_GRAPHEME_TABLE_BIT (1u << 31)
 #define ZZ_NO_COLOR UINT32_MAX
@@ -58,12 +60,74 @@ typedef struct zz_bytes {
     size_t len;
 } zz_bytes;
 
+zz_bytes zz_json_bytes(const zz_json *value);
+void zz_json_free(zz_json *value);
+zz_json *zz_snapshot_pane_descriptor(const zz_mux_snapshot *snapshot, uint64_t pane);
+zz_json *zz_client_gui_command_next(zz_client *client);
+bool zz_client_gui_response(zz_client *client, uint64_t request_id, bool ok, const char *text);
+bool zz_client_send_browser_text(zz_client *client, uint64_t pane, const char *text);
+bool zz_client_send_browser_key(zz_client *client, uint64_t pane, uint32_t code,
+    uint32_t codepoint, uint8_t function, uint32_t action, uint8_t modifiers,
+    const char *text, bool text_follows);
+uint16_t zz_client_socks_port(const zz_client *client);
+
+zz_chrome_keymap *zz_chrome_keymap_new(void);
+void zz_chrome_keymap_free(zz_chrome_keymap *keymap);
+bool zz_chrome_keymap_bind(zz_chrome_keymap *keymap, const char *table,
+                            const char *key, const char *action);
+bool zz_chrome_keymap_unbind(zz_chrome_keymap *keymap, const char *table,
+                              const char *key);
+zz_bytes zz_chrome_keymap_resolve(const zz_chrome_keymap *keymap,
+                                  const char *table, uint32_t code,
+                                  uint32_t codepoint, uint8_t function,
+                                  uint32_t action, uint8_t modifiers,
+                                  const char *text);
+
 typedef struct zz_pane_rect {
     float x;
     float y;
     float width;
     float height;
 } zz_pane_rect;
+
+typedef struct zz_browser_runtime zz_browser_runtime;
+typedef struct zz_browser_event zz_browser_event;
+typedef struct zz_browser_frame zz_browser_frame;
+zz_browser_runtime *zz_browser_runtime_new(const char *cache_root, char *error, size_t capacity);
+bool zz_browser_runtime_pump(zz_browser_runtime *runtime);
+bool zz_browser_runtime_set_egress(zz_browser_runtime *runtime, const zz_client *client, const char *endpoint, bool enabled);
+zz_json *zz_browser_history_suggestions(const zz_browser_runtime *runtime, const char *profile, const char *input, size_t limit);
+zz_json *zz_browser_history_recent(const zz_browser_runtime *runtime, const char *profile, size_t limit);
+bool zz_browser_history_remove(zz_browser_runtime *runtime, const char *profile, const char *url);
+uint64_t zz_browser_chrome_profiles(zz_browser_runtime *runtime);
+uint64_t zz_browser_import_chrome(zz_browser_runtime *runtime, uint64_t session, const char *source_profile);
+zz_bytes zz_browser_runtime_error(const zz_browser_runtime *runtime);
+bool zz_browser_runtime_free(zz_browser_runtime *runtime);
+uint64_t zz_browser_session_new(zz_browser_runtime *runtime, const char *profile,
+    const char *url, uint32_t width, uint32_t height, float scale);
+void zz_browser_session_close(zz_browser_runtime *runtime, uint64_t session);
+void zz_browser_session_viewport(zz_browser_runtime *runtime, uint64_t session,
+    uint32_t width, uint32_t height, float scale, float zoom,
+    int32_t screen_x, int32_t screen_y, bool visible, bool focused);
+bool zz_browser_session_action(zz_browser_runtime *runtime, uint64_t session, const char *json);
+bool zz_browser_session_dispatch(zz_browser_runtime *runtime, uint64_t session, const char *json);
+void zz_browser_session_pointer(zz_browser_runtime *runtime, uint64_t session,
+    int32_t x, int32_t y, uint32_t phase, uint32_t button, int32_t clicks, uint8_t flags);
+void zz_browser_session_wheel(zz_browser_runtime *runtime, uint64_t session,
+    int32_t x, int32_t y, int32_t dx, int32_t dy, bool precise, uint8_t flags);
+void zz_browser_session_key(zz_browser_runtime *runtime, uint64_t session,
+    uint32_t code, uint32_t scalar, uint8_t function, uint32_t action, uint8_t flags);
+zz_browser_event *zz_browser_event_next(zz_browser_runtime *runtime);
+zz_bytes zz_browser_event_json(const zz_browser_event *event);
+zz_bytes zz_browser_event_image(const zz_browser_event *event);
+void zz_browser_event_free(zz_browser_event *event);
+zz_browser_frame *zz_browser_frame_take(zz_browser_runtime *runtime, uint64_t session);
+void zz_browser_frame_free(zz_browser_frame *frame);
+uint32_t zz_browser_frame_width(const zz_browser_frame *frame);
+uint32_t zz_browser_frame_height(const zz_browser_frame *frame);
+void *zz_browser_frame_surface(const zz_browser_frame *frame);
+zz_bytes zz_browser_frame_bgra(const zz_browser_frame *frame);
+size_t zz_browser_resolve_address(const char *input, const char *provider, char *output, size_t capacity);
 
 typedef enum zz_connect_failure {
     ZZ_CONNECT_FAILURE_NONE = 0,
@@ -188,6 +252,7 @@ typedef enum zz_event_kind {
     ZZ_EVENT_AGENT_LAGGED = 19,
     ZZ_EVENT_AGENT_SESSIONS = 20,
     ZZ_EVENT_COMMAND_REPLY = 21,
+    ZZ_EVENT_GUI_COMMAND = 22,
 } zz_event_kind;
 
 typedef struct zz_client_event {
@@ -200,14 +265,20 @@ typedef struct zz_client_event {
 
 /* Connect to a daemon socket; NULL on failure. Free with zz_client_free. */
 zz_client *zz_client_connect(const char *socket_path);
+size_t zz_client_default_endpoint(char *buf, size_t capacity);
 zz_client *zz_client_connect_endpoint(const char *endpoint,
                                       const char *password, char *error,
                                       size_t error_capacity);
+zz_client *zz_client_connect_native(
+    const char *options_json, zz_ssh_prompt_callback callback, void *context,
+    zz_connect_failure *failure, char *error, size_t error_capacity);
 zz_client *zz_client_connect_endpoint_interactive(
     const char *endpoint, zz_ssh_prompt_callback callback, void *context,
     zz_connect_failure *failure, char *error, size_t error_capacity);
 size_t zz_client_ssh_public_key(char *buf, size_t capacity);
 void zz_client_free(zz_client *client);
+bool zz_client_claims_prefix_key(const zz_client *client, uint32_t code, uint32_t scalar, uint8_t function, uint8_t modifiers);
+bool zz_client_cancel_prefix(const zz_client *client, uint64_t request);
 
 /* Readable whenever events are queued. Poll it, then drain
  * zz_client_next_event until it returns false. */
@@ -490,6 +561,37 @@ bool zz_viewport_cursor(const zz_viewport *viewport, zz_cursor *out);
 /* Decode one row as NUL-terminated UTF-8; returns bytes written. */
 size_t zz_viewport_row_text(const zz_viewport *viewport, uint16_t row,
                             char *buf, size_t capacity);
+
+typedef struct zz_settings_model zz_settings_model;
+zz_settings_model *zz_settings_model_new(const char *system_font, const char *config_path, const char *mux_path);
+void zz_settings_model_free(zz_settings_model *model);
+uint64_t zz_settings_model_take_reload_request(zz_settings_model *model);
+zz_chrome_keymap *zz_settings_model_chrome_keymap(const zz_settings_model *model);
+bool zz_client_set_color_scheme(const zz_client *client, bool dark);
+bool zz_settings_model_poll(zz_settings_model *model);
+zz_json *zz_settings_model_snapshot(const zz_settings_model *model, const zz_client *client);
+bool zz_settings_model_apply(zz_settings_model *model, const zz_client *client, const char *endpoint);
+bool zz_settings_model_action(zz_settings_model *model, const zz_client *client, const char *endpoint, const char *action);
+zz_json *zz_client_appearance_json(const zz_client *client);
+
+typedef struct zz_agent_model zz_agent_model;
+zz_agent_model *zz_agent_model_new(const zz_client *client, uint64_t pane);
+void zz_agent_model_free(zz_agent_model *model);
+bool zz_client_load_agent_preferences(const zz_client *client, const char *path);
+void zz_agent_model_reconcile_preferences(zz_agent_model *model, const zz_client *client);
+bool zz_agent_model_apply_updates(zz_agent_model *model, const zz_client *client, const zz_agent_updates *batch);
+bool zz_agent_model_replay(zz_agent_model *model, const zz_client *client);
+void zz_agent_model_sync(zz_agent_model *model, const zz_agent_state *state);
+void zz_agent_model_apply_sessions(zz_agent_model *model, const zz_agent_sessions *reply);
+zz_json *zz_agent_model_snapshot(zz_agent_model *model, uint64_t since);
+zz_json *zz_agent_model_restored(const zz_agent_model *model);
+void zz_agent_model_acknowledge_restored(zz_agent_model *model, const zz_client *client);
+bool zz_agent_model_action(zz_agent_model *model, const zz_client *client, const char *json);
+zz_json *zz_agent_model_gui_command(zz_agent_model *model, const zz_client *client, uint64_t request_id, const char *json);
+zz_json *zz_agent_model_completions(const zz_agent_model *model, const char *text, size_t cursor);
+
+bool zz_update_checks_enabled(void);
+zz_json *zz_update_check_native(void);
 
 #ifdef __cplusplus
 }

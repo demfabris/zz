@@ -392,7 +392,7 @@ run_read_only_case() {
   start_attached_client "$name" "$socket" "$outer" 80 24 attach -r -t readonly
   wait_for_client_value "$name" "$socket" "$outer" \
     '#{client_session}|#{client_flags}|#{client_width}x#{client_height}' \
-    'readonly|attached,read-only|80x24'
+    'readonly|attached,focused,read-only,UTF-8|80x24'
 
   outer_command "$outer" send-keys -l -t driver:0.0 'printf PACKAGED_READONLY_INPUT_BAD'
   outer_command "$outer" send-keys -t driver:0.0 Enter C-b '['

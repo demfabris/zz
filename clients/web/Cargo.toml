@@ -1,0 +1,69 @@
+[workspace]
+resolver = "3"
+
+[package]
+name = "zz-web-client"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.97"
+description = "Browser client for zz using the shared GPUI interface"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+async-channel = "2.5.0"
+base64 = "0.22"
+image = { version = "=0.25.10", default-features = false }
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zz-client = { path = "../../crates/zz-client" }
+zz-protocol = { path = "../../crates/zz-protocol" }
+zz-terminal = { path = "../../crates/zz-terminal", default-features = false }
+zz-ui = { path = "../../crates/zz-ui", features = ["agent", "editor"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false, features = ["font-kit", "wayland", "x11"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys = "0.3"
+rust-embed = { version = "8.12.0", features = ["debug-embed"] }
+wasm-bindgen = "=0.2.126"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["BinaryType", "Blob", "Clipboard", "CloseEvent", "Document", "Element", "ErrorEvent", "Event", "File", "FileList", "HtmlElement", "HtmlInputElement", "Location", "MessageEvent", "Navigator", "Node", "Storage", "WebSocket", "Window"] }
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -2 }
+pedantic = { level = "warn", priority = -1 }
+too_many_lines = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+float_cmp = "allow"
+struct_excessive_bools = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"
+unused_self = "allow"
+
+[patch."https://github.com/zed-industries/zed"]
+gpui = { git = "https://github.com/demfabris/zed", rev = "3263264d6455a8f282268697377199864a81f7a4", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/demfabris/zed", rev = "3263264d6455a8f282268697377199864a81f7a4" }
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

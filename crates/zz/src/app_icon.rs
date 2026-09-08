@@ -5,6 +5,7 @@ use image::{Frame, RgbaImage, imageops::FilterType};
 use smallvec::smallvec;
 use zz_ui::ThemeMode;
 
+#[cfg(any(target_os = "linux", test))]
 const APP_ICON_PNG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../assets/linux/hicolor/256x256/apps/zz.png"
@@ -23,47 +24,13 @@ const SETTINGS_PREVIEW_RASTER_SIZE: u32 = 96;
 
 const ABOUT_LOGO_RASTER_SIZE: u32 = 176;
 
-/// What `app-icon` selects.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum AppIconSetting {
-    /// Follow the OS appearance.
-    #[default]
-    Automatic,
-    Light,
-    Dark,
-}
+pub use zz_client::chrome_palette::AppIconSetting;
 
-impl AppIconSetting {
-    pub(crate) const ALL: [Self; 3] = [Self::Automatic, Self::Light, Self::Dark];
-
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Automatic => "automatic",
-            Self::Light => "light",
-            Self::Dark => "dark",
-        }
-    }
-
-    pub(crate) const fn title(self) -> &'static str {
-        match self {
-            Self::Automatic => "Automatic",
-            Self::Light => "Light",
-            Self::Dark => "Dark",
-        }
-    }
-
-    pub(crate) fn from_str(value: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|setting| setting.as_str() == value.trim())
-    }
-
-    pub(crate) fn variant(self, appearance: WindowAppearance) -> ThemeMode {
-        match self {
-            Self::Automatic => ThemeMode::from(appearance),
-            Self::Light => ThemeMode::Light,
-            Self::Dark => ThemeMode::Dark,
-        }
+pub(crate) fn variant(setting: AppIconSetting, appearance: WindowAppearance) -> ThemeMode {
+    match setting {
+        AppIconSetting::Automatic => ThemeMode::from(appearance),
+        AppIconSetting::Light => ThemeMode::Light,
+        AppIconSetting::Dark => ThemeMode::Dark,
     }
 }
 
@@ -138,12 +105,6 @@ pub(crate) fn about_logo(variant: ThemeMode) -> Arc<RenderImage> {
     Arc::clone(&LOGOS[usize::from(variant.is_dark())])
 }
 
-pub(crate) fn sidebar_logo() -> Arc<RenderImage> {
-    static LOGO: LazyLock<Arc<RenderImage>> =
-        LazyLock::new(|| render_image(decode_png(APP_ICON_PNG)));
-    Arc::clone(&LOGO)
-}
-
 #[cfg(any(target_os = "linux", test))]
 pub(crate) fn x11_window_icon() -> Arc<RgbaImage> {
     static APP_ICON: LazyLock<Arc<RgbaImage>> =
@@ -158,7 +119,7 @@ pub(crate) fn apply(cx: &App) {
         if setting == AppIconSetting::Automatic && macos::bundle_declares_icon() {
             macos::reset_dock_icon();
         } else {
-            macos::set_dock_icon(icon_pixels(setting.variant(cx.window_appearance())));
+            macos::set_dock_icon(icon_pixels(variant(setting, cx.window_appearance())));
         }
     }
 
@@ -285,15 +246,15 @@ mod tests {
             WindowAppearance::Dark,
             WindowAppearance::VibrantDark,
         ] {
-            assert_eq!(AppIconSetting::Light.variant(appearance), ThemeMode::Light);
-            assert_eq!(AppIconSetting::Dark.variant(appearance), ThemeMode::Dark);
+            assert_eq!(variant(AppIconSetting::Light, appearance), ThemeMode::Light);
+            assert_eq!(variant(AppIconSetting::Dark, appearance), ThemeMode::Dark);
         }
         assert_eq!(
-            AppIconSetting::Automatic.variant(WindowAppearance::VibrantLight),
+            variant(AppIconSetting::Automatic, WindowAppearance::VibrantLight),
             ThemeMode::Light
         );
         assert_eq!(
-            AppIconSetting::Automatic.variant(WindowAppearance::Dark),
+            variant(AppIconSetting::Automatic, WindowAppearance::Dark),
             ThemeMode::Dark
         );
     }
@@ -301,8 +262,8 @@ mod tests {
     #[test]
     fn every_setting_round_trips_through_its_config_value() {
         for setting in AppIconSetting::ALL {
-            assert_eq!(AppIconSetting::from_str(setting.as_str()), Some(setting));
+            assert_eq!(AppIconSetting::parse(setting.as_str()), Some(setting));
         }
-        assert_eq!(AppIconSetting::from_str("rainbow"), None);
+        assert_eq!(AppIconSetting::parse("rainbow"), None);
     }
 }

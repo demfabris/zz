@@ -11,11 +11,11 @@ use std::{
 
 use gpui::{
     Anchor, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Entity,
-    EntityInputHandler, FocusHandle, Focusable, Font, FontFallbacks, FontFeatures, FontStyle,
-    FontWeight, Hsla, Image, ImageSource, IntoElement, KeyBinding, KeyDownEvent, KeyUpEvent,
-    Keystroke, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
-    MouseUpEvent, NoAction, ObjectFit, Pixels, Point, Render, Rgba, ScrollWheelEvent, Subscription,
-    Task, UTF16Selection, Window, anchored, deferred, div, font, img, point, prelude::*, px,
+    EntityInputHandler, FocusHandle, Focusable, Font, Hsla, Image, ImageSource, IntoElement,
+    KeyBinding, KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton,
+    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, NoAction, ObjectFit, Pixels,
+    Point, Render, ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, anchored,
+    deferred, div, img, point, prelude::*, px,
 };
 use parking_lot::RwLock;
 use zz_client::{ChromeAction, TERMINAL_TABLE};
@@ -23,11 +23,11 @@ use zz_protocol::{
     ClientMessageKind, CommandInvocation, InputMessage, PaneId, PopupAction, TerminalUiCommand,
 };
 use zz_terminal::{
-    AppearanceColor, AppearanceConfigKey, AppearanceProvenance, AppearanceSource, ClipboardTarget,
-    CursorBlinkPolicy, IMAGE_PLACEHOLDER_SCHEME, KeyAction, KeyCode, KeyInput, Modifiers,
-    PointerCellEvent, ScrollbarState, SearchCase, SearchDirection, SearchMode, SearchQuery,
-    SearchStatus, SessionStatus, TerminalAppearance, TerminalMode, TerminalMouseButton,
-    TerminalMouseInput, TerminalMousePhase, TerminalViewAction, TerminalViewport,
+    AppearanceConfigKey, AppearanceProvenance, AppearanceSource, ClipboardTarget,
+    IMAGE_PLACEHOLDER_SCHEME, KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent,
+    ScrollbarState, SearchCase, SearchDirection, SearchMode, SearchQuery, SearchStatus,
+    SessionStatus, TerminalAppearance, TerminalMode, TerminalMouseButton, TerminalMouseInput,
+    TerminalMousePhase, TerminalViewAction, TerminalViewport,
 };
 use zz_ui::{
     ActiveTheme as _, Colorize as _,
@@ -84,7 +84,6 @@ const LOCAL_SCROLL_DEBOUNCE: Duration = Duration::from_millis(120);
 const LOCAL_SCROLL_TIMEOUT: Duration = Duration::from_secs(2);
 const IMAGE_HOVER_DWELL: Duration = Duration::from_millis(250);
 const IMAGE_POPOVER_SIDE: f32 = 300.0;
-const MAX_SELECTION_AUTOSCROLL_ROWS: i32 = 8;
 const MAX_PASTE_BYTES: usize = 4 * 1024 * 1024;
 const TERMINAL_KEY_CONTEXT: &str = "Terminal";
 
@@ -234,40 +233,7 @@ pub(crate) fn terminal_font_for_style(
     bold: bool,
     italic: bool,
 ) -> Font {
-    let configured_families = match (bold, italic) {
-        (true, true) => &appearance.font_families_bold_italic,
-        (true, false) => &appearance.font_families_bold,
-        (false, true) => &appearance.font_families_italic,
-        (false, false) => &appearance.font_families,
-    };
-    let families = if configured_families.is_empty() {
-        &appearance.font_families
-    } else {
-        configured_families
-    };
-    let primary = families.first().map_or(TERMINAL_FONT, String::as_str);
-    let mut font = font(primary.to_owned());
-    let mut features = Vec::with_capacity(appearance.font_features.len() + 1);
-    features.push(("liga".to_owned(), 1));
-    features.extend(
-        appearance
-            .font_features
-            .iter()
-            .map(|feature| (feature.tag_string(), feature.value)),
-    );
-    font.features = FontFeatures(Arc::new(features));
-    let fallbacks = families.iter().skip(1).cloned().collect::<Vec<_>>();
-    font.fallbacks = (!fallbacks.is_empty()).then(|| FontFallbacks::from_fonts(fallbacks));
-    font.weight = FontWeight(
-        (f32::from(appearance.font_weight) + if bold { 300.0 } else { 0.0 })
-            .min(FontWeight::BLACK.0),
-    );
-    font.style = if italic {
-        FontStyle::Italic
-    } else {
-        FontStyle::Normal
-    };
-    font
+    zz_ui::terminal::terminal_font_for_style(appearance, TERMINAL_FONT, bold, italic)
 }
 
 struct TerminalRenderAppearance {
@@ -299,8 +265,9 @@ pub(crate) fn terminal_line_height(appearance: &TerminalAppearance) -> Pixels {
         .max(1.0))
 }
 
-fn appearance_hsla(color: AppearanceColor) -> Hsla {
-    Rgba {
+#[cfg(test)]
+fn appearance_hsla(color: zz_terminal::AppearanceColor) -> Hsla {
+    gpui::Rgba {
         r: f32::from(color.r) / 255.0,
         g: f32::from(color.g) / 255.0,
         b: f32::from(color.b) / 255.0,
@@ -310,25 +277,11 @@ fn appearance_hsla(color: AppearanceColor) -> Hsla {
 }
 
 #[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "validated opacity is rounded and clamped to the u8 alpha domain"
-)]
-fn opacity_byte(opacity: f32) -> u8 {
-    (opacity * 255.0).round().clamp(0.0, 255.0) as u8
-}
-
-#[allow(
     clippy::disallowed_methods,
     reason = "terminal surfaces use the independent terminal appearance color system"
 )]
 fn terminal_background(background: zz_terminal::Color, opacity: f32) -> Hsla {
-    appearance_hsla(AppearanceColor::rgba(
-        background.r,
-        background.g,
-        background.b,
-        opacity_byte(opacity),
-    ))
+    zz_ui::terminal::terminal_background(background, opacity)
 }
 
 fn presented_uri(uri: &str) -> String {
@@ -399,13 +352,7 @@ fn search_prompt_text(
 
 const DIAGNOSTIC_TARGET: &str = "zz::diagnostics::terminal_render";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct GridSize {
-    pub columns: u16,
-    pub rows: u16,
-    pub cell_width_px: u32,
-    pub cell_height_px: u32,
-}
+pub(crate) use zz_ui::terminal::GridSize;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct HitGrid {
@@ -1168,18 +1115,6 @@ impl TerminalView {
         self.marked_text.clone()
     }
 
-    pub(crate) fn search_ime_layout(
-        &self,
-        search_status: Option<SearchStatus>,
-    ) -> Option<(String, usize)> {
-        let query = self.search_query.as_ref()?;
-        Some(search_prompt_text(
-            query,
-            self.marked_text.as_deref().unwrap_or_default(),
-            search_status,
-        ))
-    }
-
     pub(crate) fn focus(&self) -> FocusHandle {
         self.focus_handle.clone()
     }
@@ -1196,7 +1131,6 @@ impl TerminalView {
         cell_width: Pixels,
         line_height: Pixels,
         cursor_bounds: Option<Bounds<Pixels>>,
-        search_cursor_bounds: Option<Bounds<Pixels>>,
         link_hover_bounds: Option<Bounds<Pixels>>,
         cx: &mut Context<Self>,
     ) {
@@ -1232,11 +1166,9 @@ impl TerminalView {
             cell_width,
             line_height,
         });
-        self.cursor_bounds = if self.search_query.is_some() {
-            search_cursor_bounds
-        } else {
-            cursor_bounds
-        };
+        if self.search_query.is_none() {
+            self.cursor_bounds = cursor_bounds;
+        }
         self.link_hover_bounds = link_hover_bounds;
         log::trace!(
             target: "zz::diagnostics::terminal_render",
@@ -1617,10 +1549,7 @@ impl TerminalView {
         let Some(grid) = self.hit_grid else {
             return;
         };
-        let fraction = ((position.y - grid.surface_bounds.origin.y)
-            / grid.surface_bounds.size.height)
-            .clamp(0.0, 1.0);
-        let fraction = (fraction * u32::MAX as f32).round() as u32;
+        let fraction = zz_ui::terminal::scroll_fraction(grid.surface_bounds, position);
         if self.should_use_local_scroll() {
             let scrollbar = self.retained.read().viewport.scrollbar;
             let maximum = scrollbar.total.saturating_sub(scrollbar.len);
@@ -1639,22 +1568,7 @@ impl TerminalView {
         let Some(grid) = self.hit_grid else {
             return 0;
         };
-        let distance = if position.y < grid.bounds.origin.y {
-            -f32::from(grid.bounds.origin.y - position.y)
-        } else if position.y > grid.bounds.bottom() {
-            f32::from(position.y - grid.bounds.bottom())
-        } else {
-            return 0;
-        };
-        let rows = (distance.abs() / f32::from(grid.line_height))
-            .ceil()
-            .max(1.0)
-            .min(MAX_SELECTION_AUTOSCROLL_ROWS as f32) as i32;
-        if distance.is_sign_negative() {
-            -rows
-        } else {
-            rows
-        }
+        zz_ui::terminal::selection_autoscroll_lines(grid.bounds, grid.line_height, position)
     }
 
     fn ensure_selection_autoscroll(&mut self, cx: &mut Context<Self>) {
@@ -2418,8 +2332,24 @@ impl Render for TerminalView {
         }
         if let Some(query) = search_query {
             let marked = self.marked_text.as_deref().unwrap_or_default();
-            let (prompt, _) = search_prompt_text(&query, marked, search_status);
-            bottom_right.push(terminal_search_prompt(prompt, cx).into_any_element());
+            let (prompt, caret) = search_prompt_text(&query, marked, search_status);
+            let view = cx.entity();
+            bottom_right.push(
+                terminal_search_prompt(
+                    prompt,
+                    caret,
+                    move |bounds, window, cx| {
+                        view.update(cx, |view, _| {
+                            if view.cursor_bounds != Some(bounds) {
+                                view.cursor_bounds = Some(bounds);
+                                window.invalidate_character_coordinates();
+                            }
+                        });
+                    },
+                    cx,
+                )
+                .into_any_element(),
+            );
         }
         if !bottom_right.is_empty() {
             root = root.child(pane_overlay_stack(
@@ -2590,11 +2520,7 @@ const fn selection_has_extent(anchor: PointerCellEvent, pointer: PointerCellEven
 }
 
 fn scrollbar_strip_hit(grid: HitGrid, scrollbar: ScrollbarState, position: Point<Pixels>) -> bool {
-    scrollbar.total > scrollbar.len
-        && position.x >= grid.surface_bounds.right() - zz_ui::scroll::GUTTER_WIDTH
-        && position.x <= grid.surface_bounds.right()
-        && position.y >= grid.surface_bounds.origin.y
-        && position.y <= grid.surface_bounds.bottom()
+    zz_ui::terminal::scrollbar_strip_hit(grid.surface_bounds, scrollbar, position)
 }
 
 fn modifiers(value: gpui::Modifiers) -> Modifiers {
@@ -2607,21 +2533,7 @@ fn single_character(key: &str) -> Option<char> {
     characters.next().is_none().then_some(character)
 }
 
-fn cursor_should_blink(
-    cursor: Option<zz_terminal::Cursor>,
-    policy: CursorBlinkPolicy,
-    focused: bool,
-) -> bool {
-    focused
-        && cursor.is_some_and(|cursor| {
-            cursor.visible()
-                && match policy {
-                    CursorBlinkPolicy::Off => false,
-                    CursorBlinkPolicy::On => true,
-                    CursorBlinkPolicy::Terminal => cursor.blinking(),
-                }
-        })
-}
+use zz_ui::terminal::cursor_should_blink;
 
 const fn should_paste_primary(command_output: bool, mouse_tracking: bool, shift: bool) -> bool {
     !command_output && (shift || !mouse_tracking)
@@ -2670,6 +2582,8 @@ pub(crate) fn key_code(key: &str) -> KeyCode {
 )]
 mod tests {
     use super::*;
+    use gpui::{FontStyle, FontWeight};
+    use zz_terminal::{AppearanceColor, CursorBlinkPolicy};
 
     gpui::actions!(terminal_view_test, [FocusNext, FocusPrevious]);
 

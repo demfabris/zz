@@ -1,6 +1,7 @@
 //! Target-agnostic presentation components and the widget layer, shared by the
 //! zz desktop app and the WASM showcase.
 
+pub mod chrome_palette;
 mod widget;
 
 pub use widget::{
@@ -56,6 +57,8 @@ pub mod feedback;
 pub mod mend;
 pub mod navigation;
 pub mod pane;
+pub mod picker;
 pub mod pulse;
 pub mod settings;
 pub mod shell;
+pub mod terminal;

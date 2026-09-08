@@ -168,6 +168,16 @@ impl LocalStream {
     }
 
     #[cfg(unix)]
+    pub(crate) fn set_timeout(&self, timeout: Option<std::time::Duration>) -> io::Result<()> {
+        match &self.0 {
+            LocalSocketStream::UdSocket(stream) => {
+                stream.inner().set_read_timeout(timeout)?;
+                stream.inner().set_write_timeout(timeout)
+            }
+        }
+    }
+
+    #[cfg(unix)]
     pub(crate) fn shutdown(&self) -> io::Result<()> {
         match &self.0 {
             LocalSocketStream::UdSocket(stream) => {

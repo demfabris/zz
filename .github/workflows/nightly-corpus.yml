@@ -13,16 +13,37 @@ jobs:
     name: Full differential corpus
     runs-on: ubuntu-24.04
     timeout-minutes: 150
+    env:
+      CEF_PATH: ${{ github.workspace }}/.cef-cache
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - name: Install pinned tmux build dependencies
+      # The harness builds zz, so this needs everything the CI Linux leg
+      # needs to compile it, plus the pinned tmux's own build dependencies.
+      # Neovim is what the pane-tmux-path fixture drives vim-tmux-navigator with.
+      - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libevent-dev libncurses-dev bison automake pkg-config
+          sudo apt-get install --yes autoconf automake bison cmake curl libevent-dev libfontconfig-dev libncurses-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev neovim ninja-build pkg-config
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Cache matching CEF distribution
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.cef-cache
+          key: cef-151.3.14-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Cache pinned tmux build
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/compat/.cache
+          key: tmux-${{ hashFiles('compat/tmux-oracle.json', 'compat/fetch-tmux.sh', 'compat/fetch-corpus.sh') }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Run the full strict corpus with the attached fixture
-        run: script -e -c "compat/run.sh --strict-geometry --attached-client" /dev/null
+        run: compat/run.sh --strict-geometry --attached-client
 
       - name: Check registry and report freshness
         run: |

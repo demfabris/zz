@@ -11,6 +11,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-mux` — tmux-compatible model: sessions, windows, panes, key tables
 - `crates/zz-protocol` — wire protocol between daemon and clients, plus the shared key contract (tables, engine, fold, command catalog)
 - `crates/zz-client` — sans-IO client core: protocol reduction, chrome keymap, daemon-backed convergence simulator
+- `crates/zz-config` - renderer-free application config, settings actions, preference persistence, and update checks
 - `crates/zz-client-ffi` — C ABI over the client core (`include/zz-client.h`, link-verified by a C integration client)
 - `crates/zz-terminal` — terminal engine: PTY sessions, libghostty-vt state, frame snapshots
 - `crates/zz-browser` — CEF off-screen-rendering browser runtime
@@ -18,7 +19,10 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-ui` — widget layer: a maintained full fork of gpui-component
 - `crates/zz-tui` — raw-terminal attach client
 - `crates/zz-gtk` — GTK4/libadwaita GNOME client, excluded from the workspace (needs system GTK); build it from its own directory
+- `crates/zz-web` - local HTTP/WebSocket gateway for browser clients
+- `clients/web` - full-page GPUI/WASM client using zz-ui and zz-client, with its own Cargo workspace
 - `clients/ios` — adaptive SwiftUI/UIKit iPhone and iPad app over `zz-client-ffi`
+- `clients/macos` - native SwiftUI/AppKit terminal, ACP agent, CEF browser, shared settings, and component gallery over `zz-client-ffi`
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `compat/` — tmux compat campaign: differential harness (`run.sh`), gap registry (`tmux-gaps.json`), dispatch-board client (`board.py`), progress meter, orchestration handoff (`orchestration/`)
 - `knowledge/` — OKF knowledge bundle for the whole system (start at `index.md`)
@@ -47,10 +51,13 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `just build <platform>` | Release bundle into `dist/zz` (wraps `cargo xtask bundle-cef`) |
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |
 | `just ios` / `just ipad` / `just ios-build` / `just ipad-build` / `just ios-test` / `just ipad-test` / `just ios-device [name]` | Native Apple client on iPhone or iPad simulator / build only / simulator tests / physical device |
+| `just macos-gallery` / `macos-gallery-build [debug\|release]` / `macos-gallery-test` | Native macOS component gallery / app bundle / Swift and isolated daemon tests |
+| `just macos-native [--socket PATH] [--session NAME]` / `macos-native-build [debug\|release]` / `macos-native-test` | Native macOS client / CEF app bundle / Swift and isolated daemon tests |
 | `just forks` / `just fork-rebase <name>` | Carried-patch fork status / rebase |
 | `just gtk [args]` | Run the GTK4/libadwaita client (`crates/zz-gtk`, workspace-excluded) |
 | `just site` | Docs site dev server with live reload |
 | `just showcase` / `showcase-setup` / `showcase-build[-release]` | wasm UI showcase dev loop / toolchain / assets |
+| `just web` / `web-build[-release]` / `web-serve` | Browser client dev loop / assets / local gateway |
 | `just profile-cpu\|profile-system\|profile-metal\|profile-terminal-diagnostics mac …` | Instruments captures (macOS); read one back with `profile-cpu-summary`, `profile-metal-summary`, or `profile-terminal-summary` (`profile-system` has no summary recipe) |
 | `just profile-build mac` | Release-optimized bundle with dSYMs for profiling |
 | `just dmg` / `zip-windows` / `pacman-package` / `pacman-install` / `deb-package` / `deb-install` | Platform packages |
@@ -66,7 +73,7 @@ Multiple agent sessions often share this checkout in parallel. Never `git stash`
 
 - `gpui`/`gpui_platform` resolve to `demfabris/zed` branch `zz-patches` — a carried-patch fork listed in `scripts/forks.conf`. Bumping upstream means rebasing the patch branch: `just forks` for status, `just fork-rebase zed` to rebase.
 - Strange gpui build errors right after a dependency change usually mean `Cargo.lock` and the fork branch are out of sync.
-- `examples/ui-showcase` is the only consumer of gpui's wasm/WebGPU path and is workspace-excluded, so a bump can break it without failing the main build. Check with `just showcase-build`.
+- `examples/ui-showcase` and `clients/web` consume gpui's WASM renderer in excluded workspaces. Keep their fork revisions and lockfiles in step with the root, and check both `just showcase-build` and `just web-build` after a bump.
 </important>
 
 <important if="a test fails under cargo test --workspace">
@@ -84,6 +91,7 @@ A few `zz-daemon` tests are timing-sensitive and only fail under full-workspace 
 
 - UI conventions: `knowledge/configuration/ui-conventions.md` (chrome colors come from the theme; clippy rejects raw `rgb`/`hsla`).
 - `crates/zz-ui` is a full fork of gpui-component, not a dependency — read `crates/zz-ui/UPSTREAM.md` before touching widget internals or trying to "update" it.
+- The native macOS presentation port lives in `clients/macos/Sources/ZZUI`. Keep its visual vocabulary aligned with zz-ui; session state, protocol reduction, commands, transport, and terminal data remain in Rust. See `knowledge/playbooks/native-macos-gallery.md` for the component inventory and native substitutions.
 </important>
 
 <important if="you are adding or editing documents under knowledge/">

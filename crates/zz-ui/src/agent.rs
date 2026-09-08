@@ -1,4 +1,7 @@
 pub mod composer;
+pub mod controls;
+pub mod presentation;
+pub mod slash;
 
 use std::{
     cell::Cell,

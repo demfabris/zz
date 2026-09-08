@@ -1161,72 +1161,12 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertNil(ZZCommandLine.split("   "))
     }
 
-    func testTmuxImportOffersOncePerHost() {
-        XCTAssertFalse(ZZTMuxImport.shouldOffer(endpoint: "", offered: []))
-        XCTAssertTrue(ZZTMuxImport.shouldOffer(endpoint: "ssh://fab@mini", offered: []))
-        XCTAssertTrue(
-            ZZTMuxImport.promptMessage(endpoint: "ssh://fab@mini")
-                .contains("replaces zz/mux.conf on the host")
-        )
-        XCTAssertFalse(
-            ZZTMuxImport.shouldOffer(
-                endpoint: "ssh://fab@mini",
-                offered: ["ssh://fab@mini"]
-            )
-        )
-        XCTAssertTrue(
-            ZZTMuxImport.shouldOffer(
-                endpoint: "ssh://fab@other",
-                offered: ["ssh://fab@mini"]
-            )
-        )
-    }
-
-    func testTmuxImportOfferedHostsRoundTrip() {
-        let suite = "TmuxImportTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-        }
-        XCTAssertTrue(ZZTMuxImport.offeredHosts(in: defaults).isEmpty)
-        ZZTMuxImport.markOffered(endpoint: "ssh://fab@mini", in: defaults)
-        XCTAssertEqual(
-            ZZTMuxImport.offeredHosts(in: defaults),
-            ["ssh://fab@mini"]
-        )
-    }
-
-    func testTmuxImportResultMessage() {
-        let binding = ZZPrefixBinding(key: "h", summary: "select-pane -L", note: "", repeats: true)
-        XCTAssertNil(ZZTMuxImport.resultMessage(baseline: [binding], current: [binding]))
-        XCTAssertEqual(
-            ZZTMuxImport.resultMessage(baseline: [], current: [binding]),
-            "Imported 1 new binding. It’s live now."
-        )
-        let rebound = ZZPrefixBinding(
-            key: "h",
-            summary: "select-pane -R",
-            note: "",
-            repeats: true
-        )
-        XCTAssertEqual(
-            ZZTMuxImport.resultMessage(baseline: [binding], current: [rebound]),
-            "Tmux config imported and reloaded."
-        )
-    }
-
-    func testTmuxImportPhaseAlertRouting() {
-        XCTAssertFalse(ZZTMuxImportPhase.hidden.needsAlert)
-        XCTAssertFalse(ZZTMuxImportPhase.working(baseline: []).needsAlert)
-        let prompting = ZZTMuxImportPhase.prompting(endpoint: "ssh://fab@mini")
-        XCTAssertTrue(prompting.needsAlert)
-        XCTAssertEqual(prompting.promptEndpoint, "ssh://fab@mini")
-        XCTAssertNil(prompting.resultMessage)
-        let done = ZZTMuxImportPhase.done(message: "Imported 1 new binding. It’s live now.")
-        XCTAssertTrue(done.needsAlert)
-        XCTAssertNil(done.promptEndpoint)
-        XCTAssertEqual(done.resultMessage, "Imported 1 new binding. It’s live now.")
+    func testPartialDamageRedrawsTheCursorsOldAndNewRows() {
+        let damage = TerminalDamage(all: false, firstRow: 4, lastRow: 5)
+        XCTAssertEqual(damage.rowRange(previousCursorRow: 2, cursorRow: 7), 2...7)
+        XCTAssertEqual(damage.rowRange(previousCursorRow: nil, cursorRow: nil), 4...5)
+        XCTAssertEqual(damage.rowRange(previousCursorRow: 4, cursorRow: 5), 4...5)
+        XCTAssertEqual(damage.rowRange(previousCursorRow: 9, cursorRow: nil), 4...9)
     }
 
     func testCommandRequestsMatchOneReplyEach() {

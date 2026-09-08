@@ -2,7 +2,7 @@
 type: Design Plan
 title: Client core & contract - one brain, every face
 description: Decision record for the shared client contract - protocol-owned commands and keys, sans-IO reduction, typed Agent attention, and a native-shell C ABI.
-status: Contract consolidation, live key tables, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native Apple ABI gained mux and styled terminal surfaces on 2026-08-15, endpoint connection and its iOS SSH identity on 2026-08-25, interactive SSH trust and authentication, Agent supervision, semantic selection, and clipboard delivery on 2026-08-26, full window trees and normalized visible pane geometry on 2026-08-30, then passive attached-session terminal preview control on 2026-08-31, and the Agent transcript stream, agent session lists, and the published prefix table on 2026-09-02. History, Kitty, multi-host selection, and Browser and Editor viewports remain open. GPUI cross-surface rebinding still needs a restart
+status: Contract consolidation, live key tables, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native Apple ABI gained mux and styled terminal surfaces on 2026-08-15, endpoint connection and its iOS SSH identity on 2026-08-25, interactive SSH trust and authentication, Agent supervision, semantic selection, and clipboard delivery on 2026-08-26, full window trees and normalized visible pane geometry on 2026-08-30, then passive attached-session terminal preview control on 2026-08-31, and the Agent transcript stream, agent session lists, and the published prefix table on 2026-09-02. Native macOS Agent presentation, settings, chrome-keymap resolution, and optional CEF runtime/frame APIs shipped 2026-09-08. Terminal history, Kitty, multi-host selection, and Editor viewports remain open. GPUI cross-surface rebinding still needs a restart
 tags:
 - client
 - ffi
@@ -33,9 +33,11 @@ clipboard delivery, appearance, disconnect events,
 interactive endpoint connection with typed failures and SSH prompts, its iOS SSH public identity, and
 retained Agent summaries, attention edges, permission responses, and cancellation. The Agent
 transcript stream, its lag and replay path, agent session lists, and the published prefix table
-joined the header on 2026-09-02. The command catalog and the other live key tables, chrome actions,
-history, Kitty images, multi-host presentation, and Browser and Editor viewports remain outside the
-ABI.
+joined the header on 2026-09-02. On 2026-09-08, `zz_chrome_keymap_resolve` added chrome
+action resolution, and the optional `native-browser` feature added CEF sessions and retained
+frames to `crates/zz-client-ffi/include/zz-client.h`. The command catalog and the other live
+key tables, history, Kitty images, multi-host presentation, and Editor viewports remain outside
+the ABI.
 
 The sections below retain the original proposal and its acceptance criteria. The rung ladder marks
 the parts that shipped and the parts that remain design intent.
@@ -189,8 +191,11 @@ The C link client compiles and links the contract, rejects an invalid interactiv
 failure, creates sessions and panes, renders styled content, types through the raw-key path, exercises
 the selection, clipboard, and Agent symbols, reports client focus and blur, kills the attached
 session, reattaches a survivor and recovers its viewport, then frees and reconnects in one process.
-The command catalog and live key-table access beyond the published prefix table, resolved chrome
-action events, history, Kitty images, and Browser and Editor viewports remain outside the ABI.
+Native clients can resolve ChromeKeymap actions and use shared settings and Agent
+presentation models through the ABI. The optional `native-browser` feature also
+exposes CEF sessions, retained frames, input, history, Chrome import, and SSH egress.
+The command catalog, terminal history, Kitty images, and Editor viewports remain
+outside the ABI.
 
 The desktop shell caches its desired window-focus state outside the pane-focus path. Construction
 seeds `true` only when the window is already active; an inactive window waits for its first real

@@ -9,28 +9,28 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            switch store.connectionState {
-            case .idle, .connecting:
-                ProgressView("Connecting to zz")
-                    .controlSize(.large)
-            case let .needsHost(message):
-                HostSetup(message: message)
-            case let .failed(message):
-                ConnectionFailure(message: message)
-            case .disconnected:
-                ConnectionFailure(message: "The daemon disconnected.")
-            case .connected:
+            if showsWorkspace {
                 workspace
-            case let .reconnecting(attempt, delay, error):
-                if store.sessions.isEmpty {
-                    ReconnectingView(attempt: attempt, delay: delay, error: error)
-                } else {
-                    workspace
-                        .overlay(alignment: .top) {
+                    .overlay(alignment: .top) {
+                        if case let .reconnecting(attempt, delay, error) = store.connectionState {
                             ReconnectBanner(attempt: attempt, delay: delay, error: error)
                                 .padding(.horizontal, 14)
                                 .padding(.top, 8)
                         }
+                    }
+            } else {
+                switch store.connectionState {
+                case .idle, .connecting, .connected:
+                    ProgressView("Connecting to zz")
+                        .controlSize(.large)
+                case let .needsHost(message):
+                    HostSetup(message: message)
+                case let .failed(message):
+                    ConnectionFailure(message: message)
+                case .disconnected:
+                    ConnectionFailure(message: "The daemon disconnected.")
+                case let .reconnecting(attempt, delay, error):
+                    ReconnectingView(attempt: attempt, delay: delay, error: error)
                 }
             }
         }
@@ -49,32 +49,6 @@ struct ContentView: View {
             }
         } message: {
             Text(store.actionError ?? "zz couldn’t complete that action.")
-        }
-        .alert(
-            "Tmux config",
-            isPresented: Binding(
-                get: { store.tmuxImportPhase.needsAlert },
-                set: { if !$0 { store.acknowledgeTmuxImport() } }
-            )
-        ) {
-            if store.tmuxImportPhase.promptEndpoint != nil {
-                Button("Import") {
-                    store.runTmuxImportManually()
-                }
-                Button("Not now", role: .cancel) {
-                    store.declineTmuxImport()
-                }
-            } else {
-                Button("OK", role: .cancel) {
-                    store.dismissTmuxImport()
-                }
-            }
-        } message: {
-            if let endpoint = store.tmuxImportPhase.promptEndpoint {
-                Text(ZZTMuxImport.promptMessage(endpoint: endpoint))
-            } else {
-                Text(store.tmuxImportPhase.resultMessage ?? "Import finished.")
-            }
         }
         .sheet(
             item: Binding(
@@ -98,6 +72,14 @@ struct ContentView: View {
                 .padding(.top, 8)
                 .id(notice.id)
                 .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    private var showsWorkspace: Bool {
+        switch store.connectionState {
+        case .connected: true
+        case .reconnecting: !store.sessions.isEmpty
+        default: false
         }
     }
 
@@ -4086,12 +4068,7 @@ private struct FullscreenPane: View {
             }
         }
         .sheet(isPresented: $showsKeyList) {
-            KeyListSheet(bindings: store.prefixBindings) {
-                showsKeyList = false
-                _ = store.requestKeyList()
-            } importTmuxConfig: {
-                store.runTmuxImportManually()
-            }
+            KeyListSheet(bindings: store.prefixBindings)
         }
     }
 
@@ -4429,13 +4406,10 @@ private struct CommandPromptSheet: View {
 }
 
 /// Prefix-table key list from the daemon-published bindings. The full
-/// `list-keys` output still needs command-output FFI (see
-/// `ZZStore.requestKeyList`); until then this covers the prefix table every
-/// iOS user actually navigates.
+/// `list-keys` output still needs command-output FFI; until then this covers
+/// the prefix table every iOS user actually navigates.
 private struct KeyListSheet: View {
     let bindings: [ZZPrefixBinding]
-    let requestFullList: () -> Void
-    let importTmuxConfig: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -4463,24 +4437,6 @@ private struct KeyListSheet: View {
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel("\(binding.displayKey), \(binding.summary)")
                     }
-                }
-                Section {
-                    Button("Request Full list-keys Output") {
-                        requestFullList()
-                    }
-                    .accessibilityIdentifier("request-full-key-list")
-                    Text("The daemon answers list-keys through command output, which iOS cannot display yet. The output lands in the attached session.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Section {
-                    Button("Import Tmux Config From This Host") {
-                        importTmuxConfig()
-                    }
-                    .accessibilityIdentifier("import-tmux-config")
-                    Text("Copies the host’s tmux config into zz/mux.conf and reloads, so custom binds appear above.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Prefix Keys")

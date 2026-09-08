@@ -1,0 +1,4 @@
+module CZZClient [system] {
+    header "../../../../crates/zz-client-ffi/include/zz-client.h"
+    export *
+}

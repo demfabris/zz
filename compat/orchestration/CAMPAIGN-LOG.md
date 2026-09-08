@@ -606,6 +606,78 @@ replay or mux hook ownership beyond the lanes' zones. macOS signal runtime and a
 iTerm2 session remain maintainer validations. Both lane locks were integrated and released;
 MAIN owns the records settlement, and TRIAGE preserves the F-SPLIT-MUX-*-V5 chain.
 
+### 2026-09-07 cycle-18 integration
+
+Two Claude Code Opus 5 lanes at xhigh, one adversarial review each, one integration gate alone, the whole
+cycle on the ubuntu box. The raw TUI client work landed at `602105e5` and the buffer wording plus
+background if-shell order at `980e7439`, each after its own gate, client first. The protocol was not
+bumped: `PROTOCOL_VERSION` stays 99, the client lane's last group could not reach the options it would
+have had to publish, and the mux lane's new wording rides `ServerError::InvalidCommand`, which
+`tmux_message` already renders. Four post-freeze items closed, three remain.
+
+Both reviews were approve-with-fixes and every must-fix landed on its branch before its gate with the
+reviewer's own probe re-run. The client lane's stall fix introduced a regression of its own: the writer
+thread it added outlived `TerminalGuard`, so a detach with unread output repainted the user's shell with
+12,100 bytes at a second of backlog and 42,401 at three, where the binary before the thread left 29.
+`TerminalWriter::abandon` empties the queue where the event loop breaks, before the guard restores; the
+sink and the guard share the stdout lock, so the one write in flight still lands ahead of the restore and
+nothing lands after it. The probe answers 29 bytes at 0.3, 1.0 and 3.0 seconds of unread output.
+
+Both reviews also found a measured divergence living in prose with no slug, which is the same complaint
+cycle 17 got and worth naming again. The client close's clause said the TUI keeps reading its stdin "no
+matter how far behind" its output is, and what was proved is a 0.75 second backlog; past the writer's
+4 MiB budget zz stalls at about thirty seconds of a terminal reading nothing while the pin answers in
+0.050 s on 0.00 CPU seconds, because `tty_block_maybe` drops output instead of keeping it. That is now
+`tui.client-output-queue-budget`, open, owned by the client. The mux close's residual is the idiom its
+group was opened on: two `if -b` branches binding one key behind feature tests that both succeed. zz
+answers the last line 8 of 8 in either ordering; the pin answered 5/3 one way and 7/1 the other. That is
+registered accepted as `config.background-if-shell-race`, because a coin flip is not a behaviour to match.
+
+The mux lane's two new differentials were blind when they landed and the gate fixed them before merging.
+Both fixtures wrote their transcript to `$HOME/<name>.txt`, and `compat/diff-scenario.sh` hands both
+binaries one home, so the zz side wrote the file, the tmux side truncated and rewrote it, and the
+scenario's own `load-buffer` read that single tmux-written file into both servers. Each scenario was
+comparing the pin against itself. The reviewer proved it by appending `writer=$side` and finding
+`writer=tmux` inside the zz block; each side now writes and loads its own transcript, and appending that
+line turns both scenarios red.
+
+The stamped full run finally moved on its fifth attempt, and the corpus is re-stamped on the ubuntu box
+for the first time since cycle 16: 254 scenarios, 3,086 steps, the four registered known rows and every
+other channel clean, attached-client `PASS`, recorded at `04d28cb19e73`. The SHA-256 of
+`compat/results/summary.md` is `fe76abeafaa9a14fb4190dbd199e7c780ea82df14b9cad94888c0c74d9e758e6`. The four earlier attempts are worth
+writing down because three of them were the gate's own doing. The first was launched under `env -i` with
+`PATH=/usr/local/bin:/usr/bin:/bin`, which is not this box: `nvim` lives in `~/.local/bin`, so
+`smoke/pane-tmux-path` asserted its way out, and the minimal environment also shrank the daemon's global
+store until `smoke/format-modifier-environment-loop` found the global and session row counts equal. HOME
+must be scrubbed; the rest of the environment must not. The second was killed on purpose. The third lost
+one row to load, `smoke/vim-tmux-navigator` answering an empty `list-keys` on the zz side, clean on two
+solo re-runs, and its fixture passed. The fourth had a clean corpus and a flaked fixture - the popup
+underlay probe read a focus byte zz sent and the pin did not - which passed solo immediately after.
+
+The stamped run also caught something the gates did not. `if-shell-background-order` asserted one run's
+exact permutation of six branches, and neither binary holds that: the four-shard delta run had zz
+answering 153426 against the pin's 124536, and the serial run had the PIN's own slow-first round come
+back 245361. Six branches are also too few to separate the implementations through a running server's
+`source-file`, where the pre-fix apply lands in file order about half the time. The round now uses twelve
+branches and asserts that file order is reachable within eight attempts, and slow-first asserts only that
+the 0.3 s branch lands last. With the pre-fix `daemon.rs` swapped back in and rebuilt, the scenario
+answers `never-file-order-in-8` on all three rounds against the pin's `file-order`. Measured at server
+start, one throwaway server per attempt: pre-fix zz 0 of 10, fixed zz 10 of 10, the pin 10 of 10; under
+six CPU spinners fixed zz drops to 0 of 8 and the pin to 2 of 8, so neither collect-then-dispatch survives
+a saturated box.
+
+One red belonged to nobody in the cycle. `cargo clippy -p zz` was hard red on Linux at the owner's
+`2f79e3bf`, `needless_pass_by_value` on the tray host's event receiver in the new daemon-side tray, which
+is `#[cfg(not(target_os = "macos"))]` and so invisible from a mac. It was proved red in a worktree at that
+commit and fixed by taking the receiver by reference, because the mux lane's own clippy stage would
+otherwise have failed on somebody else's code. The owner pushed twice more during the cycle, v0.5.0 and
+v0.5.1; both rebases were clean and neither campaign branch was force pushed.
+
+The live registry after the merges holds 46 active groups with 446 items - 3 open, 0 blocked, 43 accepted
+- and 199 closed records, for 242 of 245 known groups settled (98.8%). The frozen meter is unchanged at
+100.0%, 304/304 items and 65/65 groups. What is left is the desktop menu's mouse modality, which is a
+design front rather than a lane, the raw TUI's per-client theme colours, and the paint-queue budget.
+
 ### 2026-09-07 cycle-17 integration
 
 Claude Code Opus 5 lanes ran at xhigh on Ubuntu and were frozen mid-flight before the gate; one

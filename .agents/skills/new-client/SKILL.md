@@ -36,16 +36,26 @@ territory. The knowledge bundle is the map; source is ground truth.
    `crates/zz-client-ffi/tests/smoke.c` is its working reference. Main-loop
    integration is fd-based by design: poll `zz_client_event_fd`, then drain
    `zz_client_next_event` until false — plugs into GSource, QSocketNotifier,
-   or DispatchSource with no cross-thread callbacks. Catalog/key-table access,
-   chrome action events, history, Kitty images, and non-terminal viewport
-   models remain outside the ABI; do not recreate those contracts in toolkit
-   code.
+   or DispatchSource with no cross-thread callbacks. The command catalog and
+   live key tables other than the prefix table,
+   terminal history, Kitty images, and Editor viewport models remain outside
+   the ABI. ChromeKeymap resolution, shared config/settings, Agent transcript
+   reduction/replay, session controls, preferences, and completion are exposed.
+   The optional `native-browser` feature exposes CEF runtime/session/frame/input,
+   history, Chrome import, and egress APIs used by `clients/macos`. Keep CEF calls
+   on the main thread and retain frames through GPU completion. Check the header
+   before adding another interface.
+   Do not recreate missing shared contracts in toolkit code.
 2. **Rust surface** — depend on `zz-client` + `zz-daemon` (client half) +
    `zz-protocol` and drive `ClientCore` yourself. `crates/zz-tui` is the
    exemplar: reader thread reduces into `Arc<Mutex<ClientCore>>`, the main
    loop reads cached copies. Its dependency list is also the fence — if your
    client needs a dep the TUI doesn't have, question it.
-3. **gpui-based client on a new platform** — reuse the desktop `crates/zz`
+3. **GPUI browser client** - use `clients/web`: it compiles the shared `zz-ui`
+   components and `zz-client` to WASM, with `crates/zz-web` forwarding the unchanged
+   binary protocol over WebSocket. Keep native transport dependencies outside WASM.
+   `just web-build` builds the client; `just web-serve` connects it to an existing daemon.
+4. **gpui-based client on another platform** — reuse the desktop `crates/zz`
    engine only when the platform can support the full desktop surface. The old
    GPUI iOS crates were deleted; native Apple clients belong on
    `zz-client-ffi`, as demonstrated by `clients/ios`.

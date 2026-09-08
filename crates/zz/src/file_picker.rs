@@ -9,7 +9,7 @@ use std::{
 use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, KeyDownEvent,
     MouseButton, Render, ScrollStrategy, SharedString, Subscription, Task, UniformListScrollHandle,
-    Window, div, prelude::*, px, relative, uniform_list,
+    Window, div, prelude::*, px, uniform_list,
 };
 use ignore::WalkBuilder;
 use nucleo_matcher::{
@@ -18,8 +18,8 @@ use nucleo_matcher::{
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
-    ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _, h_flex,
-    input::{Input, InputEvent, InputState, MoveDown, MoveUp},
+    ActiveTheme as _, CHROME_GAP, Colorize as _, IconName, h_flex,
+    input::{InputEvent, InputState, MoveDown, MoveUp},
     scroll::ScrollableElement as _,
     v_flex,
 };
@@ -41,7 +41,6 @@ const NO_DESCEND_HOME_ROOTS: [&str; 9] = [
     "snap",
 ];
 const WORKSPACE_PRIOR: u32 = 1 << 10;
-const PICKER_ROW_HEIGHT: f32 = 26.0;
 
 const TRUNCATED_NOTE: &str = "truncated: showing the first 50,000 entries";
 const _: () = assert!(
@@ -570,48 +569,25 @@ impl FilePickerView {
                     let pointer_view = view.clone();
                     let click_view = view.clone();
                     Some(
-                        h_flex()
-                            .id(("file-picker-row", index))
-                            .w_full()
-                            .h(px(PICKER_ROW_HEIGHT))
-                            .items_center()
-                            .gap_2()
-                            .rounded(cx.theme().radius)
-                            .px_2p5()
-                            .cursor_pointer()
-                            .when(is_selected, |this| {
-                                this.bg(cx.theme().background.raised(2).wash())
-                            })
-                            .when(!is_selected, |this| {
-                                this.hover(|this| this.bg(cx.theme().background.hover()))
-                            })
-                            .on_mouse_move(move |_, _, cx| {
-                                pointer_view.update(cx, |picker, cx| {
-                                    if picker.selected != Some(index) {
-                                        picker.selected = Some(index);
-                                        cx.notify();
-                                    }
-                                });
-                            })
-                            .on_click(move |_, _, cx| {
-                                click_view.update(cx, |picker, cx| picker.accept(index, cx));
-                                cx.stop_propagation();
-                            })
-                            .child(
-                                Icon::new(icon.clone())
-                                    .xsmall()
-                                    .text_color(cx.theme().foreground.muted()),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .whitespace_nowrap()
-                                    .text_size(zz_ui::rems_from_px(12.0))
-                                    .child(label),
-                            ),
+                        zz_ui::picker::path_row(
+                            ("file-picker-row", index),
+                            icon.clone(),
+                            label,
+                            is_selected,
+                            cx,
+                        )
+                        .on_mouse_move(move |_, _, cx| {
+                            pointer_view.update(cx, |picker, cx| {
+                                if picker.selected != Some(index) {
+                                    picker.selected = Some(index);
+                                    cx.notify();
+                                }
+                            });
+                        })
+                        .on_click(move |_, _, cx| {
+                            click_view.update(cx, |picker, cx| picker.accept(index, cx));
+                            cx.stop_propagation();
+                        }),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -667,16 +643,7 @@ impl Render for FilePickerView {
         let backdrop_view = cx.entity();
         let empty = self.rows.is_empty();
         let empty_message = self.empty_message(cx);
-        div()
-            .id("file-picker-overlay")
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .p_4()
-            .bg(cx.theme().scrim)
-            .occlude()
+        zz_ui::picker::picker_overlay("file-picker-overlay", cx)
             .track_focus(&focus)
             .capture_action(cx.listener(Self::move_up))
             .capture_action(cx.listener(Self::move_down))
@@ -686,52 +653,10 @@ impl Render for FilePickerView {
                 cx.stop_propagation();
             })
             .child(
-                v_flex()
-                    .id("file-picker-modal")
-                    .relative()
-                    .w(relative(0.92))
-                    .max_w(px(660.0))
-                    .h(relative(0.82))
-                    .min_h(px(240.0))
-                    .max_h(px(720.0))
-                    .overflow_hidden()
-                    .rounded(cx.theme().radius)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background.raised(1))
-                    .shadow_lg()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                zz_ui::picker::picker_modal("file-picker-modal", cx)
                     .child(
-                        v_flex()
-                            .flex_none()
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .p(px(CHROME_GAP))
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .h(px(32.0))
-                                    .rounded(cx.theme().radius)
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().background.raised(1))
-                                    .px_2p5()
-                                    .child(
-                                        Icon::new(IconName::Search)
-                                            .xsmall()
-                                            .text_color(cx.theme().foreground.muted()),
-                                    )
-                                    .child(
-                                        Input::new(&self.input)
-                                            .small()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .text_size(zz_ui::rems_from_px(12.0))
-                                            .appearance(false)
-                                            .bordered(false)
-                                            .focus_bordered(false),
-                                    ),
-                            ),
+                        zz_ui::picker::picker_header(cx)
+                            .child(zz_ui::picker::picker_search(&self.input, cx)),
                     )
                     .child(
                         v_flex()

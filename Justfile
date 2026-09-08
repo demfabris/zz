@@ -69,6 +69,24 @@ ios-preview build="":
     @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-preview requires macOS" >&2; exit 2; fi
     @scripts/ios-testflight.sh "{{ build }}"
 
+macos-gallery:
+    @bash scripts/macos-gallery.sh run
+
+macos-gallery-build configuration="debug":
+    @bash scripts/macos-gallery.sh build "{{ configuration }}"
+
+macos-gallery-test:
+    @bash scripts/macos-gallery.sh test
+
+macos-native *args:
+    @bash scripts/macos-native.sh run debug {{ args }}
+
+macos-native-build configuration="debug":
+    @bash scripts/macos-native.sh build "{{ configuration }}"
+
+macos-native-test:
+    @bash scripts/macos-native.sh test
+
 # Build a release-optimized macOS bundle with matching source-level dSYMs.
 profile-build platform:
     @if [[ "{{ platform }}" != "mac" ]]; then echo "profiling bundles currently support macOS only" >&2; exit 2; fi
@@ -199,6 +217,18 @@ watch platform *args:
 site:
     npm --prefix site install
     npm --prefix site run dev
+
+web:
+    @scripts/web-dev.sh
+
+web-build:
+    @scripts/build-web-wasm.sh
+
+web-build-release:
+    @scripts/build-web-wasm.sh --release
+
+web-serve *args:
+    @cargo run -p zz-web -- --assets clients/web/dist {{ args }}
 
 # Run the zz UI showcase with Cargo watch and Vite live reload.
 showcase:

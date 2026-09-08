@@ -1,6 +1,6 @@
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke, Render,
-    Window, div, prelude::*, px,
+    Window, prelude::*,
 };
 use zz_protocol::{ConfirmAction, ConfirmState, InputMessage};
 
@@ -51,39 +51,19 @@ impl Focusable for ConfirmView {
 
 impl Render for ConfirmView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .id("confirm-before-input")
-            .size_full()
-            .flex()
-            .items_center()
-            .px(px(12.0))
-            .font_family(TERMINAL_FONT)
-            .text_size(px(13.0))
-            .line_height(px(16.0))
-            .track_focus(&self.focus_handle)
-            .on_key_down(cx.listener(Self::on_key_down))
-            .on_key_up(|_, _, cx| cx.stop_propagation())
-            .child(self.state.prompt.clone())
+        zz_ui::command::floating::confirm_prompt(
+            "confirm-before-input",
+            self.state.prompt.clone(),
+            TERMINAL_FONT,
+        )
+        .track_focus(&self.focus_handle)
+        .on_key_down(cx.listener(Self::on_key_down))
+        .on_key_up(|_, _, cx| cx.stop_propagation())
     }
 }
 
 fn confirm_accepts(state: &ConfirmState, keystroke: &Keystroke) -> bool {
-    if keystroke.key == "enter" {
-        return state.default_yes && !keystroke.modifiers.platform && !keystroke.modifiers.function;
-    }
-    if keystroke.modifiers.control || keystroke.modifiers.platform || keystroke.modifiers.function {
-        return false;
-    }
-    let Some(character) = keystroke.key_char.as_deref().and_then(|value| {
-        value
-            .as_bytes()
-            .first()
-            .copied()
-            .filter(|_| value.len() == 1)
-    }) else {
-        return false;
-    };
-    character == state.confirm_key
+    zz_ui::command::floating::confirm_accepts(state.confirm_key, state.default_yes, keystroke)
 }
 
 #[cfg(test)]

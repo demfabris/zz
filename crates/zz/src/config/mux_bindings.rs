@@ -1,1 +1,1 @@
-pub(crate) use zz_mux::settings_bindings::*;
+pub use zz_config::mux_bindings::*;

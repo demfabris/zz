@@ -1,5 +1,19 @@
 #![allow(clippy::missing_safety_doc)]
 
+mod agent;
+pub use agent::*;
+mod chrome;
+pub use chrome::*;
+mod gui;
+pub use gui::*;
+mod native_connection;
+pub use native_connection::*;
+
+#[cfg(all(feature = "native-browser", target_os = "macos"))]
+mod browser;
+#[cfg(all(feature = "native-browser", target_os = "macos"))]
+pub use browser::*;
+
 use std::{
     collections::VecDeque,
     ffi::{CStr, c_char, c_int, c_void},
@@ -9,13 +23,13 @@ use std::{
     thread,
 };
 
+use zeroize::Zeroize;
 #[cfg(target_os = "ios")]
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 use zz_client::{
     AgentAttentionEdge, AgentAttentionStatus, ClientCore, CoreEvent, NormalizedPaneRect, Outbound,
     ViewportDamage, agent_attention_status, pane_rects,
 };
-#[cfg(target_os = "ios")]
 use zz_daemon::{AskpassPromptKind, AskpassReply, SshPrompts};
 use zz_daemon::{DaemonError, Endpoint, EndpointError, InteractiveClient};
 use zz_protocol::{
@@ -80,6 +94,7 @@ pub enum ZzEventKind {
     /// `zz_client_command_reply_next` and match its request id against the one
     /// `zz_client_execute_request` returned.
     CommandReply = 21,
+    GuiCommand = 22,
 }
 
 /// One drained event; `pane` is zero when the kind carries no pane.
@@ -245,6 +260,7 @@ pub struct ZzCursor {
 pub struct ZzClient {
     client: Arc<InteractiveClient>,
     core: Arc<Mutex<ClientCore>>,
+    agent_preferences: Arc<Mutex<zz_config::agent_preferences::AgentPreferences>>,
     queues: EventQueues,
     wake_read: UnixStream,
     reader: Option<thread::JoinHandle<()>>,
@@ -260,6 +276,7 @@ struct EventQueues {
     agent_lagged: Arc<Mutex<VecDeque<ZzAgentLag>>>,
     agent_sessions: Arc<Mutex<VecDeque<ZzAgentSessionsReply>>>,
     command_replies: Arc<Mutex<VecDeque<ZzCommandReply>>>,
+    gui_commands: Arc<Mutex<VecDeque<ZzJson>>>,
 }
 
 /// One coalesced agent transcript batch, caller-owned once popped with
@@ -513,6 +530,7 @@ fn queue_event(queues: &EventQueues, event: &CoreEvent) {
         agent_lagged,
         agent_sessions,
         command_replies,
+        gui_commands,
     } = queues;
     let (kind, flags, pane, row_start, row_end) = match event {
         CoreEvent::HelloReceived => (ZzEventKind::Hello, 0, 0, 0, 0),
@@ -600,6 +618,22 @@ fn queue_event(queues: &EventQueues, event: &CoreEvent) {
             queue.push_back(ZzCommandReply::new(response));
             drop(queue);
             (ZzEventKind::CommandReply, 0, 0, 0, 0)
+        }
+        CoreEvent::BrowserCommand { pane, command } => {
+            lock(gui_commands).push_back(ZzJson::new(serde_json::json!({
+                "kind": "browser", "pane": pane.0, "command": command
+            })));
+            (ZzEventKind::GuiCommand, 0, pane.0, 0, 0)
+        }
+        CoreEvent::AgentCommand {
+            pane,
+            request_id,
+            command,
+        } => {
+            lock(gui_commands).push_back(ZzJson::new(serde_json::json!({
+                "kind": "agent", "pane": pane.0, "request_id": request_id, "command": command
+            })));
+            (ZzEventKind::GuiCommand, 0, pane.0, 0, 0)
         }
         CoreEvent::PrefixArmed { armed } => (ZzEventKind::PrefixArmed, u32::from(*armed), 0, 0, 0),
         CoreEvent::KeyTablesChanged => (ZzEventKind::KeyTablesChanged, 0, 0, 0, 0),
@@ -713,6 +747,7 @@ fn start_client(client: InteractiveClient) -> Result<*mut ZzClient, String> {
     Ok(Box::into_raw(Box::new(ZzClient {
         client,
         core,
+        agent_preferences: Arc::default(),
         queues,
         wake_read,
         reader: Some(reader),
@@ -844,9 +879,17 @@ fn interactive_prompts(
     callback: Option<ZzSshPromptCallback>,
     context: *mut c_void,
 ) -> Option<SshPrompts> {
+    native_interactive_prompts(Path::new("").to_owned(), callback, context)
+}
+
+fn native_interactive_prompts(
+    helper: PathBuf,
+    callback: Option<ZzSshPromptCallback>,
+    context: *mut c_void,
+) -> Option<SshPrompts> {
     let callback = callback?;
     let context = context as usize;
-    Some(SshPrompts::new(Path::new("").to_owned(), move |prompt| {
+    Some(SshPrompts::new(helper, move |prompt| {
         let (kind, title) = match prompt.kind() {
             AskpassPromptKind::Secret => (
                 ZzSshPromptKind::Secret,
@@ -924,6 +967,12 @@ pub unsafe extern "C" fn zz_client_connect(socket_path: *const c_char) -> *mut Z
         return std::ptr::null_mut();
     };
     start_client(client).unwrap_or(std::ptr::null_mut())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_default_endpoint(buffer: *mut c_char, capacity: usize) -> usize {
+    let path = zz_daemon::default_socket_path();
+    unsafe { write_c_string(&path.to_string_lossy(), buffer, capacity) }
 }
 
 #[unsafe(no_mangle)]
@@ -3210,3 +3259,9 @@ mod tests {
         );
     }
 }
+
+mod settings;
+pub use settings::*;
+
+mod update;
+pub use update::*;

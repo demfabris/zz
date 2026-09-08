@@ -27,6 +27,7 @@ your sessions, so closing the window detaches instead of killing your work.
 - Browser panes: a real Chromium composited on the same surface as your
   terminals, split and targeted like any other pane.
 - macOS, Linux (Wayland). Experimental Windows and WSL support.
+- Browser client with the shared GPUI interface: [build and run](knowledge/playbooks/browser-client.md).
 
 # Pty Benchmarks
 

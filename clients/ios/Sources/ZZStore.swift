@@ -34,7 +34,6 @@ final class ZZStore: ObservableObject {
     @Published private(set) var agentStates: [UInt64: ZZAgentState] = [:]
     @Published private(set) var prefixArmed = false
     @Published private(set) var prefixBindings: [ZZPrefixBinding] = []
-    @Published private(set) var tmuxImportPhase = ZZTMuxImportPhase.hidden
 
     private var client: OpaquePointer?
     private var eventSource: DispatchSourceRead?
@@ -45,7 +44,6 @@ final class ZZStore: ObservableObject {
     private var pendingAttachmentSessionID: UInt64?
     private var hasEstablishedAttachment = false
     private var sessionCreationTimeout: Task<Void, Never>?
-    private var tmuxImportTask: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var publicKeyTask: Task<Void, Never>?
@@ -166,7 +164,7 @@ final class ZZStore: ObservableObject {
     }
 
     var isConnected: Bool {
-        client != nil && connectionState == .connected
+        client != nil && connectionState == .connected && attachedSessionID != nil
     }
 
     var agentAttention: [ZZAgentAttention] {
@@ -222,7 +220,7 @@ final class ZZStore: ObservableObject {
                 password: nil,
                 savesHost: false,
                 returnsToHostSetup: false,
-                reconnecting: reconnectAttempt > 0
+                reconnecting: reconnectAttempt > 0 || !sessions.isEmpty
             )
             return
         }
@@ -233,7 +231,7 @@ final class ZZStore: ObservableObject {
                 password: nil,
                 savesHost: true,
                 returnsToHostSetup: true,
-                reconnecting: reconnectAttempt > 0
+                reconnecting: reconnectAttempt > 0 || !sessions.isEmpty
             )
             return
         }
@@ -282,12 +280,6 @@ final class ZZStore: ObservableObject {
         start()
     }
 
-    func stop() {
-        publicKeyTask?.cancel()
-        publicKeyTask = nil
-        disconnect(preservingTerminalState: false)
-    }
-
     func setSceneActive(_ active: Bool) {
         guard sceneIsActive != active else {
             if active {
@@ -301,9 +293,8 @@ final class ZZStore: ObservableObject {
             endBackgroundGrace()
             thawGraceDeadline = Date.timeIntervalSinceReferenceDate
                 + ZZReconnectPolicy.thawGraceSeconds
-            let wasConnected = client != nil
             start()
-            if wasConnected, let client {
+            if let client, attachedSessionID != nil {
                 _ = zz_client_set_focused(client, true)
             }
             if let pane = terminalInput.owner.pane {
@@ -312,7 +303,7 @@ final class ZZStore: ObservableObject {
             consumeShortcutCommand()
         } else {
             beginBackgroundGrace()
-            if let client {
+            if let client, attachedSessionID != nil {
                 _ = zz_client_set_focused(client, false)
             }
             if let pane = terminalInput.owner.pane {
@@ -422,9 +413,6 @@ final class ZZStore: ObservableObject {
         terminalModifierState.reset()
         prefixArmed = false
         prefixBindings = []
-        tmuxImportTask?.cancel()
-        tmuxImportTask = nil
-        tmuxImportPhase = .hidden
         connectionState = .idle
     }
 
@@ -915,90 +903,6 @@ final class ZZStore: ObservableObject {
         return execute(parsed.name, args: parsed.args)
     }
 
-    /// Ask the daemon for its full key list (`list-keys`). The daemon answers
-    /// through command output, which iOS cannot render yet (see the key-list
-    /// sheet): the published `prefixBindings` below cover the prefix table.
-    @discardableResult
-    func requestKeyList() -> Bool {
-        execute("list-keys", args: [])
-    }
-
-    func maybeOfferTmuxImport() {
-        guard tmuxImportPhase == .hidden else {
-            return
-        }
-        let offered = ZZTMuxImport.offeredHosts(in: .standard)
-        guard ZZTMuxImport.shouldOffer(endpoint: hostEndpoint, offered: offered) else {
-            return
-        }
-        tmuxImportPhase = .prompting(endpoint: hostEndpoint)
-    }
-
-    func declineTmuxImport() {
-        guard case .prompting(let endpoint) = tmuxImportPhase else {
-            return
-        }
-        ZZTMuxImport.markOffered(endpoint: endpoint, in: .standard)
-        tmuxImportPhase = .hidden
-    }
-
-    func runTmuxImportManually() {
-        ZZTMuxImport.markOffered(endpoint: hostEndpoint, in: .standard)
-        beginTmuxImport()
-    }
-
-    func dismissTmuxImport() {
-        tmuxImportTask?.cancel()
-        tmuxImportTask = nil
-        tmuxImportPhase = .hidden
-    }
-
-    func acknowledgeTmuxImport() {
-        guard tmuxImportPhase.needsAlert else {
-            return
-        }
-        if tmuxImportPhase.promptEndpoint != nil {
-            declineTmuxImport()
-        } else {
-            dismissTmuxImport()
-        }
-    }
-
-    private func beginTmuxImport() {
-        tmuxImportTask?.cancel()
-        let baseline = prefixBindings
-        _ = execute("import-tmux-config", args: [])
-        tmuxImportPhase = .working(baseline: baseline)
-        tmuxImportTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: ZZTMuxImport.settleDelayNanoseconds)
-            } catch {
-                return
-            }
-            self?.settleTmuxImportUnchanged()
-        }
-    }
-
-    private func settleTmuxImport(after current: [ZZPrefixBinding]) {
-        guard case .working(let baseline) = tmuxImportPhase else {
-            return
-        }
-        guard let message = ZZTMuxImport.resultMessage(baseline: baseline, current: current) else {
-            return
-        }
-        tmuxImportTask?.cancel()
-        tmuxImportTask = nil
-        tmuxImportPhase = .done(message: message)
-    }
-
-    private func settleTmuxImportUnchanged() {
-        guard case .working = tmuxImportPhase else {
-            return
-        }
-        tmuxImportTask = nil
-        tmuxImportPhase = .done(message: ZZTMuxImport.unchangedMessage)
-    }
-
     private func refreshPrefixState() {
         guard let client,
               let snapshot = zz_prefix_snapshot_acquire(client) else {
@@ -1020,7 +924,6 @@ final class ZZStore: ObservableObject {
             )
         }
         prefixBindings = next
-        settleTmuxImport(after: next)
     }
 
     func sendShortcutKey(_ code: UInt32, to pane: UInt64) {
@@ -1490,7 +1393,7 @@ final class ZZStore: ObservableObject {
     }
 
     private func focus(pane: UInt64, focused: Bool) {
-        guard let client else {
+        guard let client, attachedSessionID != nil else {
             return
         }
         _ = zz_client_focus_terminal(client, pane, focused)
@@ -1562,7 +1465,6 @@ final class ZZStore: ObservableObject {
                 unseenAgentCompletions = []
                 navigationCommandSent = false
                 refreshMux = true
-                maybeOfferTmuxImport()
                 for window in sessions.flatMap(\.windows) {
                     for pane in window.panes where pane.kind == .agent {
                         agentThreadSlot(for: pane.id).mutate { $0.prepareForReplay() }
@@ -1743,6 +1645,9 @@ final class ZZStore: ObservableObject {
             )
         }
 
+        if nextSessions.isEmpty, !hasEstablishedAttachment {
+            return
+        }
         sessions = nextSessions
         if let pendingSessionIDs,
            nextSessions.contains(where: { !pendingSessionIDs.contains($0.id) && $0.isAttached }) {
@@ -1959,29 +1864,56 @@ final class ZZStore: ObservableObject {
     /// the untracked replies are discarded. The reply's bytes belong to the
     /// handle, so they are copied into Swift strings before it is released.
     private func drainCommandReplies(_ client: OpaquePointer) {
+        var replied = false
         while let reply = zz_client_command_reply_next(client) {
-            guard let purpose = commandRequests.take(zz_command_reply_request_id(reply)) else {
-                zz_command_reply_release(reply)
+            replied = true
+            let requestID = zz_command_reply_request_id(reply)
+            let ok = zz_command_reply_ok(reply)
+            let output = string(zz_command_reply_output(reply))
+            let error = string(zz_command_reply_error(reply))
+            zz_command_reply_release(reply)
+            if requestID == 0 {
+                if !ok {
+                    handleUnrequestedFailure(error)
+                }
                 continue
             }
-            let result = ZZLastOutput.result(
-                ok: zz_command_reply_ok(reply),
-                output: string(zz_command_reply_output(reply)),
-                error: string(zz_command_reply_error(reply))
-            )
-            zz_command_reply_release(reply)
+            guard let purpose = commandRequests.take(requestID) else {
+                continue
+            }
             switch purpose {
             case .lastOutput:
-                switch result {
+                switch ZZLastOutput.result(ok: ok, output: output, error: error) {
                 case let .copy(text):
                     UIPasteboard.general.string = text
-                    dismissCommandOutputView()
                     post(.success, "Copied the last command’s output.")
                 case let .failure(message):
                     post(.failure, message)
                 }
             }
         }
+        if replied {
+            dismissCommandOutputView()
+        }
+    }
+
+    private func handleUnrequestedFailure(_ message: String) {
+        let rendered = message.isEmpty ? "zz refused the request." : message
+        guard attachedSessionID == nil else {
+            if pendingAttachmentSessionID != nil {
+                pendingAttachmentSessionID = nil
+                actionError = rendered
+            }
+            return
+        }
+        pendingAttachmentSessionID = nil
+        if rememberedSessionName != nil, let client {
+            rememberedSessionName = nil
+            rememberedPaneID = nil
+            pendingNavigation = nil
+            _ = "".withCString { zz_client_attach(client, $0) }
+        }
+        post(.failure, rendered)
     }
 
     private func resolvePendingNavigation() {
@@ -2119,7 +2051,7 @@ final class ZZStore: ObservableObject {
     }
 
     private func restoreStableGeometryAfterTransientInput(for pane: UInt64) {
-        guard let client, var geometry = terminalGeometries[pane],
+        guard let client, attachedSessionID != nil, var geometry = terminalGeometries[pane],
               let layout = geometry.stableLayoutToRestore,
               send(layout, to: pane, client: client) else {
             return

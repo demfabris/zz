@@ -17,6 +17,6 @@ we'll say so and move it to a public issue.
 
 zz embeds CEF/Chromium and can import Chrome cookies out of the OS keychain, so
 browser-profile handling and the cookie import path move secrets around on your
-behalf . bugs there are security reports, not feature requests. The same goes
+behalf. Bugs there are security reports, not feature requests. The same goes
 for the daemon's control socket and anything that lets a pane's contents reach
 another pane.

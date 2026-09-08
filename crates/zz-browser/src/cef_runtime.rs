@@ -499,8 +499,8 @@ pub struct BrowserRuntime {
     shared_texture_enabled: bool,
     external_begin_frame_enabled: bool,
     begin_frame_adaptive_enabled: bool,
-    background_color: u32,
     log_file: Option<PathBuf>,
+    background_color: u32,
     #[cfg(target_os = "macos")]
     _loader: cef::library_loader::LibraryLoader,
 }
@@ -512,6 +512,10 @@ struct ProfileContext {
 }
 
 impl BrowserRuntime {
+    pub fn set_background_color(&mut self, color: u32) {
+        self.background_color = color;
+    }
+
     #[must_use]
     pub fn phase(&self) -> RuntimePhase {
         self.message_pump.state().phase
@@ -536,10 +540,6 @@ impl BrowserRuntime {
     /// instead of stderr. Takes effect at [`Self::start`].
     pub fn set_log_file(&mut self, path: PathBuf) {
         self.log_file = Some(path);
-    }
-
-    pub fn set_background_color(&mut self, color: u32) {
-        self.background_color = color;
     }
 
     #[must_use]
@@ -1173,6 +1173,10 @@ impl BrowserCommandSink {
 
     pub fn reload(&self) {
         self.browser.reload();
+    }
+
+    pub fn stop_loading(&self) {
+        self.browser.stop_load();
     }
 
     pub fn edit(&self, command: EditCommand) {
@@ -1982,8 +1986,8 @@ fn bootstrap_args_with_paths(
         shared_texture_enabled,
         external_begin_frame_enabled,
         begin_frame_adaptive_enabled,
-        background_color: 0xff10_1318,
         log_file: None,
+        background_color: 0xff10_1318,
         #[cfg(target_os = "macos")]
         _loader: loader,
     }))

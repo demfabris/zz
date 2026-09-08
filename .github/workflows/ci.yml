@@ -2,6 +2,10 @@ name: CI
 
 on:
   push:
+    # A tag push runs the release workflow; the CI matrix on the same commit
+    # would only compete with it for runners.
+    branches: ["**"]
+    tags-ignore: ["v*"]
   pull_request:
 
 permissions:
@@ -31,7 +35,11 @@ jobs:
       CEF_PATH: ${{ github.workspace }}/.cef-cache
 
     steps:
+      # Full history: the compat summary check verifies that the commit its
+      # attached-client PASS was stamped at is an ancestor of HEAD.
       - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Check tmux compatibility summary freshness
         if: runner.os == 'Linux'
@@ -87,6 +95,15 @@ jobs:
           rustup toolchain install nightly --profile minimal --target wasm32-unknown-unknown
           rustup run nightly cargo check --manifest-path examples/ui-showcase/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
 
+      - name: Check browser client
+        if: runner.os == 'Linux'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          cargo fmt --manifest-path clients/web/Cargo.toml -- --check
+          cargo test --manifest-path clients/web/Cargo.toml --lib --locked
+          rustup run nightly cargo check --manifest-path clients/web/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
+
       # Windows is second-class support, so its test failures warn rather than
       # fail the job. Four fail deterministically there today
       # (agent::controller::tests::session_controls_send_the_daemon_every_filter_and_restore_path,
@@ -105,12 +122,16 @@ jobs:
         timeout-minutes: 15
         run: cargo test --release -p zz-mux
 
-      - name: Run strict tmux compatibility harness and attached client
+      # The full differential corpus takes about ninety minutes and belongs to
+      # the nightly workflow. A push gets the summary freshness check above,
+      # which pins the persisted corpus result to an ancestor of HEAD, plus the
+      # attached-client fixture, which drives the real attach path on this tree.
+      - name: Run the attached-client fixture
         if: runner.os == 'Linux'
         timeout-minutes: 15
         run: |
-          compat/run.sh --strict-geometry --attached-client
-          git diff --exit-code -- compat/results/summary.md
+          cargo build -p zz
+          compat/attached-client.sh target/debug/zz "$(compat/fetch-tmux.sh)"
 
       - name: Build and validate CEF bundle
         run: cargo xtask bundle-cef --release --output target/cef-bundle

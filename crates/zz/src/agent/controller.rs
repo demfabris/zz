@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -8,24 +8,18 @@ use std::{
 use agent_client_protocol::schema::{
     MaybeUndefined,
     v1::{
-        AvailableCommand, AvailableCommandInput, ContentBlock, ContentChunk, ImageContent,
-        PermissionOption, PermissionOptionKind, Plan, PlanEntryStatus, SessionConfigKind,
-        SessionConfigOption, SessionConfigOptionCategory, SessionModeState, SessionUpdate,
-        StopReason, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
-        ToolCallUpdateFields, ToolKind,
+        PermissionOption, SessionConfigOption, SessionModeState, SessionUpdate, StopReason,
+        ToolCallUpdate,
     },
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use gpui::{App, Context, Entity, EventEmitter, Image, ImageFormat, Task};
 use zz_daemon::{
     AgentAuthMethod as StreamAuthMethod, AgentPromptOutcome, AgentStreamItem, AgentStreamPayload,
 };
 use zz_protocol::{
     AgentConnectionPhase, AgentDescriptor, AgentGitSummary, AgentPaneWire, AgentProvider,
-    AgentSessionOpKind, MAX_AGENT_AUTH_METHODS, MAX_AGENT_AVAILABLE_COMMANDS,
-    MAX_AGENT_CONFIG_CHOICES, MAX_AGENT_CONFIG_OPTIONS, MAX_AGENT_MODES,
-    MAX_AGENT_PERMISSION_OPTIONS, MAX_AGENT_QUEUED_PROMPTS, MAX_AGENT_SESSION_DIRECTORIES,
-    MAX_AGENT_TOOL_CONTENT_ITEMS, MAX_GUI_TEXT_BYTES, PaneId,
+    AgentSessionOpKind, MAX_AGENT_AUTH_METHODS, MAX_AGENT_AVAILABLE_COMMANDS, MAX_AGENT_MODES,
+    MAX_AGENT_QUEUED_PROMPTS, PaneId,
 };
 
 use crate::{
@@ -36,11 +30,7 @@ use crate::{
     mux::client::{AgentRequest, MuxClient},
 };
 
-const LEGACY_MODE_PREFERENCE_ID: &str = "legacy-session-mode";
-const MAX_SESSION_ID_BYTES: usize = 16 * 1024;
-const MAX_SESSION_TITLE_BYTES: usize = 4 * 1024;
-const MAX_SESSION_TIMESTAMP_BYTES: usize = 256;
-const MAX_SESSION_CURSOR_BYTES: usize = 16 * 1024;
+use zz_config::agent_preferences::{LEGACY_MODE_PREFERENCE_ID, preference_kind_for_category};
 /// A skipped update is described by its `sessionUpdate` tag and nothing else:
 /// the payload behind it is adapter-supplied and can be megabytes of tool
 /// output, so neither it nor the serde error quoting it belongs in a log line.
@@ -49,15 +39,15 @@ const MAX_DECODE_ERROR_BYTES: usize = 256;
 const UNTAGGED_SESSION_UPDATE: &str = "<untagged>";
 /// Tool payloads live in the thread for as long as the pane does, so the
 /// reducer caps what it keeps: agents happily emit multi-megabyte outputs.
+#[cfg(test)]
 const MAX_TOOL_PAYLOAD_BYTES: usize = 512 * 1024;
-const MAX_DIFF_SIDE_BYTES: usize = 1024 * 1024;
+#[cfg(test)]
 const TRUNCATION_MARKER: &str = "… [truncated]";
 /// A derived pane title is the opening words of the first prompt: enough to
 /// tell agent panes apart in the tree without wrapping the pane header.
 const MAX_TITLE_WORDS: usize = 7;
 const MAX_TITLE_CHARS: usize = 48;
 const LIFECYCLE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-const ENTRY_CHANGE_LOG_CAPACITY: usize = 4_096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AgentConnectionState {
@@ -92,118 +82,14 @@ impl AgentConnectionState {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AgentToolKindModel {
-    Read,
-    Search,
-    Edit,
-    Delete,
-    Move,
-    Execute,
-    Fetch,
-    Think,
-    SwitchMode,
-    Other,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AgentToolStatusModel {
-    Pending,
-    Running,
-    NeedsApproval,
-    Completed,
-    Failed,
-    Canceled,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ToolPayload {
-    Diff {
-        path: String,
-        old: Option<String>,
-        new: String,
-    },
-    Text(String),
-    Json(String),
-    Terminal(String),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum AgentThreadEntry {
-    User {
-        id: u64,
-        markdown: String,
-        /// Images sent with the message, normalized to what went on the wire.
-        images: Vec<Arc<Image>>,
-    },
-    Assistant {
-        id: u64,
-        markdown: String,
-    },
-    Reasoning {
-        id: u64,
-        label: String,
-        markdown: String,
-        default_expanded: bool,
-    },
-    Tool {
-        id: u64,
-        protocol_id: String,
-        kind: AgentToolKindModel,
-        status: AgentToolStatusModel,
-        label: String,
-        location: Option<String>,
-        input: Option<ToolPayload>,
-        output: Vec<ToolPayload>,
-        default_expanded: bool,
-    },
-    Plan {
-        id: u64,
-        markdown: String,
-    },
-}
-
-impl AgentThreadEntry {
-    pub(crate) const fn id(&self) -> u64 {
-        match self {
-            Self::User { id, .. }
-            | Self::Assistant { id, .. }
-            | Self::Reasoning { id, .. }
-            | Self::Tool { id, .. }
-            | Self::Plan { id, .. } => *id,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-enum StreamRole {
-    User,
-    Assistant,
-    Reasoning,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AgentPermissionOption {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) kind: AgentPermissionKind,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AgentPermissionKind {
-    AllowOnce,
-    AllowAlways,
-    RejectOnce,
-    RejectAlways,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AgentPermissionRequest {
-    pub(crate) request_id: u64,
-    pub(crate) tool_call_id: String,
-    pub(crate) title: String,
-    pub(crate) options: Vec<AgentPermissionOption>,
-}
+#[cfg(test)]
+pub(crate) use zz_client::agent_transcript::AgentPermissionOption;
+pub(crate) use zz_client::agent_transcript::{
+    AgentPermissionKind, AgentPermissionRequest, AgentToolKindModel, AgentToolStatusModel,
+    ToolPayload,
+};
+use zz_client::agent_transcript::{AgentTranscript, capped};
+pub(crate) type AgentThreadEntry = zz_client::agent_transcript::AgentThreadEntry<Arc<Image>>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct AgentAuthMethod {
@@ -212,45 +98,13 @@ pub(crate) struct AgentAuthMethod {
     pub(crate) description: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AgentCommand {
-    pub(crate) name: String,
-    pub(crate) description: String,
-    pub(crate) input_hint: Option<String>,
-}
+pub(crate) use zz_client::agent_completion::AgentCommand;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AgentConfigCategory {
-    Mode,
-    Model,
-    ModelConfig,
-    ThoughtLevel,
-    Other,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AgentConfigChoice {
-    pub(crate) value: String,
-    pub(crate) name: String,
-    pub(crate) description: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AgentConfigOption {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) description: Option<String>,
-    pub(crate) category: AgentConfigCategory,
-    pub(crate) current_value: String,
-    pub(crate) choices: Vec<AgentConfigChoice>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AgentMode {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) description: Option<String>,
-}
+pub(crate) use zz_client::agent_config::{AgentConfigCategory, AgentConfigOption, AgentMode};
+use zz_client::agent_config::{
+    agent_command_model, config_option_models, valid_session_cursor, valid_session_directory,
+    valid_session_id, valid_session_summary,
+};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[allow(
@@ -268,15 +122,7 @@ pub(crate) struct AgentSessionCapabilities {
     pub(crate) images: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AgentSessionSummary {
-    pub(crate) session_id: String,
-    pub(crate) cwd: PathBuf,
-    pub(crate) additional_directories: Vec<PathBuf>,
-    pub(crate) title: Option<String>,
-    pub(crate) updated_at: Option<String>,
-}
-
+pub(crate) use zz_protocol::agent_stream::AgentSessionSummary;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct AgentSessionHistoryState {
     pub(crate) sessions: Arc<[AgentSessionSummary]>,
@@ -315,14 +161,9 @@ pub(crate) struct AgentPaneState {
 
 #[derive(Debug)]
 struct AgentThread {
+    transcript: AgentTranscript<Arc<Image>>,
     provider: AgentProvider,
     connection: AgentConnectionState,
-    entries: Vec<AgentThreadEntry>,
-    entry_revisions: Vec<u64>,
-    entry_indices: HashMap<u64, usize>,
-    entry_changes: VecDeque<(u64, usize)>,
-    entry_change_floor: u64,
-    pending_permissions: Arc<[AgentPermissionRequest]>,
     auth_methods: Arc<[AgentAuthMethod]>,
     error: Option<Arc<str>>,
     agent_name: Option<Arc<str>>,
@@ -341,14 +182,6 @@ struct AgentThread {
     settings_busy: bool,
     session_reset: bool,
     preference_reconcile_skips: BTreeSet<(AgentPreferenceKind, String)>,
-    next_entry_id: u64,
-    next_entry_revision: u64,
-    message_entries: BTreeMap<(StreamRole, String), u64>,
-    active_stream: Option<(StreamRole, u64)>,
-    tool_entries: HashMap<String, u64>,
-    structured_tool_outputs: BTreeSet<String>,
-    plan_entry: Option<u64>,
-    suppress_user_echo: bool,
     /// Set once the session's first prompt named the pane. A title is derived
     /// exactly once per session, so a later rename is never overwritten.
     auto_titled: bool,
@@ -363,14 +196,9 @@ struct AgentThread {
 impl AgentThread {
     fn new(provider: AgentProvider, cwd: PathBuf, session_id: Option<String>) -> Self {
         Self {
+            transcript: AgentTranscript::new(transcript_image),
             provider,
             connection: AgentConnectionState::Starting,
-            entries: Vec::new(),
-            entry_revisions: Vec::new(),
-            entry_indices: HashMap::new(),
-            entry_changes: VecDeque::new(),
-            entry_change_floor: 1,
-            pending_permissions: Arc::from([]),
             auth_methods: Arc::from([]),
             error: None,
             agent_name: None,
@@ -389,14 +217,6 @@ impl AgentThread {
             settings_busy: false,
             session_reset: false,
             preference_reconcile_skips: BTreeSet::new(),
-            next_entry_id: 1,
-            next_entry_revision: 1,
-            message_entries: BTreeMap::new(),
-            active_stream: None,
-            tool_entries: HashMap::new(),
-            structured_tool_outputs: BTreeSet::new(),
-            plan_entry: None,
-            suppress_user_echo: false,
             auto_titled: false,
             unknown_updates: 0,
         }
@@ -406,7 +226,7 @@ impl AgentThread {
         AgentPaneState {
             provider: self.provider,
             connection: self.connection,
-            pending_permissions: self.pending_permissions.clone(),
+            pending_permissions: self.transcript.permissions().clone(),
             auth_methods: self.auth_methods.clone(),
             error: self.error.clone(),
             agent_name: self.agent_name.clone(),
@@ -429,17 +249,12 @@ impl AgentThread {
 
     fn reset_for_open(&mut self, restoring: bool) {
         self.session_reset = true;
+        self.transcript.reset();
         self.connection = if restoring {
             AgentConnectionState::Restoring
         } else {
             AgentConnectionState::Starting
         };
-        self.entries.clear();
-        self.entry_revisions.clear();
-        self.entry_indices.clear();
-        self.entry_changes.clear();
-        self.entry_change_floor = self.next_entry_revision;
-        self.pending_permissions = Arc::from([]);
         self.error = None;
         self.title = None;
         self.mode = None;
@@ -451,13 +266,6 @@ impl AgentThread {
         self.session_history.loading = false;
         self.settings_busy = false;
         self.preference_reconcile_skips.clear();
-        self.next_entry_id = 1;
-        self.message_entries.clear();
-        self.active_stream = None;
-        self.tool_entries.clear();
-        self.structured_tool_outputs.clear();
-        self.plan_entry = None;
-        self.suppress_user_echo = false;
         self.auto_titled = false;
     }
 
@@ -489,48 +297,6 @@ impl AgentThread {
         }
     }
 
-    fn allocate_entry_id(&mut self) -> u64 {
-        let id = self.next_entry_id;
-        self.next_entry_id = self.next_entry_id.saturating_add(1);
-        id
-    }
-
-    fn allocate_entry_revision(&mut self) -> u64 {
-        let revision = self.next_entry_revision;
-        self.next_entry_revision = self.next_entry_revision.saturating_add(1);
-        revision
-    }
-
-    fn push_entry(&mut self, entry: AgentThreadEntry) {
-        let revision = self.allocate_entry_revision();
-        let index = self.entries.len();
-        self.entry_indices.insert(entry.id(), index);
-        self.entries.push(entry);
-        self.entry_revisions.push(revision);
-        self.record_entry_change(revision, index);
-    }
-
-    fn entry_index(&self, id: u64) -> Option<usize> {
-        self.entry_indices.get(&id).copied()
-    }
-
-    fn touch_entry(&mut self, index: usize) {
-        let revision = self.allocate_entry_revision();
-        if let Some(entry_revision) = self.entry_revisions.get_mut(index) {
-            *entry_revision = revision;
-            self.record_entry_change(revision, index);
-        }
-    }
-
-    fn record_entry_change(&mut self, revision: u64, index: usize) {
-        if self.entry_changes.len() == ENTRY_CHANGE_LOG_CAPACITY
-            && let Some((discarded, _)) = self.entry_changes.pop_front()
-        {
-            self.entry_change_floor = discarded.saturating_add(1);
-        }
-        self.entry_changes.push_back((revision, index));
-    }
-
     fn prompt_refusal(&self, has_images: bool) -> Option<Arc<str>> {
         if !self.connection.accepts_prompt() {
             return Some(Arc::from(format!(
@@ -549,45 +315,27 @@ impl AgentThread {
     }
 
     fn begin_prompt(&mut self, prompt: String, images: Vec<Arc<Image>>) {
-        self.active_stream = None;
-        let id = self.allocate_entry_id();
-        self.push_entry(AgentThreadEntry::User {
-            id,
-            markdown: prompt,
-            images,
-        });
+        self.transcript.begin_prompt(prompt, images);
         self.connection = AgentConnectionState::Running;
         self.error = None;
-        self.suppress_user_echo = true;
     }
 
     fn apply_update(&mut self, update: SessionUpdate) {
         self.apply_flat_update(update);
     }
 
+    fn apply_runtime_update(&mut self, update: SessionUpdate) {
+        self.apply_update(update);
+    }
+
     fn apply_flat_update(&mut self, update: SessionUpdate) {
         match update {
-            SessionUpdate::UserMessageChunk(chunk) => {
-                self.apply_message_chunk(StreamRole::User, chunk);
-            }
-            SessionUpdate::AgentMessageChunk(chunk) => {
-                self.apply_message_chunk(StreamRole::Assistant, chunk);
-            }
-            SessionUpdate::AgentThoughtChunk(chunk) => {
-                self.append_chunk(StreamRole::Reasoning, chunk);
-            }
-            SessionUpdate::ToolCall(tool) => {
-                self.active_stream = None;
-                self.upsert_tool(tool);
-            }
-            SessionUpdate::ToolCallUpdate(update) => {
-                self.active_stream = None;
-                self.apply_tool_update(update);
-            }
-            SessionUpdate::Plan(plan) => {
-                self.active_stream = None;
-                self.apply_plan(&plan);
-            }
+            update @ (SessionUpdate::UserMessageChunk(_)
+            | SessionUpdate::AgentMessageChunk(_)
+            | SessionUpdate::AgentThoughtChunk(_)
+            | SessionUpdate::ToolCall(_)
+            | SessionUpdate::ToolCallUpdate(_)
+            | SessionUpdate::Plan(_)) => self.transcript.apply_update(update),
             SessionUpdate::CurrentModeUpdate(update) => {
                 self.mode = Some(Arc::from(update.current_mode_id.0.as_ref()));
             }
@@ -613,396 +361,6 @@ impl AgentThread {
             }
             _ => {}
         }
-    }
-
-    fn apply_message_chunk(&mut self, role: StreamRole, chunk: ContentChunk) {
-        if role == StreamRole::User && self.suppress_user_echo {
-            return;
-        }
-        self.append_chunk(role, chunk);
-    }
-
-    fn apply_runtime_update(&mut self, update: SessionUpdate) {
-        self.apply_update(update);
-    }
-
-    fn append_chunk(&mut self, role: StreamRole, chunk: ContentChunk) {
-        let (markdown, images) = match (role, &chunk.content) {
-            (StreamRole::User, ContentBlock::Image(image)) => match inbound_image(image) {
-                Some(image) => (String::new(), vec![image]),
-                None => (content_block_markdown(&chunk.content), Vec::new()),
-            },
-            (StreamRole::User, content) => split_inline_images(&content_block_markdown(content)),
-            (_, content) => (content_block_markdown(content), Vec::new()),
-        };
-        if markdown.is_empty() && images.is_empty() {
-            return;
-        }
-        let message_id = chunk.message_id.map(|message_id| message_id.0.to_string());
-        self.append_stream_content(role, message_id, &markdown, images);
-    }
-
-    fn append_stream_content(
-        &mut self,
-        role: StreamRole,
-        message_id: Option<String>,
-        markdown: &str,
-        images: Vec<Arc<Image>>,
-    ) {
-        if markdown.is_empty() && images.is_empty() {
-            return;
-        }
-        let message_key = message_id.map(|message_id| (role, message_id));
-        let entry_id = if let Some(key) = message_key.as_ref() {
-            if let Some(id) = self.message_entries.get(key).copied() {
-                id
-            } else {
-                let id = self.push_stream_entry(role);
-                self.message_entries.insert(key.clone(), id);
-                id
-            }
-        } else if let Some((active_role, id)) = self.active_stream {
-            if active_role == role {
-                id
-            } else {
-                self.push_stream_entry(role)
-            }
-        } else {
-            self.push_stream_entry(role)
-        };
-        self.active_stream = Some((role, entry_id));
-        if let Some(index) = self.entry_index(entry_id) {
-            let changed = match &mut self.entries[index] {
-                AgentThreadEntry::User {
-                    markdown: text,
-                    images: attached,
-                    ..
-                } => {
-                    attached.extend(images);
-                    text.push_str(markdown);
-                    true
-                }
-                AgentThreadEntry::Assistant { markdown: text, .. }
-                | AgentThreadEntry::Reasoning { markdown: text, .. } => {
-                    text.push_str(markdown);
-                    true
-                }
-                AgentThreadEntry::Tool { .. } | AgentThreadEntry::Plan { .. } => false,
-            };
-            if changed {
-                self.touch_entry(index);
-            }
-        }
-    }
-
-    fn push_stream_entry(&mut self, role: StreamRole) -> u64 {
-        let id = self.allocate_entry_id();
-        let entry = match role {
-            StreamRole::User => AgentThreadEntry::User {
-                id,
-                markdown: String::new(),
-                images: Vec::new(),
-            },
-            StreamRole::Assistant => AgentThreadEntry::Assistant {
-                id,
-                markdown: String::new(),
-            },
-            StreamRole::Reasoning => AgentThreadEntry::Reasoning {
-                id,
-                label: "Reasoning".to_owned(),
-                markdown: String::new(),
-                default_expanded: false,
-            },
-        };
-        self.push_entry(entry);
-        id
-    }
-
-    fn upsert_tool(&mut self, tool: ToolCall) {
-        let protocol_id = tool.tool_call_id.0.to_string();
-        if tool.content.is_empty() {
-            self.structured_tool_outputs.remove(&protocol_id);
-        } else {
-            self.structured_tool_outputs.insert(protocol_id.clone());
-        }
-        let location = tool_location(&tool);
-        let input = tool_input(&tool);
-        let output = tool_output(&tool);
-        if let Some(entry_id) = self.tool_entries.get(&protocol_id).copied()
-            && let Some(index) = self.entry_index(entry_id)
-            && let AgentThreadEntry::Tool {
-                kind,
-                status,
-                label,
-                location: entry_location,
-                input: entry_input,
-                output: entry_output,
-                ..
-            } = &mut self.entries[index]
-        {
-            *kind = map_tool_kind(tool.kind);
-            *status = map_tool_status(tool.status);
-            *label = tool.title;
-            *entry_location = location;
-            *entry_input = input;
-            *entry_output = output;
-            self.touch_entry(index);
-            return;
-        }
-        let id = self.allocate_entry_id();
-        self.tool_entries.insert(protocol_id.clone(), id);
-        self.push_entry(AgentThreadEntry::Tool {
-            id,
-            protocol_id: protocol_id.clone(),
-            kind: map_tool_kind(tool.kind),
-            status: map_tool_status(tool.status),
-            label: tool.title,
-            location,
-            input,
-            output,
-            default_expanded: matches!(tool.status, ToolCallStatus::Failed),
-        });
-    }
-
-    fn apply_tool_update(&mut self, update: ToolCallUpdate) {
-        let protocol_id = update.tool_call_id.0.to_string();
-        let carries_shape = update_carries_tool_shape(&update.fields);
-        let Some(entry_id) = self.tool_entries.get(&protocol_id).copied() else {
-            if let Ok(tool) = ToolCall::try_from(update) {
-                self.upsert_tool(tool);
-            }
-            return;
-        };
-        let Some(index) = self.entry_index(entry_id) else {
-            return;
-        };
-        let had_structured_output = self.structured_tool_outputs.contains(&protocol_id);
-        let AgentThreadEntry::Tool {
-            kind,
-            status,
-            label,
-            location,
-            input,
-            output,
-            ..
-        } = &mut self.entries[index]
-        else {
-            return;
-        };
-        let mut changed = false;
-        if let Some(next) = update.fields.kind
-            && reclassifies_tool(*kind, next, carries_shape)
-        {
-            *kind = map_tool_kind(next);
-            changed = true;
-        }
-        if let Some(next) = update.fields.status {
-            *status = map_tool_status(next);
-            changed = true;
-        }
-        if let Some(next) = update.fields.title.filter(|title| !title.trim().is_empty()) {
-            *label = next;
-            changed = true;
-        }
-        if let Some(raw_input) = update.fields.raw_input {
-            *input = json_payload(&raw_input);
-            changed = true;
-        }
-        if let Some(locations) = update.fields.locations {
-            *location = locations.first().map(|location| {
-                location.line.map_or_else(
-                    || location.path.display().to_string(),
-                    |line| format!("{}:{line}", location.path.display()),
-                )
-            });
-            changed = true;
-        }
-        let raw_output = update
-            .fields
-            .raw_output
-            .and_then(|raw_output| json_payload(&raw_output));
-        if let Some(content) = update.fields.content {
-            let structured = tool_content_payloads(&content);
-            if structured.is_empty() {
-                self.structured_tool_outputs.remove(&protocol_id);
-            } else {
-                self.structured_tool_outputs.insert(protocol_id.clone());
-            }
-            *output = if structured.is_empty() {
-                raw_output.into_iter().collect()
-            } else {
-                structured
-            };
-            changed = true;
-        } else if let Some(raw_output) = raw_output {
-            if !had_structured_output {
-                *output = vec![raw_output];
-            }
-            changed = true;
-        }
-        if changed {
-            self.touch_entry(index);
-        }
-    }
-
-    fn apply_plan(&mut self, plan: &Plan) {
-        let markdown = plan
-            .entries
-            .iter()
-            .map(|entry| {
-                let marker = match entry.status {
-                    PlanEntryStatus::InProgress => "~",
-                    PlanEntryStatus::Completed => "x",
-                    _ => " ",
-                };
-                format!("- [{marker}] {}", entry.content)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        if let Some(id) = self.plan_entry
-            && let Some(index) = self.entry_index(id)
-            && let AgentThreadEntry::Plan {
-                markdown: current, ..
-            } = &mut self.entries[index]
-        {
-            if *current != markdown {
-                *current = markdown;
-                self.touch_entry(index);
-            }
-            return;
-        }
-        let id = self.allocate_entry_id();
-        self.plan_entry = Some(id);
-        self.push_entry(AgentThreadEntry::Plan { id, markdown });
-    }
-
-    fn request_permission(
-        &mut self,
-        request_id: u64,
-        tool_call: ToolCallUpdate,
-        options: Vec<PermissionOption>,
-    ) {
-        let tool_call_id = tool_call.tool_call_id.0.to_string();
-        let updated_title = tool_call.fields.title.clone();
-        self.apply_tool_update(tool_call);
-        let title = updated_title
-            .or_else(|| {
-                self.tool_entries
-                    .get(&tool_call_id)
-                    .and_then(|id| self.entry_index(*id))
-                    .and_then(|index| self.entries.get(index))
-                    .and_then(|entry| match entry {
-                        AgentThreadEntry::Tool { label, .. } => Some(label.clone()),
-                        _ => None,
-                    })
-            })
-            .unwrap_or_else(|| "Tool approval".to_owned());
-        if let Some(entry_id) = self.tool_entries.get(&tool_call_id).copied()
-            && let Some(index) = self.entry_index(entry_id)
-            && let AgentThreadEntry::Tool { status, .. } = &mut self.entries[index]
-            && *status != AgentToolStatusModel::NeedsApproval
-        {
-            *status = AgentToolStatusModel::NeedsApproval;
-            self.touch_entry(index);
-        }
-        let request = AgentPermissionRequest {
-            request_id,
-            tool_call_id,
-            title,
-            options: options
-                .into_iter()
-                .take(MAX_AGENT_PERMISSION_OPTIONS)
-                .map(|option| AgentPermissionOption {
-                    id: option.option_id.0.to_string(),
-                    name: option.name,
-                    kind: map_permission_kind(option.kind),
-                })
-                .collect(),
-        };
-        let mut pending_permissions = self.pending_permissions.to_vec();
-        if let Some(existing) = pending_permissions
-            .iter_mut()
-            .find(|pending| pending.request_id == request_id)
-        {
-            *existing = request;
-        } else {
-            pending_permissions.push(request);
-        }
-        self.pending_permissions = pending_permissions.into();
-    }
-
-    fn resolve_permission(&mut self, request_id: u64, canceled: bool) {
-        let Some(index) = self
-            .pending_permissions
-            .iter()
-            .position(|permission| permission.request_id == request_id)
-        else {
-            return;
-        };
-        let mut pending_permissions = self.pending_permissions.to_vec();
-        let permission = pending_permissions.remove(index);
-        self.pending_permissions = pending_permissions.into();
-        if let Some(entry_id) = self.tool_entries.get(&permission.tool_call_id).copied()
-            && let Some(index) = self.entry_index(entry_id)
-            && let AgentThreadEntry::Tool { status, .. } = &mut self.entries[index]
-        {
-            let next = if canceled {
-                AgentToolStatusModel::Canceled
-            } else {
-                AgentToolStatusModel::Pending
-            };
-            if *status != next {
-                *status = next;
-                self.touch_entry(index);
-            }
-        }
-    }
-
-    fn cancel_inflight(&mut self) {
-        self.settle_inflight(AgentToolStatusModel::Canceled);
-    }
-
-    fn finish_turn(&mut self) {
-        self.pending_permissions = Arc::from([]);
-        self.suppress_user_echo = false;
-        self.active_stream = None;
-    }
-
-    fn settle_inflight(&mut self, settled_status: AgentToolStatusModel) {
-        debug_assert!(matches!(
-            settled_status,
-            AgentToolStatusModel::Failed | AgentToolStatusModel::Canceled
-        ));
-        self.finish_turn();
-        for index in 0..self.entries.len() {
-            let changed = if let AgentThreadEntry::Tool { status, .. } = &mut self.entries[index] {
-                if matches!(
-                    status,
-                    AgentToolStatusModel::Pending
-                        | AgentToolStatusModel::Running
-                        | AgentToolStatusModel::NeedsApproval
-                ) {
-                    *status = settled_status;
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-            if changed {
-                self.touch_entry(index);
-            }
-        }
-    }
-
-    fn fail_inflight(&mut self) {
-        self.settle_inflight(AgentToolStatusModel::Failed);
-    }
-
-    fn finish_replay(&mut self) {
-        self.message_entries.clear();
-        self.active_stream = None;
     }
 }
 
@@ -1236,7 +594,7 @@ impl AgentController {
 
     pub(crate) fn pane_status(&self, pane: PaneId) -> Option<AgentPaneStatus> {
         let thread = self.panes.get(&pane)?;
-        Some(if !thread.pending_permissions.is_empty() {
+        Some(if !thread.transcript.permissions().is_empty() {
             AgentPaneStatus::NeedsInput
         } else if thread.connection == AgentConnectionState::Failed {
             AgentPaneStatus::Failed
@@ -1250,26 +608,15 @@ impl AgentController {
     pub(crate) fn pane_entries(&self, pane: PaneId) -> Option<(&[AgentThreadEntry], &[u64], u64)> {
         self.panes.get(&pane).map(|thread| {
             (
-                thread.entries.as_slice(),
-                thread.entry_revisions.as_slice(),
-                thread.next_entry_revision,
+                thread.transcript.entries(),
+                thread.transcript.entry_revisions(),
+                thread.transcript.revision(),
             )
         })
     }
 
     pub(crate) fn pane_entry_changes(&self, pane: PaneId, since: u64) -> Option<Vec<usize>> {
-        let thread = self.panes.get(&pane)?;
-        if since < thread.entry_change_floor {
-            return None;
-        }
-        let mut changes = thread
-            .entry_changes
-            .iter()
-            .filter_map(|(revision, index)| (*revision >= since).then_some(*index))
-            .collect::<Vec<_>>();
-        changes.sort_unstable();
-        changes.dedup();
-        Some(changes)
+        self.panes.get(&pane)?.transcript.changed_entries(since)
     }
 
     pub(crate) fn registered_panes(&self) -> BTreeSet<PaneId> {
@@ -1447,7 +794,7 @@ impl AgentController {
         if !thread.session_capabilities.load {
             return Err(Arc::from("this agent cannot load session history"));
         }
-        if !thread.connection.accepts_prompt() || !thread.pending_permissions.is_empty() {
+        if !thread.connection.accepts_prompt() || !thread.transcript.permissions().is_empty() {
             return Err(Arc::from(
                 "finish or cancel the current turn before switching sessions",
             ));
@@ -1494,7 +841,7 @@ impl AgentController {
         let Some(thread) = self.panes.get(&pane) else {
             return Err(Arc::from("agent pane is not registered"));
         };
-        if !thread.connection.accepts_prompt() || !thread.pending_permissions.is_empty() {
+        if !thread.connection.accepts_prompt() || !thread.transcript.permissions().is_empty() {
             return Err(Arc::from(
                 "finish or cancel the current turn before starting a new session",
             ));
@@ -1535,7 +882,7 @@ impl AgentController {
         if thread.cwd == cwd {
             return Ok(());
         }
-        if !thread.connection.accepts_prompt() || !thread.pending_permissions.is_empty() {
+        if !thread.connection.accepts_prompt() || !thread.transcript.permissions().is_empty() {
             return Err(Arc::from(
                 "finish or cancel the current turn before changing workspaces",
             ));
@@ -1768,7 +1115,7 @@ impl AgentController {
             cx,
         ) {
             if let Some(thread) = self.panes.get_mut(&pane) {
-                thread.resolve_permission(request_id, canceled);
+                thread.transcript.resolve_permission(request_id, canceled);
             }
             cx.notify();
             return true;
@@ -2064,7 +1411,7 @@ impl AgentController {
             AgentConnectionPhase::Failed { message } => {
                 thread.connection = AgentConnectionState::Failed;
                 thread.error = Some(Arc::from(message.as_str()));
-                thread.fail_inflight();
+                thread.transcript.fail_inflight();
             }
         }
         thread.title = state.title.as_deref().map(Arc::from);
@@ -2085,11 +1432,13 @@ impl AgentController {
                 .collect::<Vec<_>>()
                 .into();
         }
-        thread.pending_permissions = Arc::from([]);
+        thread.transcript.clear_permissions();
         if let Some(permission) = &state.pending_permission
             && let Some((tool_call, options)) = decode_permission_payload(&permission.payload)
         {
-            thread.request_permission(permission.request_id, tool_call, options);
+            thread
+                .transcript
+                .request_permission(permission.request_id, tool_call, options);
         }
         if state.config_options.is_empty() && state.modes.is_empty() {
             thread.config_options = Arc::from([]);
@@ -2445,10 +1794,10 @@ impl AgentController {
                     thread.session_id = Some(session_id.clone());
                     thread.set_session_configuration(modes, config_options);
                     if thread.connection == AgentConnectionState::Restoring {
-                        thread.finish_replay();
+                        thread.transcript.finish_replay();
                     }
                     thread.session_reset = false;
-                    thread.finish_turn();
+                    thread.transcript.finish_turn();
                     thread.connection = AgentConnectionState::Ready;
                     thread.error = None;
                     changed_pane = Some(pane);
@@ -2520,9 +1869,9 @@ impl AgentController {
                     for update in replay {
                         thread.apply_update(update);
                     }
-                    thread.finish_replay();
+                    thread.transcript.finish_replay();
                     thread.session_reset = false;
-                    thread.finish_turn();
+                    thread.transcript.finish_turn();
                     let session_id: Arc<str> = Arc::from(session_id);
                     thread.session_id = Some(session_id.clone());
                     thread.set_session_configuration(modes, config_options);
@@ -2591,7 +1940,9 @@ impl AgentController {
                 options,
             } => {
                 if let Some(thread) = self.panes.get_mut(&pane) {
-                    thread.request_permission(request_id, tool_call, options);
+                    thread
+                        .transcript
+                        .request_permission(request_id, tool_call, options);
                     changed_pane = Some(pane);
                 }
             }
@@ -2601,7 +1952,7 @@ impl AgentController {
                 canceled,
             } => {
                 if let Some(thread) = self.panes.get_mut(&pane) {
-                    thread.resolve_permission(request_id, canceled);
+                    thread.transcript.resolve_permission(request_id, canceled);
                     changed_pane = Some(pane);
                 }
             }
@@ -2611,17 +1962,17 @@ impl AgentController {
                         Ok(StopReason::Cancelled) => {
                             thread.connection = AgentConnectionState::Ready;
                             thread.error = None;
-                            thread.cancel_inflight();
+                            thread.transcript.cancel_inflight();
                         }
                         Ok(_) => {
                             thread.connection = AgentConnectionState::Ready;
                             thread.error = None;
-                            thread.finish_turn();
+                            thread.transcript.finish_turn();
                         }
                         Err(error) => {
                             thread.connection = AgentConnectionState::Failed;
                             thread.error = Some(Arc::from(error));
-                            thread.fail_inflight();
+                            thread.transcript.fail_inflight();
                         }
                     }
                     changed_pane = Some(pane);
@@ -2747,7 +2098,7 @@ impl AgentController {
                 if let Some(thread) = self.panes.get_mut(&pane) {
                     thread.connection = AgentConnectionState::Failed;
                     thread.error = Some(Arc::from(message));
-                    thread.fail_inflight();
+                    thread.transcript.fail_inflight();
                     thread.session_history.loading = false;
                     thread.settings_busy = false;
                     changed_pane = Some(pane);
@@ -2798,66 +2149,20 @@ fn preferred_setting_command(
     thread: &AgentThread,
     preferences: &AgentPreferences,
 ) -> Option<AgentSettingRequest> {
-    for kind in [
-        AgentPreferenceKind::Model,
-        AgentPreferenceKind::Effort,
-        AgentPreferenceKind::Permission,
-    ] {
-        let option = thread
-            .config_options
-            .iter()
-            .find(|option| preference_kind_for_category(option.category) == Some(kind));
-        if let Some(option) = option {
-            if thread
-                .preference_reconcile_skips
-                .contains(&(kind, option.id.clone()))
-            {
-                continue;
-            }
-            let Some(value) =
-                preferences.desired(thread.provider, &thread.agent_key, kind, &option.id)
-            else {
-                continue;
-            };
-            if value == option.current_value
-                || !option.choices.iter().any(|choice| choice.value == value)
-            {
-                continue;
-            }
-            return Some(AgentSettingRequest {
-                config_id: option.id.clone(),
-                value: value.to_owned(),
-                origin: AgentSettingOrigin::Preference(kind),
-            });
-        }
-        if kind == AgentPreferenceKind::Permission {
-            if thread.preference_reconcile_skips.contains(&(
-                AgentPreferenceKind::Permission,
-                LEGACY_MODE_PREFERENCE_ID.to_owned(),
-            )) {
-                continue;
-            }
-            let Some(value) = preferences.desired(
-                thread.provider,
-                &thread.agent_key,
-                AgentPreferenceKind::Permission,
-                LEGACY_MODE_PREFERENCE_ID,
-            ) else {
-                continue;
-            };
-            if thread.mode.as_deref() == Some(value)
-                || !thread.modes.iter().any(|mode| mode.id == value)
-            {
-                continue;
-            }
-            return Some(AgentSettingRequest {
-                config_id: LEGACY_MODE_PREFERENCE_ID.to_owned(),
-                value: value.to_owned(),
-                origin: AgentSettingOrigin::Preference(AgentPreferenceKind::Permission),
-            });
-        }
-    }
-    None
+    preferences
+        .preferred(
+            thread.provider,
+            &thread.agent_key,
+            &thread.config_options,
+            &thread.modes,
+            thread.mode.as_deref(),
+            &thread.preference_reconcile_skips,
+        )
+        .map(|setting| AgentSettingRequest {
+            config_id: setting.config_id,
+            value: setting.value,
+            origin: AgentSettingOrigin::Preference(setting.kind),
+        })
 }
 
 fn decode_value<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Option<T> {
@@ -2915,322 +2220,34 @@ fn decode_permission_payload(payload: &str) -> Option<(ToolCallUpdate, Vec<Permi
 
 impl EventEmitter<AgentControllerEvent> for AgentController {}
 
-fn valid_session_id(session_id: &str) -> bool {
-    !session_id.is_empty()
-        && session_id.len() <= MAX_SESSION_ID_BYTES
-        && !session_id.chars().any(char::is_control)
+fn transcript_image(mime: &str, bytes: Vec<u8>) -> Option<Arc<Image>> {
+    Some(Arc::new(Image::from_bytes(
+        ImageFormat::from_mime_type(mime)?,
+        bytes,
+    )))
 }
 
-fn valid_session_cursor(cursor: &str) -> bool {
-    !cursor.is_empty()
-        && cursor.len() <= MAX_SESSION_CURSOR_BYTES
-        && !cursor.chars().any(char::is_control)
-}
-
-fn valid_session_summary(session: &AgentSessionSummary) -> bool {
-    valid_session_id(&session.session_id)
-        && valid_session_directory(&session.cwd)
-        && session.additional_directories.len() <= MAX_AGENT_SESSION_DIRECTORIES
-        && session
-            .additional_directories
-            .iter()
-            .all(|directory| valid_session_directory(directory))
-        && session.title.as_deref().is_none_or(|title| {
-            title.len() <= MAX_SESSION_TITLE_BYTES && !title.chars().any(char::is_control)
-        })
-        && session.updated_at.as_deref().is_none_or(|timestamp| {
-            timestamp.len() <= MAX_SESSION_TIMESTAMP_BYTES
-                && !timestamp.chars().any(char::is_control)
-        })
-}
-
-fn valid_session_directory(path: &Path) -> bool {
-    !path.as_os_str().is_empty() && path.as_os_str().as_encoded_bytes().len() <= MAX_GUI_TEXT_BYTES
-}
-
-const fn preference_kind_for_category(
-    category: AgentConfigCategory,
-) -> Option<AgentPreferenceKind> {
-    match category {
-        AgentConfigCategory::Mode => Some(AgentPreferenceKind::Permission),
-        AgentConfigCategory::Model => Some(AgentPreferenceKind::Model),
-        AgentConfigCategory::ThoughtLevel => Some(AgentPreferenceKind::Effort),
-        AgentConfigCategory::ModelConfig | AgentConfigCategory::Other => None,
-    }
-}
-
-fn agent_command_model(command: AvailableCommand) -> AgentCommand {
-    let input_hint = command.input.and_then(|input| match input {
-        AvailableCommandInput::Unstructured(input) => Some(input.hint),
-        _ => None,
-    });
-    AgentCommand {
-        name: command.name,
-        description: command.description,
-        input_hint,
-    }
-}
-
-fn config_option_models(options: Vec<SessionConfigOption>) -> Vec<AgentConfigOption> {
-    options
-        .into_iter()
-        .take(MAX_AGENT_CONFIG_OPTIONS)
-        .filter_map(config_option_model)
-        .collect()
-}
-
-fn config_option_model(option: SessionConfigOption) -> Option<AgentConfigOption> {
-    let SessionConfigKind::Select(select) = option.kind else {
-        return None;
-    };
-    let choices = match select.options {
-        agent_client_protocol::schema::v1::SessionConfigSelectOptions::Ungrouped(options) => {
-            options
-        }
-        agent_client_protocol::schema::v1::SessionConfigSelectOptions::Grouped(groups) => {
-            groups.into_iter().flat_map(|group| group.options).collect()
-        }
-        _ => Vec::new(),
-    }
-    .into_iter()
-    .take(MAX_AGENT_CONFIG_CHOICES)
-    .map(|choice| AgentConfigChoice {
-        value: choice.value.0.to_string(),
-        name: choice.name,
-        description: choice.description,
-    })
-    .collect();
-    let category = match option.category {
-        Some(SessionConfigOptionCategory::Mode) => AgentConfigCategory::Mode,
-        Some(SessionConfigOptionCategory::Model) => AgentConfigCategory::Model,
-        Some(SessionConfigOptionCategory::ModelConfig) => AgentConfigCategory::ModelConfig,
-        Some(SessionConfigOptionCategory::ThoughtLevel) => AgentConfigCategory::ThoughtLevel,
-        _ => AgentConfigCategory::Other,
-    };
-    Some(AgentConfigOption {
-        id: option.id.0.to_string(),
-        name: option.name,
-        description: option.description,
-        category,
-        current_value: select.current_value.0.to_string(),
-        choices,
-    })
-}
-
-fn map_permission_kind(kind: PermissionOptionKind) -> AgentPermissionKind {
-    match kind {
-        PermissionOptionKind::AllowOnce => AgentPermissionKind::AllowOnce,
-        PermissionOptionKind::AllowAlways => AgentPermissionKind::AllowAlways,
-        PermissionOptionKind::RejectAlways => AgentPermissionKind::RejectAlways,
-        _ => AgentPermissionKind::RejectOnce,
-    }
-}
-
-fn update_carries_tool_shape(fields: &ToolCallUpdateFields) -> bool {
-    fields.title.is_some()
-        || fields.raw_input.is_some()
-        || fields.locations.is_some()
-        || fields.content.as_ref().is_some_and(|content| {
-            content
-                .iter()
-                .any(|content| matches!(content, ToolCallContent::Diff(_)))
-        })
-}
-
-fn reclassifies_tool(current: AgentToolKindModel, next: ToolKind, carries_shape: bool) -> bool {
-    carries_shape
-        || current == AgentToolKindModel::Other
-        || map_tool_kind(next) != AgentToolKindModel::Other
-}
-
-fn map_tool_kind(kind: ToolKind) -> AgentToolKindModel {
-    match kind {
-        ToolKind::Read => AgentToolKindModel::Read,
-        ToolKind::Search => AgentToolKindModel::Search,
-        ToolKind::Edit => AgentToolKindModel::Edit,
-        ToolKind::Delete => AgentToolKindModel::Delete,
-        ToolKind::Move => AgentToolKindModel::Move,
-        ToolKind::Execute => AgentToolKindModel::Execute,
-        ToolKind::Fetch => AgentToolKindModel::Fetch,
-        ToolKind::Think => AgentToolKindModel::Think,
-        ToolKind::SwitchMode => AgentToolKindModel::SwitchMode,
-        _ => AgentToolKindModel::Other,
-    }
-}
-
-fn map_tool_status(status: ToolCallStatus) -> AgentToolStatusModel {
-    match status {
-        ToolCallStatus::InProgress => AgentToolStatusModel::Running,
-        ToolCallStatus::Completed => AgentToolStatusModel::Completed,
-        ToolCallStatus::Failed => AgentToolStatusModel::Failed,
-        _ => AgentToolStatusModel::Pending,
-    }
-}
-
-fn inbound_image(image: &ImageContent) -> Option<Arc<Image>> {
-    let format = ImageFormat::from_mime_type(&image.mime_type)?;
-    let bytes = BASE64.decode(&image.data).ok()?;
-    Some(Arc::new(Image::from_bytes(format, bytes)))
-}
-
+#[cfg(test)]
 fn split_inline_images(text: &str) -> (String, Vec<Arc<Image>>) {
-    const MARKER: &str = "data:image/";
-    if !text.contains(MARKER) {
-        return (text.to_owned(), Vec::new());
-    }
-    let mut kept = String::with_capacity(text.len());
-    let mut images = Vec::new();
-    let mut remaining = text;
-    while let Some(start) = remaining.find(MARKER) {
-        let end = remaining[start..]
-            .find(|character: char| {
-                character.is_whitespace() || matches!(character, ')' | '"' | '\'' | '<' | '>')
-            })
-            .map_or(remaining.len(), |offset| start + offset);
-        let Some(image) = decode_data_uri(&remaining[start..end]) else {
-            kept.push_str(&remaining[..end]);
-            remaining = &remaining[end..];
-            continue;
-        };
-        images.push(image);
-        let before = &remaining[..start];
-        let (prefix_end, closer) = before
-            .strip_suffix("](")
-            .and_then(|before| before.rfind('['))
-            .map_or((before.len(), ""), |open| (open, ")"));
-        kept.push_str(&remaining[..prefix_end]);
-        remaining = remaining[end..]
-            .strip_prefix(closer)
-            .unwrap_or(&remaining[end..]);
-    }
-    kept.push_str(remaining);
-    (kept.trim().to_owned(), images)
-}
-
-fn decode_data_uri(uri: &str) -> Option<Arc<Image>> {
-    let (mime, payload) = uri.strip_prefix("data:")?.split_once(";base64,")?;
-    let format = ImageFormat::from_mime_type(mime)?;
-    let bytes = BASE64.decode(payload).ok()?;
-    Some(Arc::new(Image::from_bytes(format, bytes)))
-}
-
-fn content_block_markdown(content: &ContentBlock) -> String {
-    match content {
-        ContentBlock::Text(text) => text.text.clone(),
-        ContentBlock::Image(image) => format!("*[Image: {}]*", image.mime_type),
-        ContentBlock::Audio(audio) => format!("*[Audio: {}]*", audio.mime_type),
-        ContentBlock::ResourceLink(resource) => {
-            let label = resource.title.as_deref().unwrap_or(&resource.name);
-            format!("[{label}]({})", resource.uri)
-        }
-        ContentBlock::Resource(resource) => match &resource.resource {
-            agent_client_protocol::schema::v1::EmbeddedResourceResource::TextResourceContents(
-                resource,
-            ) => resource.text.clone(),
-            agent_client_protocol::schema::v1::EmbeddedResourceResource::BlobResourceContents(
-                resource,
-            ) => format!("*[Embedded resource: {}]*", resource.uri),
-            _ => pretty_json_markdown(content),
-        },
-        _ => pretty_json_markdown(content),
-    }
-}
-
-fn tool_location(tool: &ToolCall) -> Option<String> {
-    tool.locations.first().map(|location| {
-        location.line.map_or_else(
-            || location.path.display().to_string(),
-            |line| format!("{}:{line}", location.path.display()),
-        )
-    })
-}
-
-fn tool_input(tool: &ToolCall) -> Option<ToolPayload> {
-    tool.raw_input.as_ref().and_then(json_payload)
-}
-
-fn tool_output(tool: &ToolCall) -> Vec<ToolPayload> {
-    let structured = tool_content_payloads(&tool.content);
-    if structured.is_empty() {
-        tool.raw_output
-            .as_ref()
-            .and_then(json_payload)
-            .into_iter()
-            .collect()
-    } else {
-        structured
-    }
-}
-
-fn tool_content_payloads(content: &[ToolCallContent]) -> Vec<ToolPayload> {
-    content
-        .iter()
-        .take(MAX_AGENT_TOOL_CONTENT_ITEMS)
-        .map(tool_content_payload)
-        .collect()
-}
-
-fn tool_content_payload(content: &ToolCallContent) -> ToolPayload {
-    match content {
-        ToolCallContent::Diff(diff) => ToolPayload::Diff {
-            path: diff.path.display().to_string(),
-            old: diff
-                .old_text
-                .clone()
-                .map(|old| capped(old, MAX_DIFF_SIDE_BYTES)),
-            new: capped(diff.new_text.clone(), MAX_DIFF_SIDE_BYTES),
-        },
-        ToolCallContent::Content(content) => match &content.content {
-            ContentBlock::Text(text) => ToolPayload::Text(capped_payload(text.text.clone())),
-            _ => ToolPayload::Json(capped_payload(pretty_json(content).unwrap_or_default())),
-        },
-        ToolCallContent::Terminal(terminal) => {
-            ToolPayload::Terminal(format!("[terminal {}]", terminal.terminal_id.0))
-        }
-        _ => ToolPayload::Json(capped_payload(pretty_json(content).unwrap_or_default())),
-    }
-}
-
-fn pretty_json(value: &impl serde::Serialize) -> Option<String> {
-    serde_json::to_string_pretty(value).ok()
-}
-
-fn json_payload(value: &impl serde::Serialize) -> Option<ToolPayload> {
-    pretty_json(value).map(|json| ToolPayload::Json(capped_payload(json)))
-}
-
-fn capped_payload(text: String) -> String {
-    capped(text, MAX_TOOL_PAYLOAD_BYTES)
-}
-
-fn capped(mut text: String, max_bytes: usize) -> String {
-    truncate_payload(&mut text, max_bytes);
-    text
-}
-
-fn truncate_payload(text: &mut String, max_bytes: usize) {
-    if text.len() <= max_bytes {
-        return;
-    }
-    let mut end = max_bytes.saturating_sub(TRUNCATION_MARKER.len());
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text.truncate(end);
-    text.push_str(TRUNCATION_MARKER);
-}
-
-fn pretty_json_markdown(value: &impl serde::Serialize) -> String {
-    pretty_json(value).map_or_else(String::new, |value| format!("```json\n{value}\n```"))
+    zz_client::agent_transcript::split_inline_images(text, transcript_image)
 }
 
 #[cfg(test)]
 mod tests {
     use agent_client_protocol::schema::v1::{
-        AvailableCommandsUpdate, ConfigOptionUpdate, Diff, MessageId, PlanEntry, PlanEntryPriority,
-        SessionConfigSelectOption, Terminal, TextContent, ToolCallLocation,
+        AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate, ConfigOptionUpdate,
+        ContentBlock, ContentChunk, Diff, ImageContent, MessageId, PermissionOptionKind, Plan,
+        PlanEntry, PlanEntryPriority, PlanEntryStatus, SessionConfigOptionCategory,
+        SessionConfigSelectOption, Terminal, TextContent, ToolCall, ToolCallContent,
+        ToolCallLocation, ToolCallStatus, ToolCallUpdateFields, ToolKind,
     };
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
     use std::{cell::RefCell, rc::Rc};
+    use zz_client::agent_config::AgentConfigChoice;
+    use zz_protocol::{
+        MAX_AGENT_CONFIG_CHOICES, MAX_AGENT_CONFIG_OPTIONS, MAX_AGENT_PERMISSION_OPTIONS,
+        MAX_AGENT_TOOL_CONTENT_ITEMS,
+    };
 
     use gpui::{AppContext as _, TestAppContext};
     use parking_lot::Mutex;
@@ -3357,19 +2374,22 @@ mod tests {
             ContentChunk::new(ContentBlock::Text(TextContent::new("hello ")))
                 .message_id(MessageId::new("message-1")),
         ));
-        let entry_id = thread.entries[0].id();
-        let first_revision = thread.entry_revisions[0];
+        let entry_id = thread.transcript.entries()[0].id();
+        let first_revision = thread.transcript.entry_revisions()[0];
         thread.apply_update(SessionUpdate::AgentMessageChunk(
             ContentChunk::new(ContentBlock::Text(TextContent::new("world")))
                 .message_id(MessageId::new("message-1")),
         ));
 
-        assert_eq!(thread.entries.len(), 1);
-        assert_eq!(thread.entry_revisions.len(), thread.entries.len());
-        assert_eq!(thread.entry_indices.get(&entry_id), Some(&0));
-        assert!(thread.entry_revisions[0] > first_revision);
+        assert_eq!(thread.transcript.entries().len(), 1);
+        assert_eq!(
+            thread.transcript.entry_revisions().len(),
+            thread.transcript.entries().len()
+        );
+        assert_eq!(thread.transcript.entries()[0].id(), entry_id);
+        assert!(thread.transcript.entry_revisions()[0] > first_revision);
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Assistant { markdown, .. } if markdown == "hello world"
         ));
     }
@@ -3491,9 +2511,11 @@ mod tests {
         let content = (0..MAX_AGENT_TOOL_CONTENT_ITEMS + 8)
             .map(|index| ContentBlock::Text(TextContent::new(index.to_string())).into())
             .collect::<Vec<_>>();
-        assert_eq!(
-            tool_content_payloads(&content).len(),
-            MAX_AGENT_TOOL_CONTENT_ITEMS
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new("bounded", "Bounded").content(content),
+        ));
+        assert!(
+            matches!(thread.transcript.entries().last(), Some(AgentThreadEntry::Tool { output, .. }) if output.len() == MAX_AGENT_TOOL_CONTENT_ITEMS)
         );
 
         let permission_options = (0..MAX_AGENT_PERMISSION_OPTIONS + 8)
@@ -3505,7 +2527,7 @@ mod tests {
                 )
             })
             .collect();
-        thread.request_permission(
+        thread.transcript.request_permission(
             42,
             ToolCallUpdate::new(
                 "tool-cap",
@@ -3514,7 +2536,7 @@ mod tests {
             permission_options,
         );
         assert_eq!(
-            thread.pending_permissions[0].options.len(),
+            thread.transcript.permissions()[0].options.len(),
             MAX_AGENT_PERMISSION_OPTIONS
         );
     }
@@ -3527,7 +2549,7 @@ mod tests {
                 .kind(ToolKind::Execute)
                 .status(ToolCallStatus::InProgress),
         ));
-        let id = thread.entries[0].id();
+        let id = thread.transcript.entries()[0].id();
         thread.apply_update(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
             "tool-1",
             ToolCallUpdateFields::new()
@@ -3535,10 +2557,10 @@ mod tests {
                 .raw_output(serde_json::json!({"ok": true})),
         )));
 
-        assert_eq!(thread.entries.len(), 1);
-        assert_eq!(thread.entries[0].id(), id);
+        assert_eq!(thread.transcript.entries().len(), 1);
+        assert_eq!(thread.transcript.entries()[0].id(), id);
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Tool {
                 status: AgentToolStatusModel::Completed,
                 output,
@@ -3589,7 +2611,7 @@ mod tests {
         ));
 
         assert!(matches!(
-            thread.entries.as_slice(),
+            thread.transcript.entries(),
             [
                 AgentThreadEntry::Tool {
                     label,
@@ -3618,11 +2640,12 @@ mod tests {
             "Read file",
         )));
 
-        thread.finish_turn();
+        thread.transcript.finish_turn();
         thread.connection = AgentConnectionState::Ready;
 
         let statuses = thread
-            .entries
+            .transcript
+            .entries()
             .iter()
             .filter_map(|entry| match entry {
                 AgentThreadEntry::Tool { status, .. } => Some(*status),
@@ -3650,7 +2673,7 @@ mod tests {
 
         assert_eq!(thread.connection, AgentConnectionState::Ready);
         assert!(matches!(
-            thread.entries.as_slice(),
+            thread.transcript.entries(),
             [
                 AgentThreadEntry::Tool {
                     status: AgentToolStatusModel::Running,
@@ -3686,7 +2709,7 @@ mod tests {
         )));
 
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Tool {
                 location: Some(location),
                 input: Some(ToolPayload::Json(input)),
@@ -3713,7 +2736,7 @@ mod tests {
             ToolCallUpdateFields::new().raw_output(serde_json::json!({"late": true})),
         )));
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Tool { output, .. }
                 if matches!(output.first(), Some(ToolPayload::Diff { .. }))
         ));
@@ -3725,7 +2748,7 @@ mod tests {
                 .raw_output(serde_json::json!({"fallback": true})),
         )));
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Tool { output, .. }
                 if matches!(
                     output.as_slice(),
@@ -3745,13 +2768,13 @@ mod tests {
             )])
         };
         thread.apply_update(SessionUpdate::Plan(plan(PlanEntryStatus::InProgress)));
-        let id = thread.entries[0].id();
+        let id = thread.transcript.entries()[0].id();
         thread.apply_update(SessionUpdate::Plan(plan(PlanEntryStatus::Completed)));
 
-        assert_eq!(thread.entries.len(), 1);
-        assert_eq!(thread.entries[0].id(), id);
+        assert_eq!(thread.transcript.entries().len(), 1);
+        assert_eq!(thread.transcript.entries()[0].id(), id);
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Plan { markdown, .. } if markdown.starts_with("- [x]")
         ));
     }
@@ -3763,7 +2786,7 @@ mod tests {
             "tool-1",
             "Edit file",
         )));
-        thread.request_permission(
+        thread.transcript.request_permission(
             7,
             ToolCallUpdate::new(
                 "tool-1",
@@ -3776,16 +2799,16 @@ mod tests {
             )],
         );
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Tool {
                 status: AgentToolStatusModel::NeedsApproval,
                 ..
             }
         ));
-        thread.resolve_permission(7, false);
-        assert!(thread.pending_permissions.is_empty());
+        thread.transcript.resolve_permission(7, false);
+        assert!(thread.transcript.permissions().is_empty());
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Tool {
                 status: AgentToolStatusModel::Pending,
                 ..
@@ -3818,7 +2841,7 @@ mod tests {
 
         let Some(AgentThreadEntry::User {
             markdown, images, ..
-        }) = thread.entries.first()
+        }) = thread.transcript.entries().first()
         else {
             panic!("the replayed chunk should open a user entry");
         };
@@ -3843,7 +2866,7 @@ mod tests {
 
         let Some(AgentThreadEntry::User {
             markdown, images, ..
-        }) = thread.entries.first()
+        }) = thread.transcript.entries().first()
         else {
             panic!("the replayed chunk should open a user entry");
         };
@@ -3900,7 +2923,7 @@ mod tests {
                 .kind(ToolKind::Edit)
                 .status(ToolCallStatus::InProgress),
         ));
-        thread.request_permission(
+        thread.transcript.request_permission(
             7,
             ToolCallUpdate::new("tool-1", ToolCallUpdateFields::new()),
             vec![PermissionOption::new(
@@ -3910,13 +2933,11 @@ mod tests {
             )],
         );
 
-        thread.cancel_inflight();
+        thread.transcript.cancel_inflight();
 
-        assert!(thread.pending_permissions.is_empty());
-        assert!(!thread.suppress_user_echo);
-        assert!(thread.active_stream.is_none());
+        assert!(thread.transcript.permissions().is_empty());
         assert!(matches!(
-            thread.entries.last(),
+            thread.transcript.entries().last(),
             Some(AgentThreadEntry::Tool {
                 status: AgentToolStatusModel::Canceled,
                 ..
@@ -3973,12 +2994,14 @@ mod tests {
         assert!(valid_session_id("opaque/session:1"));
         assert!(!valid_session_id(""));
         assert!(!valid_session_id("bad\nsession"));
-        assert!(!valid_session_id(&"x".repeat(MAX_SESSION_ID_BYTES + 1)));
+        assert!(!valid_session_id(
+            &"x".repeat(zz_client::agent_config::MAX_SESSION_ID_BYTES + 1)
+        ));
         assert!(valid_session_cursor("opaque-next-page"));
         assert!(!valid_session_cursor(""));
         assert!(!valid_session_cursor("bad\ncursor"));
         assert!(!valid_session_cursor(
-            &"x".repeat(MAX_SESSION_CURSOR_BYTES + 1)
+            &"x".repeat(zz_client::agent_config::MAX_SESSION_CURSOR_BYTES + 1)
         ));
         assert!(valid_session_directory(Path::new("/srv/work")));
         assert!(valid_session_directory(Path::new(r"C:\work")));
@@ -4016,7 +3039,7 @@ mod tests {
                 .raw_output(serde_json::json!({"ok": true})),
         )));
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Tool {
                 kind: AgentToolKindModel::Execute,
                 status: AgentToolStatusModel::Completed,
@@ -4030,7 +3053,7 @@ mod tests {
             ToolCallUpdateFields::new().title(String::new()),
         )));
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Tool { label, .. } if label == "cargo test"
         ));
 
@@ -4041,7 +3064,7 @@ mod tests {
                 .title("Something else".to_owned()),
         )));
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Tool {
                 kind: AgentToolKindModel::Other,
                 label,
@@ -4052,8 +3075,7 @@ mod tests {
 
     #[test]
     fn oversized_tool_payloads_are_capped_on_char_boundaries() {
-        let mut text = "é".repeat(16);
-        truncate_payload(&mut text, TRUNCATION_MARKER.len() + 5);
+        let text = capped("é".repeat(16), TRUNCATION_MARKER.len() + 5);
         assert_eq!(text, "éé".to_owned() + TRUNCATION_MARKER);
 
         let mut thread = thread();
@@ -4063,7 +3085,7 @@ mod tests {
             )]),
         ));
         assert!(matches!(
-            &thread.entries[0],
+            &thread.transcript.entries()[0],
             AgentThreadEntry::Tool { output, .. }
                 if matches!(
                     output.as_slice(),
@@ -4823,7 +3845,7 @@ mod tests {
                 let thread = controller.panes.get(&pane).expect("pane");
                 assert_eq!(thread.session_id.as_deref(), Some("old-session"));
                 assert_eq!(thread.cwd, PathBuf::from("/old"));
-                assert_eq!(thread.entries.len(), 1);
+                assert_eq!(thread.transcript.entries().len(), 1);
             });
         });
     }
@@ -4930,7 +3952,7 @@ mod tests {
                 );
                 let thread = controller.panes.get(&pane).expect("pane");
                 assert!(matches!(
-                    thread.entries.first(),
+                    thread.transcript.entries().first(),
                     Some(AgentThreadEntry::Tool {
                         status: AgentToolStatusModel::Failed,
                         ..

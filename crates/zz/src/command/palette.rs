@@ -4,6 +4,10 @@ use gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton, Render,
     ScrollStrategy, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
+use zz_client::completion::{
+    CompletionKind, CompletionSuggestion, PaneKindAvailability, apply_completion, complete_command,
+    completion_insertion,
+};
 use zz_protocol::{
     CommandPromptAction, CommandPromptKind, CommandPromptMode, CommandPromptState, InputMessage,
     MAX_COMMAND_PROMPT_BYTES, MuxSnapshot,
@@ -18,10 +22,6 @@ use zz_ui::{
 };
 
 use crate::{
-    command::completion::{
-        CompletionKind, CompletionSuggestion, PaneKindAvailability, apply_completion,
-        complete_command, completion_insertion,
-    },
     mux::{client::MuxClient, prefix::terminal_key_input},
     terminal::view::TERMINAL_FONT,
 };

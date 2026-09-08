@@ -4,7 +4,7 @@ title: End-to-end data flow
 description: How terminal frames, browser pixels, ACP updates, and user input move among the daemon, GUI, PTY workers, CEF, and agents.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [architecture, data-flow, frames, input, rendering]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-09-08T00:00:00Z
 ---
 
 # Overview
@@ -131,13 +131,14 @@ override channel, and the three agent adapter keys are among them . the daemon r
 *next* pane spawns without disturbing the children already running. Only `agent-working-directory`
 stays client-side.
 
-zz's own configuration is authoritative: the daemon reads no external configs. It resolves
-[appearance](/terminal/appearance.md) as built-in defaults plus the client-pushed `zz/config`
-overrides, and sources the zz-owned `zz/mux.conf` (tmux grammar: options, bindings, status) at
-startup and on `reload-config`/`C-b r`, then pushes the resolved state to every GUI client and live
-terminal actor without killing PTYs, scrollback, selections, searches, layouts, or browser panes.
-Ghostty and tmux configs are read only by the client's explicit import flow, which snapshots them
-into `zz/config` and `zz/mux.conf` (first-run prompt or Settings → Import).
+The daemon resolves [appearance](/terminal/appearance.md) as built-in defaults plus the
+client-pushed `zz/config` overrides. With config loading enabled, it sources explicit `-f` files
+in order, or the discovered tmux config candidates when no explicit files were supplied, then
+loads `zz/mux.conf`. `reload-config`/`C-b r` replays that selection and pushes the resolved state
+to GUI clients and live terminal actors without killing PTYs, scrollback, selections, searches,
+layouts, or browser panes. See `startup_mux_config_files` and `selected_mux_config_files` in
+`crates/zz-daemon/src/daemon.rs` for the selection and precedence rules. The client's import flow
+can also copy Ghostty and tmux settings into `zz/config` and `zz/mux.conf`.
 
 # Related
 

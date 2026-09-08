@@ -10,27 +10,16 @@
 use std::{collections::BTreeMap, rc::Rc};
 
 use gpui::{App, Global, KeyBinding, Keystroke};
-use zz_client::{
-    BROWSER_TABLE, CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap, ChromeProfile,
-};
+use zz_client::{CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap};
 use zz_terminal::KeyAction;
 
 use crate::mux::prefix::terminal_key_input;
 
-/// A `zz/config` chrome override, validated while the file is parsed so the
-/// keymap only ever sees chords and actions it can honour.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ChromeOverride {
-    Bind {
-        table: &'static str,
-        key: String,
-        action: String,
-    },
-    Unbind {
-        table: &'static str,
-        key: String,
-    },
-}
+#[cfg(test)]
+use zz_client::{BROWSER_TABLE, ChromeProfile};
+pub(crate) use zz_config::keymap::{ChromeOverride, gpui_source};
+#[cfg(test)]
+use zz_config::keymap::{parse_bind, parse_unbind, tmux_key_name};
 
 /// One chord a surface should bind, under the action it carries. A chord an
 /// earlier configuration bound and this one does not comes back as not `live`:
@@ -75,24 +64,7 @@ impl Global for ChromeState {}
 /// configuration, and republish it. Every surface bound through [`bind`]
 /// re-emits its bindings.
 pub(crate) fn install(overrides: &[ChromeOverride], element_selector_hotkey: &str, cx: &mut App) {
-    let mut keymap = ChromeKeymap::for_profile(ChromeProfile::DESKTOP);
-    rebind_element_selector(&mut keymap, element_selector_hotkey);
-    for entry in overrides {
-        match entry {
-            ChromeOverride::Bind { table, key, action } => {
-                if let Err(error) = keymap.bind(table, key, action) {
-                    log::warn!(
-                        target: "zz::config",
-                        "ignoring chrome binding for unknown action `{}`",
-                        error.0,
-                    );
-                }
-            }
-            ChromeOverride::Unbind { table, key } => {
-                keymap.unbind(table, key);
-            }
-        }
-    }
+    let keymap = zz_config::keymap::configured_keymap(overrides, element_selector_hotkey);
 
     let bound = bound_chords(&keymap);
     let dropped: Vec<_> = cx
@@ -244,113 +216,7 @@ fn bound_chords(keymap: &ChromeKeymap) -> BTreeMap<(&'static str, String), Chrom
         .collect()
 }
 
-/// `browser-element-selector-hotkey` predates the chrome tables and keeps its
-/// own settings surface, so it lands here as a rebind of the one chord that
-/// carries the picker.
-fn rebind_element_selector(keymap: &mut ChromeKeymap, hotkey: &str) {
-    let Some(key) = Keystroke::parse(hotkey)
-        .ok()
-        .as_ref()
-        .and_then(chrome_key_for_keystroke)
-    else {
-        log::warn!(
-            target: "zz::config",
-            "keeping the built-in element selector chord: `{hotkey}` is not a chord zz can bind",
-        );
-        return;
-    };
-    for (bound, action) in keymap.table_bindings(BROWSER_TABLE) {
-        if action == ChromeAction::BrowserElementSelector && bound != key {
-            keymap.unbind(BROWSER_TABLE, &bound.to_string());
-        }
-    }
-    keymap
-        .bind(
-            BROWSER_TABLE,
-            &key.to_string(),
-            ChromeAction::BrowserElementSelector.name(),
-        )
-        .expect("chrome actions name themselves");
-}
-
-/// Parse a `chrome-keybind = <table>:<key>=<action>` value.
-pub(crate) fn parse_bind(value: &str) -> Result<ChromeOverride, String> {
-    let (target, action) = value
-        .rsplit_once('=')
-        .ok_or_else(|| "expected `<table>:<key>=<action>`".to_owned())?;
-    let (table, key) = parse_target(target)?;
-    let action = action.trim();
-    if ChromeAction::from_name(action).is_none() {
-        return Err(format!("unknown chrome action `{action}`"));
-    }
-    Ok(ChromeOverride::Bind {
-        table,
-        key,
-        action: action.to_owned(),
-    })
-}
-
-/// Parse a `chrome-unbind = <table>:<key>` value.
-pub(crate) fn parse_unbind(value: &str) -> Result<ChromeOverride, String> {
-    let (table, key) = parse_target(value)?;
-    Ok(ChromeOverride::Unbind { table, key })
-}
-
-fn parse_target(target: &str) -> Result<(&'static str, String), String> {
-    let (table, key) = target
-        .split_once(':')
-        .ok_or_else(|| "expected `<table>:<key>`".to_owned())?;
-    let table = table.trim();
-    let table = CHROME_TABLES
-        .into_iter()
-        .find(|known| *known == table)
-        .ok_or_else(|| {
-            format!(
-                "unknown chrome table `{table}`; expected one of {}",
-                CHROME_TABLES.join(", "),
-            )
-        })?;
-    let chord = ChromeKey::parse(key)
-        .filter(|chord| gpui_source(chord).is_some())
-        .ok_or_else(|| format!("`{key}` is not a chord zz can bind"))?;
-    Ok((table, chord.to_string()))
-}
-
-/// A chrome chord in gpui's own spelling, or `None` when gpui cannot express
-/// it.
-pub(crate) fn gpui_source(key: &ChromeKey) -> Option<String> {
-    let mut source = String::new();
-    if key.command {
-        source.push_str("cmd-");
-    }
-    if key.control {
-        source.push_str("ctrl-");
-    }
-    if key.alt {
-        source.push_str("alt-");
-    }
-    if key.shift {
-        source.push_str("shift-");
-    }
-    let base = match key.base.as_str() {
-        " " => "space",
-        named => gpui_key_name(named).unwrap_or(named),
-    };
-    let mut characters = base.chars();
-    match (characters.next(), characters.next()) {
-        (Some(character), None) if character.is_ascii_uppercase() => {
-            if key.shift {
-                return None;
-            }
-            source.push_str("shift-");
-            source.extend(character.to_lowercase());
-        }
-        (Some(_), _) => source.push_str(base),
-        (None, _) => return None,
-    }
-    Keystroke::parse(&source).ok().map(|_| source)
-}
-
+#[cfg(test)]
 fn chrome_key_for_keystroke(keystroke: &Keystroke) -> Option<ChromeKey> {
     if keystroke.modifiers.function {
         return None;
@@ -370,50 +236,6 @@ fn chrome_key_for_keystroke(keystroke: &Keystroke) -> Option<ChromeKey> {
         .normalized(),
     )
 }
-
-/// The gpui name for a tmux key name, for the keys whose spellings differ.
-pub(crate) fn gpui_key_name(name: &str) -> Option<&'static str> {
-    KEY_NAMES
-        .iter()
-        .find(|(tmux, _)| *tmux == name)
-        .map(|(_, gpui)| *gpui)
-}
-
-fn tmux_key_name(name: &str) -> Option<&'static str> {
-    KEY_NAMES
-        .iter()
-        .find(|(_, gpui)| *gpui == name)
-        .map(|(tmux, _)| *tmux)
-}
-
-const KEY_NAMES: [(&str, &str); 26] = [
-    ("Enter", "enter"),
-    ("Escape", "escape"),
-    ("Tab", "tab"),
-    ("BSpace", "backspace"),
-    ("Up", "up"),
-    ("Down", "down"),
-    ("Left", "left"),
-    ("Right", "right"),
-    ("Home", "home"),
-    ("End", "end"),
-    ("PPage", "pageup"),
-    ("NPage", "pagedown"),
-    ("DC", "delete"),
-    ("IC", "insert"),
-    ("F1", "f1"),
-    ("F2", "f2"),
-    ("F3", "f3"),
-    ("F4", "f4"),
-    ("F5", "f5"),
-    ("F6", "f6"),
-    ("F7", "f7"),
-    ("F8", "f8"),
-    ("F9", "f9"),
-    ("F10", "f10"),
-    ("F11", "f11"),
-    ("F12", "f12"),
-];
 
 #[cfg(test)]
 mod tests {

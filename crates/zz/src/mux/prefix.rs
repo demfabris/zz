@@ -7,6 +7,7 @@ use zz_client::ChromeKey;
 use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers as TerminalModifiers};
 
 /// Whether a GPUI keystroke spells the given canonical tmux key.
+#[cfg(test)]
 pub(crate) fn keystroke_is(keystroke: &Keystroke, canonical: &str) -> bool {
     !keystroke.modifiers.function
         && !canonical.is_empty()

@@ -2,8 +2,8 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     App, Bounds, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render,
-    ScrollWheelEvent, Window, div, prelude::*, px,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollWheelEvent, Window,
+    div, prelude::*, px,
 };
 use zz_client::{MenuBox, MenuKeyResult, MenuPointerKind, resolve_menu_key, resolve_menu_mouse};
 use zz_protocol::{InputMessage, MenuAction, MenuState, PopupBorderLines};
@@ -14,31 +14,15 @@ use crate::{
     terminal::view::TERMINAL_FONT,
     theme::tmux_style_colour,
 };
+use zz_ui::command::floating::{menu_row, menu_separator};
 use zz_ui::{ActiveTheme as _, Colorize as _, ElementExt as _};
 
-/// The `m->b` byte `tty-keys.c` reports for a release, and the byte a motion
-/// with no button held carries once `MOUSE_MASK_DRAG` is masked off: both read
-/// as `MOUSE_RELEASE`.
-pub(crate) const RELEASE_BUTTONS: u8 = 3;
-/// `MOUSE_WHEEL_UP`. `MOUSE_BUTTONS` leaves it alone, so it is not
-/// `MOUSE_BUTTON_1` and a `MENU_NOMOUSE` menu leaves on it.
-pub(crate) const WHEEL_BUTTONS: u8 = 64;
-/// The hairline `FloatingSurface` draws inside the one cell of border
-/// `menu_frame` measures. It sits between the frame and the content box, so
-/// the content box's origin is this much past the cell the menu starts on.
-const SURFACE_BORDER: Pixels = px(1.0);
+use zz_ui::command::floating::menu_grid_cell as grid_cell;
+pub(crate) use zz_ui::command::floating::{
+    RELEASE_BUTTONS, WHEEL_BUTTONS, menu_press_buttons as press_buttons,
+};
 
-/// `MOUSE_BUTTONS(m->b)` for a press of this button: 0, 1 and 2 for the three
-/// buttons `tty-keys.c` numbers, and `MOUSE_BUTTON_8` for the navigation
-/// buttons no tmux terminal reports as one of the first three.
-pub(crate) const fn press_buttons(button: MouseButton) -> u8 {
-    match button {
-        MouseButton::Left => zz_client::MOUSE_BUTTON_1,
-        MouseButton::Middle => 1,
-        MouseButton::Right => 2,
-        MouseButton::Navigate(_) => 128,
-    }
-}
+const SURFACE_BORDER: Pixels = px(1.0);
 
 pub(crate) struct MenuView {
     focus_handle: FocusHandle,
@@ -195,50 +179,28 @@ impl Render for MenuView {
         );
         let selected_foreground =
             tmux_style_colour(&self.state.selected_style, "fg", cx.theme().foreground, cx);
-        let muted = cx.theme().foreground.muted();
         let rows = self
             .state
             .items
             .iter()
             .enumerate()
             .map(|(index, item)| match item {
-                None => div()
-                    .id(("display-menu-separator", index))
-                    .h(row_height)
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .px(px(8.0))
-                    .child(div().h(px(1.0)).w_full().bg(cx.theme().border))
+                None => menu_separator(("display-menu-separator", index), row_height, cx)
                     .into_any_element(),
-                Some(item) => {
-                    let selected = self.selected == Some(index);
-                    let enabled = item.enabled;
-                    div()
-                        .id(("display-menu-row", index))
-                        .debug_selector(move || format!("display-menu-row-{index}"))
-                        .h(row_height)
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .px(px(12.0))
-                        .font_family(TERMINAL_FONT)
-                        .text_size(px(13.0))
-                        .line_height(px(16.0))
-                        .when(selected, |row| {
-                            row.bg(selected_background).text_color(selected_foreground)
-                        })
-                        .when(!selected && !enabled, |row| row.text_color(muted))
-                        .when(!selected && enabled, |row| {
-                            row.hover(|row| row.bg(cx.theme().background.raised(1).opaque()))
-                        })
-                        .child(item.name.clone())
-                        .when_some(item.annotation.clone(), |row, key| {
-                            row.child(format!("({key})"))
-                        })
-                        .into_any_element()
-                }
+                Some(item) => menu_row(
+                    ("display-menu-row", index),
+                    item.name.clone(),
+                    item.annotation.clone().map(Into::into),
+                    item.enabled,
+                    self.selected == Some(index),
+                    row_height,
+                    selected_background,
+                    selected_foreground,
+                    TERMINAL_FONT,
+                    cx,
+                )
+                .debug_selector(move || format!("display-menu-row-{index}"))
+                .into_any_element(),
             });
         let measured = Rc::clone(&self.content_bounds);
         div()
@@ -292,24 +254,6 @@ impl Render for MenuView {
             }))
             .children(rows)
     }
-}
-
-/// One axis of `cell_at`. `menu_frame` sizes a cell as the daemon's device
-/// pixels over the window's scale factor, so the same division maps a pointer
-/// back onto the grid. A negative offset is the pointer before the box, which
-/// answers `outside` rather than the box's own first cell.
-fn grid_cell(offset: Pixels, cell_px: u32, scale: f32, origin: u16, outside: u16) -> u16 {
-    let cell = f32::from(u16::try_from(cell_px).unwrap_or(u16::MAX)) / scale;
-    let offset = f32::from(offset);
-    if cell <= 0.0 || offset < 0.0 {
-        return outside;
-    }
-    let steps = (offset / cell).floor();
-    if steps < 0.0 || steps > f32::from(u16::MAX) {
-        return outside;
-    }
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    origin.saturating_add(steps as u16)
 }
 
 fn resolve_keystroke(

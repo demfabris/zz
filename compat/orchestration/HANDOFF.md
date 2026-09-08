@@ -1,4 +1,87 @@
-# Current handoff: cycle 18 written and minted on the macbook (2026-09-07 15:45Z); launch it on the ubuntu box
+# Current handoff: cycle 18 integrated on the ubuntu box (2026-09-08 01:00Z); the implementation phase is down to one design front and two measured items
+
+Cycle 18 ran end to end on the ubuntu box as Workflow `wf_0ca474a4-f73` (`opus-compat-run-18.js`,
+launched 13:50Z): two Opus 5 lanes at xhigh, one adversarial review each, one gate alone. Both lanes
+merged and both lane locks were ledgered INTEGRATED by the gate. Fabrico stopped the session at 00:18Z
+during the gate's fifth stamped-run attempt, before the gate's own report, so the orchestrator wrote the
+records commit from the scripts the gate had already drafted (`tracker-edit.py`, `tracker-section.py`,
+`campaign-log.py`, `checkpoint-para.py` in the session scratchpad; the numbers in them match
+`origin/main`) and closed the board itself.
+
+| Fact | Value |
+| --- | --- |
+| `origin/main` | records `2430e74b` over the harness retry commit `2e042210` and fabrico's `d13e2a06`, with this close-out commit on top; the lane merges are `602105e5` (client) and `980e7439` (mux), the fixture rewrite `04d28cb1` |
+| Agreed-scope meter | 100.0% (304/304), 65/65 groups; post-freeze scope 3 items / 3 open groups |
+| Live registry | 46 active groups / 446 items; 3 open, 0 blocked, 43 accepted; 199 closed records |
+| Corpus | 254 scenarios / 3,086 steps; stamp `04d28cb19e73` (ubuntu, cycle 18, the fifth attempt); `--check-summary` prints "summary current" with a crates/ drift warning for fabrico's web-client commits above it |
+| `PROTOCOL_VERSION` | 99 (0x63); the cycle's allowed bump was not spent |
+| Board | `F-TUI-CLIENT-CLOSE` and `F-MUX-BUFFER-IFSHELL` INTEGRATED and released; MAIN released after the records; TRIAGE free; `F-GUI-MENU-MOUSE-MODALITY` READY as the design front |
+| Runner | `compat/orchestration/opus-compat-run-18.js` is the template; its gate step 7 now describes the harness retry (below) |
+| The ubuntu box | every campaign worktree removed except `~/dev/zz-gate-target` (the warm reflink source, 95 GB); `~/dev/zz-run-14` and `-15` are 11 MB of old gate logs |
+
+## What the cycle closed
+
+Client lane (`campaign/batch-tui-client-close`, five commits, reviewed approve-with-fixes): the raw TUI
+stdin stall under its own pty backpressure (a writer thread with a 4 MiB budgeted queue; the reviewer's
+detach regression fixed at the gate with `TerminalWriter::abandon`), the detach hint off the status row
+below 109 columns, HOME pinned in 122 `cli_binary` tests, the clipboard mirror reading the v99 producer.
+Mux lane (`campaign/batch-mux-buffer-ifshell`, two commits, reviewed approve-with-fixes): the pin's
+per-verb wording for a missing buffer, and background `if -b`/`run-shell -b` insertions applied in
+queue order on one drainer instead of racing on job threads. The gate rewrote the if-shell assertion
+to order classes (`04d28cb1`) after the stamped run showed the pin itself does not hold one permutation.
+
+The stamped run took five attempts, all for reasons other than the merged code: an `env -i` launch
+that starved a scenario of `nvim`, the if-shell assertion, a vim-tmux-navigator load flake, a
+popup-underlay flake in the attached fixture, and then the fifth, started by the gate at 23:07Z and left running detached when fabrico stopped the session at 00:18Z, went clean end to end with the fixture PASS, so the summary it wrote in `~/dev/zz-gate-mux` was committed with the records and the stamp moved for the first time since cycle 16.
+
+## What is open (three items, all registered)
+
+1. `desktop.overlay-consumers`: the desktop menu's mouse modality. gpui has capture-phase hooks for
+   mouse down and up only; motion and wheel outside an open menu reach the pane beneath. A fork
+   question first (a capture-phase move/wheel hook in `demfabris/zed` `zz-patches`) or a mouse layer
+   above the panes. Board front `F-GUI-MENU-MOUSE-MODALITY`, not a lane.
+2. `tui.status-row`, item `presentation:tui-status-row-theme-colours-per-client`: user-set
+   `dark-theme-*`/`light-theme-*` colours and `theme` never reach the raw TUI. Measured and designed by
+   the client lane (bytes and the wire shape are in the group reason and in `compat/status-row.sh` as
+   recorded rows). Blocked on the daemon side: `parse_format_option` in `crates/zz-mux/src/command.rs`
+   gates by-name reads on `TMUX_OPTION_CONSUMERS`, which lacks those eleven names, and
+   `global_tmux_option_value` is private; adding them moves the manifest count in
+   `compat_manifest_tests.rs` from 118 to 129. Then the field (a `TmuxColour`, not an RGB triple:
+   the pin keeps `colour124` indexed) on `StatusLine`, protocol 99 to 100.
+3. `tui.client-output-queue-budget`: past the 4 MiB budget the paint loop parks; the pin's
+   `tty_block_maybe` drops output and answers a key in 0.050 s after 45 s of a terminal reading
+   nothing, zz does not answer within 12 s. Needs a drop-and-redraw path, not a bigger budget.
+
+Registered accepted this cycle: `config.background-if-shell-race` (two `if -b` feature tests binding
+one key: zz keeps the last line 8/8, the pin flips 5/3 or 7/1; a coin flip is not a behaviour to match)
+and the explicit `-f` stance from the census.
+
+## Harness change made at the close-out: `compat/run.sh` retries a red row alone
+
+Five full runs for three flakes is the wrong shape at 254 scenarios. `run.sh` now re-runs every row
+that failed on the first pass once, alone, after the corpus, re-runs the attached fixture once if it
+fails, writes a `## Retries` section into `summary.md` naming what needed it, and fails only when
+something is red twice. The gate prompt's step 7 says so: never start a second full run for a flake; a
+red run means a row was red twice, which is real. Verified with a scratch scenario that diverges on its
+first pass only (exit 0, listed under Retries) and one that always diverges (exit 1, "failed again
+alone"). `--check-summary` ignores the new section.
+
+Two hazards for fixture authors, both found this cycle: `compat/diff-scenario.sh` gives both binaries
+ONE home per scenario and runs zz before tmux in every step, so a fixture that writes a file under
+`$HOME` and loads it in a later step compares the pin against itself (use `-$side` paths and load from
+inside the fixture); and an `env -i` launch is not this box (`nvim` lives in `~/.local/bin`): scrub HOME
+and XDG_CONFIG_HOME, keep the rest of the environment.
+
+## Next cycle, if there is one
+
+One lane, zones raw-tui, client-core, protocol-message, daemon-status AND mux-command (the theme item
+crosses `crates/zz-mux` and the client), for items 2 and 3, plus the design front. Copy `run-18.js`,
+keep its reviewer and gate prompts. Give `daemon::tests::explicit_boot_configs_replace_default_discovery_and_load_in_order`
+a HOME pin first: it is red on this box under the real `~/.tmux.conf` and green under a scratch HOME.
+The lane worktrees are gone; `git worktree add` from `origin/main` and reflink-copy
+`~/dev/zz-gate-target` for a warm cache.
+
+# Earlier handoff: cycle 18 written and minted on the macbook (2026-09-07 15:45Z); launched on the ubuntu box the same day
 
 Cycle 17 closed the campaign's frozen scope for good and left five post-freeze items. The census
 after it registered two more, so that no divergence lives only in prose: one accepted (an explicit

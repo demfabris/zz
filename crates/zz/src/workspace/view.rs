@@ -1,5 +1,7 @@
 //! Main workspace view and pane-layout reconciliation.
 
+use zz_ui::command::floating::{FloatingFrame as PopupFrame, floating_frame};
+
 use std::{
     cell::Cell,
     collections::{BTreeMap, BTreeSet},
@@ -65,7 +67,7 @@ use crate::{
         },
         hosts::HostId,
         nav::{TreeTarget, kill_target_command},
-        prefix::{PrefixClaim, PressDisposition, keystroke_is, terminal_key_input},
+        prefix::{PrefixClaim, PressDisposition, terminal_key_input},
     },
     pane::display::DisplayPanesView,
     pane::layout::{NormalizedPaneRect, SeparatorSide, pane_rects, pane_separator},
@@ -467,13 +469,6 @@ struct PopupPane {
     terminal: Entity<TerminalView>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct PopupFrame {
-    bounds: Bounds<Pixels>,
-    inset_x: Pixels,
-    inset_y: Pixels,
-}
-
 impl Render for PaneDragChip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
@@ -840,21 +835,13 @@ impl AppView {
             cx.stop_propagation();
             return;
         }
-        let (armed, prefix, prefix2) = {
+        let (armed, claimed) = {
             let mux = self.mux.read(cx);
             (
                 mux.prefix_armed(),
-                mux.canonical_prefix(),
-                mux.canonical_prefix2(),
+                mux.claims_prefix_input(&terminal_key_input(keystroke, TerminalKeyAction::Press)),
             )
         };
-        let claimed = armed
-            || prefix
-                .as_deref()
-                .is_some_and(|prefix| keystroke_is(keystroke, prefix))
-            || prefix2
-                .as_deref()
-                .is_some_and(|prefix| keystroke_is(keystroke, prefix));
         if !claimed {
             return;
         }
@@ -2926,43 +2913,6 @@ fn menu_frame(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn floating_frame(
-    left: u16,
-    top: u16,
-    width: u16,
-    height: u16,
-    client_columns: u16,
-    client_rows: u16,
-    cell_width_px: u32,
-    cell_height_px: u32,
-    bordered: bool,
-    origin: Point<Pixels>,
-    canvas: Size<Pixels>,
-    scale: f32,
-) -> PopupFrame {
-    let cell_width = px(f32::from(u16::try_from(cell_width_px).unwrap_or(u16::MAX)) / scale);
-    let cell_height = px(f32::from(u16::try_from(cell_height_px).unwrap_or(u16::MAX)) / scale);
-    let grid_width = cell_width * usize::from(client_columns);
-    let grid_height = cell_height * usize::from(client_rows);
-    let grid_left = ((canvas.width - grid_width) / 2.0).max(Pixels::ZERO);
-    let grid_top = ((canvas.height - grid_height) / 2.0).max(Pixels::ZERO);
-    PopupFrame {
-        bounds: Bounds::new(
-            gpui::point(
-                origin.x + grid_left + cell_width * usize::from(left),
-                origin.y + grid_top + cell_height * usize::from(top),
-            ),
-            gpui::size(
-                cell_width * usize::from(width),
-                cell_height * usize::from(height),
-            ),
-        ),
-        inset_x: if bordered { cell_width } else { Pixels::ZERO },
-        inset_y: if bordered { cell_height } else { Pixels::ZERO },
-    }
-}
-
 fn pane_select_command(pane: PaneId) -> CommandInvocation {
     CommandInvocation::new("select-pane", ["-t", &pane.to_string()])
 }
@@ -3913,7 +3863,10 @@ mod tests {
         };
         zz_protocol::ChooseTreeState {
             items: vec![
-                item("session", zz_protocol::ChooseTreeTarget::Session(SessionId(0))),
+                item(
+                    "session",
+                    zz_protocol::ChooseTreeTarget::Session(SessionId(0)),
+                ),
                 item("window", zz_protocol::ChooseTreeTarget::Window(WindowId(0))),
             ],
             search: None,
@@ -4032,9 +3985,7 @@ mod tests {
                 },
                 retire: zz_protocol::EventPayload::CommandPrompt { state: None },
                 keystroke: "escape",
-                reaches_daemon: |message| {
-                    matches!(message, InputMessage::CommandPrompt { .. })
-                },
+                reaches_daemon: |message| matches!(message, InputMessage::CommandPrompt { .. }),
             },
             OverlayCase {
                 event: CoreEvent::ChooseTreeChanged,
@@ -5067,7 +5018,7 @@ mod tests {
 
         let cell_width = px(8.0);
         let line_height = px(16.0);
-        let laid_out = crate::terminal::element::terminal_grid_size(
+        let laid_out = zz_ui::terminal::terminal_grid_size(
             gpui::size(px(960.0), px(384.0)),
             cell_width,
             line_height,
@@ -5075,7 +5026,7 @@ mod tests {
         );
         assert_eq!((laid_out.columns, laid_out.rows), (120, 24));
 
-        let drawn = crate::terminal::element::terminal_grid_size(
+        let drawn = zz_ui::terminal::terminal_grid_size(
             gpui::size(px(959.5), px(383.5)),
             cell_width,
             line_height,
@@ -5093,7 +5044,6 @@ mod tests {
                 Bounds::new(point(px(0.0), px(0.0)), gpui::size(px(959.5), px(383.5))),
                 cell_width,
                 line_height,
-                None,
                 None,
                 None,
                 cx,
@@ -5153,7 +5103,6 @@ mod tests {
                     Bounds::new(point(px(0.0), px(0.0)), gpui::size(px(960.0), px(384.0))),
                     px(8.0),
                     px(16.0),
-                    None,
                     None,
                     None,
                     cx,

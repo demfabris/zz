@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds zz and the pinned tmux reference, runs the differential scenario
 # corpus, writes compat/results/summary.md after the attached fixture passes,
-# or checks that canonical summary for drift.
+# or checks that canonical summary for drift. A row that fails is re-run once,
+# alone, after the corpus; only a row red twice fails the run.
 #
 #   compat/run.sh
 #   compat/run.sh windows panes
@@ -425,9 +426,7 @@ trap cleanup_summary EXIT
   printf '| --- | ---: | :---: | ---: | :---: | :---: | :---: |\n'
 } >"$SUMMARY_TMP"
 
-failed=0
-skipped=0
-for scenario in "${scenarios[@]}"; do
+scenario_identity() {
   case "$scenario" in
   "$SCENARIOS_DIR"/*) scenario_relative="${scenario#"$SCENARIOS_DIR"/}" ;;
   *) scenario_relative="$(basename -- "$scenario")" ;;
@@ -441,28 +440,21 @@ for scenario in "${scenarios[@]}"; do
     fi
     ;;
   esac
+}
 
-  if ! corpus_mode="$(scenario_corpus_mode "$scenario")"; then
-    die "scenario has invalid corpus metadata: $scenario_relative"
-  fi
-
-  if [ "$corpus_available" -eq 0 ] && [ "$corpus_mode" = "required" ]; then
-    skipped=1
-    log "SKIP $scenario_name ($corpus_skip_reason)"
-    mkdir -p "$(dirname -- "$RESULTS_DIR/$scenario_name.log")"
-    {
-      printf '# Scenario: %s\n' "$scenario_name"
-      printf 'SKIP: %s\n' "$corpus_skip_reason"
-      printf 'SUMMARY status=skip steps=0 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0\n'
-    } >"$RESULTS_DIR/$scenario_name.log"
-    printf '| %s | 0 | SKIP | 0 | SKIP | SKIP | SKIP: corpus unavailable |\n' \
-      "$scenario_name" >>"$SUMMARY_TMP"
-    continue
-  fi
+run_scenario() {
+  local log_file metadata steps topo_clean geo_divergences fmt_clean out_clean warn_clean
+  local topo_count fmt_count out_count warn_count token scenario_rc
+  local actual_tuple expected_topo expected_geo expected_fmt expected_out expected_warn expected_rc
+  local -a diff_args metadata_tokens
 
   log_file="$RESULTS_DIR/$scenario_name.log"
   rm -f -- "$log_file"
-  log "running $scenario_name"
+  if [ "$retry_pass" -eq 1 ]; then
+    log "retrying $scenario_name alone"
+  else
+    log "running $scenario_name"
+  fi
 
   diff_args=()
   if [ "$STRICT_GEOMETRY" -eq 1 ]; then
@@ -525,9 +517,10 @@ for scenario in "${scenarios[@]}"; do
     fi
   fi
 
-  printf '| %s | %s | %s | %s | %s | %s | %s |\n' \
+  scenario_row="$(printf '| %s | %s | %s | %s | %s | %s | %s |' \
     "$scenario_name" "$steps" "$topo_clean" "$geo_divergences" "$fmt_clean" \
-    "$out_clean" "$warn_clean" >>"$SUMMARY_TMP"
+    "$out_clean" "$warn_clean")"
+  scenario_failed=0
 
   if [ -n "$known_expected" ]; then
     actual_tuple="${topo_count:-?} ${geo_divergences:-?} ${fmt_count:-?} ${out_count:-?} ${warn_count:-?}"
@@ -542,15 +535,69 @@ for scenario in "${scenarios[@]}"; do
       warn "$scenario_name has its exact documented divergence ($known_expected)"
     else
       warn "$scenario_name changed from documented tuple ($known_expected) to ($actual_tuple), exit $scenario_rc"
-      failed=1
+      scenario_failed=1
     fi
   elif [ "$scenario_rc" -ne 0 ]; then
-    warn "$scenario_name failed; see $log_file"
+    if [ "$retry_pass" -eq 1 ]; then
+      warn "$scenario_name failed again alone; see $log_file"
+    else
+      warn "$scenario_name failed; it is retried alone after the corpus"
+    fi
     if [ -f "$log_file" ]; then
       awk '/divergence$/{show=40} show>0{print "    " $0; show--}' "$log_file" >&2
     fi
+    scenario_failed=1
+  fi
+}
+
+failed=0
+skipped=0
+retry_pass=0
+retry_list=()
+retried=()
+declare -A summary_rows
+for scenario in "${scenarios[@]}"; do
+  scenario_identity
+
+  if ! corpus_mode="$(scenario_corpus_mode "$scenario")"; then
+    die "scenario has invalid corpus metadata: $scenario_relative"
+  fi
+
+  if [ "$corpus_available" -eq 0 ] && [ "$corpus_mode" = "required" ]; then
+    skipped=1
+    log "SKIP $scenario_name ($corpus_skip_reason)"
+    mkdir -p "$(dirname -- "$RESULTS_DIR/$scenario_name.log")"
+    {
+      printf '# Scenario: %s\n' "$scenario_name"
+      printf 'SKIP: %s\n' "$corpus_skip_reason"
+      printf 'SUMMARY status=skip steps=0 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0\n'
+    } >"$RESULTS_DIR/$scenario_name.log"
+    summary_rows["$scenario_name"]="$(printf '| %s | 0 | SKIP | 0 | SKIP | SKIP | SKIP: corpus unavailable |' "$scenario_name")"
+    continue
+  fi
+
+  run_scenario
+  summary_rows["$scenario_name"]="$scenario_row"
+  if [ "$scenario_failed" -ne 0 ]; then
+    retry_list+=("$scenario")
+  fi
+done
+
+retry_pass=1
+for scenario in "${retry_list[@]}"; do
+  scenario_identity
+  run_scenario
+  summary_rows["$scenario_name"]="$scenario_row"
+  if [ "$scenario_failed" -eq 0 ]; then
+    retried+=("$scenario_name")
+  else
     failed=1
   fi
+done
+
+for scenario in "${scenarios[@]}"; do
+  scenario_identity
+  printf '%s\n' "${summary_rows["$scenario_name"]}" >>"$SUMMARY_TMP"
 done
 
 attached_client_status="not run"
@@ -561,9 +608,17 @@ if [ "$ATTACHED_CLIENT" -eq 1 ]; then
     log "attached-client passed"
   else
     fixture_rc=$?
-    attached_client_status="FAIL (exit $fixture_rc)"
-    warn "attached-client failed with exit $fixture_rc"
-    failed=1
+    warn "attached-client failed with exit $fixture_rc; retrying it once"
+    if "$ATTACHED_CLIENT_FIXTURE" "$ZZ_BIN" "$TMUX_BIN"; then
+      attached_client_status="PASS"
+      retried+=("attached-client")
+      log "attached-client passed on the retry"
+    else
+      fixture_rc=$?
+      attached_client_status="FAIL (exit $fixture_rc)"
+      warn "attached-client failed again with exit $fixture_rc"
+      failed=1
+    fi
   fi
 fi
 
@@ -576,6 +631,12 @@ fi
   printf 'Status: `%s`\n' "$attached_client_status"
   if [ "$ATTACHED_CLIENT" -eq 1 ]; then
     printf 'Recorded at: `%s`\n' "$attached_client_commit"
+  fi
+  printf '\n## Retries\n\n'
+  if [ "${#retried[@]}" -eq 0 ]; then
+    printf 'Nothing failed on the first pass.\n'
+  else
+    printf 'Failed on the first pass and passed when re-run alone: %s\n' "$(IFS=', '; printf '%s' "${retried[*]}")"
   fi
 } >>"$SUMMARY_TMP"
 

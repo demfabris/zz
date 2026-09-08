@@ -314,7 +314,6 @@ struct NativeWorkspace: View {
         ZZWorkspaceSidebar(transparent: true) {
             HStack(spacing: 4) {
                 Color.clear.frame(width: client.settings.bool("use-system-titlebar") ? 0 : 72)
-                ZZIconButton("Connection", systemName: "network") { showConnection() }
                 ZZIconButton("Hide sidebar", systemName: "sidebar.left") { sidebarVisible = false }
                 ZZIconButton("Settings", systemName: "gearshape") { client.settings.visible = true }
                 Spacer(minLength: 0)
@@ -325,20 +324,44 @@ struct NativeWorkspace: View {
                     "Local host", icon: "desktopcomputer", connected: client.connected,
                     expanded: $hostExpanded, connecting: client.connecting,
                     connectionDetail: client.connected ? nil : client.message,
-                    showConnectionDetail: { showConnection() }, action: { showConnection() })
+                    showConnectionDetail: { showConnection() }, action: { showConnection() }
+                ) {
+                    ZZIconButton("New session", systemName: "plus") { client.execute("new-session") }
+                        .disabled(!client.connected)
+                }
                 if hostExpanded {
                     ForEach(client.sessions) { session in
                         ZZWorkspaceTreeRow(session.name, icon: "square.3.layers.3d", depth: 1, active: session.attached)
                         {
                             client.attach(session)
+                        } actions: {
+                            ZZIconButton("New window in \(session.name)", systemName: "plus") {
+                                client.execute("new-window", ["-t", "$\(session.id)"])
+                            }
+                            ZZIconButton("Close session \(session.name)", systemName: "xmark") {
+                                client.execute("kill-session", ["-t", "$\(session.id)"])
+                            }
                         }
+                        .disabled(!client.connected)
                         if session.attached {
                             ForEach(session.windows) { window in
                                 ZZWorkspaceTreeRow(
                                     window.name, icon: "rectangle.split.2x1", depth: 2, active: window.current
                                 ) {
                                     client.selectWindow(window.id)
+                                } actions: {
+                                    ZZWindowLayoutMenu { axis in
+                                        if let pane = window.panes.first(where: \.active) ?? window.panes.first {
+                                            client.execute(
+                                                "split-picker",
+                                                [axis == .horizontal ? "-h" : "-v", "-t", "%\(pane.id)"])
+                                        }
+                                    }
+                                    ZZIconButton("Close window \(window.name)", systemName: "xmark") {
+                                        client.execute("kill-window", ["-t", "@\(window.id)"])
+                                    }
                                 }
+                                .disabled(!client.connected)
                                 if window.current {
                                     ForEach(window.panes) { pane in
                                         ZZWorkspaceTreeRow(
@@ -347,21 +370,24 @@ struct NativeWorkspace: View {
                                             selected: pane.active
                                         ) {
                                             client.selectPane(pane.id)
+                                        } actions: {
+                                            ZZIconButton("Close pane \(pane.id)", systemName: "xmark") {
+                                                client.execute("kill-pane", ["-t", "%\(pane.id)"])
+                                            }
                                         }
+                                        .disabled(!client.connected)
                                     }
                                 }
                             }
-                            ZZWorkspaceActionRow("New window", depth: 2) {
-                                client.execute("new-window", ["-t", "$\(session.id)"])
-                            }
                         }
                     }
-                    ZZWorkspaceActionRow("New session", depth: 1) { client.execute("new-session") }
-                        .disabled(!client.connected)
+                }
+                ZZWorkspaceActionRow("Add host") {
+                    client.settings.section = "hosts"
+                    client.settings.visible = true
                 }
             }
         }
-        .frame(width: 256)
     }
 
     private var paneActions: some View {
@@ -373,7 +399,6 @@ struct NativeWorkspace: View {
             ZZIconButton("Zoom pane", systemName: "arrow.up.left.and.arrow.down.right") {
                 if let pane = client.activePane { client.execute("resize-pane", ["-Z", "-t", "%\(pane.id)"]) }
             }.disabled(client.activePane == nil || !client.connected)
-            ZZIconButton("Connection", systemName: "network") { showConnection() }
         }
     }
 
@@ -397,10 +422,6 @@ struct NativeWorkspace: View {
                                     client: client, pane: pane, slot: client.slot(for: pane.id),
                                     generation: client.connectionGeneration
                                 )
-                                .padding(
-                                    EdgeInsets(
-                                        top: client.appearance.padding[0], leading: client.appearance.padding[3],
-                                        bottom: client.appearance.padding[2], trailing: client.appearance.padding[1]))
                             } else if pane.kind == 0 {
                                 ZZConnectionState("Choose a pane type") {
                                     ZZButton("Terminal", icon: "terminal", variant: .primary) {
@@ -555,9 +576,13 @@ struct NativeWorkspace: View {
 private struct NativeInterfaceZoom: ViewModifier {
     let scale: Double
     func body(content: Content) -> some View {
-        GeometryReader { geometry in
-            content.frame(width: geometry.size.width / scale, height: geometry.size.height / scale)
-                .scaleEffect(scale, anchor: .topLeading)
+        if scale == 1 {
+            content
+        } else {
+            GeometryReader { geometry in
+                content.frame(width: geometry.size.width / scale, height: geometry.size.height / scale)
+                    .scaleEffect(scale, anchor: .topLeading)
+            }
         }
     }
 }

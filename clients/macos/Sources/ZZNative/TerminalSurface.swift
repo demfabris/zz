@@ -3,7 +3,40 @@ import CZZClient
 import SwiftUI
 import ZZNativeCore
 
-struct TerminalSurface: NSViewRepresentable {
+struct TerminalSurface: View {
+    let client: NativeClient
+    let pane: NativePane
+    let slot: TerminalSlot
+    let generation: Int
+
+    var body: some View {
+        let padding = client.appearance.padding
+        let insets = EdgeInsets(top: padding[0], leading: padding[3], bottom: padding[2], trailing: padding[1])
+        let background = slot.frame?.background ?? 0x171719
+        TerminalSurfaceView(client: client, pane: pane, slot: slot, generation: generation)
+            .padding(insets)
+            .background {
+                GeometryReader { geometry in
+                    Path { path in
+                        path.addRect(CGRect(origin: .zero, size: geometry.size))
+                        path.addRect(
+                            CGRect(
+                                x: insets.leading, y: insets.top,
+                                width: max(0, geometry.size.width - insets.leading - insets.trailing),
+                                height: max(0, geometry.size.height - insets.top - insets.bottom)))
+                    }
+                    .fill(
+                        Color(
+                            .sRGB, red: Double((background >> 16) & 0xff) / 255,
+                            green: Double((background >> 8) & 0xff) / 255,
+                            blue: Double(background & 0xff) / 255,
+                            opacity: client.appearance.background_opacity), style: FillStyle(eoFill: true))
+                }
+            }
+    }
+}
+
+private struct TerminalSurfaceView: NSViewRepresentable {
     let client: NativeClient
     let pane: NativePane
     let slot: TerminalSlot
@@ -178,7 +211,9 @@ final class TerminalView: NSView, @preconcurrency NSTextInputClient {
                 let cellValue = frame.cells[row * frame.columns + column]
                 let style =
                     frame.styles.indices.contains(Int(cellValue.style)) ? frame.styles[Int(cellValue.style)] : nil
-                color(style?.background ?? frame.background).setFill()
+                let cellBackground = style?.background ?? frame.background
+                guard cellBackground != frame.background else { continue }
+                color(cellBackground).setFill()
                 CGRect(
                     x: CGFloat(column) * size.width, y: CGFloat(row) * size.height, width: size.width,
                     height: size.height

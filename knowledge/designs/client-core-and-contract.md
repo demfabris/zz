@@ -33,9 +33,11 @@ clipboard delivery, appearance, disconnect events,
 interactive endpoint connection with typed failures and SSH prompts, its iOS SSH public identity, and
 retained Agent summaries, attention edges, permission responses, and cancellation. The Agent
 transcript stream, its lag and replay path, agent session lists, and the published prefix table
-joined the header on 2026-09-02. The command catalog and the other live key tables, chrome actions,
-history, Kitty images, multi-host presentation, and Browser and Editor viewports remain outside the
-ABI.
+joined the header on 2026-09-02. On 2026-09-08, `zz_chrome_keymap_resolve` added chrome
+action resolution, and the optional `native-browser` feature added CEF sessions and retained
+frames to `crates/zz-client-ffi/include/zz-client.h`. The command catalog and the other live
+key tables, history, Kitty images, multi-host presentation, and Editor viewports remain outside
+the ABI.
 
 The sections below retain the original proposal and its acceptance criteria. The rung ladder marks
 the parts that shipped and the parts that remain design intent.

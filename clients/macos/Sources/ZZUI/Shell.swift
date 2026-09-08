@@ -3,6 +3,7 @@ import SwiftUI
 public struct ZZAppShell<Sidebar: View, Content: View, Status: View>: View {
     @Environment(\.zzTheme) private var theme
     @Binding private var sidebarVisible: Bool
+    @State private var sidebarWidth = ZZWorkspaceMetrics.sidebarWidth
     private let sidebar: Sidebar
     private let content: Content
     private let status: Status
@@ -20,16 +21,32 @@ public struct ZZAppShell<Sidebar: View, Content: View, Status: View>: View {
     }
 
     public var body: some View {
-        HSplitView {
+        Group {
             if sidebarVisible {
-                sidebar.ignoresSafeArea(.container, edges: .top)
+                GeometryReader { geometry in
+                    let available = max(1, geometry.size.width - 6)
+                    let maximum = min(640, available / 2)
+                    let minimum = min(160, maximum)
+                    ZZWorkspaceSplit(
+                        axis: .horizontal,
+                        fraction: Binding(
+                            get: { min(maximum, max(minimum, sidebarWidth)) / available },
+                            set: { sidebarWidth = $0 * available }),
+                        fractionRange: (minimum / available)...(maximum / available)
+                    ) {
+                        sidebar
+                    } second: {
+                        content
+                    }
+                }
+            } else {
+                VStack(spacing: 0) {
+                    status
+                    content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
-            VStack(spacing: 0) {
-                status
-                content.frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .ignoresSafeArea(.container, edges: .top)
         }
+        .ignoresSafeArea(.container, edges: .top)
         .foregroundStyle(theme.foreground.color).background(theme.background.opacity(backgroundOpacity).color)
     }
 }

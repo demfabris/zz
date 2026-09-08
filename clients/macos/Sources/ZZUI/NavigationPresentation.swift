@@ -13,7 +13,8 @@ public struct ZZWorkspaceMarker: View {
     }
 
     public var body: some View {
-        Image(systemName: icon).font(.system(size: 14)).frame(width: 14, height: 14)
+        Image(systemName: icon).resizable().scaledToFit()
+            .frame(width: ZZWorkspaceMetrics.iconSize, height: ZZWorkspaceMetrics.iconSize)
             .overlay(alignment: .topTrailing) {
                 if bell { Circle().fill(theme.warning.color).frame(width: 5, height: 5).offset(x: 1, y: -1) }
             }

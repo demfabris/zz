@@ -6,6 +6,63 @@ import Testing
 
 @MainActor
 struct CompositionTests {
+    @Test func sidebarUsesItsDefaultWidthAndReplacesTheStatusBar() throws {
+        _ = NSApplication.shared
+        var visible = true
+        func root() -> some View {
+            ZZThemeContainer {
+                ZZAppShell(sidebarVisible: Binding(get: { visible }, set: { visible = $0 })) {
+                    ZZWorkspaceSidebar {
+                        EmptyView()
+                    } content: {
+                        EmptyView()
+                    }
+                    .background(LayoutProbe("sidebar"))
+                } content: {
+                    LayoutProbe("content")
+                } status: {
+                    LayoutProbe("status").frame(height: 35)
+                }
+                .frame(width: 1280, height: 840)
+            }
+        }
+        let hosting = NSHostingView(rootView: root())
+        hosting.frame = NSRect(x: 0, y: 0, width: 1280, height: 840)
+        hosting.layoutSubtreeIfNeeded()
+        #expect(try #require(probe("sidebar", in: hosting)).frame.width == 256)
+        #expect(probe("status", in: hosting) == nil)
+        #expect(try #require(probe("content", in: hosting)).frame.width == 1018)
+
+        visible = false
+        hosting.rootView = root()
+        hosting.layoutSubtreeIfNeeded()
+        #expect(probe("sidebar", in: hosting) == nil)
+        #expect(try #require(probe("status", in: hosting)).frame.height == 35)
+        #expect(try #require(probe("content", in: hosting)).frame.width == 1280)
+    }
+
+    @Test func sidebarSplitRespectsItsWidthLimits() throws {
+        for (fraction, expectedWidth) in [(CGFloat(0), CGFloat(160)), (CGFloat(1), CGFloat(640))] {
+            let hosting = NSHostingView(
+                rootView: ZZWorkspaceSplit(
+                    axis: .horizontal, fraction: .constant(fraction), fractionRange: (160.0 / 1274)...(640.0 / 1274)
+                ) {
+                    LayoutProbe("sidebar")
+                } second: {
+                    Color.clear
+                }
+                .frame(width: 1280, height: 840))
+            hosting.frame = NSRect(x: 0, y: 0, width: 1280, height: 840)
+            hosting.layoutSubtreeIfNeeded()
+            #expect(abs(try #require(probe("sidebar", in: hosting)).frame.width - expectedWidth) < 1)
+        }
+    }
+
+    private func probe(_ name: String, in view: NSView) -> NSView? {
+        if view.identifier?.rawValue == name { return view }
+        return view.subviews.lazy.compactMap { probe(name, in: $0) }.first
+    }
+
     @Test func providerSuggestionsCapAtSixRows() {
         for count in [0, 3, 100] {
             let size = measured(width: 600, theme: .dark) {
@@ -157,4 +214,15 @@ struct CompositionTests {
 
 @MainActor private final class FlippedDocument: NSView {
     override var isFlipped: Bool { true }
+}
+
+private struct LayoutProbe: NSViewRepresentable {
+    let name: String
+    init(_ name: String) { self.name = name }
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.identifier = NSUserInterfaceItemIdentifier(name)
+        return view
+    }
+    func updateNSView(_ view: NSView, context: Context) {}
 }

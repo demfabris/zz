@@ -128,7 +128,8 @@ the full client can feed it the existing Rust Mermaid renderer's output.
 Application components take values, bindings, content builders, and action
 closures. The gallery uses those callbacks to change fixture state. The terminal client
 supplies the workspace views with Rust-owned snapshots and forwards their
-actions through the C ABI. Agent and browser adapters remain to be connected.
+actions through the C ABI. The native client also connects Agent and CEF browser
+adapters; see [Native macOS client](/playbooks/native-macos-client.md).
 The composer accepts caller-owned `canSend` readiness, including attachment-only
 messages. Pane borders and per-corner radii come from the caller's layout state.
 

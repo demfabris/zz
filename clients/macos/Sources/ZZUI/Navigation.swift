@@ -293,16 +293,14 @@ public struct ZZWorkspaceStatusWindow: View {
                 HStack(spacing: 5) {
                     Text(index).font(theme.font(size: 12)).foregroundStyle(theme.foreground.muted().color)
                     Text(name).font(theme.font(size: 13)).lineLimit(1)
-                    Image(systemName: "cpu").font(.system(size: 13)).opacity(agent ? 1 : 0)
-                    HStack(spacing: 3) {
-                        Circle().fill(theme.warning.color).frame(width: 5, height: 5).opacity(bell ? 1 : 0)
-                        Circle().fill(theme.success.color).frame(width: 5, height: 5).opacity(activity ? 1 : 0)
-                    }
+                    if agent { Image(systemName: "cpu").font(.system(size: 13)) }
+                    if bell { Circle().fill(theme.warning.color).frame(width: 5, height: 5) }
+                    if activity { Circle().fill(theme.success.color).frame(width: 5, height: 5) }
                 }
-                .padding(.horizontal, 9).frame(minWidth: 36, maxWidth: 180).frame(height: 24)
+                .padding(.horizontal, 9).frame(minWidth: 36, maxWidth: .infinity).frame(height: 24)
+                .contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityLabel("Window \(index), \(name)")
                 .accessibilityAddTraits(active ? [.isSelected] : [])
-                .onHover { hovered = $0 }
                 .contextMenu {
                     if connected {
                         if let rename { Button("Rename window", action: rename) }

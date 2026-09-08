@@ -7426,16 +7426,34 @@ impl Shared {
                     snapshot_changed = true;
                 }
             }
+            let attaching_session = execution.effects.iter().find_map(|effect| match effect {
+                MuxEffect::Attach { session, .. }
+                    if invoking_client_terminal == ClientTerminal::Present =>
+                {
+                    Some(*session)
+                }
+                _ => None,
+            });
             let changed_windows = inner
                 .engine
                 .state
                 .sessions
                 .iter()
                 .filter_map(|(session, state)| {
-                    active_windows_before
-                        .get(session)
-                        .is_some_and(|previous| *previous != state.active_window)
-                        .then_some((*session, state.active_window))
+                    let client_selected_window = (matches!(
+                        command_name,
+                        "select-window" | "next-window" | "previous-window" | "last-window"
+                    ) || attaching_session == Some(*session))
+                        && context.session == Some(*session)
+                        && context.window == Some(state.active_window)
+                        && focused_windows_before
+                            .get(&(*session, client))
+                            .is_some_and(|previous| *previous != state.active_window);
+                    (client_selected_window
+                        || active_windows_before
+                            .get(session)
+                            .is_some_and(|previous| *previous != state.active_window))
+                    .then_some((*session, state.active_window))
                 })
                 .collect::<Vec<_>>();
             for (_, window) in &changed_windows {
@@ -7450,7 +7468,7 @@ impl Shared {
             }
             for (session, focused_window) in changed_windows {
                 let attached = inner.attached.get(&session).cloned().unwrap_or_default();
-                if attached.contains(&client) {
+                if attached.contains(&client) || attaching_session == Some(session) {
                     for attached_client in attached {
                         let focus = if attached_client == client {
                             focused_window
@@ -78337,6 +78355,192 @@ bind - split-window -v -c "#{pane_current_path}"
         );
         assert_eq!(inner.engine.pane_geometry(first_pane), Some((200, 30)));
         assert_eq!(inner.engine.pane_geometry(second_pane), Some((90, 20)));
+    }
+
+    #[test]
+    fn attach_session_target_publishes_requested_focus_and_preserves_other_viewers() {
+        for (target_pane_included, same_session) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
+            let shared = Arc::new(Shared::new(1));
+            let (a, _, _) = switch_test_session(&shared, "A");
+            let (b, target_window, first_pane) = switch_test_session(&shared, "B");
+            let (last_window, target_pane) = {
+                let mut inner = shared.inner.lock();
+                let pane = inner
+                    .engine
+                    .state
+                    .split_pane(
+                        first_pane,
+                        zz_protocol::Axis::Horizontal,
+                        PaneKind::Terminal,
+                    )
+                    .expect("split target window");
+                inner
+                    .engine
+                    .state
+                    .select_pane(first_pane)
+                    .expect("restore first pane");
+                let (window, _) = inner
+                    .engine
+                    .state
+                    .create_window_at(b, Some(1), None, PaneKind::Terminal, true)
+                    .expect("create last focused window");
+                (window, pane)
+            };
+            let mailbox = OutboundMailbox::new();
+            let (client, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                None,
+                None,
+                Arc::clone(&mailbox),
+            );
+            let (other, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                None,
+                None,
+                OutboundMailbox::new(),
+            );
+            shared
+                .attach(client, if same_session { b } else { a })
+                .expect("attach to original session");
+            shared
+                .attach(other, b)
+                .expect("attach other viewer to destination");
+            if same_session {
+                shared
+                    .execute(
+                        other,
+                        ClientKind::Interactive,
+                        &mut ExecutionContext::default(),
+                        &CommandInvocation::new(
+                            "select-window",
+                            ["-t", &target_window.to_string()],
+                        ),
+                    )
+                    .expect("other viewer selects target while client keeps last window");
+            }
+            take_reliable_messages(&mailbox);
+            let target = if target_pane_included {
+                format!("{b}:{target_window}.{target_pane}")
+            } else {
+                format!("{b}:{target_window}")
+            };
+            let expected_pane = if target_pane_included {
+                target_pane
+            } else {
+                first_pane
+            };
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("attach-session", ["-t", &target]),
+                )
+                .expect("attach directly to clicked row");
+
+            let messages = take_reliable_messages(&mailbox);
+            let attached = messages.iter().position(|message| {
+                matches!(message, ProtocolMessage::Attached { session, .. } if *session == b)
+            }).expect("targeted attachment is published");
+            let snapshots = messages[attached..]
+                .iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Attached { snapshot, .. }
+                    | ProtocolMessage::Event(Event {
+                        payload: EventPayload::Snapshot(snapshot),
+                        ..
+                    }) => Some(snapshot),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert!(snapshots.len() >= 2);
+            for snapshot in snapshots {
+                assert_eq!(snapshot.focused_window, Some(target_window));
+                let window = snapshot
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == b)
+                    .expect("destination session is present")
+                    .windows
+                    .iter()
+                    .find(|window| window.id == target_window)
+                    .expect("target window is present");
+                assert_eq!(window.active_pane, expected_pane);
+            }
+            assert_eq!(
+                client_focused_window_for_attachment(&shared.inner.lock(), other),
+                Some(if same_session {
+                    target_window
+                } else {
+                    last_window
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn select_window_updates_client_focus_when_session_already_selected_it() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, first_window, _) = switch_test_session(&shared, "focus");
+        let second_window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_window_at(session, Some(1), None, PaneKind::Terminal, false)
+            .expect("create second window")
+            .0;
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (other, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        shared.attach(client, session).expect("attach client");
+        shared.attach(other, session).expect("attach other viewer");
+        let (mover, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        shared.attach(mover, session).expect("attach moving viewer");
+        shared
+            .execute(
+                mover,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("select-window", ["-t", &second_window.to_string()]),
+            )
+            .expect("another viewer selects the second window");
+        take_reliable_messages(&mailbox);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("select-window", ["-t", &second_window.to_string()]),
+            )
+            .expect("select the window already selected by the session");
+
+        let inner = shared.inner.lock();
+        assert_eq!(
+            client_focused_window_for_attachment(&inner, client),
+            Some(second_window)
+        );
+        assert_eq!(
+            client_focused_window_for_attachment(&inner, other),
+            Some(first_window)
+        );
+        assert!(
+            take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::Snapshot(snapshot),
+                        ..
+                    }) if snapshot.focused_window == Some(second_window)
+                ))
+        );
     }
 
     #[test]

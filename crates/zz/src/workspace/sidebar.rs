@@ -59,7 +59,7 @@ use crate::{
 #[cfg(test)]
 use crate::mux::nav::{
     MuxTreePane, NavActivation as SidebarActivation, activation_for_target, rename_prompt_command,
-    select_pane_command, select_window_command, session_label,
+    select_pane_commands, select_window_command, session_label,
 };
 
 const SIDEBAR_MIN_WIDTH: f32 = 160.0;
@@ -2185,7 +2185,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_rows_attach_to_the_owning_session_then_select_the_clicked_row() {
+    fn remote_rows_attach_directly_to_the_clicked_row() {
         let remote = host_ids(&["studio"])[0];
         let connected = HostState::Connected;
         let disconnected = HostState::Disconnected;
@@ -2217,26 +2217,23 @@ mod tests {
         );
         assert_eq!(
             activation(TreeNode::Target(remote, TreeTarget::Window(WindowId(21)))),
-            Some(SidebarActivation::AttachThenExecute {
+            Some(SidebarActivation::AttachAt {
                 host: remote,
-                session: SessionId(9),
-                command: select_window_command(WindowId(21)),
+                target: "$9:@21".to_owned(),
             })
         );
         assert_eq!(
             activation(TreeNode::Target(remote, TreeTarget::Pane(PaneId(303)))),
-            Some(SidebarActivation::AttachThenExecute {
+            Some(SidebarActivation::AttachAt {
                 host: remote,
-                session: SessionId(9),
-                command: select_pane_command(PaneId(303)),
+                target: "$9:@21.%303".to_owned(),
             })
         );
         assert_eq!(
             activation(TreeNode::Target(remote, TreeTarget::Pane(PaneId(202)))),
-            Some(SidebarActivation::AttachThenExecute {
+            Some(SidebarActivation::AttachAt {
                 host: remote,
-                session: SessionId(1),
-                command: select_pane_command(PaneId(202)),
+                target: "$1:@11.%202".to_owned(),
             })
         );
         assert_eq!(
@@ -2388,9 +2385,11 @@ mod tests {
                 "Rename Window…",
                 SidebarActivation::Execute {
                     host: remote,
-                    command: rename_prompt_command(TreeTarget::Window(WindowId(21)), "compile",)
-                        .unwrap()
-                        .1,
+                    commands: vec![
+                        rename_prompt_command(TreeTarget::Window(WindowId(21)), "compile")
+                            .unwrap()
+                            .1,
+                    ],
                 },
             ))
         );
@@ -2404,9 +2403,11 @@ mod tests {
                 SidebarActivation::AttachThenExecute {
                     host: HostId::LOCAL,
                     session: SessionId(1),
-                    command: rename_prompt_command(TreeTarget::Window(WindowId(11)), "work")
-                        .unwrap()
-                        .1,
+                    commands: vec![
+                        rename_prompt_command(TreeTarget::Window(WindowId(11)), "work")
+                            .unwrap()
+                            .1,
+                    ],
                 },
             ))
         );
@@ -2884,6 +2885,7 @@ mod tests {
                 HostId::LOCAL,
                 target,
                 Some(SessionId(2)),
+                Some(WindowId(13)),
                 HostId::LOCAL,
                 Some(SessionId(1)),
                 false,
@@ -2895,32 +2897,33 @@ mod tests {
                 HostId::LOCAL,
                 target,
                 Some(SessionId(1)),
+                Some(WindowId(13)),
                 HostId::LOCAL,
                 Some(SessionId(1)),
                 true,
             ),
             Some(SidebarActivation::Execute {
                 host: HostId::LOCAL,
-                command: select_pane_command(PaneId(21)),
+                commands: select_pane_commands(PaneId(21)),
             })
         );
     }
 
     #[test]
-    fn selecting_a_target_in_another_session_attaches_before_selecting() {
+    fn selecting_a_target_in_another_session_attaches_directly_to_it() {
         assert_eq!(
             activation_for_target(
                 HostId::LOCAL,
                 TreeTarget::Pane(PaneId(21)),
                 Some(SessionId(2)),
+                Some(WindowId(13)),
                 HostId::LOCAL,
                 Some(SessionId(1)),
                 true,
             ),
-            Some(SidebarActivation::AttachThenExecute {
+            Some(SidebarActivation::AttachAt {
                 host: HostId::LOCAL,
-                session: SessionId(2),
-                command: select_pane_command(PaneId(21)),
+                target: "$2:@13.%21".to_owned(),
             })
         );
         assert_eq!(
@@ -2928,16 +2931,64 @@ mod tests {
                 HostId::LOCAL,
                 TreeTarget::Window(WindowId(13)),
                 Some(SessionId(2)),
+                Some(WindowId(13)),
                 HostId::LOCAL,
                 None,
                 true,
             ),
-            Some(SidebarActivation::AttachThenExecute {
+            Some(SidebarActivation::AttachAt {
                 host: HostId::LOCAL,
-                session: SessionId(2),
-                command: select_window_command(WindowId(13)),
+                target: "$2:@13".to_owned(),
             })
         );
+    }
+
+    #[test]
+    fn clicking_a_pane_in_an_inactive_window_selects_its_window_and_pane() {
+        let mut engine = zz_mux::MuxEngine::default();
+        let mut context = zz_mux::ExecutionContext::default();
+        for command in [
+            CommandInvocation::new("new-session", ["-s", "work", "-n", "A"]),
+            CommandInvocation::new("new-window", ["-n", "B"]),
+        ] {
+            engine.execute(&mut context, &command).unwrap();
+        }
+        let session = context.session.unwrap();
+        let target_window = context.window.unwrap();
+        let target_pane = context.pane.unwrap();
+        for command in [
+            CommandInvocation::new("split-window", ["-h"]),
+            CommandInvocation::new("new-window", ["-n", "C"]),
+        ] {
+            engine.execute(&mut context, &command).unwrap();
+        }
+        assert_ne!(context.window, Some(target_window));
+        assert_ne!(
+            engine.state.windows[&target_window].active_pane,
+            target_pane
+        );
+
+        let snapshot = engine.state.snapshot();
+        let model = local_model(&snapshot, Some(session));
+        let activation = model.activation_for_node(
+            TreeNode::Target(HostId::LOCAL, TreeTarget::Pane(target_pane)),
+            HostId::LOCAL,
+            Some(session),
+        );
+        let Some(SidebarActivation::Execute { commands, .. }) = activation else {
+            panic!("a pane in this session must be directly selectable");
+        };
+        for command in commands {
+            engine.execute(&mut context, &command).unwrap();
+        }
+
+        assert_eq!(engine.state.sessions[&session].active_window, target_window);
+        assert_eq!(
+            engine.state.windows[&target_window].active_pane,
+            target_pane
+        );
+        assert_eq!(context.window, Some(target_window));
+        assert_eq!(context.pane, Some(target_pane));
     }
 
     #[test]
@@ -2951,8 +3002,11 @@ mod tests {
             CommandInvocation::new("select-window", ["-t", "@13"])
         );
         assert_eq!(
-            select_pane_command(PaneId(21)),
-            CommandInvocation::new("select-pane", ["-t", "%21"])
+            select_pane_commands(PaneId(21)),
+            vec![
+                CommandInvocation::new("select-window", ["-t", "%21"]),
+                CommandInvocation::new("select-pane", ["-t", "%21"]),
+            ]
         );
         assert_eq!(
             kill_target_command(TreeTarget::Session(SessionId(8))),

@@ -9,17 +9,14 @@ timestamp: 2026-08-26T00:00:00-03:00
 
 # Cycle-16 checkpoint
 
-At the 2026-09-07 cycle-17 integration checkpoint, the merged registry has 47 active groups
-holding 448 items: 5 open, 0 blocked, and 42 accepted, plus 196 closed records (two items
-registered by the 2026-09-07 census).
-The frozen meter remains 304/304 items across 65/65 groups; 6 post-freeze items remain
-open across 5 groups. Ledger settlement is 238/243 known groups (97.9%). The full run covers
-251 scenarios / 3,080 steps / 4 registered known rows; the attached-client fixture passed at the
-merged tip `6fa9ef581e06`, but the canonical summary was NOT re-stamped, because eleven corpus rows
-diverge on the macbook that gated this cycle and diverge identically at the pre-merge baseline.
-The persisted summary therefore still carries the Ubuntu stamp `6edc5c7ec425`. Summary SHA-256:
-`ec8f868aead7855a0fab58f94da6535d2a4a80c834b45886d70169e1d95d10d8`.
-The open groups are `buffers.target-error-message`, `config.background-if-shell-order`, `desktop.overlay-consumers`, `tui.client-input-backpressure`, `tui.status-row`.
+At the 2026-09-07 cycle-18 integration checkpoint, the merged registry has 46 active groups
+holding 446 items: 3 open, 0 blocked, and 43 accepted, plus 199 closed records.
+The frozen meter remains 304/304 items across 65/65 groups; 3 post-freeze items remain
+open across 3 groups. Ledger settlement is 242/245 known groups (98.8%). The full run covers
+254 scenarios / 3,086 steps / 4 registered known rows; the attached-client fixture passed and the
+canonical summary was re-stamped on the ubuntu box at `04d28cb19e73`, the first re-stamp since cycle 16.
+Summary SHA-256: `fe76abeafaa9a14fb4190dbd199e7c780ea82df14b9cad94888c0c74d9e758e6`.
+The open groups are `desktop.overlay-consumers`, `tui.client-output-queue-budget`, `tui.status-row`.
 
 The attached fixture preserves the stock-search discrepancy as open work: stock vi `/`
 discards zz command output when its prompt opens. The fixture separately proves navigation

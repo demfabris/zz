@@ -260,4 +260,4 @@
 ## Attached-client fixture
 
 Status: `PASS`
-Recorded at: `6edc5c7ec425`
+Recorded at: `04d28cb19e73`

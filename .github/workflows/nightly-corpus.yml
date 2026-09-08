@@ -42,7 +42,7 @@ jobs:
           key: tmux-${{ hashFiles('compat/tmux-oracle.json', 'compat/fetch-tmux.sh', 'compat/fetch-corpus.sh') }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Run the full strict corpus with the attached fixture
-        run: script -e -c "compat/run.sh --strict-geometry --attached-client" /dev/null
+        run: compat/run.sh --strict-geometry --attached-client
 
       - name: Check registry and report freshness
         run: |

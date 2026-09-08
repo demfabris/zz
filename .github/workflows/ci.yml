@@ -118,12 +118,16 @@ jobs:
         timeout-minutes: 15
         run: cargo test --release -p zz-mux
 
-      - name: Run strict tmux compatibility harness and attached client
+      # The full differential corpus takes about ninety minutes and belongs to
+      # the nightly workflow. A push gets the summary freshness check above,
+      # which pins the persisted corpus result to an ancestor of HEAD, plus the
+      # attached-client fixture, which drives the real attach path on this tree.
+      - name: Run the attached-client fixture
         if: runner.os == 'Linux'
         timeout-minutes: 15
         run: |
-          compat/run.sh --strict-geometry --attached-client
-          git diff --exit-code -- compat/results/summary.md
+          cargo build -p zz
+          compat/attached-client.sh target/debug/zz "$(compat/fetch-tmux.sh)"
 
       - name: Build and validate CEF bundle
         run: cargo xtask bundle-cef --release --output target/cef-bundle

@@ -20,10 +20,11 @@ jobs:
 
       # The harness builds zz, so this needs everything the CI Linux leg
       # needs to compile it, plus the pinned tmux's own build dependencies.
+      # Neovim is what the pane-tmux-path fixture drives vim-tmux-navigator with.
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes autoconf automake bison cmake curl libevent-dev libfontconfig-dev libncurses-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev ninja-build pkg-config
+          sudo apt-get install --yes autoconf automake bison cmake curl libevent-dev libfontconfig-dev libncurses-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev neovim ninja-build pkg-config
 
       - uses: mlugg/setup-zig@v2.2.1
         with:

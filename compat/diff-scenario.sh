@@ -138,6 +138,9 @@ die() {
 # mode-keys/status-keys defaults (tmux.c sniffs vi out of VISUAL/EDITOR).
 # Running the harness from a shell that carries any of those would leak the
 # developer's context into the scratch servers, so both sides run scrubbed.
+# Jobs and panes also resolve a bare `tmux` through PATH, so the pinned build
+# goes first on both sides: a machine's own tmux, or none at all, must not
+# decide what a run-shell on the tmux side talks to.
 zz_command() {
   if [ "$LAUNCHER_MODE" -eq 1 ]; then
     env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
@@ -160,6 +163,7 @@ zz_command() {
     env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
       -u EDITOR -u VISUAL \
       HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
+      PATH="$(dirname -- "$TMUX_BIN"):$HARNESS_PATH" \
       "$ZZ_BIN" --socket "$ZZ_SOCKET" "$@"
   fi
 }
@@ -177,6 +181,7 @@ tmux_command() {
     env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
       -u EDITOR -u VISUAL \
       HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
+      PATH="$(dirname -- "$TMUX_BIN"):$HARNESS_PATH" \
       "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" "$@"
   fi
 }
@@ -194,6 +199,7 @@ tmux_start_command() {
     env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
       -u EDITOR -u VISUAL \
       HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
+      PATH="$(dirname -- "$TMUX_BIN"):$HARNESS_PATH" \
       "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" "${STARTUP_CONFIG_ARGS[@]}" "$@"
   fi
 }

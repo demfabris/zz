@@ -39409,11 +39409,14 @@ mod tests {
         let first = directory.path().join("first.conf");
         let second = directory.path().join("second.conf");
         let sourced = directory.path().join("sourced.conf");
+        let mux = directory.path().join("mux.conf");
         fs::write(&first, "set -g prefix C-a\n").expect("first config");
         fs::write(&second, "set -g prefix C-x\n").expect("second config");
         fs::write(&sourced, "set -g prefix C-z\n").expect("sourced config");
+        fs::write(&mux, "").expect("isolated mux config");
         let configs = [first, second];
         let shared = Arc::new(Shared::new(1));
+        *shared.zz_mux_config_path.lock() = Some(mux.clone());
         shared
             .initialize_with_mux_config_files(true, Some(&configs), None)
             .expect("initialize explicit configs");
@@ -39428,7 +39431,7 @@ mod tests {
             .output;
         assert_eq!(output, "C-x");
 
-        let expected = format_config_files(&configs);
+        let expected = format_config_files(&[configs[0].clone(), configs[1].clone(), mux]);
         let config_files = shared
             .execute(
                 ClientId(7),
@@ -62154,7 +62157,31 @@ set-option -g @alias-mixed-next yes
         let mailbox = OutboundMailbox::new();
         let (client, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
-        let (_, pane, terminal) = attached_message_fixture(&shared, "prompt-freeze", &[client]);
+        let (session, _, pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("prompt-freeze")
+            .expect("create prompt session");
+        let terminal = Arc::new(TerminalSession::spawn_output_view(
+            "prompt fixture".to_owned(),
+            "fixture".to_owned(),
+        ));
+        shared
+            .inner
+            .lock()
+            .terminals
+            .insert(pane, Arc::clone(&terminal));
+        shared
+            .attach(client, session)
+            .expect("attach prompt client");
+        wait_for_viewport(
+            &terminal,
+            TerminalViewId(client.0),
+            "prompt viewport never attached",
+            |_| true,
+        );
         let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
             .expect("pane context");
         let viewport = terminal
@@ -73623,16 +73650,10 @@ bind - split-window -v -c "#{pane_current_path}"
     #[test]
     fn history_request_is_guarded_clamped_and_returns_self_contained_rows() {
         let shared = Arc::new(Shared::new(1));
-        let mailbox = OutboundMailbox::new();
         let (client, _) =
-            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
-        let unattached_mailbox = OutboundMailbox::new();
-        let (unattached, _) = shared.register_subscribed(
-            ClientKind::Interactive,
-            None,
-            None,
-            Arc::clone(&unattached_mailbox),
-        );
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (unattached, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
         let mut context = ExecutionContext::default();
         shared
             .execute(
@@ -73679,10 +73700,9 @@ bind - split-window -v -c "#{pane_current_path}"
             thread::sleep(Duration::from_millis(10));
         }
 
-        take_reliable_messages(&mailbox);
-        take_reliable_messages(&unattached_mailbox);
-        shared.send_history(unattached, first, 0, 10, &unattached_mailbox);
-        assert!(take_reliable_messages(&unattached_mailbox).is_empty());
+        let replies = OutboundMailbox::new();
+        shared.send_history(unattached, first, 0, 10, &replies);
+        assert!(take_reliable_messages(&replies).is_empty());
 
         shared
             .execute(
@@ -73692,12 +73712,11 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("resize-pane", ["-Z", "-t", &first.to_string()]),
             )
             .expect("zoom first pane");
-        take_reliable_messages(&mailbox);
-        shared.send_history(client, second, 0, 10, &mailbox);
-        assert!(take_reliable_messages(&mailbox).is_empty());
+        shared.send_history(client, second, 0, 10, &replies);
+        assert!(take_reliable_messages(&replies).is_empty());
 
-        shared.send_history(client, first, 0, u32::MAX, &mailbox);
-        let messages = take_reliable_messages(&mailbox);
+        shared.send_history(client, first, 0, u32::MAX, &replies);
+        let messages = take_reliable_messages(&replies);
         let chunk = messages.into_iter().find_map(|message| match message {
             ProtocolMessage::Event(Event {
                 payload:

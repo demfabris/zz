@@ -14384,28 +14384,34 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn pty_output_drains_while_the_input_writer_is_backpressured() {
+        let directory = tempfile::tempdir().expect("PTY duplex test directory");
         let session = TerminalSession::spawn(
             DEFAULT_HISTORY_LIMIT,
             Arc::new(TerminalAppearance::default()),
             TerminalSpawn {
                 command: Some(vec![
-                    "stty raw -echo; sleep 1; dd if=/dev/zero bs=262144 count=1 2>/dev/null; IFS= read -r line; printf '\\r\\nZZ_DUPLEX_DRAIN_OK\\r\\n'; sleep 30"
+                    "stty raw -echo; printf 'ZZ_DUPLEX_READY\\r\\n'; while [ ! -f release ]; do sleep 0.01; done; dd if=/dev/zero bs=262144 count=1 2>/dev/null; IFS= read -r line; printf '\\r\\nZZ_DUPLEX_DRAIN_OK\\r\\n'; sleep 30"
                         .to_owned(),
                 ]),
+                working_directory: Some(directory.path().to_owned()),
                 ..TerminalSpawn::default()
             },
         );
         let view = TerminalViewId(2);
         session.attach_view(view);
         wait_for_test_viewport(&session, |viewport| {
-            matches!(viewport.status, SessionStatus::Running)
+            let mut contents = String::new();
+            for cell in viewport.cells.iter() {
+                viewport.push_glyph(*cell, &mut contents);
+            }
+            contents.contains("ZZ_DUPLEX_READY")
         });
 
         assert!(session.send_command(Command::Text {
             view: Some(view),
             text: Arc::from(format!("{}\n", "i".repeat(256 * 1024))),
         }));
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while session.commands.pending_input().0 == 0
             || !session
                 .commands
@@ -14423,6 +14429,7 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
 
+        std::fs::write(directory.path().join("release"), []).expect("release PTY output");
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             let viewport = session.latest_viewport_for(view);

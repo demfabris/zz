@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-09-08
+* **Update**: Corrected the architecture data-flow page to describe daemon startup config precedence: explicit files or discovered tmux candidates, followed by zz/mux.conf.
+
 ## 2026-09-07
 * **Update**: Moved terminal painting, popup geometry and styling, status tabs, sidebar interactions, and Agent slash-command rows into shared components used by desktop and browser. Browser terminals now support Kitty images, scrollbars, cursor blinking, and selection autoscroll; pane appearance settings use the desktop groups.
 * **Update**: Desktop and browser now share command-palette presentation and completion, floating menus and confirmations, terminal search overlays, and Agent cards. Recorded remaining browser differences in popup styling, status and sidebar controls, pane settings, and terminal painting.

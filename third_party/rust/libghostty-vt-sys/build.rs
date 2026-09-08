@@ -132,6 +132,7 @@ fn build_vendored(link_mode: LinkMode) {
         .arg("build")
         .arg("-Demit-lib-vt=true")
         .arg(format!("-Doptimize={optimize}"))
+        .arg("-Dcpu=baseline")
         .arg("-Demit-xcframework=false")
         .arg("-Dapp-runtime=none")
         .arg("--prefix")

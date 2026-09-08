@@ -19,11 +19,16 @@ truncating it to the low byte. The public libghostty-vt header is unchanged acro
 checked-in Rust bindings remain those generated from the Zig 0.16 migration. The local
 `cargo:rerun-if-changed` path names this snapshot's own `build.rs`.
 
+The vendored build passes `-Dcpu=baseline` so Zig does not require the build machine's CPU
+extensions. The Linux x86_64 v0.6.0 release emitted AVX-512 instructions in a memory-fill routine
+that crashed with `SIGILL` on a Ryzen 7 5700X3D. Keep this CPU setting when updating the snapshot.
+
 The migrated C API changes the Kitty temporary-file medium option from a boolean to a restricted
-directory string. zz builds `libghostty-vt` with `default-features = false`, so the v0.2.1 safe
-wrapper's old Kitty graphics method is not compiled. Do not enable that feature on this snapshot;
-replace the local override with the first upstream `libghostty-rs` release that both pins Ghostty's
-Zig 0.16 migration and updates the safe Kitty API.
+directory string. `zz-terminal` enables the wrapper's `kitty-graphics` feature but does not call
+`is_kitty_image_from_temp_file_allowed` or `set_kitty_image_from_temp_file_allowed`; those v0.2.1
+methods still use the old boolean ABI. Avoid those methods on this snapshot; replace the local
+override with the first upstream `libghostty-rs` release that both pins Ghostty's Zig 0.16 migration
+and updates the safe Kitty API.
 
 When replacing this snapshot, remove its git-source patch from the workspace, refresh `Cargo.lock`,
 and run the focused terminal tests plus the real macOS bundle build.

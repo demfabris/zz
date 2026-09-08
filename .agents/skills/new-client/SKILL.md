@@ -36,10 +36,13 @@ territory. The knowledge bundle is the map; source is ground truth.
    `crates/zz-client-ffi/tests/smoke.c` is its working reference. Main-loop
    integration is fd-based by design: poll `zz_client_event_fd`, then drain
    `zz_client_next_event` until false — plugs into GSource, QSocketNotifier,
-   or DispatchSource with no cross-thread callbacks. Catalog/key-table access,
-   chrome action events, history, Kitty images, and non-terminal viewport
-   models remain outside the ABI; do not recreate those contracts in toolkit
-   code.
+   or DispatchSource with no cross-thread callbacks. The command catalog and
+   live key tables other than the prefix table,
+   chrome action events, terminal history, Kitty images, and Browser/Editor
+   viewport models remain outside the ABI. The published prefix table, Agent
+   state, transcript updates/replay, session lists, permissions, and session
+   controls are exposed; check the header before adding another interface.
+   Do not recreate missing shared contracts in toolkit code.
 2. **Rust surface** — depend on `zz-client` + `zz-daemon` (client half) +
    `zz-protocol` and drive `ClientCore` yourself. `crates/zz-tui` is the
    exemplar: reader thread reduces into `Arc<Mutex<ClientCore>>`, the main

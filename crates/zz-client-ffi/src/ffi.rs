@@ -927,6 +927,12 @@ pub unsafe extern "C" fn zz_client_connect(socket_path: *const c_char) -> *mut Z
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_default_endpoint(buffer: *mut c_char, capacity: usize) -> usize {
+    let path = zz_daemon::default_socket_path();
+    unsafe { write_c_string(&path.to_string_lossy(), buffer, capacity) }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn zz_client_connect_endpoint(
     endpoint: *const c_char,
     password: *const c_char,

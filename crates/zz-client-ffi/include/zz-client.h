@@ -200,6 +200,7 @@ typedef struct zz_client_event {
 
 /* Connect to a daemon socket; NULL on failure. Free with zz_client_free. */
 zz_client *zz_client_connect(const char *socket_path);
+size_t zz_client_default_endpoint(char *buf, size_t capacity);
 zz_client *zz_client_connect_endpoint(const char *endpoint,
                                       const char *password, char *error,
                                       size_t error_capacity);

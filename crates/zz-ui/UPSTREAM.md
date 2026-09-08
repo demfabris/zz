@@ -43,7 +43,7 @@ so the fork never moved a call site.
 | --- | --- | --- |
 | `foundation` | mixed | dropped upstream's JSON theme registry + schema (~1.4k lines, and the `schemars` dep): zz shares its palette definitions in `zz_ui::chrome_palette`, so nothing deserialized a theme. Palette values ported verbatim. Metrics are down to two: `radius` (upstream's `radius_lg` is gone, and no widget derives halves or doubles off it any more) and a `CHROME_GAP` const. `rems_from_px` keeps named typography and control metrics on the 16px design baseline so changing GPUI's root rem scales them together; custom `Size::Size(px)` remains the fixed-pixel escape hatch. Added `oklab_lightness`, which exposes the L of the already-vendored Oklab conversion so the app crate can assert perceptual distance between two theme roots rather than eyeballing HSL. |
 | `separator`, `spinner` | trimmed | reduced to the variants the app uses |
-| `tag` | trimmed | 4 of upstream's variants; theme-driven radius |
+| `tag` | trimmed | Three variants: Primary, Secondary, and Success; theme-driven radius |
 | `kbd` | trimmed | one muted pill: upstream's `appearance(false)` plain-text mode and its outline/primary treatments are dropped, since every hint reads as a caption beside its label. Added `lowercase()` for hints that read as prose (`t`, `b`, `a`) rather than as a keycap legend. |
 | `switch` | trimmed | dropped inline label/`Side`/custom color; kept the animated thumb |
 | `menu` | close-to-source | item text `text_sm` → **`text_xs`** (the change that started the fork); owns its actions (`zz_menu`), key context (`ZzPopupMenu`) and `init()`; upstream's native `AppMenuBar` not carried over |

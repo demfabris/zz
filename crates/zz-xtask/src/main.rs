@@ -180,6 +180,16 @@ fn main() -> ExitCode {
 fn run() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
+        #[cfg(target_os = "macos")]
+        Some("bundle-native-macos") => {
+            let binaries = PathBuf::from(args.next().ok_or("missing Swift binary directory")?);
+            let helper = PathBuf::from(args.next().ok_or("missing native helper path")?);
+            let output = PathBuf::from(args.next().ok_or("missing bundle output directory")?);
+            if args.next().is_some() {
+                return Err("bundle-native-macos takes three paths".into());
+            }
+            bundle_native_macos(&binaries, &helper, &output)
+        }
         Some("bundle-cef") => bundle_cef(&args.collect::<Vec<_>>()),
         Some("verify-cef-bundle") => {
             let path = args
@@ -196,6 +206,41 @@ fn run() -> Result<(), Box<dyn Error>> {
                 .into(),
         ),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn bundle_native_macos(
+    binaries: &Path,
+    helper: &Path,
+    output: &Path,
+) -> Result<(), Box<dyn Error>> {
+    let staged = output.join(".native-binaries");
+    fs::create_dir_all(&staged)?;
+    fs::copy(binaries.join("ZZNative"), staged.join("ZZNative"))?;
+    fs::copy(helper, staged.join("zz_native_helper"))?;
+    let app = cef::build_util::mac::bundle(
+        output,
+        &staged,
+        "ZZNative",
+        "zz_native_helper",
+        None,
+        cef::build_util::mac::BundleInfo {
+            name: "zz Native".to_owned(),
+            identifier: "sh.zzmux.native".to_owned(),
+            display_name: "zz Native".to_owned(),
+            development_region: "English".to_owned(),
+            version: product_version(env!("CARGO_PKG_VERSION")).parse()?,
+        },
+    )?;
+    prune_locales(
+        &app.join(MACOS_CEF_FRAMEWORK).join("Resources"),
+        "lproj",
+        MACOS_CEF_LOCALE,
+    )?;
+    install_cef_notices(&app)?;
+    fs::remove_dir_all(staged)?;
+    println!("{}", app.display());
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]

@@ -390,6 +390,8 @@ public struct ZZAgentDiff: View {
 public struct ZZAgentComposer<Settings: View, Attachments: View, Footer: View>: View {
     @Environment(\.zzTheme) private var theme
     @Binding private var text: String
+    @FocusState private var focused: Bool
+    private let focusRequest: Int
     private let canSend: Bool
     private let running: Bool
     private let placeholder: String
@@ -399,10 +401,12 @@ public struct ZZAgentComposer<Settings: View, Attachments: View, Footer: View>: 
     private let settings: Settings
     private let attachments: Attachments
     private let footer: Footer
+    private var stops: Bool { running && !canSend }
+    private var actionTitle: String { running ? (canSend ? "Queue" : "Stop") : "Send" }
 
     public init(
         text: Binding<String>, canSend: Bool, running: Bool = false, placeholder: String = "Ask the agent…",
-        hint: String? = nil, send: @escaping () -> Void,
+        hint: String? = nil, focusRequest: Int = 0, send: @escaping () -> Void,
         stop: @escaping () -> Void, @ViewBuilder settings: () -> Settings,
         @ViewBuilder attachments: () -> Attachments, @ViewBuilder footer: () -> Footer
     ) {
@@ -411,6 +415,7 @@ public struct ZZAgentComposer<Settings: View, Attachments: View, Footer: View>: 
         self.running = running
         self.placeholder = placeholder
         self.hint = hint
+        self.focusRequest = focusRequest
         self.send = send
         self.stop = stop
         self.settings = settings()
@@ -423,9 +428,11 @@ public struct ZZAgentComposer<Settings: View, Attachments: View, Footer: View>: 
             VStack(alignment: .leading, spacing: 0) {
                 attachments
                 TextField(placeholder, text: $text, axis: .vertical)
+                    .focused($focused)
+                    .onChange(of: focusRequest) { focused = true }
                     .textFieldStyle(.plain).lineLimit(2...8).font(theme.font(size: 13))
                     .padding(.top, 12).padding(.horizontal, 14)
-                    .onSubmit { if !running && canSend { send() } }
+                    .onSubmit { if canSend { send() } }
                 if let hint {
                     Text(hint).font(theme.font(size: 10)).foregroundStyle(theme.foreground.muted().color)
                         .padding(.horizontal, 12).padding(.bottom, 4)
@@ -434,15 +441,15 @@ public struct ZZAgentComposer<Settings: View, Attachments: View, Footer: View>: 
                     HStack(spacing: 6) { settings }
                     Spacer(minLength: 0)
                     ZZButton(
-                        running ? "Stop" : "Send", icon: running ? "xmark" : "arrow.up",
+                        actionTitle, icon: stops ? "xmark" : (running ? "plus" : "arrow.up"),
                         variant: running ? .default : .primary,
-                        size: .xSmall, iconOnly: true, action: running ? stop : send
+                        size: .xSmall, iconOnly: true, action: stops ? stop : send
                     )
                     .compactChromeIcon()
                     .transformEnvironment(\.zzTheme) { $0.radius = .infinity }
                     .disabled(!running && !canSend)
                     .keyboardShortcut(.return, modifiers: .command)
-                    .help(running ? "Stop the current turn" : "Send message")
+                    .help(stops ? "Stop the current turn" : (running ? "Queue this as the next turn" : "Send message"))
                 }.padding(6).frame(minHeight: 40, alignment: .bottom)
             }
             .frame(minHeight: ZZAgentMetrics.composerMinHeight, alignment: .bottom).background(

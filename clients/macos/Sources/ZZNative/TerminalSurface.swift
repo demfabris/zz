@@ -14,7 +14,7 @@ struct TerminalSurface: NSViewRepresentable {
     }
 
     func updateNSView(_ view: TerminalView, context: Context) {
-        view.update(frame: slot.frame, active: pane.active, generation: generation)
+        view.update(frame: slot.frame, active: pane.active, generation: generation, appearance: client.appearance)
     }
 }
 
@@ -34,7 +34,8 @@ final class TerminalView: NSView, @preconcurrency NSTextInputClient {
     private var blinkTimer: Timer?
     private var blinkVisible = true
     private var wheelRemainder: CGFloat = 0
-    private let font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+    private var terminalAppearance = NativeTerminalAppearance()
+    private var font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
     private var cell: CGSize {
         let scale = window?.backingScaleFactor ?? 2
         return CGSize(
@@ -53,11 +54,25 @@ final class TerminalView: NSView, @preconcurrency NSTextInputClient {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
     override var isFlipped: Bool { true }
-    override var isOpaque: Bool { true }
+    override var isOpaque: Bool { terminalAppearance.background_opacity >= 1 }
     override var acceptsFirstResponder: Bool { true }
     override func accessibilityValue() -> Any? { frameValue?.text ?? "" }
 
-    func update(frame: TerminalFrame?, active: Bool, generation: Int) {
+    func update(frame: TerminalFrame?, active: Bool, generation: Int, appearance: NativeTerminalAppearance) {
+        if self.terminalAppearance != appearance {
+            self.terminalAppearance = appearance
+            let weight: NSFont.Weight =
+                appearance.font_weight >= 600 ? .bold : appearance.font_weight >= 500 ? .medium : .regular
+            font =
+                appearance.font_families.lazy.compactMap { NSFont(name: $0, size: appearance.font_size) }.first
+                ?? NSFont.monospacedSystemFont(ofSize: appearance.font_size, weight: weight)
+            if appearance.font_weight >= 600 { font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) }
+            lastSize = .zero
+            blinkTimer?.invalidate()
+            blinkTimer = nil
+            needsDisplay = true
+            updateBlink()
+        }
         if frameValue !== frame {
             frameValue = frame
             needsDisplay = true
@@ -135,7 +150,8 @@ final class TerminalView: NSView, @preconcurrency NSTextInputClient {
             return
         }
         guard blinkTimer == nil else { return }
-        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: max(0.05, Double(terminalAppearance.cursor_blink_ms) / 1000), repeats: true) {
+            [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.blinkVisible.toggle()
@@ -147,7 +163,9 @@ final class TerminalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let background = color(frameValue?.background ?? 0x171719)
+        client.recordFrame()
+        let background = color(frameValue?.background ?? 0x171719).withAlphaComponent(
+            terminalAppearance.background_opacity)
         background.setFill()
         dirtyRect.fill()
         guard let frame = frameValue else { return }

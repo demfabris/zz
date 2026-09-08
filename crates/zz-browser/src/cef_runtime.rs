@@ -500,6 +500,7 @@ pub struct BrowserRuntime {
     external_begin_frame_enabled: bool,
     begin_frame_adaptive_enabled: bool,
     log_file: Option<PathBuf>,
+    background_color: u32,
     #[cfg(target_os = "macos")]
     _loader: cef::library_loader::LibraryLoader,
 }
@@ -511,6 +512,10 @@ struct ProfileContext {
 }
 
 impl BrowserRuntime {
+    pub fn set_background_color(&mut self, color: u32) {
+        self.background_color = color;
+    }
+
     #[must_use]
     pub fn phase(&self) -> RuntimePhase {
         self.message_pump.state().phase
@@ -593,7 +598,7 @@ impl BrowserRuntime {
                 .as_deref()
                 .map(path_to_cef_string)
                 .unwrap_or_default(),
-            background_color: 0xff10_1318,
+            background_color: self.background_color,
             ..Default::default()
         };
         // Native CEF windows send `CefAppProtocol` selectors GPUI's `NSApp` class lacks.
@@ -961,7 +966,7 @@ impl BrowserRuntime {
             windowless_frame_rate: windowless_frame_rate
                 .unwrap_or(self.windowless_frame_rate)
                 .clamp(1, MAX_BROWSER_FRAME_RATE),
-            background_color: 0xff10_1318,
+            background_color: self.background_color,
             ..Default::default()
         };
         let url = CefString::from(initial_url);
@@ -1168,6 +1173,10 @@ impl BrowserCommandSink {
 
     pub fn reload(&self) {
         self.browser.reload();
+    }
+
+    pub fn stop_loading(&self) {
+        self.browser.stop_load();
     }
 
     pub fn edit(&self, command: EditCommand) {
@@ -1978,6 +1987,7 @@ fn bootstrap_args_with_paths(
         external_begin_frame_enabled,
         begin_frame_adaptive_enabled,
         log_file: None,
+        background_color: 0xff10_1318,
         #[cfg(target_os = "macos")]
         _loader: loader,
     }))

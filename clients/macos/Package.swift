@@ -23,8 +23,10 @@ let package = Package(
         .target(
             name: "ZZNativeCore", dependencies: ["CZZClient"],
             linkerSettings: [
-                .unsafeFlags([ffiDirectory + "/libzz_client_ffi.a"]),
+                .unsafeFlags(["-Xlinker", "-load_hidden", "-Xlinker", ffiDirectory + "/libzz_client_ffi.a"]),
+                .unsafeFlags(["-Xlinker", "-dead_strip"]),
                 .linkedFramework("CoreFoundation"), .linkedFramework("IOKit"),
+                .linkedFramework("Metal"), .linkedFramework("IOSurface"), .linkedFramework("QuartzCore"),
                 .linkedLibrary("iconv"), .linkedLibrary("c++"),
             ]),
         .executableTarget(name: "ZZNative", dependencies: ["ZZUI", "ZZNativeCore", "CZZClient"]),

@@ -38,10 +38,13 @@ territory. The knowledge bundle is the map; source is ground truth.
    `zz_client_next_event` until false — plugs into GSource, QSocketNotifier,
    or DispatchSource with no cross-thread callbacks. The command catalog and
    live key tables other than the prefix table,
-   chrome action events, terminal history, Kitty images, and Browser/Editor
-   viewport models remain outside the ABI. The published prefix table, Agent
-   state, transcript updates/replay, session lists, permissions, and session
-   controls are exposed; check the header before adding another interface.
+   terminal history, Kitty images, and Editor viewport models remain outside
+   the ABI. ChromeKeymap resolution, shared config/settings, Agent transcript
+   reduction/replay, session controls, preferences, and completion are exposed.
+   The optional `native-browser` feature exposes CEF runtime/session/frame/input,
+   history, Chrome import, and egress APIs used by `clients/macos`. Keep CEF calls
+   on the main thread and retain frames through GPU completion. Check the header
+   before adding another interface.
    Do not recreate missing shared contracts in toolkit code.
 2. **Rust surface** — depend on `zz-client` + `zz-daemon` (client half) +
    `zz-protocol` and drive `ClientCore` yourself. `crates/zz-tui` is the

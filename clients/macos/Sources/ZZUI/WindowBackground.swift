@@ -3,19 +3,23 @@ import SwiftUI
 
 public struct ZZWindowBackground: NSViewRepresentable {
     private let tint: ZZColor?
+    private let enabled: Bool
 
-    public init(tint: ZZColor? = nil) {
+    public init(tint: ZZColor? = nil, enabled: Bool = true) {
         self.tint = tint
+        self.enabled = enabled
     }
 
     public func makeNSView(context: Context) -> NSVisualEffectView {
         let view = ZZWindowEffectView()
         view.setTint(tint)
+        view.state = enabled ? .active : .inactive
         return view
     }
 
     public func updateNSView(_ view: NSVisualEffectView, context: Context) {
         (view as? ZZWindowEffectView)?.setTint(tint)
+        view.state = enabled ? .active : .inactive
     }
 }
 

@@ -21,7 +21,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-web` - local HTTP/WebSocket gateway for browser clients
 - `clients/web` - full-page GPUI/WASM client using zz-ui and zz-client, with its own Cargo workspace
 - `clients/ios` — adaptive SwiftUI/UIKit iPhone and iPad app over `zz-client-ffi`
-- `clients/macos` - native SwiftUI/AppKit terminal client, component library, and gallery over `zz-client-ffi`
+- `clients/macos` - native SwiftUI/AppKit terminal, ACP agent, CEF browser, shared settings, and component gallery over `zz-client-ffi`
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `compat/` — tmux compat campaign: differential harness (`run.sh`), gap registry (`tmux-gaps.json`), dispatch-board client (`board.py`), progress meter, orchestration handoff (`orchestration/`)
 - `knowledge/` — OKF knowledge bundle for the whole system (start at `index.md`)
@@ -51,7 +51,7 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |
 | `just ios` / `just ipad` / `just ios-build` / `just ipad-build` / `just ios-test` / `just ipad-test` / `just ios-device [name]` | Native Apple client on iPhone or iPad simulator / build only / simulator tests / physical device |
 | `just macos-gallery` / `macos-gallery-build [debug\|release]` / `macos-gallery-test` | Native macOS component gallery / app bundle / Swift and isolated daemon tests |
-| `just macos-native [--socket PATH] [--session NAME]` / `macos-native-build [debug\|release]` / `macos-native-test` | Native macOS terminal client / app bundle / Swift and isolated daemon tests |
+| `just macos-native [--socket PATH] [--session NAME]` / `macos-native-build [debug\|release]` / `macos-native-test` | Native macOS client / CEF app bundle / Swift and isolated daemon tests |
 | `just forks` / `just fork-rebase <name>` | Carried-patch fork status / rebase |
 | `just site` | Docs site dev server with live reload |
 | `just showcase` / `showcase-setup` / `showcase-build[-release]` | wasm UI showcase dev loop / toolchain / assets |

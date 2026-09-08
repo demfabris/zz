@@ -10,14 +10,31 @@ publish = false
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
 
+[features]
+native-browser = ["dep:zz-browser", "dep:async-channel", "dep:zz-chrome-import", "zz-daemon/agent"]
+
 [dependencies]
+zz-config = { path = "../zz-config" }
+async-channel = { workspace = true, optional = true }
 rustix.workspace = true
+serde.workspace = true
+agent-client-protocol-schema = "1.5.0"
+base64.workspace = true
 serde_json.workspace = true
 zeroize.workspace = true
 zz-client = { path = "../zz-client" }
 zz-daemon = { path = "../zz-daemon", default-features = false }
 zz-protocol = { path = "../zz-protocol" }
 zz-terminal = { path = "../zz-terminal", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+zz-browser = { path = "../zz-browser", optional = true }
+zz-chrome-import = { path = "../zz-chrome-import", optional = true }
+
+[[bin]]
+name = "zz_native_helper"
+path = "src/bin/native_helper.rs"
+required-features = ["native-browser"]
 
 [dev-dependencies]
 zz-daemon = { path = "../zz-daemon" }

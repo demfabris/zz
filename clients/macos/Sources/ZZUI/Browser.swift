@@ -79,9 +79,20 @@ public struct ZZBrowserTabStrip: View {
     private let submit: () -> Void
     private let close: (String) -> Void
     private let newTab: () -> Void
+    private let focusRequest: Int
+    private let blurRequest: Int
+    private let focusChanged: (Bool) -> Void
+    private let addressChanged: (String) -> Void
+    private let moveSelection: (Int) -> Bool
+    private let removeSelection: () -> Bool
+    private let cancel: () -> Void
 
     public init(
-        tabs: [ZZBrowserTab], selection: Binding<String>, address: Binding<String>,
+        tabs: [ZZBrowserTab], selection: Binding<String>, address: Binding<String>, focusRequest: Int = 0,
+        blurRequest: Int = 0,
+        focusChanged: @escaping (Bool) -> Void = { _ in }, addressChanged: @escaping (String) -> Void = { _ in },
+        moveSelection: @escaping (Int) -> Bool = { _ in false }, removeSelection: @escaping () -> Bool = { false },
+        cancel: @escaping () -> Void = {},
         submit: @escaping () -> Void, close: @escaping (String) -> Void, newTab: @escaping () -> Void
     ) {
         self.tabs = tabs
@@ -90,6 +101,13 @@ public struct ZZBrowserTabStrip: View {
         self.submit = submit
         self.close = close
         self.newTab = newTab
+        self.focusRequest = focusRequest
+        self.blurRequest = blurRequest
+        self.focusChanged = focusChanged
+        self.addressChanged = addressChanged
+        self.moveSelection = moveSelection
+        self.removeSelection = removeSelection
+        self.cancel = cancel
     }
 
     public var body: some View {
@@ -97,8 +115,10 @@ public struct ZZBrowserTabStrip: View {
             ForEach(tabs) { tab in
                 ZZBrowserTabItem(
                     tab: tab, selected: tab.id == selection, closable: tabs.count > 1,
+                    focusRequest: focusRequest, blurRequest: blurRequest,
                     address: $address, submit: submit, activate: { selection = tab.id },
-                    close: { close(tab.id) })
+                    close: { close(tab.id) }, focusChanged: focusChanged, addressChanged: addressChanged,
+                    moveSelection: moveSelection, removeSelection: removeSelection, cancel: cancel)
             }
             if tabs.isEmpty { ZZBrowserAddress($address, submit: submit) }
             ZZIconButton("New tab", systemName: "plus", action: newTab)
@@ -109,19 +129,38 @@ public struct ZZBrowserTabStrip: View {
 private struct ZZBrowserTabItem: View {
     @Environment(\.zzTheme) private var theme
     @State private var hovered = false
+    @FocusState private var addressFocused: Bool
     let tab: ZZBrowserTab
     let selected: Bool
     let closable: Bool
+    let focusRequest: Int
+    let blurRequest: Int
     @Binding var address: String
     let submit: () -> Void
     let activate: () -> Void
     let close: () -> Void
+    let focusChanged: (Bool) -> Void
+    let addressChanged: (String) -> Void
+    let moveSelection: (Int) -> Bool
+    let removeSelection: () -> Bool
+    let cancel: () -> Void
 
     var body: some View {
         HStack(spacing: 2) {
             if selected {
                 TextField("Search or enter address", text: $address).textFieldStyle(.plain)
-                    .font(theme.font(size: 12)).onSubmit(submit).autocorrectionDisabled()
+                    .focused($addressFocused)
+                    .font(theme.font(size: 12)).onSubmit {
+                        submit(); addressFocused = false
+                    }.autocorrectionDisabled()
+                    .onKeyPress(.downArrow) { moveSelection(1) ? .handled : .ignored }
+                    .onKeyPress(.upArrow) { moveSelection(-1) ? .handled : .ignored }
+                    .onKeyPress(keys: [.delete]) { key in
+                        key.modifiers.contains(.shift) && removeSelection() ? .handled : .ignored
+                    }
+                    .onKeyPress(.escape) {
+                        cancel(); addressFocused = false; return .handled
+                    }
                     .accessibilityLabel("Address")
             } else {
                 Button(action: activate) {
@@ -143,6 +182,10 @@ private struct ZZBrowserTabItem: View {
         )
         .zzControlSurface().onHover { hovered = $0 }.help(tab.detail.isEmpty ? tab.title : tab.detail)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .onChange(of: focusRequest) { if selected { addressFocused = true } }
+        .onChange(of: blurRequest) { if selected { addressFocused = false } }
+        .onChange(of: addressFocused) { if selected { focusChanged(addressFocused) } }
+        .onChange(of: address) { if selected && addressFocused { addressChanged(address) } }
     }
 }
 

@@ -1,14 +1,14 @@
 ---
 type: Playbook
-title: Native macOS terminal client
-description: Build the Swift terminal client, connect it to a zz daemon, and verify native input, layout, and reconnect.
+title: Native macOS client
+description: Build and verify the Swift terminal, ACP agent, CEF browser, and shared settings client.
 resource: clients/macos/Sources/ZZNative/NativeApp.swift
 tags:
 - swift
 - macos
 - client
 - terminal
-timestamp: 2026-09-08T00:21:10Z
+timestamp: 2026-09-08T02:00:00Z
 ---
 
 # Build and connect
@@ -18,21 +18,36 @@ Run from the repository root on macOS with Xcode and the repository's Rust toolc
 ```sh
 just macos-native
 just macos-native --socket /tmp/zz.sock --session work
+just macos-native --config /tmp/native-config --mux-config /tmp/native-mux
 just macos-native-build release
 just macos-native-test
 ```
 
-The build script compiles `zz-client-ffi`, statically links `ZZNative`, and signs
+The build script compiles `zz-client-ffi` with `native-browser`, links `ZZNative`,
+and bundles CEF with `ZZNative Helper.app` and its renderer/GPU helpers. It signs
 `clients/macos/dist/zz Native.app` with the separate `sh.zzmux.native` identifier.
-The existing GPUI app and its daemon stay installed. The native app connects to
-a running daemon; it does not start one. Without a socket argument it asks Rust
-for `default_socket_path()`, including the `ZZ_SOCKET` override. The connection
-sheet accepts a socket path and an optional session name. An empty session uses
-the daemon's default attach behavior.
+`MACOSX_DEPLOYMENT_TARGET=14.0` applies to Rust C dependencies as well as Swift.
 
-`ZZ_MACOS_FFI_DIR` lets direct Swift builds locate `libzz_client_ffi.a`; the build
-recipe derives it from Cargo metadata. The component gallery remains a separate
-product in the same Swift package. See [the gallery guide](/playbooks/native-macos-gallery.md).
+Release Chromium uses macOS Keychain for its Safe Storage key. A Keychain access
+prompt can hold page loading until the user answers it, even while renderer
+processes and the CEF event pump are running. Debug builds use the shared runtime's
+development keychain setting. If release pages remain blank, check for that system
+prompt before changing rendering or sandbox settings.
+
+Without a socket argument, the app asks Rust for `default_socket_path()`, including
+`ZZ_SOCKET`. It starts the bundled daemon helper when that default socket is absent.
+An explicit `--socket` connects to an existing daemon. The connection sheet also
+accepts `ssh://user@host`; AppKit dialogs display Rust's trust and authentication
+prompts. The auto-restart setting controls incompatible local-daemon replacement.
+Helper identity checks remain in Rust.
+
+An empty session name uses the daemon's default attach behavior. `--config` and
+`--mux-config` accept absolute paths for isolated runs. The latter applies both
+to daemon startup and subsequent reloads. Saved hosts use the shared config parser.
+
+`ZZ_MACOS_FFI_DIR` lets direct Swift builds locate `libzz_client_ffi.a`; the recipe
+derives it from Cargo metadata. The component gallery remains a separate Swift
+product. See [the gallery guide](/playbooks/native-macos-gallery.md).
 
 # Client boundary
 
@@ -70,32 +85,92 @@ off. A successful connection replaces the Rust handle and reattaches the
 remembered session. Quitting the native app detaches its client and leaves the
 daemon's sessions running.
 
-# Current scope
+# Agent panes
 
-As of 2026-09-08, the native app supports terminal output and input, paste,
-selection/copy, scrolling, split creation, zoom, window creation/switching/renaming,
-session navigation, and reconnect. The sidebar and status use the native `ZZUI`
-components built for the gallery.
+`NativeAgent.swift` presents the Rust `zz_agent_model` transcript and controls. The
+shared reducer handles replay, ordered turn boundaries, optimistic message echo
+suppression, queued-prompt recovery, and preference acknowledgments. Swift keeps
+composer drafts and image attachments across reconnects.
 
-Browser, agent, and editor adapters remain to be connected. Full chrome-keymap
-actions, daemon appearance/configuration, terminal images, terminal history/search
-presentation, mouse reporting to terminal applications, and daemon chooser and
-command-prompt overlays still need interface or presentation work. The first
-renderer uses AppKit drawing; it is not the GPUI painter or a Metal renderer.
-It currently redraws a changed pane's visible rows. Wavy, dotted, and dashed
-underlines render as a simple underline. This is a functional terminal milestone,
-not desktop feature parity.
+The native pane shows messages, reasoning, plans, tool output and before/after
+changes. It supports image prompts, slash completion, permissions, cancellation,
+queued prompt recovery, model/mode selection, authentication, and the provider's
+new/list/load/delete session capabilities. A successful user setting change enters
+the shared preference store; a new agent session restores that selection.
+Images can come from the file chooser or clipboard. Enter and Command-Enter queue
+a populated draft during a running turn. Permission shortcuts leave an engaged
+composer draft alone.
+
+# Browser panes
+
+`NativeBrowser.swift` owns one Rust CEF runtime on the main thread. Swift presents
+the daemon's tab/profile descriptors and retains CEF frames until Metal completes
+rendering. IOSurface frames require no pixel copy; software frames borrow the
+retained Rust buffer. `BrowserSurface.swift` supplies AppKit input, IME, cursor,
+context menu, focus, and viewport updates. The application event monitor routes
+pointer events to the hit browser view and retains that view during a drag, so
+AppKit text composition does not interrupt page clicks. Native sheets and chrome
+controls retain their own event handling.
+
+Tabs support navigation/search, history suggestions, back/forward/reload, page
+zoom, popups, profile switching, Chrome import, site-data clearing, developer tools,
+and the element picker. Rust owns URL resolution, history ranking and persistence,
+Chrome database import, and SSH browser egress. Native profiles live under the
+`root-native` CEF directory, separate from the GPUI browser cache. Browser profiles
+continue through daemon reconnects; an egress change rebuilds CEF sessions with the
+current SSH SOCKS route.
+Reconnect also clears unacknowledged tab-save requests so subsequent tab changes
+can reach the daemon.
+
+Browser GUI commands and keyboard encoding share the desktop Rust paths. The shell
+resolves chrome bindings through `ChromeKeymap`; daemon prefix keys take priority
+while editing a page or agent prompt.
+
+# Settings
+
+`zz-config` contains the shared parser, defaults, provenance, validation, config
+writers, Ghostty import, split-binding edits, agent preferences, and release checks.
+The desktop and native app use these same Rust implementations. Swift receives a
+settings snapshot and sends typed JSON actions through `zz_settings_model`.
+
+The native settings pages cover interface colors and metrics, status, panes, editor
+preferences, browser, hosts, system options, terminal configuration, multiplexer
+bindings, and updates. Scalar controls write atomically and refresh the client.
+Configuration editors retain dirty drafts during external changes and require Save.
+Multiplexer saves reload the attached daemon and display command failures.
+
+UI zoom lasts for the current process. Native appearance follows the system or the
+selected light/dark override. The tray setting controls the menu item and behavior
+after closing the workspace. Release checks offer a download only when the release
+contains a native macOS asset for this architecture.
+
+The editor-pane flag and Vim preference remain shared configuration for the GPUI
+editor. The native configuration editor currently uses AppKit editing. Native
+editor panes, terminal images/history search, terminal application mouse reporting,
+and daemon chooser/command-prompt overlays remain separate work. Terminal drawing
+uses AppKit and simplifies wavy, dotted, and dashed underlines.
 
 # Verification
 
 `just macos-native-test` builds the real daemon fixture in
 `crates/zz-client-ffi/examples/native_fixture.rs` and runs the combined Swift tests.
-The fixture uses a private `/tmp` socket, no user configuration, and a deterministic
-`cat` session. The integration test exercises styled Unicode, typed and pasted
+The fixture uses a private `/tmp` socket, no user configuration, and deterministic terminal and ACP fixtures. The terminal test exercises styled Unicode, typed and pasted
 input, resize, split geometry, pane/window selection, zoom, retained-frame lifetime,
 manual reconnect, and automatic recovery after a daemon restart. Tests without
 `ZZ_NATIVE_TEST_FIXTURE` skip the daemon integration case; use the recipe for the
-complete check.
+complete check. The ACP fixture covers permission replies, queued prompts,
+setting acknowledgments, new-session preferences, and reconnect replay. Settings
+tests use private files to check persistence, dirty drafts, live appearance, and
+multiplexer reload. `tests/native_connection.rs` verifies helper startup, custom
+mux configuration, and bounded handshake failures.
+
+The September 2026 native integration run covers 42 Swift tests. Manual checks on
+a local HTTP fixture cover typing followed by clicks, page links, popup tabs,
+history navigation, Chrome profile discovery, context menus, wheel scrolling,
+developer tools, and copying element context. Agent checks cover completion,
+keyboard permissions, saved model restoration, session loading, and prefix keys
+while retaining the composer draft. Palette persistence and per-run UI zoom are
+also checked in the running client.
 
 The default-endpoint test checks buffer sizing, truncation, and NUL termination
 through the C import. `cargo test -p zz-client-ffi` also checks the linked C client,

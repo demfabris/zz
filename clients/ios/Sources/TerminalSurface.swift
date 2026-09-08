@@ -362,6 +362,7 @@ final class TerminalGridView: UIView, UIKeyInput {
         let previewChanged = self.preview != preview
         let cursorActiveChanged = self.cursorActive != cursorActive
         let cursorBlinkingChanged = self.cursorBlinking != cursorBlinking
+        let previousCursorRow = viewport?.cursor.map { Int($0.row) }
         viewport = frame
         if generationChanged {
             blinkingRows = frame.map {
@@ -415,8 +416,12 @@ final class TerminalGridView: UIView, UIKeyInput {
         if fontChanged || previewChanged || cursorActiveChanged || cursorBlinkingChanged {
             setNeedsDisplay()
         } else if generationChanged, let frame, !frame.damage.all {
-            let first = CGFloat(frame.damage.firstRow) * measuredCell.height
-            let last = CGFloat(frame.damage.lastRow + 1) * measuredCell.height
+            let rows = frame.damage.rowRange(
+                previousCursorRow: previousCursorRow,
+                cursorRow: frame.cursor.map { Int($0.row) }
+            )
+            let first = CGFloat(rows.lowerBound) * measuredCell.height
+            let last = CGFloat(rows.upperBound + 1) * measuredCell.height
             setNeedsDisplay(CGRect(x: 0, y: first, width: bounds.width, height: last - first))
         } else if generationChanged {
             setNeedsDisplay()

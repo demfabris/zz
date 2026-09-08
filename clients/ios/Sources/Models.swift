@@ -136,75 +136,6 @@ enum ZZReconnectPolicy {
     }
 }
 
-enum ZZTMuxImportPhase: Equatable {
-    case hidden
-    case prompting(endpoint: String)
-    case working(baseline: [ZZPrefixBinding])
-    case done(message: String)
-
-    var needsAlert: Bool {
-        promptEndpoint != nil || resultMessage != nil
-    }
-
-    var promptEndpoint: String? {
-        if case .prompting(let endpoint) = self {
-            return endpoint
-        }
-        return nil
-    }
-
-    var resultMessage: String? {
-        if case .done(let message) = self {
-            return message
-        }
-        return nil
-    }
-}
-
-enum ZZTMuxImport {
-    static let offeredHostsKey = "zz.tmux-import-offered-hosts"
-    static let settleDelayNanoseconds: UInt64 = 8_000_000_000
-
-    static func shouldOffer(endpoint: String, offered: Set<String>) -> Bool {
-        !endpoint.isEmpty && !offered.contains(endpoint)
-    }
-
-    static func offeredHosts(in defaults: UserDefaults) -> Set<String> {
-        Set(defaults.stringArray(forKey: offeredHostsKey) ?? [])
-    }
-
-    static func markOffered(endpoint: String, in defaults: UserDefaults) {
-        var offered = offeredHosts(in: defaults)
-        offered.insert(endpoint)
-        defaults.set(Array(offered), forKey: offeredHostsKey)
-    }
-
-    static func promptMessage(endpoint: String) -> String {
-        "Import \(endpoint)’s tmux config? This replaces zz/mux.conf on the host, then reloads it so custom binds work in zz."
-    }
-
-    static func successMessage(added: Int) -> String {
-        added == 1
-            ? "Imported 1 new binding. It’s live now."
-            : "Imported \(added) new bindings. They’re live now."
-    }
-
-    static func resultMessage(baseline: [ZZPrefixBinding], current: [ZZPrefixBinding]) -> String? {
-        guard current != baseline else {
-            return nil
-        }
-        let before = Set(baseline.map(\.key))
-        let added = current.filter({ !before.contains($0.key) }).count
-        if added > 0 {
-            return successMessage(added: added)
-        }
-        return "Tmux config imported and reloaded."
-    }
-
-    static let unchangedMessage =
-        "No new bindings. The host has no tmux config, or it adds none."
-}
-
 enum ZZHostEndpoint {
     static func normalized(_ value: String) -> String? {
         let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1499,6 +1430,16 @@ struct TerminalDamage: Equatable, Sendable {
     let lastRow: Int
 
     static let full = Self(all: true, firstRow: 0, lastRow: .max)
+
+    func rowRange(previousCursorRow: Int?, cursorRow: Int?) -> ClosedRange<Int> {
+        var first = firstRow
+        var last = lastRow
+        for row in [previousCursorRow, cursorRow].compactMap({ $0 }) {
+            first = min(first, row)
+            last = max(last, row)
+        }
+        return first...max(first, last)
+    }
 }
 
 enum TerminalInputOwner: Equatable, Sendable {

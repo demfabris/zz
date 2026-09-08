@@ -98,7 +98,7 @@ private struct TerminalSettingsPreview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 0) {
-                Text("demfabris@macbook")
+                Text("you@host")
                     .foregroundStyle(Color.accentColor)
                 Text(" ~ % ")
                     .foregroundStyle(.white.opacity(0.72))

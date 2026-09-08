@@ -60,16 +60,22 @@ Network restoration starts the next attempt immediately. Authentication, rejecte
 configuration errors, and protocol incompatibility stop automatic retries and return to setup;
 transport, probe, forwarding, and daemon-start failures retry. A successful reconnect creates a fresh
 client core, reattaches the remembered session, restores the last keyboard-hidden terminal geometry,
-and selects the exact remembered pane, including a pane in a formerly inactive window.
+and selects the exact remembered pane, including a pane in a formerly inactive window. The retained
+workspace renders from one view branch across the connected and reconnecting states, so a drop never
+rebuilds the terminal views, and a manual retry with retained sessions re-enters the reconnecting
+banner rather than the first-connect page. A remembered session the daemon no longer has comes back
+as a request-id-zero rejection; the client then attaches to the daemon's default session and reports
+the rejection in the notice banner. Terminal surfaces become interactive only once a session is
+attached, so nothing but the attach itself reaches the daemon before `ZZ_EVENT_ATTACHED`.
 
 This slice deliberately selects one host at a time. It does not reproduce the desktop fleet chooser
 or aggregate sessions from several daemons. `ZZ_SOCKET` remains the simulator override and bypasses
 saved-host setup for the local development loop.
 
-The existing first-attach and Prefix Keys import actions call the daemon's `import-tmux-config`.
-Since cycle 15 (2026-09-05), that command explains that the daemon reads the host's tmux config
-files in place at startup, with `zz/mux.conf` as the final layer; it no longer copies or reloads
-files. The first-attach offer remains remembered per normalized endpoint.
+The client offers no tmux config import. Since cycle 15 (2026-09-05) the daemon reads the host's
+tmux config files in place at startup, with `zz/mux.conf` as the final layer, so
+`import-tmux-config` only prints that explanation. The first-attach offer and the Prefix Keys import
+button that used to call it were removed together with the result messages they invented.
 
 ## Pane overview
 
@@ -242,8 +248,9 @@ otherwise, and keeps the bytes away from the key tables. Routing a paste through
 would deliver line feeds a shell runs as separate commands and let a pasted prefix byte be swallowed.
 Any command this client runs that prints something also opens a daemon-side command-output view,
 which switches the client to the pane's copy-mode table and swallows its terminal input; the client
-does not render that view, so it cancels it through `zz_client_cancel_command_output` once a reply
-arrives. The cancel is a semantic action rather than a keystroke because `mode-keys vi` resolves
+does not render that view, so it cancels it through `zz_client_cancel_command_output` after every
+drained reply, tracked or not, because the daemon installs the view before it answers. The cancel is
+a semantic action rather than a keystroke because `mode-keys vi` resolves
 Escape to clear-selection, which leaves copy mode running.
 
 The store owns one explicit input target: no pane or one terminal pane. A focus request advances an
@@ -257,9 +264,10 @@ focus from that return path. Attachment does not replay pane focus. A foreground
 transition sends the terminal input owner's distinct pane/application focus signal so the child
 application retains its `CSI I`/`CSI O` path. Backgrounding keeps the FFI client, reduced core, and
 retained viewports alive, and holds a `UIApplication` background task for whatever budget iOS grants
-so a brief app switch does not cost a reconnect; the connection is torn down only when that budget
-expires. Returning to the foreground suppresses failure escalation for five seconds, because a socket
-the system froze reads as stalled rather than dead.
+so a brief app switch does not cost a reconnect. When that budget expires, an in-flight attempt and
+any pending retry are cancelled; an established connection is left to the system, and the disconnect
+it reports on thaw enters the ladder. Returning to the foreground suppresses failure escalation for
+five seconds, because a socket the system froze reads as stalled rather than dead.
 
 A two-finger pinch changes the current pane's terminal font in one-point steps from 9 through 23
 points. Each crossed step emits selection haptics and reports the resulting cell geometry to the
@@ -501,7 +509,7 @@ global font size plus per-pane zoom, and cursor blink policy.
 
 | File | Role |
 | --- | --- |
-| `clients/ios/project.yml` | Universal iPhone and iPad target, URL scheme, bundle settings, and Rust pre-build phase. |
+| `clients/ios/project.yml` | Universal iPhone and iPad target, URL scheme, bundle settings, the pinned `swift-markdown` package, and the Rust pre-build phase. |
 | `clients/ios/Sources/ContentView.swift` | Host setup, compact phone shell, regular-width session tree, all-session Panorama, and split pane workspace. |
 | `clients/ios/Sources/Models.swift` | Host, reconnect, SSH prompt, Agent, modifier, deep-link, input, and terminal geometry policies. |
 | `clients/ios/Sources/ZZStore.swift` | Connection recovery, event drain, exact routing, snapshots, actions, and published models. |
@@ -513,7 +521,6 @@ global font size plus per-pane zoom, and cursor blink policy.
 | `clients/ios/Sources/ClientSettings.swift` | Persisted appearance, terminal, and iPad layout settings. |
 | `clients/ios/Sources/ClientSettingsView.swift` | Native settings form and live terminal preview. |
 | `clients/ios/Sources/AgentPromptEditor.swift` | UIKit prompt field carrying the desktop key contract. |
-| `clients/ios/project.yml` | XcodeGen spec, including the pinned `swift-markdown` package. |
 | `clients/ios/Tests/Unit/TerminalInteractionTests.swift` | Simulator policy regressions. |
 | `crates/zz-client-ffi/include/zz-client.h` | Stable C boundary consumed by Swift. |
 | `scripts/ios-sim.sh` | Simulator build, install, socket injection, and launch. |

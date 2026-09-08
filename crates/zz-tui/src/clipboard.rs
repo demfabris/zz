@@ -123,7 +123,8 @@ mod tests {
         let accepted = "a".repeat(786_432);
         let rejected = "a".repeat(786_433);
 
-        let Osc52::Encoded(encoded) = encode(Selection::Named(ClipboardTarget::Clipboard), &accepted)
+        let Osc52::Encoded(encoded) =
+            encode(Selection::Named(ClipboardTarget::Clipboard), &accepted)
         else {
             panic!("payload at the cap should be accepted");
         };

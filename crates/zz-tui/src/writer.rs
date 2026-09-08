@@ -258,7 +258,9 @@ mod tests {
             Ok(())
         }));
 
-        writer.submit(vec![b'x'; 1]).expect("the first paint queues");
+        writer
+            .submit(vec![b'x'; 1])
+            .expect("the first paint queues");
         assert_eq!(
             written
                 .recv_timeout(Duration::from_secs(5))

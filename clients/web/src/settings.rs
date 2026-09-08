@@ -336,7 +336,12 @@ impl WebClient {
                         picker_tile(
                             format!("web-theme-{}", mode.as_str()).into(),
                             mode.title(),
-                            theme_preview(zz_ui::chrome_palette::pinned_theme_mode(mode), &light, &dark, cx),
+                            theme_preview(
+                                zz_ui::chrome_palette::pinned_theme_mode(mode),
+                                &light,
+                                &dark,
+                                cx,
+                            ),
                             self.preferences.theme_mode() == mode,
                             cx,
                         )

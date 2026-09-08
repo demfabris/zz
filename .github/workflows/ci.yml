@@ -31,7 +31,11 @@ jobs:
       CEF_PATH: ${{ github.workspace }}/.cef-cache
 
     steps:
+      # Full history: the compat summary check verifies that the commit its
+      # attached-client PASS was stamped at is an ancestor of HEAD.
       - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Check tmux compatibility summary freshness
         if: runner.os == 'Linux'

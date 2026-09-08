@@ -537,8 +537,10 @@ fn agent_stream_soak_slow_client() {
         },
     );
 
+    let mut witness = soak.attach();
+    let mut witnessed = Transcript::default();
+
     soak.prompt(&mut peer, "soak a client that stops reading");
-    thread::sleep(Duration::from_secs(2));
     let terminal = soak.terminal.to_string();
     for keys in [
         ["-t", terminal.as_str(), "zz-soak-marker"],
@@ -548,7 +550,14 @@ fn agent_stream_soak_slow_client() {
             .execute(CommandInvocation::new("send-keys", keys))
             .expect("type at the terminal");
     }
-    thread::sleep(Duration::from_secs(1));
+    drain_until(
+        &mut witness,
+        &mut witnessed,
+        &soak,
+        "the whole turn to reach a client that keeps reading",
+        Duration::from_mins(3),
+        Transcript::turn_finished,
+    );
 
     drain_until(
         &mut peer,

@@ -2696,6 +2696,14 @@ mod completion_tests {
 
     use super::*;
 
+    fn command(name: &str) -> AgentCommand {
+        AgentCommand {
+            name: name.to_owned(),
+            description: format!("Run {name}"),
+            input_hint: None,
+        }
+    }
+
     fn permission(request_id: u64) -> AgentPermissionRequest {
         use crate::agent::controller::AgentPermissionOption;
 

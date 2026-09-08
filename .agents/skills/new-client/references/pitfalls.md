@@ -117,7 +117,7 @@ workspace `Cargo.toml`:
 
 ```toml
 [patch."https://github.com/uzaaft/libghostty-rs"]
-libghostty-vt-sys = { path = "/home/demfabris/dev/zz/third_party/rust/libghostty-vt-sys" }
+libghostty-vt-sys = { path = "<repo>/third_party/rust/libghostty-vt-sys" }
 ```
 
 With that line plus `CARGO_TARGET_DIR` pointed at the repo's `target/`, an

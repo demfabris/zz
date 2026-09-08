@@ -41,3 +41,6 @@ node_modules/
 .astro/
 crash.log
 __pycache__/
+
+# gh CLI state written when XDG_STATE_HOME pointed at the checkout.
+/.local/

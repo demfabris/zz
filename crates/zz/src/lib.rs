@@ -1929,6 +1929,11 @@ struct CommandOutputWriter {
 
 #[cfg(not(target_os = "ios"))]
 impl CommandOutputWriter {
+    #[cfg(unix)]
+    const OWNED_STREAM_ERROR: i32 = libc::EBADF;
+    #[cfg(windows)]
+    const OWNED_STREAM_ERROR: i32 = 6;
+
     fn write(
         &mut self,
         output: &RawText,
@@ -1940,7 +1945,7 @@ impl CommandOutputWriter {
             return Ok(());
         }
         if raw && self.raw_owner.is_some() {
-            return Err(io::Error::from_raw_os_error(libc::EBADF));
+            return Err(io::Error::from_raw_os_error(Self::OWNED_STREAM_ERROR));
         }
         if self.raw_owner == Some(true) {
             return Ok(());
@@ -1956,7 +1961,7 @@ impl CommandOutputWriter {
     fn print(&mut self, output: &RawText, raw: bool) -> u8 {
         if let Err(error) = self.write(output, raw, &mut io::stdout().lock())
             && raw
-            && error.raw_os_error() == Some(libc::EBADF)
+            && error.raw_os_error() == Some(Self::OWNED_STREAM_ERROR)
         {
             eprintln!("{}: -", os_error_text(&error));
             return 1;
@@ -3632,7 +3637,7 @@ mod tests {
                 .write(&"again".into(), true, &mut stdout)
                 .unwrap_err()
                 .raw_os_error(),
-            Some(libc::EBADF)
+            Some(CommandOutputWriter::OWNED_STREAM_ERROR)
         );
         assert_eq!(stdout, b"hello");
     }
@@ -3647,7 +3652,7 @@ mod tests {
                 .write(&"hello".into(), true, &mut stdout)
                 .unwrap_err()
                 .raw_os_error(),
-            Some(libc::EBADF)
+            Some(CommandOutputWriter::OWNED_STREAM_ERROR)
         );
         writer.write(&"AFTER\n".into(), false, &mut stdout).unwrap();
         assert_eq!(stdout, b"\nAFTER\n");

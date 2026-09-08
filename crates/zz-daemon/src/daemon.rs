@@ -41805,6 +41805,7 @@ mod tests {
         shared
             .attach(first, session)
             .expect("make first attached client latest");
+        wait_for_pending_terminal(&first_mailbox, pane);
         let mut chooser_context =
             ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
                 .expect("activity chooser context");
@@ -96008,6 +96009,17 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("popup command timed out");
         worker.join().expect("popup command worker");
         result
+    }
+
+    fn wait_for_pending_terminal(mailbox: &OutboundMailbox, pane: PaneId) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !mailbox.state.lock().terminals.contains_key(&pane) {
+            assert!(
+                Instant::now() < deadline,
+                "no terminal frame for {pane} reached the mailbox"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn take_reliable_messages(mailbox: &OutboundMailbox) -> Vec<ProtocolMessage> {

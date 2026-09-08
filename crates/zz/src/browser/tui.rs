@@ -7,15 +7,13 @@ use std::{
 
 use async_channel::Receiver;
 use zz_browser::{
-    BrowserEvent, BrowserKey, BrowserProfilePaths, BrowserRuntime, BrowserSession,
-    KeyAction as BrowserKeyAction, KeyInput as BrowserKeyInput, Modifiers as BrowserModifiers,
-    OsrFrame, PointerButton, PointerEvent, PointerPhase, RuntimePhase, RuntimeSignal, SessionPhase,
-    Viewport, WheelEvent, normalize_browser_profile_name,
+    BrowserEvent, BrowserProfilePaths, BrowserRuntime, BrowserSession, KeyInput as BrowserKeyInput,
+    Modifiers as BrowserModifiers, OsrFrame, PointerButton, PointerEvent, PointerPhase,
+    RuntimePhase, RuntimeSignal, SessionPhase, Viewport, WheelEvent,
+    normalize_browser_profile_name,
 };
 use zz_protocol::{BrowserCommand, BrowserDescriptor, KeyToken, MAX_BROWSER_KEY_REPEAT, PaneId};
-use zz_terminal::{
-    KeyAction as TerminalKeyAction, KeyCode as TerminalKeyCode, KeyInput as TerminalKeyInput,
-};
+use zz_terminal::KeyInput as TerminalKeyInput;
 use zz_tui::browser::{
     BrowserFrameProvider, ProviderFrame, ProviderModifiers, ProviderPointerButton,
     ProviderPointerInput, ProviderPointerPhase, ProviderTick,
@@ -754,41 +752,7 @@ const fn browser_pointer_button(button: ProviderPointerButton) -> PointerButton 
 }
 
 fn browser_input_from_terminal(input: &TerminalKeyInput) -> BrowserKeyInput {
-    BrowserKeyInput {
-        action: match input.action {
-            TerminalKeyAction::Press | TerminalKeyAction::Repeat => BrowserKeyAction::Press,
-            TerminalKeyAction::Release => BrowserKeyAction::Release,
-        },
-        key: match input.key {
-            TerminalKeyCode::Character(character) => BrowserKey::Character(character),
-            TerminalKeyCode::Backspace => BrowserKey::Backspace,
-            TerminalKeyCode::Enter => BrowserKey::Enter,
-            TerminalKeyCode::Tab => BrowserKey::Tab,
-            TerminalKeyCode::Escape => BrowserKey::Escape,
-            TerminalKeyCode::Delete => BrowserKey::Delete,
-            TerminalKeyCode::Insert => BrowserKey::Insert,
-            TerminalKeyCode::Home => BrowserKey::Home,
-            TerminalKeyCode::End => BrowserKey::End,
-            TerminalKeyCode::PageUp => BrowserKey::PageUp,
-            TerminalKeyCode::PageDown => BrowserKey::PageDown,
-            TerminalKeyCode::ArrowUp => BrowserKey::ArrowUp,
-            TerminalKeyCode::ArrowDown => BrowserKey::ArrowDown,
-            TerminalKeyCode::ArrowLeft => BrowserKey::ArrowLeft,
-            TerminalKeyCode::ArrowRight => BrowserKey::ArrowRight,
-            TerminalKeyCode::Function(number) => BrowserKey::Function(number),
-            TerminalKeyCode::Unidentified => BrowserKey::Unidentified,
-        },
-        modifiers: browser_modifiers(
-            ProviderModifiers::new(
-                input.modifiers.shift(),
-                input.modifiers.control(),
-                input.modifiers.alt(),
-                input.modifiers.platform(),
-            ),
-            None,
-            input.action == TerminalKeyAction::Repeat,
-        ),
-    }
+    zz_browser::terminal_key_input(input)
 }
 
 fn browser_modifiers(
@@ -807,43 +771,7 @@ fn browser_modifiers(
 }
 
 fn browser_named_key(name: &str) -> Option<BrowserKeyInput> {
-    let mut modifiers = BrowserModifiers::default();
-    let mut name = name;
-    loop {
-        if let Some(rest) = name.strip_prefix("C-") {
-            modifiers.set_control(true);
-            name = rest;
-        } else if let Some(rest) = name.strip_prefix("M-") {
-            modifiers.set_alt(true);
-            name = rest;
-        } else {
-            break;
-        }
-    }
-    let key = match name {
-        "Enter" => BrowserKey::Enter,
-        "Escape" => BrowserKey::Escape,
-        "Space" => BrowserKey::Space,
-        "Tab" => BrowserKey::Tab,
-        "BSpace" => BrowserKey::Backspace,
-        "Up" => BrowserKey::ArrowUp,
-        "Down" => BrowserKey::ArrowDown,
-        "Left" => BrowserKey::ArrowLeft,
-        "Right" => BrowserKey::ArrowRight,
-        "Home" => BrowserKey::Home,
-        "End" => BrowserKey::End,
-        "PPage" => BrowserKey::PageUp,
-        "NPage" => BrowserKey::PageDown,
-        "DC" => BrowserKey::Delete,
-        "IC" => BrowserKey::Insert,
-        value if value.chars().count() == 1 => BrowserKey::Character(value.chars().next()?),
-        value => BrowserKey::Function(value.strip_prefix('F')?.parse().ok()?),
-    };
-    Some(BrowserKeyInput {
-        action: BrowserKeyAction::Press,
-        key,
-        modifiers,
-    })
+    zz_browser::named_key_input(name)
 }
 
 fn deadline(now: Instant, after: Duration) -> Instant {
@@ -853,6 +781,8 @@ fn deadline(now: Instant, after: Duration) -> Instant {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use zz_browser::{BrowserKey, KeyAction as BrowserKeyAction};
+    use zz_terminal::{KeyAction as TerminalKeyAction, KeyCode as TerminalKeyCode};
 
     use super::*;
     use zz_terminal::Modifiers as TerminalModifiers;

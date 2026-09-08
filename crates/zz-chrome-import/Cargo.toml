@@ -8,6 +8,7 @@ description = "Google Chrome profile, cookie, and history import"
 publish = false
 
 [dependencies]
+log.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true

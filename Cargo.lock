@@ -10931,7 +10931,6 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror 2.0.20",
- "ureq",
  "wayland-client",
  "wgpu",
  "windows 0.62.2",
@@ -10939,6 +10938,7 @@ dependencies = [
  "zz-browser",
  "zz-chrome-import",
  "zz-client",
+ "zz-config",
  "zz-daemon",
  "zz-mux",
  "zz-protocol",
@@ -10969,7 +10969,9 @@ dependencies = [
  "thiserror 2.0.20",
  "url",
  "wgpu",
+ "zz-client",
  "zz-protocol",
+ "zz-terminal",
 ]
 
 [[package]]
@@ -10980,6 +10982,7 @@ dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "cbc",
+ "log",
  "objc2-foundation 0.3.2",
  "oo7",
  "pbkdf2",
@@ -11002,9 +11005,15 @@ dependencies = [
 name = "zz-client"
 version = "0.5.1"
 dependencies = [
+ "agent-client-protocol-schema",
+ "base64 0.22.1",
  "log",
+ "serde",
+ "serde_json",
  "tempfile",
+ "thiserror 2.0.20",
  "unicode-width",
+ "url",
  "zz-daemon",
  "zz-protocol",
  "zz-terminal",
@@ -11014,11 +11023,35 @@ dependencies = [
 name = "zz-client-ffi"
 version = "0.5.1"
 dependencies = [
+ "agent-client-protocol-schema",
+ "async-channel",
+ "base64 0.22.1",
  "rustix 1.1.4",
+ "serde",
  "serde_json",
  "zeroize",
+ "zz-browser",
+ "zz-chrome-import",
+ "zz-client",
+ "zz-config",
+ "zz-daemon",
+ "zz-protocol",
+ "zz-terminal",
+]
+
+[[package]]
+name = "zz-config"
+version = "0.5.1"
+dependencies = [
+ "log",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
  "zz-client",
  "zz-daemon",
+ "zz-mux",
  "zz-protocol",
  "zz-terminal",
 ]
@@ -11080,6 +11113,7 @@ dependencies = [
 name = "zz-protocol"
 version = "0.5.1"
 dependencies = [
+ "base64 0.22.1",
  "postcard",
  "serde",
  "serde_json",
@@ -11157,6 +11191,7 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "zed-sum-tree",
+ "zz-client",
  "zz-terminal",
 ]
 

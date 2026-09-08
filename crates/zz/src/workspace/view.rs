@@ -67,7 +67,7 @@ use crate::{
         },
         hosts::HostId,
         nav::{TreeTarget, kill_target_command},
-        prefix::{PrefixClaim, PressDisposition, keystroke_is, terminal_key_input},
+        prefix::{PrefixClaim, PressDisposition, terminal_key_input},
     },
     pane::display::DisplayPanesView,
     pane::layout::{NormalizedPaneRect, SeparatorSide, pane_rects, pane_separator},
@@ -835,21 +835,13 @@ impl AppView {
             cx.stop_propagation();
             return;
         }
-        let (armed, prefix, prefix2) = {
+        let (armed, claimed) = {
             let mux = self.mux.read(cx);
             (
                 mux.prefix_armed(),
-                mux.canonical_prefix(),
-                mux.canonical_prefix2(),
+                mux.claims_prefix_input(&terminal_key_input(keystroke, TerminalKeyAction::Press)),
             )
         };
-        let claimed = armed
-            || prefix
-                .as_deref()
-                .is_some_and(|prefix| keystroke_is(keystroke, prefix))
-            || prefix2
-                .as_deref()
-                .is_some_and(|prefix| keystroke_is(keystroke, prefix));
         if !claimed {
             return;
         }

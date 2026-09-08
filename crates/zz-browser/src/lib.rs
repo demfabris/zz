@@ -39,7 +39,7 @@ pub use frame::{MacGpuFrame, MacIoSurface};
 pub use frame::{WinGpuFrame, WinGpuTexture};
 pub use input::{
     BrowserKey, EditCommand, KeyAction, KeyInput, Modifiers, PointerButton, PointerEvent,
-    PointerPhase, Viewport, WheelEvent,
+    PointerPhase, Viewport, WheelEvent, named_key_input, terminal_key_input,
 };
 pub use lifecycle::{RuntimePhase, SessionPhase};
 pub use profile::{

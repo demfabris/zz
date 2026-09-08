@@ -464,6 +464,25 @@ impl ClientCore {
         self.prefix_armed
     }
 
+    pub fn claims_prefix_input(&self, input: &zz_terminal::KeyInput) -> bool {
+        if input.modifiers.platform() {
+            return false;
+        }
+        let key = zz_protocol::input_key_name(input);
+        self.prefix_armed
+            || [
+                zz_protocol::MuxOptionKey::Prefix,
+                zz_protocol::MuxOptionKey::Prefix2,
+            ]
+            .into_iter()
+            .any(|option| {
+                self.mux_options.get(option).is_some_and(|option| {
+                    !option.value.eq_ignore_ascii_case("none")
+                        && zz_protocol::canonical_key(&option.value) == key.as_str()
+                })
+            })
+    }
+
     #[must_use]
     pub const fn command_prompt(&self) -> Option<&CommandPromptState> {
         self.command_prompt.as_ref()

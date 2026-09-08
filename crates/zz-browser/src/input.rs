@@ -268,6 +268,92 @@ pub struct KeyInput {
     pub modifiers: Modifiers,
 }
 
+pub fn terminal_key_input(input: &zz_terminal::KeyInput) -> KeyInput {
+    use zz_terminal::{KeyAction as Action, KeyCode as Key};
+    KeyInput {
+        action: if input.action == Action::Release {
+            KeyAction::Release
+        } else {
+            KeyAction::Press
+        },
+        key: match input.key {
+            Key::Character(value) => BrowserKey::Character(value),
+            Key::Backspace => BrowserKey::Backspace,
+            Key::Enter => BrowserKey::Enter,
+            Key::Tab => BrowserKey::Tab,
+            Key::Escape => BrowserKey::Escape,
+            Key::Delete => BrowserKey::Delete,
+            Key::Insert => BrowserKey::Insert,
+            Key::Home => BrowserKey::Home,
+            Key::End => BrowserKey::End,
+            Key::PageUp => BrowserKey::PageUp,
+            Key::PageDown => BrowserKey::PageDown,
+            Key::ArrowUp => BrowserKey::ArrowUp,
+            Key::ArrowDown => BrowserKey::ArrowDown,
+            Key::ArrowLeft => BrowserKey::ArrowLeft,
+            Key::ArrowRight => BrowserKey::ArrowRight,
+            Key::Function(value) => BrowserKey::Function(value),
+            Key::Unidentified => BrowserKey::Unidentified,
+        },
+        modifiers: Modifiers::new(
+            input.modifiers.shift(),
+            input.modifiers.control(),
+            input.modifiers.alt(),
+            input.modifiers.platform(),
+        )
+        .with_repeat(input.action == Action::Repeat),
+    }
+}
+
+pub fn named_key_input(name: &str) -> Option<KeyInput> {
+    let mut shift = false;
+    let mut control = false;
+    let mut alt = false;
+    let mut name = name;
+    loop {
+        if let Some(rest) = name.strip_prefix("C-") {
+            control = true;
+            name = rest;
+        } else if let Some(rest) = name.strip_prefix("M-") {
+            alt = true;
+            name = rest;
+        } else if let Some(rest) = name.strip_prefix("S-") {
+            shift = true;
+            name = rest;
+        } else {
+            break;
+        }
+    }
+    let key = match name {
+        "Enter" => BrowserKey::Enter,
+        "Escape" => BrowserKey::Escape,
+        "Space" => BrowserKey::Space,
+        "Tab" => BrowserKey::Tab,
+        "BTab" => {
+            shift = true;
+            BrowserKey::Tab
+        }
+        "BSpace" => BrowserKey::Backspace,
+        "Up" => BrowserKey::ArrowUp,
+        "Down" => BrowserKey::ArrowDown,
+        "Left" => BrowserKey::ArrowLeft,
+        "Right" => BrowserKey::ArrowRight,
+        "Home" => BrowserKey::Home,
+        "End" => BrowserKey::End,
+        "PPage" => BrowserKey::PageUp,
+        "NPage" => BrowserKey::PageDown,
+        "DC" => BrowserKey::Delete,
+        "IC" => BrowserKey::Insert,
+        value if value.chars().count() == 1 => BrowserKey::Character(value.chars().next()?),
+        value => BrowserKey::Function(value.strip_prefix('F')?.parse().ok()?),
+    };
+    Some(KeyInput {
+        action: KeyAction::Press,
+        key,
+        modifiers: Modifiers::new(shift, control, alt, false),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::mem::{align_of, size_of};

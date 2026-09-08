@@ -2,7 +2,7 @@ use std::ops::Range;
 
 const MAX_COMPLETION_RESULTS: usize = 64;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct AgentCommand {
     pub name: String,
     pub description: String,

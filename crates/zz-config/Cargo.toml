@@ -1,0 +1,26 @@
+[package]
+name = "zz-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Shared configuration parsing and persistence for zz clients"
+publish = false
+
+[dependencies]
+zz-client = { path = "../zz-client" }
+zz-daemon = { path = "../zz-daemon", default-features = false }
+zz-protocol = { path = "../zz-protocol" }
+zz-mux = { path = "../zz-mux" }
+zz-terminal = { path = "../zz-terminal", default-features = false }
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+semver = "1"
+ureq = "3"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

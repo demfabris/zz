@@ -339,11 +339,8 @@ mod tests {
         let (_, cx) = cx.add_window_view(move |window, cx| {
             let controller =
                 cx.new(|cx| BrowserController::new(Err(BrowserError::AlreadyShutdown), cx));
-            let agent_controller = cx.new(|_| {
-                AgentController::new(crate::config::AgentConfig {
-                    working_directory: None,
-                })
-            });
+            let agent_controller =
+                cx.new(|_| AgentController::new(crate::config::AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),

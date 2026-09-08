@@ -14,7 +14,8 @@ use std::{
 
 use gpui::{App, AsyncApp, Entity, Global, Window, prelude::*};
 use semver::Version;
-use serde::Deserialize;
+pub(crate) use zz_config::update::{Channel, Release};
+use zz_config::update::{checks_enabled, fetch_latest};
 use zz_protocol::CommandInvocation;
 use zz_ui::{
     Sizable as _, WindowExt as _,
@@ -25,43 +26,12 @@ use zz_ui::{
 
 use crate::{config, mux::client::MuxClient, user_data, window::toast};
 
-const RELEASES_API: &str = "https://api.github.com/repos/demfabris/zz/releases?per_page=10";
 const INSTALL_SCRIPT_URL: &str = "https://zzmux.sh/install.sh";
 const INITIAL_DELAY: Duration = Duration::from_secs(10);
 const CHECK_INTERVAL: Duration = Duration::from_hours(24);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const TOAST_KEY: &str = "update-available";
 const DISMISSED_FILE_NAME: &str = "update-dismissed";
 const LOG_TARGET: &str = "zz::update";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Channel {
-    Stable,
-    Beta,
-}
-
-impl Channel {
-    fn of(version: &Version) -> Self {
-        if version.pre.is_empty() {
-            Self::Stable
-        } else {
-            Self::Beta
-        }
-    }
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Stable => "stable",
-            Self::Beta => "beta",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Release {
-    pub version: Version,
-    pub url: String,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CheckState {
@@ -175,13 +145,6 @@ pub(crate) fn install(window: &mut Window, cx: &mut App) {
         InstallPlan::Open(url) => cx.open_url(&url),
     }
     window.dismiss_notification(TOAST_KEY, cx);
-}
-
-fn checks_enabled() -> bool {
-    match std::env::var("ZZ_UPDATE_CHECK") {
-        Ok(value) => !matches!(value.as_str(), "" | "0" | "false" | "off"),
-        Err(_) => !cfg!(debug_assertions),
-    }
 }
 
 async fn run_check(trigger: Trigger, cx: &mut AsyncApp) {
@@ -342,53 +305,6 @@ fn write_dismissed(version: &Version) -> io::Result<()> {
     user_data::restrict_to_current_user(&path)
 }
 
-fn fetch_latest(channel: Channel) -> Result<Option<Release>, String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(REQUEST_TIMEOUT))
-        .build()
-        .into();
-    let mut response = agent
-        .get(RELEASES_API)
-        .header("User-Agent", concat!("zz/", env!("CARGO_PKG_VERSION")))
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(|error| error.to_string())?;
-    let body = response
-        .body_mut()
-        .read_to_string()
-        .map_err(|error| error.to_string())?;
-    parse_releases(&body, channel)
-}
-
-#[derive(Deserialize)]
-struct ReleaseEntry {
-    tag_name: String,
-    html_url: String,
-    #[serde(default)]
-    draft: bool,
-    #[serde(default)]
-    prerelease: bool,
-}
-
-/// The newest release the channel accepts: stable ignores anything marked
-/// prerelease or tagged with a prerelease suffix; beta takes everything.
-fn parse_releases(json: &str, channel: Channel) -> Result<Option<Release>, String> {
-    let entries: Vec<ReleaseEntry> =
-        serde_json::from_str(json).map_err(|error| format!("unexpected release list: {error}"))?;
-    Ok(entries
-        .into_iter()
-        .filter(|entry| !entry.draft)
-        .filter_map(|entry| {
-            let version = Version::parse(entry.tag_name.strip_prefix('v')?).ok()?;
-            let stable = !entry.prerelease && version.pre.is_empty();
-            (channel == Channel::Beta || stable).then_some(Release {
-                version,
-                url: entry.html_url,
-            })
-        })
-        .max_by(|a, b| a.version.cmp(&b.version)))
-}
-
 /// Facts about this copy of zz that pick the install route.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Environment {
@@ -521,84 +437,11 @@ mod tests {
         Version::parse(text).expect("valid version")
     }
 
-    fn release(tag: &str, prerelease: bool, draft: bool) -> String {
-        format!(
-            r#"{{"tag_name":"{tag}","html_url":"https://github.com/demfabris/zz/releases/tag/{tag}","draft":{draft},"prerelease":{prerelease}}}"#
-        )
-    }
-
-    fn releases(entries: &[String]) -> String {
-        format!("[{}]", entries.join(","))
-    }
-
-    #[test]
-    fn channel_follows_the_running_build() {
-        assert_eq!(Channel::of(&version("0.3.1")), Channel::Stable);
-        assert_eq!(Channel::of(&version("0.3.2-beta.1")), Channel::Beta);
-    }
-
-    #[test]
-    fn stable_channel_skips_prereleases_and_drafts() {
-        let json = releases(&[
-            release("v0.4.0", false, true),
-            release("v0.3.2-beta.1", true, false),
-            release("v0.3.1", false, false),
-            release("v0.3.0", false, false),
-        ]);
-        let newest = parse_releases(&json, Channel::Stable)
-            .expect("parses")
-            .expect("finds a release");
-        assert_eq!(newest.version, version("0.3.1"));
-        assert_eq!(
-            newest.url,
-            "https://github.com/demfabris/zz/releases/tag/v0.3.1"
-        );
-    }
-
-    #[test]
-    fn stable_channel_distrusts_an_unflagged_prerelease_tag() {
-        let json = releases(&[
-            release("v0.3.2-beta.1", false, false),
-            release("v0.3.1", false, false),
-        ]);
-        let newest = parse_releases(&json, Channel::Stable).unwrap().unwrap();
-        assert_eq!(newest.version, version("0.3.1"));
-    }
-
-    #[test]
-    fn beta_channel_takes_the_newest_of_everything() {
-        let json = releases(&[
-            release("v0.3.1", false, false),
-            release("v0.3.2-beta.1", true, false),
-            release("v0.3.2-beta.2", true, false),
-        ]);
-        let newest = parse_releases(&json, Channel::Beta).unwrap().unwrap();
-        assert_eq!(newest.version, version("0.3.2-beta.2"));
-
-        let promoted = releases(&[
-            release("v0.3.2", false, false),
-            release("v0.3.2-beta.2", true, false),
-        ]);
-        let newest = parse_releases(&promoted, Channel::Beta).unwrap().unwrap();
-        assert_eq!(newest.version, version("0.3.2"));
-    }
-
-    #[test]
-    fn foreign_tags_and_bad_json_are_handled() {
-        let json = releases(&[
-            release("nightly", false, false),
-            release("v0.3.1", false, false),
-        ]);
-        let newest = parse_releases(&json, Channel::Stable).unwrap().unwrap();
-        assert_eq!(newest.version, version("0.3.1"));
-        assert_eq!(parse_releases("[]", Channel::Stable), Ok(None));
-        assert!(parse_releases(r#"{"message":"rate limited"}"#, Channel::Stable).is_err());
-    }
-
     fn offered() -> Release {
         Release {
             version: version("0.3.2"),
             url: "https://github.com/demfabris/zz/releases/tag/v0.3.2".to_owned(),
+            assets: Vec::new(),
         }
     }
 

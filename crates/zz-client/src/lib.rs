@@ -8,6 +8,8 @@
 //! thread, a deterministic simulator, or a C caller behind FFI.
 
 pub mod agent_completion;
+pub mod agent_config;
+pub mod agent_transcript;
 mod chrome;
 pub mod completion;
 mod core;
@@ -34,3 +36,6 @@ pub use status::{ComposedStatusRow, StatusHitRange, compose_status_row, compose_
 pub use status_bar::{
     StatusBarAlignment, StatusBarClock, StatusBarModel, StatusBarSettings, StatusBarWindow,
 };
+
+pub mod chrome_palette;
+pub mod url_input;

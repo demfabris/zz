@@ -262,6 +262,8 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
                         150.0,
                         bottom_right(terminal_search_prompt(
                             "Find: renderer  3/8  [forward, literal, smart-case]",
+                            14,
+                            |_, _, _| {},
                             cx,
                         )),
                         cx,
@@ -272,6 +274,8 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
                         150.0,
                         bottom_right(terminal_search_prompt(
                             "Find: [unterminated  invalid pattern  [forward, regex]",
+                            19,
+                            |_, _, _| {},
                             cx,
                         )),
                         cx,

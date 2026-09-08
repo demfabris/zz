@@ -2110,6 +2110,10 @@ impl MuxClient {
         Arc::clone(self.core.snapshot())
     }
 
+    pub(crate) fn claims_prefix_input(&self, input: &zz_terminal::KeyInput) -> bool {
+        self.attached_connection().client.is_some() && self.core.claims_prefix_input(input)
+    }
+
     /// The daemon-published prefix in the form a keystroke is compared
     /// against, or `None` while disconnected.
     #[must_use]
@@ -2118,18 +2122,6 @@ impl MuxClient {
         self.core
             .mux_options()
             .get(MuxOptionKey::Prefix)
-            .map(|option| zz_protocol::canonical_key(&option.value))
-    }
-
-    /// The daemon-published secondary prefix in the same form, or `None`
-    /// while disconnected or while `prefix2` is unset.
-    #[must_use]
-    pub(crate) fn canonical_prefix2(&self) -> Option<String> {
-        self.attached_connection().client.as_ref()?;
-        self.core
-            .mux_options()
-            .get(MuxOptionKey::Prefix2)
-            .filter(|option| !option.value.eq_ignore_ascii_case("none"))
             .map(|option| zz_protocol::canonical_key(&option.value))
     }
 

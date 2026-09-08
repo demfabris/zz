@@ -1,5 +1,6 @@
 //! Versioned, renderer-neutral protocol shared by zz clients and the daemon.
 
+pub mod agent_stream;
 mod catalog;
 mod framing;
 mod id;

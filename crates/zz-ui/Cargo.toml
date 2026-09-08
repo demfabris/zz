@@ -55,6 +55,7 @@ parking_lot.workspace = true
 ropey = { version = "=2.0.0-beta.1", features = ["metric_lines_lf", "metric_utf16"] }
 sum-tree = { version = "0.2.0", package = "zed-sum-tree" }
 tracing = "0.1.44"
+zz-client = { path = "../zz-client" }
 zz-terminal = { path = "../zz-terminal", default-features = false }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

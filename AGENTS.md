@@ -11,6 +11,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-mux` — tmux-compatible model: sessions, windows, panes, key tables
 - `crates/zz-protocol` — wire protocol between daemon and clients, plus the shared key contract (tables, engine, fold, command catalog)
 - `crates/zz-client` — sans-IO client core: protocol reduction, chrome keymap, daemon-backed convergence simulator
+- `crates/zz-config` - renderer-free application config, settings actions, preference persistence, and update checks
 - `crates/zz-client-ffi` — C ABI over the client core (`include/zz-client.h`, link-verified by a C integration client)
 - `crates/zz-terminal` — terminal engine: PTY sessions, libghostty-vt state, frame snapshots
 - `crates/zz-browser` — CEF off-screen-rendering browser runtime

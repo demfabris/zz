@@ -871,8 +871,10 @@ impl SettingsView {
                     picker_tile(
                         format!("settings-app-icon-{}", choice.as_str()).into(),
                         choice.title(),
-                        img(crate::app_icon::icon_preview(choice.variant(appearance)))
-                            .size(px(APP_ICON_PREVIEW_SIZE)),
+                        img(crate::app_icon::icon_preview(crate::app_icon::variant(
+                            choice, appearance,
+                        )))
+                        .size(px(APP_ICON_PREVIEW_SIZE)),
                         choice == setting.value,
                         cx,
                     )
@@ -949,8 +951,11 @@ impl SettingsView {
                     .child(badge),
             )
             .control(
-                ColorPicker::new(&self.chrome_pickers[&color], color.read(inherited))
-                    .label(color.title()),
+                ColorPicker::new(
+                    &self.chrome_pickers[&color],
+                    zz_ui::chrome_palette::read_chrome_color(color, inherited),
+                )
+                .label(color.title()),
             )
     }
 
@@ -1062,8 +1067,8 @@ impl SettingsView {
         resolved: &AppConfig,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let setting = browser.element_selector_hotkey;
-        let search = browser.search_provider;
+        let setting = browser.0.element_selector_hotkey;
+        let search = browser.0.search_provider;
         Self::scroll_column("settings-browser")
             .child(settings_page_description(SettingsSection::Browser, cx))
             .child(
@@ -2408,7 +2413,7 @@ fn preset_swatches(preset: &'static ChromePreset, cx: &App) -> gpui::Div {
             div()
                 .flex()
                 .gap(px(2.0))
-                .children(preset.colors(mode).iter().map(|hex| {
+                .children(preset.colors(mode.is_dark()).iter().map(|hex| {
                     div()
                         .size(px(6.0))
                         .rounded_full()
@@ -2766,12 +2771,12 @@ mod tests {
 
         cx.update(|window, cx| {
             cx.set_global(config);
-            cx.set_global(config::UiFontConfig {
+            cx.set_global(config::UiFontConfig(zz_config::UiFontConfig {
                 family: ConfigValue {
                     value: Some(family.clone()),
                     provenance: ConfigProvenance::Override,
                 },
-            });
+            }));
             settings.update(cx, |settings, cx| {
                 settings.synchronize_numeric_inputs(window, cx);
                 settings.synchronize_ui_font(window, cx);

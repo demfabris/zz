@@ -12,29 +12,8 @@ pub fn hsl(h: f32, s: f32, l: f32) -> Hsla {
 /// Parse `#rgb`, `#rrggbb` or `#rrggbbaa` into a color. The leading `#` is
 /// optional, and the error is a sentence callers show to the user verbatim.
 pub fn parse_hex(value: &str) -> Result<Hsla, String> {
-    let digits = value.trim().strip_prefix('#').unwrap_or(value.trim());
-    if !digits.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err("expected hexadecimal digits".to_owned());
-    }
-    // `#rgb` is the CSS shorthand: each digit doubles into a byte.
-    let component = |index: usize, width: usize| -> f32 {
-        let slice = &digits[index * width..(index + 1) * width];
-        let byte = u8::from_str_radix(slice, 16).unwrap_or_default();
-        f32::from(if width == 1 { byte * 17 } else { byte }) / 255.0
-    };
-    let (width, alpha) = match digits.len() {
-        3 => (1, 1.0),
-        6 => (2, 1.0),
-        8 => (2, component(3, 2)),
-        _ => return Err("expected #rgb, #rrggbb or #rrggbbaa".to_owned()),
-    };
-    Ok(Rgba {
-        r: component(0, width),
-        g: component(1, width),
-        b: component(2, width),
-        a: alpha,
-    }
-    .into())
+    let [r, g, b, a] = zz_client::chrome_palette::parse_hex(value)?;
+    Ok(Rgba { r, g, b, a }.into())
 }
 
 /// Render a color as `#rrggbb`, or `#rrggbbaa` when it is translucent. The

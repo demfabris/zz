@@ -96,7 +96,7 @@ impl Preferences {
     }
 
     pub(super) fn apply(&self, window: &mut Window, cx: &mut App) {
-        if let Some(mode) = self.theme_mode().pinned() {
+        if let Some(mode) = zz_ui::chrome_palette::pinned_theme_mode(self.theme_mode()) {
             Theme::change(mode, Some(window), cx);
         } else {
             Theme::sync_system_appearance(Some(window), cx);
@@ -336,7 +336,7 @@ impl WebClient {
                         picker_tile(
                             format!("web-theme-{}", mode.as_str()).into(),
                             mode.title(),
-                            theme_preview(mode.pinned(), &light, &dark, cx),
+                            theme_preview(zz_ui::chrome_palette::pinned_theme_mode(mode), &light, &dark, cx),
                             self.preferences.theme_mode() == mode,
                             cx,
                         )
@@ -430,7 +430,7 @@ impl WebClient {
                         SettingEntry::new(color.title(), color.description()).control(
                             ColorPicker::new(
                                 &self.settings_controls.colors[index],
-                                color.read(&inherited),
+                                zz_ui::chrome_palette::read_chrome_color(color, &inherited),
                             )
                             .label(color.title())
                             .small(),

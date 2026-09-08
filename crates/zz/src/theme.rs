@@ -193,10 +193,11 @@ pub(crate) fn refresh_current_theme(cx: &mut App) {
     if !cx.has_global::<Theme>() {
         return;
     }
-    let mode = config::theme_mode(cx).pinned().unwrap_or_else(|| {
-        cx.try_global::<SystemThemeMode>()
-            .map_or_else(|| Theme::global(cx).mode, |mode| mode.0)
-    });
+    let mode =
+        zz_ui::chrome_palette::pinned_theme_mode(config::theme_mode(cx)).unwrap_or_else(|| {
+            cx.try_global::<SystemThemeMode>()
+                .map_or_else(|| Theme::global(cx).mode, |mode| mode.0)
+        });
     Theme::change(mode, None, cx);
     apply_zz_overrides(cx);
     for window in cx.windows() {
@@ -227,7 +228,7 @@ pub fn sync_system_appearance(mut window: Option<&mut Window>, cx: &mut App) {
     }
     Theme::sync_system_appearance(window, cx);
     crate::app_icon::apply(cx);
-    if let Some(mode) = config::theme_mode(cx).pinned() {
+    if let Some(mode) = zz_ui::chrome_palette::pinned_theme_mode(config::theme_mode(cx)) {
         Theme::change(mode, None, cx);
     }
     apply_zz_overrides(cx);
@@ -271,13 +272,17 @@ mod tests {
         for color in ChromeColor::ALL {
             let marker = zz_ui::parse_hex("#808080").expect("test marker parses");
             let mut colors = base;
-            color.write(&mut colors, marker);
+            zz_ui::chrome_palette::write_chrome_color(color, &mut colors, marker);
 
-            assert_eq!(color.read(&colors), marker, "{color:?} did not round-trip");
+            assert_eq!(
+                zz_ui::chrome_palette::read_chrome_color(color, &colors),
+                marker,
+                "{color:?} did not round-trip"
+            );
             for other in ChromeColor::ALL.into_iter().filter(|it| *it != color) {
                 assert_eq!(
-                    other.read(&colors),
-                    other.read(&base),
+                    zz_ui::chrome_palette::read_chrome_color(other, &colors),
+                    zz_ui::chrome_palette::read_chrome_color(other, &base),
                     "writing {color:?} also changed {other:?}"
                 );
             }
@@ -292,7 +297,7 @@ mod tests {
     fn paired_presets_land_on_the_roots_in_order() {
         let preset = &CHROME_PRESETS[0];
         for mode in [ThemeMode::Light, ThemeMode::Dark] {
-            let expected = preset.colors(mode);
+            let expected = preset.colors(mode.is_dark());
             let colors = inherited_chrome_colors(Some(preset.id), mode);
             assert_eq!(zz_ui::to_hex(colors.background), expected[0]);
             assert_eq!(zz_ui::to_hex(colors.foreground), expected[1]);
@@ -314,7 +319,7 @@ mod tests {
                 } else {
                     SEPARATOR_DELTA_FLOOR_LIGHT
                 };
-                let colors = preset.colors(mode);
+                let colors = preset.colors(mode.is_dark());
                 let plane = zz_ui::parse_hex(colors[0]).expect("preset background parses");
                 let hairline = zz_ui::parse_hex(colors[2]).expect("preset border parses");
                 let delta =
@@ -354,9 +359,18 @@ mod tests {
 
     #[test]
     fn only_an_explicit_mode_pins_the_palette() {
-        assert_eq!(ThemeModeSetting::System.pinned(), None);
-        assert_eq!(ThemeModeSetting::Light.pinned(), Some(ThemeMode::Light));
-        assert_eq!(ThemeModeSetting::Dark.pinned(), Some(ThemeMode::Dark));
+        assert_eq!(
+            zz_ui::chrome_palette::pinned_theme_mode(ThemeModeSetting::System),
+            None
+        );
+        assert_eq!(
+            zz_ui::chrome_palette::pinned_theme_mode(ThemeModeSetting::Light),
+            Some(ThemeMode::Light)
+        );
+        assert_eq!(
+            zz_ui::chrome_palette::pinned_theme_mode(ThemeModeSetting::Dark),
+            Some(ThemeMode::Dark)
+        );
     }
 
     #[gpui::test]

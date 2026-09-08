@@ -171,7 +171,12 @@ impl Interceptor {
         // `display-panes` owns the keyboard while its numbers are up, and the
         // shell forwards those presses from its own capture controller. Yielding
         // here makes the two controllers order-independent.
-        if self.engine.display_panes().is_some() {
+        if self.engine.display_panes().is_some()
+            || self.engine.popup().is_some()
+            || self.engine.menu().is_some()
+            || self.engine.confirm().is_some()
+            || self.engine.command_prompt().is_some()
+        {
             return false;
         }
         self.engine

@@ -79,15 +79,21 @@ pub enum Kind {
 pub enum Page {
     Interface,
     Terminal,
+    StatusBar,
+    Browser,
+    Agent,
     Multiplexer,
     Hosts,
     System,
 }
 
 impl Page {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 8] = [
         Self::Interface,
         Self::Terminal,
+        Self::StatusBar,
+        Self::Browser,
+        Self::Agent,
         Self::Multiplexer,
         Self::Hosts,
         Self::System,
@@ -95,8 +101,11 @@ impl Page {
 
     pub const fn title(self) -> &'static str {
         match self {
-            Self::Interface => "General",
+            Self::Interface => "Interface",
             Self::Terminal => "Terminal",
+            Self::StatusBar => "Status Bar",
+            Self::Browser => "Browser",
+            Self::Agent => "Agents",
             Self::Multiplexer => "Multiplexer",
             Self::Hosts => "Hosts",
             Self::System => "System",
@@ -107,6 +116,9 @@ impl Page {
         match self {
             Self::Interface => "preferences-system-symbolic",
             Self::Terminal => "utilities-terminal-symbolic",
+            Self::StatusBar => "view-more-symbolic",
+            Self::Browser => "web-browser-symbolic",
+            Self::Agent => "system-run-symbolic",
             Self::Multiplexer => "view-list-symbolic",
             Self::Hosts => "network-server-symbolic",
             Self::System => "emblem-system-symbolic",
@@ -118,6 +130,9 @@ impl Page {
         match self {
             Self::Interface => "interface",
             Self::Terminal => "terminal",
+            Self::StatusBar => "status-bar",
+            Self::Browser => "browser",
+            Self::Agent => "agent",
             Self::Multiplexer => "multiplexer",
             Self::Hosts => "hosts",
             Self::System => "system",
@@ -168,6 +183,189 @@ const ON_OFF: &[Choice] = &[choice("off", "Off"), choice("on", "On")];
 
 pub const SETTINGS: &[Setting] = &[
     Setting {
+        key: "ui-font-family",
+        title: "Interface font",
+        description: "Font used by interface labels; empty follows the desktop font.",
+        page: Page::Interface,
+        group: "Appearance",
+        owner: Owner::Client,
+        support: Support::Honored,
+        kind: Kind::Text {
+            placeholder: "Desktop font",
+        },
+    },
+    Setting {
+        key: "animations",
+        title: "Animations",
+        description: "Animate interface transitions.",
+        page: Page::Interface,
+        group: "Appearance",
+        owner: Owner::Client,
+        support: Support::Honored,
+        kind: Kind::Toggle { default: true },
+    },
+    Setting {
+        key: "status-show-session",
+        title: "Session name",
+        description: "Show the current session name.",
+        page: Page::StatusBar,
+        group: "Contents",
+        owner: Owner::Client,
+        support: Support::Honored,
+        kind: Kind::Toggle { default: true },
+    },
+    Setting {
+        key: "status-badges",
+        title: "Window indicators",
+        description: "Show bell, activity, and agent indicators on windows.",
+        page: Page::StatusBar,
+        group: "Contents",
+        owner: Owner::Client,
+        support: Support::Honored,
+        kind: Kind::Toggle { default: true },
+    },
+    Setting {
+        key: "status-agents",
+        title: "Agent count",
+        description: "Show the number of active agents.",
+        page: Page::StatusBar,
+        group: "Contents",
+        owner: Owner::Client,
+        support: Support::Honored,
+        kind: Kind::Toggle { default: true },
+    },
+    Setting {
+        key: "status-host",
+        title: "Remote host",
+        description: "Show the connected remote host name.",
+        page: Page::StatusBar,
+        group: "Contents",
+        owner: Owner::Client,
+        support: Support::Honored,
+        kind: Kind::Toggle { default: true },
+    },
+    Setting {
+        key: "status-align",
+        title: "Alignment",
+        description: "Align the status bar contents.",
+        page: Page::StatusBar,
+        group: "Layout",
+        owner: Owner::Client,
+        support: Support::Honored,
+        kind: Kind::Choice {
+            default: "left",
+            options: &[choice("left", "Left"), choice("center", "Center")],
+        },
+    },
+    Setting {
+        key: "status-clock",
+        title: "Clock",
+        description: "Choose the clock format.",
+        page: Page::StatusBar,
+        group: "Contents",
+        owner: Owner::Client,
+        support: Support::Honored,
+        kind: Kind::Choice {
+            default: "24-hour",
+            options: &[
+                choice("24-hour", "24-hour"),
+                choice("12-hour", "12-hour"),
+                choice("time-date", "Time and date"),
+                choice("off", "Off"),
+            ],
+        },
+    },
+    Setting {
+        key: "browser-search-provider",
+        title: "Search engine",
+        description: "Use this engine when the address is a search query.",
+        page: Page::Browser,
+        group: "Navigation",
+        owner: Owner::Client,
+        support: Support::Honored,
+        kind: Kind::Choice {
+            default: "google",
+            options: &[
+                choice("google", "Google"),
+                choice("duckduckgo", "DuckDuckGo"),
+                choice("brave", "Brave"),
+            ],
+        },
+    },
+    Setting {
+        key: "browser-egress",
+        title: "Browse through remote hosts",
+        description: "New browser panes on an SSH host use that host’s network connection.",
+        page: Page::Browser,
+        group: "Network",
+        owner: Owner::Client,
+        support: Support::Honored,
+        kind: Kind::Toggle { default: true },
+    },
+    Setting {
+        key: "experimental-agent-pane",
+        title: "Enable agent panes",
+        description: "Allow creating new agent panes on the local daemon.",
+        page: Page::Agent,
+        group: "Agents",
+        owner: Owner::Mux(MuxOptionKey::ExperimentalAgentPane),
+        support: Support::Honored,
+        kind: Kind::Toggle { default: false },
+    },
+    Setting {
+        key: "agent-working-directory",
+        title: "Starting directory",
+        description: "Absolute directory for new local agent panes; empty inherits the pane directory.",
+        page: Page::Agent,
+        group: "Agents",
+        owner: Owner::Client,
+        support: Support::Honored,
+        kind: Kind::Text {
+            placeholder: "Inherit the pane directory",
+        },
+    },
+    Setting {
+        key: "agent-auto-approve",
+        title: "Automatic approval",
+        description: "Choose which agent tool requests the daemon approves automatically.",
+        page: Page::Agent,
+        group: "Permissions",
+        owner: Owner::Mux(MuxOptionKey::AgentAutoApprove),
+        support: Support::Honored,
+        kind: Kind::Choice {
+            default: "reads",
+            options: &[
+                choice("off", "Ask every time"),
+                choice("reads", "Read operations"),
+                choice("all", "All operations"),
+            ],
+        },
+    },
+    Setting {
+        key: "agent-command",
+        title: "Codex adapter command",
+        description: "Command used by newly started Codex agents.",
+        page: Page::Agent,
+        group: "Adapters",
+        owner: Owner::Mux(MuxOptionKey::AgentCommand),
+        support: Support::Honored,
+        kind: Kind::Text {
+            placeholder: "Use the daemon default",
+        },
+    },
+    Setting {
+        key: "agent-claude-code-command",
+        title: "Claude Code adapter command",
+        description: "Command used by newly started Claude Code agents.",
+        page: Page::Agent,
+        group: "Adapters",
+        owner: Owner::Mux(MuxOptionKey::AgentClaudeCodeCommand),
+        support: Support::Honored,
+        kind: Kind::Text {
+            placeholder: "Use the daemon default",
+        },
+    },
+    Setting {
         key: "theme-mode",
         title: "Theme",
         description: "Follow the desktop's light/dark preference, or pin one.",
@@ -202,8 +400,8 @@ pub const SETTINGS: &[Setting] = &[
         support: Support::Honored,
         kind: Kind::Number {
             default: 13.0,
-            min: 4.0,
-            max: 72.0,
+            min: 1.0,
+            max: 256.0,
             step: 0.5,
             digits: 1,
         },
@@ -211,15 +409,15 @@ pub const SETTINGS: &[Setting] = &[
     Setting {
         key: "zz-font-weight",
         title: "Font weight",
-        description: "Weight of regular text; 700 and above renders bold.",
+        description: "Weight of regular text from 1 to 1000.",
         page: Page::Terminal,
         group: "Font",
         owner: Owner::Appearance(AppearanceConfigKey::ZzFontWeight),
         support: Support::Honored,
         kind: Kind::Number {
             default: 400.0,
-            min: 100.0,
-            max: 900.0,
+            min: 1.0,
+            max: 1000.0,
             step: 100.0,
             digits: 0,
         },
@@ -343,9 +541,9 @@ pub const SETTINGS: &[Setting] = &[
         owner: Owner::Appearance(AppearanceConfigKey::ZzCursorBlinkIntervalMs),
         support: Support::Honored,
         kind: Kind::Number {
-            default: 600.0,
-            min: 0.0,
-            max: 5000.0,
+            default: 500.0,
+            min: 50.0,
+            max: 60000.0,
             step: 50.0,
             digits: 0,
         },
@@ -388,7 +586,7 @@ pub const SETTINGS: &[Setting] = &[
         group: "Selection and search",
         owner: Owner::Appearance(AppearanceConfigKey::ZzRoundedSelection),
         support: Support::Unwired("the pane fills selection rectangles square."),
-        kind: Kind::Toggle { default: false },
+        kind: Kind::Toggle { default: true },
     },
     Setting {
         key: "zz-search-match-color",
@@ -417,7 +615,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::Terminal,
         group: "Selection and search",
         owner: Owner::Appearance(AppearanceConfigKey::ZzLinkColor),
-        support: Support::Unwired("the pane paints no link decorations yet."),
+        support: Support::Honored,
         kind: Kind::Color,
     },
     Setting {
@@ -574,7 +772,9 @@ pub const SETTINGS: &[Setting] = &[
 ];
 
 pub fn for_page(page: Page) -> impl Iterator<Item = &'static Setting> {
-    SETTINGS.iter().filter(move |setting| setting.page == page)
+    SETTINGS
+        .iter()
+        .filter(move |setting| setting.page == page && setting.support == Support::Honored)
 }
 
 /// The groups a page renders, in table order and without duplicates.

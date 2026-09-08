@@ -30,6 +30,7 @@ pub struct Overlays {
     parent: gtk::Widget,
     chooser: RefCell<Option<Chooser>>,
     palette: Rc<CommandPalette>,
+    dialogs: super::dialogs::Dialogs,
 }
 
 /// Which chooser the daemon has open. Both carry the whole published list, so
@@ -52,6 +53,22 @@ impl Chosen {
     }
 
     fn search(&self) -> Option<String> {
+        match self {
+            Self::Tree(state) if !state.prompt.is_empty() => return Some(state.prompt.clone()),
+            Self::Tree(state) if state.help => {
+                return Some("Chooser help · Press any key to return".to_owned());
+            }
+            Self::Buffer(state) if state.help => {
+                return Some("Buffer help · Press any key to return".to_owned());
+            }
+            Self::Tree(state) if state.filter_no_matches => {
+                return Some("No matching sessions or panes".to_owned());
+            }
+            Self::Buffer(state) if state.filter_no_matches => {
+                return Some("No matching buffers".to_owned());
+            }
+            _ => {}
+        }
         let (query, reverse) = match self {
             Self::Tree(state) => {
                 let search = state.search.as_ref()?;
@@ -79,10 +96,21 @@ impl Chosen {
                 .items
                 .iter()
                 .map(|item| {
-                    row(
-                        &item.name,
+                    let result = row(
+                        if item.text.is_empty() {
+                            &item.name
+                        } else {
+                            &item.text
+                        },
                         &format!("{} · {}", human_size(item.size_bytes), item.preview),
-                    )
+                    );
+                    if !item.key.is_empty() {
+                        result.add_suffix(&gtk::Label::new(Some(&item.key)));
+                    }
+                    if item.tagged {
+                        result.add_prefix(&gtk::Image::from_icon_name("object-select-symbolic"));
+                    }
+                    result
                 })
                 .collect(),
         }
@@ -116,11 +144,17 @@ impl Chosen {
         match (self, other) {
             (Self::Tree(current), Self::Tree(next)) => {
                 current.kind == next.kind
+                    && current.prompt == next.prompt
                     && current.items == next.items
                     && current.search == next.search
+                    && current.help == next.help
+                    && current.filter_no_matches == next.filter_no_matches
             }
             (Self::Buffer(current), Self::Buffer(next)) => {
-                current.items == next.items && current.search == next.search
+                current.items == next.items
+                    && current.search == next.search
+                    && current.help == next.help
+                    && current.filter_no_matches == next.filter_no_matches
             }
             _ => false,
         }
@@ -138,6 +172,7 @@ impl Overlays {
     pub fn new(engine: Arc<Engine>, parent: &impl IsA<gtk::Widget>) -> Rc<Self> {
         Rc::new(Self {
             palette: CommandPalette::new(Arc::clone(&engine)),
+            dialogs: super::dialogs::Dialogs::new(Arc::clone(&engine), parent),
             engine,
             parent: parent.clone().upcast(),
             chooser: RefCell::new(None),
@@ -151,7 +186,7 @@ impl Overlays {
     }
 
     pub fn is_open(&self) -> bool {
-        self.chooser.borrow().is_some() || self.palette.is_open()
+        self.chooser.borrow().is_some() || self.palette.is_open() || self.dialogs.is_open()
     }
 
     /// Bring every overlay in line with the core. Called for each notification;
@@ -159,11 +194,22 @@ impl Overlays {
     pub fn sync(self: &Rc<Self>) {
         self.palette.sync();
         self.sync_chooser();
+        self.dialogs.sync();
     }
 
     /// Tear the overlays down without telling the daemon: used when the session
     /// goes away under the shell, where there is nothing left to inform.
+    pub fn apply_frame(
+        &self,
+        pane: zz_protocol::PaneId,
+        viewport: zz_terminal::TerminalViewport,
+        damage: &zz_client::ViewportDamage,
+    ) {
+        self.dialogs.apply_frame(pane, viewport, damage);
+    }
+
     pub fn dismiss(&self) {
+        self.dialogs.dismiss();
         if let Some(chooser) = self.chooser.borrow_mut().take() {
             chooser.dialog.force_close();
         }
@@ -322,7 +368,20 @@ fn select(list: &gtk::ListBox, index: u32) {
 }
 
 fn tree_row(item: &ChooseTreeItem) -> adw::ActionRow {
-    let row = row(&item.label, &item.detail);
+    let row = row(
+        if item.text.is_empty() {
+            &item.label
+        } else {
+            &item.text
+        },
+        &item.detail,
+    );
+    if !item.key.is_empty() {
+        row.add_suffix(&gtk::Label::new(Some(&item.key)));
+    }
+    if item.tagged() {
+        row.add_prefix(&gtk::Image::from_icon_name("object-select-symbolic"));
+    }
     row.set_margin_start(i32::from(item.depth) * 12);
     row.add_prefix(&gtk::Image::from_icon_name(tree_icon(item)));
     if item.active() {
@@ -381,6 +440,8 @@ mod tests {
                 depth: 1,
                 flags: ChooseTreeItem::ACTIVE,
                 pane_kind: None,
+                key: String::new(),
+                text: String::new(),
             }],
             search: query.map(|query| ChooseTreeSearchState {
                 query: query.to_owned(),
@@ -388,6 +449,9 @@ mod tests {
             }),
             selected,
             kind: ChooseTreeKind::Windows,
+            filter_no_matches: false,
+            help: false,
+            prompt: String::new(),
         })
     }
 
@@ -400,6 +464,8 @@ mod tests {
                 items: Vec::new(),
                 search: None,
                 selected: 0,
+                filter_no_matches: false,
+                help: false,
             }))
         );
     }
@@ -418,9 +484,14 @@ mod tests {
                 preview: "hello".to_owned(),
                 size_bytes: 2048,
                 created_unix_seconds: 0,
+                key: String::new(),
+                text: String::new(),
+                tagged: false,
             }],
             search: None,
             selected: 0,
+            filter_no_matches: false,
+            help: false,
         });
 
         assert_eq!(state.title(), "Choose buffer");

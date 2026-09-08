@@ -57,9 +57,6 @@ pub struct Sidebar {
     scroller: gtk::ScrolledWindow,
     list: gtk::ListBox,
     menu: gtk::PopoverMenu,
-    status_bar: gtk::Box,
-    status_left: gtk::Label,
-    status_right: gtk::Label,
     tree: RefCell<Tree>,
     rows: RefCell<Vec<Row>>,
     expanded: RefCell<BTreeSet<TreeNode>>,
@@ -87,8 +84,6 @@ impl Sidebar {
             .child(&list)
             .build();
 
-        let (status_bar, status_left, status_right) = build_status();
-
         let header = adw::HeaderBar::builder()
             .show_end_title_buttons(false)
             .build();
@@ -113,7 +108,6 @@ impl Sidebar {
         root.set_hexpand(true);
         root.add_top_bar(&header);
         root.set_content(Some(&scroller));
-        root.add_bottom_bar(&status_bar);
 
         let split = adw::OverlaySplitView::builder()
             .sidebar(&root)
@@ -137,9 +131,6 @@ impl Sidebar {
             scroller,
             list,
             menu,
-            status_bar,
-            status_left,
-            status_right,
             tree: RefCell::new(Tree::default()),
             rows: RefCell::new(Vec::new()),
             expanded: RefCell::new(BTreeSet::new()),
@@ -154,7 +145,6 @@ impl Sidebar {
         sidebar.install_actions();
         sidebar.connect_signals();
         sidebar.sync();
-        sidebar.refresh_status();
         sidebar
     }
 
@@ -266,7 +256,8 @@ impl Sidebar {
             // that would only teach the user to close it again.
             let mut greeted = self.greeted.borrow_mut();
             for host in &tree.hosts {
-                if !host.sessions.is_empty() && greeted.insert(host.id) {
+                if host.id == HostId::LOCAL && !host.sessions.is_empty() && greeted.insert(host.id)
+                {
                     expanded.insert(TreeNode::Host(host.id));
                 }
             }
@@ -289,19 +280,26 @@ impl Sidebar {
         self.select(live.or(self.tree.borrow().active));
     }
 
-    /// The daemon's status line, stacked under the tree. It carries a clock and
-    /// republishes about once a second; an empty line is the daemon's default
-    /// and stays hidden rather than showing an empty bar.
-    pub fn refresh_status(&self) {
-        let status = self.engine.status();
-        let left = status.left.trim();
-        let right = status.right.trim();
-        self.status_bar
-            .set_visible(!left.is_empty() || !right.is_empty());
-        self.status_left.set_text(left);
-        self.status_left.set_visible(!left.is_empty());
-        self.status_right.set_text(right);
-        self.status_right.set_visible(!right.is_empty());
+    pub fn shows_sidebar(&self) -> bool {
+        self.split.shows_sidebar() && !self.split.is_collapsed()
+    }
+
+    pub fn connect_visibility(&self, changed: impl Fn() + 'static) {
+        let changed = Rc::new(changed);
+        let showing = Rc::clone(&changed);
+        self.split.connect_show_sidebar_notify(move |_| showing());
+        self.split.connect_collapsed_notify(move |_| changed());
+    }
+
+    fn split_pane(&self, node: TreeNode, axis: Axis) {
+        let pane = self.rows.borrow().iter().find_map(|row| match row.kind {
+            RowKind::Window { active_pane } if row.node == node => Some(active_pane),
+            _ => None,
+        });
+        if let Some(pane) = pane {
+            self.engine
+                .execute_on(node.host(), new_pane_command(pane, axis));
+        }
     }
 
     fn install_actions(self: &Rc<Self>) {
@@ -345,7 +343,7 @@ impl Sidebar {
         self.split.insert_action_group("sidebar", Some(&actions));
     }
 
-    fn verbs() -> [(&'static str, fn(&Rc<Self>, TreeNode)); 8] {
+    fn verbs() -> [(&'static str, fn(&Rc<Self>, TreeNode)); 9] {
         [
             ("toggle", |sidebar, node| {
                 sidebar.select(Some(node));
@@ -363,15 +361,10 @@ impl Sidebar {
                 }
             }),
             ("new-pane", |sidebar, node| {
-                let pane = sidebar.rows.borrow().iter().find_map(|row| match row.kind {
-                    RowKind::Window { active_pane } if row.node == node => Some(active_pane),
-                    _ => None,
-                });
-                if let Some(pane) = pane {
-                    sidebar
-                        .engine
-                        .execute_on(node.host(), new_pane_command(pane, Axis::Horizontal));
-                }
+                sidebar.split_pane(node, Axis::Horizontal);
+            }),
+            ("split-bottom", |sidebar, node| {
+                sidebar.split_pane(node, Axis::Vertical);
             }),
             // A host's own verbs. New session lands on that machine rather than
             // on whichever one the workspace happens to be showing.
@@ -555,6 +548,9 @@ impl Sidebar {
     /// whether a row on it can be selected outright or has to be attached to
     /// first. A host nobody has activated yet is attached to nothing.
     fn attached_on(&self, host: HostId) -> Option<zz_protocol::SessionId> {
+        if host != self.engine.active_host() {
+            return None;
+        }
         self.tree
             .borrow()
             .host(host)
@@ -767,27 +763,6 @@ fn resolve_chrome(chrome: &ChromeKeymap, input: &KeyInput) -> Option<ChromeActio
     chrome.resolve(SIDEBAR_TABLE, input)
 }
 
-fn build_status() -> (gtk::Box, gtk::Label, gtk::Label) {
-    let left = gtk::Label::builder()
-        .xalign(0.0)
-        .ellipsize(gtk::pango::EllipsizeMode::End)
-        .build();
-    let right = gtk::Label::builder()
-        .xalign(0.0)
-        .ellipsize(gtk::pango::EllipsizeMode::End)
-        .build();
-    right.add_css_class("dim-label");
-    let bar = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .visible(false)
-        .build();
-    bar.add_css_class("toolbar");
-    bar.add_css_class("zz-status");
-    bar.append(&left);
-    bar.append(&right);
-    (bar, left, right)
-}
-
 /// One row is a widget tree rather than an `adw::ActionRow` so the disclosure,
 /// the kind marker and the action gutter sit where the desktop puts them.
 fn build_row(row: &Row, tree: &Tree) -> gtk::ListBoxRow {
@@ -930,12 +905,19 @@ fn build_gutter(row: &Row, target: &glib::Variant, tree: &Tree) -> gtk::Box {
             "sidebar.new-window",
             target,
         )),
-        RowKind::Window { .. } => gutter.append(&gutter_button(
-            "list-add-symbolic",
-            "Add Pane",
-            "sidebar.new-pane",
-            target,
-        )),
+        RowKind::Window { .. } => {
+            let menu = gio::Menu::new();
+            menu.append_item(&item("Split Right", "sidebar.new-pane", target));
+            menu.append_item(&item("Split Bottom", "sidebar.split-bottom", target));
+            gutter.append(
+                &gtk::MenuButton::builder()
+                    .icon_name("view-grid-symbolic")
+                    .tooltip_text("Window Layout")
+                    .menu_model(&menu)
+                    .has_frame(false)
+                    .build(),
+            );
+        }
         RowKind::Pane(_) => {}
     }
     gutter.append(&gutter_button(
@@ -1006,7 +988,10 @@ fn row_menu(node: TreeNode, rows: &[Row], tree: &Tree) -> gio::Menu {
     ));
     match kind {
         RowKind::Session => menu.append_item(&item("New Window", "sidebar.new-window", &value)),
-        RowKind::Window { .. } => menu.append_item(&item("Add Pane", "sidebar.new-pane", &value)),
+        RowKind::Window { .. } => {
+            menu.append_item(&item("Split Right", "sidebar.new-pane", &value));
+            menu.append_item(&item("Split Bottom", "sidebar.split-bottom", &value));
+        }
         _ => {}
     }
     menu.append_item(&item(delete_label(kind), "sidebar.kill", &value));

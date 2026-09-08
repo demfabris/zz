@@ -9,6 +9,8 @@
 //! invalidates the stamp and ticks immediately, so a click applies now rather
 //! than up to half a second later; it is still the poll doing the applying.
 
+mod config_editor;
+mod mux;
 mod pages;
 mod rows;
 mod zoom;
@@ -33,7 +35,9 @@ use crate::{
     engine::Engine,
 };
 
-use pages::{HostsPage, MuxEditor};
+use config_editor::ConfigEditor;
+use mux::MuxEditor;
+use pages::HostsPage;
 use rows::{Row, Syncing, Write};
 pub use zoom::UiZoom;
 
@@ -41,6 +45,9 @@ pub use zoom::UiZoom;
 pub struct Settings {
     engine: Arc<Engine>,
     chrome: RefCell<Option<Rc<dyn Fn(ChromeAction)>>>,
+    changed: RefCell<Option<Rc<dyn Fn()>>>,
+    config_editor: Rc<ConfigEditor>,
+    import_row: RefCell<Option<adw::ActionRow>>,
     store: RefCell<Store>,
     rows: RefCell<Vec<Row>>,
     syncing: Syncing,
@@ -55,7 +62,6 @@ pub struct Settings {
     mux: Rc<MuxEditor>,
     hosts: Rc<HostsPage>,
     zoom: UiZoom,
-    config_group: adw::PreferencesGroup,
     css: gtk::CssProvider,
     open: Cell<bool>,
     prompted: Cell<bool>,
@@ -64,7 +70,7 @@ pub struct Settings {
 impl Settings {
     pub fn new(engine: Arc<Engine>) -> Rc<Self> {
         let syncing: Syncing = Rc::new(Cell::new(false));
-        let mux = MuxEditor::new();
+        let mux = MuxEditor::new(Arc::clone(&engine));
         let zoom_row = adw::ActionRow::builder()
             .title("Interface zoom")
             .subtitle("100%")
@@ -120,6 +126,9 @@ impl Settings {
         let settings = Rc::new(Self {
             engine,
             chrome: RefCell::new(None),
+            changed: RefCell::new(None),
+            config_editor: ConfigEditor::new(),
+            import_row: RefCell::new(None),
             store: RefCell::new(Store::load()),
             rows: RefCell::new(Vec::new()),
             syncing,
@@ -134,15 +143,18 @@ impl Settings {
             mux,
             hosts: HostsPage::new(),
             zoom: UiZoom::default(),
-            config_group: adw::PreferencesGroup::builder()
-                .title("Configuration")
-                .build(),
             css: gtk::CssProvider::new(),
             open: Cell::new(false),
             prompted: Cell::new(false),
         });
+        let target = Rc::downgrade(&settings);
+        settings.config_editor.connect_saved(Rc::new(move || {
+            if let Some(settings) = target.upgrade() {
+                settings.store.borrow_mut().invalidate();
+                settings.tick();
+            }
+        }));
         settings.build_pages();
-        settings.connect_mux_save();
         settings.connect_host_edits();
         settings.install_css();
         settings.apply_file();
@@ -166,31 +178,6 @@ impl Settings {
         let target = Rc::downgrade(&settings);
         glib::timeout_add_local(POLL_INTERVAL, move || tick(&target));
         settings
-    }
-
-    fn connect_mux_save(self: &Rc<Self>) {
-        let target = Rc::downgrade(self);
-        self.mux.connect_save(Rc::new(move |source: &str| {
-            let Some(route) = target.upgrade() else {
-                return;
-            };
-            let Some(path) = route.mux.path() else {
-                return;
-            };
-            match crate::config::file::write_editor_source(
-                path,
-                source,
-                import::MAX_MUX_CONFIG_BYTES,
-            ) {
-                Ok(()) => {
-                    route
-                        .engine
-                        .execute(CommandInvocation::new("reload-config", [] as [&str; 0]));
-                    route.mux.note("Saved. The daemon is re-sourcing the file.");
-                }
-                Err(error) => route.mux.note(&format!("Could not save: {error}")),
-            }
-        }));
     }
 
     /// Adding and removing a host are file edits like any other setting: the
@@ -251,6 +238,10 @@ impl Settings {
         self.chrome.replace(Some(chrome));
     }
 
+    pub fn connect_changed(&self, changed: Rc<dyn Fn()>) {
+        self.changed.replace(Some(changed));
+    }
+
     pub fn zoom(&self) -> &UiZoom {
         &self.zoom
     }
@@ -282,7 +273,8 @@ impl Settings {
         if !self.open.replace(true) {
             self.dialog.present(Some(parent));
         }
-        self.mux.reload();
+        self.mux.refresh();
+        self.config_editor.refresh();
         self.refresh_rows();
         if let Some(position) = Page::ALL.iter().position(|page| page.name() == name) {
             self.select_page(position);
@@ -336,6 +328,11 @@ impl Settings {
             content.set_title(page.title());
             content.set_icon_name(Some(page.icon()));
             content.set_name(Some(page.name()));
+            if page == Page::Multiplexer {
+                for group in self.mux.groups() {
+                    content.add(group);
+                }
+            }
             for group in schema::groups(page) {
                 let section = adw::PreferencesGroup::builder().title(group).build();
                 for setting in schema::for_page(page).filter(|s| s.group == group) {
@@ -352,8 +349,10 @@ impl Settings {
                     zoom.add(&self.zoom_row);
                     content.add(&zoom);
                 }
-                Page::Multiplexer => content.add(self.mux.group()),
-                Page::System => content.add(&self.import_group()),
+                Page::Terminal => content.add(&self.import_group()),
+                Page::System => {
+                    content.add(self.config_editor.group());
+                }
                 _ => {}
             }
             self.pages.add_named(&content, Some(page.name()));
@@ -379,30 +378,55 @@ impl Settings {
         self.pages.set_visible_child_name(page.name());
         self.content_page.set_title(page.title());
         self.split.set_show_content(true);
+        if page == Page::Multiplexer {
+            self.mux.refresh();
+        }
+        if page == Page::System {
+            self.config_editor.refresh();
+        }
+        if page == Page::Terminal
+            && let Some(row) = self.import_row.borrow().as_ref()
+        {
+            let donor = zz_terminal::discover_ghostty_config();
+            row.set_sensitive(donor.is_some());
+            row.set_subtitle(&donor.map_or_else(
+                || "No Ghostty configuration found.".to_owned(),
+                |path| path.display().to_string(),
+            ));
+        }
     }
 
-    /// The offer the first-run prompt says can be taken later. Its group also
-    /// carries the file every row on every page writes to, which is the one
-    /// fact a config-file application is always asked for.
     fn import_group(self: &Rc<Self>) -> adw::PreferencesGroup {
+        let donor = zz_terminal::discover_ghostty_config();
         let row = adw::ActionRow::builder()
-            .title("Import from Ghostty and tmux")
-            .subtitle(
-                "Copies the Ghostty appearance keys into zz/config and your tmux configuration \
-                 into zz/mux.conf. The originals are never modified.",
-            )
+            .title("Import Ghostty appearance…")
+            .subtitle(donor.as_ref().map_or_else(
+                || "No Ghostty configuration found.".to_owned(),
+                |path| path.display().to_string(),
+            ))
             .activatable(true)
+            .sensitive(donor.is_some())
             .build();
         row.set_subtitle_lines(0);
         row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
         let target = Rc::downgrade(self);
         row.connect_activated(move |_| {
-            if let Some(settings) = target.upgrade() {
-                settings.run_import();
-            }
+            let Some(settings) = target.upgrade() else { return; };
+            let dialog = adw::AlertDialog::new(Some("Import Ghostty appearance?"), Some("Replace the appearance settings supplied by Ghostty in zz/config. Other settings and the original Ghostty files stay intact."));
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("import", "Import");
+            dialog.set_response_appearance("import", adw::ResponseAppearance::Suggested);
+            dialog.set_close_response("cancel");
+            let target = Rc::downgrade(&settings);
+            dialog.connect_response(None, move |_, response| {
+                if response == "import" && let Some(settings) = target.upgrade() { settings.run_import(); }
+            });
+            dialog.present(Some(&settings.dialog));
         });
-        self.config_group.add(&row);
-        self.config_group.clone()
+        let group = adw::PreferencesGroup::builder().title("Import").build();
+        group.add(&row);
+        self.import_row.replace(Some(row));
+        group
     }
 
     fn zoom_buttons(self: &Rc<Self>) -> gtk::Box {
@@ -444,19 +468,12 @@ impl Settings {
             if let Err(error) = crate::config::write(setting.key, value.as_deref()) {
                 log::warn!("zz-gtk could not write {}: {error}", setting.key);
                 route.report(&format!("Could not write {}: {error}", setting.key));
+                route.refresh_rows();
                 return;
             }
             route.store.borrow_mut().invalidate();
             route.tick();
         })
-    }
-
-    /// Where every row on every page writes.
-    fn config_path(&self) -> String {
-        self.store.borrow().path().map_or_else(
-            || "No zz/config yet; the first edit creates one.".to_owned(),
-            |path| path.display().to_string(),
-        )
     }
 
     /// Where a write failure or an import result is said. The dialog carries it
@@ -471,6 +488,9 @@ impl Settings {
     }
 
     fn tick(self: &Rc<Self>) {
+        if self.open.get() {
+            self.mux.sync_controls();
+        }
         let changed = self.store.borrow_mut().poll();
         if changed {
             self.apply_file();
@@ -482,6 +502,7 @@ impl Settings {
     fn apply_file(self: &Rc<Self>) {
         let store = self.store.borrow();
         let state = store.state();
+        crate::config::publish(state);
         apply_theme_mode(state);
         let chrome = state.chrome_keymap();
         // The fleet is a config value like any other: the poll is what adds and
@@ -495,10 +516,12 @@ impl Settings {
         drop(store);
         self.engine.set_chrome(chrome);
         self.hosts.refresh(&listed);
-        self.config_group.set_description(Some(&self.config_path()));
         self.restyle();
         self.send_overrides(self.store.borrow().state());
         self.refresh_rows();
+        if let Some(changed) = self.changed.borrow().as_ref() {
+            changed();
+        }
     }
 
     fn send_overrides(&self, state: &State) {
@@ -567,19 +590,14 @@ impl Settings {
         }
     }
 
-    /// The one-time offer to adopt an existing Ghostty or tmux configuration.
-    /// The marker is written on either answer, so declining is remembered.
     pub fn prompt_import(self: &Rc<Self>, parent: &impl IsA<gtk::Widget>) {
         if self.prompted.replace(true) || !import::prompt_pending() {
             return;
         }
         let dialog = adw::AlertDialog::new(
-            Some("Import your existing configuration?"),
+            Some("Import Ghostty appearance?"),
             Some(
-                "zz found a Ghostty or tmux configuration. zz reads only its own files: the \
-                 Ghostty appearance keys are copied into zz/config and your tmux configuration \
-                 into zz/mux.conf. The originals are never modified, and you can import later \
-                 from Preferences.",
+                "zz found a Ghostty configuration. Import its terminal colors and fonts into zz/config? You can also import them later from Terminal preferences.",
             ),
         );
         dialog.add_response("skip", "Not now");
@@ -600,17 +618,23 @@ impl Settings {
     }
 
     fn run_import(self: &Rc<Self>) {
-        match import::run() {
+        let scheme = if adw::StyleManager::default().is_dark() {
+            zz_terminal::TerminalColorScheme::Dark
+        } else {
+            zz_terminal::TerminalColorScheme::Light
+        };
+        match import::run(scheme) {
             Ok(report) => {
-                if report.mux_path.is_some() {
-                    self.mux.reload();
-                    self.engine
-                        .execute(CommandInvocation::new("reload-config", [] as [&str; 0]));
-                }
                 self.store.borrow_mut().invalidate();
                 self.tick();
+                if report.imported_anything() {
+                    self.engine.execute_on(
+                        crate::engine::HostId::LOCAL,
+                        CommandInvocation::new("reload-config", [] as [&str; 0]),
+                    );
+                }
                 self.report(if report.imported_anything() {
-                    "Imported. Your Ghostty and tmux originals were not touched."
+                    "Imported Ghostty appearance."
                 } else {
                     "Nothing to import."
                 });
@@ -690,19 +714,6 @@ mod tests {
 
         assert_eq!(client_default(theme), "system");
         assert_eq!(client_default(quit), "false");
-    }
-
-    /// Every row the surface still offers is one this client or the daemon
-    /// behind it acts on: a key nobody reads has no business being drawn.
-    #[test]
-    fn the_table_offers_no_key_this_shell_ignores() {
-        let client_keys: Vec<&str> = schema::SETTINGS
-            .iter()
-            .filter(|setting| setting.owner == Owner::Client)
-            .map(|setting| setting.key)
-            .collect();
-
-        assert_eq!(client_keys, ["theme-mode", "quit-daemon-on-exit"]);
     }
 
     fn setting(key: &str) -> &'static Setting {

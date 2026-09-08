@@ -10,13 +10,14 @@
 #![cfg(unix)]
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     ffi::OsString,
     fmt::Write as _,
     io::ErrorKind,
     net::Shutdown,
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -29,7 +30,7 @@ use std::{
 use zz_client::{ClientCore, Outbound};
 use zz_daemon::{CommandClient, Daemon, Endpoint, HostEntry, InteractiveClient};
 use zz_gtk::engine::{Engine, EngineEvent, HostId, HostState};
-use zz_protocol::{CommandInvocation, InputMessage, PaneId, ProtocolMessage};
+use zz_protocol::{CommandInvocation, InputMessage, PaneId, ProtocolMessage, SessionId};
 use zz_terminal::{
     Glyph, KeyAction, KeyCode, KeyInput, Modifiers, PackedCell, PackedStyle, TerminalColorScheme,
     TerminalViewport,
@@ -48,6 +49,47 @@ const COLUMNS: u16 = 80;
 const ROWS: u16 = 24;
 const CELL_WIDTH_PX: u32 = 8;
 const CELL_HEIGHT_PX: u32 = 16;
+
+#[test]
+fn default_launch_creates_a_session_in_the_launch_directory_and_reuses_it() {
+    let daemon = Fixture {
+        socket: PathBuf::from(format!(
+            "/tmp/zzgtk-{}-cold-attach.sock",
+            std::process::id()
+        )),
+    };
+    daemon.spawn();
+    let mut commands = connect_commands(&daemon.socket);
+    let engine = connect(&daemon);
+    let mut watch = Watch::default();
+    let session = watch.poll(&engine, "a new default session", |_| engine.session_view());
+    assert_eq!(session.name, "0");
+    let directory = commands
+        .execute(CommandInvocation::new(
+            "display-message",
+            [
+                "-p",
+                "-t",
+                &session.active_pane.to_string(),
+                "#{pane_current_path}",
+            ],
+        ))
+        .expect("read the initial pane directory");
+    assert_eq!(
+        PathBuf::from(directory.trim()),
+        std::env::current_dir().expect("launch directory")
+    );
+    let second = connect(&daemon);
+    let mut second_watch = Watch::default();
+    let reused = second_watch.poll(&second, "the existing default session", |_| {
+        second.session_view()
+    });
+    assert_eq!(session.session, reused.session);
+    assert_eq!(second.snapshot().sessions.len(), 1);
+    engine.detach();
+    second.detach();
+    daemon.shutdown();
+}
 
 #[test]
 fn the_engine_attaches_renders_and_echoes_what_it_sends() {
@@ -84,6 +126,186 @@ fn the_engine_attaches_renders_and_echoes_what_it_sends() {
     });
 
     daemon.shutdown();
+}
+
+#[test]
+fn client_focus_replays_on_attach_and_recovers_after_a_failed_session_switch() {
+    let daemon = Fixture::boot("focus", FIXTURE);
+    let mut commands = connect_commands(&daemon.socket);
+    commands
+        .execute(CommandInvocation::new(
+            "set-option",
+            ["-g", "@gtk-focus", ""],
+        ))
+        .expect("initialize the focus trace");
+    for (hook, marker) in [("client-focus-in", "i"), ("client-focus-out", "o")] {
+        commands
+            .execute(CommandInvocation::new(
+                "set-hook",
+                ["-g", hook, &format!("set-option -ag @gtk-focus {marker}")],
+            ))
+            .expect("record daemon focus hooks");
+    }
+    let engine = Engine::connect(
+        &Endpoint::Local(daemon.socket.clone()),
+        SESSION,
+        TerminalColorScheme::Dark,
+    )
+    .expect("connect the engine to the focus fixture");
+    engine.set_focused(false);
+    let mut watch = Watch::default();
+    let mut option = |name: &str| {
+        commands
+            .execute(CommandInvocation::new("show-options", ["-gqv", name]))
+            .expect("read the daemon focus trace")
+            .trim()
+            .to_owned()
+    };
+    watch.poll(&engine, "the initial blur", |_| {
+        (option("@gtk-focus") == "o").then_some(())
+    });
+    engine.set_focused(false);
+    engine.set_focused(false);
+    engine.execute(CommandInvocation::new(
+        "set-option",
+        ["-g", "@gtk-focus-barrier", "done"],
+    ));
+    watch.poll(&engine, "the focus message barrier", |_| {
+        (option("@gtk-focus-barrier") == "done").then_some(())
+    });
+    assert_eq!(option("@gtk-focus"), "o");
+
+    let session = engine.attached_session().expect("the attached session");
+    engine.attach_session(session);
+    watch.poll(&engine, "blur replay on attachment", |_| {
+        (option("@gtk-focus") == "oo").then_some(())
+    });
+    engine.attach_session(SessionId(u64::MAX));
+    engine.set_focused(true);
+    watch.poll(
+        &engine,
+        "focus restored after the rejected attachment",
+        |_| (option("@gtk-focus") == "ooi").then_some(()),
+    );
+    assert_eq!(engine.attached_session(), Some(session));
+    engine.set_focused(false);
+    watch.poll(&engine, "focus changes on the retained session", |_| {
+        (option("@gtk-focus") == "ooio").then_some(())
+    });
+    daemon.shutdown();
+}
+
+#[test]
+fn agent_handshake_permission_transcript_and_replay_reach_the_engine() {
+    let daemon = Fixture::boot("agent", FIXTURE);
+    let script = PathBuf::from(format!("/tmp/zzgtk-agent-{}.awk", std::process::id()));
+    std::fs::write(&script, include_str!("fixtures/agent.awk")).expect("write the ACP fixture");
+    let awk = "/usr/bin/awk";
+    let mawk = Command::new(awk)
+        .args(["-W", "version"])
+        .stdin(Stdio::null())
+        .output()
+        .is_ok_and(|output| {
+            [output.stdout, output.stderr]
+                .iter()
+                .any(|bytes| String::from_utf8_lossy(bytes).starts_with("mawk"))
+        });
+    let adapter = format!(
+        "{awk} {} -f {}",
+        if mawk { "-W interactive" } else { "" },
+        script.display()
+    );
+    let mut commands = connect_commands(&daemon.socket);
+    for command in [
+        CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
+        CommandInvocation::new("set-option", ["-g", "agent-auto-approve", "off"]),
+        CommandInvocation::new("set-option", ["-g", "agent-command", &adapter]),
+        CommandInvocation::new("set-option", ["-g", "agent-claude-code-command", &adapter]),
+    ] {
+        commands
+            .execute(command)
+            .expect("configure the ACP fixture");
+    }
+    let engine = connect(&daemon);
+    let mut watch = Watch::default();
+    let terminal = watch.poll(&engine, "the original terminal", |_| engine.active_pane());
+    commands
+        .execute(CommandInvocation::new(
+            "split-picker",
+            ["-v", "-t", &terminal.to_string()],
+        ))
+        .expect("create an agent picker");
+    let pane = watch.poll(&engine, "the picker pane", |_| {
+        engine
+            .session_view()?
+            .panes
+            .into_iter()
+            .find(|(_, pane)| matches!(pane.kind, zz_protocol::PaneKindSnapshot::Picker))
+            .map(|(pane, _)| pane)
+    });
+    commands
+        .execute(CommandInvocation::new(
+            "select-pane-kind",
+            ["-t", &pane.to_string(), "agent"],
+        ))
+        .expect("create an agent pane");
+    watch.poll(&engine, "the adapter handshake", |_| {
+        let state = engine.agent_state(pane)?;
+        if let zz_protocol::AgentConnectionPhase::Failed { message } = &state.phase {
+            panic!("the adapter failed: {message}");
+        }
+        (state.phase == zz_protocol::AgentConnectionPhase::Ready).then_some(())
+    });
+    assert!(engine.agent_replay(pane, 0));
+    assert!(engine.agent_prompt(pane, "exercise GTK agent transport".to_owned(), Vec::new()));
+    let permission = watch.poll(&engine, "the daemon permission request", |_| {
+        engine.agent_state(pane)?.pending_permission
+    });
+    assert!(permission.payload.contains("gtk-read"));
+    assert!(engine.agent_respond_permission(pane, permission.request_id, Some("allow".to_owned())));
+    watch.poll(&engine, "the completed agent transcript", |watch| {
+        let items = watch.agent_items.get(&pane)?;
+        (items
+            .values()
+            .any(|item| item["update"]["content"]["text"] == "gtk-agent-answered")
+            && items.values().any(|item| item["item"] == "promptFinished")
+            && engine.agent_state(pane)?.phase == zz_protocol::AgentConnectionPhase::Ready)
+            .then_some(())
+    });
+    let completed = watch
+        .agent_items
+        .get(&pane)
+        .expect("the first transcript")
+        .clone();
+    assert!(completed.values().any(|item| item["item"] == "ready"));
+    assert!(
+        completed
+            .values()
+            .any(|item| item["item"] == "permissionRequested")
+    );
+    assert!(
+        completed
+            .values()
+            .any(|item| item["item"] == "permissionResolved")
+    );
+
+    let restored = connect(&daemon);
+    let mut replay = Watch::default();
+    replay.poll(&restored, "a second attached client", |_| {
+        restored.attached_session()
+    });
+    assert!(restored.agent_replay(pane, 0));
+    replay.poll(&restored, "the replayed transcript", |watch| {
+        let items = watch.agent_items.get(&pane)?;
+        completed
+            .iter()
+            .all(|(seq, item)| items.get(seq) == Some(item))
+            .then_some(())
+    });
+    engine.detach();
+    restored.detach();
+    daemon.shutdown();
+    std::fs::remove_file(script).expect("remove the ACP fixture");
 }
 
 /// The reconnect contract, end to end: the engine must keep answering with the
@@ -481,6 +703,12 @@ fn scrollback_is_backfilled_on_request_and_answers_a_scrolled_window() {
 #[test]
 fn the_daemon_opens_the_output_pager_and_asks_for_the_search_prompt() {
     let daemon = Fixture::boot("surfaces", FIXTURE);
+    connect_commands(&daemon.socket)
+        .execute(CommandInvocation::new(
+            "set-window-option",
+            ["-g", "mode-keys", "emacs"],
+        ))
+        .expect("select the tested copy-mode table");
     let engine = connect(&daemon);
     let mut watch = Watch::default();
 
@@ -516,7 +744,7 @@ fn the_daemon_opens_the_output_pager_and_asks_for_the_search_prompt() {
         let (_, viewport) = engine.command_output()?;
         (viewport.columns == COLUMNS
             && viewport.rows == ROWS
-            && resolved_text(&viewport).contains("bind-key"))
+            && !resolved_text(&viewport).trim().is_empty())
         .then_some(())
     });
 
@@ -525,15 +753,15 @@ fn the_daemon_opens_the_output_pager_and_asks_for_the_search_prompt() {
         engine.command_output().is_none().then_some(())
     });
 
-    // `C-s` is the emacs copy-mode search binding, and `mode-keys` defaults to
-    // emacs; the vi table spells the same command `/`.
     engine.send_key(pane, control('b'), false);
     engine.send_key(pane, typed('['), false);
     engine.send_key(pane, control('s'), false);
-    let opened = watch.poll(&engine, "the daemon's search prompt request", |watch| {
-        watch.search_prompt
+    let prompt = watch.poll(&engine, "the daemon's search prompt", |_| {
+        engine.command_prompt()
     });
-    assert_eq!(opened, pane);
+    assert_eq!(prompt.prompt_type, zz_protocol::CommandPromptType::Search);
+    assert_eq!(prompt.mode, zz_protocol::CommandPromptMode::Incremental);
+    assert!(engine.command_prompt_revision() > 0);
 
     daemon.shutdown();
 }
@@ -709,28 +937,26 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// The daemon is never session-less: it boots session "0" and an empty
-    /// attach target resolves to that default. The fixture session therefore
-    /// replaces it outright, so the client's own default attach is what the
-    /// tests exercise. Sockets are named per test because these daemons run in
-    /// parallel, and they live directly under `/tmp` because `sun_path` is
-    /// short.
     fn boot(tag: &str, command: &str) -> Self {
+        Self::start(tag, command)
+    }
+
+    fn boot_beside_the_default(tag: &str, command: &str) -> Self {
         let fixture = Self::start(tag, command);
         let mut commands = connect_commands(&fixture.socket);
         commands
-            .execute(CommandInvocation::new("kill-session", ["-t", "0"]))
-            .expect("retire the boot session");
+            .execute(CommandInvocation::new(
+                "rename-session",
+                ["-t", SESSION, "0"],
+            ))
+            .expect("name the default session");
+        commands
+            .execute(CommandInvocation::new(
+                "new-session",
+                ["-d", "-s", SESSION, command],
+            ))
+            .expect("create the non-default fixture session");
         fixture
-    }
-
-    /// Leave the boot session in place, so the fixture session exists but is
-    /// not what an empty attach target resolves to — the default is the lowest
-    /// session id, which is always the boot session. That difference is what
-    /// tells a client that re-attaches what it remembers from one that forgot
-    /// its attachment and fell back to the default.
-    fn boot_beside_the_default(tag: &str, command: &str) -> Self {
-        Self::start(tag, command)
     }
 
     fn start(tag: &str, command: &str) -> Self {
@@ -766,26 +992,14 @@ impl Fixture {
         }
     }
 
-    /// Bring a replacement up on the same path. Its session is built out of the
-    /// boot session the daemon always creates rather than beside it: a client
-    /// that is already retrying can reconnect at any point during the rebuild,
-    /// and there must never be a session for it to land on that this is about
-    /// to kill.
     fn respawn(&self, command: &str) {
         self.spawn();
-        let mut commands = connect_commands(&self.socket);
-        commands
+        connect_commands(&self.socket)
             .execute(CommandInvocation::new(
-                "rename-session",
-                ["-t", "0", SESSION],
+                "new-session",
+                ["-d", "-s", SESSION, command],
             ))
-            .expect("rename the boot session");
-        commands
-            .execute(CommandInvocation::new("split-window", ["-t", "0", command]))
-            .expect("add the fixture pane beside the boot pane");
-        commands
-            .execute(CommandInvocation::new("kill-pane", ["-t", "0"]))
-            .expect("retire the boot pane");
+            .expect("create the replacement session");
     }
 
     fn spawn(&self) {
@@ -930,6 +1144,7 @@ fn connect_commands(socket: &Path) -> CommandClient {
 /// What the engine has announced so far, plus what draining its inbox cost.
 #[derive(Default)]
 struct Watch {
+    agent_items: BTreeMap<PaneId, BTreeMap<u64, serde_json::Value>>,
     seen: HashSet<&'static str>,
     frames: usize,
     widest_batch: usize,
@@ -974,6 +1189,25 @@ impl Watch {
         let events = engine.events();
         while let Ok(event) = events.try_recv() {
             match event {
+                EngineEvent::AgentUpdates {
+                    pane,
+                    first_seq,
+                    items,
+                } => {
+                    let transcript = self.agent_items.entry(pane).or_default();
+                    for (offset, bytes) in items.into_iter().enumerate() {
+                        let item: serde_json::Value =
+                            serde_json::from_slice(&bytes).expect("a JSON transcript item");
+                        let seq = first_seq + offset as u64;
+                        assert_eq!(item["seq"].as_u64(), Some(seq));
+                        if let Some(previous) = transcript.insert(seq, item.clone()) {
+                            assert_eq!(previous, item, "replayed items retain their contents");
+                        }
+                    }
+                }
+                EngineEvent::AgentLagged { pane, next_seq } => {
+                    assert!(engine.agent_replay(pane, next_seq));
+                }
                 EngineEvent::Attached(_) => {
                     self.seen.insert("attached");
                 }

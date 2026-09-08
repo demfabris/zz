@@ -9,8 +9,8 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use zz_client::{ChromeAction, UI_TABLE, ViewportDamage};
 use zz_protocol::{
-    CommandInvocation, DisplayPanesAction, InputMessage, LayoutNode, PaneId, PaneKindSnapshot,
-    SessionId, WindowId,
+    BrowserCommand, CommandInvocation, DisplayPanesAction, GuiResponse, InputMessage, LayoutNode,
+    PaneId, PaneKindSnapshot, SessionId, WindowId,
 };
 use zz_terminal::{ClipboardTarget, KeyAction, TerminalAppearance};
 
@@ -77,6 +77,8 @@ const MAX_FONT_POINTS: f32 = 256.0;
 
 enum PaneWidget {
     Terminal(Rc<TerminalPane>),
+    Agent(Rc<super::agent::AgentPane>),
+    Browser(Rc<super::browser::BrowserPane>),
     // ── gtk-termux: an unclaimed split shows the kind chooser ──
     Picker(Rc<PanePicker>),
     // ── end gtk-termux ──
@@ -90,6 +92,8 @@ impl PaneWidget {
     fn widget(&self) -> gtk::Widget {
         match self {
             Self::Terminal(pane) => pane.widget(),
+            Self::Agent(pane) => pane.widget(),
+            Self::Browser(pane) => pane.widget(),
             Self::Picker(picker) => picker.widget(),
             Self::Other { widget, .. } => widget.clone(),
         }
@@ -98,6 +102,8 @@ impl PaneWidget {
     fn matches(&self, kind: &'static str) -> bool {
         match self {
             Self::Terminal(_) => kind == "terminal",
+            Self::Agent(_) => kind == "agent",
+            Self::Browser(_) => kind == "browser",
             Self::Picker(_) => kind == "picker",
             Self::Other { kind: current, .. } => *current == kind,
         }
@@ -111,6 +117,8 @@ pub struct Shell {
     engine: Arc<Engine>,
     window: adw::ApplicationWindow,
     title: adw::WindowTitle,
+    title_stack: gtk::Stack,
+    status: super::status::Status,
     toasts: adw::ToastOverlay,
     workspace: gtk::Stack,
     prefix: gtk::Label,
@@ -121,6 +129,7 @@ pub struct Shell {
     grid: PaneGrid,
     widgets: RefCell<HashMap<PaneId, PaneWidget>>,
     focused_pane: Cell<Option<PaneId>>,
+    parked_agents: RefCell<HashMap<(HostId, PaneId), Rc<super::agent::AgentPane>>>,
     font_offset: Cell<f32>,
     numbering: Cell<bool>,
     /// The host the pane widgets belong to. Pane ids are per daemon, so a
@@ -136,7 +145,9 @@ impl Shell {
 
         let title = adw::WindowTitle::new("zz", "");
         let header = adw::HeaderBar::new();
-        header.set_title_widget(Some(&title));
+        let title_stack = gtk::Stack::new();
+        title_stack.add_named(&title, Some("title"));
+        header.set_title_widget(Some(&title_stack));
         let prefix = gtk::Label::builder().label("PREFIX").visible(false).build();
         prefix.add_css_class("caption-heading");
         prefix.add_css_class("zz-prefix");
@@ -153,6 +164,16 @@ impl Shell {
 
         let sidebar = Sidebar::build(Arc::clone(&engine), &primary_menu);
         header.pack_start(&sidebar.toggle_button());
+        let status_sidebar = Rc::downgrade(&sidebar);
+        let status = super::status::Status::new(
+            Arc::clone(&engine),
+            Rc::new(move || {
+                if let Some(sidebar) = status_sidebar.upgrade() {
+                    sidebar.focus();
+                }
+            }),
+        );
+        title_stack.add_named(status.widget(), Some("status"));
 
         let grid = PaneGrid::new();
         let empty = NewSessionPanel::new(Arc::clone(&engine));
@@ -199,6 +220,8 @@ impl Shell {
             engine,
             window,
             title,
+            title_stack,
+            status,
             toasts,
             workspace,
             prefix,
@@ -209,6 +232,7 @@ impl Shell {
             grid,
             widgets: RefCell::new(HashMap::new()),
             focused_pane: Cell::new(None),
+            parked_agents: RefCell::new(HashMap::new()),
             font_offset: Cell::new(0.0),
             numbering: Cell::new(false),
             host: Cell::new(HostId::LOCAL),
@@ -222,6 +246,12 @@ impl Shell {
                 shell.perform(action);
             }
         }));
+        let target = Rc::downgrade(&shell);
+        shell.settings.connect_changed(Rc::new(move || {
+            if let Some(shell) = target.upgrade() {
+                shell.refresh_status();
+            }
+        }));
         shell.install_actions();
         shell.install_chrome();
         shell.connect_signals();
@@ -229,7 +259,13 @@ impl Shell {
         shell.pump_events();
         shell.pump_ssh_prompts();
         shell.sync();
-        shell.sidebar.refresh_status();
+        let target = Rc::downgrade(&shell);
+        shell.sidebar.connect_visibility(move || {
+            if let Some(shell) = target.upgrade() {
+                shell.refresh_status();
+            }
+        });
+        shell.refresh_status();
         shell
     }
 
@@ -324,7 +360,7 @@ impl Shell {
                     if pressed.borrow().contains(&key.keycode()) {
                         return glib::Propagation::Stop;
                     }
-                    if shell.numbering.get() {
+                    if shell.numbering.get() || shell.overlays.is_open() {
                         return glib::Propagation::Proceed;
                     }
                     let input = keys::key_input(
@@ -382,12 +418,12 @@ impl Shell {
             }),
             ("split-right", |shell| {
                 shell.on_active_pane(|pane| {
-                    CommandInvocation::new("new-pane", ["-h", "-t", &pane.to_string()])
+                    CommandInvocation::new("split-picker", ["-h", "-t", &pane.to_string()])
                 });
             }),
             ("split-down", |shell| {
                 shell.on_active_pane(|pane| {
-                    CommandInvocation::new("new-pane", ["-v", "-t", &pane.to_string()])
+                    CommandInvocation::new("split-picker", ["-v", "-t", &pane.to_string()])
                 });
             }),
             ("zoom-pane", |shell| {
@@ -462,6 +498,10 @@ impl Shell {
     }
 
     fn connect_signals(self: &Rc<Self>) {
+        self.engine.set_focused(self.window.is_active());
+        let engine = Arc::clone(&self.engine);
+        self.window
+            .connect_is_active_notify(move |window| engine.set_focused(window.is_active()));
         // The one-time import offer needs a window to sit over, so it waits for
         // the tree to be mapped rather than firing during construction.
         let target = Rc::downgrade(self);
@@ -583,8 +623,63 @@ impl Shell {
         }
         match event {
             EngineEvent::FramesReady => self.apply_frames(),
-            EngineEvent::StatusChanged => self.sidebar.refresh_status(),
-            EngineEvent::SnapshotChanged | EngineEvent::Attached(_) => self.sync(),
+            EngineEvent::SnapshotChanged => self.sync(),
+            EngineEvent::Attached(_) => {
+                self.settings.resend_overrides();
+                self.sync();
+                for widget in self.widgets.borrow().values() {
+                    if let PaneWidget::Agent(agent) = widget {
+                        agent.set_connected(true);
+                    }
+                }
+            }
+            EngineEvent::AgentStateChanged { pane } => {
+                if let Some(PaneWidget::Agent(agent)) = self.widgets.borrow().get(&pane) {
+                    agent.refresh();
+                }
+                self.sidebar.sync();
+            }
+            EngineEvent::AgentUpdates {
+                pane,
+                first_seq,
+                items,
+            } => {
+                if let Some(PaneWidget::Agent(agent)) = self.widgets.borrow().get(&pane) {
+                    agent.apply_updates(first_seq, &items);
+                }
+            }
+            EngineEvent::AgentLagged { pane, .. } => {
+                if let Some(PaneWidget::Agent(agent)) = self.widgets.borrow().get(&pane) {
+                    agent.lagged();
+                }
+            }
+            EngineEvent::AgentCommand {
+                pane,
+                request_id,
+                command,
+            } => {
+                if let Some(PaneWidget::Agent(agent)) = self.widgets.borrow().get(&pane) {
+                    agent.handle_command(request_id, command);
+                } else {
+                    self.unavailable_request(host, request_id);
+                }
+            }
+            EngineEvent::AgentSessions {
+                pane,
+                request_id,
+                result,
+            } => {
+                if let Some(PaneWidget::Agent(agent)) = self.widgets.borrow().get(&pane) {
+                    agent.handle_sessions(request_id, &result);
+                }
+            }
+            EngineEvent::BrowserCommand { pane, command } => {
+                if let Some(PaneWidget::Browser(browser)) = self.widgets.borrow().get(&pane) {
+                    browser.command(command);
+                } else if let BrowserCommand::Screenshot { request_id, .. } = command {
+                    self.unavailable_request(host, request_id);
+                }
+            }
             EngineEvent::FocusSidebar => self.sidebar.focus(),
             EngineEvent::OverlaysChanged => self.refresh_overlays(),
             EngineEvent::AppearanceChanged => {
@@ -604,7 +699,8 @@ impl Shell {
             // notch will reach further back, so nothing has to repaint now.
             // The three fleet variants are unwrapped above and cannot arrive
             // here at all.
-            EngineEvent::HistoryChanged(_)
+            EngineEvent::StatusChanged
+            | EngineEvent::HistoryChanged(_)
             | EngineEvent::Fleet(..)
             | EngineEvent::HostState(_)
             | EngineEvent::FleetChanged => {}
@@ -612,6 +708,11 @@ impl Shell {
             // ── end gtk-termux ──
             EngineEvent::Notice(text) => self.toasts.add_toast(adw::Toast::new(&text)),
             EngineEvent::Reconnecting { attempt } => {
+                for widget in self.widgets.borrow().values() {
+                    if let PaneWidget::Agent(agent) = widget {
+                        agent.set_connected(false);
+                    }
+                }
                 self.overlays.dismiss();
                 self.sidebar.sync();
                 if attempt == 1 {
@@ -645,6 +746,11 @@ impl Shell {
     /// workspace.
     fn handle_background(self: &Rc<Self>, host: HostId, event: EngineEvent) {
         match event {
+            EngineEvent::AgentCommand { request_id, .. }
+            | EngineEvent::BrowserCommand {
+                command: BrowserCommand::Screenshot { request_id, .. },
+                ..
+            } => self.unavailable_request(host, request_id),
             EngineEvent::SnapshotChanged
             | EngineEvent::Attached(_)
             | EngineEvent::Detached
@@ -672,11 +778,24 @@ impl Shell {
         }
     }
 
+    fn unavailable_request(&self, host: HostId, request_id: u64) {
+        self.engine.respond_to_request_on(
+            host,
+            GuiResponse::Error {
+                request_id,
+                message: "The requested pane is not available in this GTK view.".into(),
+            },
+        );
+    }
+
     fn apply_frames(&self) {
         let widgets = self.widgets.borrow();
         for frame in self.engine.take_frames() {
             if let Some(PaneWidget::Terminal(pane)) = widgets.get(&frame.pane) {
                 pane.apply_frame(frame.viewport, &frame.damage);
+            } else {
+                self.overlays
+                    .apply_frame(frame.pane, frame.viewport, &frame.damage);
             }
         }
     }
@@ -702,7 +821,7 @@ impl Shell {
                         .indicators
                         .iter()
                         .find(|indicator| indicator.pane == *pane)
-                        .copied()
+                        .cloned()
                 }));
             }
         }
@@ -719,13 +838,33 @@ impl Shell {
         }
     }
 
+    fn refresh_status(&self) {
+        self.status.refresh();
+        self.title_stack
+            .set_visible_child_name(if self.sidebar.shows_sidebar() {
+                "title"
+            } else {
+                "status"
+            });
+    }
+
     fn sync(self: &Rc<Self>) {
         self.sidebar.sync();
+        self.refresh_status();
         let host = self.engine.active_host();
-        if self.host.replace(host) != host {
+        let previous_host = self.host.replace(host);
+        if previous_host != host {
             // Another machine's panes: nothing on screen can be reused, and a
             // pane id that happens to match belongs to a different terminal.
-            self.widgets.borrow_mut().clear();
+            self.overlays.dismiss();
+            for (pane, widget) in self.widgets.borrow_mut().drain() {
+                if let PaneWidget::Agent(agent) = widget {
+                    agent.park();
+                    self.parked_agents
+                        .borrow_mut()
+                        .insert((previous_host, pane), agent);
+                }
+            }
             self.focused_pane.set(None);
         }
         let Some(view) = self.engine.session_view() else {
@@ -761,7 +900,50 @@ impl Shell {
         let placed = layout_panes(&layout);
         let appearance = self.appearance();
         let mut widgets = self.widgets.borrow_mut();
-        widgets.retain(|pane, _| placed.contains(pane));
+        let snapshot = self.engine.snapshot();
+        let session_panes: HashMap<_, _> = snapshot
+            .sessions
+            .iter()
+            .filter(|session| session.id == view.session)
+            .flat_map(|session| &session.windows)
+            .flat_map(|window| &window.panes)
+            .map(|(id, pane)| (*id, pane))
+            .collect();
+        widgets.retain(|pane, widget| {
+            if session_panes.contains_key(pane) {
+                return true;
+            }
+            if let PaneWidget::Agent(agent) = widget {
+                agent.park();
+                self.parked_agents
+                    .borrow_mut()
+                    .insert((self.engine.active_host(), *pane), Rc::clone(agent));
+            }
+            false
+        });
+        let hosts = self.engine.hosts();
+        self.parked_agents.borrow_mut().retain(|(host, pane), _| {
+            hosts.iter().any(|view| {
+                view.id == *host
+                    && view
+                        .snapshot
+                        .sessions
+                        .iter()
+                        .flat_map(|session| &session.windows)
+                        .any(|window| window.panes.contains_key(pane))
+            })
+        });
+        for (pane, snapshot) in &session_panes {
+            let kind = kind_label(&snapshot.kind);
+            if !widgets.get(pane).is_some_and(|widget| widget.matches(kind)) {
+                widgets.insert(*pane, self.make_widget(*pane, kind, &appearance));
+            }
+            if let (Some(PaneWidget::Browser(browser)), PaneKindSnapshot::Browser(descriptor)) =
+                (widgets.get(pane), &snapshot.kind)
+            {
+                browser.update(descriptor);
+            }
+        }
 
         let mut children = Vec::with_capacity(placed.len());
         for pane in &placed {
@@ -804,6 +986,39 @@ impl Shell {
                 surface.apply_frame(viewport, &ViewportDamage::All);
             }
             return PaneWidget::Terminal(surface);
+        }
+        if kind == "agent" {
+            let parked = self
+                .parked_agents
+                .borrow_mut()
+                .remove(&(self.engine.active_host(), pane));
+            if let Some(agent) = &parked {
+                agent.resume();
+            }
+            return PaneWidget::Agent(
+                parked.unwrap_or_else(|| {
+                    super::agent::AgentPane::new(Arc::clone(&self.engine), pane)
+                }),
+            );
+        }
+        if kind == "browser" {
+            let snapshot = self.engine.snapshot();
+            if let Some(descriptor) = snapshot
+                .sessions
+                .iter()
+                .flat_map(|session| &session.windows)
+                .find_map(|window| window.panes.get(&pane))
+                .and_then(|pane| match &pane.kind {
+                    PaneKindSnapshot::Browser(descriptor) => Some(descriptor),
+                    _ => None,
+                })
+            {
+                return PaneWidget::Browser(super::browser::BrowserPane::new(
+                    Arc::clone(&self.engine),
+                    pane,
+                    descriptor,
+                ));
+            }
         }
         // ── gtk-termux: an unclaimed split chooses what it becomes ──
         if kind == "picker" {
@@ -849,10 +1064,37 @@ impl Shell {
                 }
             }
             ChromeAction::ToggleSidebar => self.sidebar.toggle(),
-            other => log::debug!(
-                "zz-gtk has no handler for the {} chrome action",
-                other.name()
-            ),
+            ChromeAction::BrowserFocusAddress => {
+                if let Some(pane) = self.engine.active_pane()
+                    && let Some(PaneWidget::Browser(browser)) = self.widgets.borrow().get(&pane)
+                {
+                    browser.focus_address();
+                }
+            }
+            ChromeAction::ClosePane => {
+                if let Some(pane) = self.engine.active_pane() {
+                    if let Some(PaneWidget::Browser(browser)) = self.widgets.borrow().get(&pane) {
+                        browser.perform(ChromeAction::ClosePane);
+                    } else {
+                        self.engine.kill_pane(pane);
+                    }
+                }
+            }
+            other => {
+                let handled = self.engine.active_pane().is_some_and(|pane| {
+                    if let Some(PaneWidget::Browser(browser)) = self.widgets.borrow().get(&pane) {
+                        browser.perform(other)
+                    } else {
+                        false
+                    }
+                });
+                if !handled {
+                    log::debug!(
+                        "zz-gtk has no handler for the {} chrome action",
+                        other.name()
+                    );
+                }
+            }
         }
     }
 
@@ -896,13 +1138,18 @@ impl Shell {
             return;
         }
         // ── gtk-termux: the pager and an open find bar own the keyboard ──
-        if self.pager.borrow().is_some() {
+        if self.pager.borrow().is_some() || self.overlays.is_open() {
             return;
         }
         let took = match self.widgets.borrow().get(&pane) {
             Some(PaneWidget::Terminal(surface)) if surface.search_is_open() => true,
             Some(PaneWidget::Terminal(surface)) => surface.view().grab_focus(),
             Some(PaneWidget::Picker(picker)) => picker.grab_focus(),
+            Some(PaneWidget::Agent(agent)) => {
+                agent.focus();
+                true
+            }
+            Some(PaneWidget::Browser(browser)) => browser.grab_focus(),
             // ── end gtk-termux ──
             _ => false,
         };

@@ -13,18 +13,60 @@ pub mod import;
 pub mod schema;
 
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
     io,
     path::{Path, PathBuf},
 };
 
-use zz_client::{CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap, ChromeProfile};
+use zz_client::{
+    CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap, ChromeProfile, StatusBarAlignment,
+    StatusBarClock, StatusBarSettings,
+};
 use zz_daemon::{HostEntry, RejectedHost, apply_fleet_host_entry, validate_fleet_host};
 use zz_protocol::{ConfigOverrideEntry, MuxOptionKey};
 use zz_terminal::AppearanceConfigKey;
 
 pub use file::{MAX_CONFIG_BYTES, POLL_INTERVAL};
 pub use schema::{Kind, Owner, Page, Setting, Support};
+
+#[derive(Clone, Debug)]
+pub struct ClientSettings {
+    pub ui_font_family: Option<String>,
+    pub animations: bool,
+    pub browser_search: zz_browser::SearchProvider,
+    pub browser_egress: bool,
+    pub status: StatusBarSettings,
+    pub agent_directory: Option<PathBuf>,
+}
+
+impl Default for ClientSettings {
+    fn default() -> Self {
+        Self {
+            ui_font_family: None,
+            animations: true,
+            browser_search: zz_browser::SearchProvider::default(),
+            browser_egress: true,
+            status: StatusBarSettings {
+                show_update: false,
+                ..StatusBarSettings::default()
+            },
+            agent_directory: None,
+        }
+    }
+}
+
+thread_local! {
+    static CURRENT: RefCell<ClientSettings> = RefCell::new(ClientSettings::default());
+}
+
+pub fn publish(state: &State) {
+    CURRENT.with_borrow_mut(|current| *current = state.client_settings());
+}
+
+pub fn current() -> ClientSettings {
+    CURRENT.with_borrow(Clone::clone)
+}
 
 /// Where an effective value came from. The two client-local variants are the
 /// desktop's `ConfigProvenance`; the rest are the daemon's own answer for the
@@ -127,10 +169,41 @@ impl State {
 
     #[must_use]
     pub fn boolean(&self, key: &str, default: bool) -> bool {
-        match self.value(key) {
-            Some("true") => true,
-            Some("false") => false,
-            _ => default,
+        self.value(key).and_then(parse_boolean).unwrap_or(default)
+    }
+
+    pub fn client_settings(&self) -> ClientSettings {
+        let defaults = StatusBarSettings::default();
+        ClientSettings {
+            ui_font_family: self.value("ui-font-family").and_then(parse_config_string),
+            animations: self.boolean("animations", true),
+            browser_search: self
+                .value("browser-search-provider")
+                .and_then(zz_browser::SearchProvider::parse)
+                .unwrap_or_default(),
+            browser_egress: self.boolean("browser-egress", true),
+            agent_directory: self
+                .value("agent-working-directory")
+                .and_then(parse_config_string)
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute()),
+            status: StatusBarSettings {
+                show_session: self.boolean("status-show-session", defaults.show_session),
+                badges: self.boolean("status-badges", defaults.badges),
+                show_agents: self.boolean("status-agents", defaults.show_agents),
+                show_host: self.boolean("status-host", defaults.show_host),
+                show_update: false,
+                alignment: match self.value("status-align") {
+                    Some("center") => StatusBarAlignment::Center,
+                    _ => StatusBarAlignment::Left,
+                },
+                clock: match self.value("status-clock") {
+                    Some("12-hour") => StatusBarClock::TwelveHour,
+                    Some("time-date") => StatusBarClock::TimeAndDate,
+                    Some("off") => StatusBarClock::Off,
+                    _ => StatusBarClock::TwentyFourHour,
+                },
+            },
         }
     }
 
@@ -199,9 +272,72 @@ pub fn parse(source: &str) -> State {
                 value,
             );
         }
-        state.values.insert(key.to_owned(), value.to_owned());
+        if let Some(setting) = schema::SETTINGS
+            .iter()
+            .find(|setting| setting.key == key && setting.owner == Owner::Client)
+        {
+            let normalized = normalize_client_value(setting, value);
+            if let Some(value) = normalized {
+                state.values.insert(key.to_owned(), value);
+            } else {
+                log::warn!("Ignoring invalid {key} on config line {}", index + 1);
+            }
+        } else {
+            state.values.insert(key.to_owned(), value.to_owned());
+        }
     }
     state
+}
+
+fn normalize_client_value(setting: &Setting, value: &str) -> Option<String> {
+    match setting.kind {
+        Kind::Toggle { .. } => parse_boolean(value).map(|value| schema::boolean(value).to_owned()),
+        Kind::Choice { options, .. } => options
+            .iter()
+            .any(|option| option.value == value)
+            .then(|| value.to_owned()),
+        Kind::Text { .. } if setting.key == "ui-font-family" => parse_config_string(value)
+            .filter(|family| !family.trim().is_empty() && !family.chars().any(char::is_control))
+            .map(|_| value.to_owned()),
+        Kind::Text { .. } if setting.key == "agent-working-directory" => parse_config_string(value)
+            .filter(|path| {
+                Path::new(path).is_absolute() && path.len() <= zz_protocol::MAX_GUI_TEXT_BYTES
+            })
+            .map(|_| value.to_owned()),
+        _ => Some(value.to_owned()),
+    }
+}
+
+fn parse_boolean(value: &str) -> Option<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "true" | "on" | "yes" | "1" => Some(true),
+        "false" | "off" | "no" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_config_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    let first = value.chars().next()?;
+    if !matches!(first, '\'' | '"') {
+        return Some(value.to_owned());
+    }
+    if value.len() < 2 || !value.ends_with(first) {
+        return None;
+    }
+    let mut result = String::new();
+    let mut escaped = false;
+    for character in value[1..value.len() - 1].chars() {
+        if escaped {
+            result.push(character);
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else {
+            result.push(character);
+        }
+    }
+    (!escaped && !result.is_empty()).then_some(result)
 }
 
 fn parse_chrome_bind(value: &str) -> Result<ChromeOverride, String> {
@@ -360,9 +496,52 @@ fn read_state(stamp: &file::Stamp) -> State {
 /// Write one key, or delete its line when `value` is `None`. The caller then
 /// polls: nothing applies from here.
 pub fn write(key: &str, value: Option<&str>) -> io::Result<()> {
-    match value {
-        Some(value) => file::set_key(key, value),
-        None => file::remove_key(key),
+    let value = value.map(|value| value_for_write(key, value)).transpose()?;
+    write_value_at(&file::path_for_write()?, key, value.as_deref())
+}
+
+fn write_value_at(path: &Path, key: &str, value: Option<&str>) -> io::Result<()> {
+    let Some(value) = value else {
+        return file::remove_key_group_at(path, key);
+    };
+    if key != "font-family" {
+        return file::set_key_at(path, key, value);
+    }
+    if value.bytes().any(|byte| matches!(byte, b'\r' | b'\n')) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Configuration values must fit on one line",
+        ));
+    }
+    let source = file::read_editor_source(path, file::MAX_CONFIG_BYTES)?;
+    let edited = file::replace_key_group(&source, key, &[value.to_owned()]);
+    if edited == source {
+        return Ok(());
+    }
+    file::write_editor_source(path, &edited, file::MAX_CONFIG_BYTES)
+}
+
+fn value_for_write(key: &str, value: &str) -> io::Result<String> {
+    let Some(setting) = schema::SETTINGS
+        .iter()
+        .find(|setting| setting.key == key && setting.owner == Owner::Client)
+    else {
+        return Ok(value.to_owned());
+    };
+    let value = normalize_client_value(setting, value).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid value for {key}"),
+        )
+    })?;
+    if matches!(key, "ui-font-family" | "agent-working-directory") {
+        let decoded = parse_config_string(&value).expect("validated client string");
+        Ok(format!(
+            "\"{}\"",
+            decoded.replace('\\', "\\\\").replace('"', "\\\"")
+        ))
+    } else {
+        Ok(value)
     }
 }
 
@@ -385,6 +564,111 @@ pub fn write_host(name: &str, endpoint: Option<&str>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn font_selection_and_reset_replace_all_prior_overrides() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("zz-gtk-font-reset-{}-{unique}", std::process::id()));
+        let original = "# keep this comment\nfont-family = First\nfont-size = 17\nfont-family = Fallback\nstatus-clock = off\nstatus-clock = 12-hour\n";
+        std::fs::write(&path, original).unwrap();
+        write_value_at(&path, "font-family", Some("Chosen Font")).unwrap();
+        let source = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(source.matches("font-family =").count(), 1);
+        assert!(source.starts_with("# keep this comment\nfont-size = 17\n"));
+        assert_eq!(
+            zz_terminal::load_ghostty_appearance_from(&path)
+                .appearance
+                .font_families,
+            ["Chosen Font"]
+        );
+        assert!(write_value_at(&path, "font-family", Some("bad\nfont-size = 90")).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+        std::fs::write(&path, original).unwrap();
+        write_value_at(&path, "font-family", None).unwrap();
+        write_value_at(&path, "status-clock", None).unwrap();
+        let reset = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(reset, "# keep this comment\nfont-size = 17\n");
+        assert_eq!(
+            zz_terminal::load_ghostty_appearance_from(&path)
+                .appearance
+                .font_families,
+            zz_terminal::TerminalAppearance::default().font_families
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn client_writes_validate_and_quote_before_touching_the_file() {
+        assert!(write("agent-working-directory", Some("relative/path")).is_err());
+        assert!(write("browser-search-provider", Some("unknown")).is_err());
+        assert!(write("ui-font-family", Some("invalid\tfont")).is_err());
+        let value =
+            value_for_write("agent-working-directory", "/tmp/project #2").expect("valid path");
+        let state = parse(&format!("agent-working-directory = {value}\n"));
+        assert_eq!(
+            state.client_settings().agent_directory,
+            Some(PathBuf::from("/tmp/project #2"))
+        );
+    }
+
+    #[test]
+    fn client_values_match_shared_spellings_and_keep_valid_duplicates() {
+        let state = parse(
+            "quit-daemon-on-exit = YES\nquit-daemon-on-exit = invalid\nstatus-badges = OFF\nbrowser-egress = 0\nbrowser-search-provider = brave\nbrowser-search-provider = unknown\nstatus-align = center\nstatus-clock = time-date\n",
+        );
+        assert!(state.boolean("quit-daemon-on-exit", false));
+        assert_eq!(state.value("quit-daemon-on-exit"), Some("true"));
+        let config = state.client_settings();
+        assert!(!config.status.badges);
+        assert!(!config.browser_egress);
+        assert_eq!(config.browser_search, zz_browser::SearchProvider::Brave);
+        assert_eq!(config.status.alignment, StatusBarAlignment::Center);
+        assert_eq!(config.status.clock, StatusBarClock::TimeAndDate);
+    }
+
+    #[test]
+    fn quoted_agent_directory_and_interface_font_round_trip() {
+        let state = parse(
+            "agent-working-directory = '/tmp/my project'\nagent-working-directory = relative/path\nui-font-family = \"Adwaita Sans\"\nanimations = No\n",
+        );
+        let config = state.client_settings();
+        assert_eq!(
+            config.agent_directory,
+            Some(PathBuf::from("/tmp/my project"))
+        );
+        assert_eq!(config.ui_font_family.as_deref(), Some("Adwaita Sans"));
+        assert!(!config.animations);
+        assert!(
+            !state
+                .daemon_entries()
+                .iter()
+                .any(|(key, _)| key == "agent-working-directory")
+        );
+    }
+
+    #[test]
+    fn publishing_a_reset_restores_client_defaults() {
+        publish(&parse(
+            "browser-search-provider = duckduckgo\nstatus-clock = off\n",
+        ));
+        assert_eq!(
+            current().browser_search,
+            zz_browser::SearchProvider::DuckDuckGo
+        );
+        publish(&State::default());
+        assert_eq!(current().browser_search, zz_browser::SearchProvider::Google);
+        assert_eq!(
+            current().status,
+            StatusBarSettings {
+                show_update: false,
+                ..StatusBarSettings::default()
+            }
+        );
+    }
 
     const SAMPLE: &str = "\
 # the zz configuration

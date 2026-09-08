@@ -61,7 +61,11 @@ fn the_prefix_chord_opens_a_prompt_the_model_completes_and_submits() {
 
     let mut model = PaletteModel::new();
     assert_eq!(
-        model.sync(Some(&state), engine.snapshot()),
+        model.sync(
+            engine.command_prompt_revision(),
+            Some(&state),
+            engine.snapshot()
+        ),
         PaletteSync::Opened
     );
 
@@ -112,7 +116,11 @@ fn closing_a_prompt_leaves_the_mux_alone() {
     let state = wait(&engine, "a command prompt", Engine::command_prompt);
 
     let mut model = PaletteModel::new();
-    model.sync(Some(&state), engine.snapshot());
+    model.sync(
+        engine.command_prompt_revision(),
+        Some(&state),
+        engine.snapshot(),
+    );
     assert!(model.is_open());
     assert!(
         !model.suggestions().is_empty(),
@@ -125,7 +133,10 @@ fn closing_a_prompt_leaves_the_mux_alone() {
     wait(&engine, "the prompt to close", |engine| {
         engine.command_prompt().is_none().then_some(())
     });
-    assert_eq!(model.sync(None, engine.snapshot()), PaletteSync::Closed);
+    assert_eq!(
+        model.sync(engine.command_prompt_revision(), None, engine.snapshot()),
+        PaletteSync::Closed
+    );
     assert!(!model.is_open());
     assert_eq!(
         engine.session_view().map(|view| view.windows.len()),
@@ -159,7 +170,11 @@ fn a_rename_prompt_arrives_pre_filled_and_unsuggested() {
     );
 
     let mut model = PaletteModel::new();
-    model.sync(Some(&state), engine.snapshot());
+    model.sync(
+        engine.command_prompt_revision(),
+        Some(&state),
+        engine.snapshot(),
+    );
     assert!(model.suggestions().is_empty());
     assert_eq!(model.input(), state.input);
 
@@ -266,9 +281,6 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// The daemon is never session-less, so the boot session is retired and the
-    /// fixture session is what an empty attach resolves to. Sockets live
-    /// directly under `/tmp` because `sun_path` is short.
     fn boot(tag: &str) -> Self {
         let socket = PathBuf::from(format!("/tmp/zzgtkp-{}-{tag}.sock", std::process::id()));
         let _ = std::fs::remove_file(&socket);
@@ -288,9 +300,6 @@ impl Fixture {
                 ["-d", "-s", SESSION, FIXTURE],
             ))
             .expect("create the fixture session");
-        commands
-            .execute(CommandInvocation::new("kill-session", ["-t", "0"]))
-            .expect("retire the boot session");
         fixture
     }
 

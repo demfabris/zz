@@ -1,5 +1,8 @@
+mod agent;
+pub mod browser;
 mod colors;
 pub mod completion;
+mod dialogs;
 mod keys;
 mod overlay;
 mod pager;
@@ -13,6 +16,7 @@ mod settings;
 mod shortcuts;
 mod sidebar;
 mod ssh_prompt;
+mod status;
 mod terminal;
 mod tray;
 mod window;
@@ -26,8 +30,6 @@ use crate::engine::Engine;
 
 pub const APP_ID: &str = "sh.zzmux.zz.Gtk";
 
-/// Where to attach. An empty `session` means the daemon's default, which on a
-/// freshly booted daemon is session "0" rather than the newest session.
 pub struct Launch {
     pub endpoint: Endpoint,
     pub session: String,
@@ -42,17 +44,54 @@ pub fn run(launch: Launch) -> glib::ExitCode {
     glib::set_application_name("zz");
     app.connect_startup(|_| gtk::Window::set_default_icon_name(APP_ID));
     app.connect_activate(move |app| activate(app, &launch));
-    app.run_with_args::<&str>(&[])
+    let result = app.run_with_args::<&str>(&[]);
+    browser::shutdown();
+    result
 }
 
 fn activate(app: &adw::Application, launch: &Launch) {
-    match Engine::connect(&launch.endpoint, &launch.session, color_scheme()) {
-        Ok(engine) => {
-            follow_system_theme(&engine);
-            window::Shell::build(app, engine).present();
+    let loading = adw::StatusPage::builder()
+        .title("Connecting to zz")
+        .child(&adw::Spinner::new())
+        .build();
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
+    toolbar.set_content(Some(&loading));
+    let window = adw::ApplicationWindow::builder()
+        .application(app)
+        .title("zz")
+        .default_width(720)
+        .default_height(480)
+        .content(&toolbar)
+        .build();
+    window.present();
+    let endpoint = launch.endpoint.clone();
+    let session = launch.session.clone();
+    let scheme = color_scheme();
+    let (send, receive) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = send.send_blocking(Engine::connect(&endpoint, &session, scheme));
+    });
+    let app = app.clone();
+    glib::spawn_future_local(async move {
+        let Ok(result) = receive.recv().await else {
+            return;
+        };
+        if !window.is_visible() {
+            if let Ok(engine) = result {
+                engine.detach_all();
+            }
+            return;
         }
-        Err(error) => present_failure(app, &error),
-    }
+        match result {
+            Ok(engine) => {
+                follow_system_theme(&engine);
+                window::Shell::build(&app, engine).present();
+            }
+            Err(error) => present_failure(&app, &error),
+        }
+        window.close();
+    });
 }
 
 fn color_scheme() -> TerminalColorScheme {

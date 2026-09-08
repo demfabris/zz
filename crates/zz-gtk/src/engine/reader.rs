@@ -7,7 +7,7 @@ use std::{
 use async_channel::Sender;
 use zz_client::{ClientCore, CoreEvent, Outbound};
 use zz_daemon::InteractiveClient;
-use zz_protocol::{BrowserCommand, CommandResponse, GuiResponse, ServerError, TerminalUiCommand};
+use zz_protocol::{CommandResponse, ServerError, TerminalUiCommand};
 
 use super::{AUTH_DECLINED_REASON, EngineEvent, HistoryChunk, HostState, Ladder, Link};
 
@@ -119,6 +119,8 @@ fn pump(link: &Link, events: &Sender<EngineEvent>) -> Option<String> {
 /// with the state the dead connection left behind. True when a fresh connection
 /// took over; false when the ladder gave up or the UI hung up.
 fn reconnect(link: &Link, events: &Sender<EngineEvent>, reason: String) -> bool {
+    link.focus.lock().expect("client focus poisoned").reset();
+    *link.client.lock().expect("client slot poisoned") = None;
     log::warn!("zz-gtk lost the daemon connection: {reason}");
     match link.ladder {
         Ladder::Local => reconnect_local(link, events, reason),
@@ -249,6 +251,9 @@ fn reduce(
         }
         CoreEvent::Attached { session } => {
             link.remembered_reattach.store(false, Ordering::Relaxed);
+            let mut focus = link.focus.lock().expect("client focus poisoned");
+            focus.attached();
+            focus.flush(|focused| link.send_focus(focused));
             link.frames.clear();
             link.clear_history();
             forwarded.push(EngineEvent::Attached(session));
@@ -298,8 +303,15 @@ fn reduce(
         CoreEvent::AppearanceChanged => forwarded.push(EngineEvent::AppearanceChanged),
         CoreEvent::FocusSidebar => forwarded.push(EngineEvent::FocusSidebar),
         CoreEvent::MuxOptionsChanged => forwarded.push(EngineEvent::MuxOptionsChanged),
+        CoreEvent::CommandPromptChanged => {
+            link.prompt_revision.fetch_add(1, Ordering::Release);
+            forwarded.push(EngineEvent::OverlaysChanged);
+        }
         CoreEvent::PrefixArmed { .. }
-        | CoreEvent::CommandPromptChanged
+        | CoreEvent::KeyTablesChanged
+        | CoreEvent::PopupChanged
+        | CoreEvent::MenuChanged
+        | CoreEvent::ConfirmChanged
         | CoreEvent::ChooseTreeChanged
         | CoreEvent::ChooseBufferChanged
         | CoreEvent::DisplayPanesChanged => forwarded.push(EngineEvent::OverlaysChanged),
@@ -307,32 +319,64 @@ fn reduce(
             forwarded.push(EngineEvent::Clipboard { target, text });
         }
         CoreEvent::ClientMessage { text, .. } => forwarded.push(EngineEvent::Notice(text)),
-        CoreEvent::CommandResponse(CommandResponse::Error { error, .. }) => {
-            if matches!(error, ServerError::MissingTarget(_)) && link.retry_default_attach(client) {
+        CoreEvent::CommandResponse(CommandResponse::Error {
+            request_id, error, ..
+        }) => {
+            let attach_error = matches!(
+                error,
+                ServerError::MissingTarget(_) | ServerError::SessionNotFound(_)
+            );
+            if request_id == 0 && attach_error && link.retry_default_attach(client) {
                 return;
+            }
+            if request_id != 0 || attach_error {
+                link.attach_failed(request_id);
             }
             forwarded.push(EngineEvent::Notice(error.to_string()));
         }
-        CoreEvent::Detached { .. } => forwarded.push(EngineEvent::Detached),
+        CoreEvent::Detached { .. } => {
+            link.focus.lock().expect("client focus poisoned").reset();
+            forwarded.push(EngineEvent::Detached);
+        }
         CoreEvent::ServerStopping => {
             forwarded.push(EngineEvent::Notice("the zz daemon stopped".to_owned()));
         }
-        CoreEvent::AgentCommand { request_id, .. } => {
-            reject_gui_request(client, request_id, "agent commands require the zz app");
+        CoreEvent::AgentCommand {
+            pane,
+            request_id,
+            command,
+        } => forwarded.push(EngineEvent::AgentCommand {
+            pane,
+            request_id,
+            command,
+        }),
+        CoreEvent::AgentStateChanged { pane, .. } => {
+            forwarded.push(EngineEvent::AgentStateChanged { pane });
         }
-        CoreEvent::BrowserCommand {
-            command: BrowserCommand::Screenshot { request_id, .. },
-            ..
-        } => reject_gui_request(client, request_id, "browser panes require the zz app"),
+        CoreEvent::AgentUpdates {
+            pane,
+            first_seq,
+            items,
+        } => forwarded.push(EngineEvent::AgentUpdates {
+            pane,
+            first_seq,
+            items,
+        }),
+        CoreEvent::AgentLagged { pane, next_seq } => {
+            forwarded.push(EngineEvent::AgentLagged { pane, next_seq });
+        }
+        CoreEvent::AgentSessions {
+            pane,
+            request_id,
+            result,
+        } => forwarded.push(EngineEvent::AgentSessions {
+            pane,
+            request_id,
+            result,
+        }),
+        CoreEvent::BrowserCommand { pane, command } => {
+            forwarded.push(EngineEvent::BrowserCommand { pane, command });
+        }
         _ => {}
-    }
-}
-
-fn reject_gui_request(client: &InteractiveClient, request_id: u64, message: &str) {
-    if let Err(error) = client.send_gui_response(GuiResponse::Error {
-        request_id,
-        message: message.to_owned(),
-    }) {
-        log::warn!("zz-gtk failed to answer a GUI request: {error}");
     }
 }

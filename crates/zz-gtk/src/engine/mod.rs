@@ -1,7 +1,9 @@
 mod fleet;
+mod focus;
 mod frames;
 mod history;
 mod reader;
+mod startup;
 
 pub use fleet::{HostId, HostState, HostView, SshPromptRequest};
 pub use frames::{FrameInbox, FrameUpdate, merge_damage};
@@ -14,7 +16,7 @@ use std::{
     mem,
     sync::{
         Arc, Mutex, MutexGuard,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -23,11 +25,14 @@ use zz_client::{ChromeKeymap, ChromeProfile, ClientCore};
 use zz_daemon::{Endpoint, HostEntry, InteractiveClient};
 
 use fleet::{AUTH_DECLINED_REASON, Fleet, PromptRoute};
+use focus::ClientFocus;
 use zz_protocol::{
-    ChooseBufferState, ChooseTreeState, CommandInvocation, CommandPromptState, ConfigOverrideEntry,
-    DisplayPanesState, InputMessage, KeyBindingSnapshot, LayoutNode, MuxOptionKey, MuxOptions,
-    MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PaneId, PaneKindSnapshot, PaneSnapshot,
-    ProtocolMessage, SPLIT_RATIO_BASIS, SessionId, SplitId, StatusLine, WindowId, canonical_key,
+    AgentCommand, AgentImage, AgentPaneWire, AgentSessionOpKind, BrowserCommand, ChooseBufferState,
+    ChooseTreeState, ClientInstanceId, CommandInvocation, CommandPromptState, ConfigOverrideEntry,
+    ConfirmState, DisplayPanesState, GuiResponse, InputMessage, KeyBindingSnapshot, LayoutNode,
+    MenuState, MuxOptionKey, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PaneId,
+    PaneKindSnapshot, PaneSnapshot, PopupState, ProtocolMessage, SPLIT_RATIO_BASIS, SessionId,
+    SplitId, StatusLine, WindowId, canonical_key,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, KeyInput, SearchDirection, TerminalAppearance,
@@ -44,6 +49,32 @@ pub const MAX_SPLIT_RATIO: f32 = 0.9;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineEvent {
     Attached(SessionId),
+    AgentStateChanged {
+        pane: PaneId,
+    },
+    AgentUpdates {
+        pane: PaneId,
+        first_seq: u64,
+        items: Vec<Vec<u8>>,
+    },
+    AgentLagged {
+        pane: PaneId,
+        next_seq: u64,
+    },
+    AgentSessions {
+        pane: PaneId,
+        request_id: u64,
+        result: String,
+    },
+    AgentCommand {
+        pane: PaneId,
+        request_id: u64,
+        command: AgentCommand,
+    },
+    BrowserCommand {
+        pane: PaneId,
+        command: BrowserCommand,
+    },
     SnapshotChanged,
     /// Frames are waiting in the inbox; drain with [`Engine::take_frames`].
     FramesReady,
@@ -164,23 +195,24 @@ pub struct Engine {
     prompts: Receiver<SshPromptRequest>,
     asked: Sender<SshPromptRequest>,
     chrome: Mutex<ChromeKeymap>,
+    focused: Mutex<Option<bool>>,
 }
 
 impl Engine {
-    /// Connect, seed the core with the handshake hello, and attach. An empty
-    /// `session` attaches to the daemon's default, which is session "0" on a
-    /// freshly booted daemon rather than the newest session.
     pub fn connect(
         endpoint: &Endpoint,
         session: &str,
         color_scheme: TerminalColorScheme,
     ) -> Result<Arc<Self>, String> {
-        let client = InteractiveClient::connect_endpoint(endpoint, color_scheme)
-            .map_err(|error| error.to_string())?;
+        let client = startup::connect(endpoint, color_scheme)?;
         let core = seeded_core(&client);
-        client
-            .attach(session.to_owned())
-            .map_err(|error| error.to_string())?;
+        if session.is_empty() {
+            let directory = std::env::current_dir().map_err(|error| error.to_string())?;
+            client.attach_default_in(&directory)
+        } else {
+            client.attach(session.to_owned())
+        }
+        .map_err(|error| error.to_string())?;
 
         let link = Arc::new(Link::local(
             endpoint.clone(),
@@ -198,6 +230,7 @@ impl Engine {
             prompts,
             asked,
             chrome: Mutex::new(ChromeKeymap::for_profile(ChromeProfile::DESKTOP)),
+            focused: Mutex::new(None),
         }))
     }
 
@@ -289,9 +322,11 @@ impl Engine {
     /// own order with duplicates intact: the daemon applies last-writer per key
     /// and cumulative keys need every occurrence.
     pub fn set_config_overrides(&self, entries: Vec<ConfigOverrideEntry>) {
-        let Some(client) = self.link().client() else {
+        let link = self.link();
+        let Some(client) = link.client() else {
             return;
         };
+        let entries = config_overrides_for_host(entries, matches!(link.endpoint, Endpoint::Ssh(_)));
         if let Err(error) = client.set_config_overrides(entries) {
             log::warn!("zz-gtk failed to send configuration overrides: {error}");
         }
@@ -333,6 +368,120 @@ impl Engine {
 
     pub fn command_prompt(&self) -> Option<CommandPromptState> {
         self.link().core().command_prompt().cloned()
+    }
+
+    pub fn command_prompt_revision(&self) -> u64 {
+        self.link().prompt_revision.load(Ordering::Acquire)
+    }
+
+    pub fn popup(&self) -> Option<PopupState> {
+        self.link().core().popup().cloned()
+    }
+
+    pub fn menu(&self) -> Option<MenuState> {
+        self.link().core().menu().cloned()
+    }
+
+    pub fn confirm(&self) -> Option<ConfirmState> {
+        self.link().core().confirm().cloned()
+    }
+
+    pub fn agent_state(&self, pane: PaneId) -> Option<AgentPaneWire> {
+        self.link().core().agent_state(pane).cloned()
+    }
+
+    pub fn client_instance_id(&self) -> Option<ClientInstanceId> {
+        self.link()
+            .client()
+            .map(|client| client.server_hello().client_instance_id)
+    }
+
+    fn agent_request(
+        &self,
+        send: impl FnOnce(&InteractiveClient) -> Result<(), zz_daemon::DaemonError>,
+    ) -> bool {
+        let Some(client) = self.link().client() else {
+            self.notify("The daemon is not connected".to_owned());
+            return false;
+        };
+        match send(&client) {
+            Ok(()) => true,
+            Err(error) => {
+                self.notify(error.to_string());
+                false
+            }
+        }
+    }
+
+    pub fn agent_prompt(&self, pane: PaneId, text: String, images: Vec<AgentImage>) -> bool {
+        self.agent_request(|client| client.agent_prompt(pane, text, images))
+    }
+
+    pub fn agent_cancel(&self, pane: PaneId) -> bool {
+        self.agent_request(|client| client.agent_cancel(pane))
+    }
+
+    pub fn agent_unqueue(&self, pane: PaneId) -> bool {
+        self.agent_request(|client| client.agent_unqueue(pane))
+    }
+
+    pub fn agent_respond_permission(
+        &self,
+        pane: PaneId,
+        request_id: u64,
+        option_id: Option<String>,
+    ) -> bool {
+        self.agent_request(|client| client.agent_respond_permission(pane, request_id, option_id))
+    }
+
+    pub fn agent_set_config_option(&self, pane: PaneId, option_id: String, value: String) -> bool {
+        self.agent_request(|client| client.agent_set_config_option(pane, option_id, value))
+    }
+
+    pub fn agent_set_mode(&self, pane: PaneId, mode_id: String) -> bool {
+        self.agent_request(|client| client.agent_set_mode(pane, mode_id))
+    }
+
+    pub fn agent_authenticate(&self, pane: PaneId, method_id: String) -> bool {
+        self.agent_request(|client| client.agent_authenticate(pane, method_id))
+    }
+
+    pub fn agent_session_op(&self, pane: PaneId, op: AgentSessionOpKind) -> bool {
+        self.agent_request(|client| client.agent_session_op(pane, op))
+    }
+
+    pub fn agent_replay(&self, pane: PaneId, from_seq: u64) -> bool {
+        self.agent_request(|client| client.agent_replay(pane, from_seq))
+    }
+
+    pub fn agent_acknowledge_prompt_restore(&self, pane: PaneId, reclaim_id: u64) -> bool {
+        self.agent_request(|client| client.agent_acknowledge_prompt_restore(pane, reclaim_id))
+    }
+
+    pub fn respond_gui(&self, response: GuiResponse) -> bool {
+        self.agent_request(|client| client.send_gui_response(response))
+    }
+
+    pub fn respond_to_request(&self, response: GuiResponse) -> bool {
+        self.respond_to_request_on(self.active_host(), response)
+    }
+
+    pub fn respond_to_request_on(&self, host: HostId, response: GuiResponse) -> bool {
+        let Some(client) = self.fleet().link(host).and_then(|link| link.client()) else {
+            return false;
+        };
+        match client.send_gui_response(response) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("zz-gtk failed to answer a GUI request on {host:?}: {error}");
+                false
+            }
+        }
+    }
+
+    pub fn set_focused(&self, focused: bool) {
+        *self.focused.lock().expect("window focus poisoned") = Some(focused);
+        self.link().set_focused(focused);
     }
 
     pub fn choose_tree(&self) -> Option<ChooseTreeState> {
@@ -477,6 +626,13 @@ impl Engine {
         ));
     }
 
+    pub fn select_window(&self, window: WindowId) {
+        self.execute(CommandInvocation::new(
+            "select-window",
+            ["-t", &window.to_string()],
+        ));
+    }
+
     pub fn kill_pane(&self, pane: PaneId) {
         self.execute(CommandInvocation::new(
             "kill-pane",
@@ -488,6 +644,12 @@ impl Engine {
     /// owns chooser and prompt semantics, so the client never resolves them.
     pub fn send(&self, input: InputMessage) {
         self.link().send(input);
+    }
+
+    pub fn send_on(&self, host: HostId, input: InputMessage) {
+        if let Some(link) = self.fleet().link(host) {
+            link.send(input);
+        }
     }
 
     pub fn execute(&self, command: CommandInvocation) {
@@ -533,6 +695,25 @@ impl Engine {
                 }
             })
             .collect()
+    }
+
+    pub fn browser_egress(&self, host: HostId) -> Result<Option<(String, u16)>, String> {
+        let link = self
+            .fleet()
+            .link(host)
+            .ok_or_else(|| "The browser host is no longer configured".to_owned())?;
+        match &link.endpoint {
+            Endpoint::Local(_) => Ok(None),
+            Endpoint::Ssh(endpoint) => {
+                let client = link
+                    .client()
+                    .ok_or_else(|| "The browser host is not connected".to_owned())?;
+                let port = client
+                    .socks_port()
+                    .ok_or_else(|| "The browser host has no SSH proxy".to_owned())?;
+                Ok(Some((endpoint.to_string(), port)))
+            }
+        }
     }
 
     pub fn host_name(&self, host: HostId) -> Option<String> {
@@ -582,23 +763,33 @@ impl Engine {
     /// attachment, so anything that follows has to reach the same connection.
     pub fn attach_host_session(&self, host: HostId, session: SessionId) {
         self.set_active_host(host);
-        let Some(client) = self.fleet().link(host).and_then(|link| link.client()) else {
+        let Some(link) = self.fleet().link(host) else {
             log::warn!("zz-gtk cannot attach to {session}: {host:?} is not connected");
             return;
         };
-        if let Err(error) = client.attach(session.to_string()) {
+        if let Err(error) = link.attach(session.to_string()) {
             log::warn!("zz-gtk failed to attach to {session}: {error}");
         }
     }
 
     pub fn execute_on(&self, host: HostId, command: CommandInvocation) {
         let name = command.name.clone();
-        let Some(client) = self.fleet().link(host).and_then(|link| link.client()) else {
+        let Some(link) = self.fleet().link(host) else {
+            return;
+        };
+        let Some(client) = link.client() else {
             log::warn!("zz-gtk dropped {name}: {host:?} is not connected");
             return;
         };
-        if let Err(error) = client.execute(command) {
-            log::warn!("zz-gtk failed to execute {name}: {error}");
+        let attaching = matches!(
+            name.as_str(),
+            "attach-session" | "attach" | "new-session" | "new"
+        ) && !command.args.iter().any(|arg| arg == "-d");
+        let mut focus = link.focus.lock().expect("client focus poisoned");
+        match client.execute(command) {
+            Ok(request_id) if attaching => focus.begin(request_id),
+            Ok(_) => {}
+            Err(error) => log::warn!("zz-gtk failed to execute {name}: {error}"),
         }
     }
 
@@ -641,10 +832,14 @@ impl Engine {
     /// local daemon only here, where the host is being taken away on purpose;
     /// a host that merely failed keeps the workspace exactly where it was.
     pub fn close_host(&self, host: HostId) {
+        let active = self.active_host() == host;
         let Some(removed) = self.fleet().remove(host) else {
             return;
         };
         removed.link.close();
+        if active && let Some(focused) = *self.focused.lock().expect("window focus poisoned") {
+            self.link().set_focused(focused);
+        }
     }
 
     /// Leave every session this client is attached to, on every host. A host
@@ -679,7 +874,11 @@ impl Engine {
         // frame needs. The core keeps the viewports, so the widgets rebuild
         // from those instead.
         fleet.active_link().frames.clear();
+        fleet.active_link().set_focused(false);
         fleet.set_active(host);
+        if let Some(focused) = *self.focused.lock().expect("window focus poisoned") {
+            fleet.active_link().set_focused(focused);
+        }
     }
 
     fn dial_host(&self, entry: &HostEntry) {
@@ -736,6 +935,8 @@ struct Link {
     geometry: Mutex<HashMap<PaneId, Geometry>>,
     replay: Mutex<Vec<(PaneId, Geometry)>>,
     remembered_reattach: AtomicBool,
+    focus: Mutex<ClientFocus>,
+    prompt_revision: AtomicU64,
     /// Scrollback the client keeps for local scrolling, one ring per pane.
     /// Deliberately off the frame path: rows arrive only through
     /// `HistoryRequest`, so nothing here runs while frames do.
@@ -775,6 +976,11 @@ impl Link {
         Self {
             client: Mutex::new(Some(client)),
             core: Mutex::new(core),
+            focus: Mutex::new({
+                let mut focus = ClientFocus::default();
+                focus.begin(0);
+                focus
+            }),
             ..Self::blank(endpoint, color_scheme)
         }
     }
@@ -814,6 +1020,8 @@ impl Link {
             geometry: Mutex::new(HashMap::new()),
             replay: Mutex::new(Vec::new()),
             remembered_reattach: AtomicBool::new(false),
+            focus: Mutex::new(ClientFocus::default()),
+            prompt_revision: AtomicU64::new(0),
             history: Mutex::new(HashMap::new()),
             state: Mutex::new(HostState::Connected),
             active: AtomicBool::new(true),
@@ -977,6 +1185,40 @@ impl Link {
         self.history().clear();
     }
 
+    fn set_focused(&self, focused: bool) {
+        let mut focus = self.focus.lock().expect("client focus poisoned");
+        focus.set(focused);
+        focus.flush(|focused| self.send_focus(focused));
+    }
+
+    fn send_focus(&self, focused: bool) -> bool {
+        self.client().is_some_and(|client| {
+            client
+                .send_input(InputMessage::ClientFocus { focused })
+                .is_ok()
+        })
+    }
+
+    fn attach_failed(&self, request_id: u64) {
+        let mut focus = self.focus.lock().expect("client focus poisoned");
+        focus.failed(request_id);
+        focus.flush(|focused| self.send_focus(focused));
+    }
+
+    fn attach(&self, session: String) -> Result<(), String> {
+        let client = self
+            .client()
+            .ok_or_else(|| "the daemon is not connected".to_owned())?;
+        let mut focus = self.focus.lock().expect("client focus poisoned");
+        focus.begin(0);
+        if let Err(error) = client.attach(session) {
+            focus.failed(0);
+            focus.flush(|focused| self.send_focus(focused));
+            return Err(error.to_string());
+        }
+        Ok(())
+    }
+
     fn send(&self, input: InputMessage) {
         let Some(client) = self.client() else {
             return;
@@ -1021,6 +1263,7 @@ impl Link {
     /// the workspace for a whole round trip — and the remembered session is
     /// re-attached by id, exactly as the desktop does.
     fn dial(&self) -> Result<(), String> {
+        self.focus.lock().expect("client focus poisoned").reset();
         let color_scheme = self.color_scheme();
         let prompts = self.prompts.as_ref().map(PromptRoute::prompts);
         let client =
@@ -1032,6 +1275,7 @@ impl Link {
             core.attached_session()
         };
         if session.is_some() || self.attaches_by_default {
+            self.focus.lock().expect("client focus poisoned").begin(0);
             client
                 .attach(session.map_or_else(String::new, |session| session.to_string()))
                 .map_err(|error| error.to_string())?;
@@ -1142,4 +1386,50 @@ fn seeded_core(client: &InteractiveClient) -> ClientCore {
     core.handle_message(ProtocolMessage::ServerHello(client.server_hello().clone()));
     while core.poll_event().is_some() {}
     core
+}
+
+fn config_overrides_for_host(
+    entries: Vec<ConfigOverrideEntry>,
+    remote: bool,
+) -> Vec<ConfigOverrideEntry> {
+    if !remote {
+        return entries;
+    }
+    entries
+        .into_iter()
+        .filter(|(key, _)| {
+            !matches!(
+                MuxOptionKey::from_config_key(key),
+                Some(MuxOptionKey::ExperimentalAgentPane | MuxOptionKey::ExperimentalEditorPane)
+            )
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::config_overrides_for_host;
+
+    #[test]
+    fn remote_config_preserves_host_feature_gates_and_other_override_order() {
+        let entries: Vec<(String, String)> = [
+            ("experimental-agent-pane", "true"),
+            ("prefix", "C-a"),
+            ("experimental-editor-pane", "false"),
+            ("prefix", "C-b"),
+            ("font-family", "monospace"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+        assert_eq!(config_overrides_for_host(entries.clone(), false), entries);
+        assert_eq!(
+            config_overrides_for_host(entries, true),
+            vec![
+                ("prefix".to_owned(), "C-a".to_owned()),
+                ("prefix".to_owned(), "C-b".to_owned()),
+                ("font-family".to_owned(), "monospace".to_owned()),
+            ]
+        );
+    }
 }

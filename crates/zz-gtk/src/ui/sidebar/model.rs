@@ -638,7 +638,7 @@ pub fn new_window_command(session: SessionId) -> CommandInvocation {
 
 pub fn new_pane_command(pane: PaneId, axis: Axis) -> CommandInvocation {
     CommandInvocation::new(
-        "new-pane",
+        "split-picker",
         [
             match axis {
                 Axis::Horizontal => "-h",
@@ -704,6 +704,11 @@ mod tests {
             title: title.to_owned(),
             kind: PaneKindSnapshot::Terminal,
             synchronized_input: false,
+            dead: false,
+            dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
+            border_status_text: String::new(),
             bell,
         }
     }
@@ -726,6 +731,16 @@ mod tests {
             name: name.to_owned(),
             active_pane: panes[0].id,
             zoomed_pane: None,
+            automatic_rename: true,
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
+            status_label: String::new(),
+            activity: false,
+            pane_border_status: zz_protocol::PaneBorderStatus::Off,
+            pane_border_lines: zz_protocol::PaneBorderLines::Single,
+            pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
+            pane_order: Vec::new(),
+            pane_z_order: Vec::new(),
             layout,
             panes: panes.into_iter().map(|pane| (pane.id, pane)).collect(),
         }

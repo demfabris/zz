@@ -124,21 +124,14 @@ external client crate resolves identically to the workspace and builds against
 the warm cache in seconds. (Both independent eval builds of an external client
 hit this wall; the gpui/proc-macro-error2 patches are UI-only and not needed.)
 
-## 12. A fresh daemon starts with session 0, but a live daemon can become session-less
+## 12. A daemon can start and remain without sessions
 
-`Shared::initialize` auto-creates session "0" at boot when nothing restores,
-and `attach("")` resolves to that default session. Killing the last session
-after a client attaches can still produce an authoritative zero-session
-snapshot. Three consequences:
-
-- A test that wants exactly one session with a controlled name should
-  **rename the boot session** (`rename-session`) rather than create a second
-  one — otherwise default-attach lands on "0" while your fixture session sits
-  unattached and frameless (see pitfall 2).
-- "Attach to the default session" in a user-facing client means session "0"
-  on a fresh daemon, not the most recently created session.
-- Clients must render and recover from a zero-session snapshot instead of
-  assuming the boot invariant remains true for the daemon's lifetime.
+As of 2026-09-07, starting a daemon through a command client need not create
+session "0". Explicitly create the session required by a fixture; do not kill
+or rename an assumed boot session. The GUI's default interactive attachment
+can create its initial session through the current attach contract. A named
+attachment and a command-client snapshot do not imply that creation happened.
+Clients must also render and recover after the last session disappears.
 
 ## 13. Don't bump `PROTOCOL_VERSION` casually
 
@@ -203,14 +196,15 @@ or hand verification to a human. The exception: `copy-mode -t %n` is
 pane-scoped and visible to every attached client, so mode indicators are
 headlessly checkable.
 
-## 20. The daemon publishes status text pre-stripped and prompts un-echoed
+## 20. Native status and command-prompt publications are typed
 
-`#[fg=…]` style directives are removed during expansion — `StatusLine`
-segments are plain text; style them with your toolkit, never parse markup.
-And the daemon deliberately never echoes `CommandPromptAction::Update`: its
-retained prompt input stays at the open value, so re-reading prompt state on a
-generic overlay notification wipes what the user typed. Distinguish a
-genuinely new prompt from a republication.
+Graphical clients derive native status from `zz_client::StatusBarModel` and
+`MuxSnapshot`, rather than rendering `StatusLine` fragments. The TUI retains
+the daemon's formatted status path. Track each `CommandPromptChanged`
+publication with a revision: a newly opened prompt can have identical content
+to the previous one, while unrelated overlay changes must preserve local edits.
+Honor `CommandPromptMode` before offering completions or letting a text widget
+consume keys.
 
 ## 21. `force_selection` means "the user is overriding the program"
 

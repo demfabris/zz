@@ -14,10 +14,13 @@ usage: zz-gtk [options] [session]
                      platform's runtime path)
     -h, --help       print this message
 
-The daemon owns the sessions; zz-gtk attaches to one and renders it.";
+Starts a local daemon when needed; creates the default session when omitted.";
 
 fn main() -> ExitCode {
     if let Some(code) = run_askpass_mode() {
+        return code;
+    }
+    if let Some(code) = ui::browser::run_subprocess() {
         return code;
     }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();

@@ -1,6 +1,8 @@
 use adw::prelude::*;
 use gtk::gdk;
-use zz_client::{ChromeAction, ChromeKey, ChromeKeymap, SIDEBAR_TABLE, TERMINAL_TABLE, UI_TABLE};
+use zz_client::{
+    BROWSER_TABLE, ChromeAction, ChromeKey, ChromeKeymap, SIDEBAR_TABLE, TERMINAL_TABLE, UI_TABLE,
+};
 
 const GENERAL: &[(ChromeAction, &str)] = &[
     (ChromeAction::Detach, "Detach"),
@@ -20,6 +22,21 @@ const TERMINAL: &[(ChromeAction, &str)] = &[
     (ChromeAction::TerminalClearHistory, "Clear Scrollback"),
     (ChromeAction::TerminalFontIncrease, "Increase Text Size"),
     (ChromeAction::TerminalFontDecrease, "Decrease Text Size"),
+];
+
+const BROWSER: &[(ChromeAction, &str)] = &[
+    (ChromeAction::BrowserFocusAddress, "Focus Address"),
+    (ChromeAction::BrowserNewTab, "New Browser Tab"),
+    (ChromeAction::ClosePane, "Close Browser Tab"),
+    (ChromeAction::BrowserNextTab, "Next Browser Tab"),
+    (ChromeAction::BrowserPreviousTab, "Previous Browser Tab"),
+    (ChromeAction::BrowserBack, "Back"),
+    (ChromeAction::BrowserForward, "Forward"),
+    (ChromeAction::BrowserReload, "Reload"),
+    (ChromeAction::BrowserZoomIn, "Zoom In"),
+    (ChromeAction::BrowserZoomOut, "Zoom Out"),
+    (ChromeAction::BrowserZoomReset, "Reset Zoom"),
+    (ChromeAction::BrowserDevTools, "Developer Tools"),
 ];
 
 const SIDEBAR: &[(ChromeAction, &str)] = &[
@@ -51,6 +68,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, chrome: &ChromeKeymap) {
     ));
     dialog.add(general);
     add_section(&dialog, chrome, "Terminal", TERMINAL_TABLE, TERMINAL);
+    add_section(&dialog, chrome, "Browser", BROWSER_TABLE, BROWSER);
     add_section(&dialog, chrome, "Sessions", SIDEBAR_TABLE, SIDEBAR);
     dialog.present(Some(parent));
 }

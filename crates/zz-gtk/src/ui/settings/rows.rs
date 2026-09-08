@@ -1,4 +1,7 @@
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use adw::prelude::*;
 use gtk::gdk;
@@ -38,10 +41,18 @@ pub struct Row {
     control: Control,
     badge: gtk::Label,
     reset: gtk::Button,
+    value: Rc<RefCell<Option<String>>>,
 }
 
 impl Row {
     pub fn build(setting: &'static Setting, write: &Write, syncing: &Syncing) -> Self {
+        let value = Rc::new(RefCell::new(None));
+        let cached = Rc::clone(&value);
+        let target = Rc::clone(write);
+        let write: Write = Rc::new(move |setting, value| {
+            cached.replace(None);
+            target(setting, value);
+        });
         let badge = gtk::Label::new(None);
         badge.add_css_class("dim-label");
         badge.add_css_class("caption");
@@ -59,19 +70,19 @@ impl Row {
         suffix.append(&reset);
 
         let (row, control) = match setting.kind {
-            Kind::Toggle { .. } => toggle(setting, write, syncing, &suffix),
+            Kind::Toggle { .. } => toggle(setting, &write, syncing, &suffix),
             Kind::Number {
                 min,
                 max,
                 step,
                 digits,
                 ..
-            } => number(setting, write, syncing, &suffix, (min, max, step, digits)),
+            } => number(setting, &write, syncing, &suffix, (min, max, step, digits)),
             Kind::Choice { default, options } => {
-                choice(setting, write, syncing, &suffix, default, options)
+                choice(setting, &write, syncing, &suffix, default, options)
             }
-            Kind::Color => color(setting, write, syncing, &suffix),
-            Kind::Text { placeholder } => text(setting, write, syncing, &suffix, placeholder),
+            Kind::Color => color(setting, &write, syncing, &suffix),
+            Kind::Text { placeholder } => text(setting, &write, syncing, &suffix, placeholder),
         };
         row.set_title(setting.title);
         Self {
@@ -80,6 +91,7 @@ impl Row {
             control,
             badge,
             reset,
+            value,
         }
     }
 
@@ -92,13 +104,19 @@ impl Row {
     /// reset can act on — a daemon value sourced from `mux.conf` or a theme file
     /// is not this client's to delete.
     pub fn sync(&self, value: &str, provenance: Provenance, overridden: bool, syncing: &Syncing) {
+        self.badge.set_text(provenance.badge());
+        self.reset.set_sensitive(overridden);
+        if self.value.borrow().as_deref() == Some(value) {
+            return;
+        }
+        self.value.replace(Some(value.to_owned()));
         syncing.set(true);
         match &self.control {
             Control::Toggle(row) => {
                 let default = matches!(self.setting.kind, Kind::Toggle { default: true });
                 row.set_active(match value {
-                    "true" => true,
-                    "false" => false,
+                    "true" | "on" | "yes" | "1" => true,
+                    "false" | "off" | "no" | "0" => false,
                     _ => default,
                 });
             }
@@ -322,6 +340,34 @@ fn text(
             "{}\nEmpty means: {placeholder}",
             subtitle(setting)
         )));
+    }
+    if matches!(setting.key, "font-family" | "ui-font-family") {
+        let choose = gtk::Button::from_icon_name("font-select-symbolic");
+        choose.set_tooltip_text(Some("Choose a font"));
+        choose.set_valign(gtk::Align::Center);
+        row.add_suffix(&choose);
+        let target = write.clone();
+        let weak = row.downgrade();
+        choose.connect_clicked(move |_| {
+            let Some(row) = weak.upgrade() else {
+                return;
+            };
+            let parent = row.root().and_downcast::<gtk::Window>();
+            let write = target.clone();
+            gtk::FontDialog::builder()
+                .title(setting.title)
+                .build()
+                .choose_family(
+                    parent.as_ref(),
+                    None::<&gtk::pango::FontFamily>,
+                    None::<&gtk::gio::Cancellable>,
+                    move |result| {
+                        if let Ok(family) = result {
+                            write(setting, Some(family.name().to_string()));
+                        }
+                    },
+                );
+        });
     }
     dress(&row, setting);
     let target = write.clone();

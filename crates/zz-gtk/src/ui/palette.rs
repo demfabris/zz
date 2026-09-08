@@ -14,7 +14,7 @@ use std::{
 use adw::prelude::*;
 use gtk::{gdk, glib};
 use zz_protocol::{
-    CommandPromptAction, CommandPromptKind, CommandPromptState, InputMessage,
+    CommandPromptAction, CommandPromptKind, CommandPromptMode, CommandPromptState, InputMessage,
     MAX_COMMAND_PROMPT_BYTES, MuxSnapshot,
 };
 
@@ -32,12 +32,9 @@ const ROW_HEIGHT: i32 = 40;
 const COMMAND_HINT: &str = "Tab complete · ↑↓ select · Enter run · Esc close";
 const VALUE_HINT: &str = "Enter apply · Esc close";
 
-/// The daemon can still make a browser pane this client renders as a
-/// placeholder, so browser commands stay in the catalog; agent and editor panes
-/// are experiments zz-gtk does not carry at all.
 const AVAILABILITY: PaneKindAvailability = PaneKindAvailability {
     browser: true,
-    agent: false,
+    agent: true,
     editor: false,
 };
 
@@ -87,6 +84,8 @@ pub enum PaletteEnter {
 /// way the completion engine spells them.
 pub struct PaletteModel {
     kind: CommandPromptKind,
+    mode: CommandPromptMode,
+    revision: Option<u64>,
     prompt: String,
     history: Vec<String>,
     snapshot: Arc<MuxSnapshot>,
@@ -103,6 +102,8 @@ impl PaletteModel {
     pub fn new() -> Self {
         Self {
             kind: CommandPromptKind::Command,
+            mode: CommandPromptMode::Text,
+            revision: None,
             prompt: String::new(),
             history: Vec::new(),
             snapshot: Arc::new(MuxSnapshot::default()),
@@ -118,6 +119,7 @@ impl PaletteModel {
 
     pub fn sync(
         &mut self,
+        revision: u64,
         state: Option<&CommandPromptState>,
         snapshot: Arc<MuxSnapshot>,
     ) -> PaletteSync {
@@ -129,13 +131,15 @@ impl PaletteModel {
         if moved {
             self.snapshot = snapshot;
         }
-        if self.adopted.as_ref() == Some(state) {
+        if self.revision == Some(revision) {
             if moved {
                 self.recompute();
             }
             return PaletteSync::Retained;
         }
         self.adopted = Some(state.clone());
+        self.revision = Some(revision);
+        self.mode = state.mode;
         self.kind = state.kind;
         self.prompt.clone_from(&state.prompt);
         self.history.clone_from(&state.history);
@@ -149,6 +153,7 @@ impl PaletteModel {
 
     pub fn close(&mut self) {
         self.adopted = None;
+        self.revision = None;
         self.input.clear();
         self.cursor = 0;
         self.suggestions.clear();
@@ -256,7 +261,11 @@ impl PaletteModel {
     /// Value prompts substitute into a daemon-private template, so nothing the
     /// catalog knows can be suggested for them.
     fn recompute(&mut self) {
-        self.suggestions = if self.kind == CommandPromptKind::Command {
+        self.suggestions = if self.kind == CommandPromptKind::Command
+            && matches!(
+                self.mode,
+                CommandPromptMode::Text | CommandPromptMode::BackspaceExit
+            ) {
             complete_command(
                 &self.input,
                 self.cursor,
@@ -375,7 +384,11 @@ impl CommandPalette {
     pub fn sync(self: &Rc<Self>) {
         let state = self.engine.command_prompt();
         let snapshot = self.engine.snapshot();
-        let outcome = self.model.borrow_mut().sync(state.as_ref(), snapshot);
+        let outcome = self.model.borrow_mut().sync(
+            self.engine.command_prompt_revision(),
+            state.as_ref(),
+            snapshot,
+        );
         match outcome {
             PaletteSync::Closed => self.dismiss(),
             PaletteSync::Opened => self.adopt(),
@@ -530,6 +543,34 @@ impl CommandPalette {
         keyval: gdk::Key,
         modifiers: gdk::ModifierType,
     ) -> glib::Propagation {
+        let mode = self.model.borrow().mode;
+        if matches!(
+            mode,
+            CommandPromptMode::Single | CommandPromptMode::Numeric | CommandPromptMode::Key
+        ) {
+            if !crate::ui::keys::is_modifier(keyval)
+                && let Some(view) = self.engine.session_view()
+            {
+                self.engine.send(InputMessage::Key {
+                    pane: view.active_pane,
+                    input: crate::ui::keys::key_input(
+                        zz_terminal::KeyAction::Press,
+                        keyval,
+                        modifiers,
+                        None,
+                    ),
+                    text_follows: false,
+                });
+            }
+            return glib::Propagation::Stop;
+        }
+        if mode == CommandPromptMode::BackspaceExit
+            && keyval == gdk::Key::BackSpace
+            && self.entry.text().is_empty()
+        {
+            self.close();
+            return glib::Propagation::Stop;
+        }
         if modifiers.intersects(gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK) {
             return glib::Propagation::Proceed;
         }
@@ -691,6 +732,9 @@ mod tests {
             input: input.to_owned(),
             cursor,
             kind: CommandPromptKind::Command,
+            prompt_type: zz_protocol::CommandPromptType::Command,
+            mode: CommandPromptMode::Text,
+            no_freeze: false,
             history: history.iter().map(|entry| (*entry).to_owned()).collect(),
         }
     }
@@ -709,23 +753,52 @@ mod tests {
         let state = command("", 0, &[]);
 
         assert_eq!(
-            model.sync(Some(&state), Arc::new(MuxSnapshot::default())),
+            model.sync(1, Some(&state), Arc::new(MuxSnapshot::default())),
             PaletteSync::Opened
         );
         assert!(model.is_open());
         assert!(model.edit("ren".to_owned(), 3));
         assert_eq!(
-            model.sync(Some(&state), Arc::new(MuxSnapshot::default())),
+            model.sync(1, Some(&state), Arc::new(MuxSnapshot::default())),
             PaletteSync::Retained,
             "the daemon never echoes an Update, so its input lags behind"
         );
         assert_eq!(model.input(), "ren");
         assert_eq!(
-            model.sync(None, Arc::new(MuxSnapshot::default())),
+            model.sync(1, None, Arc::new(MuxSnapshot::default())),
             PaletteSync::Closed
         );
         assert!(!model.is_open());
         assert_eq!(model.input(), "");
+    }
+
+    #[test]
+    fn a_new_publication_reopens_an_identical_prompt() {
+        let mut model = PaletteModel::new();
+        let state = command("", 0, &[]);
+        model.sync(1, Some(&state), Arc::new(MuxSnapshot::default()));
+        model.edit("local draft".to_owned(), 11);
+        assert_eq!(
+            model.sync(2, Some(&state), Arc::new(MuxSnapshot::default())),
+            PaletteSync::Opened
+        );
+        assert_eq!(model.input(), "");
+    }
+
+    #[test]
+    fn incremental_and_key_prompts_offer_no_completions() {
+        for mode in [
+            CommandPromptMode::Incremental,
+            CommandPromptMode::Single,
+            CommandPromptMode::Numeric,
+            CommandPromptMode::Key,
+        ] {
+            let mut state = command("new-", 4, &[]);
+            state.mode = mode;
+            let mut model = PaletteModel::new();
+            model.sync(1, Some(&state), Arc::new(MuxSnapshot::default()));
+            assert!(model.suggestions().is_empty());
+        }
     }
 
     #[test]
@@ -736,10 +809,13 @@ mod tests {
             input: "notes".to_owned(),
             cursor: 5,
             kind: CommandPromptKind::Value,
+            prompt_type: zz_protocol::CommandPromptType::Command,
+            mode: CommandPromptMode::Text,
+            no_freeze: false,
             history: vec!["list-panes".to_owned()],
         };
 
-        model.sync(Some(&state), Arc::new(MuxSnapshot::default()));
+        model.sync(1, Some(&state), Arc::new(MuxSnapshot::default()));
 
         assert_eq!(model.input(), "notes");
         assert_eq!(model.cursor(), 5);
@@ -751,6 +827,7 @@ mod tests {
     fn navigation_engages_before_it_steps_and_wraps_both_ways() {
         let mut model = PaletteModel::new();
         model.sync(
+            1,
             Some(&command("new-", 4, &[])),
             Arc::new(MuxSnapshot::default()),
         );
@@ -785,6 +862,7 @@ mod tests {
     fn enter_runs_while_typing_and_accepts_once_the_list_is_engaged() {
         let mut model = PaletteModel::new();
         model.sync(
+            1,
             Some(&command("new-w", 5, &[])),
             Arc::new(MuxSnapshot::default()),
         );
@@ -805,6 +883,7 @@ mod tests {
     fn tab_accepts_the_top_suggestion_without_engaging_the_list() {
         let mut model = PaletteModel::new();
         model.sync(
+            1,
             Some(&command("new-w", 5, &[])),
             Arc::new(MuxSnapshot::default()),
         );
@@ -821,6 +900,7 @@ mod tests {
     fn history_leads_the_ranking_and_survives_a_snapshot_bump() {
         let mut model = PaletteModel::new();
         model.sync(
+            1,
             Some(&command("", 0, &["list-panes", "split-window -h"])),
             Arc::new(MuxSnapshot::default()),
         );
@@ -837,6 +917,7 @@ mod tests {
         };
         assert_eq!(
             model.sync(
+                1,
                 Some(&command("", 0, &["list-panes", "split-window -h"])),
                 Arc::new(moved)
             ),
@@ -866,6 +947,7 @@ mod tests {
     fn a_unicode_prompt_keeps_its_cursor_through_a_round_trip() {
         let mut model = PaletteModel::new();
         model.sync(
+            1,
             Some(&command("rename-window café", 18, &[])),
             Arc::new(MuxSnapshot::default()),
         );

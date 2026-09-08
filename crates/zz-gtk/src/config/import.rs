@@ -1,28 +1,15 @@
-//! One-shot import of an existing Ghostty or tmux configuration, offered once
-//! on first run.
-//!
-//! The desktop flattens its Ghostty donor through the appearance loader and
-//! re-serializes 30 typed keys. This client copies the donor's own appearance
-//! lines instead: the daemon already parses the Ghostty dialect — `theme = X`
-//! included — so re-deriving the values here would only buy a second
-//! serializer to keep in step. The cost is that a donor split across
-//! `config-file` includes contributes only its root file, which is noted in the
-//! prompt rather than silently papered over.
-//!
-//! Donors are read, never modified.
-
 use std::{
-    fs,
-    io::{self, ErrorKind, Read as _},
+    io::{self, ErrorKind},
     path::{Path, PathBuf},
 };
 
-use zz_terminal::{AppearanceConfigKey, discover_ghostty_config};
+use zz_terminal::{
+    AppearanceConfigKey, AppearanceLoad, AppearanceSource, TerminalAppearance, TerminalColorScheme,
+    discover_ghostty_config, load_ghostty_appearance_from_for,
+};
 
-use crate::config::file;
+use crate::config::{file, schema};
 
-/// Cap on the verbatim tmux copy, matching the desktop's import bound. Also
-/// the cap the `zz/mux.conf` editor enforces.
 pub const MAX_MUX_CONFIG_BYTES: usize = 1024 * 1024;
 
 const MARKER_FILE_NAME: &str = "import-prompted";
@@ -31,59 +18,32 @@ const MARKER_FILE_NAME: &str = "import-prompted";
 pub struct Report {
     pub ghostty_keys: usize,
     pub config_path: Option<PathBuf>,
-    pub mux_path: Option<PathBuf>,
 }
 
 impl Report {
     #[must_use]
     pub const fn imported_anything(&self) -> bool {
-        self.config_path.is_some() || self.mux_path.is_some()
+        self.config_path.is_some()
     }
-}
-
-fn nonempty_env(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-}
-
-/// The tmux config the import copies, in tmux's own precedence order.
-#[must_use]
-pub fn discover_tmux_config() -> Option<PathBuf> {
-    let home = nonempty_env("HOME");
-    let xdg = nonempty_env("XDG_CONFIG_HOME");
-    tmux_config_candidates(home.as_deref(), xdg.as_deref())
-        .into_iter()
-        .find(|path| path.is_file())
-}
-
-fn tmux_config_candidates(home: Option<&Path>, xdg: Option<&Path>) -> Vec<PathBuf> {
-    let mut candidates = Vec::with_capacity(3);
-    if let Some(home) = home {
-        candidates.push(home.join(".tmux.conf"));
-    }
-    if let Some(xdg) = xdg {
-        candidates.push(xdg.join("tmux/tmux.conf"));
-    }
-    if let Some(home) = home {
-        let fallback = home.join(".config/tmux/tmux.conf");
-        if !candidates.contains(&fallback) {
-            candidates.push(fallback);
-        }
-    }
-    candidates
 }
 
 #[must_use]
 pub fn donors_present() -> bool {
-    discover_ghostty_config().is_some() || discover_tmux_config().is_some()
+    discover_ghostty_config().is_some()
 }
 
-/// Whether the one-time prompt is still owed. The marker is written whatever
-/// the answer was, so declining is remembered as firmly as accepting.
 #[must_use]
 pub fn prompt_pending() -> bool {
-    !marker_path().as_deref().is_some_and(Path::exists) && donors_present()
+    if marker_path().as_deref().is_some_and(Path::exists)
+        || legacy_marker_path().as_deref().is_some_and(Path::exists)
+    {
+        return false;
+    }
+    if donors_present() {
+        return true;
+    }
+    mark_prompted();
+    false
 }
 
 pub fn mark_prompted() {
@@ -99,186 +59,305 @@ pub fn mark_prompted() {
     }
 }
 
-/// The marker lives beside the config rather than in a data directory of its
-/// own: this client has exactly one state file's worth of state, and putting it
-/// next to `zz/config` keeps the whole footprint in one place.
 fn marker_path() -> Option<PathBuf> {
+    zz_daemon::user_data::platform_data_dir().map(|data| data.join("zz").join(MARKER_FILE_NAME))
+}
+
+fn legacy_marker_path() -> Option<PathBuf> {
     file::candidates()
         .into_iter()
         .next()
         .and_then(|config| config.parent().map(|parent| parent.join(MARKER_FILE_NAME)))
 }
 
-pub fn run() -> io::Result<Report> {
-    let mut report = Report::default();
-    import_ghostty(&mut report)?;
-    import_tmux(&mut report)?;
-    Ok(report)
-}
-
-fn import_ghostty(report: &mut Report) -> io::Result<()> {
+pub fn run(scheme: TerminalColorScheme) -> io::Result<Report> {
     let Some(donor) = discover_ghostty_config() else {
-        return Ok(());
+        return Ok(Report::default());
     };
-    let groups = appearance_groups(&read_bounded_string(&donor, file::MAX_CONFIG_BYTES)?);
+    let load = load_ghostty_appearance_from_for(&donor, scheme);
+    let groups = appearance_groups(&load)?;
     if groups.is_empty() {
-        return Ok(());
+        return Ok(Report::default());
     }
     let target = file::path_for_write()?;
-    let source = match file::read_source(&target) {
-        Ok(source) => source,
-        Err(error) if error.kind() == ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(error),
-    };
-    let mut edited = source;
-    for (key, values) in &groups {
-        edited = file::replace_key_group(&edited, key, values);
-    }
-    if edited.len() > file::MAX_CONFIG_BYTES {
-        return Err(io::Error::new(
-            ErrorKind::InvalidData,
-            format!(
-                "importing would push the configuration past its {}-byte limit",
-                file::MAX_CONFIG_BYTES
-            ),
-        ));
-    }
-    file::atomic_write(&target, edited.as_bytes())?;
-    report.ghostty_keys = groups.len();
-    report.config_path = Some(target);
-    Ok(())
+    write_import(&target, &groups)?;
+    Ok(Report {
+        ghostty_keys: groups.len(),
+        config_path: Some(target),
+    })
 }
 
-/// The donor's appearance lines, grouped by key in first-appearance order. A
-/// key the donor repeats keeps every occurrence, because `palette` and
-/// `font-family` are cumulative.
-fn appearance_groups(donor: &str) -> Vec<(String, Vec<String>)> {
-    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
-    for line in donor.lines() {
-        let Some(key) = file::key_for_line(line) else {
-            continue;
+fn write_import(path: &Path, groups: &[(AppearanceConfigKey, Vec<String>)]) -> io::Result<()> {
+    let source = file::read_editor_source(path, file::MAX_CONFIG_BYTES)?;
+    let edited = apply_import(&source, groups)?;
+    file::atomic_write(path, edited.as_bytes())
+}
+
+fn apply_import(source: &str, groups: &[(AppearanceConfigKey, Vec<String>)]) -> io::Result<String> {
+    let mut edited = source.to_owned();
+    for (key, values) in groups {
+        edited = if !is_cumulative(*key)
+            && let [value] = values.as_slice()
+        {
+            file::edit_source(&edited, key.as_str(), Some(value))
+        } else {
+            file::replace_key_group(&edited, key.as_str(), values)
         };
-        if AppearanceConfigKey::from_config_key(key).is_none() {
-            continue;
-        }
-        let Some((_, value)) = line.split_once('=') else {
-            continue;
-        };
-        let value = file::value_without_comment(value).trim().to_owned();
-        match groups.iter_mut().find(|(existing, _)| existing == key) {
-            Some((_, values)) => values.push(value),
-            None => groups.push((key.to_owned(), vec![value])),
+        if edited.len() > file::MAX_CONFIG_BYTES {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!(
+                    "importing would push the configuration past its {}-byte limit",
+                    file::MAX_CONFIG_BYTES
+                ),
+            ));
         }
     }
-    groups
+    Ok(edited)
 }
 
-fn import_tmux(report: &mut Report) -> io::Result<()> {
-    let Some(donor) = discover_tmux_config() else {
-        return Ok(());
-    };
-    let contents = read_bounded(&donor, MAX_MUX_CONFIG_BYTES)?;
-    let target = zz_daemon::mux_config_write_path().ok_or_else(|| {
-        io::Error::new(
-            ErrorKind::NotFound,
-            "cannot create zz/mux.conf because neither XDG_CONFIG_HOME nor HOME is available",
-        )
-    })?;
-    file::atomic_write(&target, &contents)?;
-    report.mux_path = Some(target);
-    Ok(())
-}
-
-fn read_bounded_string(path: &Path, limit: usize) -> io::Result<String> {
-    String::from_utf8(read_bounded(path, limit)?)
-        .map_err(|error| io::Error::new(ErrorKind::InvalidData, error))
-}
-
-fn read_bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
-    let file = fs::File::open(path)?;
-    let byte_limit = u64::try_from(limit).unwrap_or(u64::MAX - 1);
-    let mut contents = Vec::new();
-    file.take(byte_limit + 1).read_to_end(&mut contents)?;
-    if contents.len() > limit {
-        return Err(io::Error::new(
-            ErrorKind::InvalidData,
-            format!("configuration exceeds the {limit}-byte import limit"),
-        ));
+fn appearance_groups(load: &AppearanceLoad) -> io::Result<Vec<(AppearanceConfigKey, Vec<String>)>> {
+    let mut groups = Vec::new();
+    for key in AppearanceConfigKey::ALL {
+        if !matches!(
+            load.provenance.source(key),
+            AppearanceSource::Ghostty | AppearanceSource::ThemeFile
+        ) {
+            continue;
+        }
+        let values = appearance_values(&load.appearance, key)?;
+        if !values.is_empty() || is_cumulative(key) {
+            groups.push((key, values));
+        }
     }
-    Ok(contents)
+    Ok(groups)
+}
+
+fn is_cumulative(key: AppearanceConfigKey) -> bool {
+    matches!(
+        key,
+        AppearanceConfigKey::Palette
+            | AppearanceConfigKey::FontFamily
+            | AppearanceConfigKey::FontFamilyBold
+            | AppearanceConfigKey::FontFamilyItalic
+            | AppearanceConfigKey::FontFamilyBoldItalic
+            | AppearanceConfigKey::FontFeature
+    )
+}
+
+fn appearance_values(
+    appearance: &TerminalAppearance,
+    key: AppearanceConfigKey,
+) -> io::Result<Vec<String>> {
+    let families = match key {
+        AppearanceConfigKey::FontFamily => Some(&appearance.font_families),
+        AppearanceConfigKey::FontFamilyBold => Some(&appearance.font_families_bold),
+        AppearanceConfigKey::FontFamilyItalic => Some(&appearance.font_families_italic),
+        AppearanceConfigKey::FontFamilyBoldItalic => Some(&appearance.font_families_bold_italic),
+        _ => None,
+    };
+    if let Some(families) = families {
+        return Ok(families
+            .iter()
+            .map(|family| format!("\"{family}\""))
+            .collect());
+    }
+    Ok(match key {
+        AppearanceConfigKey::Palette => {
+            let defaults = TerminalAppearance::default();
+            appearance
+                .palette
+                .as_array()
+                .iter()
+                .zip(defaults.palette.as_array())
+                .enumerate()
+                .filter(|(_, (color, default))| color != default)
+                .map(|(index, (color, _))| {
+                    format!("{index}=#{:02X}{:02X}{:02X}", color.r, color.g, color.b)
+                })
+                .collect()
+        }
+        AppearanceConfigKey::FontFeature => {
+            let mut tags = Vec::new();
+            let mut values = Vec::new();
+            for feature in &appearance.font_features {
+                if tags.contains(&feature.tag) {
+                    return Err(io::Error::new(
+                        ErrorKind::InvalidData,
+                        format!(
+                            "resolved appearance contains duplicate `{}` feature tags",
+                            feature.tag_string()
+                        ),
+                    ));
+                }
+                tags.push(feature.tag);
+                values.push(format!("{}={}", feature.tag_string(), feature.value));
+            }
+            values
+        }
+        AppearanceConfigKey::FontSyntheticStyle => {
+            let styles = appearance.font_synthetic_style;
+            vec![if styles.bold && styles.italic && styles.bold_italic {
+                "true".to_owned()
+            } else if !styles.bold && !styles.italic && !styles.bold_italic {
+                "false".to_owned()
+            } else {
+                [
+                    ("bold", styles.bold),
+                    ("italic", styles.italic),
+                    ("bold-italic", styles.bold_italic),
+                ]
+                .into_iter()
+                .map(|(style, enabled)| {
+                    if enabled {
+                        style.to_owned()
+                    } else {
+                        format!("no-{style}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+            }]
+        }
+        AppearanceConfigKey::FontThicken => vec![appearance.font_thicken.to_string()],
+        AppearanceConfigKey::FontThickenStrength => {
+            vec![appearance.font_thicken_strength.to_string()]
+        }
+        _ => schema::appearance_display(appearance, key)
+            .into_iter()
+            .collect(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        fs,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
     use super::*;
 
-    #[test]
-    fn tmux_candidates_prefer_the_home_dotfile_then_xdg() {
-        let home = PathBuf::from("/home/u");
-        let xdg = PathBuf::from("/home/u/xdg");
+    static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
 
-        assert_eq!(
-            tmux_config_candidates(Some(&home), Some(&xdg)),
-            vec![
-                PathBuf::from("/home/u/.tmux.conf"),
-                PathBuf::from("/home/u/xdg/tmux/tmux.conf"),
-                PathBuf::from("/home/u/.config/tmux/tmux.conf"),
-            ],
-        );
-    }
+    struct Scratch(PathBuf);
 
-    #[test]
-    fn tmux_candidates_dedupe_an_xdg_that_is_the_home_config() {
-        let home = PathBuf::from("/home/u");
-        let xdg = PathBuf::from("/home/u/.config");
-
-        assert_eq!(
-            tmux_config_candidates(Some(&home), Some(&xdg)),
-            vec![
-                PathBuf::from("/home/u/.tmux.conf"),
-                PathBuf::from("/home/u/.config/tmux/tmux.conf"),
-            ],
-        );
-    }
-
-    #[test]
-    fn only_appearance_keys_are_taken_from_a_ghostty_donor() {
-        let groups = appearance_groups(
-            "# ghostty\nfont-size = 15\nkeybind = ctrl+a=new_split\ntheme = catppuccin\n",
-        );
-
-        assert_eq!(
-            groups,
-            vec![
-                ("font-size".to_owned(), vec!["15".to_owned()]),
-                ("theme".to_owned(), vec!["catppuccin".to_owned()]),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_repeated_donor_key_keeps_every_occurrence() {
-        let groups = appearance_groups("palette = 0=#000000\npalette = 1=#111111\n");
-
-        assert_eq!(
-            groups,
-            vec![(
-                "palette".to_owned(),
-                vec!["0=#000000".to_owned(), "1=#111111".to_owned()]
-            )]
-        );
-    }
-
-    #[test]
-    fn importing_replaces_the_whole_group_and_leaves_everything_else_alone() {
-        let source = "# mine\npalette = 0=#FFFFFF\npane-margin = 8\npalette = 1=#EEEEEE\n";
-        let groups = appearance_groups("palette = 0=#000000\n");
-
-        let mut edited = source.to_owned();
-        for (key, values) in &groups {
-            edited = file::replace_key_group(&edited, key, values);
+    impl Scratch {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "zz-gtk-import-{}-{}",
+                std::process::id(),
+                NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
         }
 
-        assert_eq!(edited, "# mine\npane-margin = 8\npalette = 0=#000000\n");
+        fn write(&self, name: &str, contents: &str) -> PathBuf {
+            let path = self.0.join(name);
+            file::atomic_write(&path, contents.as_bytes()).unwrap();
+            path
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[test]
+    fn imports_resolved_theme_and_includes_without_touching_mux_or_donors() {
+        let scratch = Scratch::new();
+        let theme = scratch.write("theme", "background = #123456\nforeground = #abcdef\n");
+        let child = scratch.write(
+            "child",
+            "font-family = First Mono\nfont-family = Second Mono\nfont-size = 17\n",
+        );
+        let donor_text = format!(
+            "theme = {}\nconfig-file = child\nkeybind = ctrl+a=new_split\n",
+            theme.display()
+        );
+        let donor = scratch.write("ghostty", &donor_text);
+        let target = scratch.write(
+            "zz/config",
+            "# mine\npane-margin = 8\nfont-size = 12 # size\n",
+        );
+        let mux = scratch.write("zz/mux.conf", "set -g status off\n");
+        let groups = appearance_groups(&load_ghostty_appearance_from_for(
+            &donor,
+            TerminalColorScheme::Dark,
+        ))
+        .unwrap();
+        write_import(&target, &groups).unwrap();
+        let imported = fs::read_to_string(&target).unwrap();
+        assert!(imported.starts_with("# mine\npane-margin = 8\nfont-size = 17 # size\n"));
+        assert!(imported.contains("background = #123456\n"));
+        assert!(imported.contains("foreground = #ABCDEF\n"));
+        assert!(imported.contains("font-family = \"First Mono\"\nfont-family = \"Second Mono\"\n"));
+        assert!(!imported.contains("theme ="));
+        assert!(!imported.contains("config-file ="));
+        assert!(!imported.contains("keybind ="));
+        assert_eq!(fs::read_to_string(&mux).unwrap(), "set -g status off\n");
+        assert_eq!(fs::read_to_string(&donor).unwrap(), donor_text);
+        assert!(
+            fs::read_to_string(&child)
+                .unwrap()
+                .contains("font-size = 17")
+        );
+    }
+
+    #[test]
+    fn empty_cumulative_import_clears_existing_groups_and_keeps_other_bytes() {
+        let scratch = Scratch::new();
+        let donor = scratch.write("ghostty", "font-family-bold = \"\"\nfont-feature = \"\"\n");
+        let groups = appearance_groups(&load_ghostty_appearance_from_for(
+            &donor,
+            TerminalColorScheme::Dark,
+        ))
+        .unwrap();
+        let edited = apply_import(
+            "# mine\r\nfont-family-bold = Old\r\nfont-family-bold = Older\r\nfont-feature = liga\r\npane-margin = 8\r\n",
+            &groups,
+        )
+        .unwrap();
+        assert_eq!(edited, "# mine\r\npane-margin = 8\r\n");
+    }
+
+    #[test]
+    fn selected_color_scheme_is_resolved_before_import() {
+        let scratch = Scratch::new();
+        let light = scratch.write("light", "background = #ffffff\n");
+        let dark = scratch.write("dark", "background = #000000\n");
+        let donor = scratch.write(
+            "ghostty",
+            &format!(
+                "theme = light:{},dark:{}\n",
+                light.display(),
+                dark.display()
+            ),
+        );
+        for (scheme, expected) in [
+            (TerminalColorScheme::Light, "#FFFFFF"),
+            (TerminalColorScheme::Dark, "#000000"),
+        ] {
+            let groups =
+                appearance_groups(&load_ghostty_appearance_from_for(&donor, scheme)).unwrap();
+            assert!(groups.contains(&(AppearanceConfigKey::Background, vec![expected.to_owned()])));
+        }
+    }
+
+    #[test]
+    fn oversized_import_leaves_existing_file_unchanged() {
+        let scratch = Scratch::new();
+        let source = format!("#{}\n", "x".repeat(file::MAX_CONFIG_BYTES - 2));
+        let target = scratch.write("config", &source);
+        let error = write_import(
+            &target,
+            &[(AppearanceConfigKey::FontSize, vec!["17".to_owned()])],
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+        assert_eq!(fs::read_to_string(target).unwrap(), source);
     }
 }

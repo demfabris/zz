@@ -201,6 +201,9 @@ impl TerminalPane {
 }
 
 fn number_text(indicator: PaneIndicator) -> String {
+    if !indicator.label.is_empty() {
+        return indicator.label;
+    }
     match indicator.selection_key() {
         Some(key) => format!("{}  {key}", indicator.index),
         None => indicator.index.to_string(),
@@ -211,8 +214,14 @@ fn number_text(indicator: PaneIndicator) -> String {
 /// output it has not shown piled up behind a scroll.
 fn badge_text((mode, unseen): Indicator) -> Option<String> {
     let mut text = match mode {
-        TerminalMode::Live => String::new(),
-        TerminalMode::Copy { position, total } => format!("COPY MODE  {position}/{total}"),
+        TerminalMode::Live
+        | TerminalMode::Copy {
+            hide_position: true,
+            ..
+        } => String::new(),
+        TerminalMode::Copy {
+            position, total, ..
+        } => format!("COPY MODE  {position}/{total}"),
         TerminalMode::View { position, total } => {
             format!("VIEW MODE  {position}/{total}  ·  q close")
         }
@@ -241,10 +250,11 @@ mod tests {
             pane: zz_protocol::PaneId(4),
             index: 2,
             select_key: b'c',
+            label: String::new(),
             flags: 0,
         };
 
-        assert_eq!(number_text(indicator), "2  c");
+        assert_eq!(number_text(indicator.clone()), "2  c");
         assert_eq!(
             number_text(PaneIndicator {
                 select_key: 0,
@@ -264,7 +274,8 @@ mod tests {
             badge_text((
                 TerminalMode::Copy {
                     position: 12,
-                    total: 340
+                    total: 340,
+                    hide_position: false
                 },
                 0
             ))
@@ -275,7 +286,8 @@ mod tests {
             badge_text((
                 TerminalMode::Copy {
                     position: 12,
-                    total: 340
+                    total: 340,
+                    hide_position: false
                 },
                 3
             ))

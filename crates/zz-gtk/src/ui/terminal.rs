@@ -11,7 +11,7 @@ use std::{
 use gtk::{gdk, glib, graphene, gsk, pango, prelude::*, subclass::prelude::*};
 use unicode_segmentation::UnicodeSegmentation;
 use zz_client::{ChromeAction, ChromeKeymap, ViewportDamage};
-use zz_protocol::{InputMessage, PaneId};
+use zz_protocol::{InputMessage, PaneId, PopupAction};
 use zz_terminal::{
     CellWidth, ClipboardTarget, Cursor, CursorStyle, GRAPHEME_TABLE_BIT, Glyph, KeyAction,
     KeyInput, OVERLAY_RECTANGLE, OverlayKind, PackedCell, PackedStyle, PointerCellEvent,
@@ -196,6 +196,7 @@ mod imp {
         pub scrollbar_dragging: Cell<bool>,
         pub hover: RefCell<Option<String>>,
         pub popup: RefCell<Option<gtk::Popover>>,
+        pub daemon_popup: Cell<bool>,
         pub(super) accessible_active: Cell<bool>,
         pub(super) accessible_text: RefCell<Option<AccessibleTerminalText>>,
     }
@@ -417,6 +418,21 @@ impl TerminalView {
         view
     }
 
+    pub fn new_popup(
+        engine: Arc<Engine>,
+        pane: PaneId,
+        appearance: TerminalAppearance,
+        chrome: Rc<dyn Fn(ChromeAction)>,
+    ) -> Self {
+        let view = Self::new(engine, pane, appearance, chrome);
+        view.imp().daemon_popup.set(true);
+        view
+    }
+
+    pub fn cell_metrics(&self) -> CellMetrics {
+        self.imp().metrics.get()
+    }
+
     pub fn pane(&self) -> PaneId {
         self.imp().pane.get()
     }
@@ -562,24 +578,27 @@ impl TerminalView {
                 .first()
                 .map_or("Monospace", String::as_str),
         );
-        font.set_weight(if appearance.font_weight >= 600 {
-            pango::Weight::Bold
-        } else {
-            pango::Weight::Normal
-        });
+        font.set_weight(pango::Weight::__Unknown(i32::from(appearance.font_weight)));
         font.set_size((appearance.font_size_points * pango::SCALE as f32).round() as i32);
         let metrics = self.pango_context().metrics(Some(&font), None);
         let width = metrics.approximate_char_width() as f32 / pango::SCALE as f32;
-        let height = (metrics.ascent() + metrics.descent()) as f32 / pango::SCALE as f32;
+        let base_height = (metrics.ascent() + metrics.descent()) as f32 / pango::SCALE as f32;
+        let height = appearance
+            .cell_height_adjustment
+            .apply(if base_height > 1.0 { base_height } else { 16.0 })
+            .max(1.0);
         imp.metrics.set(CellMetrics {
             width: if width > 1.0 { width } else { 8.0 },
-            height: if height > 1.0 { height } else { 16.0 },
+            height,
         });
         drop(appearance);
         imp.font.replace(font);
     }
 
     fn publish_geometry(&self, width: i32, height: i32) {
+        if self.imp().daemon_popup.get() {
+            return;
+        }
         let Some(engine) = self.engine() else {
             return;
         };
@@ -978,7 +997,7 @@ impl TerminalView {
             return glib::Propagation::Stop;
         }
         self.flush_local_scroll();
-        if action == KeyAction::Press {
+        if action == KeyAction::Press && !self.imp().daemon_popup.get() {
             let probe = keys::key_input(action, keyval, state, None);
             if let Some(chrome) = resolve_chrome(&engine.chrome(), &probe) {
                 self.imp()
@@ -998,7 +1017,7 @@ impl TerminalView {
             .key_routes
             .borrow_mut()
             .insert(key.keycode(), KeyRoute::Daemon);
-        engine.send_key(self.pane(), input, false);
+        self.send_key(input);
         glib::Propagation::Stop
     }
 
@@ -1013,9 +1032,6 @@ impl TerminalView {
         let Some(route) = self.imp().key_routes.borrow_mut().remove(&key.keycode()) else {
             return glib::Propagation::Proceed;
         };
-        let Some(engine) = self.engine() else {
-            return glib::Propagation::Stop;
-        };
         let kitty = self
             .imp()
             .viewport
@@ -1024,7 +1040,7 @@ impl TerminalView {
             .is_some_and(|viewport| viewport.kitty_keyboard);
         if route == KeyRoute::Daemon && kitty {
             let input = keys::key_input(KeyAction::Release, keyval, state, None);
-            engine.send_key(self.pane(), input, false);
+            self.send_key(input);
         }
         glib::Propagation::Stop
     }
@@ -1050,9 +1066,30 @@ impl TerminalView {
         }
     }
 
+    fn send_key(&self, input: KeyInput) {
+        if let Some(engine) = self.engine() {
+            if self.imp().daemon_popup.get() {
+                engine.send(InputMessage::Popup {
+                    action: PopupAction::Key {
+                        input,
+                        text_follows: false,
+                    },
+                });
+            } else {
+                engine.send_key(self.pane(), input, false);
+            }
+        }
+    }
+
     fn send_text(&self, text: &str) {
         if let Some(engine) = self.engine() {
-            engine.send_text(self.pane(), text.to_owned());
+            if self.imp().daemon_popup.get() {
+                engine.send(InputMessage::Popup {
+                    action: PopupAction::Text(text.to_owned()),
+                });
+            } else {
+                engine.send_text(self.pane(), text.to_owned());
+            }
         }
     }
 
@@ -1089,7 +1126,11 @@ impl TerminalView {
         let Some(engine) = self.engine() else {
             return;
         };
-        engine.send(if self.imp().frozen.get() {
+        engine.send(if self.imp().daemon_popup.get() {
+            InputMessage::Popup {
+                action: PopupAction::TerminalView(action),
+            }
+        } else if self.imp().frozen.get() {
             InputMessage::CommandOutputView { action }
         } else {
             InputMessage::TerminalView {
@@ -1141,7 +1182,7 @@ impl TerminalView {
     /// True when the overlay took the gesture and nothing should reach the wire.
     fn scroll_locally_by(&self, delta: i64) -> bool {
         let imp = self.imp();
-        if imp.frozen.get() {
+        if imp.frozen.get() || imp.daemon_popup.get() {
             return false;
         }
         let Some(engine) = self.engine() else {
@@ -1633,11 +1674,19 @@ impl TerminalView {
         font: &pango::FontDescription,
     ) {
         let attributes = run_attributes(run.style);
+        let minimum_contrast = self.imp().appearance.borrow().minimum_contrast;
+        let decorative = |cell| match glyph_of(dictionary, cell) {
+            Glyph::Empty => false,
+            Glyph::Scalar(character) => colors::is_decorative_character(character),
+            Glyph::Grapheme(grapheme) => grapheme.chars().all(colors::is_decorative_character),
+        };
         let mut column = run.start;
         while column < run.end {
             let mut text = String::new();
             let segment_start = column;
+            let segment_decorative = decorative(cells[column]);
             while column < run.end
+                && decorative(cells[column]) == segment_decorative
                 && !matches!(
                     cells[column].width(),
                     CellWidth::SpacerTail | CellWidth::SpacerHead
@@ -1664,10 +1713,12 @@ impl TerminalView {
             let layout = self.create_pango_layout(Some(&text));
             layout.set_font_description(Some(font));
             layout.set_attributes(Some(&attributes));
+            let color =
+                colors::resolved_foreground(run.style, minimum_contrast, segment_decorative);
             let foreground = if run.style.faint() {
-                colors::rgba_faded(run.style.foreground(), FAINT_ALPHA)
+                colors::rgba_faded(color, FAINT_ALPHA)
             } else {
-                colors::rgba(run.style.foreground())
+                colors::rgba(color)
             };
             snapshot.save();
             snapshot.translate(&graphene::Point::new(

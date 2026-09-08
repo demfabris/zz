@@ -332,6 +332,7 @@ mod tests {
         live.mode = zz_terminal::TerminalMode::Copy {
             position: 0,
             total: 0,
+            hide_position: false,
         };
         assert!(!local_scroll_gate(&live, 10));
 

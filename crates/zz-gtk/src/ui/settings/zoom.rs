@@ -2,14 +2,6 @@
 //!
 //! Deliberately not a config key: the desktop's zoom is transient too, so a
 //! chord pressed to read one long line does not become a persisted preference.
-//!
-//! Two mechanisms, because GTK has no single knob for both halves. Chrome text
-//! is scaled by an app-level CSS `font-size` on `window`, computed from the
-//! desktop's own font size so the family stays the theme's. The terminal grid
-//! is scaled by multiplying the point size the daemon resolved, because the
-//! pane caches its cell metrics and only recomputes them when the appearance
-//! value it was handed actually changes. Driving the terminal through the CSS
-//! rule instead would leave those metrics stale and the grid misaligned.
 
 use std::cell::Cell;
 
@@ -20,12 +12,14 @@ const FALLBACK_POINTS: f32 = 11.0;
 
 pub struct UiZoom {
     scale: Cell<f32>,
+    animations_disabled: Cell<bool>,
 }
 
 impl Default for UiZoom {
     fn default() -> Self {
         Self {
             scale: Cell::new(1.0),
+            animations_disabled: Cell::new(false),
         }
     }
 }
@@ -57,14 +51,46 @@ impl UiZoom {
         true
     }
 
-    /// The chrome half, as a CSS rule. Empty at 100% so the default look is
-    /// exactly the platform's, with no rule of ours in the cascade.
     pub fn css(&self) -> String {
+        let config = crate::config::current();
+        self.apply_animations(config.animations);
         let scale = self.scale.get();
-        if (scale - 1.0).abs() < f32::EPSILON {
-            return String::new();
+        let points = if (scale - 1.0).abs() < f32::EPSILON {
+            FALLBACK_POINTS
+        } else {
+            base_points()
+        };
+        chrome_css(scale, points, config.ui_font_family.as_deref())
+    }
+
+    fn apply_animations(&self, enabled: bool) {
+        if self.animations_disabled.get() != enabled {
+            return;
         }
-        format!("window {{ font-size: {:.1}pt; }}\n", base_points() * scale)
+        if let Some(settings) = gtk::Settings::default() {
+            if enabled {
+                settings.reset_property("gtk-enable-animations");
+            } else {
+                settings.set_gtk_enable_animations(false);
+            }
+            self.animations_disabled.set(!enabled);
+        }
+    }
+}
+
+fn chrome_css(scale: f32, points: f32, family: Option<&str>) -> String {
+    let mut declarations = Vec::new();
+    if (scale - 1.0).abs() >= f32::EPSILON {
+        declarations.push(format!("font-size: {:.1}pt;", points * scale));
+    }
+    if let Some(family) = family.filter(|family| !family.is_empty() && *family != ".SystemUIFont") {
+        let family = family.replace('\\', "\\\\").replace('"', "\\\"");
+        declarations.push(format!("font-family: \"{family}\";"));
+    }
+    if declarations.is_empty() {
+        String::new()
+    } else {
+        format!("window {{ {} }}\n", declarations.join(" "))
     }
 }
 
@@ -120,7 +146,35 @@ mod tests {
 
         assert!(zoom.reset());
         assert_eq!(zoom.percent(), 100);
-        assert!(zoom.css().is_empty());
+        assert!(chrome_css(zoom.scale(), 11.0, None).is_empty());
         assert!(!zoom.reset());
+    }
+
+    #[test]
+    fn family_override_survives_reset_and_zoom_remains_transient() {
+        let zoom = UiZoom::default();
+        assert_eq!(
+            chrome_css(zoom.scale(), 11.0, Some("Inter")),
+            "window { font-family: \"Inter\"; }\n"
+        );
+        zoom.step(1);
+        assert_eq!(
+            chrome_css(zoom.scale(), 11.0, Some("Inter")),
+            "window { font-size: 12.1pt; font-family: \"Inter\"; }\n"
+        );
+        zoom.reset();
+        assert_eq!(
+            chrome_css(zoom.scale(), 11.0, Some("Inter")),
+            "window { font-family: \"Inter\"; }\n"
+        );
+        assert!(chrome_css(zoom.scale(), 11.0, Some(".SystemUIFont")).is_empty());
+    }
+
+    #[test]
+    fn font_names_remain_single_css_strings() {
+        assert_eq!(
+            chrome_css(1.0, 11.0, Some("A\\B\"; color: red;")),
+            "window { font-family: \"A\\\\B\\\"; color: red;\"; }\n"
+        );
     }
 }

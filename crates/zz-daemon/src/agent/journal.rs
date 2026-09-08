@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::{HashMap, HashSet, hash_map::Entry},
     ffi::OsStr,
     fs::{self, File, OpenOptions},
     io::{self, Write as _},
@@ -381,6 +381,7 @@ struct JournalTail {
 pub(crate) struct AgentJournal {
     directory: PathBuf,
     handles: Mutex<HashMap<String, OpenJournal>>,
+    incomplete: Mutex<HashSet<String>>,
 }
 
 impl AgentJournal {
@@ -390,6 +391,7 @@ impl AgentJournal {
         Ok(Self {
             directory: directory.to_path_buf(),
             handles: Mutex::new(HashMap::new()),
+            incomplete: Mutex::new(HashSet::new()),
         })
     }
 
@@ -413,14 +415,26 @@ impl AgentJournal {
         record: impl FnOnce(&mut OpenJournal) -> Result<u64, JournalError>,
     ) -> Result<u64, JournalError> {
         let key = journal_key(provider, session_id);
+        let result = self.record_with_handle(&key, record);
+        if result.is_err() {
+            self.incomplete.lock().insert(key);
+        }
+        result
+    }
+
+    fn record_with_handle(
+        &self,
+        key: &str,
+        record: impl FnOnce(&mut OpenJournal) -> Result<u64, JournalError>,
+    ) -> Result<u64, JournalError> {
         let mut handles = self.handles.lock();
-        if handles.len() >= MAX_OPEN_JOURNALS && !handles.contains_key(&key) {
+        if handles.len() >= MAX_OPEN_JOURNALS && !handles.contains_key(key) {
             handles.clear();
         }
-        let journal = match handles.entry(key.clone()) {
+        let journal = match handles.entry(key.to_owned()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                let path = self.directory.join(journal_file_name(&key));
+                let path = self.directory.join(journal_file_name(key));
                 let tail = scan(&path)?;
                 let file = OpenOptions::new().create(true).append(true).open(&path)?;
                 restrict_to_current_user(&path)?;
@@ -439,11 +453,18 @@ impl AgentJournal {
             Ok(seq) => Ok(seq),
             Err(error) => {
                 if matches!(error, JournalError::Io(_)) {
-                    handles.remove(&key);
+                    handles.remove(key);
                 }
                 Err(error)
             }
         }
+    }
+
+    pub(crate) fn is_complete_for(&self, provider: AgentProvider, session_id: &str) -> bool {
+        !self
+            .incomplete
+            .lock()
+            .contains(&journal_key(provider, session_id))
     }
 
     /// Every recorded entry in order, torn or malformed lines skipped. A
@@ -463,6 +484,8 @@ impl AgentJournal {
                 .transpose();
             if let Err(error) = flushed {
                 handles.remove(&key);
+                drop(handles);
+                self.incomplete.lock().insert(key);
                 return Err(error);
             }
         }
@@ -493,6 +516,7 @@ impl AgentJournal {
         if let Some(mut journal) = self.handles.lock().remove(&key) {
             journal.discard_pending();
         }
+        self.incomplete.lock().remove(&key);
         match fs::remove_file(self.directory.join(journal_file_name(&key))) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),

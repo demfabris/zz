@@ -510,10 +510,11 @@ transcoded, long edge capped at 1568 px, 5 MiB ceiling), then sends one `PasteUp
 
 `PasteUploadBegin.purpose` chooses what happens after the bytes land:
 
-- `PastePath` writes `<runtime-dir>/paste/paste-<client>-<upload id>.<extension>` (directory `0700`,
-  file `0600` on unix) next to the daemon socket, keeps only the newest 8 files there, and pastes
-  that absolute path into the pane through the ordinary bracketed-paste path. Path-aware CLIs read
-  the file from there.
+- `PastePath` writes `<runtime-dir>/paste/<socket name>/paste-<client>-<upload id>.<extension>`
+  (directory `0700`, file `0600` on unix) next to the daemon socket, keeps only the newest 8 files
+  there, and pastes that absolute path into the pane through the ordinary bracketed-paste path.
+  Each daemon owns the subdirectory named after its socket, and a name that already exists gets a
+  `-<n>` suffix rather than being truncated. Path-aware CLIs read the file from there.
 - `RecordPastedImage` keeps the encoded bytes until the terminal prints a numbered placeholder
   (`[Image #N]`). A later `FetchPastedImage { pane, number }` asks the daemon to stream that image
   back as `PastedImageBegin` + `PastedImageChunk`s, or `PastedImageUnavailable` if it is gone.

@@ -1225,6 +1225,7 @@ pub struct Daemon {
     socket_path: PathBuf,
     load_user_config: bool,
     mux_config_files: Option<Vec<PathBuf>>,
+    zz_mux_config_path: Option<PathBuf>,
     server_id: Option<u64>,
     initial_client_working_directory: Option<PathBuf>,
 }
@@ -1236,6 +1237,7 @@ impl Daemon {
             socket_path: socket_path.into(),
             load_user_config: true,
             mux_config_files: None,
+            zz_mux_config_path: None,
             server_id: None,
             initial_client_working_directory: None,
         }
@@ -1245,6 +1247,12 @@ impl Daemon {
     pub fn with_mux_config_files(mut self, files: impl IntoIterator<Item = PathBuf>) -> Self {
         let files = files.into_iter().collect::<Vec<_>>();
         self.mux_config_files = (!files.is_empty()).then_some(files);
+        self
+    }
+
+    #[must_use]
+    pub fn with_zz_mux_config_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.zz_mux_config_path = Some(path.into());
         self
     }
 
@@ -1323,6 +1331,10 @@ impl Daemon {
             paste_upload_directory(&self.socket_path),
             self.socket_path.clone(),
         ));
+        shared
+            .zz_mux_config_path
+            .lock()
+            .clone_from(&self.zz_mux_config_path);
         #[cfg(unix)]
         shared.install_tmux_shim()?;
         shared.begin_startup();
@@ -1570,21 +1582,24 @@ impl Drop for TmuxShimGuard {
     }
 }
 
-#[cfg(unix)]
 fn paste_upload_directory(socket_path: &Path) -> PathBuf {
-    socket_path
+    #[cfg(unix)]
+    let root = socket_path
         .parent()
-        .map_or_else(|| PathBuf::from("paste"), |parent| parent.join("paste"))
-}
-
-#[cfg(not(unix))]
-fn paste_upload_directory(_socket_path: &Path) -> PathBuf {
-    std::env::temp_dir().join("zz").join("paste")
+        .map_or_else(|| PathBuf::from("paste"), |parent| parent.join("paste"));
+    #[cfg(not(unix))]
+    let root = std::env::temp_dir().join("zz").join("paste");
+    root.join(
+        socket_path
+            .file_name()
+            .unwrap_or_else(|| OsStr::new("default")),
+    )
 }
 
 fn write_paste_upload(
     directory: &Path,
-    file_name: &str,
+    stem: &str,
+    extension: &str,
     bytes: &[u8],
 ) -> Result<PathBuf, std::io::Error> {
     fs::create_dir_all(directory)?;
@@ -1593,15 +1608,27 @@ fn write_paste_upload(
         directory,
         <fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o700),
     )?;
-    let path = directory.join(file_name);
     let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut file = options.open(&path)?;
-    file.write_all(bytes)?;
-    file.flush()?;
-    Ok(path)
+    let mut attempt = 0u32;
+    loop {
+        let path = if attempt == 0 {
+            directory.join(format!("{stem}.{extension}"))
+        } else {
+            directory.join(format!("{stem}-{attempt}.{extension}"))
+        };
+        match options.open(&path) {
+            Ok(mut file) => {
+                file.write_all(bytes)?;
+                file.flush()?;
+                return Ok(path);
+            }
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => attempt += 1,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 fn prune_paste_uploads(directory: &Path, keep: usize) {
@@ -1683,6 +1710,27 @@ struct TerminalGeneration {
     dictionary: u32,
     columns: u16,
     rows: u16,
+}
+
+impl TerminalGeneration {
+    fn precedes(self, other: Self) -> bool {
+        self.view < other.view && self.content <= other.content
+    }
+}
+
+fn newer_terminal_delivered(
+    state: &OutboundState,
+    pane: PaneId,
+    current: TerminalGeneration,
+) -> bool {
+    state
+        .terminals
+        .get(&pane)
+        .is_some_and(|pending| current.precedes(pending.current))
+        || state
+            .delivered_terminals
+            .get(&pane)
+            .is_some_and(|delivered| current.precedes(*delivered))
 }
 
 struct PendingTerminal {
@@ -2272,6 +2320,11 @@ impl OutboundMailbox {
             {
                 return TerminalEnqueue::NeedsFull;
             }
+            if transition.base.is_none()
+                && newer_terminal_delivered(&state, pane, transition.current)
+            {
+                return TerminalEnqueue::Dropped;
+            }
             if let TerminalDelivery::Preview { foreground_panes } = delivery
                 && (state.terminals.len() >= MAX_PENDING_TERMINALS.saturating_sub(foreground_panes)
                     || frame_len.is_some_and(|frame_len| {
@@ -2315,6 +2368,10 @@ impl OutboundMailbox {
         {
             recycle_outbound_frame(&mut state, encoded);
             return TerminalEnqueue::NeedsFull;
+        }
+        if transition.base.is_none() && newer_terminal_delivered(&state, pane, transition.current) {
+            recycle_outbound_frame(&mut state, encoded);
+            return TerminalEnqueue::Dropped;
         }
         match delivery {
             TerminalDelivery::Foreground => {
@@ -2404,6 +2461,10 @@ impl OutboundMailbox {
         };
         let mut state = self.state.lock();
         if state.closed {
+            return false;
+        }
+        if newer_terminal_delivered(&state, pane, transition.current) {
+            recycle_outbound_frame(&mut state, encoded);
             return false;
         }
         clear_preview_refresh(&mut state, pane);
@@ -2940,12 +3001,15 @@ struct Shared {
     exit_empty_armed: AtomicBool,
     server_id: u64,
     mux_config_selection: Mutex<(bool, Option<Vec<PathBuf>>)>,
+    zz_mux_config_path: Mutex<Option<PathBuf>>,
     paste_directory: PathBuf,
     socket_path: PathBuf,
     #[cfg(test)]
     delivered_wrap_search_commands: Mutex<Vec<bool>>,
     #[cfg(test)]
     response_admission_hook: Mutex<Option<ResponseAdmissionHook>>,
+    #[cfg(test)]
+    destroy_unattached_hook: Mutex<Option<ResponseAdmissionHook>>,
     #[cfg(unix)]
     tmux_shim: Mutex<Option<TmuxShimGuard>>,
 }
@@ -4010,12 +4074,15 @@ impl Shared {
             exit_empty_armed: AtomicBool::new(false),
             server_id,
             mux_config_selection: Mutex::new((load_user_config, None)),
+            zz_mux_config_path: Mutex::new(None),
             paste_directory,
             socket_path,
             #[cfg(test)]
             delivered_wrap_search_commands: Mutex::new(Vec::new()),
             #[cfg(test)]
             response_admission_hook: Mutex::new(None),
+            #[cfg(test)]
+            destroy_unattached_hook: Mutex::new(None),
             #[cfg(unix)]
             tmux_shim: Mutex::new(None),
         }
@@ -13849,7 +13916,10 @@ impl Shared {
             }));
         if !sent {
             self.inner.lock().client_file_waiters.remove(&request_id);
-            return None;
+            return Some(Err(client_file_failure(
+                "the invoking client is gone",
+                path,
+            )));
         }
         let reply = wait.recv().ok();
         self.inner.lock().client_file_waiters.remove(&request_id);
@@ -14953,7 +15023,9 @@ impl Shared {
         event_hooks_enabled: bool,
     ) -> Result<(MuxSnapshot, Vec<PendingHookEvent>), ServerError> {
         let mut inner = self.inner.lock();
-        if !inner.engine.state.sessions.contains_key(&session) {
+        if !inner.engine.state.sessions.contains_key(&session)
+            || inner.destroying_unattached.contains(&session)
+        {
             return Err(ServerError::MissingTarget(session.to_string()));
         }
         let hook_state_before = event_hooks_enabled.then(|| {
@@ -15302,23 +15374,31 @@ impl Shared {
                 .collect::<Vec<_>>()
         };
         for session in candidates {
-            let eligible = {
-                let inner = self.inner.lock();
-                inner.engine.state.sessions.contains_key(&session)
-                    && !inner.attached.contains_key(&session)
-            };
-            if !eligible {
-                continue;
+            {
+                let mut inner = self.inner.lock();
+                let eligible = inner.engine.state.sessions.contains_key(&session)
+                    && !inner.attached.contains_key(&session);
+                if !eligible {
+                    continue;
+                }
+                inner.destroying_unattached.insert(session);
+            }
+            #[cfg(test)]
+            if let Some(hook) = self.destroy_unattached_hook.lock().take() {
+                let _ = hook.reached.send(());
+                let _ = hook.release.recv();
             }
             let target = session.to_string();
             let command = CommandInvocation::new("kill-session", ["-t", target.as_str()]);
             let mut context = ExecutionContext::default();
-            if let Err(error) = self.execute(
+            let result = self.execute(
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut context,
                 &command,
-            ) {
+            );
+            self.inner.lock().destroying_unattached.remove(&session);
+            if let Err(error) = result {
                 log::warn!("destroy-unattached could not destroy {target}: {error}");
             }
         }
@@ -19343,7 +19423,8 @@ impl Shared {
         }
         let path = match write_paste_upload(
             &self.paste_directory,
-            &format!("paste-{client}-{upload_id}.{}", upload.extension),
+            &format!("paste-{client}-{upload_id}"),
+            &upload.extension,
             &upload.bytes,
         ) {
             Ok(path) => path,
@@ -21473,30 +21554,39 @@ impl Shared {
                 .cloned()
                 .unwrap_or_default();
             let current_path = live_path.unwrap_or_else(|| previous.start_path.clone());
-            let facts = format_hook_facts(&inner);
-            let mut hooks = DaemonFormatHooks::command(&facts);
-            let before = MuxHookSnapshot::capture(&inner.engine);
-            let changed = inner.engine.set_pane_runtime_facts_with_hooks(
-                pane,
-                PaneRuntimeFacts {
-                    current_command: current_command.to_owned(),
-                    current_path,
-                    dead_signal: previous.dead_signal,
-                    reported_path,
-                    start_path: previous.start_path,
-                    pid,
-                    tty,
-                },
-                &mut hooks,
-            );
-            let after = MuxHookSnapshot::capture(&inner.engine);
-            (
-                changed,
-                mux_hook_events(&before, &after, ""),
-                refresh_activity_choosers,
-                alert_window,
-                silence_schedule,
-            )
+            let runtime = PaneRuntimeFacts {
+                current_command: current_command.to_owned(),
+                current_path,
+                dead_signal: previous.dead_signal,
+                reported_path,
+                start_path: previous.start_path,
+                pid,
+                tty,
+            };
+            if inner.engine.pane_runtime_facts(pane) == Some(&runtime) {
+                (
+                    false,
+                    Vec::new(),
+                    refresh_activity_choosers,
+                    alert_window,
+                    silence_schedule,
+                )
+            } else {
+                let facts = format_hook_facts(&inner);
+                let mut hooks = DaemonFormatHooks::command(&facts);
+                let before = MuxHookSnapshot::capture(&inner.engine);
+                let changed = inner
+                    .engine
+                    .set_pane_runtime_facts_with_hooks(pane, runtime, &mut hooks);
+                let after = MuxHookSnapshot::capture(&inner.engine);
+                (
+                    changed,
+                    mux_hook_events(&before, &after, ""),
+                    refresh_activity_choosers,
+                    alert_window,
+                    silence_schedule,
+                )
+            }
         };
         if let Some(deadline) = silence_schedule {
             let _ = self
@@ -23627,7 +23717,12 @@ impl Shared {
             selection.0,
             selection.1.as_deref(),
             tmux_config_candidates,
-            default_mux_config,
+            || {
+                self.zz_mux_config_path
+                    .lock()
+                    .clone()
+                    .or_else(default_mux_config)
+            },
         )
     }
 
@@ -26654,6 +26749,7 @@ struct ServerState {
     pane_exit_waits: BTreeMap<PaneId, PaneExitWait>,
     next_client_file_request: u64,
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
+    destroying_unattached: BTreeSet<SessionId>,
     visible_terminals: BTreeMap<ClientId, BTreeSet<PaneId>>,
     streamed_terminals: BTreeMap<ClientId, BTreeMap<PaneId, TerminalStreamKind>>,
     terminal_preview_clients: BTreeSet<ClientId>,
@@ -32844,7 +32940,7 @@ fn run_shell_job(
         process.env(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, startup_reentry);
     }
     let mut child = process.spawn().map_err(|_| ())?;
-    let _stdin = child.stdin.take();
+    drop(child.stdin.take());
     let Some(mut stdout) = child.stdout.take() else {
         let _ = terminate_copy_pipe(&mut child);
         return Err(());
@@ -62337,6 +62433,47 @@ set-option -g @alias-mixed-next yes
         }
     }
 
+    #[test]
+    fn unchanged_pane_runtime_facts_do_not_bump_the_mux_generation() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "a", QUIET_PANE_COMMAND]),
+            )
+            .expect("session");
+        let pane = context.pane.expect("session pane");
+        wait_for_pane_runtime_facts(&shared, &[pane]);
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        let viewport = terminal.latest_viewport();
+        let (facts, generation) = {
+            let inner = shared.inner.lock();
+            (
+                inner
+                    .engine
+                    .pane_runtime_facts(pane)
+                    .cloned()
+                    .expect("settled facts"),
+                inner.engine.state.generation(),
+            )
+        };
+
+        shared.synchronize_pane_runtime(pane, &terminal, &viewport, &facts.current_command, false);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.state.generation(), generation);
+            assert_eq!(inner.engine.pane_runtime_facts(pane), Some(&facts));
+        }
+
+        shared.synchronize_pane_runtime(pane, &terminal, &viewport, "zz-changed", false);
+        let inner = shared.inner.lock();
+        assert!(inner.engine.state.generation() > generation);
+        assert_ne!(inner.engine.pane_runtime_facts(pane), Some(&facts));
+    }
+
     fn two_session_pair(
         shared: &Arc<Shared>,
     ) -> (
@@ -67022,6 +67159,44 @@ set-option -g @alias-mixed-next yes
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn shell_job_closes_stdin_before_waiting_for_the_child() {
+        let process = Arc::new(Mutex::new(None));
+        let worker_process = Arc::clone(&process);
+        let (finished, result) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || {
+            let stopping = AtomicBool::new(false);
+            let result = run_shell_job(
+                "sort",
+                &std::env::temp_dir(),
+                "",
+                &[],
+                "tmux-256color",
+                Path::new("zz-shell-job-test"),
+                None,
+                None,
+                None,
+                false,
+                &worker_process,
+                &stopping,
+                false,
+                None,
+            );
+            let _ = finished.send(result);
+        });
+        let result = match result.recv_timeout(Duration::from_secs(5)) {
+            Ok(result) => result.expect("shell job"),
+            Err(error) => {
+                terminate_managed_process(&process);
+                worker.join().expect("shell job worker");
+                panic!("shell job kept waiting for stdin to close: {error}");
+            }
+        };
+        worker.join().expect("shell job worker");
+        assert!(result.status.success());
+    }
+
     #[cfg(unix)]
     #[test]
     fn foreground_shell_jobs_run_concurrently_and_obey_the_process_cap() {
@@ -68010,6 +68185,39 @@ set-option -g @alias-mixed-next yes
         let mut expected = b"prefix:".to_vec();
         expected.extend_from_slice(bytes);
         assert_eq!(fs::read(&output).expect("appended bytes"), expected);
+    }
+
+    #[test]
+    fn save_buffer_fails_instead_of_writing_locally_when_the_command_client_is_gone() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let output = directory.path().join("output.txt");
+        let shared = Arc::new(Shared::new(1));
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        let context = ExecutionContext::default();
+        shared
+            .buffer_command(
+                &context,
+                "set-buffer",
+                &["-b", "remote", "payload"].map(RawText::from),
+            )
+            .expect("set buffer");
+        let path = output.to_string_lossy().into_owned();
+        let args = ["-b", "remote", path.as_str()].map(RawText::from);
+        let mailbox = OutboundMailbox::new();
+        let _writer = ClientWriterRegistrationGuard::new(&shared, client, Arc::clone(&mailbox));
+        mailbox.close();
+
+        let error = shared
+            .buffer_command_for_client(Some(client), &context, "save-buffer", &args)
+            .expect_err("a closed writer cannot take the write");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message.contains("the invoking client is gone")
+        ));
+        assert!(!output.exists());
+        assert!(shared.inner.lock().client_file_waiters.is_empty());
     }
 
     #[test]
@@ -69639,12 +69847,58 @@ set-option -g @alias-mixed-next yes
     }
 
     #[test]
+    fn paste_uploads_from_separate_daemons_never_share_a_directory_or_a_file() {
+        let sockets = tempfile::tempdir().expect("temporary directory");
+        let first_directory = paste_upload_directory(&sockets.path().join("default.sock"));
+        let second_directory = paste_upload_directory(&sockets.path().join("other.sock"));
+        assert_ne!(first_directory, second_directory);
+        assert_eq!(first_directory.parent(), second_directory.parent());
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let paste = directory.path().join("paste");
+        let first = paste_upload_fixture(&paste, "first-daemon");
+        let second = paste_upload_fixture(&paste, "second-daemon");
+        assert_eq!(
+            first.2, second.2,
+            "both daemons hand out the same first client id"
+        );
+        for ((shared, mailbox, client, pane), bytes) in [
+            (&first, b"first".as_slice()),
+            (&second, b"second".as_slice()),
+        ] {
+            take_reliable_messages(mailbox);
+            shared.begin_paste_upload(
+                *client,
+                ClientKind::Interactive,
+                1,
+                *pane,
+                PasteUploadPurpose::PastePath,
+                "txt".to_owned(),
+                u32::try_from(bytes.len()).expect("payload length"),
+            );
+            shared.extend_paste_upload(*client, 1, bytes);
+            assert!(client_message_texts(take_reliable_messages(mailbox)).is_empty());
+        }
+
+        let client = first.2;
+        assert_eq!(
+            fs::read(paste.join(format!("paste-{client}-1.txt"))).expect("first upload"),
+            b"first"
+        );
+        assert_eq!(
+            fs::read(paste.join(format!("paste-{client}-1-1.txt"))).expect("second upload"),
+            b"second"
+        );
+        assert_eq!(fs::read_dir(&paste).expect("upload directory").count(), 2);
+    }
+
+    #[test]
     fn paste_upload_retention_keeps_only_the_newest_files() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let paste = directory.path().join("paste");
         for index in 0..PASTE_UPLOAD_RETENTION + 4 {
             thread::sleep(Duration::from_millis(10));
-            write_paste_upload(&paste, &format!("paste-c1-{index}.png"), b"upload")
+            write_paste_upload(&paste, &format!("paste-c1-{index}"), "png", b"upload")
                 .expect("write upload");
             prune_paste_uploads(&paste, PASTE_UPLOAD_RETENTION);
         }
@@ -71374,6 +71628,41 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(decode_protocol_frame(&encoded).expect("decode"), second);
         mailbox.close();
         assert!(mailbox.recv().is_none());
+    }
+
+    #[test]
+    fn outbound_mailbox_keeps_the_newest_full_frame_when_an_older_one_lands_late() {
+        let mailbox = OutboundMailbox::new();
+        let pane = PaneId(9);
+        let newer = terminal_test_message(pane, 1, 2);
+        let older = terminal_test_message(pane, 2, 1);
+
+        assert_eq!(
+            mailbox.enqueue_terminal(pane, &newer),
+            TerminalEnqueue::Queued
+        );
+        let encoded = mailbox.recv().expect("newer frame");
+        assert_eq!(decode_protocol_frame(&encoded).expect("decode"), newer);
+
+        assert!(!mailbox.replace_terminal(pane, &older));
+        assert_eq!(
+            mailbox.enqueue_terminal(pane, &older),
+            TerminalEnqueue::Dropped
+        );
+        assert!(mailbox.state.lock().terminals.is_empty());
+        assert_eq!(
+            mailbox.enqueue_terminal(pane, &terminal_patch_test_message(pane, 3, 2, 3)),
+            TerminalEnqueue::Queued,
+            "the client still holds generation 2, so a patch from it applies"
+        );
+        assert!(mailbox.recv().is_some());
+
+        let pending = terminal_test_message(pane, 4, 5);
+        assert!(mailbox.replace_terminal(pane, &pending));
+        assert!(!mailbox.replace_terminal(pane, &terminal_test_message(pane, 5, 4)));
+        let encoded = mailbox.recv().expect("pending frame");
+        assert_eq!(decode_protocol_frame(&encoded).expect("decode"), pending);
+        mailbox.close();
     }
 
     #[test]
@@ -88442,6 +88731,56 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(a)
         );
         assert!(!shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn destroy_unattached_refuses_an_attach_that_lands_before_the_kill() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, _) = switch_test_session(&shared, "a");
+        let (b, _, _) = switch_test_session(&shared, "b");
+        let (leaver, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("leaver".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (joiner, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("joiner".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(leaver, b).expect("attach leaver");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-t", "b", "destroy-unattached", "on"]),
+            )
+            .expect("set destroy-unattached");
+        let (reached_tx, reached_rx) = crossbeam_channel::bounded(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+        *shared.destroy_unattached_hook.lock() = Some(ResponseAdmissionHook {
+            reached: reached_tx,
+            release: release_rx,
+        });
+        let detacher = {
+            let shared = Arc::clone(&shared);
+            thread::spawn(move || shared.detach(leaver))
+        };
+        reached_rx
+            .recv()
+            .expect("destroy-unattached reached the window before kill-session");
+        let attach = shared.attach(joiner, b);
+        release_tx.send(()).expect("release kill-session");
+        detacher.join().expect("detach thread");
+        assert!(matches!(attach, Err(ServerError::MissingTarget(_))));
+        let inner = shared.inner.lock();
+        assert!(!inner.engine.state.sessions.contains_key(&b));
+        assert!(inner.engine.state.sessions.contains_key(&a));
+        assert_eq!(client_attached_session(&inner, joiner), None);
+        assert!(inner.destroying_unattached.is_empty());
     }
 
     #[test]

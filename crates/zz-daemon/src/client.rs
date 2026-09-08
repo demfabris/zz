@@ -433,6 +433,29 @@ impl InteractiveClient {
         )
     }
 
+    #[cfg(unix)]
+    pub fn connect_terminal_surface_with_timeout(
+        path: &Path,
+        color_scheme: TerminalColorScheme,
+        timeout: std::time::Duration,
+    ) -> Result<Self, DaemonError> {
+        let stream = LocalTransport::connect(path)?;
+        stream.set_timeout(Some(timeout))?;
+        let control = stream.try_clone()?;
+        let connected = connect_stream(
+            ClientStream::Local(stream),
+            path.display(),
+            ClientKind::Interactive,
+            short_device_name(),
+            Some(color_scheme),
+            true,
+            false,
+            EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
+        )?;
+        control.set_timeout(None)?;
+        Ok(Self::from_connected(connected))
+    }
+
     pub fn connect_terminal_surface(
         path: &Path,
         color_scheme: TerminalColorScheme,
@@ -815,6 +838,10 @@ impl InteractiveClient {
 
     pub fn request_history(&self, pane: PaneId, start: u32, count: u32) -> Result<(), DaemonError> {
         self.send(&ProtocolMessage::HistoryRequest { pane, start, count })
+    }
+
+    pub fn client_instance_id(&self) -> ClientInstanceId {
+        client_instance_id()
     }
 
     /// Submit a prompt to the pane's daemon-owned agent. Images cross as

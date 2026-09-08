@@ -3395,6 +3395,9 @@ fn store_search_state(slot: &mut SearchSlot, state: SearchState) {
     }
 }
 
+static NEXT_GENERATION_SEED: AtomicU64 = AtomicU64::new(0);
+const GENERATION_SEED_STRIDE: u64 = 1 << 40;
+
 #[derive(Default)]
 struct ViewportGenerations {
     content: u64,
@@ -3404,9 +3407,11 @@ struct ViewportGenerations {
 
 impl ViewportGenerations {
     fn new() -> Result<Self, WorkerError> {
+        let seed = NEXT_GENERATION_SEED.fetch_add(GENERATION_SEED_STRIDE, Ordering::Relaxed);
         Ok(Self {
+            content: seed,
+            view: seed,
             kitty: Some(KittyGraphicsState::new()?),
-            ..Self::default()
         })
     }
 }
@@ -4341,31 +4346,33 @@ fn run_output_view(
                     )?;
                 }
                 Ok(Command::ReleaseView(view_id)) => {
-                    if frozen {
-                        active_views.remove(&view_id);
+                    let released = if frozen {
                         inactive_views.remove(&view_id);
+                        active_views.remove(&view_id).is_some()
                     } else {
                         release_view(
                             &mut terminal,
                             view_id,
                             &mut active_views,
                             &mut inactive_views,
+                        )?
+                    };
+                    search_worker.forget(view_id);
+                    if released {
+                        publish_active_views(
+                            &mut terminal,
+                            publisher,
+                            &mut render_state,
+                            &mut row_iterator,
+                            &mut cell_iterator,
+                            &mut generations,
+                            SnapshotChange::View,
+                            &mut dictionary,
+                            &mut active_views,
+                            &word_separators,
+                            SessionStatus::Running,
                         )?;
                     }
-                    search_worker.forget(view_id);
-                    publish_active_views(
-                        &mut terminal,
-                        publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
-                        SnapshotChange::View,
-                        &mut dictionary,
-                        &mut active_views,
-                        &word_separators,
-                        SessionStatus::Running,
-                    )?;
                 }
                 Ok(Command::Resize(next)) => {
                     if next != geometry {
@@ -5583,20 +5590,21 @@ fn run_terminal(
                 }
                 Command::ReleaseView(view) => {
                     search_worker.forget(view);
-                    release_view(&mut terminal, view, &mut active_views, &mut inactive_views)?;
-                    publish_active_views(
-                        &mut terminal,
-                        publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
-                        SnapshotChange::View,
-                        &mut dictionary,
-                        &mut active_views,
-                        &word_separators,
-                        SessionStatus::Running,
-                    )?;
+                    if release_view(&mut terminal, view, &mut active_views, &mut inactive_views)? {
+                        publish_active_views(
+                            &mut terminal,
+                            publisher,
+                            &mut render_state,
+                            &mut row_iterator,
+                            &mut cell_iterator,
+                            &mut generations,
+                            SnapshotChange::View,
+                            &mut dictionary,
+                            &mut active_views,
+                            &word_separators,
+                            SessionStatus::Running,
+                        )?;
+                    }
                 }
                 Command::ViewAction { view, action } => {
                     if active_views.contains_key(&view) {
@@ -6543,13 +6551,14 @@ fn release_view(
     view_id: TerminalViewId,
     active: &mut ActiveTerminalViews,
     inactive: &mut InactiveTerminalViews,
-) -> Result<(), WorkerError> {
-    if active.remove(&view_id).is_some() {
-        terminal.set_selection(None)?;
-        terminal.scroll_viewport(ScrollViewport::Bottom);
-    }
+) -> Result<bool, WorkerError> {
     inactive.remove(&view_id);
-    Ok(())
+    if active.remove(&view_id).is_none() {
+        return Ok(false);
+    }
+    terminal.set_selection(None)?;
+    terminal.scroll_viewport(ScrollViewport::Bottom);
+    Ok(true)
 }
 
 fn prepare_live_input(
@@ -13833,6 +13842,16 @@ mod tests {
         assert_eq!(search.as_ref().and_then(|search| search.current), Some(2));
     }
 
+    #[test]
+    fn viewport_generations_never_restart_across_terminal_lifetimes() {
+        let first = ViewportGenerations::new().expect("generations");
+        let second = ViewportGenerations::new().expect("generations");
+
+        assert!(second.content > first.content);
+        assert!(second.view > first.view);
+        assert_eq!(second.content, second.view);
+    }
+
     fn snapshot_fixture(terminal: &Terminal<'_, '_>) -> TerminalViewport {
         let mut render_state = RenderState::new().expect("render state");
         let mut rows = RowIterator::new().expect("rows");
@@ -16003,11 +16022,22 @@ mod tests {
             &word_separators,
         )
         .expect("park second view");
-        release_view(&mut terminal, first_id, &mut active, &mut inactive)
-            .expect("release first view");
+        assert!(
+            release_view(&mut terminal, first_id, &mut active, &mut inactive)
+                .expect("release first view")
+        );
         assert!(active.is_empty());
         assert!(!inactive.contains_key(&first_id));
         assert!(inactive.contains_key(&second_id));
+        assert!(
+            !release_view(&mut terminal, second_id, &mut active, &mut inactive)
+                .expect("release parked view")
+        );
+        assert!(inactive.is_empty());
+        assert!(
+            !release_view(&mut terminal, first_id, &mut active, &mut inactive)
+                .expect("release unknown view")
+        );
     }
 
     #[test]
@@ -20239,6 +20269,72 @@ mod tests {
             (after.generation, after.view_generation, after.scrollbar),
             before_generation
         );
+    }
+
+    fn assert_release_view_publishes_only_for_active_views(session: &TerminalSession) {
+        let attached = TerminalViewId(11);
+        let parked = TerminalViewId(12);
+        session.resize(8, 2, 8, 18);
+        session.attach_view(attached);
+        session.attach_view(parked);
+        session.detach_view(parked);
+        wait_for_test_viewport(session, |viewport| {
+            viewport.columns == 8
+                && viewport.rows == 2
+                && matches!(viewport.status, SessionStatus::Running)
+        });
+        let fence = |session: &TerminalSession| {
+            session.history(0, 1).expect("worker round trip");
+        };
+        fence(session);
+        let before = session.latest_viewport();
+        assert!(session.latest_viewport_for(attached).is_some());
+        assert!(session.latest_viewport_for(parked).is_none());
+
+        session.release_view(TerminalViewId(13));
+        fence(session);
+        assert_eq!(
+            session.latest_viewport().view_generation,
+            before.view_generation,
+            "releasing a view that was never attached must not publish"
+        );
+
+        session.release_view(parked);
+        fence(session);
+        assert_eq!(
+            session.latest_viewport().view_generation,
+            before.view_generation,
+            "releasing a parked view must not publish"
+        );
+        assert!(session.latest_viewport_for(attached).is_some());
+
+        session.release_view(attached);
+        fence(session);
+        assert!(
+            session.latest_viewport().view_generation > before.view_generation,
+            "releasing an active view must publish"
+        );
+        assert!(session.latest_viewports().is_empty());
+    }
+
+    #[test]
+    fn output_view_release_publishes_only_for_active_views() {
+        let session = TerminalSession::spawn_output_view("release".to_owned(), "abc".to_owned());
+        assert_release_view_publishes_only_for_active_views(&session);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_release_publishes_only_for_active_views() {
+        let session = TerminalSession::spawn(
+            128,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(vec!["read _".to_owned()]),
+                ..TerminalSpawn::default()
+            },
+        );
+        assert_release_view_publishes_only_for_active_views(&session);
     }
 
     #[test]

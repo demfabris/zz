@@ -201,12 +201,19 @@ overflowed; `AgentSessions` is the JSON session-list reply.
   way a reliable-lane overflow does: the pane's queued frames are dropped and a tiny `AgentLagged`
   marker is queued, so a slow client degrades to replay instead of dying.
 - **Replay.** Each pane keeps an 18 MiB (2 × `MAX_AGENT_UPDATES_BYTES`) in-memory ring of encoded items. A replay inside the ring is
-  served straight to the asking client. A replay older than the ring falls back to the journal. The
-  lane emits its cached `Ready`, `SessionReset { restoring: true }`, the journalled updates, and a
-  closing `SessionReady` with the current session and configuration as freshly numbered items. An
-  ordered `StateSynced` item follows it, so the authoritative Running, Failed, or pending-permission
-  state wins even though the mailbox drains reliable `AgentState` frames before agent frames. A
-  late client restores adapter metadata and leaves the reducer in the daemon's current phase.
+  served straight to the asking client. A replay older than the ring falls back to the journal when
+  the journal can vouch for the whole session (it exists, reads cleanly, and never refused or lost a
+  record — `AgentJournal::is_complete_for`). The lane then emits its cached `Ready`,
+  `SessionReset { restoring: true }`, the journalled updates, and a closing `SessionReady` with the
+  current session and configuration as freshly numbered items to every viewer. An ordered
+  `StateSynced` item follows it, so the authoritative Running, Failed, or pending-permission state
+  wins even though the mailbox drains reliable `AgentState` frames before agent frames. A late
+  client restores adapter metadata and leaves the reducer in the daemon's current phase. When the
+  journal cannot vouch (absent, unreadable, or marked incomplete), only the asking client is reset:
+  it privately receives `SessionReset { restoring: true }` stamped with the last evicted sequence,
+  followed by everything the ring still holds, and the metadata (`Ready`, `SessionReady`,
+  `TurnStarted`, `PromptsRestored`, `StateSynced`) is stamped live so every viewer stays contiguous
+  and nobody else's transcript is cleared.
 - **Visibility.** The heavy stream flows only to clients the pane is visible to — attached session
   plus that client's focused window, honoring zoom, the same derivation terminal frames use.
   `AgentState` goes to every client attached to the session, so badges and permission prompts work

@@ -152,7 +152,11 @@ attached to the pane's session, publication is not frozen, and the pane has an e
 mailbox capacity for foreground panes and uses a separate byte limit. The frame lands in that client's `OutboundMailbox`
 terminal lane (one coalesced pending frame per pane), where the watcher's `is_current_terminal` guard
 and the mailbox's generation check (`delivered_terminals`) promote a stale-base patch back to a full
-viewport. Full details of the mailbox lanes and backpressure live in
+viewport. The same check refuses a full frame that trails what is pending or already delivered
+(`TerminalGeneration::precedes`), so two producers encoding outside the lock cannot move a client
+backward; a respawned terminal starts its generations past every predecessor (a process-wide seed
+in `ViewportGenerations::new`), which keeps that comparison meaningful across respawns. Full details
+of the mailbox lanes and backpressure live in
 [terminal frame](/concepts/terminal-frame.md) and [the server crate](/crates/zz-daemon.md). The
 watcher also forwards `CopyReady` (paste buffers / copy-pipe / clipboard) and `OpenUri` events, both
 of which carry the originating view and route to `ClientId(view.0)`.

@@ -315,6 +315,11 @@ fn validate_identity_start_time(
 }
 
 fn daemon_executable_and_command_match(executable: Option<&Path>, command: &[OsString]) -> bool {
+    if executable.and_then(Path::file_name).is_some_and(|name| {
+        name == OsStr::new("zz_native_helper") || name == OsStr::new("ZZNative Helper")
+    }) {
+        return command.get(1).is_some_and(|argument| argument == "daemon");
+    }
     let executable_matches = executable
         .and_then(Path::file_name)
         .is_some_and(daemon_executable_name_matches);
@@ -692,6 +697,31 @@ mod tests {
             &[OsString::from("/tmp/zz"), OsString::from("list-sessions")]
         ));
         assert!(!daemon_executable_and_command_match(None, &daemon));
+    }
+
+    #[test]
+    fn native_helper_requires_exact_name_and_daemon_subcommand() {
+        for name in ["zz_native_helper", "ZZNative Helper"] {
+            assert!(daemon_executable_and_command_match(
+                Some(Path::new(name)),
+                &[
+                    name.into(),
+                    "daemon".into(),
+                    "--socket".into(),
+                    "/tmp/test".into()
+                ],
+            ));
+            for command in ["display-message", "--type=renderer"] {
+                assert!(!daemon_executable_and_command_match(
+                    Some(Path::new(name)),
+                    &[name.into(), command.into(), "daemon".into()],
+                ));
+            }
+        }
+        assert!(!daemon_executable_and_command_match(
+            Some(Path::new("ZZNative Helper (Renderer)")),
+            &["ZZNative Helper (Renderer)".into(), "daemon".into()],
+        ));
     }
 
     #[cfg(unix)]

@@ -2,6 +2,10 @@ name: CI
 
 on:
   push:
+    # A tag push runs the release workflow; the CI matrix on the same commit
+    # would only compete with it for runners.
+    branches: ["**"]
+    tags-ignore: ["v*"]
   pull_request:
 
 permissions:

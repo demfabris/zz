@@ -12,16 +12,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  macos:
-    name: macOS arm64
-    runs-on: macos-15
+  # Validates the tag and opens the empty draft the platform legs upload into,
+  # so the three builds run side by side instead of queueing behind macOS. The
+  # release is born a draft and stays one until every platform has uploaded.
+  # Drafts are invisible to the unauthenticated releases API, so install.sh
+  # keeps resolving the previous version rather than naming this one and then
+  # 404ing on a Linux tarball that is still building.
+  draft:
+    name: Draft release
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
-    env:
-      CEF_PATH: ${{ github.workspace }}/.cef-cache
-      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-      MACOS_NOTARY_PROFILE: zz-notary
-      ZZ_MACOS_BUILD_VERSION: ${{ github.run_number }}
 
     steps:
       - uses: actions/checkout@v6.0.2
@@ -38,6 +39,47 @@ jobs:
             echo "tag $GITHUB_REF_NAME does not match the workspace version $manifest" >&2
             exit 1
           fi
+
+      - name: Create the draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists; the legs upload into it"
+            exit 0
+          fi
+          prerelease=()
+          if [[ "$version" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --title "zz $version" \
+            --generate-notes \
+            --verify-tag \
+            --draft \
+            "${prerelease[@]}"
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-15
+    needs: draft
+    permissions:
+      contents: write
+    env:
+      CEF_PATH: ${{ github.workspace }}/.cef-cache
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      MACOS_NOTARY_PROFILE: zz-notary
+      ZZ_MACOS_BUILD_VERSION: ${{ github.run_number }}
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Resolve the release artifact names
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
           echo "ZZ_VERSION=$version" >> "$GITHUB_ENV"
           echo "ZZ_DMG=dist/zz-$version-macos-arm64.dmg" >> "$GITHUB_ENV"
 
@@ -115,43 +157,23 @@ jobs:
           (cd dist && shasum -a 256 "$(basename "$ZZ_DMG")" > "$(basename "$ZZ_DMG").sha256")
           cat "$ZZ_DMG.sha256"
 
-      # The release is born a draft and stays one until every platform has
-      # uploaded. Drafts are invisible to the unauthenticated releases API, so
-      # install.sh keeps resolving the previous version rather than naming this
-      # one and then 404ing on a Linux tarball that is still building.
-      - name: Create the draft GitHub release
+      - name: Attach the disk image to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: |
-          prerelease=()
-          if [[ "$ZZ_VERSION" == *-* ]]; then
-            prerelease=(--prerelease)
-          fi
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$ZZ_DMG" "$ZZ_DMG.sha256" --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" "$ZZ_DMG" "$ZZ_DMG.sha256" \
-              --title "zz $ZZ_VERSION" \
-              --generate-notes \
-              --verify-tag \
-              --draft \
-              "${prerelease[@]}"
-          fi
+        run: gh release upload "$GITHUB_REF_NAME" "$ZZ_DMG" "$ZZ_DMG.sha256" --clobber
 
       - name: Remove the signing keychain
         if: ${{ always() && env.ZZ_KEYCHAIN != '' }}
         run: security delete-keychain "$ZZ_KEYCHAIN"
 
-  # The macOS job owns creating the draft release and validating the tag against
-  # the workspace version, so this job and the Windows one below only upload.
-  # Serializing on it also keeps anyone from racing to create the same release
-  # object. The aarch64 leg rides GitHub's arm runners, which are free only
-  # while the repository is public.
+  # The draft job owns validating the tag and creating the release object, so
+  # this job and the Windows one below only upload. The aarch64 leg rides
+  # GitHub's arm runners, which are free only while the repository is public.
   linux:
     name: Linux ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
-    needs: macos
+    needs: draft
     permissions:
       contents: write
     strategy:
@@ -234,7 +256,7 @@ jobs:
   windows:
     name: Windows x64
     runs-on: windows-2025
-    needs: macos
+    needs: draft
     permissions:
       contents: write
     env:
@@ -331,17 +353,16 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             "$ZZ_ZIP" "$ZZ_ZIP.sha256" "$ZZ_SETUP" "$ZZ_SETUP.sha256" --clobber
 
-  # The one gate that makes the release real. It still waits for every platform
-  # leg to finish, so their assets are attached before the draft flips, but only
+  # The one gate that makes the release real. It waits for every platform leg
+  # to finish, so their assets are attached before the draft flips, but only
   # macOS and Linux can hold it back. Windows is second-class support: a broken
   # Windows leg ships the release without its zip and installer rather than
-  # stranding every other platform in a draft nobody can install. macOS gates
-  # this transitively, since a failed macOS leg skips Linux.
+  # stranding every other platform in a draft nobody can install.
   publish:
     name: Publish
     runs-on: ubuntu-24.04
-    needs: [linux, windows]
-    if: ${{ !cancelled() && needs.linux.result == 'success' }}
+    needs: [macos, linux, windows]
+    if: ${{ !cancelled() && needs.macos.result == 'success' && needs.linux.result == 'success' }}
     permissions:
       contents: write
 

@@ -1,0 +1,39 @@
+TUI-002 attempt-01 environment
+captured: 2026-09-09T19:22:59-03:00
+
+[binaries]
+zz: 3cb6e28437cd028b49c2c2eb07c4414a69226518bf2f287e7c52123d5bf70a38  target/debug/zz
+tmux (pin): df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+zz --version: zz 0.6.1
+tmux -V: tmux next-3.8
+pin commit: d77c9dc6aa021e4bc61f0da128c591af695e6466
+
+[source revision]
+worktree: /home/demfabris/dev/zz-tui-lane
+git rev-parse HEAD: 2699669a5b4f45bb8bc3e25f2a3ecbc375936c36
+git status --short:
+?? compat/tui-screen-diff.sh
+?? compat/tui/evidence/TUI-002/
+(end git status)
+
+[host]
+uname -a: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+os-release: NAME="CachyOS Linux" PRETTY_NAME="CachyOS" 
+TERM: xterm-ghostty
+SHELL: /bin/bash
+bash on PATH: /usr/bin/bash -- GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+inner shell: /bin/sh -> /usr/bin/bash, run as ENV= PS1=$ exec /bin/sh
+LANG=en_US.UTF-8 LC_ALL=<unset> LC_TIME=pt_BR.UTF-8
+XDG_STATE_HOME=<unset>
+
+[outer tmux driver]
+the pin, one server per run, status off, one window per side named zz and tmux
+sizes driven: 80x24 same, 100x24 same, 80x10 same, 109x24 record, 120x24 record
+resize case per size: 80x24<->100x24, 100x24<->80x24, 80x10<->100x10, 109x24<->120x24, 120x24<->100x24
+checkpoints per size: fresh, status-off, status-on, split, zoom, unzoom, resized, restored,
+  status-two-rows, status-top, wide-glyphs, default-fg (record), colour-classes (record)
+
+[comparison channels]
+cells: capture-pane -p -e -S 0 -E rows-1 of the outer pane, every row, asserted
+cursor asserted: #{cursor_x},#{cursor_y} flag=#{cursor_flag} pane=#{pane_width}x#{pane_height}
+cursor recorded: shape=#{cursor_shape} blinking=#{cursor_blinking} very_visible=#{cursor_very_visible} colour=#{cursor_colour}

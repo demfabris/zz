@@ -1,0 +1,802 @@
+#!/usr/bin/env bash
+# Whole-screen differential for an attached client.
+#
+# tui-pane-geometry.sh compares two numbers and status-row.sh compares one row.
+# Neither one ever looked at the rest of the screen, so a raw TUI could paint
+# any cell it liked above the status line and no campaign proof would notice.
+# This fixture attaches both binaries inside one outer pinned tmux, drives both
+# sides with the same input, and compares EVERY decoded cell of both screens
+# plus the cursor, at named checkpoints.
+#
+# THE DECODED SCREEN IS THE CONTRACT, NOT THE BYTE STREAM. The outer pinned
+# tmux is the decoder: `capture-pane -p -e` re-emits SGR from the outer pane's
+# own grid, so attribute order, batching, redundant resets and cursor-movement
+# spelling collapse on both sides before anything is compared. What does NOT
+# collapse is the colour CLASS: a named colour, an indexed one and an RGB one
+# stay three different cells in the pin's grid, and the recorded colour-classes
+# case below measures what each binary does with them.
+#
+# What the pin collapses was measured rather than assumed. colour.c
+# colour_fromstring gives `red` the value 1 and `colour1` the value
+# 1|COLOUR_FLAG_256, two DIFFERENT values, and yet both reach the outer grid as
+# the same cell and capture-pane re-emits both as \e[41m, so that pair really is
+# an equivalence here; --self-check asserts it, along with attribute order in a
+# style and two spellings of the same bold cell.
+#
+# THE CURSOR is read with `display-message -p` against the OUTER pane of each
+# side, so it is the cursor the inner client left in the outer terminal:
+# position, visibility, shape, blink and very-visible. The pin exposes all five
+# to a format (format.c format_cb_cursor_shape and its neighbours), so cursor
+# shape is a covered channel here rather than a declared hole.
+#
+# CONTROLLED DYNAMIC VALUES, set on both sides before the first checkpoint and
+# never left to chance:
+#   status-right ''      the default ends in a clock, and %H:%M can tick
+#                        between the two captures. It also carries %d-%b-%y,
+#                        which the pin expands through libc strftime(3) and zz
+#                        expands locale-independently, a real divergence that
+#                        belongs to status-row.sh and not to this comparison.
+#   status-left L        fixed literal, so the left of the row is asserted
+#                        rather than emptied.
+#   automatic-rename off plus rename-window win: the default name follows the
+#                        running command and would race the marker.
+#   select-pane -T title fixed: the pin seeds a pane title from gethostname and
+#                        zz reports the shell name through its shell
+#                        integration. That is the recorded pane.runtime-facts
+#                        decision, not a divergence of this screen.
+#   the inner shell      ENV= PS1='$ ' exec /bin/sh, handed to new-session and
+#                        to split-window as the pane's command: no rc file, and
+#                        a prompt that carries no host, user, path or clock.
+# Nothing else is masked. Anything not in that list is compared.
+#
+# SETTLED CHECKPOINTS. Every checkpoint ends by sending `printf 'MARK-%s\n'
+# NAME` to both sides and waiting, bounded, for that marker to reach each screen
+# AND for each screen to stop changing. The typed command carries MARK-%s, not
+# MARK-NAME, so only the shell's own output can satisfy it, and the option
+# changes and pane commands of a case reach the server before the send-keys does
+# and travel to the outer grid through the same ordered stream, so a repaint the
+# case asked for is on the screen before its marker is. The stability half is
+# not decoration: see wait_settled for the run that proved the marker alone is
+# not enough. No wait in this file is a sleep.
+#
+# SIZES AND MODES. `same` asserts; `record` prints the same report and keeps
+# going. zz's sidebar appears from 109 columns (crates/zz-tui/src/sidebar.rs
+# AUTO_HIDE_COLUMNS = 80 + 28 + 1), which is a standing decision that TUI-004
+# owns, so 109 and 120 are recorded rather than waived by omission, and every
+# `same` size keeps its resize case strictly below 109 so an asserted size can
+# never invoke the sidebar by accident.
+#
+# --self-check runs the same driver against a deliberate one-sided difference in
+# each channel and requires the comparison to catch it in that channel, plus three
+# equivalences it must NOT report. A fixture that only passes has proved nothing.
+#
+# ZZ_SCREEN_CAPTURE_DIR, when set, keeps every capture and cursor tuple as text.
+# A bounded wait that runs out dumps the same diagnostics the geometry fixture
+# dumps, into ZZ_SCREEN_DIAGNOSTICS_DIR or a fresh /tmp directory it names.
+set -eEuo pipefail
+
+usage() {
+  printf 'usage: compat/tui-screen-diff.sh [--self-check] [ZZ_BIN [TMUX_BIN]]\n' >&2
+  printf '       ZZ_BIN=path TMUX_BIN=path compat/tui-screen-diff.sh\n' >&2
+}
+
+COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd -- "$COMPAT_DIR/.." && pwd)"
+SELF_CHECK=0
+POSITIONAL=()
+for argument in "$@"; do
+  case "$argument" in
+  --self-check) SELF_CHECK=1 ;;
+  -*)
+    usage
+    exit 2
+    ;;
+  *) POSITIONAL+=("$argument") ;;
+  esac
+done
+[ "${#POSITIONAL[@]}" -le 2 ] || { usage; exit 2; }
+ZZ_INPUT="${POSITIONAL[0]:-${ZZ_BIN:-$REPO_DIR/target/debug/zz}}"
+TMUX_INPUT="${POSITIONAL[1]:-${TMUX_BIN:-${ZZ_COMPAT_TMUX:-$COMPAT_DIR/.cache/tmux-src/tmux}}}"
+
+resolve_binary() {
+  local input="$1"
+  if [ -x "$input" ]; then
+    printf '%s\n' "$(cd -- "$(dirname -- "$input")" && pwd)/$(basename -- "$input")"
+    return 0
+  fi
+  command -v -- "$input"
+}
+ZZ_BIN="$(resolve_binary "$ZZ_INPUT")" || { printf 'error: zz binary not found: %s\n' "$ZZ_INPUT" >&2; exit 2; }
+TMUX_BIN="$(resolve_binary "$TMUX_INPUT")" || { printf 'error: tmux binary not found: %s\n' "$TMUX_INPUT" >&2; exit 2; }
+
+# SIZE|MODE|ALTERNATE. ALTERNATE is the width the resize case moves to and back
+# from; it stays on the same side of the 109 column sidebar threshold as SIZE so
+# an asserted size never invokes the sidebar mid-case.
+SIZES=(80x24\|same\|100 100x24\|same\|80 80x10\|same\|100 109x24\|record\|120 120x24\|record\|100)
+PANE_TITLE="screentitle"
+WINDOW_NAME="win"
+SCRATCH_DIR="$(mktemp -d /tmp/zzsd.XXXXXX)"
+TOKEN="${SCRATCH_DIR##*.}"
+OUTER_SOCKET_NAME="zzsdo-$TOKEN"
+INNER_SOCKET_NAME="zzsdi-$TOKEN"
+ZZ_SOCKET="/tmp/zzsd-$TOKEN.sock"
+OUTER_SESSION="driver"
+INNER_SESSION="screen"
+ZZ_HOME="$SCRATCH_DIR/zz-home"
+TMUX_HOME="$SCRATCH_DIR/tmux-home"
+OUTER_HOME="$SCRATCH_DIR/outer-home"
+ZZ_LOG_DIR="$SCRATCH_DIR/zz-logs"
+ZZ_CLIENT_STDERR="$SCRATCH_DIR/zz-client.err"
+TMUX_CLIENT_STDERR="$SCRATCH_DIR/tmux-client.err"
+CAPTURE_DIR="${ZZ_SCREEN_CAPTURE_DIR:-}"
+DIAGNOSTICS_DIR=""
+COLUMNS_UNDER_TEST=0
+ROWS_UNDER_TEST=0
+SIZE_LABEL=""
+ZZ_PID=""
+FAILURES=0
+CHECKS=0
+RECORDS=0
+CURSOR_RECORDS=0
+LAST_ROWS_DIFFERED=0
+LAST_CURSOR_DIFFERED=0
+mkdir -p "$ZZ_HOME" "$TMUX_HOME" "$OUTER_HOME" "$ZZ_LOG_DIR"
+[ -z "$CAPTURE_DIR" ] || mkdir -p "$CAPTURE_DIR"
+
+scrubbed() {
+  env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL \
+    -u XDG_STATE_HOME -u ZZ_LOG_DIR \
+    TMUX_TMPDIR=/tmp "$@"
+}
+tmux_outer_command() {
+  scrubbed HOME="$OUTER_HOME" XDG_CONFIG_HOME="$OUTER_HOME/config" \
+    "$TMUX_BIN" -L "$OUTER_SOCKET_NAME" "$@"
+}
+zz_command() {
+  scrubbed HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_HOME/config" ZZ_LOG_DIR="$ZZ_LOG_DIR" \
+    "$ZZ_BIN" --socket "$ZZ_SOCKET" "$@"
+}
+tmux_inner_command() {
+  scrubbed HOME="$TMUX_HOME" XDG_CONFIG_HOME="$TMUX_HOME/config" \
+    "$TMUX_BIN" -L "$INNER_SOCKET_NAME" "$@"
+}
+side_command() {
+  local side="$1"
+  shift
+  case "$side" in
+  zz) zz_command "$@" ;;
+  tmux) tmux_inner_command "$@" ;;
+  esac
+}
+side_home() {
+  case "$1" in
+  zz) printf '%s\n' "$ZZ_HOME" ;;
+  tmux) printf '%s\n' "$TMUX_HOME" ;;
+  esac
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT ERR INT TERM
+  set +e
+  tmux_outer_command kill-server >/dev/null 2>&1
+  zz_command kill-server >/dev/null 2>&1
+  tmux_inner_command kill-server >/dev/null 2>&1
+  if [ -n "$ZZ_PID" ]; then
+    kill "$ZZ_PID" >/dev/null 2>&1
+    wait "$ZZ_PID" >/dev/null 2>&1
+  fi
+  rm -f -- "$ZZ_SOCKET" "/tmp/tmux-$(id -u)/$OUTER_SOCKET_NAME" "/tmp/tmux-$(id -u)/$INNER_SOCKET_NAME"
+  rm -rf -- "$SCRATCH_DIR"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 2
+}
+
+diagnostics_dir() {
+  if [ -z "$DIAGNOSTICS_DIR" ]; then
+    DIAGNOSTICS_DIR="${ZZ_SCREEN_DIAGNOSTICS_DIR:-$(mktemp -d /tmp/zzsd-diag.XXXXXX)}"
+    mkdir -p "$DIAGNOSTICS_DIR"
+  fi
+  printf '%s\n' "$DIAGNOSTICS_DIR"
+}
+
+# A timeout is a failed check, and a failed check has to say what it was waiting
+# for and what the screen showed at that moment. Every command here may fail: a
+# wait can run out before the outer session exists.
+dump_diagnostics() {
+  local label="$1"
+  local dir side log
+  dir="$(diagnostics_dir)"
+  {
+    printf 'wait that ran out: %s\n' "$label"
+    printf 'at: %s\n' "$(date -Is 2>/dev/null || date)"
+    printf 'size under test: %s\n' "${SIZE_LABEL:-none yet}"
+    printf 'zz: %s\n' "$ZZ_BIN"
+    printf 'tmux: %s\n' "$TMUX_BIN"
+    printf 'zz socket: %s\n' "$ZZ_SOCKET"
+    printf 'outer socket: %s\n' "$OUTER_SOCKET_NAME"
+    printf 'inner tmux socket: %s\n' "$INNER_SOCKET_NAME"
+    printf 'ZZ_LOG_DIR (%s) holds:\n' "$ZZ_LOG_DIR"
+    ls -1 -- "$ZZ_LOG_DIR" 2>&1 || true
+  } >"$dir/what-fired.txt" 2>&1 || true
+  for side in zz tmux; do
+    tmux_outer_command capture-pane -p -e -S - -t "=$OUTER_SESSION:$side" \
+      >"$dir/outer-$side.screen.txt" 2>&1 || true
+    tmux_outer_command display-message -p -t "=$OUTER_SESSION:$side" \
+      "$CURSOR_FORMAT" >"$dir/outer-$side.cursor.txt" 2>&1 || true
+    side_command "$side" list-clients \
+      -F '#{client_name} session=#{client_session} #{client_width}x#{client_height} flags=#{client_flags}' \
+      >"$dir/$side.list-clients.txt" 2>&1 || true
+    side_command "$side" list-panes -a \
+      -F '#{session_name}:#{window_index}.#{pane_index} #{pane_width}x#{pane_height} dead=#{pane_dead}' \
+      >"$dir/$side.list-panes.txt" 2>&1 || true
+  done
+  cp -f -- "$SCRATCH_DIR/zz-daemon.out" "$dir/zz-daemon.stdout.txt" 2>/dev/null || true
+  cp -f -- "$SCRATCH_DIR/zz-daemon.err" "$dir/zz-daemon.stderr.txt" 2>/dev/null || true
+  cp -f -- "$ZZ_CLIENT_STDERR" "$dir/zz-client.stderr.txt" 2>/dev/null || true
+  cp -f -- "$TMUX_CLIENT_STDERR" "$dir/tmux-client.stderr.txt" 2>/dev/null || true
+  for log in "$ZZ_LOG_DIR"/*; do
+    [ -f "$log" ] || continue
+    cp -f -- "$log" "$dir/ring-$(basename -- "$log").txt" 2>/dev/null || true
+  done
+  printf 'diagnostics retained in %s:\n' "$dir" >&2
+  ls -1 -- "$dir" >&2 || true
+}
+
+wait_for() {
+  local label="$1"
+  local attempt
+  shift
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    if "$@" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  dump_diagnostics "$label"
+  die "$label did not happen within 10 seconds"
+}
+
+# The cursor is read in two halves. The first is asserted. The second is
+# RECORDED, printed on every checkpoint with both sides' values and never
+# waived by omission: measured 2026-09-09, zz's raw TUI writes DECSCUSR and an
+# OSC 12 cursor colour on every cursor placement
+# (crates/zz-tui/src/render.rs:1770-1799 turns the pane cursor's style and
+# blink into `\x1b[<n> q` and `\x1b]12;#rrggbb\x07`), where pinned tmux emits
+# neither and leaves the outer terminal's own cursor alone. The outer tmux
+# therefore reports shape=block blinking=1 for zz and shape=default blinking=0
+# for the pin at every size. That divergence has no registry owner yet, so this
+# fixture measures and prints it rather than asserting it or hiding it.
+CURSOR_ASSERTED_FORMAT='#{cursor_x},#{cursor_y} flag=#{cursor_flag} pane=#{pane_width}x#{pane_height}'
+CURSOR_RECORDED_FORMAT='shape=#{cursor_shape} blinking=#{cursor_blinking} very_visible=#{cursor_very_visible} colour=#{cursor_colour}'
+CURSOR_FORMAT="$CURSOR_ASSERTED_FORMAT $CURSOR_RECORDED_FORMAT"
+
+outer_pane_is() {
+  [ "$(tmux_outer_command display-message -p -t "$1" '#{pane_width}x#{pane_height}' 2>/dev/null)" = "$2" ]
+}
+client_attached() {
+  [ "$(side_command "$1" list-clients -F '#{client_session}' 2>/dev/null)" = "$INNER_SESSION" ]
+}
+
+# Exactly ROWS_UNDER_TEST lines of the visible screen, escapes included, so the
+# two sides are compared row index by row index and never off by a trimmed
+# trailing blank.
+capture_screen() {
+  tmux_outer_command capture-pane -p -e -S 0 -E "$((ROWS_UNDER_TEST - 1))" \
+    -t "=$OUTER_SESSION:$1"
+}
+# The marker is waited for against the plain capture: a settle condition must
+# not depend on whether the decoder happened to put an SGR run at the start of
+# that row. The comparison itself always uses the -e capture above.
+capture_plain() {
+  tmux_outer_command capture-pane -p -S 0 -E "$((ROWS_UNDER_TEST - 1))" \
+    -t "=$OUTER_SESSION:$1"
+}
+cursor_tuple() {
+  tmux_outer_command display-message -p -t "=$OUTER_SESSION:$1" "$CURSOR_ASSERTED_FORMAT"
+}
+recorded_cursor_tuple() {
+  tmux_outer_command display-message -p -t "=$OUTER_SESSION:$1" "$CURSOR_RECORDED_FORMAT"
+}
+
+write_attach() {
+  local side="$1"
+  local destination="$2"
+  printf '#!/usr/bin/env bash\n' >"$destination"
+  if [ "$side" = zz ]; then
+    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME HOME=%q XDG_CONFIG_HOME=%q ZZ_LOG_DIR=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -t %q 2> >(tee -a %q >&2)\n' \
+      "$ZZ_HOME" "$ZZ_HOME/config" "$ZZ_LOG_DIR" "$ZZ_BIN" "$ZZ_SOCKET" "=$INNER_SESSION" "$ZZ_CLIENT_STDERR" >>"$destination"
+  else
+    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -t %q 2> >(tee -a %q >&2)\n' \
+      "$TMUX_HOME" "$TMUX_HOME/config" "$TMUX_BIN" "$INNER_SOCKET_NAME" "=$INNER_SESSION" "$TMUX_CLIENT_STDERR" >>"$destination"
+  fi
+  chmod +x "$destination"
+}
+
+set_on_both() {
+  side_command zz set-option -g "$1" "$2" || die "zz refused set-option -g $1"
+  side_command tmux set-option -g "$1" "$2" || die "tmux refused set-option -g $1"
+}
+# Every pane command names the pane id it resolved, never a bare session, so a
+# case that moved the active pane (a split, a zoom) is still driving the same
+# pane on both sides and neither binary has to agree about what a loose target
+# means.
+active_pane() {
+  side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_active} #{pane_id}' |
+    awk '$1 == 1 { print $2; exit }'
+}
+# No terminfo dependency: the pane's shell writes the erase itself.
+clear_both() {
+  send_both "printf '\\033[2J\\033[3J\\033[H'"
+}
+send_both() {
+  local pane
+  pane="$(active_pane zz)"
+  [ -n "$pane" ] || die "zz has no active pane"
+  zz_command send-keys -t "$pane" "$1" Enter || die "zz refused send-keys"
+  pane="$(active_pane tmux)"
+  [ -n "$pane" ] || die "tmux has no active pane"
+  tmux_inner_command send-keys -t "$pane" "$1" Enter || die "tmux refused send-keys"
+}
+# The same command against each side's own active pane.
+run_on_both_active() {
+  local side pane
+  for side in zz tmux; do
+    pane="$(active_pane "$side")"
+    [ -n "$pane" ] || die "$side has no active pane"
+    side_command "$side" "$@" -t "$pane" || die "$side refused $1"
+  done
+}
+run_on_both() {
+  side_command zz "$@" || die "zz refused $1"
+  side_command tmux "$@" || die "tmux refused $1"
+}
+
+# Global options outlive the session that was set up with them, so a case that
+# sets one would carry it into every later case and into the next size. Both
+# servers go back to their own defaults before each attach, and only then are
+# the declared values pinned again.
+OWNED_OPTIONS=(
+  status status-position status-style status-left status-right status-justify
+  window-status-format window-status-current-format default-command
+  automatic-rename
+)
+reset_owned_options() {
+  local side="$1"
+  local option
+  for option in "${OWNED_OPTIONS[@]}"; do
+    side_command "$side" set-option -gu "$option" >/dev/null 2>&1 || true
+  done
+}
+
+# An option cannot be set on a server that is not running and a server with no
+# session does not stay running, so the inner shell is handed to new-session as
+# the pane's command rather than through default-command. It runs through the
+# same spawn path either way.
+INNER_SHELL="ENV= PS1='\$ ' exec /bin/sh"
+
+pin_dynamic_values() {
+  local side="$1"
+  reset_owned_options "$side"
+  side_command "$side" set-option -g status-right '' || die "$side refused status-right"
+  side_command "$side" set-option -g status-left L || die "$side refused status-left"
+  side_command "$side" set-option -g automatic-rename off || die "$side refused automatic-rename"
+}
+
+attach_both_at() {
+  local columns="$1"
+  local rows="$2"
+  COLUMNS_UNDER_TEST="$columns"
+  ROWS_UNDER_TEST="$rows"
+  tmux_outer_command kill-server >/dev/null 2>&1 || true
+  zz_command kill-session -t "=$INNER_SESSION" >/dev/null 2>&1 || true
+  tmux_inner_command kill-session -t "=$INNER_SESSION" >/dev/null 2>&1 || true
+  zz_command new-session -d -s "$INNER_SESSION" -n "$WINDOW_NAME" -x "$columns" -y "$rows" \
+    "$INNER_SHELL" || die "could not create the zz session"
+  tmux_inner_command -f /dev/null new-session -d -s "$INNER_SESSION" -n "$WINDOW_NAME" \
+    -x "$columns" -y "$rows" "$INNER_SHELL" || die "could not create the tmux session"
+  pin_dynamic_values zz
+  pin_dynamic_values tmux
+  tmux_outer_command -f /dev/null new-session -d -s "$OUTER_SESSION" -n zz \
+    -x "$columns" -y "$rows" "$SCRATCH_DIR/attach-zz.sh" ||
+    die "could not create the outer session"
+  tmux_outer_command set-option -g status off
+  tmux_outer_command new-window -d -n tmux "$SCRATCH_DIR/attach-tmux.sh"
+  wait_for "outer zz pane at ${columns}x${rows}" outer_pane_is "=$OUTER_SESSION:zz" "${columns}x${rows}"
+  wait_for "outer tmux pane at ${columns}x${rows}" outer_pane_is "=$OUTER_SESSION:tmux" "${columns}x${rows}"
+  wait_for "zz client attached" client_attached zz
+  wait_for "tmux client attached" client_attached tmux
+  run_on_both rename-window -t "=$INNER_SESSION:0" "$WINDOW_NAME"
+  run_on_both select-pane -t "=$INNER_SESSION:0.0" -T "$PANE_TITLE"
+}
+
+# A substring, not a whole line: zz draws its sidebar to the LEFT of the pane
+# from 109 columns, so at those widths the marker shares its row with sidebar
+# cells and a border. The typed command carries MARK-%s, never MARK-<name>, so
+# only the shell's own output can satisfy this.
+screen_has_marker() {
+  capture_plain "$1" | grep -Fq "$2"
+}
+# THE SETTLE. The marker alone is not enough, and this is measured rather than
+# argued: with the marker as the only condition, one run in two of the 80x24
+# zoom checkpoint captured the zz side between the marker's newline and the
+# prompt the shell wrote next, so row 11 held `$` in one run and nothing in the
+# next. The shell writes the marker and the prompt as two separate writes and a
+# capture can land between them.
+#
+# A checkpoint is settled when the marker is on the screen AND the screen has
+# not changed between two polls. Both halves are observable and the whole thing
+# is bounded; the 50 ms poll is the same interval every bounded wait in this
+# harness uses, and it is never the settle by itself.
+wait_settled() {
+  local side="$1"
+  local marker="$2"
+  local label="$3"
+  local previous=""
+  local current attempt
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    current="$(capture_plain "$side" 2>/dev/null || true)"
+    if [ -n "$previous" ] && [ "$current" = "$previous" ] &&
+      printf '%s' "$current" | grep -Fq "$marker"; then
+      return 0
+    fi
+    previous="$current"
+    sleep 0.05
+  done
+  dump_diagnostics "$label"
+  die "$label did not settle within 10 seconds"
+}
+settle_both() {
+  wait_settled zz "$1" "$2 settled on the zz screen"
+  wait_settled tmux "$1" "$2 settled on the tmux screen"
+}
+
+
+# Rows first, then the cursor. The report names the checkpoint, the first row
+# index that differs with both sides' bytes through cat -v, and both cursor
+# tuples, which is enough to tell a glyph difference from a colour one and both
+# from a cursor one without re-running anything.
+compare_screens() {
+  local name="$1"
+  local zz_rows tmux_rows zz_cursor tmux_cursor index differing total
+  mapfile -t zz_rows < <(capture_screen zz)
+  mapfile -t tmux_rows < <(capture_screen tmux)
+  zz_cursor="$(cursor_tuple zz)"
+  tmux_cursor="$(cursor_tuple tmux)"
+  local zz_recorded tmux_recorded
+  zz_recorded="$(recorded_cursor_tuple zz)"
+  tmux_recorded="$(recorded_cursor_tuple tmux)"
+  if [ "$zz_recorded" = "$tmux_recorded" ]; then
+    printf 'note  %s %s recorded cursor attributes identical, the record can close: %s\n' \
+      "$SIZE_LABEL" "$name" "$zz_recorded"
+  else
+    CURSOR_RECORDS=$((CURSOR_RECORDS + 1))
+    printf 'note  %s %s recorded cursor attributes differ (no registry owner yet)\n' "$SIZE_LABEL" "$name"
+    printf '        tmux: %s\n' "$tmux_recorded"
+    printf '        zz:   %s\n' "$zz_recorded"
+  fi
+  if [ -n "$CAPTURE_DIR" ]; then
+    printf '%s\n' "${zz_rows[@]-}" >"$CAPTURE_DIR/$SIZE_LABEL.$name.zz.screen.txt"
+    printf '%s\n' "${tmux_rows[@]-}" >"$CAPTURE_DIR/$SIZE_LABEL.$name.tmux.screen.txt"
+    {
+      printf 'asserted zz:   %s\n' "$zz_cursor"
+      printf 'asserted tmux: %s\n' "$tmux_cursor"
+      printf 'recorded zz:   %s\n' "$zz_recorded"
+      printf 'recorded tmux: %s\n' "$tmux_recorded"
+    } >"$CAPTURE_DIR/$SIZE_LABEL.$name.cursor.txt"
+  fi
+  total="$ROWS_UNDER_TEST"
+  differing=-1
+  for ((index = 0; index < total; index++)); do
+    if [ "${zz_rows[index]-}" != "${tmux_rows[index]-}" ]; then
+      differing="$index"
+      break
+    fi
+  done
+  LAST_ROWS_DIFFERED=0
+  LAST_CURSOR_DIFFERED=0
+  [ "$differing" -lt 0 ] || LAST_ROWS_DIFFERED=1
+  [ "$zz_cursor" = "$tmux_cursor" ] || LAST_CURSOR_DIFFERED=1
+  if [ "$LAST_ROWS_DIFFERED" -eq 0 ] && [ "$LAST_CURSOR_DIFFERED" -eq 0 ]; then
+    return 0
+  fi
+  printf '      checkpoint %s at %s\n' "$name" "$SIZE_LABEL"
+  if [ "$LAST_ROWS_DIFFERED" -eq 1 ]; then
+    printf '      first differing row %s of %s\n' "$differing" "$total"
+    printf '        tmux: %s\n' "$(printf '%s' "${tmux_rows[differing]-}" | cat -v)"
+    printf '        zz:   %s\n' "$(printf '%s' "${zz_rows[differing]-}" | cat -v)"
+  else
+    printf '      all %s rows identical\n' "$total"
+  fi
+  printf '      asserted cursor tmux: %s\n' "$tmux_cursor"
+  printf '      asserted cursor zz:   %s\n' "$zz_cursor"
+  return 1
+}
+
+# The named settled checkpoint: mark, wait for the mark on both sides, compare.
+# A recorded case says WHY it is recorded. The default is the sidebar, which is
+# what the 109 and 120 column sizes record; a case that records something else
+# passes its own reason.
+SIDEBAR_REASON='zz shows its sidebar from 109 columns'
+checkpoint() {
+  local name="$1"
+  local mode="$2"
+  local reason="${3:-$SIDEBAR_REASON}"
+  send_both "printf 'MARK-%s\\n' $name"
+  settle_both "MARK-$name" "$name"
+  if [ "$mode" = same ]; then
+    CHECKS=$((CHECKS + 1))
+  else
+    RECORDS=$((RECORDS + 1))
+  fi
+  if compare_screens "$name"; then
+    printf 'ok    %s %s\n' "$SIZE_LABEL" "$name"
+    return 0
+  fi
+  if [ "$mode" = same ]; then
+    FAILURES=$((FAILURES + 1))
+    printf 'DIFF  %s %s\n' "$SIZE_LABEL" "$name"
+  else
+    printf 'note  %s %s recorded, not asserted: %s\n' "$SIZE_LABEL" "$name" "$reason"
+  fi
+  return 0
+}
+
+run_size() {
+  local size="$1"
+  local mode="$2"
+  local alternate="$3"
+  local columns="${size%x*}"
+  local rows="${size#*x}"
+  SIZE_LABEL="$size"
+  attach_both_at "$columns" "$rows"
+
+  checkpoint fresh "$mode"
+
+  set_on_both status off
+  checkpoint status-off "$mode"
+  set_on_both status on
+  checkpoint status-on "$mode"
+
+  run_on_both_active split-window -v "$INNER_SHELL"
+  checkpoint split "$mode"
+
+  run_on_both_active resize-pane -Z
+  checkpoint zoom "$mode"
+  run_on_both_active resize-pane -Z
+  checkpoint unzoom "$mode"
+
+  tmux_outer_command resize-window -t "=$OUTER_SESSION:zz" -x "$alternate" -y "$rows"
+  tmux_outer_command resize-window -t "=$OUTER_SESSION:tmux" -x "$alternate" -y "$rows"
+  wait_for "outer zz pane at ${alternate}x${rows}" outer_pane_is "=$OUTER_SESSION:zz" "${alternate}x${rows}"
+  wait_for "outer tmux pane at ${alternate}x${rows}" outer_pane_is "=$OUTER_SESSION:tmux" "${alternate}x${rows}"
+  COLUMNS_UNDER_TEST="$alternate"
+  SIZE_LABEL="${alternate}x${rows}-from-$size"
+  checkpoint resized "$mode"
+
+  tmux_outer_command resize-window -t "=$OUTER_SESSION:zz" -x "$columns" -y "$rows"
+  tmux_outer_command resize-window -t "=$OUTER_SESSION:tmux" -x "$columns" -y "$rows"
+  wait_for "outer zz pane back at ${columns}x${rows}" outer_pane_is "=$OUTER_SESSION:zz" "${columns}x${rows}"
+  wait_for "outer tmux pane back at ${columns}x${rows}" outer_pane_is "=$OUTER_SESSION:tmux" "${columns}x${rows}"
+  COLUMNS_UNDER_TEST="$columns"
+  SIZE_LABEL="$size"
+  checkpoint restored "$mode"
+
+  set_on_both status 2
+  checkpoint status-two-rows "$mode"
+  set_on_both status-position top
+  checkpoint status-top "$mode"
+  set_on_both status-position bottom
+  set_on_both status on
+
+  # Two channels the corpus above never touches, both driven identically on the
+  # two sides and both RECORDED rather than asserted, because 2026-09-09
+  # measured a real divergence in each and neither has a registry owner yet.
+  #
+  # colour-classes writes the same three cells as a NAMED colour, an INDEXED
+  # colour and an RGB one. The pin keeps the class it was given; zz resolves the
+  # named and the indexed one through its palette and hands the outer terminal
+  # RGB, so \e[31m arrives as \e[38;2;205;0;0m and \e[38;5;196m arrives as
+  # \e[38;2;255;0;0m, while the RGB cell passes through unchanged.
+  # Cell widths, which the rest of the corpus never exercises: a CJK pair that
+  # occupies two columns each, a base letter with a combining accent that
+  # occupies none of its own, and an emoji. Both sides are sent the same bytes,
+  # so the columns the cells claim, and everything the row after them lines up
+  # with, are compared like any other row.
+  clear_both
+  send_both "printf 'W[%s][%s][%s]|\\n' '你好' 'éä' '🙂'"
+  checkpoint wide-glyphs "$mode"
+
+  # Each of the two below clears the screen first: a recorded difference stays
+  # on the screen, and the report names the FIRST differing row, so without the
+  # clear the second case would report the first case's leftovers instead of
+  # its own.
+  clear_both
+  set_on_both status-style bg=colour4
+  checkpoint default-fg record \
+    'zz writes an explicit RGB foreground where the pin leaves the foreground default'
+  side_command zz set-option -gu status-style >/dev/null 2>&1 || true
+  side_command tmux set-option -gu status-style >/dev/null 2>&1 || true
+
+  clear_both
+  send_both "printf '\\033[31mNAMED\\033[0m \\033[38;5;196mINDEXED\\033[0m \\033[38;2;1;2;3mRGB\\033[0m\\n'"
+  checkpoint colour-classes record \
+    'zz resolves a named and an indexed colour to RGB before writing to the terminal'
+}
+
+# --- self-check ------------------------------------------------------------
+#
+# Each case attaches a fresh pair, applies a difference to ONE side, marks both
+# and compares. A sabotage has to be reported in the channel it was made in; an
+# equivalence has to be reported nowhere.
+SELF_CHECK_FAILURES=0
+
+# The typed input has to stay identical on both sides or a sabotage would only
+# prove that the fixture notices its own different keystrokes. Each side reads
+# its own $HOME/<name>, so the command echoed on screen is the same bytes on
+# both sides and only the OUTPUT differs.
+plant() {
+  local side="$1"
+  local name="$2"
+  local content="$3"
+  printf '%s' "$content" >"$(side_home "$side")/$name"
+}
+
+self_check_case() {
+  local name="$1"
+  local expectation="$2"
+  local rows_differed="$LAST_ROWS_DIFFERED"
+  local cursor_differed="$LAST_CURSOR_DIFFERED"
+  local verdict=ok
+  case "$expectation" in
+  rows)
+    [ "$rows_differed" -eq 1 ] || verdict='no row difference reported'
+    ;;
+  cursor)
+    [ "$cursor_differed" -eq 1 ] || verdict='no cursor difference reported'
+    ;;
+  none)
+    if [ "$rows_differed" -ne 0 ] || [ "$cursor_differed" -ne 0 ]; then
+      verdict='reported a difference the pin collapses'
+    fi
+    ;;
+  esac
+  if [ "$verdict" = ok ]; then
+    printf 'ok    self-check %s\n' "$name"
+    return 0
+  fi
+  SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES + 1))
+  printf 'FAIL  self-check %s: %s\n' "$name" "$verdict"
+}
+
+self_check_checkpoint() {
+  local name="$1"
+  send_both "printf 'MARK-%s\\n' $name"
+  settle_both "MARK-$name" "$name"
+  compare_screens "$name" || true
+}
+
+# A sabotage that moves the cursor has to be compared where it left it. Sending
+# a marker afterwards would run a whole command and put the cursor back at a
+# fresh prompt on both sides, which is how the first attempt at the cursor case
+# passed its rows and reported no cursor difference at all. This settles on a
+# substring both sides' own sabotage output share instead.
+self_check_settle_on() {
+  local marker="$1"
+  local name="$2"
+  settle_both "$marker" "$name"
+  compare_screens "$name" || true
+}
+
+run_self_check() {
+  printf 'self-check: one deliberate difference per channel, plus three the pin collapses\n'
+
+  SIZE_LABEL='80x24-glyph'
+  attach_both_at 80 24
+  plant zz glyph 'GLYPH-AA'
+  plant tmux glyph 'GLYPH-AB'
+  send_both 'cat $HOME/glyph'
+  self_check_checkpoint glyph
+  self_check_case 'glyph, one character of output differs' rows
+
+  SIZE_LABEL='80x24-colour'
+  attach_both_at 80 24
+  side_command zz set-option -g status-style bg=red || die 'zz refused status-style'
+  self_check_checkpoint colour
+  self_check_case 'colour, status-style bg=red on one side' rows
+
+  SIZE_LABEL='80x24-cursor'
+  attach_both_at 80 24
+  plant zz cursorline 'CURSORMARK-WITH-A-LONGER-TAIL'
+  plant tmux cursorline 'CURSORMARK'
+  send_both 'printf %s "$(cat $HOME/cursorline)"'
+  self_check_settle_on CURSORMARK cursor
+  self_check_case 'cursor, a different-length unterminated line' cursor
+
+  SIZE_LABEL='80x24-geometry'
+  attach_both_at 80 24
+  side_command zz split-window -v -t "$(active_pane zz)" "$INNER_SHELL" ||
+    die 'zz refused split-window'
+  self_check_checkpoint geometry
+  self_check_case 'geometry, split-window on one side' rows
+
+  # The pin parses a style into a cell, so the order the attributes were written
+  # in is gone by the time capture-pane re-emits it. The foreground is named on
+  # both sides on purpose: with the foreground left at default the two binaries
+  # already differ, which is the recorded default-fg case above, and an
+  # equivalence must not be built on top of a divergence.
+  SIZE_LABEL='80x24-style-order'
+  attach_both_at 80 24
+  side_command zz set-option -g status-style 'bg=colour1,fg=colour7,bold' ||
+    die 'zz refused status-style'
+  side_command tmux set-option -g status-style 'bold,fg=colour7,bg=colour1' ||
+    die 'tmux refused status-style'
+  self_check_checkpoint style-order
+  self_check_case 'equivalence: attribute order in a style' none
+
+  # colour.c colour_fromstring gives `red` the value 1 and `colour1` the value
+  # 1|COLOUR_FLAG_256, two different values, and yet both reach the outer grid
+  # as the same cell and capture-pane re-emits both as \e[41m. This is the
+  # equivalence measured, not the one assumed.
+  SIZE_LABEL='80x24-red-vs-colour1'
+  attach_both_at 80 24
+  side_command zz set-option -g status-style 'bg=red,fg=colour7' ||
+    die 'zz refused status-style'
+  side_command tmux set-option -g status-style 'bg=colour1,fg=colour7' ||
+    die 'tmux refused status-style'
+  self_check_checkpoint red-vs-colour1
+  self_check_case 'equivalence: bg=red and bg=colour1 reach the same cell' none
+
+  # The same bold cell written with two spellings: a redundant leading zero in
+  # the parameter, and the short form of the reset. Attributes carry no colour,
+  # so this equivalence is clear of the colour-class divergence above. Both
+  # sides are told to run the same command; each reads its own file.
+  SIZE_LABEL='80x24-escape-spelling'
+  attach_both_at 80 24
+  plant zz spell '\033[1mBOLD\033[0m'
+  plant tmux spell '\033[01mBOLD\033[m'
+  send_both 'printf "%b\\n" "$(cat $HOME/spell)"'
+  self_check_checkpoint escape-spelling
+  self_check_case 'equivalence: two spellings of the same bold cell' none
+
+  if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
+    printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"
+    return 1
+  fi
+  printf 'self-check complete: every sabotage was caught in its own channel and every equivalence passed\n'
+  return 0
+}
+
+# --- run -------------------------------------------------------------------
+
+write_attach zz "$SCRATCH_DIR/attach-zz.sh"
+write_attach tmux "$SCRATCH_DIR/attach-tmux.sh"
+zz_command -f /dev/null daemon >"$SCRATCH_DIR/zz-daemon.out" 2>"$SCRATCH_DIR/zz-daemon.err" &
+ZZ_PID=$!
+wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
+
+if [ "$SELF_CHECK" -eq 1 ]; then
+  run_self_check
+  exit $?
+fi
+
+printf 'whole-screen differential (pin %s)\n' "$(basename -- "$TMUX_BIN")"
+for entry in "${SIZES[@]}"; do
+  IFS='|' read -r size mode alternate <<<"$entry"
+  run_size "$size" "$mode" "$alternate"
+done
+
+if [ "$FAILURES" -ne 0 ]; then
+  printf '%s of %s asserted checkpoints differ, %s recorded, %s recorded cursor differences\n' \
+    "$FAILURES" "$CHECKS" "$RECORDS" "$CURSOR_RECORDS"
+  exit 1
+fi
+printf 'all %s asserted checkpoints identical, %s recorded not asserted, %s recorded cursor differences\n' \
+  "$CHECKS" "$RECORDS" "$CURSOR_RECORDS"

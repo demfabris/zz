@@ -1,0 +1,24 @@
+$ printf 'MARK-%s\n' fresh
+MARK-fresh
+$ printf 'MARK-%s\n' status-off
+MARK-status-off
+$ printf 'MARK-%s\n' status-on
+MARK-status-on
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[38;2;13;13;13m[48;2;154;205;50mL[4m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m

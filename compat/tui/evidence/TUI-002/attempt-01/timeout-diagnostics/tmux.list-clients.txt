@@ -1,0 +1,1 @@
+/dev/pts/4 session=screen 80x24 flags=attached,focused,UTF-8

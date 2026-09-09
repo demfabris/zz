@@ -1,0 +1,2 @@
+[2026-09-09T22:27:56Z INFO  zz_browser::cef_runtime] CEF OSR frame-rate ceiling: 60 FPS
+[2026-09-09T22:27:56Z INFO  zz_browser::cef_runtime] CEF shared-texture OSR enabled (GPU import/copy-on-receive active with a GPUI device; atomic readback fallback retained)

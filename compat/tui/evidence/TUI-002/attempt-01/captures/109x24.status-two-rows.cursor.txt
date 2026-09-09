@@ -1,0 +1,4 @@
+asserted zz:   31,18 flag=1 pane=109x24
+asserted tmux: 2,18 flag=1 pane=109x24
+recorded zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+recorded tmux: shape=default blinking=0 very_visible=0 colour=none

@@ -1,0 +1,10 @@
+$ printf 'W[%s][%s][%s]|\n' '你好' 'éä' '🙂'
+W[你好][éä][🙂]|
+$ printf 'MARK-%s\n' wide-glyphs
+MARK-wide-glyphs
+$
+
+
+
+
+[38;2;13;13;13m[48;2;154;205;50mL[4m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m

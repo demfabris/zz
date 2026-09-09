@@ -1,0 +1,24 @@
+$ printf '\033[31mNAMED\033[0m \033[38;5;196mINDEXED\033[0m \033[38;2;1;2;3mRGB\
+033[0m\n'
+[38;2;205;0;0mNAMED[39m [38;2;255;0;0mINDEXED[39m [38;2;1;2;3mRGB[39m
+$ printf 'MARK-%s\n' colour-classes
+MARK-colour-classes
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[38;2;13;13;13m[48;2;154;205;50mL[4m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m

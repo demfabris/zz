@@ -1,0 +1,10 @@
+MARK-unzoom
+$ printf 'MARK-%s\n' resized
+MARK-resized
+$ printf 'MARK-%s\n' restored
+MARK-restored
+$ printf 'MARK-%s\n' status-two-rows
+MARK-status-two-rows
+$
+[38;2;13;13;13m[48;2;154;205;50mL[4m0:win*[0m[38;2;13;13;13m[48;2;154;205;50m
+      P: [4m0:[screentitle]*[0m[38;2;13;13;13m[48;2;154;205;50m

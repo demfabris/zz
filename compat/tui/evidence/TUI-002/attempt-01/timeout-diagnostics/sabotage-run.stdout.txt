@@ -1,0 +1,1 @@
+whole-screen differential (pin tmux)

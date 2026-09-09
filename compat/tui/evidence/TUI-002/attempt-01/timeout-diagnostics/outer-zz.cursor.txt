@@ -1,0 +1,1 @@
+2,2 flag=1 pane=80x24 shape=block blinking=1 very_visible=0 colour=#e5c07b

@@ -1,0 +1,9 @@
+wait that ran out: fresh settled on the zz screen
+at: 2026-09-09T19:28:09-03:00
+size under test: 80x24
+zz: /home/demfabris/dev/zz-tui-lane/target/debug/zz
+tmux: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+zz socket: /tmp/zzsd-Uwd3MB.sock
+outer socket: zzsdo-Uwd3MB
+inner tmux socket: zzsdi-Uwd3MB
+ZZ_LOG_DIR (/tmp/zzsd.Uwd3MB/zz-logs) holds:

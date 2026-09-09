@@ -1,0 +1,54 @@
+self-check: one deliberate difference per channel, plus three the pin collapses
+note  80x24-glyph glyph recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint glyph at 80x24-glyph
+      first differing row 1 of 24
+        tmux: GLYPH-AB$ printf 'MARK-%s\n' glyph
+        zz:   GLYPH-AA$ printf 'MARK-%s\n' glyph
+      asserted cursor tmux: 2,3 flag=1 pane=80x24
+      asserted cursor zz:   2,3 flag=1 pane=80x24
+ok    self-check glyph, one character of output differs
+note  80x24-colour colour recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint colour at 80x24-colour
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[38;2;216;222;233m^[[41mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[41m
+      asserted cursor tmux: 2,2 flag=1 pane=80x24
+      asserted cursor zz:   2,2 flag=1 pane=80x24
+ok    self-check colour, status-style bg=red on one side
+note  80x24-cursor cursor recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint cursor at 80x24-cursor
+      first differing row 1 of 24
+        tmux: CURSORMARK$
+        zz:   CURSORMARK-WITH-A-LONGER-TAIL$
+      asserted cursor tmux: 12,1 flag=1 pane=80x24
+      asserted cursor zz:   31,1 flag=1 pane=80x24
+ok    self-check cursor, a different-length unterminated line
+note  80x24-geometry geometry recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint geometry at 80x24-geometry
+      first differing row 0 of 24
+        tmux: $ printf 'MARK-%s\n' geometry
+        zz:   $
+      asserted cursor tmux: 2,2 flag=1 pane=80x24
+      asserted cursor zz:   2,14 flag=1 pane=80x24
+ok    self-check geometry, split-window on one side
+note  80x24-style-order style-order recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    self-check equivalence: attribute order in a style
+note  80x24-red-vs-colour1 red-vs-colour1 recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    self-check equivalence: bg=red and bg=colour1 reach the same cell
+note  80x24-escape-spelling escape-spelling recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    self-check equivalence: two spellings of the same bold cell
+self-check complete: every sabotage was caught in its own channel and every equivalence passed

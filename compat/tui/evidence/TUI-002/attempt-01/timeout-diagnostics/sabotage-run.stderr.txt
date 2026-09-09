@@ -1,0 +1,17 @@
+diagnostics retained in /home/demfabris/dev/zz-tui-lane/compat/tui/evidence/TUI-002/attempt-01/timeout-diagnostics:
+outer-tmux.cursor.txt
+outer-tmux.screen.txt
+outer-zz.cursor.txt
+outer-zz.screen.txt
+sabotage-run.stderr.txt
+sabotage-run.stdout.txt
+tmux-client.stderr.txt
+tmux.list-clients.txt
+tmux.list-panes.txt
+what-fired.txt
+zz-client.stderr.txt
+zz-daemon.stderr.txt
+zz-daemon.stdout.txt
+zz.list-clients.txt
+zz.list-panes.txt
+error: fresh settled on the zz screen did not settle within 10 seconds

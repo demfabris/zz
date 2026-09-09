@@ -1,0 +1,24 @@
+$ printf 'MARK-%s\n' default-fg
+MARK-default-fg
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[44mL[4m0:win*[0m[44m

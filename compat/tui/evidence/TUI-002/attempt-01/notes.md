@@ -202,13 +202,20 @@ masked.
 Clause 3's list is fully driven: 80, 100, 109 and 120 columns, a small height at
 80x10, split, zoom and resize, and status off, on, two rows, top and bottom.
 
-Clause 1 is met for cells, glyph widths, styles, cursor position, cursor
-visibility and geometry, and NOT met for cursor shape, blink and colour, which
-are measured and recorded rather than asserted because zz and the pin genuinely
-differ there today (finding 2). That is the honest state: the channel is
-compared and printed on every run, and it will start asserting the moment the
-divergence closes — the fixture already prints `recorded cursor attributes
-identical, the record can close` when the two sides agree.
+Clause 1 asks for these channels to be COMPARED at named settled checkpoints,
+and every one of them is: cells, glyph widths, styles, cursor position, cursor
+visibility, cursor shape, geometry and the interaction state a split, a zoom and
+a resize leave behind. Cells, glyph widths, styles, cursor position, cursor
+visibility and geometry are also GATED — a difference in any of them exits 1.
+Cursor shape, blink and colour are compared and printed on every run but not
+gated, because zz and the pin genuinely differ there today (finding 2) and a
+sabotage of that channel could not be told apart from the standing divergence.
+A shape regression would not turn this fixture red, and that is the one thing a
+reviewer should weigh: if clause 1 is read as requiring a gate rather than a
+comparison, this obligation is short on that point and on nothing else. The
+channel starts asserting the moment the divergence closes — the fixture already
+prints `recorded cursor attributes identical, the record can close` when the two
+sides agree.
 
 What this attempt did not cover, for the lane that takes it further:
 

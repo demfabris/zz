@@ -131,16 +131,55 @@ pub(crate) fn with_workspace_environment(
 }
 
 fn with_executable_path(agent: AcpAgent, path: Option<&str>) -> AcpAgent {
-    let Some(path) = path else {
-        return agent;
-    };
-
     let mut config = agent.into_config();
-    if !config.environment().contains_key("PATH") {
+    if let Some(path) = path
+        && !config.environment().contains_key("PATH")
+    {
         config = config.env("PATH", path);
         log::debug!(target: "zz::agent", "using the repaired PATH for the ACP process");
     }
+    if !config.environment().contains_key(CLAUDE_CODE_EXECUTABLE)
+        && std::env::var_os(CLAUDE_CODE_EXECUTABLE).is_none()
+        && let Some(claude) = installed_claude(
+            config
+                .environment()
+                .get("PATH")
+                .map(String::as_str)
+                .or(path),
+        )
+    {
+        config = config.env(CLAUDE_CODE_EXECUTABLE, claude.to_string_lossy());
+        log::debug!(
+            target: "zz::agent",
+            "pointing the Claude adapter at the installed Claude Code at {}",
+            claude.display()
+        );
+    }
     AcpAgent::new(config)
+}
+
+/// The Claude adapter runs Claude Code through the agent SDK, whose newer
+/// releases ship the CLI as a platform-specific optional package that `npx`
+/// does not always install. The user's own `claude` on PATH is always the
+/// right binary anyway: current, and already signed in.
+const CLAUDE_CODE_EXECUTABLE: &str = "CLAUDE_CODE_EXECUTABLE";
+
+fn installed_claude(path: Option<&str>) -> Option<std::path::PathBuf> {
+    std::env::split_paths(path?)
+        .map(|directory| directory.join("claude"))
+        .find(|candidate| is_executable_file(candidate))
+}
+
+#[cfg(unix)]
+fn is_executable_file(candidate: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::metadata(candidate)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(candidate: &std::path::Path) -> bool {
+    candidate.with_extension("exe").is_file() || candidate.with_extension("cmd").is_file()
 }
 
 #[cfg(unix)]
@@ -706,5 +745,37 @@ mod workspace_tests {
         let agent = AcpAgent::from_str("npx -y example").expect("valid command");
         let agent = with_executable_path(agent, None);
         assert!(environment(&agent).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_installed_claude_is_offered_to_the_adapter_unless_already_set() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().expect("bin dir");
+        let claude = directory.path().join("claude");
+        std::fs::write(&claude, "#!/bin/sh\n").expect("stub");
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let path = format!("{}:/usr/bin", directory.path().display());
+        let expected = claude.to_string_lossy().into_owned();
+
+        let agent = AcpAgent::from_str("npx -y example").expect("valid command");
+        let agent = with_executable_path(agent, Some(&path));
+        assert!(environment(&agent).contains(&("CLAUDE_CODE_EXECUTABLE".to_owned(), expected)));
+
+        let agent = AcpAgent::from_str("CLAUDE_CODE_EXECUTABLE=/opt/claude npx -y example")
+            .expect("valid configured command");
+        let agent = with_executable_path(agent, Some(&path));
+        assert!(environment(&agent).contains(&(
+            "CLAUDE_CODE_EXECUTABLE".to_owned(),
+            "/opt/claude".to_owned()
+        )));
+
+        let agent = AcpAgent::from_str("npx -y example").expect("valid command");
+        let agent = with_executable_path(agent, Some("/usr/bin"));
+        assert!(
+            !environment(&agent)
+                .iter()
+                .any(|(name, _)| name == "CLAUDE_CODE_EXECUTABLE")
+        );
     }
 }

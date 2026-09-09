@@ -4161,16 +4161,6 @@ impl Shared {
             inner.command_history = command;
             inner.search_history = search;
         }
-        // Building the runtime is what warms the adapter cache, so a daemon
-        // that has agent panes enabled pays the npx download before the first
-        // pane asks for it.
-        #[cfg(feature = "agent")]
-        {
-            let agent_panes_enabled = self.inner.lock().engine.experimental_agent_pane();
-            if agent_panes_enabled {
-                let _ = self.agent_runtime();
-            }
-        }
         Ok(())
     }
 
@@ -68455,7 +68445,7 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "explain"]),
+                &CommandInvocation::new("new-session", ["-s", "explain", "exec /bin/cat"]),
             )
             .expect("session");
         let session = context.session.expect("session");
@@ -68479,10 +68469,10 @@ set-option -g @alias-mixed-next yes
                 &CommandInvocation::new("send-last-output", ["-t", &picker.to_string()]),
             )
             .expect_err("picker is not a terminal");
-        assert!(matches!(
-            error,
-            DaemonError::Server(ServerError::InvalidTarget(_))
-        ));
+        assert!(
+            matches!(error, DaemonError::Server(ServerError::InvalidTarget(_))),
+            "{error:?}"
+        );
 
         let error = shared
             .execute(
@@ -68511,7 +68501,7 @@ set-option -g @alias-mixed-next yes
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "readback"]),
+                &CommandInvocation::new("new-session", ["-s", "readback", "exec /bin/cat"]),
             )
             .expect("session");
         let terminal = context.pane.expect("terminal");

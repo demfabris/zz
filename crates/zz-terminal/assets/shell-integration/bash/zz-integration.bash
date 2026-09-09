@@ -71,7 +71,7 @@ __zz_prompt_begin() {
 }
 
 __zz_prompt_debug() {
-  builtin local __zz_status=$1 __zz_next=$2
+  builtin local __zz_status="$1" __zz_next="$2"
   if [[ $__zz_next == __zz_prompt_begin ]]; then
     __zz_prompt_ready=0
   elif [[ ${__zz_prompt_ready-0} == 1 && ${BASH_SUBSHELL-0} == 0

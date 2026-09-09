@@ -2,7 +2,7 @@
 type: Design Plan
 title: Agent backbone v3 - browser over CDP, typed agent state, headless completeness
 description: Handoff plan from the 2026-09-09 headless audit of what an AI agent can drive through the zz CLI - the verified working set, the verified gaps, the locked decisions (zz is the browser process and the agent brings its own CLI, no MCP server, no native snapshot verbs before measurement), and three lanes of work with file pointers, acceptance checks, and traps.
-status: Proposed 2026-09-09; nothing built; lane A step 2 belongs to the TUI rework session
+status: Lanes A1, B1, B2, B3, B4, C1 shipped 2026-09-09 (commits 7c4ba1a0, 62e5b802, d9b3e072, 48ccf3e1); C2 in progress; A2 belongs to the TUI rework session; A3 is a decision gate
 tags:
 - agent
 - browser
@@ -57,36 +57,44 @@ zz kill-server                       # when done
 
 ## Verified gaps
 
-1. **Browser has no read, act, or wait verbs.** The CLI offers `set-browser-url`, `set-browser-tabs`,
-   `set-browser-profile`, `capture-browser`, `split-browser`, `new-browser`. Nothing returns page text
-   or an accessibility tree, nothing clicks or types, nothing evaluates JS, nothing reads console or
-   network, nothing waits for a condition.
+1. **Browser has no read, act, or wait verbs (addressed 2026-09-09 by A1).** `browser-remote-debugging-port`
+   or `ZZ_BROWSER_REMOTE_DEBUGGING_PORT` opens a loopback CDP endpoint so agent-browser, Playwright MCP,
+   and Chrome DevTools MCP attach; `#{browser_url}` correlates panes with targets. See
+   `knowledge/browser/agent-cdp.md`. zz itself still ships no snapshot, click, or wait verbs (A3 gate).
 2. **Browser needs a hosting client.** Headless `capture-browser` answers "pane is not attached". A TUI
    attach (`env -u TMUX zz attach -t ai` from a pane in another session) starts CEF, five helper
    processes appear, and `capture-browser` then answers "browser screenshots require the zz app"
    from `crates/zz-tui/src/app.rs:1575`. `#{pane_title}` on a browser pane stayed at the first URL
    after `set-browser-url`.
-3. **No typed agent state on the CLI.** The daemon publishes `EventPayload::AgentState` carrying
-   `AgentPaneWire` whose `phase` is `AgentConnectionPhase { Starting, Ready, Running,
-   AwaitingPermission, Failed }` (`crates/zz-protocol/src/message.rs:2046`, `:2081`, `:3056`). No
-   format variable exposes it, no wait channel fires on it, control mode never mentions it.
-4. **No permission answer from the CLI.** `ProtocolMessage::AgentRespondPermission` is the only
-   route (`daemon.rs:25230`) and only the GUI sends it. With `agent-auto-approve` at `off` or
-   `reads` an unattended agent pane blocks until a human opens the GUI.
+3. **No typed agent state on the CLI (implemented 2026-09-09 by B1).** `#{agent_state}` reports
+   `starting`, `idle`, `working`, `blocked`, or `failed`; `#{agent_pending_permission}` is `1` or `0`;
+   every transition signals the sticky `agent_state@%N` wait channel, and control-mode
+   `refresh-client -B` subscriptions push the changes.
+4. **No permission answer from the CLI (implemented 2026-09-09 by B2).** `show-agent-permission`
+   prints the pending request as JSON, `agent-respond --allow|--deny|--option ID` answers it, and
+   `agent-send --wait --on-block fail` returns the request with exit code 3 while the turn keeps running.
 5. **Pane id discovery for non-terminal splits (implemented 2026-09-09).** `split-picker`,
    `split-browser`, and `split-agent` accept `-P [-F format]`. `split-agent` creates the pane with
    its provider and cwd in one command (`crates/zz-mux/src/command.rs`, `split_agent`).
 6. **Agent panes default on (implemented 2026-09-09).** The engine and client config enable
-   `experimental-agent-pane` by default. An explicit `off` still blocks new agent panes.
-7. **Bundled shell integration emits no OSC 133.** bash, zsh, and PowerShell assets emit OSC 2 and
-   OSC 7 only, so `show-last-output` and `send-last-output` fail on a stock shell.
+   `experimental-agent-pane` by default. An explicit `off` still blocks new agent panes. The daemon no
+   longer builds the agent runtime eagerly at start (that warmed the adapter cache with `npx` on every
+   daemon, including the real daemons the CLI tests spawn); the first agent pane pays the download.
+7. **Bundled shell integration emits no OSC 133 (implemented 2026-09-09 by C1).** bash, zsh, and
+   PowerShell hooks now emit A, B, C, and D marks. Apple's `/bin/bash` 3.2 stays excluded because it never
+   reads `ENV`. The scroll-on-clear rewrite re-marks a prompt row it scrolls away, which zsh's per-prompt
+   erase-below at the origin otherwise stripped.
 8. **`zz tools` undersells the surface.** `WORKSPACE_TOOLS` (`daemon.rs:37212`) omits `wait-for`,
    `set-hook`, `run-shell -b -d`, `pipe-pane`, `show-options -p`, and `list-panes -F '#{pane_kind}'`.
    The skill at `.claude/skills/zz-workspace/SKILL.md` covers them and drifts from the catalog.
 9. **Adapter pins (updated 2026-09-09).** `DEFAULT_AGENT_COMMAND` pins `codex-acp@1.11.0`;
    `DEFAULT_AGENT_CLAUDE_CODE_COMMAND` pins `claude-agent-acp@0.76.0`
    (`crates/zz-protocol/src/message.rs`). The Claude adapter depends on SDK `0.3.257`, whose
-   `claudeCodeVersion` is `2.1.257`, above the required `2.1.251`.
+   `claudeCodeVersion` is `2.1.257`, above the required `2.1.251`. That SDK ships Claude Code as a
+   platform-specific optional package that `npx` did not install here ("Claude native binary not found
+   for darwin-arm64"), so the daemon now sets `CLAUDE_CODE_EXECUTABLE` for the ACP child from the
+   `claude` on its repaired PATH unless the adapter command or the environment already sets it
+   (`crates/zz-daemon/src/agent/environment.rs`). Verified: `agent-send --wait` answers `pong`.
 10. **No session restore on main.** A local branch `feat/session-resurrect` built one; fabrico did
     not find it useful and it stays out of this plan.
 
@@ -355,6 +363,10 @@ Every new verb in lanes A and B touches all of these, or a test fails:
   the failing test alone before diagnosing. On headless machines
   `concurrent_default_interactive_attaches_atomically_share_session_zero` fails with "not a
   terminal" by design.
+- **Control-mode exit tests under load.** `cli_binary` tests `wait_exit_holds_the_control_process_until_a_second_blank_line`
+  and `refresh_client_b_reports_initial_change_and_exact_removal` hung or failed during a full workspace
+  run while four other builds shared the machine, and passed alone in 4 s. Both binaries complete the
+  flow by hand. Rerun alone before diagnosing.
 - **Failed turns and OSC 133.** A turn that fails leaves `show-last-output` on the agent pane saying
   "has not completed a command yet"; the projection closes the D mark only on PromptFinished.
   Worth a one-line fix while in `PaneLane::project` if you are nearby.

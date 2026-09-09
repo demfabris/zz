@@ -322,7 +322,11 @@ it; the mechanism and the hazards it closes are in
 # Workspace environment for the ACP child
 
 An ACP child is additively given `ZZ_SOCKET` (the daemon endpoint, passed explicitly because a
-`--socket` launch leaves it out of the daemon's own environment). Injection and the PATH repair
+`--socket` launch leaves it out of the daemon's own environment). It also receives
+`CLAUDE_CODE_EXECUTABLE` pointing at the `claude` found on the repaired PATH when neither the adapter
+command nor the daemon's environment sets it: newer `claude-agent-acp` releases ship Claude Code as a
+platform-specific optional package that `npx` does not always install, and the user's own install is
+current and signed in. Injection and the PATH repair
 share one shape (`with_workspace_environment` at `environment.rs:109`, `with_executable_path` at
 `:123`): take the agent's `AcpAgentConfig`, skip any name the user already configured through
 `agent-command`, add the rest. A configured value always wins. So an agent inside a pane can run

@@ -75,7 +75,7 @@ use zz_protocol::{
 use crate::agent::{
     environment::AgentWorkspaceEnvironment,
     fanout::{AgentPublisher, AgentRequestReply, AgentRuntime, is_default_agent_title},
-    host::{AgentPaneSpec, AgentTurnFailure, HostCommand},
+    host::{AgentPaneSpec, AgentTurnFailure, HostCommand, PermissionResponse},
     runtime::{AgentSpawnConfig, load_persistent_journal},
     stream::{AgentImage, AgentPrompt, AgentSessionSummary},
 };
@@ -2864,6 +2864,8 @@ enum DaemonCommandDispatch {
     RunShell,
     IfShell,
     AgentSend,
+    ShowAgentPermission,
+    AgentRespond,
     SendLastOutput,
     ShowLastOutput,
     SendText,
@@ -2892,6 +2894,11 @@ const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
     ("if-shell", DaemonCommandDispatch::IfShell),
     ("if", DaemonCommandDispatch::IfShell),
     ("agent-send", DaemonCommandDispatch::AgentSend),
+    (
+        "show-agent-permission",
+        DaemonCommandDispatch::ShowAgentPermission,
+    ),
+    ("agent-respond", DaemonCommandDispatch::AgentRespond),
     ("send-last-output", DaemonCommandDispatch::SendLastOutput),
     ("show-last-output", DaemonCommandDispatch::ShowLastOutput),
     ("send-text", DaemonCommandDispatch::SendText),
@@ -6428,6 +6435,12 @@ impl Shared {
                     }
                     DaemonCommandDispatch::AgentSend => {
                         self.agent_send(client, kind, context, &command.args)
+                    }
+                    DaemonCommandDispatch::ShowAgentPermission => {
+                        self.show_agent_permission(context, &command.args)
+                    }
+                    DaemonCommandDispatch::AgentRespond => {
+                        self.agent_respond(kind, context, &command.args)
                     }
                     DaemonCommandDispatch::SendLastOutput => {
                         self.send_last_output(context, &command.args)
@@ -12544,16 +12557,128 @@ impl Shared {
                 )
                 .into());
             }
-            let execution =
-                self.submit_agent_prompt_and_wait(pane, payload, parsed.wait_timeout())?;
-            self.record_command_stderr(client, &pane.to_string());
-            return Ok(execution);
+            let result = self.submit_agent_prompt_and_wait(
+                pane,
+                payload,
+                parsed.wait_timeout(),
+                parsed.fail_on_block,
+            );
+            if result.is_ok()
+                || matches!(&result, Err(DaemonError::CommandExit { exit_code: 3, .. }))
+            {
+                self.record_command_stderr(client, &pane.to_string());
+            }
+            return result;
         }
         let mut execution = self.deliver_to_agent(pane, payload, parsed.submit)?;
         if parsed.submit && kind != ClientKind::Interactive {
             execution.output = pane.to_string().into();
         }
         Ok(execution)
+    }
+
+    fn resolve_agent_permission_pane(
+        &self,
+        context: &ExecutionContext,
+        target: Option<&str>,
+    ) -> Result<PaneId, DaemonError> {
+        if let Some(target) = target {
+            let inner = self.inner.lock();
+            let pane = inner
+                .engine
+                .resolve_pane(Some(target), context.window, context.pane)?;
+            if !matches!(
+                inner.engine.state.pane(pane).map(|pane| &pane.kind),
+                Some(PaneKind::Agent(_))
+            ) {
+                return Err(
+                    ServerError::InvalidTarget(format!("{pane} is not an agent pane")).into(),
+                );
+            }
+            Ok(pane)
+        } else {
+            self.resolve_agent_pane(context, None)
+        }
+    }
+
+    fn show_agent_permission(
+        &self,
+        context: &ExecutionContext,
+        args: &[RawText],
+    ) -> Result<Execution, DaemonError> {
+        let target = parse_target_only_args("show-agent-permission", args)?;
+        let pane = self.resolve_agent_permission_pane(context, target.as_deref())?;
+        #[cfg(feature = "agent")]
+        {
+            let permission = self
+                .open_agent_runtime()
+                .and_then(|runtime| runtime.wire_state(pane))
+                .and_then(|state| state.pending_permission)
+                .ok_or_else(|| {
+                    ServerError::InvalidCommand(format!("no pending permission: {pane}"))
+                })?;
+            Ok(Execution {
+                output: serde_json::to_string(&permission)
+                    .expect("permission JSON")
+                    .into(),
+                effects: Vec::new(),
+            })
+        }
+        #[cfg(not(feature = "agent"))]
+        Err(ServerError::InvalidCommand(format!("no pending permission: {pane}")).into())
+    }
+
+    fn agent_respond(
+        &self,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        args: &[RawText],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_agent_respond_args(args)?;
+        if !matches!(kind, ClientKind::Command | ClientKind::Control) {
+            return Err(ServerError::InvalidCommand(
+                "agent-respond needs a command client".to_owned(),
+            )
+            .into());
+        }
+        let pane = self.resolve_agent_permission_pane(context, parsed.target.as_deref())?;
+        #[cfg(feature = "agent")]
+        {
+            use crate::agent::host::PermissionChoice;
+            let choice = if parsed.allow {
+                PermissionChoice::Allow
+            } else if parsed.deny {
+                PermissionChoice::Deny
+            } else {
+                PermissionChoice::Option(parsed.option.expect("validated permission choice"))
+            };
+            let runtime = self.open_agent_runtime().ok_or_else(|| {
+                ServerError::InvalidCommand(format!("no pending permission: {pane}"))
+            })?;
+            let (reply, result) = crossbeam_channel::bounded(1);
+            if !runtime.command(
+                pane,
+                HostCommand::RespondPermission {
+                    response: PermissionResponse::Select {
+                        request_id: parsed.request_id,
+                        choice,
+                        reply,
+                    },
+                },
+            ) {
+                return Err(ServerError::PaneExited(pane).into());
+            }
+            let option = result
+                .recv()
+                .map_err(|_| ServerError::PaneExited(pane))?
+                .map_err(|error| ServerError::InvalidCommand(format!("{error}: {pane}")))?;
+            Ok(Execution {
+                output: option.into(),
+                effects: Vec::new(),
+            })
+        }
+        #[cfg(not(feature = "agent"))]
+        Err(ServerError::InvalidCommand(format!("no pending permission: {pane}")).into())
     }
 
     fn send_last_output(
@@ -25128,6 +25253,11 @@ impl Shared {
         for pane in panes {
             runtime.close(*pane);
         }
+        let mut inner = self.inner.lock();
+        let states = Arc::make_mut(&mut inner.agent_states);
+        for pane in panes {
+            states.remove(pane);
+        }
     }
 
     fn shutdown_agents(&self) {
@@ -25232,8 +25362,10 @@ impl Shared {
                 option_id,
                 ..
             } => HostCommand::RespondPermission {
-                request_id,
-                option_id,
+                response: PermissionResponse::Exact {
+                    request_id,
+                    option_id,
+                },
             },
             ProtocolMessage::AgentSetConfigOption {
                 option_id, value, ..
@@ -25303,6 +25435,7 @@ impl Shared {
         pane: PaneId,
         text: String,
         timeout: Option<Duration>,
+        fail_on_block: bool,
     ) -> Result<Execution, DaemonError> {
         let runtime = self.agent_runtime().ok_or(ServerError::PaneExited(pane))?;
         let (waiter, reply) = crossbeam_channel::bounded(1);
@@ -25313,7 +25446,10 @@ impl Shared {
                 text,
                 images: Vec::new(),
             },
-            Some(waiter),
+            Some(crate::agent::host::AgentTurnWaiter {
+                reply: waiter,
+                fail_on_block,
+            }),
         );
         if !sent {
             return Err(ServerError::PaneExited(pane).into());
@@ -25338,6 +25474,12 @@ impl Shared {
                     text.push_str(COMMAND_PROMPT_OUTPUT_TRUNCATED);
                 }
                 text
+            }
+            Err(AgentTurnFailure::Blocked { payload }) => {
+                return Err(DaemonError::CommandExit {
+                    output: payload.into(),
+                    exit_code: 3,
+                });
             }
             Err(AgentTurnFailure::Failed(message)) => {
                 return Err(
@@ -25367,6 +25509,7 @@ impl Shared {
         pane: PaneId,
         _text: String,
         _timeout: Option<Duration>,
+        _fail_on_block: bool,
     ) -> Result<Execution, DaemonError> {
         Err(ServerError::PaneExited(pane).into())
     }
@@ -25553,6 +25696,18 @@ impl AgentPublisher for Shared {
     }
 
     fn publish_agent_state(&self, pane: PaneId, state: AgentPaneWire) {
+        let changed = {
+            let mut inner = self.inner.lock();
+            let previous = Arc::make_mut(&mut inner.agent_states).insert(pane, state.clone());
+            previous.as_ref().is_none_or(|previous| {
+                crate::status::agent_state_name(&previous.phase)
+                    != crate::status::agent_state_name(&state.phase)
+                    || previous.pending_permission != state.pending_permission
+            })
+        };
+        if changed {
+            self.signal_wait_channel(&format!("agent_state@{pane}"));
+        }
         self.publish_for_pane(pane, &EventPayload::AgentState { pane, state });
     }
 
@@ -26709,6 +26864,7 @@ impl ColdBootstrapLease {
 
 #[derive(Default)]
 struct ServerState {
+    agent_states: Arc<BTreeMap<PaneId, zz_protocol::AgentPaneWire>>,
     engine: MuxEngine,
     cold_bootstrap: ColdBootstrapLease,
     last_published_mux_generation: u64,
@@ -34530,6 +34686,7 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
 
 fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
     FormatHookFacts {
+        agent_states: Arc::clone(&inner.agent_states),
         mux: Arc::new(inner.engine.format_facts()),
         copy_modes: Arc::new(copy_mode_format_facts(inner)),
         unseen_changes: Arc::new(unseen_change_panes(inner)),
@@ -36305,7 +36462,66 @@ fn parse_line_range(value: &str) -> Option<(Option<u32>, Option<u32>)> {
 }
 
 #[derive(Debug, Default)]
+struct ParsedAgentRespond {
+    target: Option<String>,
+    allow: bool,
+    deny: bool,
+    option: Option<String>,
+    request_id: Option<u64>,
+}
+
+fn parse_agent_respond_args(args: &[RawText]) -> Result<ParsedAgentRespond, ServerError> {
+    let mut parsed = ParsedAgentRespond::default();
+    let mut index = 0;
+    let mut positional = false;
+    let mut choices = 0;
+    while let Some(argument) = args.get(index) {
+        if !positional && argument == "--" {
+            positional = true;
+            index += 1;
+            continue;
+        }
+        if !positional {
+            if argument == "--allow" || argument == "--deny" {
+                parsed.allow = argument == "--allow";
+                parsed.deny = argument == "--deny";
+                choices += 1;
+                index += 1;
+                continue;
+            }
+            if let Some(value) = option_value("agent-respond", args, index, &["-t"])? {
+                parsed.target = Some(value.value);
+                index += value.consumed;
+                continue;
+            }
+            if let Some(value) = option_value("agent-respond", args, index, &["--option"])? {
+                parsed.option = Some(value.value);
+                choices += 1;
+                index += value.consumed;
+                continue;
+            }
+        }
+        if parsed.request_id.is_some() {
+            return Err(ServerError::CommandParse(
+                "agent-respond accepts one request ID".to_owned(),
+            ));
+        }
+        parsed.request_id = Some(argument.parse().map_err(|_| {
+            ServerError::CommandParse(format!("invalid permission request ID: {argument}"))
+        })?);
+        index += 1;
+    }
+    if choices != 1 {
+        return Err(ServerError::CommandParse(
+            "agent-respond needs exactly one of --allow, --deny, or --option ID".to_owned(),
+        ));
+    }
+    Ok(parsed)
+}
+
+#[derive(Debug, Default)]
 struct ParsedAgentSend {
+    fail_on_block: bool,
     target: Option<String>,
     submit: bool,
     wait: bool,
@@ -37032,6 +37248,7 @@ pub fn agent_send_reads_stdin(args: &[RawText]) -> bool {
 
 fn parse_agent_send_args(args: &[RawText]) -> Result<ParsedAgentSend, ServerError> {
     let mut parsed = ParsedAgentSend::default();
+    let mut on_block_set = false;
     let mut index = 0;
     while let Some(argument) = args.get(index) {
         if argument == "--" {
@@ -37051,6 +37268,20 @@ fn parse_agent_send_args(args: &[RawText]) -> Result<ParsedAgentSend, ServerErro
             parsed.submit = true;
             parsed.wait = true;
             index += 1;
+            continue;
+        }
+        if let Some(value) = option_value("agent-send", args, index, &["--on-block"])? {
+            parsed.fail_on_block = match value.value.as_str() {
+                "wait" => false,
+                "fail" => true,
+                _ => {
+                    return Err(ServerError::CommandParse(
+                        "agent-send --on-block needs wait or fail".to_owned(),
+                    ));
+                }
+            };
+            on_block_set = true;
+            index += value.consumed;
             continue;
         }
         if let Some(value) = option_value("agent-send", args, index, &["--timeout"])? {
@@ -37080,6 +37311,11 @@ fn parse_agent_send_args(args: &[RawText]) -> Result<ParsedAgentSend, ServerErro
         }
         parsed.text.push(argument.to_string());
         index += 1;
+    }
+    if on_block_set && !parsed.wait {
+        return Err(ServerError::CommandParse(
+            "agent-send --on-block needs --wait".to_owned(),
+        ));
     }
     if parsed.timeout.is_some() && !parsed.wait {
         return Err(ServerError::CommandParse(
@@ -37219,7 +37455,7 @@ Run `zz list-panes -t @N` or `zz list-windows` to discover the rest.
   zz tools
       Print this catalog.
 
-  zz agent-send [-t %N] [--submit | --wait [--timeout SECS]] [--context PATH[:START[-END]]] [TEXT]
+  zz agent-send [-t %N] [--submit | --wait [--timeout SECS] [--on-block wait|fail]] [--context PATH[:START[-END]]] [TEXT]
       Put TEXT in an agent pane's composer for its user to review, or submit
       it outright with --submit; a busy pane queues it behind the running
       turn. --submit prints the pane it chose. --wait submits and blocks
@@ -37230,7 +37466,19 @@ Run `zz list-panes -t @N` or `zz list-windows` to discover the rest.
       routes to that window's most recently focused agent pane, so a pipe
       from a terminal needs no addressing at all: `git diff | zz agent-send`.
       Reads standard input when TEXT is omitted. --context adds a file/line
-      header and fences the payload.
+      header and fences the payload. --on-block wait is the default; fail
+      prints the pending permission JSON and exits 3 while the turn continues.
+
+  zz show-agent-permission [-t %N]
+      Print the oldest pending permission as JSON; exit 1 if none is pending.
+
+  zz agent-respond [-t %N] (--allow | --deny | --option ID) [REQUEST_ID]
+      Answer a pending permission and print the chosen option ID. Without a
+      request ID, answer the oldest request. --allow prefers allow-once.
+
+State and waiting:
+  zz list-panes -F '#{pane_id} #{agent_state}'
+  until [ \"$(zz display-message -p -t %N '#{agent_state}')\" = idle ]; do zz wait-for agent_state@%N; done
 
   zz capture-pane -p -t %N [-S -] [-E -] [-J]
       Print a terminal pane's text. -S -/-E - widen the range to the whole
@@ -63140,6 +63388,57 @@ set-option -g @alias-mixed-next yes
     }
 
     #[test]
+    fn agent_permission_parsers_require_one_choice_and_a_wait_policy() {
+        for args in [
+            vec!["--wait", "--on-block", "fail"],
+            vec!["--wait", "--on-block=fail"],
+        ] {
+            assert!(
+                parse_agent_send_args(&args.into_iter().map(RawText::from).collect::<Vec<_>>())
+                    .expect("fail policy")
+                    .fail_on_block
+            );
+        }
+        assert!(
+            !parse_agent_send_args(&["--wait", "--on-block", "wait"].map(RawText::from))
+                .expect("wait policy")
+                .fail_on_block
+        );
+        assert!(
+            !parse_agent_send_args(&["--wait"].map(RawText::from))
+                .expect("default policy")
+                .fail_on_block
+        );
+        for args in [
+            vec!["--on-block", "fail"],
+            vec!["--wait", "--on-block", "other"],
+            vec!["--wait", "--on-block"],
+        ] {
+            assert!(
+                parse_agent_send_args(&args.into_iter().map(RawText::from).collect::<Vec<_>>())
+                    .is_err()
+            );
+        }
+        let parsed = parse_agent_respond_args(&["-t%7", "--option=allow", "42"].map(RawText::from))
+            .expect("option");
+        assert_eq!(parsed.target.as_deref(), Some("%7"));
+        assert_eq!(parsed.option.as_deref(), Some("allow"));
+        assert_eq!(parsed.request_id, Some(42));
+        for args in [
+            vec![],
+            vec!["--allow", "--deny"],
+            vec!["--allow", "--option", "x"],
+            vec!["--allow", "wrong"],
+            vec!["--allow", "1", "2"],
+        ] {
+            assert!(
+                parse_agent_respond_args(&args.into_iter().map(RawText::from).collect::<Vec<_>>())
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn agent_send_reads_stdin_only_when_argv_carries_no_text() {
         assert!(agent_send_reads_stdin(&["-t".into(), "%1".into()]));
         assert!(agent_send_reads_stdin(&["-t%1".into(), "--submit".into()]));
@@ -63240,9 +63539,11 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn tools_catalog_matches_dispatchable_verbs() {
-        const TOOL_VERBS: [&str; 8] = [
+        const TOOL_VERBS: [&str; 10] = [
             "capture-pane",
             "agent-send",
+            "show-agent-permission",
+            "agent-respond",
             "send-last-output",
             "show-last-output",
             "send-text",
@@ -63670,6 +63971,177 @@ set-option -g @alias-mixed-next yes
             DaemonError::Server(ServerError::InvalidCommand(message))
                 if message == "channel sticky not locked"
         ));
+    }
+
+    #[cfg(feature = "agent")]
+    #[test]
+    fn agent_state_formats_reach_commands_and_control_subscriptions() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        {
+            let mut inner = shared.inner.lock();
+            for command in [
+                CommandInvocation::new("new-session", ["-s", "agent-formats"]),
+                CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
+                CommandInvocation::new("split-picker", [] as [&str; 0]),
+                CommandInvocation::new("select-pane-kind", ["agent"]),
+            ] {
+                inner
+                    .engine
+                    .execute(&mut context, &command)
+                    .expect("mux setup");
+            }
+        }
+        let pane = context.pane.expect("agent");
+        let target = pane.to_string();
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(control, context.session.expect("session"))
+            .expect("attach");
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new(
+                    "refresh-client",
+                    ["-B", &format!("agent:{pane}:#{{agent_state}}")],
+                ),
+            )
+            .expect("subscribe");
+        for (phase, expected) in [
+            (zz_protocol::AgentConnectionPhase::Running, "working"),
+            (zz_protocol::AgentConnectionPhase::Ready, "idle"),
+        ] {
+            shared.publish_agent_state(
+                pane,
+                AgentPaneWire {
+                    phase,
+                    ..AgentPaneWire::default()
+                },
+            );
+            let display = shared
+                .execute(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "display-message",
+                        [
+                            "-p",
+                            "-t",
+                            &target,
+                            "#{agent_state}:#{agent_pending_permission}",
+                        ],
+                    ),
+                )
+                .expect("display state");
+            assert_eq!(display.output, format!("{expected}:0"));
+            let panes = shared
+                .execute(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    &CommandInvocation::new("list-panes", ["-F", "#{pane_id}:#{agent_state}"]),
+                )
+                .expect("list state");
+            assert!(
+                panes
+                    .output
+                    .lines()
+                    .any(|line| line == format!("{pane}:{expected}"))
+            );
+            shared.refresh_control_subscriptions();
+            assert!(take_reliable_messages(&mailbox).iter().any(|message| matches!(message,
+                ProtocolMessage::Event(Event { payload: EventPayload::SubscriptionChanged { name, value, .. }, .. })
+                    if name == "agent" && value == expected
+            )));
+            shared.publish_agent_state(
+                pane,
+                AgentPaneWire {
+                    phase: if expected == "working" {
+                        zz_protocol::AgentConnectionPhase::Running
+                    } else {
+                        zz_protocol::AgentConnectionPhase::Ready
+                    },
+                    ..AgentPaneWire::default()
+                },
+            );
+            shared.refresh_control_subscriptions();
+            assert!(
+                !take_reliable_messages(&mailbox)
+                    .iter()
+                    .any(|message| matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::SubscriptionChanged { .. },
+                            ..
+                        })
+                    ))
+            );
+        }
+    }
+
+    #[cfg(feature = "agent")]
+    #[test]
+    fn agent_state_transitions_wake_parked_and_late_waiters_without_noop_edges() {
+        let shared = Arc::new(Shared::new(1));
+        register_wait_clients(&shared, [1, 2]);
+        let pane = PaneId(7);
+        let channel = "agent_state@%7";
+        let parked = Arc::clone(&shared);
+        let waiter = thread::spawn(move || {
+            parked.wait_for(ClientId(1), ClientKind::Command, &[channel.into()])
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared
+            .inner
+            .lock()
+            .wait_channels
+            .get(channel)
+            .is_none_or(|channel| channel.waiters.is_empty())
+        {
+            assert!(Instant::now() < deadline, "waiter did not park");
+            thread::yield_now();
+        }
+        let mut state = AgentPaneWire {
+            phase: zz_protocol::AgentConnectionPhase::Running,
+            ..AgentPaneWire::default()
+        };
+        shared.publish_agent_state(pane, state.clone());
+        waiter.join().expect("waiter").expect("transition");
+        shared.publish_agent_state(pane, state.clone());
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .wait_channels
+                .get(channel)
+                .is_some_and(|channel| channel.woken || !channel.waiters.is_empty())
+        );
+        state.phase = zz_protocol::AgentConnectionPhase::Ready;
+        shared.publish_agent_state(pane, state.clone());
+        assert!(shared.inner.lock().wait_channels[channel].woken);
+        shared
+            .wait_for(ClientId(2), ClientKind::Command, &[channel.into()])
+            .expect("sticky transition");
+        state.title = Some("unrelated title".to_owned());
+        shared.publish_agent_state(pane, state.clone());
+        assert!(!shared.inner.lock().wait_channels.contains_key(channel));
+        for request_id in [Some(1), Some(2), None] {
+            state.pending_permission =
+                request_id.map(|request_id| zz_protocol::AgentPermissionWire {
+                    request_id,
+                    payload: "{}".to_owned(),
+                });
+            shared.publish_agent_state(pane, state.clone());
+            assert!(shared.inner.lock().wait_channels[channel].woken);
+            shared
+                .wait_for(ClientId(2), ClientKind::Command, &[channel.into()])
+                .expect("permission edge");
+        }
     }
 
     #[test]
@@ -97147,6 +97619,277 @@ bind - split-window -v -c "#{pane_current_path}"
                 )
                 .expect("agent-send --wait returns once the turn ends");
             assert_eq!(execution.output, "turn 0");
+        }
+
+        #[test]
+        fn on_block_fail_reports_permission_and_preserves_queued_turn_attribution() {
+            let workspace = workspace(Behavior::AskPermission);
+            let target = workspace.agent.to_string();
+            workspace
+                .shared
+                .inner
+                .lock()
+                .command_streams
+                .entry(ClientId(99))
+                .or_default();
+            let run = |args: &[&str]| {
+                workspace.shared.execute(
+                    ClientId(99),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+            };
+            let error = run(&[
+                "agent-send",
+                "-t",
+                &target,
+                "--wait",
+                "--on-block",
+                "fail",
+                "--timeout",
+                "5",
+                "first",
+            ])
+            .expect_err("permission interrupts waiter");
+            let DaemonError::CommandExit { output, exit_code } = error else {
+                panic!("expected exit code 3: {error:?}");
+            };
+            assert_eq!(exit_code, 3);
+            assert_eq!(
+                workspace.shared.inner.lock().command_streams[&ClientId(99)].stderr,
+                format!("{target}\n")
+            );
+            let permission: zz_protocol::AgentPermissionWire =
+                serde_json::from_str(&output).expect("permission JSON");
+            assert_eq!(
+                run(&["show-agent-permission", "-t", &target])
+                    .expect("pending")
+                    .output,
+                output
+            );
+            assert!(matches!(
+                workspace
+                    .runtime
+                    .wire_state(workspace.agent)
+                    .expect("state")
+                    .phase,
+                zz_protocol::AgentConnectionPhase::AwaitingPermission
+            ));
+            let bad_option = run(&["agent-respond", "-t", &target, "--option", "missing"])
+                .expect_err("unknown option");
+            assert!(daemon_error_text(&bad_option).contains("valid ids: allow, deny"));
+            assert!(
+                run(&[
+                    "agent-respond",
+                    "-t",
+                    &target,
+                    "--allow",
+                    "18446744073709551615"
+                ])
+                .is_err()
+            );
+            assert!(
+                workspace
+                    .shared
+                    .agent_respond(
+                        ClientKind::Interactive,
+                        &ExecutionContext::default(),
+                        &["-t", &target, "--allow"].map(RawText::from)
+                    )
+                    .is_err()
+            );
+
+            let shared = Arc::clone(&workspace.shared);
+            let second_target = target.clone();
+            let (finished, result) = crossbeam_channel::bounded(1);
+            let second = thread::spawn(move || {
+                let reply = shared.execute(
+                    ClientId(100),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(
+                        "agent-send",
+                        [
+                            "-t",
+                            &second_target,
+                            "--wait",
+                            "--on-block",
+                            "wait",
+                            "--timeout",
+                            "5",
+                            "second",
+                        ],
+                    ),
+                );
+                let _ = finished.send(reply);
+            });
+            let deadline = Instant::now() + DEADLINE;
+            while workspace
+                .runtime
+                .wire_state(workspace.agent)
+                .expect("state")
+                .queued_prompts
+                != 1
+            {
+                assert!(Instant::now() < deadline, "second prompt did not queue");
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(
+                run(&[
+                    "agent-respond",
+                    "-t",
+                    &target,
+                    "--allow",
+                    &permission.request_id.to_string()
+                ])
+                .expect("allow first")
+                .output,
+                "allow"
+            );
+            let deadline = Instant::now() + DEADLINE;
+            loop {
+                if workspace
+                    .runtime
+                    .wire_state(workspace.agent)
+                    .and_then(|state| state.pending_permission)
+                    .is_some_and(|pending| pending.request_id != permission.request_id)
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "second permission did not arrive"
+                );
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert!(matches!(
+                result.try_recv(),
+                Err(crossbeam_channel::TryRecvError::Empty)
+            ));
+            assert_eq!(
+                run(&["agent-respond", "-t", &target, "--deny"])
+                    .expect("deny second")
+                    .output,
+                "deny"
+            );
+            assert_eq!(
+                result
+                    .recv_timeout(DEADLINE)
+                    .expect("second waiter")
+                    .expect("second turn")
+                    .output,
+                "turn 1"
+            );
+            second.join().expect("second command");
+            let deadline = Instant::now() + DEADLINE;
+            while workspace
+                .runtime
+                .wire_state(workspace.agent)
+                .expect("state")
+                .pending_permission
+                .is_some()
+            {
+                assert!(Instant::now() < deadline, "permission did not clear");
+                thread::sleep(Duration::from_millis(2));
+            }
+            for verb in ["show-agent-permission", "agent-respond"] {
+                let args = if verb == "agent-respond" {
+                    vec![verb, "-t", &target, "--allow"]
+                } else {
+                    vec![verb, "-t", &target]
+                };
+                assert_eq!(
+                    daemon_error_text(&run(&args).expect_err("no pending request")),
+                    format!("no pending permission: {target}")
+                );
+            }
+        }
+
+        #[test]
+        fn agent_permission_default_wait_and_explicit_non_agent_target() {
+            let workspace = workspace(Behavior::AskPermission);
+            let target = workspace.agent.to_string();
+            let shared = Arc::clone(&workspace.shared);
+            let prompt_target = target.clone();
+            let (finished, result) = crossbeam_channel::bounded(1);
+            let waiter = thread::spawn(move || {
+                let reply = shared.execute(
+                    ClientId(99),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(
+                        "agent-send",
+                        ["-t", &prompt_target, "--wait", "--timeout", "5", "default"],
+                    ),
+                );
+                let _ = finished.send(reply);
+            });
+            let deadline = Instant::now() + DEADLINE;
+            while workspace
+                .runtime
+                .wire_state(workspace.agent)
+                .and_then(|state| state.pending_permission)
+                .is_none()
+            {
+                assert!(Instant::now() < deadline, "permission did not arrive");
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert!(matches!(
+                result.try_recv(),
+                Err(crossbeam_channel::TryRecvError::Empty)
+            ));
+            let terminal = {
+                let inner = workspace.shared.inner.lock();
+                inner
+                    .engine
+                    .state
+                    .windows
+                    .values()
+                    .flat_map(|window| window.panes.iter())
+                    .find(|(_, pane)| matches!(pane.kind, PaneKind::Terminal))
+                    .map(|(pane, _)| *pane)
+                    .expect("terminal")
+            };
+            let mut context = ExecutionContext::default();
+            let terminal_target = terminal.to_string();
+            for args in [
+                vec!["show-agent-permission", "-t", &terminal_target],
+                vec!["agent-respond", "-t", &terminal_target, "--allow"],
+            ] {
+                let error = workspace
+                    .shared
+                    .execute(
+                        ClientId(100),
+                        ClientKind::Command,
+                        &mut context,
+                        &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                    )
+                    .expect_err("explicit terminal target");
+                assert_eq!(
+                    daemon_error_text(&error),
+                    format!("invalid target: {terminal} is not an agent pane")
+                );
+            }
+            let allowed = workspace
+                .shared
+                .execute(
+                    ClientId(100),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("agent-respond", ["-t", &target, "--option", "allow"]),
+                )
+                .expect("answer default wait");
+            assert_eq!(allowed.output, "allow");
+            assert_eq!(
+                result
+                    .recv_timeout(DEADLINE)
+                    .expect("waiter")
+                    .expect("turn")
+                    .output,
+                "turn 0"
+            );
+            waiter.join().expect("command thread");
         }
 
         #[test]

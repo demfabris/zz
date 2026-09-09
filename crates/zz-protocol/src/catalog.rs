@@ -554,6 +554,8 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "if-shell",
     "if",
     "agent-send",
+    "agent-respond",
+    "show-agent-permission",
     "send-last-output",
     "show-last-output",
     "send-text",
@@ -796,6 +798,7 @@ static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
 ];
 
 pub static NATIVE_COMMAND_NAMES: &[&str] = &[
+    "agent-respond",
     "agent-send",
     "capture-browser",
     "copy-mode-search-prompt",
@@ -814,6 +817,7 @@ pub static NATIVE_COMMAND_NAMES: &[&str] = &[
     "set-browser-tabs",
     "set-browser-url",
     "set-editor-path",
+    "show-agent-permission",
     "show-last-output",
     "split-agent",
     "split-browser",
@@ -854,7 +858,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "agent-send",
         aliases: &[],
         description: "Send text to an agent pane",
-        usage: "[-t target-pane] [--target target-pane] [--submit] [--wait] [--timeout seconds] [--context context] [text ...]",
+        usage: "[-t target-pane] [--target target-pane] [--submit] [--wait] [--timeout seconds] [--on-block wait|fail] [--context context] [text ...]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("--target", Pane, "target pane"),
@@ -864,10 +868,38 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
             ),
             CommandOptionSpec::flag("--wait", "submit, then print the turn's reply"),
             CommandOptionSpec::value("--timeout", FreeForm, "seconds to wait for the reply"),
+            CommandOptionSpec::value(
+                "--on-block",
+                FreeForm,
+                "wait for permission or fail with exit code 3",
+            ),
             CommandOptionSpec::value("--context", FreeForm, "file and optional line range"),
         ],
         positionals: &[],
         variadic: Some(FreeForm),
+    },
+    CommandSpec {
+        name: "show-agent-permission",
+        aliases: &[],
+        description: "Print an agent pane's oldest pending permission as JSON",
+        usage: "[-t target-pane]",
+        options: &[CommandOptionSpec::value("-t", Pane, "target agent pane")],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "agent-respond",
+        aliases: &[],
+        description: "Answer an agent pane's pending permission",
+        usage: "[-t target-pane] [--allow] [--deny] [--option option-id] [request-id]",
+        options: &[
+            CommandOptionSpec::value("-t", Pane, "target agent pane"),
+            CommandOptionSpec::flag("--allow", "allow, preferring allow-once"),
+            CommandOptionSpec::flag("--deny", "reject the request"),
+            CommandOptionSpec::value("--option", FreeForm, "exact permission option ID"),
+        ],
+        positionals: &[FreeForm],
+        variadic: None,
     },
     CommandSpec {
         name: "send-last-output",

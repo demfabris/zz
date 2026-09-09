@@ -280,6 +280,35 @@ and output from OSC 133 marks and appends it to `MuxState::recent_agent_pane`'s 
 window. Both verbs are daemon-side commands like `capture-pane`; see
 [the command set](/tmux/commands.md).
 
+Use `#{agent_state}` to read the daemon's phase: `starting`, `idle`, `working`, `blocked`, or
+`failed`. `#{agent_pending_permission}` returns `1` or `0` for an agent. Both return an empty
+string for other pane kinds. These variables work in pane listings, display messages, status
+formats, hooks, and control-mode `refresh-client -B` subscriptions. The daemon signals the sticky
+`agent_state@%N` wait channel when the phase or pending permission changes; repeated publication
+of the same state does not signal it.
+
+```sh
+zz list-panes -F '#{pane_id} #{agent_state}'
+until [ "$(zz display-message -p -t %N '#{agent_state}')" = idle ]; do zz wait-for agent_state@%N; done
+```
+
+`show-agent-permission [-t %N]` prints the oldest pending `AgentPermissionWire` as JSON:
+`request_id` identifies the request, and `payload` contains a JSON string with `toolCall` and
+`options`. With no pending request it prints nothing to stdout, reports `no pending permission:
+%N` on stderr, and exits 1. An explicit non-agent target fails; an omitted target selects the
+window's most recent agent pane.
+
+`agent-respond [-t %N] (--allow | --deny | --option ID) [REQUEST_ID]` answers the oldest request
+unless you name one. `--allow` prefers the first allow-once option over allow-always; `--deny`
+selects the first reject option. `--option` requires an exact advertised ID. Success prints the
+chosen option ID and exits 0. Missing requests, unknown request IDs, and invalid option IDs exit
+1; an invalid option lists the valid IDs. Interactive clients cannot invoke this command.
+
+`agent-send --wait --on-block wait|fail` defaults to `wait`, which keeps waiting through a
+permission request. With `fail`, it prints the same JSON as `show-agent-permission`, writes the
+pane ID to stderr, and exits 3. The turn keeps running. Use `agent-respond` to answer it; a later
+`agent-send --wait` queues behind that turn and receives only its own reply.
+
 # Reading a pane from outside: the transcript projection
 
 An Agent pane also owns a PTY-free shadow `TerminalSession` fed with a text projection of its

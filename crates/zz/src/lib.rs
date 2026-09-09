@@ -3106,6 +3106,21 @@ mod tests {
     }
 
     #[test]
+    fn agent_permission_commands_pass_preflight_and_route_stdin() {
+        let send = CommandInvocation::new("agent-send", ["--wait", "--on-block", "fail"]);
+        let show = CommandInvocation::new("show-agent-permission", ["-t", "%1"]);
+        let respond = CommandInvocation::new("agent-respond", ["-t", "%1", "--allow"]);
+        assert!(command_reads_stdin(&send));
+        assert!(!command_reads_stdin(&show));
+        assert!(!command_reads_stdin(&respond));
+        zz_mux::validate_static_command_chain(&[send, show, respond]).expect("native preflight");
+        assert!(!command_reads_stdin(&CommandInvocation::new(
+            "agent-send",
+            ["--wait", "--on-block=fail", "hello"]
+        )));
+    }
+
+    #[test]
     fn stdin_payload_boundary_distinguishes_terminators_from_option_values() {
         let mut send_text = ["-t", "--"].map(RawText::from).to_vec();
         append_stdin_payload("send-text", &mut send_text, "--no-enter".to_owned());

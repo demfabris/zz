@@ -173,8 +173,19 @@ pub(crate) struct StatusRequest {
     pub(crate) facts: FormatHookFacts,
 }
 
+pub(crate) fn agent_state_name(phase: &zz_protocol::AgentConnectionPhase) -> &'static str {
+    match phase {
+        zz_protocol::AgentConnectionPhase::Starting => "starting",
+        zz_protocol::AgentConnectionPhase::Ready => "idle",
+        zz_protocol::AgentConnectionPhase::Running => "working",
+        zz_protocol::AgentConnectionPhase::AwaitingPermission => "blocked",
+        zz_protocol::AgentConnectionPhase::Failed { .. } => "failed",
+    }
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct FormatHookFacts {
+    pub(crate) agent_states: Arc<BTreeMap<PaneId, zz_protocol::AgentPaneWire>>,
     pub(crate) terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
     pub(crate) pane_pipes: Arc<BTreeMap<PaneId, u32>>,
     pub(crate) session_attachments: Arc<BTreeMap<SessionId, (usize, String)>>,
@@ -1405,6 +1416,24 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 }
                 .to_owned(),
             ),
+            "agent_state" | "agent_pending_permission" => {
+                if self.facts.mux.pane_kind(&context.pane_id) != Some("agent") {
+                    return Some(String::new());
+                }
+                let state = context
+                    .pane_id
+                    .parse()
+                    .ok()
+                    .and_then(|pane| self.facts.agent_states.get(&pane));
+                Some(if name == "agent_state" {
+                    state
+                        .map_or("starting", |state| agent_state_name(&state.phase))
+                        .to_owned()
+                } else {
+                    u8::from(state.is_some_and(|state| state.pending_permission.is_some()))
+                        .to_string()
+                })
+            }
             "pane_kind" => self
                 .facts
                 .mux
@@ -2011,6 +2040,78 @@ mod tests {
         );
         request.context.pane_id = terminal.to_string();
         assert_eq!(renderer.render_initial(&request).left, "url=");
+    }
+
+    #[test]
+    fn agent_formats_cover_phases_permissions_and_other_panes() {
+        let mut engine = MuxEngine::default();
+        let mut context = zz_mux::ExecutionContext::default();
+        execute(&mut engine, &mut context, &["new-session", "-s", "agents"]);
+        let terminal = context.pane.expect("terminal");
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-g", "experimental-agent-pane", "on"],
+        );
+        execute(&mut engine, &mut context, &["split-picker"]);
+        execute(&mut engine, &mut context, &["select-pane-kind", "agent"]);
+        let pane = context.pane.expect("agent");
+        for (phase, expected) in [
+            (zz_protocol::AgentConnectionPhase::Starting, "starting"),
+            (zz_protocol::AgentConnectionPhase::Ready, "idle"),
+            (zz_protocol::AgentConnectionPhase::Running, "working"),
+            (
+                zz_protocol::AgentConnectionPhase::AwaitingPermission,
+                "blocked",
+            ),
+            (
+                zz_protocol::AgentConnectionPhase::Failed {
+                    message: "failed".to_owned(),
+                },
+                "failed",
+            ),
+        ] {
+            for pending in [false, true] {
+                let state = zz_protocol::AgentPaneWire {
+                    phase: phase.clone(),
+                    pending_permission: pending.then(|| zz_protocol::AgentPermissionWire {
+                        request_id: 1,
+                        payload: "{}".to_owned(),
+                    }),
+                    ..zz_protocol::AgentPaneWire::default()
+                };
+                let facts = FormatHookFacts {
+                    mux: Arc::new(engine.format_facts()),
+                    agent_states: Arc::new(BTreeMap::from([(pane, state)])),
+                    ..FormatHookFacts::default()
+                };
+                let mut hooks = DaemonFormatHooks::command(&facts);
+                let context = StatusContext {
+                    pane_id: pane.to_string(),
+                    ..StatusContext::default()
+                };
+                assert_eq!(
+                    zz_mux::expand_format_values(
+                        "#{agent_state}:#{agent_pending_permission}",
+                        &context,
+                        &mut hooks
+                    ),
+                    format!("{expected}:{}", u8::from(pending))
+                );
+                let context = StatusContext {
+                    pane_id: terminal.to_string(),
+                    ..StatusContext::default()
+                };
+                assert_eq!(
+                    zz_mux::expand_format_values(
+                        "#{agent_state}:#{agent_pending_permission}",
+                        &context,
+                        &mut hooks
+                    ),
+                    ":"
+                );
+            }
+        }
     }
 
     #[test]

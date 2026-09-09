@@ -17087,6 +17087,9 @@ mod tests {
             command("clock-mode", &[]),
             command("capture-pane", &["-C", "-p"]),
             command("agent-send", &["--submit", "hello"]),
+            command("agent-send", &["--wait", "--on-block", "fail", "hello"]),
+            command("show-agent-permission", &["-t", "%1"]),
+            command("agent-respond", &["-t", "%1", "--allow"]),
         ];
 
         validate_static_command_chain(&commands).unwrap();
@@ -42779,7 +42782,7 @@ mod tests {
         assert!(rows.contains(&"list-commands (lscm) [-F format] [command]"));
         assert!(rows.contains(&"start-server (start) "));
         assert!(rows.contains(
-            &"agent-send [-t target-pane] [--target target-pane] [--submit] [--wait] [--timeout seconds] [--context context] [text ...]"
+            &"agent-send [-t target-pane] [--target target-pane] [--submit] [--wait] [--timeout seconds] [--on-block wait|fail] [--context context] [text ...]"
         ));
         assert!(rows.contains(&"send-last-output [-t target-pane]"));
         assert!(rows.contains(&"capture-browser [-t target-pane] [-o output-path]"));

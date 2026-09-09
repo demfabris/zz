@@ -48,8 +48,7 @@ pub(crate) enum HostCommand {
     /// Hand the queued prompts back so the composer can refill.
     Unqueue,
     RespondPermission {
-        request_id: u64,
-        option_id: Option<String>,
+        response: PermissionResponse,
     },
     Authenticate {
         method_id: String,
@@ -91,13 +90,90 @@ pub(crate) struct AgentTurnReply {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AgentTurnFailure {
     Failed(String),
+    Blocked { payload: String },
     Cancelled,
     Reclaimed,
     Closed,
 }
 
+#[derive(Debug)]
+pub(crate) enum PermissionResponse {
+    Exact {
+        request_id: u64,
+        option_id: Option<String>,
+    },
+    Select {
+        request_id: Option<u64>,
+        choice: PermissionChoice,
+        reply: crossbeam_channel::Sender<Result<String, String>>,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) enum PermissionChoice {
+    Allow,
+    Deny,
+    Option(String),
+}
+
+fn select_permission(
+    pending: &[AgentPendingPermission],
+    request_id: Option<u64>,
+    choice: &PermissionChoice,
+) -> Result<(u64, String), String> {
+    let permission = match request_id {
+        Some(id) => pending
+            .iter()
+            .find(|pending| pending.request_id == id)
+            .ok_or_else(|| format!("unknown permission request: {id}"))?,
+        None => pending
+            .first()
+            .ok_or_else(|| "no pending permission".to_owned())?,
+    };
+    let options = permission
+        .options
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    fn kind(option: &Value) -> Option<&str> {
+        option.get("kind").and_then(Value::as_str)
+    }
+    let selected = match choice {
+        PermissionChoice::Option(id) => options
+            .iter()
+            .find(|option| option.get("optionId").and_then(Value::as_str) == Some(id.as_str())),
+        PermissionChoice::Allow => options
+            .iter()
+            .find(|option| kind(option) == Some("allow_once"))
+            .or_else(|| {
+                options
+                    .iter()
+                    .find(|option| kind(option) == Some("allow_always"))
+            }),
+        PermissionChoice::Deny => options
+            .iter()
+            .find(|option| matches!(kind(option), Some("reject_once" | "reject_always"))),
+    };
+    let id = selected
+        .and_then(|option| option.get("optionId"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            let valid = options
+                .iter()
+                .filter_map(|option| option.get("optionId").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("unknown or unavailable permission option; valid ids: {valid}")
+        })?;
+    Ok((permission.request_id, id.to_owned()))
+}
+
 pub(crate) type AgentTurnResult = Result<AgentTurnReply, AgentTurnFailure>;
-pub(crate) type AgentTurnWaiter = crossbeam_channel::Sender<AgentTurnResult>;
+#[derive(Debug)]
+pub(crate) struct AgentTurnWaiter {
+    pub(crate) reply: crossbeam_channel::Sender<AgentTurnResult>,
+    pub(crate) fail_on_block: bool,
+}
 
 /// A prompt on its way to a pane, with the waiter that wants its reply. The
 /// prompt itself stays the wire type; the waiter never leaves the process.
@@ -110,7 +186,7 @@ pub(crate) struct QueuedPrompt {
 impl QueuedPrompt {
     pub(crate) fn settle(&mut self, result: AgentTurnResult) {
         if let Some(waiter) = self.waiter.take() {
-            let _ = waiter.try_send(result);
+            let _ = waiter.reply.try_send(result);
         }
     }
 
@@ -711,22 +787,48 @@ impl PanePump {
         }
     }
 
+    fn respond_permission(&mut self, request_id: u64, option_id: Option<String>) -> bool {
+        if self.send_control(RuntimeControl::RespondPermission {
+            request_id,
+            option_id,
+        }) {
+            true
+        } else {
+            self.fail_control();
+            false
+        }
+    }
+
     fn command(&mut self, command: HostCommand) {
         match command {
             HostCommand::Prompt(prompt) => self.prompt(prompt),
             HostCommand::Cancel => self.cancel(),
             HostCommand::Unqueue => self.reclaim_queue(),
-            HostCommand::RespondPermission {
-                request_id,
-                option_id,
-            } => {
-                if !self.send_control(RuntimeControl::RespondPermission {
+            HostCommand::RespondPermission { response } => match response {
+                PermissionResponse::Exact {
                     request_id,
                     option_id,
-                }) {
-                    self.fail_control();
+                } => {
+                    self.respond_permission(request_id, option_id);
                 }
-            }
+                PermissionResponse::Select {
+                    request_id,
+                    choice,
+                    reply,
+                } => {
+                    let selected = select_permission(
+                        &self.state.lock().pending_permissions,
+                        request_id,
+                        &choice,
+                    );
+                    let result = selected.and_then(|(request_id, option_id)| {
+                        self.respond_permission(request_id, Some(option_id.clone()))
+                            .then_some(option_id)
+                            .ok_or_else(|| "agent runtime is busy".to_owned())
+                    });
+                    let _ = reply.try_send(result);
+                }
+            },
             HostCommand::Authenticate { method_id } => {
                 if !self.send(RuntimeCommand::Authenticate { method_id }) {
                     self.observe(AgentStreamPayload::AuthenticationFailed {
@@ -973,10 +1075,35 @@ impl PanePump {
                 | AgentStreamPayload::PromptsRestored { .. } => {}
             }
         }
+        let blocked = if turn_result.is_none()
+            && self
+                .active_waiter
+                .as_ref()
+                .is_some_and(|waiter| waiter.fail_on_block)
+            && let AgentStreamPayload::PermissionRequested {
+                request_id,
+                tool_call,
+                options,
+            } = &payload
+        {
+            let permission = zz_protocol::AgentPermissionWire {
+                request_id: *request_id,
+                payload: serde_json::json!({ "toolCall": tool_call, "options": options })
+                    .to_string(),
+            };
+            Some(AgentTurnFailure::Blocked {
+                payload: serde_json::to_string(&permission).expect("permission JSON"),
+            })
+        } else {
+            None
+        };
         if let Some(result) = turn_result {
             self.settle_active_turn(result);
         }
         self.emit(payload);
+        if let Some(blocked) = blocked {
+            self.settle_active_turn(Err(blocked));
+        }
         if refresh_git {
             self.start_git_refresh();
         }
@@ -1092,7 +1219,7 @@ impl PanePump {
 
     fn settle_active_turn(&mut self, result: AgentTurnResult) {
         if let Some(waiter) = self.active_waiter.take() {
-            let _ = waiter.try_send(result);
+            let _ = waiter.reply.try_send(result);
         }
     }
 
@@ -1567,7 +1694,10 @@ mod tests {
                     text: text.to_owned(),
                     images: Vec::new(),
                 },
-                waiter: Some(waiter),
+                waiter: Some(AgentTurnWaiter {
+                    reply: waiter,
+                    fail_on_block: false,
+                }),
             }));
             reply
         }
@@ -1837,6 +1967,128 @@ mod tests {
     }
 
     #[test]
+    fn permission_selection_uses_advertised_ids_and_kinds() {
+        let pending = vec![
+            AgentPendingPermission {
+                request_id: 7,
+                tool_call: serde_json::json!({}),
+                options: serde_json::json!([
+                    { "optionId": "always", "kind": "allow_always" },
+                    { "optionId": "once", "kind": "allow_once" },
+                    { "optionId": "reject", "kind": "reject_once" },
+                    { "optionId": "later", "kind": "allow_once" }
+                ]),
+            },
+            AgentPendingPermission {
+                request_id: 8,
+                tool_call: serde_json::json!({}),
+                options: serde_json::json!([{ "optionId": "other", "kind": "allow_always" }]),
+            },
+        ];
+        assert_eq!(
+            select_permission(&pending, None, &PermissionChoice::Allow),
+            Ok((7, "once".to_owned()))
+        );
+        assert_eq!(
+            select_permission(&pending, None, &PermissionChoice::Deny),
+            Ok((7, "reject".to_owned()))
+        );
+        assert_eq!(
+            select_permission(&pending, Some(8), &PermissionChoice::Allow),
+            Ok((8, "other".to_owned()))
+        );
+        assert_eq!(
+            select_permission(
+                &pending,
+                None,
+                &PermissionChoice::Option("always".to_owned())
+            ),
+            Ok((7, "always".to_owned()))
+        );
+        let error = select_permission(
+            &pending,
+            None,
+            &PermissionChoice::Option("missing".to_owned()),
+        )
+        .expect_err("unknown option");
+        assert!(error.contains("valid ids: always, once, reject, later"));
+        assert_eq!(
+            select_permission(&[], None, &PermissionChoice::Allow),
+            Err("no pending permission".to_owned())
+        );
+        assert_eq!(
+            select_permission(&pending, Some(99), &PermissionChoice::Allow),
+            Err("unknown permission request: 99".to_owned())
+        );
+    }
+
+    #[test]
+    fn blocked_waiter_returns_without_settling_the_turn() {
+        let fixture = Fixture::open(Behavior::AskPermission, AgentAutoApprove::Off);
+        fixture.wait_for_session();
+        let (reply, result) = crossbeam_channel::bounded(1);
+        fixture.command(HostCommand::Prompt(QueuedPrompt {
+            prompt: AgentPrompt {
+                owner: ClientInstanceId::default(),
+                text: "first".to_owned(),
+                images: Vec::new(),
+            },
+            waiter: Some(AgentTurnWaiter {
+                reply,
+                fail_on_block: true,
+            }),
+        }));
+        let Err(AgentTurnFailure::Blocked { payload }) =
+            result.recv_timeout(DEADLINE).expect("blocked waiter")
+        else {
+            panic!("expected blocked permission");
+        };
+        let permission: zz_protocol::AgentPermissionWire =
+            serde_json::from_str(&payload).expect("permission JSON");
+        assert_eq!(fixture.state().phase, AgentConnectionPhase::Running);
+        assert_eq!(
+            fixture.state().pending_permissions[0].request_id,
+            permission.request_id
+        );
+        let second = fixture.prompt_waiting("second");
+        fixture.command(HostCommand::RespondPermission {
+            response: PermissionResponse::Exact {
+                request_id: permission.request_id,
+                option_id: Some("allow".to_owned()),
+            },
+        });
+        let deadline = Instant::now() + DEADLINE;
+        let next = loop {
+            if let Some(next) = fixture.state().pending_permissions.first()
+                && next.request_id != permission.request_id
+            {
+                break next.request_id;
+            }
+            assert!(Instant::now() < deadline, "second permission");
+            thread::sleep(Duration::from_millis(2));
+        };
+        assert!(matches!(
+            second.try_recv(),
+            Err(crossbeam_channel::TryRecvError::Empty)
+        ));
+        fixture.command(HostCommand::RespondPermission {
+            response: PermissionResponse::Exact {
+                request_id: next,
+                option_id: Some("allow".to_owned()),
+            },
+        });
+        assert_eq!(
+            second
+                .recv_timeout(DEADLINE)
+                .expect("second waiter")
+                .expect("second turn")
+                .text,
+            "turn 1"
+        );
+        fixture.close();
+    }
+
+    #[test]
     fn a_surfaced_permission_waits_for_an_answer_and_then_resolves() {
         let fixture = Fixture::open(Behavior::AskPermission, AgentAutoApprove::Off);
         fixture.wait_for_session();
@@ -1871,8 +2123,10 @@ mod tests {
         );
 
         fixture.command(HostCommand::RespondPermission {
-            request_id,
-            option_id: Some("allow".to_owned()),
+            response: PermissionResponse::Exact {
+                request_id,
+                option_id: Some("allow".to_owned()),
+            },
         });
         let payloads = fixture.recorder.wait("the turn to finish", |payload| {
             matches!(payload, AgentStreamPayload::PromptFinished { .. })
@@ -1911,8 +2165,10 @@ mod tests {
             unreachable!()
         };
         fixture.command(HostCommand::RespondPermission {
-            request_id,
-            option_id: Some("allow".to_owned()),
+            response: PermissionResponse::Exact {
+                request_id,
+                option_id: Some("allow".to_owned()),
+            },
         });
 
         let payloads = fixture.recorder.wait("the queued turn", |payload| {
@@ -2106,8 +2362,10 @@ mod tests {
             host.command(
                 pane,
                 HostCommand::RespondPermission {
-                    request_id: 9,
-                    option_id: None,
+                    response: PermissionResponse::Exact {
+                        request_id: 9,
+                        option_id: None,
+                    }
                 },
             )
             .is_ok()
@@ -2337,8 +2595,10 @@ mod tests {
             })
             .expect("permission request");
         fixture.command(HostCommand::RespondPermission {
-            request_id,
-            option_id: Some("allow".to_owned()),
+            response: PermissionResponse::Exact {
+                request_id,
+                option_id: Some("allow".to_owned()),
+            },
         });
         fixture.recorder.wait("the turn to finish", |payload| {
             matches!(payload, AgentStreamPayload::PromptFinished { .. })

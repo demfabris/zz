@@ -48,6 +48,7 @@ grammar work on an Agent pane too.
 | --- | --- |
 | `capture-pane` (any flags, copy-mode, search) | Works — gated only on `inner.terminals` |
 | `show-last-output` / `send-last-output` | Works — the kind guard accepts Agent panes; a turn is a command |
+| `show-agent-permission`, `#{agent_state}`, `#{agent_pending_permission}` | Read the daemon's agent state directly; permission JSON comes from `AgentPaneWire`. |
 | `monitor-activity`, `monitor-silence`, `alert-activity` | Works via `mark_output_activity` |
 | `alert-bell` | Works — BEL at turn end and on permission requests |
 | `pipe-pane` | Works — the surface worker now arms taps; `-I` has nothing to write to |

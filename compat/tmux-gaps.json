@@ -206,6 +206,8 @@
       "owner": "protocol",
       "items": [
         "native-command:agent-send",
+        "native-command:agent-respond",
+        "native-command:show-agent-permission",
         "native-command:capture-browser",
         "native-command:copy-mode-search-prompt",
         "native-command:debug-marker",

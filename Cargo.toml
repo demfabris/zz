@@ -101,8 +101,8 @@ proc-macro-error2 = { path = "third_party/rust/proc-macro-error2" }
 libghostty-vt-sys = { path = "third_party/rust/libghostty-vt-sys" }
 
 [patch."https://github.com/zed-industries/zed"]
-gpui = { path = "/Users/demfabris/.cache/zz-forks/zed/crates/gpui", version = "=0.2.2" }
-gpui_platform = { path = "/Users/demfabris/.cache/zz-forks/zed/crates/gpui_platform" }
+gpui = { git = "https://github.com/demfabris/zed", rev = "37d0b352edc95b719725cecd316258467f946e2e", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/demfabris/zed", rev = "37d0b352edc95b719725cecd316258467f946e2e" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

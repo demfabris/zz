@@ -73,20 +73,20 @@ zz kill-server                       # when done
 4. **No permission answer from the CLI.** `ProtocolMessage::AgentRespondPermission` is the only
    route (`daemon.rs:25230`) and only the GUI sends it. With `agent-auto-approve` at `off` or
    `reads` an unattended agent pane blocks until a human opens the GUI.
-5. **Pane id discovery for non-terminal splits.** `split-picker` declares `-P` unsupported
-   (`catalog.rs:1578`) and `split-browser` omits it (`catalog.rs:1626`); scripts diff `list-panes`.
-   Creating an agent pane takes three verbs.
-6. **The agent-pane gate starts off in CLI-spawned daemons.** `experimental_agent_pane` defaults to
-   false in the engine (`command.rs:2237`); the GUI forwards the config key as a `set-option`
-   (`crates/zz/src/config/mod.rs:1387`), a daemon nobody attached a GUI to never receives it.
+5. **Pane id discovery for non-terminal splits (implemented 2026-09-09).** `split-picker`,
+   `split-browser`, and `split-agent` accept `-P [-F format]`. `split-agent` creates the pane with
+   its provider and cwd in one command (`crates/zz-mux/src/command.rs`, `split_agent`).
+6. **Agent panes default on (implemented 2026-09-09).** The engine and client config enable
+   `experimental-agent-pane` by default. An explicit `off` still blocks new agent panes.
 7. **Bundled shell integration emits no OSC 133.** bash, zsh, and PowerShell assets emit OSC 2 and
    OSC 7 only, so `show-last-output` and `send-last-output` fail on a stock shell.
 8. **`zz tools` undersells the surface.** `WORKSPACE_TOOLS` (`daemon.rs:37212`) omits `wait-for`,
    `set-hook`, `run-shell -b -d`, `pipe-pane`, `show-options -p`, and `list-panes -F '#{pane_kind}'`.
    The skill at `.claude/skills/zz-workspace/SKILL.md` covers them and drifts from the catalog.
-9. **Adapter pin.** `DEFAULT_AGENT_COMMAND` pins `claude-agent-acp@0.68.0`
-   (`message.rs:129`), which bundles Claude Code 2.1.232; current models answer
-   `400 ... version 2.1.251 or newer is required`.
+9. **Adapter pins (updated 2026-09-09).** `DEFAULT_AGENT_COMMAND` pins `codex-acp@1.11.0`;
+   `DEFAULT_AGENT_CLAUDE_CODE_COMMAND` pins `claude-agent-acp@0.76.0`
+   (`crates/zz-protocol/src/message.rs`). The Claude adapter depends on SDK `0.3.257`, whose
+   `claudeCodeVersion` is `2.1.257`, above the required `2.1.251`.
 10. **No session restore on main.** A local branch `feat/session-resurrect` built one; fabrico did
     not find it useful and it stays out of this plan.
 

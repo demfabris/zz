@@ -1358,8 +1358,8 @@ impl SettingsView {
                                 group.child(Self::boolean_setting(
                                     ConfigKey::ExperimentalAgentPane,
                                     "Agent pane",
-                                    "Offer the Agent pane in the pane picker. Not ready \
-                                     for prime time; expect rough edges. Turning this off \
+                                    "Offer the Agent pane in the pane picker. Enabled by \
+                                     default. Turning this off \
                                      blocks new agent panes everywhere (picker, command \
                                      palette, CLI); agent panes that are already open keep \
                                      running.",

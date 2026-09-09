@@ -43,9 +43,15 @@ geometry. On the local host, the picker passes `agent-working-directory` through
 the desktop machine's configured path; its daemon resolves the picker donor's current terminal
 working directory and records it in the new `AgentDescriptor`.
 
-Materialization is gated on the `experimental-agent-pane` flag: while it is off (the default), the
-mux engine rejects `select-pane-kind … agent` from every route . picker, palette, CLI, and
-`mux.conf` bindings. The runtime flag is now the only gate a normal build has: `crates/zz/Cargo.toml`
+`split-agent [-dhv] [-p provider] [-c start-directory] [-P [-F format]] [-t target-pane]`
+creates an agent pane directly, with Codex as the default provider. An explicit absolute `-c`
+directory wins over the target's cwd donor. `split-agent`, `split-browser`, and `split-picker`
+accept `-P` to print the new pane ID; `-F` overrides the output format.
+
+Agent panes default on in both the mux engine and the client config. Setting
+`experimental-agent-pane` off blocks `split-agent` and `select-pane-kind … agent` from every
+route: picker, palette, CLI, and `mux.conf` bindings. The runtime flag is now the only gate a
+normal build has: `crates/zz/Cargo.toml`
 sets `default = ["desktop", "agent-pane"]`, so a stock `cargo build` and every packaged release ship
 the implementation. The `agent-pane` cargo feature survives as a build-size lever rather than a
 release gate; dropping it still compiles, because `crates/zz/src/agent/mod.rs` is the facade whose
@@ -127,8 +133,8 @@ edits to `DEFAULT_AGENT_COMMAND` / `DEFAULT_AGENT_CLAUDE_CODE_COMMAND` in
 `crates/zz-protocol/src/message.rs`:
 
 ```text
-npx -y @agentclientprotocol/codex-acp@1.3.0
-npx -y @agentclientprotocol/claude-agent-acp@0.68.0
+npx -y @agentclientprotocol/codex-acp@1.11.0
+npx -y @agentclientprotocol/claude-agent-acp@0.76.0
 ```
 
 ## Where the agent keys live

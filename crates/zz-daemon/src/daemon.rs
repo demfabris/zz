@@ -37265,7 +37265,7 @@ Run `zz list-panes -t @N` or `zz list-windows` to discover the rest.
   zz send-keys -t %N 'text' Enter
       Type into a terminal pane. -l sends text literally.
 
-  zz split-window | zz split-browser | zz split-picker [-h|-v] [-t %N]
+  zz split-window | zz split-browser | zz split-picker | zz split-agent [-h|-v] [-t %N]
       Add a pane beside another one.
 
   zz debug-marker [NOTE]
@@ -58442,6 +58442,11 @@ set-option -g @alias-mixed-next yes
             )
             .expect("picker");
         let picker = context.pane.expect("picker");
+        let report = shared.apply_mux_config_overrides(
+            &[("experimental-agent-pane".to_owned(), "false".to_owned())],
+            "test-experimental-lock",
+        );
+        assert_eq!(report.applied, 1);
 
         let gated = shared.execute(
             ClientId(3),

@@ -35,6 +35,7 @@ const AGENT_COMMANDS: &[&str] = &[
     "send-last-output",
     "set-agent-provider",
     "set-agent-session",
+    "split-agent",
 ];
 const SET_OPTIONS: &[&str] = &[
     "base-index",
@@ -1085,7 +1086,12 @@ mod tests {
             agent: false,
             editor: false,
         };
-        for command in ["agent-send", "send-last-output", "capture-browser"] {
+        for command in [
+            "agent-send",
+            "split-agent",
+            "send-last-output",
+            "capture-browser",
+        ] {
             let completions =
                 complete_command(command, command.len(), &[], &snapshot(), unavailable);
             assert!(
@@ -1095,6 +1101,21 @@ mod tests {
                 "advertised unavailable {command}"
             );
         }
+        let available = PaneKindAvailability {
+            agent: true,
+            ..unavailable
+        };
+        assert!(
+            complete_command(
+                "split-agent",
+                "split-agent".len(),
+                &[],
+                &snapshot(),
+                available
+            )
+            .iter()
+            .any(|completion| completion.label == "split-agent")
+        );
         for command in ["debug-marker", "tools"] {
             let completions =
                 complete_command(command, command.len(), &[], &snapshot(), unavailable);

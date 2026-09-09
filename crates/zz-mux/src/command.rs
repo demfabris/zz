@@ -2234,7 +2234,7 @@ impl Default for MuxEngine {
             pane_runtime_facts: BTreeMap::new(),
             pane_start_commands: BTreeMap::new(),
             destroyed_sessions: Vec::new(),
-            experimental_agent_pane: false,
+            experimental_agent_pane: true,
             experimental_editor_pane: false,
             agent: AgentOptions::default(),
             format_monitors: Vec::new(),
@@ -4383,6 +4383,7 @@ impl MuxEngine {
             "split-picker" => self.split_picker(context, &command.args, hooks)?,
             "split-window" => self.split_window(context, &command.args, None, hooks)?,
             "split-browser" => self.split_browser(context, &command.args, hooks)?,
+            "split-agent" => self.split_agent(context, &command.args, hooks)?,
             "select-pane-kind" => self.select_pane_kind(context, &command.args)?,
             "break-pane" => self.break_pane(context, &command.args, hooks)?,
             "join-pane" | "move-pane" => self.join_pane(context, &command.args, name, hooks)?,
@@ -5851,7 +5852,12 @@ impl MuxEngine {
         args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
-        let (options, positional) = parse_command_options("split-picker", args)?;
+        let (mut options, positional) = parse_command_options("split-picker", args)?;
+        if options.value("-F").is_none() {
+            options
+                .values
+                .push(("-F".to_owned(), "#{pane_id}".to_owned()));
+        }
         if !positional.is_empty() {
             return Err(ServerError::CommandParse(
                 "split-picker does not accept positional arguments".to_owned(),
@@ -5883,12 +5889,69 @@ impl MuxEngine {
         args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
-        let (options, positional) = parse_command_options("split-browser", args)?;
+        let (mut options, positional) = parse_command_options("split-browser", args)?;
+        if options.value("-F").is_none() {
+            options
+                .values
+                .push(("-F".to_owned(), "#{pane_id}".to_owned()));
+        }
         let browser = browser_from_args(&options, &positional)?;
         self.split_window_with_options(
             context,
             &options,
             PaneKind::Browser(browser),
+            None,
+            None,
+            false,
+            hooks,
+        )
+    }
+
+    fn split_agent(
+        &mut self,
+        context: &mut ExecutionContext,
+        args: &[RawText],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
+        let (mut options, positional) = parse_command_options("split-agent", args)?;
+        if !positional.is_empty() {
+            return Err(ServerError::CommandParse(
+                "split-agent does not accept positional arguments".to_owned(),
+            ));
+        }
+        if !self.experimental_agent_pane {
+            return Err(ServerError::InvalidCommand(
+                "agent panes are disabled; set experimental-agent-pane on".to_owned(),
+            ));
+        }
+        let provider = options
+            .value("-p")
+            .map(AgentProvider::from_str)
+            .transpose()
+            .map_err(ServerError::InvalidCommand)?
+            .unwrap_or_default();
+        let cwd = options.value("-c").map(PathBuf::from);
+        if cwd.as_ref().is_some_and(|cwd| {
+            !cwd.is_absolute() || cwd.as_os_str().as_encoded_bytes().len() > MAX_GUI_TEXT_BYTES
+        }) {
+            return Err(ServerError::InvalidCommand(
+                "agent working directory must be absolute and stay inside the wire limit"
+                    .to_owned(),
+            ));
+        }
+        if options.value("-F").is_none() {
+            options
+                .values
+                .push(("-F".to_owned(), "#{pane_id}".to_owned()));
+        }
+        self.split_window_with_options(
+            context,
+            &options,
+            PaneKind::Agent(AgentDescriptor {
+                provider,
+                cwd,
+                ..AgentDescriptor::default()
+            }),
             None,
             None,
             false,
@@ -5927,9 +5990,7 @@ impl MuxEngine {
             "agent" => {
                 if !self.experimental_agent_pane {
                     return Err(ServerError::InvalidCommand(
-                        "agent panes are experimental; enable experimental-agent-pane in \
-                         Settings → Advanced first"
-                            .to_owned(),
+                        "agent panes are disabled; set experimental-agent-pane on".to_owned(),
                     ));
                 }
                 PaneKind::Agent(AgentDescriptor {
@@ -15378,6 +15439,12 @@ fn spawn_cwd_source(
     format_client: FormatClient,
     hooks: &mut impl StatusHooks,
 ) -> (Option<PaneId>, Option<String>) {
+    if matches!(kind, PaneKind::Agent(_)) {
+        return (
+            origin.and_then(|origin| engine.state.cwd_donor(origin)),
+            None,
+        );
+    }
     if !matches!(kind, PaneKind::Terminal) {
         return (None, None);
     }
@@ -23392,6 +23459,196 @@ mod tests {
     }
 
     #[test]
+    fn split_agent_creates_one_generation_with_provider_cwd_and_printed_id() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        let donor = context.pane.expect("terminal");
+        let cwd = absolute_test_path("agent project");
+        let cwd_arg = cwd.to_string_lossy().into_owned();
+        let generation = engine.state.generation();
+        let created = engine
+            .execute(
+                &mut context,
+                &command(
+                    "split-agent",
+                    &["-h", "-P", "-p", "claude-code", "-c", &cwd_arg],
+                ),
+            )
+            .expect("agent split");
+        let agent = context.pane.expect("agent");
+        assert_eq!(engine.state.generation(), generation + 1);
+        assert_eq!(created.output, format!("{agent}\n"));
+        assert!(matches!(
+            &engine.state.pane(agent).expect("agent pane").kind,
+            PaneKind::Agent(descriptor)
+                if descriptor.provider == AgentProvider::ClaudeCode
+                    && descriptor.cwd.as_ref() == Some(&cwd)
+                    && descriptor.session_id.is_none()
+        ));
+        assert!(matches!(
+            created.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                pane,
+                kind: PaneKindSnapshot::Agent(descriptor),
+                inherit_cwd_from: Some(source),
+                ..
+            }) if *pane == agent && *source == donor && descriptor.cwd.as_ref() == Some(&cwd)
+        ));
+        assert!(created.effects.iter().any(|effect| matches!(
+            effect,
+            MuxEffect::PaneFormatOutput { pane, format, .. }
+                if *pane == agent && format == "#{pane_id}"
+        )));
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn split_agent_defaults_and_detached_target_keep_the_terminal_cwd_donor() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &[]))
+            .expect("session");
+        let donor = context.pane.expect("terminal");
+        engine
+            .execute(&mut context, &command("split-browser", &[]))
+            .expect("browser");
+        let browser = context.pane.expect("browser");
+        let created = engine
+            .execute(
+                &mut context,
+                &command(
+                    "split-agent",
+                    &[
+                        "-dv",
+                        "-t",
+                        &browser.to_string(),
+                        "-P",
+                        "-F",
+                        "pane=#{pane_id}",
+                    ],
+                ),
+            )
+            .expect("agent");
+        assert_eq!(context.pane, Some(browser));
+        let agent = match created.effects.first() {
+            Some(MuxEffect::PaneCreated {
+                pane,
+                kind: PaneKindSnapshot::Agent(descriptor),
+                inherit_cwd_from: Some(source),
+                ..
+            }) => {
+                assert_eq!(*source, donor);
+                assert_eq!(descriptor, &AgentDescriptor::default());
+                *pane
+            }
+            effect => panic!("unexpected creation effect: {effect:?}"),
+        };
+        assert_eq!(created.output, format!("pane={agent}\n"));
+    }
+
+    #[test]
+    fn split_agent_rejects_disabled_panes_and_invalid_arguments_before_creation() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &[]))
+            .expect("session");
+        assert!(engine.experimental_agent_pane());
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "experimental-agent-pane"]),
+                )
+                .expect("read default")
+                .output,
+            "on"
+        );
+        for args in [vec!["-p", "unknown"], vec!["-c", "relative"], vec!["extra"]] {
+            let generation = engine.state.generation();
+            assert!(
+                engine
+                    .execute(&mut context, &command("split-agent", &args))
+                    .is_err()
+            );
+            assert_eq!(engine.state.generation(), generation);
+        }
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "experimental-agent-pane", "off"]),
+            )
+            .expect("disable agents");
+        let generation = engine.state.generation();
+        assert!(matches!(
+            engine.execute(&mut context, &command("split-agent", &["-P"])),
+            Err(ServerError::InvalidCommand(message))
+                if message == "agent panes are disabled; set experimental-agent-pane on"
+        ));
+        assert_eq!(engine.state.generation(), generation);
+        engine
+            .execute(&mut context, &command("split-picker", &[]))
+            .expect("picker");
+        assert!(matches!(
+            engine.execute(&mut context, &command("select-pane-kind", &["agent"])),
+            Err(ServerError::InvalidCommand(message))
+                if message == "agent panes are disabled; set experimental-agent-pane on"
+        ));
+    }
+
+    #[test]
+    fn native_splits_print_the_created_pane_and_picker_ids_survive_materialization() {
+        for (verb, args, kind) in [
+            (
+                "split-browser",
+                vec!["-P", "-F", "pane=#{pane_id}"],
+                "browser",
+            ),
+            ("split-picker", vec!["-P"], "picker"),
+        ] {
+            let mut engine = MuxEngine::default();
+            let mut context = ExecutionContext::default();
+            engine
+                .execute(&mut context, &command("new-session", &[]))
+                .expect("session");
+            let created = engine
+                .execute(&mut context, &command(verb, &args))
+                .expect("split");
+            let pane = context.pane.expect("new pane");
+            let format = if kind == "browser" {
+                "pane=#{pane_id}"
+            } else {
+                "#{pane_id}"
+            };
+            let expected = if kind == "browser" {
+                format!("pane={pane}\n")
+            } else {
+                format!("{pane}\n")
+            };
+            assert_eq!(created.output, expected);
+            assert!(created.effects.iter().any(|effect| matches!(
+                effect,
+                MuxEffect::PaneFormatOutput { pane: printed, format: printed_format, .. }
+                    if *printed == pane && printed_format == format
+            )));
+            if kind == "picker" {
+                engine
+                    .execute(&mut context, &command("select-pane-kind", &["agent"]))
+                    .expect("materialize");
+                assert_eq!(context.pane, Some(pane));
+                assert!(matches!(
+                    &engine.state.pane(pane).expect("same pane").kind,
+                    PaneKind::Agent(_)
+                ));
+            }
+        }
+    }
+
+    #[test]
     fn new_panes_preserve_their_id_while_materializing_the_selected_kind() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -23743,7 +24000,7 @@ mod tests {
     }
 
     #[test]
-    fn experimental_pane_kinds_are_rejected_until_their_flag_is_enabled() {
+    fn pane_kinds_are_rejected_when_their_flag_is_disabled() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -23753,6 +24010,17 @@ mod tests {
             .execute(&mut context, &command("split-picker", &["-h"]))
             .expect("picker split");
         let picker = context.pane.expect("picker pane");
+
+        assert_eq!(
+            engine.mux_option_value(MuxOptionKey::ExperimentalAgentPane),
+            "on"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "experimental-agent-pane", "off"]),
+            )
+            .expect("disable agent panes");
 
         for (kind, flag, option) in [
             (
@@ -31454,7 +31722,7 @@ mod tests {
             "2"
         );
 
-        for expected in ["on", "off"] {
+        for expected in ["off", "on"] {
             engine
                 .execute(
                     &mut context,

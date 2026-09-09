@@ -107,7 +107,7 @@ The client-local schema includes these scalar settings and chrome colors.
 | `status-host` | `true` | `true` or `false` | Whether the bar shows the host name while attached to a remote host. Local attachment has no host item |
 | `status-update` | `true` | `true` or `false` | Whether an available release appears in the bar with its version and an install action. `check-for-updates` separately controls the release check |
 | `status-clock` | `24-hour` | `24-hour`, `12-hour`, `time-date`, or `off` | Select the desktop clock format. It has no seconds; `time-date` renders 24-hour time plus abbreviated month and day |
-| `experimental-agent-pane` | `false` | `true` or `false` | Whether new Agent panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind agent` |
+| `experimental-agent-pane` | `true` | `true` or `false` | Whether new Agent panes can be created at all . picker row, palette completion, and the daemon's `split-agent` and `select-pane-kind agent` |
 | `experimental-editor-pane` | `false` | `true` or `false` | Whether new Editor panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind editor` |
 | `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, surface ring, and divider treatment |
 | `pane-background-opacity` | `0.5` | `0..=1` | Pane and Agent composer background strength; Panes settings display 0–100%. Browser panes apply it only to the toolbar |
@@ -233,17 +233,16 @@ Editor page disappear, and a pane handed over by a featureful daemon renders a l
 Dev builds opt back in with `ZZ_CARGO_FEATURES=editor-pane just run mac` (or `--features` on cargo
 directly). The `agent-pane` feature works the same way and keeps the same facade
 (`crates/zz/src/agent/mod.rs`), but it is **in the default set** since 0.2.0-beta.2, so
-`experimental-agent-pane` is the only gate a stock build has.
+`experimental-agent-pane` defaults on and is the only gate a stock build has.
 
 `experimental-agent-pane` and `experimental-editor-pane` are **hard capability gates** with two
 consumers of the same config entry. Client-side they gate the pane picker rows (and the `a`/`e`
 hotkeys) in `pane::picker::choices` plus the palette's `select-pane-kind` completions.
 Daemon-side the entries are forwarded through the config-override push (they are also
 `MuxOptionKey`s), and the mux engine rejects `select-pane-kind … agent|editor` while the flag is
-off . closing the palette, CLI, and `mux.conf` `bind-key` routes. The one remaining power-user
-escape hatch is deliberate: `set-option -g experimental-agent-pane on` (in `mux.conf` or at
-runtime) flips the daemon gate directly, though the picker row follows the `zz/config` entry, not
-the mux option. Panes that already exist keep rendering on reattach when the switch is off;
+off. Turning the agent flag off also blocks `split-agent`. To enable it again, run
+`set-option -g experimental-agent-pane on` in `mux.conf` or at runtime. This changes the daemon
+gate directly; the picker row follows the `zz/config` entry, not the mux option. Panes that already exist keep rendering on reattach when the switch is off;
 flipping it never destroys pane state.
 
 `use-system-titlebar` maps to GPUI server-side decorations for the main window on
@@ -430,11 +429,11 @@ second-prefix arming and `send-prefix -2`; a reload reapplies them exactly like 
 | `set-clipboard` | `external` | `on`, `external`, or `off` |
 | `buffer-limit` | `50` | integer `1..=2147483647`; updates automatic paste-buffer eviction |
 | `synchronize-panes` | `off` | `on` or `off`; controls global synchronized input inheritance |
-| `experimental-agent-pane` | `off` | flag value (`on`/`off`/`true`/`false`/…); gates `select-pane-kind agent` in the engine |
+| `experimental-agent-pane` | `on` | flag value (`on`/`off`/`true`/`false`/…); gates `split-agent` and `select-pane-kind agent` in the engine |
 | `experimental-editor-pane` | `off` | flag value; gates `select-pane-kind editor` in the engine |
 | `history-trickle` | `2000` | integer `0..=10000`; background scrollback backfill budget. `0` disables trickle and leaves scroll-driven prefetch intact |
-| `agent-command` | `npx -y @agentclientprotocol/codex-acp@1.3.0` | Nonempty command string or an `AcpAgentConfig` JSON object (`{"command", "args", "env"}`), up to 4 KiB; what the daemon spawns for a Codex pane |
-| `agent-claude-code-command` | `npx -y @agentclientprotocol/claude-agent-acp@0.68.0` | Same, for Claude Code panes |
+| `agent-command` | `npx -y @agentclientprotocol/codex-acp@1.11.0` | Nonempty command string or an `AcpAgentConfig` JSON object (`{"command", "args", "env"}`), up to 4 KiB; what the daemon spawns for a Codex pane |
+| `agent-claude-code-command` | `npx -y @agentclientprotocol/claude-agent-acp@0.76.0` | Same, for Claude Code panes |
 | `agent-auto-approve` | `reads` | `off`, `reads` or `all` (the flag spellings `on`/`yes`/`true`/`1` still parse as `all`, `off`/`no`/`false`/`0` as `off`); `reads` answers only read-only tool kinds (`read`, `search`, `fetch`, `think`) daemon-side and sends `execute`, `edit`, `delete`, `move`, an absent kind and any unrecognised kind to the permission wizard; when the tier answers, a kinded `session/request_permission` is answered daemon-side with the agent's preferred allow option (`allow_always`, else `allow_once`) and the tool call is still published to the stream. A request with no allow option always falls through to the permission wizard |
 | `mouse` | `on` (the pin builds with `-DTMUX_MOUSE=1`) | flag value; session-effective per client on the wire. zz-tui gates its outer-terminal mouse modes on it and the daemon rejects mouse input from terminal-surface clients when off; the GUI's native mouse is ungated (decision 6) |
 | `escape-time` | `10` | integer milliseconds; zz-tui's escape-sequence fold timeout (`0` clamps to 1 like the pin's `tty_keys_next`) |

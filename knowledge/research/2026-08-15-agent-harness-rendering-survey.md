@@ -145,7 +145,7 @@ zz implements exactly this. The differences between apps are in the *reducer dis
 
 Near-term (directly addresses dangling subagent spinners and empty "Done" cards):
 
-1. **Bump `claude-agent-acp` 0.63.0 → ≥0.68.0** and handle the `_session/turn_ended`
+1. **Bump `claude-agent-acp` 0.63.0 → ≥0.76.0** and handle the `_session/turn_ended`
    extension — deterministic settling for autonomous/self-continued turns. Gate on
    "no prompt outstanding" + session-ID match (comet `acp/mod.rs:2371`).
 2. **Widen the raw-SDK filter**: subscribe `tool_progress` (`tool_use_id`,

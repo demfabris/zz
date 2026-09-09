@@ -72,7 +72,7 @@ pub const DEFAULT_EDITOR_LINE_NUMBERS: bool = true;
 pub const DEFAULT_EDITOR_RELATIVE_LINE_NUMBERS: bool = true;
 pub const DEFAULT_EDITOR_SOFT_WRAP: bool = true;
 pub const DEFAULT_EDITOR_VIM_MODE: bool = true;
-pub const DEFAULT_EXPERIMENTAL_AGENT_PANE: bool = false;
+pub const DEFAULT_EXPERIMENTAL_AGENT_PANE: bool = true;
 pub const DEFAULT_EXPERIMENTAL_EDITOR_PANE: bool = false;
 static CONFIG_TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1834,3 +1834,26 @@ pub fn config_overrides_for_host(
 }
 
 pub mod settings;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_panes_default_on_and_allow_an_explicit_off_override() {
+        assert!(AppConfig::default().experimental_agent_pane.value);
+        assert!(
+            parse_config("", "monospace")
+                .config
+                .experimental_agent_pane
+                .value
+        );
+        let parsed = parse_config("experimental-agent-pane = off\n", "monospace");
+        assert!(!parsed.config.experimental_agent_pane.value);
+        assert_eq!(
+            parsed.daemon_entries,
+            [("experimental-agent-pane".to_owned(), "off".to_owned())]
+        );
+        assert!(parsed.diagnostics.is_empty());
+    }
+}

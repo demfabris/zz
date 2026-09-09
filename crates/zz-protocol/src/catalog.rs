@@ -958,10 +958,13 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "tools",
         aliases: &[],
         description: "Show commands for controlling a zz workspace",
-        usage: "[argument ...]",
-        options: &[],
+        usage: "[--skill]",
+        options: &[CommandOptionSpec::flag(
+            "--skill",
+            "include skill frontmatter",
+        )],
         positionals: &[],
-        variadic: Some(FreeForm),
+        variadic: None,
     },
     CommandSpec {
         name: "clear-prompt-history",

@@ -6445,7 +6445,9 @@ impl Shared {
                     DaemonCommandDispatch::DebugMarker => {
                         Ok(debug_marker(client, context, &command.args))
                     }
-                    DaemonCommandDispatch::Tools => Ok(workspace_tools_catalog()),
+                    DaemonCommandDispatch::Tools => {
+                        workspace_tools_catalog(&command.args).map_err(Into::into)
+                    }
                     DaemonCommandDispatch::Buffer => self.buffer_command_for_client(
                         Some(client),
                         context,
@@ -37428,88 +37430,225 @@ fn debug_marker(client: ClientId, context: &ExecutionContext, args: &[RawText]) 
     Execution::default()
 }
 
-fn workspace_tools_catalog() -> Execution {
-    Execution {
-        output: WORKSPACE_TOOLS.into(),
+fn workspace_tools_catalog(args: &[RawText]) -> Result<Execution, ServerError> {
+    let skill = match args {
+        [] => false,
+        [flag] if flag == "--skill" => true,
+        _ => {
+            return Err(ServerError::CommandParse(
+                "usage: tools [--skill]".to_owned(),
+            ));
+        }
+    };
+    Ok(Execution {
+        output: if skill {
+            format!("{WORKSPACE_TOOLS_FRONTMATTER}{WORKSPACE_TOOLS}").into()
+        } else {
+            WORKSPACE_TOOLS.into()
+        },
         effects: Vec::new(),
-    }
+    })
 }
 
-const WORKSPACE_TOOLS: &str = "\
-zz workspace verbs: drive the surrounding zz session from inside an agent pane.
+const WORKSPACE_TOOLS_FRONTMATTER: &str = r"---
+name: zz-workspace
+description: Drive the surrounding zz workspace from inside a zz Agent pane using the `zz` CLI — send text or piped output to another agent's composer, read a terminal pane's scrollback, screenshot a browser pane, navigate a browser, and route a failing command's output to an agent. Use whenever you are running inside zz (the `ZZ_PANE` environment variable is set) and the task involves another pane, a terminal's output, or a browser page.
+---
 
-Targets are stable IDs: %N a pane, @N a window, $N a session. Your own pane is
-$ZZ_PANE, your session is $ZZ_SESSION, and the daemon socket is $ZZ_SOCKET.
-Run `zz list-panes -t @N` or `zz list-windows` to discover the rest.
-
-  zz tools
-      Print this catalog.
-
-  zz agent-send [-t %N] [--submit | --wait [--timeout SECS] [--on-block wait|fail]] [--context PATH[:START[-END]]] [TEXT]
-      Put TEXT in an agent pane's composer for its user to review, or submit
-      it outright with --submit; a busy pane queues it behind the running
-      turn. --submit prints the pane it chose. --wait submits and blocks
-      until that prompt's turn ends, printing the agent's reply on stdout
-      (the pane goes to stderr); it exits non-zero if the turn fails, is
-      cancelled, or gives no reply within --timeout seconds (default 600,
-      0 waits forever). A -t naming a non-agent pane, or no -t at all,
-      routes to that window's most recently focused agent pane, so a pipe
-      from a terminal needs no addressing at all: `git diff | zz agent-send`.
-      Reads standard input when TEXT is omitted. --context adds a file/line
-      header and fences the payload. --on-block wait is the default; fail
-      prints the pending permission JSON and exits 3 while the turn continues.
-
-  zz show-agent-permission [-t %N]
-      Print the oldest pending permission as JSON; exit 1 if none is pending.
-
-  zz agent-respond [-t %N] (--allow | --deny | --option ID) [REQUEST_ID]
-      Answer a pending permission and print the chosen option ID. Without a
-      request ID, answer the oldest request. --allow prefers allow-once.
-
-State and waiting:
-  zz list-panes -F '#{pane_id} #{agent_state}'
-  until [ \"$(zz display-message -p -t %N '#{agent_state}')\" = idle ]; do zz wait-for agent_state@%N; done
-
-  zz capture-pane -p -t %N [-S -] [-E -] [-J]
-      Print a terminal pane's text. -S -/-E - widen the range to the whole
-      scrollback; -J rejoins soft-wrapped lines.
-
-  zz send-last-output -t %N
-      Send a terminal pane's last completed command and its output to the most
-      recently focused agent pane in the same window. Needs a shell that emits
-      OSC 133 prompt marks.
-
-  zz show-last-output -t %N
-      Print a terminal pane's last completed command and its output, fenced
-      under a `%N $ command` header, instead of routing it to an agent. Same
-      OSC 133 requirement and 200-line / 256 KiB cap as send-last-output.
-
-  zz send-text -t %N [--no-enter] [--timeout MS] TEXT
-      Deliver TEXT to a TUI running in a terminal pane and submit it: paste
-      (bracketed when the app asked for it), wait until the text is visibly
-      on screen, then press Enter. Exits non-zero, with nothing submitted,
-      if it has not appeared within --timeout ms (default 2000). Use this
-      instead of `send-keys ... Enter` for Claude Code, Codex, and other
-      composers that swallow an Enter sent too early. Reads standard input
-      when TEXT is omitted: `cat prompt.md | zz send-text -t %N`. --no-enter
-      only drafts.
-
-  zz capture-browser -t %N -o /absolute/out.png
-      Write a browser pane's latest rendered frame to a PNG.
-
-  zz set-browser-url -t %N URL
-      Point a browser pane at URL.
-
-  zz send-keys -t %N 'text' Enter
-      Type into a terminal pane. -l sends text literally.
-
-  zz split-window | zz split-browser | zz split-picker | zz split-agent [-h|-v] [-t %N]
-      Add a pane beside another one.
-
-  zz debug-marker [NOTE]
-      Stamp a user_marker line into the daemon log, so the moment something
-      looked wrong is easy to find when reading diagnostics later.
 ";
+
+const WORKSPACE_TOOLS: &str = r##"# Workspace tools
+
+Drive terminal, browser, and Agent panes through the `zz` CLI. Run `zz tools`
+for this catalog, or `zz tools --skill` for the same text with skill frontmatter.
+Regenerate the skill with `just tools-skill`.
+
+## Environment
+
+| Variable | Meaning |
+| --- | --- |
+| `ZZ_PANE` | Your own pane, e.g. `%3`. Do not send to yourself. |
+| `ZZ_SESSION` | Your daemon session name. |
+| `ZZ_SOCKET` | The daemon endpoint; the CLI honors it. |
+
+Explicit values in `agent-command` config take precedence over these defaults.
+
+## Targets
+
+Use stable IDs: `%N` for a pane, `@N` for a window, `$N` for a session.
+
+```sh
+zz list-sessions
+zz list-windows
+zz list-panes -F '#{pane_id} #{pane_kind} #{agent_state} #{@agent_state}'
+```
+
+`#{pane_kind}` is `terminal`, `agent`, `browser`, `editor`, or `picker`.
+`#{@name}` reads a user option from pane, window, session, then global scope.
+
+## Verbs
+
+### `zz agent-send [-t %N] [--submit | --wait [--timeout SECS] [--on-block wait|fail]] [--context PATH[:START[-END]]] [TEXT]`
+
+Draft into another Agent pane's composer for its user to review. An omitted or
+non-agent target routes to that window's most recently focused Agent pane.
+Read stdin when TEXT is omitted: `git diff | zz agent-send`.
+`--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
+
+`--submit` sends now and prints the chosen pane; a busy pane queues the prompt.
+`--wait` submits, waits for that turn, and prints its reply on stdout (pane ID on
+stderr). Failure, cancellation, hand-back, or timeout exits non-zero. The timeout
+defaults to 600 seconds; `0` waits forever. A timeout leaves the turn running.
+`--on-block wait` waits for permission; `fail` prints the pending permission JSON
+and exits 3 while the turn continues.
+
+### `zz show-agent-permission [-t %N]`
+
+Print the oldest pending permission as JSON; exit 1 when none is pending.
+
+### `zz agent-respond [-t %N] (--allow | --deny | --option ID) [REQUEST_ID]`
+
+Answer the named or oldest pending permission and print the chosen option ID.
+`--allow` prefers allow-once.
+
+### `zz capture-pane -p -t %N [-S -] [-E -] [-J]`
+
+Read a terminal or Agent pane's text. `-S -`/`-E -` include the whole scrollback;
+`-J` rejoins soft-wrapped lines.
+
+### `zz send-last-output -t %N`
+
+Send the last completed command and output to the window's most recently focused
+Agent pane. The default binding is `<prefix> e`. Requires OSC 133 prompt marks;
+the bundled Bash/zsh integration emits them, with best-effort PowerShell support.
+Output is capped at 200 lines or 256 KiB with a truncation note.
+
+### `zz show-last-output -t %N`
+
+Print that last command and output under a `%N $ command` header, with the same
+OSC 133 requirement and caps. For an Agent pane, read its last prompt and reply.
+
+### `zz send-text -t %N [--no-enter] [--timeout MS] [TEXT]`
+
+Paste into a terminal TUI, wait for the text to appear, then press Enter. Read
+stdin when TEXT is omitted. `--no-enter` drafts; the default timeout is 2000 ms.
+If the text never appears, exit non-zero without submitting.
+
+### `zz send-keys -t %N 'text' Enter`
+
+Send raw keys to a terminal; `-l` sends literal text. Use `send-text` for composers
+that swallow an Enter sent before the paste appears.
+
+### `zz capture-browser -t %N -o /absolute/out.png`
+
+Save the latest browser frame as a PNG. Use an absolute path: the window process
+writes the file. On Linux, restart with `ZZ_BROWSER_SHARED_TEXTURE=0` if the GPU
+path reports that readback is unavailable.
+
+### `zz set-browser-url -t %N URL`
+
+Navigate a browser pane.
+
+### `zz debug-marker [NOTE]`
+
+Write a `user_marker` line to the daemon log for later diagnostics.
+
+## Layout
+
+```sh
+zz split-window -h
+zz split-window -d -P -F '#{pane_id}' -e KEY=VAL -c DIR prog arg
+zz split-browser -h -P URL
+zz split-picker -v -P
+zz split-agent -h -P -p codex
+```
+
+Use `-t %N` to choose the pane to split. `-P` prints the new pane ID and `-F`
+changes its format. `split-window` executes the supplied argv without a shell.
+The bundled adapters pin `claude-agent-acp@0.76.0` and `codex-acp@1.11.0`.
+
+## State and waiting
+
+Read native Agent state and permission presence through formats:
+
+```sh
+zz list-panes -F '#{pane_id} #{agent_state} #{agent_pending_permission}'
+until [ "$(zz display-message -p -t %5 '#{agent_state}')" = idle ]; do zz wait-for agent_state@%5; done
+```
+
+The `agent_state@%N` channel is sticky: a signal before the wait still wakes it.
+Recheck the state after waking. A completed turn or permission request also rings
+the pane bell; use `zz set-hook -g alert-bell 'display-message "agent needs attention"'`.
+
+For foreign agents, read `@agent_state` with `zz show-options -p -t %5 -v @agent_state`
+and wait on `zz wait-for '@agent_state@%5'`. Use the lifecycle hooks below to write it.
+`zz set-hook -g @option-changed` observes user-option writes.
+
+```sh
+zz run-shell -b -d 300 'zz send-text -t %5 continue'
+zz pipe-pane -o -t %5 'cat >> /tmp/agent-output.log'
+```
+
+`run-shell -b -d SECS` schedules a background timer. `pipe-pane -o` starts an output
+pipe only when none exists, including for an Agent pane's transcript.
+The `zz refresh-client` verb supports `-B` subscriptions in control mode. Send this
+on the control connection and read `%subscription-changed`:
+
+```text
+refresh-client -B 'agent:%5:#{agent_state}'
+```
+
+## Foreign agents in terminal panes
+
+A terminal CLI agent has no ACP stream. Configure its lifecycle hooks (Stop,
+Notification, or equivalent) to write a pane option:
+
+```sh
+zz set-option -p -t "$TMUX_PANE" @agent_state idle
+zz set-option -p -t "$TMUX_PANE" @agent_state needs-approval
+until [ "$(zz show-options -p -t %5 -v @agent_state)" = idle ]; do zz wait-for '@agent_state@%5'; done
+zz set-hook -g @option-changed 'run-shell "notify-send zz \"#{hook_target} #{hook_option}\""'
+```
+
+Each write signals the sticky channel `<option>@<pane>` and runs `@option-changed`.
+Use `#{hook_target}` and `#{hook_option}` to identify the write.
+
+## Browser through CDP
+
+CDP is off by default. Set `browser-remote-debugging-port = 9222` in `zz/config`,
+or `ZZ_BROWSER_REMOTE_DEBUGGING_PORT=9222` in the client environment (which takes
+precedence). Use `0` to disable it; enabled ports range from 1024 to 65535.
+Open a browser pane to initialize CEF. Restart the client to change the port after
+initialization. The loopback endpoint grants local processes access to your browser
+session; enable it while you intend to grant that access.
+
+Replace PORT with the configured port in one of these attach recipes:
+
+```sh
+agent-browser --cdp PORT snapshot -i
+npx @playwright/mcp@latest --cdp-endpoint http://127.0.0.1:PORT
+npx chrome-devtools-mcp@latest --browserUrl http://127.0.0.1:PORT
+```
+
+Correlate pane URLs with CDP targets:
+
+```sh
+zz list-panes -a -F '#{pane_id} #{pane_kind} #{browser_url}'
+zz display-message -p -t %5 '#{browser_url}'
+curl http://127.0.0.1:PORT/json/list
+```
+
+`#{browser_url}` gives the active tab URL, or an empty string for other pane kinds.
+Compare it with each target's `url`; duplicate URLs need more context, and CDP may
+list background tabs too. For `Page.captureScreenshot` with a clip, use `clip.scale`
+of `1.0`; CEF off-screen rendering does not support custom capture scale.
+
+## Etiquette
+
+- Draft into another person's Agent pane; use `--submit` only for an authorized hand-off.
+- Do not send to `$ZZ_PANE`.
+- Trim piped logs to the part the recipient needs.
+"##;
 
 fn ensure_browser_attached(inner: &ServerState, pane: PaneId) -> Result<(), ServerError> {
     let window = inner
@@ -63529,7 +63668,7 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn tools_catalog_matches_dispatchable_verbs() {
-        const TOOL_VERBS: [&str; 10] = [
+        const TOOL_VERBS: &[&str] = &[
             "capture-pane",
             "agent-send",
             "show-agent-permission",
@@ -63540,27 +63679,103 @@ set-option -g @alias-mixed-next yes
             "capture-browser",
             "debug-marker",
             "tools",
+            "wait-for",
+            "run-shell",
+            "pipe-pane",
+            "refresh-client",
         ];
-        let catalog = workspace_tools_catalog().output;
-        let mut documented = BTreeSet::new();
-        for line in catalog.lines().filter(|line| line.starts_with("  zz ")) {
-            let tokens = line.split_whitespace().collect::<Vec<_>>();
-            for pair in tokens.windows(2) {
-                if pair[0] == "zz" {
-                    documented.insert(pair[1]);
-                }
-            }
-        }
+        const MUX_VERBS: &[&str] = &[
+            "set-hook",
+            "set-option",
+            "show-options",
+            "list-sessions",
+            "list-windows",
+            "list-panes",
+            "display-message",
+            "split-window",
+            "split-browser",
+            "split-picker",
+            "split-agent",
+            "send-keys",
+            "set-browser-url",
+        ];
+        let catalog = workspace_tools_catalog(&[]).expect("plain catalog").output;
+        let documented = catalog
+            .split("zz ")
+            .skip(1)
+            .filter_map(|text| {
+                let verb = text
+                    .split(|ch: char| !ch.is_ascii_lowercase() && ch != '-')
+                    .next()?;
+                (!verb.is_empty()).then_some(verb)
+            })
+            .collect::<BTreeSet<_>>();
         for verb in TOOL_VERBS {
+            assert!(documented.contains(verb), "catalog is missing `zz {verb}`");
+            assert!(
+                daemon_command_dispatch(verb).is_some(),
+                "catalog documents `zz {verb}`, which has no daemon dispatch"
+            );
+        }
+        for verb in MUX_VERBS {
             assert!(documented.contains(verb), "catalog is missing `zz {verb}`");
         }
         for verb in &documented {
             assert!(
-                TOOL_VERBS.contains(verb) || zz_mux::command_spec(verb).is_some(),
+                zz_mux::command_spec(verb).is_some()
+                    || zz_protocol::catalog_command_spec(verb).is_some(),
                 "catalog documents `zz {verb}`, which no command implements"
             );
+            if daemon_command_dispatch(verb).is_some() {
+                assert!(TOOL_VERBS.contains(verb), "add `zz {verb}` to TOOL_VERBS");
+            }
         }
         assert!(catalog.contains(crate::transport::SOCKET_ENVIRONMENT_VARIABLE));
+    }
+
+    #[test]
+    fn tools_skill_matches_workspace_skill() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.agents/skills/zz-workspace/SKILL.md");
+        let skill = std::fs::read_to_string(path)
+            .expect("read workspace skill; run just tools-skill to regenerate it");
+        let generated = workspace_tools_catalog(&["--skill".into()])
+            .expect("skill catalog")
+            .output;
+        assert_eq!(
+            skill, generated,
+            "run just tools-skill to regenerate the skill"
+        );
+        assert_eq!(
+            generated.strip_prefix(WORKSPACE_TOOLS_FRONTMATTER),
+            Some(
+                workspace_tools_catalog(&[])
+                    .expect("plain catalog")
+                    .output
+                    .as_str()
+            ),
+            "plain tools output must equal the skill body"
+        );
+    }
+
+    #[test]
+    fn tools_catalog_accepts_only_skill_flag() {
+        let spec = zz_protocol::catalog_command_spec("tools").expect("tools spec");
+        assert_eq!(spec.options.len(), 1);
+        assert_eq!(spec.options[0].name, "--skill");
+        assert!(spec.options[0].value.is_none());
+        assert_eq!(spec.positional_maximum(), Some(0));
+        for args in [
+            vec!["--unknown"],
+            vec!["--skill=true"],
+            vec!["argument"],
+            vec!["--skill", "argument"],
+            vec!["--skill", "--skill"],
+            vec!["--", "--skill"],
+        ] {
+            let args = args.into_iter().map(RawText::from).collect::<Vec<_>>();
+            assert!(workspace_tools_catalog(&args).is_err(), "accepted {args:?}");
+        }
     }
 
     #[test]

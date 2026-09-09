@@ -524,7 +524,7 @@ to tmux's `capture-pane`. Execution remains daemon-owned.
 
 | Command | Purpose |
 | --- | --- |
-| `tools` | Print the agent-readable catalog of workspace verbs. Pure output; the self-teaching entry point for an agent running in a pane. |
+| `tools` | Print the workspace catalog; `--skill` includes the skill YAML frontmatter. Run `just tools-skill` to regenerate `.agents/skills/zz-workspace/SKILL.md` from that output. |
 | `agent-send` | `[-t %N] [--submit \| --wait [--timeout SECS] [--on-block wait\|fail]] [--context PATH[:START[-END]]] [TEXT]` . append text to a GUI-owned Agent composer, submit it as a prompt (daemon-side, no GUI needed; prints the pane it chose), or with `--wait` submit and block until that turn ends, printing the reply. A non-agent or omitted target routes to that window's most recently focused Agent pane. Reads stdin when TEXT is omitted; capped at 1 MiB. See [Agent pane](/concepts/agent-pane.md). |
 | `show-agent-permission` | `[-t %N]` . print the oldest pending permission as JSON; exit 1 when none is pending. |
 | `agent-respond` | `[-t %N] (--allow \| --deny \| --option ID) [REQUEST_ID]` . answer the oldest or named request and print the option ID. `--allow` prefers allow-once. Interactive clients cannot invoke it. |

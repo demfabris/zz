@@ -17,6 +17,9 @@ compat *args:
 compat-check:
     @compat/check.sh
 
+tools-skill:
+    @skill="$(cargo run -q -p zz --bin zz -- tools --skill)"; printf '%s\n' "$skill" > .agents/skills/zz-workspace/SKILL.md
+
 # Build a release bundle for a supported platform (must run on that platform).
 # Extra args after `--` pass through to bundle-cef.
 build platform *args:

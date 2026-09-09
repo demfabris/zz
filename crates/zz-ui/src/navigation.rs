@@ -230,9 +230,6 @@ pub fn workspace_status_window(
         )
 }
 
-/// Titlebar-height strip at the top of the full-height workspace sidebar,
-/// carrying `controls` at its leading end. No border and no background of its
-/// own: the parent sidebar owns the shared surface.
 #[must_use]
 pub fn workspace_sidebar_titlebar(
     id: impl Into<ElementId>,
@@ -290,7 +287,6 @@ pub fn workspace_sidebar_surface(
         .flex_none()
         .overflow_hidden()
         .relative()
-        .bg(cx.theme().background)
         .text_color(cx.theme().foreground)
         .border_r_1()
         .border_color(workspace_sidebar_divider(cx))

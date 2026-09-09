@@ -16,7 +16,7 @@ use zz_terminal::{
     TerminalMouseInput, TerminalMousePhase, TerminalViewAction, TerminalViewport,
 };
 use zz_ui::{
-    ActiveTheme,
+    ActiveTheme, Colorize as _,
     pane::{
         PaneOverlayCorner, pane_overlay_stack, terminal_link_popup, terminal_mode_indicator,
         terminal_search_prompt, terminal_status_popup,
@@ -947,7 +947,15 @@ impl Render for TerminalPane {
             .relative()
             .size_full()
             .overflow_hidden()
-            .bg(background)
+            .bg(if self.surface == TerminalSurface::Pane {
+                cx.theme()
+                    .background
+                    .opaque()
+                    .blend(background)
+                    .opacity(cx.theme().pane_background_opacity)
+            } else {
+                background
+            })
             .font(font)
             .text_size(font_size)
             .when(self.surface != TerminalSurface::Popup, |root| {

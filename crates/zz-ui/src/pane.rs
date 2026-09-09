@@ -15,7 +15,6 @@ pub struct PaneChrome {
     pub radii: Corners<Pixels>,
     pub border_width: Pixels,
     pub border_color: Hsla,
-    pub gap_background: Hsla,
     pub shadow: bool,
     pub active: bool,
     pub inactive_opacity: f32,
@@ -27,14 +26,12 @@ impl PaneChrome {
         radii: Corners<Pixels>,
         border_width: Pixels,
         border_color: Hsla,
-        gap_background: Hsla,
         shadow: bool,
     ) -> Self {
         Self {
             radii,
             border_width,
             border_color,
-            gap_background,
             shadow,
             active: false,
             inactive_opacity: 1.0,
@@ -63,49 +60,38 @@ pub fn pane_border_color(active: bool, cx: &App) -> Hsla {
     }
 }
 
-/// A pane leaf, filling the box the layout gives it. Rounded corners leave four
-/// wedges of that box bare, which this fills with the gap plane before the
-/// surface paints its border.
 pub fn pane_surface(
     id: impl Into<ElementId>,
     content: impl IntoElement,
     overlays: impl IntoIterator<Item = AnyElement>,
     chrome: PaneChrome,
     cx: &App,
-) -> gpui::Div {
+) -> Stateful<gpui::Div> {
     div()
+        .id(id)
         .relative()
         .flex()
         .size_full()
-        .children(pane_corner_notches(chrome))
-        .child(
-            div()
-                .id(id)
-                .relative()
-                .flex()
-                .size_full()
-                .overflow_hidden()
-                .rounded_tl(chrome.radii.top_left)
-                .rounded_tr(chrome.radii.top_right)
-                .rounded_bl(chrome.radii.bottom_left)
-                .rounded_br(chrome.radii.bottom_right)
-                .bg(cx.theme().background.opaque())
-                .border(chrome.border_width)
-                .border_color(chrome.border_color)
-                .shadow(pane_surface_shadow_style(chrome.shadow, cx))
-                .child(content)
-                .when(chrome.active, |surface| {
-                    surface.child(pane_focus_glow(chrome.radii, cx))
-                })
-                .when(chrome.inactive_opacity < 1.0, |surface| {
-                    surface.child(pane_inactive_scrim(
-                        chrome.radii,
-                        chrome.inactive_opacity,
-                        cx,
-                    ))
-                })
-                .children(overlays),
-        )
+        .overflow_hidden()
+        .rounded_tl(chrome.radii.top_left)
+        .rounded_tr(chrome.radii.top_right)
+        .rounded_bl(chrome.radii.bottom_left)
+        .rounded_br(chrome.radii.bottom_right)
+        .border(chrome.border_width)
+        .border_color(chrome.border_color)
+        .shadow(pane_surface_shadow_style(chrome.shadow, cx))
+        .child(content)
+        .when(chrome.active, |surface| {
+            surface.child(pane_focus_glow(chrome.radii, cx))
+        })
+        .when(chrome.inactive_opacity < 1.0, |surface| {
+            surface.child(pane_inactive_scrim(
+                chrome.radii,
+                chrome.inactive_opacity,
+                cx,
+            ))
+        })
+        .children(overlays)
 }
 
 fn pane_surface_shadow_style(shadow: bool, cx: &App) -> Vec<BoxShadow> {
@@ -131,35 +117,6 @@ fn pane_focus_glow(radii: Corners<Pixels>, cx: &App) -> gpui::Div {
             spread_radius: px(-8.0),
             inset: true,
         }])
-}
-
-fn pane_corner_notches(chrome: PaneChrome) -> Option<gpui::Div> {
-    let radii = chrome.radii;
-    let band = radii
-        .top_left
-        .max(radii.top_right)
-        .max(radii.bottom_left)
-        .max(radii.bottom_right);
-    if band <= px(0.0) {
-        return None;
-    }
-    let outset = px(-f32::from(band));
-    Some(
-        div().absolute().inset_0().overflow_hidden().child(
-            div()
-                .absolute()
-                .left(outset)
-                .top(outset)
-                .right(outset)
-                .bottom(outset)
-                .rounded_tl(radii.top_left + band)
-                .rounded_tr(radii.top_right + band)
-                .rounded_bl(radii.bottom_left + band)
-                .rounded_br(radii.bottom_right + band)
-                .border(band + chrome.border_width.max(Pixels::ZERO))
-                .border_color(chrome.gap_background),
-        ),
-    )
 }
 
 fn pane_inactive_scrim(radii: Corners<Pixels>, opacity: f32, cx: &App) -> gpui::Div {
@@ -473,7 +430,6 @@ pub fn pane_split_surface(
     first_content: impl IntoElement,
     second_content: impl IntoElement,
     hit_target: impl IntoElement,
-    gap_background: Hsla,
     cx: &App,
 ) -> Stateful<gpui::Div> {
     let slot = f32::from(pane_split_slot(gap));
@@ -562,19 +518,6 @@ pub fn pane_split_surface(
         .when(!gaps, gpui::Styled::overflow_hidden)
         .when(axis == PaneSplitAxis::Vertical, |element| {
             element.flex_col()
-        })
-        .when(gaps, |element| {
-            element.child(
-                div()
-                    .absolute()
-                    .bg(gap_background)
-                    .when(axis == PaneSplitAxis::Horizontal, |gap| {
-                        gap.left(relative(ratio)).w(px(slot)).h_full()
-                    })
-                    .when(axis == PaneSplitAxis::Vertical, |gap| {
-                        gap.top(relative(ratio)).h(px(slot)).w_full()
-                    }),
-            )
         })
         .child(first)
         .child(divider)
@@ -875,7 +818,6 @@ mod tests {
         let chrome = PaneChrome::new(
             Corners::default(),
             px(0.0),
-            gpui::transparent_black(),
             gpui::transparent_black(),
             false,
         );

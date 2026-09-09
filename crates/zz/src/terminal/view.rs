@@ -2259,6 +2259,15 @@ impl Render for TerminalView {
             )
         };
         let background = terminal_background(viewport_background, appearance.background_opacity);
+        let background = if self.popup {
+            background
+        } else {
+            cx.theme()
+                .background
+                .opaque()
+                .blend(background)
+                .opacity(cx.theme().pane_background_opacity)
+        };
         let mode_indicator = (!self.popup)
             .then(|| mode_indicator(mode, unseen_output))
             .flatten();

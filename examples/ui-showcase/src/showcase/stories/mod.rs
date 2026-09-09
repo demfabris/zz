@@ -146,7 +146,11 @@ pub(super) fn mock_terminal(cx: &App) -> Div {
         .gap(px(5.0))
         .p(px(14.0))
         .overflow_hidden()
-        .bg(cx.theme().background)
+        .bg(cx
+            .theme()
+            .background
+            .opaque()
+            .opacity(cx.theme().pane_background_opacity))
         .font_family(cx.theme().mono_font_family.clone())
         .text_size(px(11.0))
         .text_color(cx.theme().foreground)

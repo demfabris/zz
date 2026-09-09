@@ -338,6 +338,7 @@ fn connection_stage(message: impl IntoElement, cx: &App) -> AnyElement {
         .rounded(cx.theme().radius)
         .border_1()
         .border_color(cx.theme().border)
+        .bg(cx.theme().background)
         .child(message)
         .into_any_element()
 }
@@ -354,6 +355,7 @@ fn pane_chrome_fixture(
         .w(px(240.0))
         .h(px(150.0))
         .p(px(margin))
+        .bg(cx.theme().background)
         .child(pane_leaf(
             id,
             radius,
@@ -390,6 +392,7 @@ fn pane_split_fixture(gaps: bool, cx: &App) -> gpui::Div {
         .w(px(480.0))
         .h(px(180.0))
         .p(px(margin))
+        .bg(cx.theme().background)
         .child(pane_split_surface(
             surface_id,
             PaneSplitAxis::Horizontal,
@@ -402,7 +405,6 @@ fn pane_split_fixture(gaps: bool, cx: &App) -> gpui::Div {
             first,
             second,
             pane_split_hit_target(hit_id, PaneSplitAxis::Horizontal, 0.5, px(margin)),
-            cx.theme().background,
             cx,
         ))
 }
@@ -423,7 +425,6 @@ fn pane_leaf(
             uniform_radii(radius),
             px(border_width),
             pane_border_color(active, cx),
-            cx.theme().background,
             shadow,
         )
         .active(active)

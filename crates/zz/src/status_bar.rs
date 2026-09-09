@@ -29,7 +29,6 @@ use crate::{
             select_window_command,
         },
     },
-    theme::chrome_background,
     workspace::sidebar::WorkspaceSidebar,
 };
 
@@ -43,7 +42,6 @@ pub(crate) fn render_gui_status_bar(
     _window: &mut Window,
     cx: &mut App,
 ) -> Stateful<gpui::Div> {
-    let background = chrome_background(cx);
     let (snapshot, attached_host, attached, connected) = {
         let mux = mux.read(cx);
         (
@@ -88,7 +86,6 @@ pub(crate) fn render_gui_status_bar(
     workspace_status_bar(
         model.alignment == StatusBarAlignment::Center,
         crate::config::pane_gaps(cx),
-        background,
         workspace_controls_leading_inset(cx),
         WorkspaceStatusSlots {
             session,

@@ -110,6 +110,10 @@ fn value(parsed: &ParsedConfig, key: ConfigKey) -> (Value, ConfigProvenance) {
             let setting = &parsed.config.pane_gaps;
             (json!(setting.value), setting.provenance)
         }
+        ConfigKey::PaneBackgroundOpacity => {
+            let setting = &parsed.config.pane_background_opacity;
+            (json!(setting.value), setting.provenance)
+        }
         ConfigKey::PaneInactiveOpacity => {
             let setting = &parsed.config.pane_inactive_opacity;
             (json!(setting.value), setting.provenance)
@@ -248,6 +252,7 @@ fn section(key: ConfigKey) -> &'static str {
         | ConfigKey::StatusUpdate
         | ConfigKey::StatusClock => "status",
         ConfigKey::PaneGaps
+        | ConfigKey::PaneBackgroundOpacity
         | ConfigKey::PaneInactiveOpacity
         | ConfigKey::PaneCornerRadius
         | ConfigKey::PaneMargin
@@ -314,6 +319,7 @@ pub fn settings(parsed: &ParsedConfig) -> Vec<Setting> {
         ConfigKey::ExperimentalAgentPane,
         ConfigKey::ExperimentalEditorPane,
         ConfigKey::PaneGaps,
+        ConfigKey::PaneBackgroundOpacity,
         ConfigKey::PaneInactiveOpacity,
         ConfigKey::PaneCornerRadius,
         ConfigKey::PaneMargin,

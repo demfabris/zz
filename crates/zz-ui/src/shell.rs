@@ -15,6 +15,7 @@ pub fn chrome_background(background: Hsla, blur: bool) -> Hsla {
 
 pub fn app_shell_surface(
     id: impl Into<ElementId>,
+    background: Hsla,
     sidebar: impl IntoElement,
     titlebar: Option<AnyElement>,
     workspace: impl IntoElement,
@@ -27,6 +28,7 @@ pub fn app_shell_surface(
         .flex_col()
         .size_full()
         .overflow_hidden()
+        .bg(background)
         .child(
             div()
                 .flex()
@@ -83,9 +85,6 @@ pub fn app_titlebar_strip(
         .child(controls)
 }
 
-/// Workspace composition beneath the native title bar. Native callers attach
-/// drag handlers and window-corner clipping to the returned element. `content`
-/// owns its own background; this draws no workspace tint under it.
 pub fn app_workspace_surface(
     id: impl Into<ElementId>,
     content: impl IntoElement,
@@ -117,7 +116,6 @@ pub fn app_connection_state(message: impl IntoElement, cx: &App) -> gpui::Div {
         .flex_1()
         .items_center()
         .justify_center()
-        .bg(cx.theme().background)
         .text_size(crate::rems_from_px(12.0))
         .text_color(cx.theme().foreground.muted())
         .child(message)
@@ -135,7 +133,6 @@ pub struct WorkspaceStatusSlots {
 pub fn workspace_status_bar(
     centered: bool,
     gaps: bool,
-    background: Hsla,
     leading_inset: Pixels,
     slots: WorkspaceStatusSlots,
     cx: &App,
@@ -204,7 +201,6 @@ pub fn workspace_status_bar(
         .w_full()
         .h(TITLE_BAR_HEIGHT)
         .overflow_hidden()
-        .bg(background)
         .text_color(cx.theme().foreground)
         .when(!gaps, |bar| {
             bar.border_b_1().border_color(cx.theme().border)

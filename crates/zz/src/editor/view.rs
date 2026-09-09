@@ -534,13 +534,15 @@ impl Render for EditorView {
             .flex()
             .size_full()
             .overflow_hidden()
-            .bg(crate::theme::app_pane_background(cx))
             .font_family(cx.theme().mono_font_family.clone())
             .text_size(config::editor_font_size(cx))
             .on_action(cx.listener(Self::open_file))
             .on_action(cx.listener(Self::save_file))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-            .child(CodeEditor::new(&self.editor))
+            .child(
+                CodeEditor::new(&self.editor)
+                    .background_opacity(cx.theme().pane_background_opacity),
+            )
             .when(scratch_hint, |this| {
                 this.child(
                     div()

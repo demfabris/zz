@@ -186,7 +186,11 @@ pub fn chrome_background(cx: &App) -> Hsla {
 }
 
 pub fn app_pane_background(cx: &App) -> Hsla {
-    Theme::global(cx).background.opaque()
+    let theme = Theme::global(cx);
+    theme
+        .background
+        .opaque()
+        .opacity(theme.pane_background_opacity)
 }
 
 pub(crate) fn refresh_current_theme(cx: &mut App) {
@@ -247,6 +251,7 @@ fn apply_zz_overrides(cx: &mut App) {
         .map_or_else(|| gpui::Font::default().family, SharedString::from);
     let widget_corner_radius = config::widget_corner_radius(cx);
     let shadow_strength = config::shadow_strength(cx);
+    let pane_background_opacity = config::pane_background_opacity(cx);
     let chrome_preset = config::chrome_preset(cx);
     let chrome = config::chrome_colors(cx);
     let theme = Theme::global_mut(cx);
@@ -259,6 +264,7 @@ fn apply_zz_overrides(cx: &mut App) {
 
     theme.radius = widget_corner_radius;
     theme.shadow_strength = shadow_strength;
+    theme.pane_background_opacity = pane_background_opacity;
 }
 
 #[cfg(test)]

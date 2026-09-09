@@ -233,6 +233,7 @@ pub struct CodeEditorState {
     pub(super) reset_scroll: bool,
     pub(super) soft_wrap: bool,
     pub(super) disabled: bool,
+    pub(super) background_opacity: f32,
     pub(super) corner_radii: Corners<Pixels>,
     pub(super) vim: Option<VimState>,
 
@@ -297,6 +298,7 @@ impl CodeEditorState {
             reset_scroll: false,
             soft_wrap: true,
             disabled: false,
+            background_opacity: 1.0,
             corner_radii: Corners::default(),
             vim: None,
             selecting: false,

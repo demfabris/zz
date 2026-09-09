@@ -2144,7 +2144,6 @@ impl AppView {
         match node {
             LayoutNode::Pane(pane) => {
                 let radii = config::pane_content_radii(cx, corners);
-                let gap_background = crate::theme::chrome_background(cx);
                 let active = *pane == window.active_pane;
                 let inactive = !active;
                 let inactive_opacity = config::pane_inactive_opacity(cx);
@@ -2272,7 +2271,6 @@ impl AppView {
                         radii,
                         config::pane_border_width(cx),
                         border_color,
-                        gap_background,
                         config::pane_gaps(cx),
                     )
                     .active(active)
@@ -2363,7 +2361,6 @@ impl AppView {
                     first_element,
                     second_element,
                     hit_target,
-                    crate::theme::chrome_background(cx),
                     cx,
                 )
                 .on_drag_move::<SplitDrag>(cx.listener(
@@ -2816,50 +2813,33 @@ impl Render for AppView {
             overlays.push(confirm);
         }
         let measured_canvas_size = self.pane_canvas_size.clone();
-        let gap_background = crate::theme::chrome_background(cx);
-        let content = div()
-            .relative()
-            .size_full()
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .border(pane_margin)
-                    .border_color(gap_background)
-                    .when(chrome_above_panes, |gap| gap.border_t(px(0.))),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left(pane_margin)
-                    .top(canvas_top)
-                    .right(pane_margin)
-                    .bottom(pane_margin)
-                    .flex()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .min_h_0()
-                            .relative()
-                            .on_prepaint(move |bounds, _, _| {
-                                measured_canvas_size.set(bounds.size);
-                            })
-                            .on_drag_move::<PaneDrag>(cx.listener(Self::on_pane_drag_move))
-                            .on_drop(cx.listener(|view, drag: &PaneDrag, window, cx| {
-                                view.on_pane_drop(*drag, window, cx);
-                            }))
-                            .child(content)
-                            .children(drop_preview),
-                    ),
-            );
+        let content = div().relative().size_full().child(
+            div()
+                .absolute()
+                .left(pane_margin)
+                .top(canvas_top)
+                .right(pane_margin)
+                .bottom(pane_margin)
+                .flex()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .min_h_0()
+                        .relative()
+                        .on_prepaint(move |bounds, _, _| {
+                            measured_canvas_size.set(bounds.size);
+                        })
+                        .on_drag_move::<PaneDrag>(cx.listener(Self::on_pane_drag_move))
+                        .on_drop(cx.listener(|view, drag: &PaneDrag, window, cx| {
+                            view.on_pane_drop(*drag, window, cx);
+                        }))
+                        .child(content)
+                        .children(drop_preview),
+                ),
+        );
         layout_corners.round_div(
             app_workspace_surface("app-root", content, overlays, cx)
-                .when(
-                    (active_window.is_none() && route == WorkspaceRoute::App)
-                        || !crate::theme::chrome_blur(cx),
-                    |surface| surface.bg(gap_background),
-                )
                 .capture_any_mouse_down(cx.listener(Self::on_menu_mouse_down))
                 .capture_any_mouse_up(cx.listener(Self::on_menu_mouse_up))
                 .capture_any_mouse_up(cx.listener(Self::on_split_mouse_up))

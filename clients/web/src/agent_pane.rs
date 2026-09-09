@@ -1956,7 +1956,11 @@ impl Render for AgentPane {
             .flex_col()
             .size_full()
             .overflow_hidden()
-            .bg(cx.theme().background.opaque())
+            .bg(cx
+                .theme()
+                .background
+                .opaque()
+                .opacity(cx.theme().pane_background_opacity))
             .child(agent_pane_header(
                 provider_picker,
                 div().flex().gap(px(4.0)).child(new_session).child(history),

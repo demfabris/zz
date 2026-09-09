@@ -548,6 +548,16 @@ impl Element for TextElement {
         let gutter = background.raised(1).opaque();
         let divider = cx.theme().border;
         let radii = self.state.read(cx).corner_radii;
+        let background_opacity = self.state.read(cx).background_opacity;
+        let text_radii = if layout.gutter_width > Pixels::ZERO {
+            Corners {
+                top_left: Pixels::ZERO,
+                bottom_left: Pixels::ZERO,
+                ..radii
+            }
+        } else {
+            radii
+        };
         let gutter_radii = Corners {
             top_left: radii.top_left,
             bottom_left: radii.bottom_left,
@@ -560,14 +570,20 @@ impl Element for TextElement {
                 bounds: layout.viewport_bounds,
             }),
             |window| {
-                window.paint_quad(fill(layout.viewport_bounds, background).corner_radii(radii));
+                window.paint_quad(
+                    fill(layout.text_bounds, background.opacity(background_opacity))
+                        .corner_radii(text_radii),
+                );
 
                 if layout.gutter_width > Pixels::ZERO {
                     let gutter_bounds = Bounds {
                         origin: layout.viewport_bounds.origin,
                         size: size(layout.gutter_width, layout.viewport_bounds.size.height),
                     };
-                    window.paint_quad(fill(gutter_bounds, gutter).corner_radii(gutter_radii));
+                    window.paint_quad(
+                        fill(gutter_bounds, gutter.opacity(background_opacity))
+                            .corner_radii(gutter_radii),
+                    );
                     window.paint_quad(fill(
                         Bounds {
                             origin: point(gutter_bounds.right() - px(1.0), gutter_bounds.origin.y),

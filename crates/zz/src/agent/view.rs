@@ -2195,7 +2195,7 @@ impl AgentView {
                 .render_attachments(view, cx)
                 .map(IntoElement::into_any_element),
             radii: pane_radii,
-            background: crate::theme::app_pane_background(cx),
+            background: crate::theme::app_pane_background(cx).opaque(),
         }
     }
 }

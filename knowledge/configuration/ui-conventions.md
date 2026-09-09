@@ -69,8 +69,7 @@ page backgrounds, simulated window blur, and the font/renderer differences that 
    actions and browser tab close buttons also use `Button::text()` so hover only brightens their
    foreground, without a button fill. Other embedded actions keep their wash.
    Gapped panes use the same soft shadow and foreground edge, retaining their configured border
-   width and a stronger active-pane outline. The opaque pane paints over its shadow so content
-   stays clear; gutter fills paint first so they cannot cover the shadow. Flush panes have no
+   width and a stronger active-pane outline. The continuous app background sits beneath both pane and shadow. Flush panes have no
    outer shadow.
 
    The local renderer makes blurred shadows follow the pane's corner smoothing, including
@@ -79,7 +78,7 @@ page backgrounds, simulated window blur, and the font/renderer differences that 
    Active panes add a soft inset foreground glow above content and below status overlays:
    3.2% opacity, 96px blur, (16px, 24px) offset, and -8px spread. `PaneChrome::active` shares
    this top-left emphasis across desktop, browser, and preview callers. The local Metal,
-   WGPU, and DirectX renderers dither the fade to reduce banding. Pane backgrounds remain opaque.
+   WGPU, and DirectX renderers dither the fade to reduce banding. Pane content roots paint their own backgrounds using the configured pane opacity.
 
 # Control density
 
@@ -211,10 +210,12 @@ instead, with “Preset” shown when an otherwise-unset root inherits from the 
 `ThemeColor` is seven roots and every other color is derived through `Colorize` at paint time, so
 overriding a root needs no parallel token table kept in step. Views read
 `cx.theme()` and never receive a copied palette or local color literals.
-Chrome tint is composited once per visible surface, and the sidebar titlebar inherits the sidebar
-shell tint instead of repainting it. App-owned pane roots use `theme::app_pane_background` and stay
-opaque. The terminal root uses the same opaque base, then paints Ghostty `background-opacity` as a
-terminal-color tint inside the pane. Native blur remains confined to visible chrome planes.
+The app shell paints one continuous chrome background beneath the pane layout. Fixed sidebar,
+titlebar, Settings, margins, split gaps, and rounded pane corners inherit that fill. The slideover
+sidebar paints its own overlay surface. App-owned pane roots use `theme::app_pane_background`
+with `Theme::pane_background_opacity`, controlled by Panes settings and defaulting to 50%. The Agent composer card and footer
+use the same factor; the shared pane frame adds no background fill. The terminal blends its
+Ghostty tint with the theme base before applying the factor. Browser pages remain opaque.
 
 # Related
 

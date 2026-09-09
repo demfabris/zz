@@ -49,20 +49,6 @@ impl RenderOnce for AgentComposer {
             .bottom(px(0.0))
             .w_full()
             .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .h(
-                        px(COMPOSER_FOOTER_HEIGHT + COMPOSER_OUTER_PADDING + COMPOSER_SECTION_GAP)
-                            + cx.theme().radius,
-                    )
-                    .bg(self.background)
-                    .rounded_bl(self.radii.bottom_left)
-                    .rounded_br(self.radii.bottom_right),
-            )
-            .child(
                 v_flex()
                     .w_full()
                     .px(px(COMPOSER_OUTER_PADDING))
@@ -81,7 +67,11 @@ impl RenderOnce for AgentComposer {
                                     .rounded(cx.theme().radius)
                                     .border_1()
                                     .border_color(cx.theme().border)
-                                    .bg(cx.theme().background.raised(1))
+                                    .bg(cx
+                                        .theme()
+                                        .background
+                                        .raised(1)
+                                        .opacity(cx.theme().pane_background_opacity))
                                     .when(cx.theme().shadow, gpui::Styled::shadow_xs)
                                     .children(self.attachments)
                                     .child(
@@ -133,7 +123,7 @@ impl RenderOnce for AgentComposer {
             .child(
                 v_flex()
                     .w_full()
-                    .bg(self.background)
+                    .bg(self.background.opacity(cx.theme().pane_background_opacity))
                     .rounded_bl(self.radii.bottom_left)
                     .rounded_br(self.radii.bottom_right)
                     .px(px(COMPOSER_OUTER_PADDING))

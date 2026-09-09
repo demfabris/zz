@@ -42,13 +42,13 @@ zz-patches  main  gpui,gpui_platform`), which is what `just forks` and `just for
 outside `gpui` itself is left. The fork's source revision and per-module port notes live in
 `crates/zz-ui/UPSTREAM.md`, not here.
 
-# Local pane-shadow renderer changes
+# Local pane renderer changes
 
 Desktop, browser, and showcase currently override `gpui` and `gpui_platform` with local paths under
 `/Users/demfabris/.cache/zz-forks/zed/crates`, based on v0.6.1's pinned revision
 `3263264d6455a8f282268697377199864a81f7a4`. Metal, WGPU, and DirectX blurred inset shadows
 use position-seeded stochastic alpha rounding in 1/128 steps to reduce banding. WGPU applies
-this before any required premultiplication. RGB and blend factors retain release behavior.
+this before any required premultiplication. Dithering changes only alpha.
 The GPU test `faint_inset_shadows_dither_dark_composites` checks variation, noise size,
 brightness, and opaque composition. All three workspaces resolve the same local renderer
 through their manifests and lockfiles. These changes remain uncommitted.
@@ -57,7 +57,13 @@ Blurred shadows also follow the element's superellipse cross-section in Metal, W
 DirectX. The earlier carried smoothing fix covered only unblurred shadows, leaving the 2px
 pane shadow tracing a circle around a squircle. The GPU test
 `blurred_shadows_follow_smoothed_corners` checks all four corners and the circular and
-fully rounded cases. The Gaussian blur, pane backgrounds, and blend factors are unchanged.
+fully rounded cases. The Gaussian blur is unchanged.
+
+Pane background opacity also requires source-over destination alpha in Metal
+and DirectX color/path pipelines and WGPU path composition. The Metal GPU test
+`translucent_layers_preserve_source_over_alpha` checks the root, one and two half-opacity
+layers, and an opaque foreground. This prevents translucent layers from adding up to
+opaque window alpha.
 
 # Carried patches
 

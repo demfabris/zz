@@ -5,7 +5,7 @@ use gpui::{
 };
 use zz_protocol::PaneId;
 use zz_ui::{
-    ActiveTheme as _, IconName,
+    ActiveTheme as _, Colorize as _, IconName,
     pane::{pane_picker_choices, pane_picker_row},
 };
 
@@ -142,7 +142,11 @@ impl Render for PanePicker {
             .items_center()
             .justify_center()
             .overflow_hidden()
-            .bg(cx.theme().background)
+            .bg(cx
+                .theme()
+                .background
+                .opaque()
+                .opacity(cx.theme().pane_background_opacity))
             .text_color(cx.theme().foreground)
             .px(px(12.0))
             .child(pane_picker_choices(rows))

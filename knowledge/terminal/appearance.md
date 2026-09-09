@@ -26,8 +26,9 @@ This is a **terminal-only** system. Application chrome has its own light/dark pa
 [zz-ui](/configuration/ui-conventions.md) and does not derive from these colors; only
 `mono_font_family` still crosses the boundary, and it is not chroma. `background-opacity` remains
 pane-local too. The renderer paints the terminal color at that alpha over an opaque app-pane base,
-so `1` shows the configured terminal background and lower values mix toward the app surface. Window
-blur does not enter terminal pixels.
+so `1` shows the configured terminal background and lower values mix toward the app surface.
+The app applies `pane-background-opacity` (default 50%) to that blended color. Terminal
+text and explicit cell backgrounds retain their own colors.
 
 # Model
 

@@ -996,6 +996,7 @@ impl SelectItem for SettingsSelectItem {
 
 pub fn panes_page(
     gaps: SettingEntry,
+    background_opacity: SettingEntry,
     opacity: SettingEntry,
     margin: SettingEntry,
     radius: SettingEntry,
@@ -1005,6 +1006,7 @@ pub fn panes_page(
     settings_scroll_column("settings-panes")
         .child(settings_page_description(SettingsSection::Panes, cx))
         .child(SettingsStack::titled("Layout").child(gaps))
+        .child(SettingsStack::titled("Appearance").child(background_opacity))
         .child(SettingsStack::titled("Focus").child(opacity))
         .child(
             SettingsStack::titled("Frame")

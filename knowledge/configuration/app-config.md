@@ -110,6 +110,7 @@ The client-local schema includes these scalar settings and chrome colors.
 | `experimental-agent-pane` | `false` | `true` or `false` | Whether new Agent panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind agent` |
 | `experimental-editor-pane` | `false` | `true` or `false` | Whether new Editor panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind editor` |
 | `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, surface ring, and divider treatment |
+| `pane-background-opacity` | `0.5` | `0..=1` | Pane and Agent composer background strength; Panes settings display 0–100%. Browser panes apply it only to the toolbar |
 | `pane-inactive-opacity` | `0.7` | `0..=1` | Retained strength of inactive pane content and chrome; `1` disables dimming |
 | `pane-margin` | `6` | `0..=32` | Inset around each pane, on every platform; applies only with `pane-gaps` |
 | `pane-corner-radius` | `13.5` | `0..=32` | All four corners of every pane, on every platform; applies only with `pane-gaps` |
@@ -140,7 +141,7 @@ normal watched-config refresh. The clock never shows seconds. `AppShell` aligns 
 the next minute boundary, then requests one redraw per minute while the bar and clock are visible;
 `time-date` renders `%H:%M · %b %d`.
 
-`widget-corner-radius`, `shadow-strength`, and the theme keys land on the **zz-ui theme** rather than being read
+`widget-corner-radius`, `shadow-strength`, `pane-background-opacity`, and the theme keys land on the **zz-ui theme** rather than being read
 per-frame by a renderer: `zz::theme::apply_zz_overrides` pushes them onto the `Theme` global, and
 every widget already reads from there, so no component is plumbed individually. Because the preset
 and overrides are reapplied on every theme rebuild, they survive a light/dark switch, the same
@@ -269,22 +270,28 @@ chrome, `Opaque`/`Transparent` native request . logged at startup. picom ignores
 property entirely (open upstream feature request), so picom setups stay in the opaque fallback by
 design.
 
-**Only window chrome reveals the compositor blur.** All platform requests remain window-wide, and
-app paint decides where the backdrop appears. While blur is active, chrome uses
-`BLURRED_CHROME_ALPHA` through `theme::chrome_background`. Pane roots force an opaque theme base.
-The pane picker, Agent, Editor, Browser shell, waiting state, and terminal cover the native
-backdrop. Browser blank, loading, error, and toolbar states share the same pane base; Chromium
-pages keep their own pixels above it.
+Panes → Appearance → Background opacity controls `pane-background-opacity`, stored as 0–1
+and displayed as 0–100%. Valid edits apply live, and Reset restores 50%. The control works
+with or without pane gaps. The value reaches paints through `Theme::pane_background_opacity`. Each pane content root owns its fill; the shared
+pane frame paints borders, shadows, and focus effects above the continuous app background.
+Terminal, Agent, Editor, picker, and waiting surfaces use this factor. Browser panes apply
+it only to the toolbar; page, blank, loading, and error backgrounds stay opaque.
 
-A terminal paints its resolved Ghostty background color as a tint over that opaque pane base.
-`background-opacity = 1` shows the terminal color, and lower values mix it toward the app pane
-color. The setting no longer exposes the desktop or chrome blur. Ghostty's `background-blur` stays
-ignored; `window-background-blur` owns the native compositor request.
+The Agent main surface, raised composer card, and footer each use the chosen opacity.
+Shadow strength remains independent.
+The extra footer backing strip is removed. These are separate overlapping layers; text
+keeps its own opacity. The composer can reveal timeline content underneath while scrolling.
 
-Each chrome region paints its tint once; 0.93 over 0.93 becomes 0.995 and hides the
-backdrop. During active blur the workspace root leaves pane rectangles unpainted. The outer margin,
-split gaps, and rounded corner wedges paint chrome around opaque pane interiors. The Settings
-route supplies its own chrome background.
+A terminal first blends its Ghostty background color with the theme base using
+`background-opacity`, then applies the shared pane factor to that result. Ghostty's
+`background-blur` stays ignored; `window-background-blur` owns the native compositor request.
+
+`app_shell_surface` paints one continuous app background beneath the sidebar, titlebar,
+Settings, and pane layout. It uses `theme::chrome_background`: 93% alpha with native blur,
+and the theme background otherwise. Margins, split gaps, and rounded pane corners reveal
+this same root surface. They do not paint separate fills. Pane surfaces and their shadows
+sit above it; the fixed sidebar, titlebar, workspace, and Settings inherit the root fill.
+The slideover sidebar keeps its own background because it overlays pane content.
 
 Active panes add a rounded inset foreground glow above content and below status overlays:
 3.2% opacity, 96px blur, (16px, 24px) offset, and -8px spread. The local Metal, WGPU, and
@@ -534,7 +541,7 @@ always-live inactive-opacity factor.
 | Status bar | Title-bar items shown when the sidebar is retracted (`status-show-session`, `status-badges`, `status-align`, `status-agents`, `status-host`, `status-update`, `status-clock`) |
 | Browser | **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
-| Panes | **Layout** (`pane-gaps`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
+| Panes | **Layout** (`pane-gaps`) · **Appearance** (`pane-background-opacity`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |
 | System | **Tray** (`tray`, only where the profile has one) · **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`, each row present only with its cargo feature). `auto-restart-stale-daemon` is a file key with no Settings row |
 | Multiplexer | **Configuration files** (the existing tmux files, then `zz/mux.conf`, in load order) · **Split panes** (shortcut and Pane picker / Terminal / Browser for Split below and Split right) · `zz/mux.conf` editor with Reload and Save, plus a one-click trim when the file still begins with an old tmux copy |

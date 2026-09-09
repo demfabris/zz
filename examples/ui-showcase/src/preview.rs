@@ -51,6 +51,7 @@ pub(crate) struct PreviewOptions {
     pub macos: bool,
     pub radius: f32,
     pub shadow_strength: f32,
+    pub pane_background_opacity: f32,
     pub pane_margin: f32,
     pub pane_radius: f32,
     pub pane_border: f32,
@@ -75,6 +76,7 @@ impl Default for PreviewOptions {
             macos: cfg!(target_os = "macos"),
             radius: 6.0,
             shadow_strength: 1.0,
+            pane_background_opacity: 0.5,
             pane_margin: 6.0,
             pane_radius: 13.5,
             pane_border: 0.5,
@@ -117,6 +119,7 @@ impl PreviewOptions {
             (&mut self.pane_border, 8.0, 0.5),
             (&mut self.inactive_opacity, 1.0, 0.7),
             (&mut self.shadow_strength, 1.0, 1.0),
+            (&mut self.pane_background_opacity, 1.0, 0.5),
         ] {
             *value = if value.is_finite() {
                 value.clamp(0.0, maximum)
@@ -131,6 +134,7 @@ impl PreviewOptions {
     }
 
     fn apply_colors(&self, cx: &mut App) {
+        zz_ui::Theme::global_mut(cx).pane_background_opacity = self.pane_background_opacity;
         let mode = zz_ui::Theme::global(cx).mode;
         let base = zz_ui::ThemeColor::for_mode(mode);
         let defaults = [
@@ -287,7 +291,6 @@ impl Preview {
             navigation,
             cx,
         )
-        .bg(self.chrome_background(cx))
         .when(self.options.gaps, |sidebar| {
             sidebar.border_color(cx.theme().transparent)
         })
@@ -574,7 +577,6 @@ impl Preview {
         workspace_status_bar(
             false,
             self.options.gaps,
-            self.chrome_background(cx),
             self.inset(cx),
             WorkspaceStatusSlots {
                 session: Some(session),
@@ -617,7 +619,6 @@ impl Preview {
                 0.0
             }),
             pane_border_color(active, cx),
-            self.chrome_background(cx),
             self.options.gaps,
         )
         .active(active)
@@ -654,7 +655,11 @@ impl Preview {
             .font_family(cx.theme().mono_font_family.clone())
             .text_size(px(13.0))
             .line_height(px(18.0))
-            .bg(cx.theme().background.opaque())
+            .bg(cx
+                .theme()
+                .background
+                .opaque()
+                .opacity(cx.theme().pane_background_opacity))
             .text_color(cx.theme().foreground)
             .children(lines.into_iter().map(|(text, muted)| {
                 div()
@@ -752,13 +757,22 @@ impl Preview {
             .flex_col()
             .size_full()
             .overflow_hidden()
-            .bg(cx.theme().background.opaque())
-            .child(toolbar)
+            .child(
+                div()
+                    .flex_none()
+                    .bg(cx
+                        .theme()
+                        .background
+                        .opaque()
+                        .opacity(cx.theme().pane_background_opacity))
+                    .child(toolbar),
+            )
             .child(
                 div()
                     .relative()
                     .flex_1()
                     .min_h_0()
+                    .bg(cx.theme().background.opaque())
                     .child(zz_ui::browser::browser_start_surface(BrowserEmptyHint)),
             )
             .into_any_element()
@@ -809,7 +823,11 @@ impl Preview {
             .flex_col()
             .size_full()
             .overflow_hidden()
-            .bg(cx.theme().background.opaque())
+            .bg(cx
+                .theme()
+                .background
+                .opaque()
+                .opacity(cx.theme().pane_background_opacity))
             .child(agent_pane_header(
                 Button::new("preview-agent-picker")
                     .ghost()
@@ -886,14 +904,6 @@ impl Preview {
                 .child(
                     div()
                         .absolute()
-                        .inset_0()
-                        .border(margin)
-                        .border_t(top)
-                        .border_color(self.chrome_background(cx)),
-                )
-                .child(
-                    div()
-                        .absolute()
                         .left(margin)
                         .top(top)
                         .right(margin)
@@ -933,7 +943,6 @@ impl Preview {
             first,
             second,
             div(),
-            self.chrome_background(cx),
             cx,
         )
         .into_any_element()
@@ -972,7 +981,14 @@ impl Render for Preview {
                     .map(IntoElement::into_any_element),
             )
             .collect::<Vec<_>>();
-        app_shell_surface("app-shell", sidebar, titlebar, content, overlays)
-            .text_color(cx.theme().foreground)
+        app_shell_surface(
+            "app-shell",
+            self.chrome_background(cx),
+            sidebar,
+            titlebar,
+            content,
+            overlays,
+        )
+        .text_color(cx.theme().foreground)
     }
 }

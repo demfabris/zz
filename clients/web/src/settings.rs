@@ -35,6 +35,7 @@ pub(super) struct Preferences {
     pub colors: [Option<String>; 6],
     pub zoom: f32,
     pub radius: f32,
+    pub pane_background_opacity: f32,
     pub pane_inactive_opacity: f32,
     pub pane_margin: f32,
     pub pane_radius: f32,
@@ -52,6 +53,7 @@ impl Default for Preferences {
             colors: Default::default(),
             zoom: 1.0,
             radius: 6.0,
+            pane_background_opacity: 0.5,
             pane_inactive_opacity: 0.7,
             pane_margin: 6.0,
             pane_radius: 13.5,
@@ -110,6 +112,7 @@ impl Preferences {
                 .map(|color| color.and_then(|value| zz_ui::parse_hex(&value).ok())),
         );
         Theme::global_mut(cx).radius = px(self.radius);
+        Theme::global_mut(cx).pane_background_opacity = self.pane_background_opacity;
         cx.set_global(UiZoom(self.zoom));
         window.set_zoom(self.zoom);
         cx.refresh_windows();
@@ -142,7 +145,7 @@ impl Preferences {
 pub(super) struct Controls {
     zoom: Entity<InputState>,
     radius: Entity<InputState>,
-    panes: [Entity<InputState>; 4],
+    panes: [Entity<InputState>; 5],
     colors: Vec<Entity<ColorPickerState>>,
     search_engine: Entity<SelectState<Vec<SettingsSelectItem>>>,
     _subscriptions: Vec<Subscription>,
@@ -211,6 +214,7 @@ impl Controls {
             ));
         }
         let pane_values = [
+            preferences.pane_background_opacity,
             preferences.pane_inactive_opacity,
             preferences.pane_margin,
             preferences.pane_radius,
@@ -218,7 +222,13 @@ impl Controls {
         ];
         let panes = PaneControl::ALL.map(|control| {
             let (min, max, step) = control.limits();
-            let value = pane_values[control as usize];
+            let scale = if control == PaneControl::BackgroundOpacity {
+                100.0
+            } else {
+                1.0
+            };
+            let (min, max, step) = (min * scale, max * scale, step * f64::from(scale));
+            let value = pane_values[control as usize] * scale;
             let input = cx.new(|cx| {
                 InputState::new(window, cx)
                     .default_value(value.to_string())
@@ -240,20 +250,23 @@ impl Controls {
                         .parse::<f32>()
                         .ok()
                         .filter(|value| value.is_finite());
-                    let previous = *control.value(&mut this.preferences);
+                    let previous = *control.value(&mut this.preferences) * scale;
                     let value = match parsed {
                         Some(value) if commit => value.clamp(min, max),
                         Some(value) if (min..=max).contains(&value) => value,
                         _ if commit => previous,
                         _ => return,
                     };
-                    *control.value(&mut this.preferences) = value;
+                    *control.value(&mut this.preferences) = value / scale;
                     if commit {
                         input.update(cx, |input, cx| {
                             input.set_value(value.to_string(), window, cx);
                         });
                     }
                     this.preferences.save();
+                    Theme::global_mut(cx).pane_background_opacity =
+                        this.preferences.pane_background_opacity;
+                    cx.refresh_windows();
                     cx.notify();
                 },
             ));
@@ -506,22 +519,63 @@ impl WebClient {
                                     cx.notify();
                                 })),
                         );
-                let [opacity, margin, radius, border] = PaneControl::ALL.map(|control| {
-                    SettingEntry::new(control.title(), control.description())
-                        .disabled(control != PaneControl::Opacity && !self.preferences.gaps)
-                        .control(
-                            div().w(px(120.0)).flex_none().child(
-                                NumberInput::new(&self.settings_controls.panes[control as usize])
+                let [background_opacity, opacity, margin, radius, border] =
+                    PaneControl::ALL.map(|control| {
+                        SettingEntry::new(control.title(), control.description())
+                            .disabled(
+                                !matches!(
+                                    control,
+                                    PaneControl::BackgroundOpacity | PaneControl::Opacity
+                                ) && !self.preferences.gaps,
+                            )
+                            .when(control == PaneControl::BackgroundOpacity, |entry| {
+                                entry.title_actions(
+                                    settings_reset_button(
+                                        "web-pane-background-opacity-reset",
+                                        "Reset pane background opacity to 50%",
+                                        self.preferences.pane_background_opacity
+                                            != Preferences::default().pane_background_opacity,
+                                    )
+                                    .on_click(cx.listener(
+                                        |this, _, window, cx| {
+                                            let value =
+                                                Preferences::default().pane_background_opacity;
+                                            this.preferences.pane_background_opacity = value;
+                                            this.settings_controls.panes
+                                                [PaneControl::BackgroundOpacity as usize]
+                                                .update(cx, |input, cx| {
+                                                    input.set_value(
+                                                        (value * 100.0).to_string(),
+                                                        window,
+                                                        cx,
+                                                    );
+                                                });
+                                            this.preferences.save();
+                                            this.preferences.apply(window, cx);
+                                        },
+                                    )),
+                                )
+                            })
+                            .control(
+                                div().w(px(120.0)).flex_none().child(
+                                    NumberInput::new(
+                                        &self.settings_controls.panes[control as usize],
+                                    )
                                     .small()
                                     .bg(settings_control_fill(cx)),
-                            ),
-                        )
-                });
+                                ),
+                            )
+                    });
                 return div()
                     .size_full()
-                    .bg(cx.theme().background)
                     .child(zz_ui::settings::panes_page(
-                        gaps, opacity, margin, radius, border, cx,
+                        gaps,
+                        background_opacity,
+                        opacity,
+                        margin,
+                        radius,
+                        border,
+                        cx,
                     ))
                     .into_any_element();
             }
@@ -684,7 +738,6 @@ impl WebClient {
         }
         div()
             .size_full()
-            .bg(cx.theme().background)
             .child(
                 settings_scroll_column("web-settings-page")
                     .child(settings_page_description(section, cx))
@@ -713,6 +766,7 @@ fn unavailable(title: &str, reason: &str) -> SettingEntry {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PaneControl {
+    BackgroundOpacity,
     Opacity,
     Margin,
     Radius,
@@ -720,10 +774,17 @@ enum PaneControl {
 }
 
 impl PaneControl {
-    const ALL: [Self; 4] = [Self::Opacity, Self::Margin, Self::Radius, Self::Border];
+    const ALL: [Self; 5] = [
+        Self::BackgroundOpacity,
+        Self::Opacity,
+        Self::Margin,
+        Self::Radius,
+        Self::Border,
+    ];
 
     fn value(self, preferences: &mut Preferences) -> &mut f32 {
         match self {
+            Self::BackgroundOpacity => &mut preferences.pane_background_opacity,
             Self::Opacity => &mut preferences.pane_inactive_opacity,
             Self::Margin => &mut preferences.pane_margin,
             Self::Radius => &mut preferences.pane_radius,
@@ -733,7 +794,7 @@ impl PaneControl {
 
     fn limits(self) -> (f32, f32, f64) {
         match self {
-            Self::Opacity => (0.0, 1.0, 0.05),
+            Self::BackgroundOpacity | Self::Opacity => (0.0, 1.0, 0.05),
             Self::Margin | Self::Radius => (0.0, 32.0, 0.5),
             Self::Border => (0.0, 8.0, 0.5),
         }
@@ -741,6 +802,7 @@ impl PaneControl {
 
     fn title(self) -> &'static str {
         match self {
+            Self::BackgroundOpacity => "Pane background opacity",
             Self::Opacity => "Inactive pane opacity",
             Self::Margin => "Pane margin",
             Self::Radius => "Pane corner radius",
@@ -750,6 +812,9 @@ impl PaneControl {
 
     fn description(self) -> &'static str {
         match self {
+            Self::BackgroundOpacity => {
+                "Background strength from 0% to 100%. Browser panes apply this to the toolbar only."
+            }
             Self::Opacity => {
                 "Visible strength of inactive pane content and chrome (0–1). Set to 1 to disable dimming."
             }
@@ -783,11 +848,13 @@ mod tests {
         assert_eq!(preferences.radius, 8.0);
         assert_eq!(preferences.pane_margin, 6.0);
         assert_eq!(preferences.pane_radius, 13.5);
+        assert_eq!(preferences.pane_background_opacity, 0.5);
         let preferences = Preferences {
             pane_margin: -1.0,
             pane_radius: 200.0,
             pane_border_width: f32::NAN,
             pane_inactive_opacity: 2.0,
+            pane_background_opacity: -1.0,
             ..preferences
         }
         .sanitized();
@@ -795,5 +862,17 @@ mod tests {
         assert_eq!(preferences.pane_radius, 32.0);
         assert_eq!(preferences.pane_border_width, 0.5);
         assert_eq!(preferences.pane_inactive_opacity, 1.0);
+        assert_eq!(preferences.pane_background_opacity, 0.0);
+        for (value, expected) in [(2.0, 1.0), (f32::NAN, 0.5)] {
+            assert_eq!(
+                Preferences {
+                    pane_background_opacity: value,
+                    ..Preferences::default()
+                }
+                .sanitized()
+                .pane_background_opacity,
+                expected,
+            );
+        }
     }
 }

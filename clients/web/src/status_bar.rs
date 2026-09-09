@@ -3,7 +3,6 @@ use std::rc::Rc;
 use gpui::{AnyElement, App, Context, Entity, IntoElement, px};
 use zz_client::{StatusBarAlignment, StatusBarModel, StatusBarSettings};
 use zz_ui::{
-    ActiveTheme as _,
     navigation::{
         WorkspaceStatusWindowState,
         status::{
@@ -114,7 +113,6 @@ pub(super) fn render(view: &WebClient, cx: &mut Context<WebClient>) -> AnyElemen
     workspace_status_bar(
         model.alignment == StatusBarAlignment::Center,
         view.preferences.gaps,
-        cx.theme().background,
         px(8.0),
         WorkspaceStatusSlots {
             session,

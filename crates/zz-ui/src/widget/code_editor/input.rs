@@ -18,6 +18,7 @@ pub struct CodeEditor {
     bordered: bool,
     focus_bordered: bool,
     disabled: bool,
+    background_opacity: f32,
     tab_index: isize,
 }
 
@@ -29,6 +30,7 @@ impl CodeEditor {
             bordered: false,
             focus_bordered: false,
             disabled: false,
+            background_opacity: 1.0,
             tab_index: 0,
         }
     }
@@ -52,6 +54,12 @@ impl CodeEditor {
     }
 
     #[must_use]
+    pub fn background_opacity(mut self, opacity: f32) -> Self {
+        self.background_opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    #[must_use]
     pub fn tab_index(mut self, tab_index: isize) -> Self {
         self.tab_index = tab_index;
         self
@@ -66,8 +74,12 @@ impl Styled for CodeEditor {
 
 impl RenderOnce for CodeEditor {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        self.state.update(cx, |state, _| {
+        self.state.update(cx, |state, cx| {
             state.disabled = self.disabled;
+            if state.background_opacity != self.background_opacity {
+                state.background_opacity = self.background_opacity;
+                cx.notify();
+            }
         });
         let focus_handle = self.state.read(cx).focus_handle_ref().clone();
         let focused = focus_handle.is_focused(window) && !self.disabled;

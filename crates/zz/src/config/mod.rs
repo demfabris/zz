@@ -345,6 +345,10 @@ pub(crate) fn pane_gaps(cx: &App) -> bool {
     resolved_config(cx).pane_gaps.value
 }
 
+pub(crate) fn pane_background_opacity(cx: &App) -> f32 {
+    resolved_config(cx).pane_background_opacity.value
+}
+
 pub(crate) fn pane_inactive_opacity(cx: &App) -> f32 {
     resolved_config(cx).pane_inactive_opacity.value
 }
@@ -2328,6 +2332,48 @@ mod tests {
         }
     }
 
+    #[gpui::test]
+    fn pane_background_opacity_validates_reloads_and_resets_without_changing_shadows(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        for value in ["-0.01", "1.01", "NaN", "inf", "invalid"] {
+            let parsed = parse_config(&format!("pane-background-opacity = {value}\n"));
+            assert_eq!(parsed.diagnostics.len(), 1, "{value}");
+            assert_f32_eq(parsed.config.pane_background_opacity.value, 0.5);
+        }
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(CONFIG_FILE_NAME);
+        write_config_edit_at(&path, ConfigKey::ShadowStrength.as_str(), Some("0.4"))
+            .expect("write shadow strength");
+        cx.update(zz_ui::init);
+        let shadows = cx.update(|cx| {
+            install_config(Some(&path), Some(load_config(&path)), cx);
+            crate::theme::refresh_current_theme(cx);
+            zz_ui::control_shadow(cx)
+        });
+        for (value, expected, provenance) in [
+            (Some("0"), 0.0, ConfigProvenance::Override),
+            (Some("0.25"), 0.25, ConfigProvenance::Override),
+            (Some("1"), 1.0, ConfigProvenance::Override),
+            (None, 0.5, ConfigProvenance::Default),
+        ] {
+            write_config_edit_at(&path, ConfigKey::PaneBackgroundOpacity.as_str(), value)
+                .expect("write pane background opacity");
+            cx.update(|cx| {
+                install_config(Some(&path), Some(load_config(&path)), cx);
+                crate::theme::refresh_current_theme(cx);
+                assert_f32_eq(pane_background_opacity(cx), expected);
+                assert_f32_eq(zz_ui::Theme::global(cx).pane_background_opacity, expected);
+                assert_f32_eq(crate::theme::app_pane_background(cx).a, expected);
+                assert_eq!(
+                    resolved_config(cx).pane_background_opacity.provenance,
+                    provenance
+                );
+                assert_eq!(zz_ui::control_shadow(cx), shadows);
+            });
+        }
+    }
+
     #[test]
     fn writer_creates_a_fresh_file_and_parent_directories_atomically() {
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -2927,6 +2973,7 @@ mod tests {
             "experimental-agent-pane",
             "experimental-editor-pane",
             "pane-gaps",
+            "pane-background-opacity",
             "pane-inactive-opacity",
             "pane-corner-radius",
             "pane-margin",

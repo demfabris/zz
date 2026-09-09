@@ -153,7 +153,6 @@ impl AppShell {
         draws_window_controls(window).then(|| {
             let title_corners = WindowCorners::for_window(window).top();
             let strip = app_titlebar_strip("app-titlebar", self.window_controls())
-                .bg(crate::theme::chrome_background(cx))
                 .when(title_corners.top_right(), |strip| {
                     strip.rounded_tr(frame_content_corner_radius(cx))
                 });
@@ -204,6 +203,7 @@ impl AppShell {
                     .h_full()
                     .flex()
                     .flex_none()
+                    .bg(crate::theme::chrome_background(cx))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(self.sidebar.clone()),
             )
@@ -248,11 +248,15 @@ impl Render for AppShell {
             .collect::<Vec<_>>();
         let shell = app_shell_surface(
             "app-shell",
+            crate::theme::chrome_background(cx),
             sidebar,
             titlebar,
             self.workspace.clone(),
             overlays,
         )
+        .map(|shell| {
+            WindowCorners::for_window(window).round_div(shell, frame_content_corner_radius(cx))
+        })
         .on_drag_move::<SidebarResizeDrag>(cx.listener(Self::on_sidebar_resize_drag_move))
         .capture_key_up(cx.listener(|shell, event: &KeyUpEvent, window, cx| {
             shell.workspace.update(cx, |workspace, cx| {

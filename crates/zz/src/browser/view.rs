@@ -3491,6 +3491,7 @@ impl Render for BrowserView {
 
         let browser_surface = div()
             .id("browser-content")
+            .bg(crate::theme::app_pane_background(cx).opaque())
             .relative()
             .flex()
             .flex_1()
@@ -3613,7 +3614,6 @@ impl Render for BrowserView {
                 .flex()
                 .flex_col()
                 .size_full()
-                .bg(crate::theme::app_pane_background(cx))
                 .on_action(cx.listener(Self::on_zoom_in))
                 .on_action(cx.listener(Self::on_zoom_out))
                 .on_action(cx.listener(Self::on_reset_zoom))
@@ -3637,6 +3637,9 @@ impl Render for BrowserView {
                 .child(
                     div()
                         .relative()
+                        .bg(crate::theme::app_pane_background(cx))
+                        .rounded_tl(content_radii.top_left)
+                        .rounded_tr(content_radii.top_right)
                         .h(BrowserToolbar::HEIGHT)
                         .w_full()
                         .flex_none()

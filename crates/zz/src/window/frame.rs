@@ -119,9 +119,6 @@ impl RenderOnce for RoundedWindowFrame {
                             ),
                     })
                     .on_mouse_move(|_, _, cx| cx.stop_propagation())
-                    .when(!crate::theme::chrome_blur(cx), |surface| {
-                        surface.bg(cx.theme().background)
-                    })
                     .children(self.children)
                     .map(|surface| match decorations {
                         Decorations::Server => surface,

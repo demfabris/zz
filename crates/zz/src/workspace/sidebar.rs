@@ -787,7 +787,6 @@ impl Render for WorkspaceSidebar {
             (settings_route || matches!(self.mode(), ChromeMode::Sidebar)) && pane_gaps(cx);
         let shell = corners.round_div(
             workspace_sidebar_surface("workspace-sidebar", width, titlebar, navigation, cx)
-                .bg(crate::theme::chrome_background(cx))
                 .when(divider_hidden, |this| {
                     this.border_color(gpui::transparent_black())
                 }),

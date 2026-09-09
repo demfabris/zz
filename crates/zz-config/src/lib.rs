@@ -36,6 +36,7 @@ pub const MAX_WINDOW_CORNER_RADIUS: f32 = 32.0;
 pub const DEFAULT_WINDOW_CORNER_RADIUS: f32 = 13.5;
 
 pub const DEFAULT_PANE_GAPS: bool = false;
+pub const DEFAULT_PANE_BACKGROUND_OPACITY: f32 = 0.5;
 pub const DEFAULT_PANE_INACTIVE_OPACITY: f32 = 0.7;
 pub const MIN_PANE_INACTIVE_OPACITY: f32 = 0.0;
 pub const MAX_PANE_INACTIVE_OPACITY: f32 = 1.0;
@@ -117,6 +118,7 @@ pub enum ConfigKey {
     ExperimentalAgentPane,
     ExperimentalEditorPane,
     PaneGaps,
+    PaneBackgroundOpacity,
     PaneInactiveOpacity,
     PaneCornerRadius,
     PaneMargin,
@@ -160,6 +162,7 @@ impl ConfigKey {
             Self::ExperimentalAgentPane => "experimental-agent-pane",
             Self::ExperimentalEditorPane => "experimental-editor-pane",
             Self::PaneGaps => "pane-gaps",
+            Self::PaneBackgroundOpacity => "pane-background-opacity",
             Self::PaneInactiveOpacity => "pane-inactive-opacity",
             Self::PaneCornerRadius => "pane-corner-radius",
             Self::PaneMargin => "pane-margin",
@@ -203,6 +206,7 @@ impl ConfigKey {
             "experimental-agent-pane" => Some(Self::ExperimentalAgentPane),
             "experimental-editor-pane" => Some(Self::ExperimentalEditorPane),
             "pane-gaps" => Some(Self::PaneGaps),
+            "pane-background-opacity" => Some(Self::PaneBackgroundOpacity),
             "pane-inactive-opacity" => Some(Self::PaneInactiveOpacity),
             "pane-corner-radius" => Some(Self::PaneCornerRadius),
             "pane-margin" => Some(Self::PaneMargin),
@@ -229,6 +233,7 @@ impl ConfigKey {
     /// is not numeric.
     pub const fn numeric_range(self) -> Option<(f32, f32)> {
         match self {
+            Self::PaneBackgroundOpacity => Some((0.0, 1.0)),
             Self::PaneInactiveOpacity => {
                 Some((MIN_PANE_INACTIVE_OPACITY, MAX_PANE_INACTIVE_OPACITY))
             }
@@ -346,6 +351,7 @@ pub struct AppConfig {
     pub experimental_agent_pane: ConfigValue<bool>,
     pub experimental_editor_pane: ConfigValue<bool>,
     pub pane_gaps: ConfigValue<bool>,
+    pub pane_background_opacity: ConfigValue<f32>,
     pub pane_inactive_opacity: ConfigValue<f32>,
     pub pane_corner_radius: ConfigValue<f32>,
     pub pane_margin: ConfigValue<f32>,
@@ -391,6 +397,7 @@ impl Default for AppConfig {
             experimental_agent_pane: ConfigValue::from_default(DEFAULT_EXPERIMENTAL_AGENT_PANE),
             experimental_editor_pane: ConfigValue::from_default(DEFAULT_EXPERIMENTAL_EDITOR_PANE),
             pane_gaps: ConfigValue::from_default(DEFAULT_PANE_GAPS),
+            pane_background_opacity: ConfigValue::from_default(DEFAULT_PANE_BACKGROUND_OPACITY),
             pane_inactive_opacity: ConfigValue::from_default(DEFAULT_PANE_INACTIVE_OPACITY),
             pane_corner_radius: ConfigValue::from_default(DEFAULT_PANE_CORNER_RADIUS),
             pane_margin: ConfigValue::from_default(DEFAULT_PANE_MARGIN),
@@ -438,6 +445,7 @@ impl AppConfig {
             ConfigKey::EditorVimMode => Some(&mut self.editor_vim_mode),
             ConfigKey::BrowserEgress => Some(&mut self.browser_egress),
             ConfigKey::WindowCornerRadius
+            | ConfigKey::PaneBackgroundOpacity
             | ConfigKey::PaneInactiveOpacity
             | ConfigKey::PaneCornerRadius
             | ConfigKey::PaneMargin
@@ -943,6 +951,7 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
 
         let target = match key {
             ConfigKey::WindowCornerRadius => &mut parsed.config.window_corner_radius,
+            ConfigKey::PaneBackgroundOpacity => &mut parsed.config.pane_background_opacity,
             ConfigKey::PaneInactiveOpacity => &mut parsed.config.pane_inactive_opacity,
             ConfigKey::PaneCornerRadius => &mut parsed.config.pane_corner_radius,
             ConfigKey::PaneMargin => &mut parsed.config.pane_margin,
@@ -1163,7 +1172,10 @@ pub fn parse_numeric_value(
     value: &str,
     (min, max): (f32, f32),
 ) -> Result<f32, String> {
-    let unit = if key == ConfigKey::PaneInactiveOpacity {
+    let unit = if matches!(
+        key,
+        ConfigKey::PaneInactiveOpacity | ConfigKey::PaneBackgroundOpacity
+    ) {
         ""
     } else {
         " logical pixels"

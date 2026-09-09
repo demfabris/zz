@@ -583,7 +583,6 @@ impl WebClient {
                 .items_center()
                 .justify_center()
                 .gap(px(12.0))
-                .bg(cx.theme().background)
                 .child(Icon::new(IconName::SquareTerminal).size(px(32.0)))
                 .child(div().text_size(px(16.0)).child(if connected {
                     "Your workspace"
@@ -750,7 +749,6 @@ impl WebClient {
                     0.5
                 }),
                 pane_border_color(active_window.active_pane == pane_id, cx),
-                cx.theme().background,
                 self.preferences.gaps,
             )
             .active(active_window.active_pane == pane_id)
@@ -1007,7 +1005,6 @@ impl WebClient {
         div()
             .relative()
             .size_full()
-            .bg(cx.theme().background)
             .children(panes)
             .into_any_element()
     }
@@ -1485,6 +1482,7 @@ impl Render for WebClient {
             .extend(Root::render_notification_layer(window, cx).map(IntoElement::into_any_element));
         app_shell_surface(
             "web-client",
+            cx.theme().background,
             sidebar,
             titlebar,
             app_workspace_surface("web-workspace", workspace, terminal_overlays, cx),
@@ -1664,6 +1662,15 @@ fn unsupported_pane(
         .justify_center()
         .gap(px(12.0))
         .p(px(24.0))
+        .bg(cx
+            .theme()
+            .background
+            .opaque()
+            .opacity(if title == "Browser" {
+                1.0
+            } else {
+                cx.theme().pane_background_opacity
+            }))
         .child(Icon::new(icon).size(px(26.0)))
         .child(title.to_owned())
         .child(
@@ -1684,7 +1691,16 @@ fn unsupported_pane(
         .flex()
         .flex_col()
         .size_full()
-        .children(toolbar)
+        .children(toolbar.map(|toolbar| {
+            div()
+                .flex_none()
+                .bg(cx
+                    .theme()
+                    .background
+                    .opaque()
+                    .opacity(cx.theme().pane_background_opacity))
+                .child(toolbar)
+        }))
         .child(message)
         .into_any_element()
 }

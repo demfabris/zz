@@ -108,6 +108,13 @@ impl SettingsFixture {
                 5.0,
             ),
             ("opacity", options.inactive_opacity, 0.0, 1.0, 0.1),
+            (
+                "pane-background-opacity",
+                options.pane_background_opacity * 100.0,
+                0.0,
+                100.0,
+                5.0,
+            ),
             ("margin", options.pane_margin, 0.0, 32.0, 1.0),
             ("pane-radius", options.pane_radius, 0.0, 32.0, 0.5),
             ("border", options.pane_border, 0.0, 8.0, 0.5),
@@ -134,6 +141,12 @@ impl SettingsFixture {
                             Theme::global_mut(cx).radius = px(value);
                         }
                         "opacity" => this.options.inactive_opacity = value,
+                        "pane-background-opacity" => {
+                            this.options.pane_background_opacity = value / 100.0;
+                            Theme::global_mut(cx).pane_background_opacity =
+                                this.options.pane_background_opacity;
+                            cx.refresh_windows();
+                        }
                         "shadow-strength" => {
                             this.options.shadow_strength = value / 100.0;
                             Theme::global_mut(cx).shadow_strength = this.options.shadow_strength;
@@ -345,6 +358,21 @@ impl Preview {
         } else if self.settings == SettingsSection::Panes {
             zz_ui::settings::panes_page(
 self.toggle("gaps", "Pane gaps", "Separate panes with card-like spacing and chrome.", cx),
+self.number("pane-background-opacity", "Pane background opacity", "Background strength from 0% to 100%. Browser panes apply this to the toolbar only.", cx)
+    .title_actions(settings_reset_button(
+        "preview-pane-background-opacity-reset",
+        "Reset pane background opacity to 50%",
+        self.options.pane_background_opacity != super::PreviewOptions::default().pane_background_opacity,
+    ).on_click(cx.listener(|this, _, window, cx| {
+        let value = super::PreviewOptions::default().pane_background_opacity;
+        this.options.pane_background_opacity = value;
+        Theme::global_mut(cx).pane_background_opacity = value;
+        this.settings_state.numbers["pane-background-opacity"].update(cx, |input, cx| {
+            input.set_value((value * 100.0).to_string(), window, cx);
+        });
+        this.remember(cx);
+        cx.refresh_windows();
+    }))),
 self.number("opacity", "Inactive pane opacity", "Visible strength of inactive pane content and chrome (0–1). Set to 1 to disable dimming.", cx),
 self.number("margin", "Pane margin", "Space around each pane on all platforms, in logical pixels (0–32).", cx).disabled(!self.options.gaps),
 self.number("pane-radius", "Pane corner radius", "Rounds every pane corner on all platforms, in logical pixels (0–32).", cx).disabled(!self.options.gaps),
@@ -370,7 +398,6 @@ self.number("border", "Pane border width", "Border width for gapped panes, in lo
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .bg(self.chrome_background(cx))
             .text_color(cx.theme().foreground)
             .child(content)
             .into_any_element()

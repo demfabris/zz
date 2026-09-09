@@ -1,5 +1,10 @@
 # Update Log
 
+## 2026-09-09
+* **Update**: Added Panes → Appearance → Background opacity with live 0–100% edits, persistence, and reset to 50%. Shared theme opacity drives pane and Agent composer fills while shadow strength stays independent; web and showcase use the same control.
+* **Update**: Added a fixed 50% pane-background experiment above the continuous root. Agent canvas, composer card, and footer follow it; removed duplicate footer backing. Browser pages stay opaque. Corrected renderer source-over alpha and verified it with a Metal GPU test.
+* **Update**: Simplified app background painting to one continuous root surface beneath panes. Removed separate margin, split-gap, and rounded-corner fills; fixed sidebar, titlebar, and Settings inherit the root. Desktop, web, and showcase share this composition.
+
 ## 2026-09-08
 * **Update**: Ported inset-shadow dithering to WGPU and DirectX, matching Metal's final-alpha rounding. Browser and showcase now resolve the same local renderer as desktop, including the glow and corner fixes; their lockfiles also reflect the existing v0.6.1 workspace packages. Changes remain uncommitted.
 * **Fix**: Extended local Metal, WGPU, and DirectX blurred-shadow geometry to follow superellipse corners. The earlier contour fix covered only unblurred shadows; the pane's 2px outer shadow still used circular corners. Added a Metal GPU regression for all four corners, circular shapes, and fully rounded shapes.

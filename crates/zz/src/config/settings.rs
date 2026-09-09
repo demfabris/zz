@@ -138,6 +138,7 @@ pub(crate) struct SettingsView {
     status_clock: Entity<SelectState<Vec<SettingsSelectItem>>>,
     ui_zoom: Entity<InputState>,
     observed_ui_zoom: u32,
+    pane_background_opacity: Entity<InputState>,
     pane_inactive_opacity: Entity<InputState>,
     pane_corner_radius: Entity<InputState>,
     pane_margin: Entity<InputState>,
@@ -183,6 +184,13 @@ impl SettingsView {
             cx,
         );
         let ui_zoom = ui_zoom_input(window, cx);
+        let pane_background_opacity = numeric_value_input(
+            ConfigKey::PaneBackgroundOpacity,
+            observed.pane_background_opacity.value,
+            5.0,
+            window,
+            cx,
+        );
         let pane_inactive_opacity = numeric_value_input(
             ConfigKey::PaneInactiveOpacity,
             observed.pane_inactive_opacity.value,
@@ -252,6 +260,12 @@ impl SettingsView {
             config_select_subscription(&status_clock, ConfigKey::StatusClock, window, cx),
             ui_zoom_subscription(&ui_zoom, window, cx),
             numeric_input_subscription(
+                &pane_background_opacity,
+                ConfigKey::PaneBackgroundOpacity,
+                window,
+                cx,
+            ),
+            numeric_input_subscription(
                 &pane_inactive_opacity,
                 ConfigKey::PaneInactiveOpacity,
                 window,
@@ -293,6 +307,7 @@ impl SettingsView {
             status_clock,
             ui_zoom,
             observed_ui_zoom: crate::ui_scale::percent(cx),
+            pane_background_opacity,
             pane_inactive_opacity,
             pane_corner_radius,
             pane_margin,
@@ -498,6 +513,21 @@ impl SettingsView {
                 synchronize_text_input(
                     &self.shadow_strength,
                     &numeric_input_text(ConfigKey::ShadowStrength, resolved.shadow_strength.value),
+                    window,
+                    cx,
+                );
+            }
+            if !numeric_input_matches_value(
+                ConfigKey::PaneBackgroundOpacity,
+                &self.pane_background_opacity.read(cx).value(),
+                resolved.pane_background_opacity.value,
+            ) {
+                synchronize_text_input(
+                    &self.pane_background_opacity,
+                    &numeric_input_text(
+                        ConfigKey::PaneBackgroundOpacity,
+                        resolved.pane_background_opacity.value,
+                    ),
                     window,
                     cx,
                 );
@@ -1611,6 +1641,14 @@ Self::boolean_setting(
                 cx,
             ),
 Self::numeric_setting(
+                ConfigKey::PaneBackgroundOpacity,
+                "Background opacity",
+                "Pane and Agent composer backgrounds (0–100%). Browser panes apply this to the toolbar only.",
+                resolved.pane_background_opacity,
+                &self.pane_background_opacity,
+                cx,
+            ),
+Self::numeric_setting(
                 ConfigKey::PaneInactiveOpacity,
                 "Inactive pane opacity",
                 "Visible strength of inactive pane content and chrome (0–1). Set to 1 to disable dimming.",
@@ -1937,7 +1975,6 @@ impl Render for SettingsView {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .bg(crate::theme::chrome_background(cx))
             .text_color(cx.theme().foreground)
             .child(content)
     }
@@ -2235,7 +2272,11 @@ fn numeric_input_subscription(
         move |settings, input, event: &InputEvent, window, cx| {
             if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
                 settings.commit_numeric_input(key, input, true, window, cx);
-            } else if key == ConfigKey::ShadowStrength && matches!(event, InputEvent::Change) {
+            } else if matches!(
+                key,
+                ConfigKey::ShadowStrength | ConfigKey::PaneBackgroundOpacity
+            ) && matches!(event, InputEvent::Change)
+            {
                 settings.commit_numeric_input(key, input, false, window, cx);
             }
         },
@@ -2276,7 +2317,10 @@ fn numeric_range(key: ConfigKey) -> (f32, f32) {
 }
 
 fn numeric_input_scale(key: ConfigKey) -> f32 {
-    if key == ConfigKey::ShadowStrength {
+    if matches!(
+        key,
+        ConfigKey::ShadowStrength | ConfigKey::PaneBackgroundOpacity
+    ) {
         100.0
     } else {
         1.0
@@ -2284,7 +2328,10 @@ fn numeric_input_scale(key: ConfigKey) -> f32 {
 }
 
 fn numeric_input_text(key: ConfigKey, value: f32) -> String {
-    if key == ConfigKey::ShadowStrength {
+    if matches!(
+        key,
+        ConfigKey::ShadowStrength | ConfigKey::PaneBackgroundOpacity
+    ) {
         format!("{:.2}", value * numeric_input_scale(key))
             .trim_end_matches('0')
             .trim_end_matches('.')
@@ -2311,6 +2358,7 @@ fn numeric_input_matches_value(key: ConfigKey, text: &str, value: f32) -> bool {
 
 fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
     match key {
+        ConfigKey::PaneBackgroundOpacity => config.pane_background_opacity.value,
         ConfigKey::PaneInactiveOpacity => config.pane_inactive_opacity.value,
         ConfigKey::PaneCornerRadius => config.pane_corner_radius.value,
         ConfigKey::PaneMargin => config.pane_margin.value,
@@ -2614,25 +2662,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shadow_strength_inputs_convert_percentages_and_reject_invalid_edits() {
-        let key = ConfigKey::ShadowStrength;
-        assert_eq!(numeric_range(key), (0.0, 100.0));
-        for (factor, displayed) in [(0.0, "0"), (0.15, "15"), (0.5, "50"), (1.0, "100")] {
-            assert_eq!(numeric_input_text(key, factor), displayed);
-            let parsed = validate_numeric_value(key, displayed).expect("valid percentage");
-            assert!((parsed / numeric_input_scale(key) - factor).abs() < f32::EPSILON);
+    fn percentage_inputs_convert_and_reject_invalid_edits() {
+        for (key, default) in [
+            (ConfigKey::ShadowStrength, "100"),
+            (ConfigKey::PaneBackgroundOpacity, "50"),
+        ] {
+            assert_eq!(numeric_range(key), (0.0, 100.0));
+            for (factor, displayed) in [(0.0, "0"), (0.15, "15"), (0.5, "50"), (1.0, "100")] {
+                assert_eq!(numeric_input_text(key, factor), displayed);
+                let parsed = validate_numeric_value(key, displayed).expect("valid percentage");
+                assert!((parsed / numeric_input_scale(key) - factor).abs() < f32::EPSILON);
+            }
+            for value in ["", "-1", "101", "NaN", "inf", "invalid"] {
+                assert!(validate_numeric_value(key, value).is_err(), "{value}");
+            }
+            assert!(numeric_input_matches_value(key, "50.", 0.5));
+            assert!(numeric_input_matches_value(key, "0.", 0.0));
+            assert!(!numeric_input_matches_value(key, "", 0.5));
+            assert!(!numeric_input_matches_value(key, "50.", 1.0));
+            assert_eq!(
+                numeric_input_text(key, numeric_config_value(&AppConfig::default(), key)),
+                default,
+            );
         }
-        for value in ["", "-1", "101", "NaN", "inf", "invalid"] {
-            assert!(validate_numeric_value(key, value).is_err(), "{value}");
-        }
-        assert!(numeric_input_matches_value(key, "50.", 0.5));
-        assert!(numeric_input_matches_value(key, "0.", 0.0));
-        assert!(!numeric_input_matches_value(key, "", 0.5));
-        assert!(!numeric_input_matches_value(key, "50.", 1.0));
-        assert_eq!(
-            numeric_input_text(key, numeric_config_value(&AppConfig::default(), key)),
-            "100",
-        );
         assert_eq!(numeric_range(ConfigKey::PaneInactiveOpacity), (0.0, 1.0));
         assert_eq!(
             numeric_input_text(ConfigKey::PaneInactiveOpacity, 0.7),

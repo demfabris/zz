@@ -753,6 +753,7 @@ impl WebClient {
                 cx.theme().background,
                 self.preferences.gaps,
             )
+            .active(active_window.active_pane == pane_id)
             .dimmed(
                 active_window.active_pane != pane_id,
                 self.preferences.pane_inactive_opacity,

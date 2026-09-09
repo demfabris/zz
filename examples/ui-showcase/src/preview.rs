@@ -620,6 +620,7 @@ impl Preview {
             self.chrome_background(cx),
             self.options.gaps,
         )
+        .active(active)
         .dimmed(!active, self.options.inactive_opacity);
         pane_surface(id, content, [], chrome, cx).into_any_element()
     }

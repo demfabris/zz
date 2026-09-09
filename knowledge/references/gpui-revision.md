@@ -10,18 +10,20 @@ timestamp: 2026-07-27T00:00:00Z
 # Overview
 
 zz's GPUI application layer comes from the `demfabris/zed` `zz-patches` branch rather than a
-published crate. Both `gpui` and `gpui_platform` resolve through it; there is no local-path `[patch]`
-entry. On Linux, `gpui_platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
+published crate. Desktop, browser, and showcase currently use local paths for the pane-shadow
+changes described below.
+On Linux, `gpui_platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
 selects the native macOS and Windows backends automatically.
 
-**Do not read a revision out of this document.** The pin lives in two manifests and two lockfiles,
-and they must agree:
+**Do not read a revision out of this document.** The normal pin lives in three manifests and
+three lockfiles, which must agree outside a local experiment:
 
 | Place | Role |
 | --- | --- |
 | `Cargo.toml`, `[patch."https://github.com/zed-industries/zed"]` | The `rev = "…"` on `gpui` and `gpui_platform`. This is the authority . editing it is how the pin moves. |
 | `examples/ui-showcase/Cargo.toml` | The gallery's independent workspace patch. Keep it on the desktop revision so stories use the same GPUI behavior. |
-| `Cargo.lock` and `examples/ui-showcase/Cargo.lock` | The resolved `source = "git+https://github.com/demfabris/zed?rev=…"`. Regenerated, never hand-edited. |
+| `clients/web/Cargo.toml` | The browser client's independent workspace patch. Keep it on the desktop revision. |
+| `Cargo.lock`, `examples/ui-showcase/Cargo.lock`, and `clients/web/Cargo.lock` | The resolved `source = "git+https://github.com/demfabris/zed?rev=…"` for normal Git pins. Regenerated, never hand-edited. |
 
 The appearance diagnostics log line no longer holds a third copy to keep in sync:
 `crates/zz/build.rs` reads the resolved source out of `Cargo.lock` and stamps it into
@@ -29,16 +31,33 @@ The appearance diagnostics log line no longer holds a third copy to keep in sync
 trust this document:
 
 ```bash
-rg 'demfabris/zed' Cargo.toml examples/ui-showcase/{Cargo.toml,Cargo.lock} Cargo.lock
+rg 'demfabris/zed|zz-forks/zed' Cargo.toml Cargo.lock examples/ui-showcase/{Cargo.toml,Cargo.lock} clients/web/{Cargo.toml,Cargo.lock}
 ```
 
 The fork itself is declared in `scripts/forks.conf` (`zed  zed-industries/zed  demfabris/zed
 zz-patches  main  gpui,gpui_platform`), which is what `just forks` and `just fork-rebase zed` read.
 
 **`gpui-component` is not a dependency.** It was forked into `crates/zz-ui` (`zz-ui`) and both
-`gpui-component` and `gpui-component-assets` are gone from the workspace and both lockfiles; nothing
+`gpui-component` and `gpui-component-assets` are gone from the workspace and its lockfiles; nothing
 outside `gpui` itself is left. The fork's source revision and per-module port notes live in
 `crates/zz-ui/UPSTREAM.md`, not here.
+
+# Local pane-shadow renderer changes
+
+Desktop, browser, and showcase currently override `gpui` and `gpui_platform` with local paths under
+`/Users/demfabris/.cache/zz-forks/zed/crates`, based on v0.6.1's pinned revision
+`3263264d6455a8f282268697377199864a81f7a4`. Metal, WGPU, and DirectX blurred inset shadows
+use position-seeded stochastic alpha rounding in 1/128 steps to reduce banding. WGPU applies
+this before any required premultiplication. RGB and blend factors retain release behavior.
+The GPU test `faint_inset_shadows_dither_dark_composites` checks variation, noise size,
+brightness, and opaque composition. All three workspaces resolve the same local renderer
+through their manifests and lockfiles. These changes remain uncommitted.
+
+Blurred shadows also follow the element's superellipse cross-section in Metal, WGPU, and
+DirectX. The earlier carried smoothing fix covered only unblurred shadows, leaving the 2px
+pane shadow tracing a circle around a squircle. The GPU test
+`blurred_shadows_follow_smoothed_corners` checks all four corners and the circular and
+fully rounded cases. The Gaussian blur, pane backgrounds, and blend factors are unchanged.
 
 # Carried patches
 
@@ -135,8 +154,8 @@ Adding a carried patch (no rebase; the lock is already at the branch tip):
 just forks   # confirm LOCK is "in sync" before appending a commit
 ```
 
-Bumping upstream means rebasing `zz-patches`, then moving the `rev` in `Cargo.toml` and
-`examples/ui-showcase/Cargo.toml` before regenerating both lockfiles.
+Bumping upstream means rebasing `zz-patches`, then moving the `rev` in `Cargo.toml`,
+`examples/ui-showcase/Cargo.toml`, and `clients/web/Cargo.toml` before regenerating their lockfiles.
 
 # Related
 

@@ -73,6 +73,14 @@ page backgrounds, simulated window blur, and the font/renderer differences that 
    stays clear; gutter fills paint first so they cannot cover the shadow. Flush panes have no
    outer shadow.
 
+   The local renderer makes blurred shadows follow the pane's corner smoothing, including
+   its small 2px control shadow. Circular and fully rounded surfaces retain circular shadows.
+
+   Active panes add a soft inset foreground glow above content and below status overlays:
+   3.2% opacity, 96px blur, (16px, 24px) offset, and -8px spread. `PaneChrome::active` shares
+   this top-left emphasis across desktop, browser, and preview callers. The local Metal,
+   WGPU, and DirectX renderers dither the fade to reduce banding. Pane backgrounds remain opaque.
+
 # Control density
 
 Settings uses 13px primary row labels, so `Input::small()` renders its editable value at the same

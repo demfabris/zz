@@ -238,7 +238,7 @@ calls `MuxClient::detach()`, leaving the daemon alive for the next launch; with 
 
 The background-blur switch becomes a platform blur request in `window/background.rs`. Window
 creation uses the resolved value, and every watcher update reapplies it to all open GPUI windows in
-place. macOS keeps a transparent GPUI surface and installs an AppKit semantic material behind it;
+place. macOS keeps a transparent GPUI surface and sets the WindowServer background-blur radius;
 Windows uses DWM's system backdrop; Wayland uses GPUI's standard `ext-background-effect-v1` path
 when advertised and retains the legacy KDE protocol as a fallback. X11 publishes KDE's rounded
 blur-behind region and refreshes it as window bounds change. The request is capability-gated:

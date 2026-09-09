@@ -1,6 +1,9 @@
 # Update Log
 
 ## 2026-09-08
+* **Update**: Ported inset-shadow dithering to WGPU and DirectX, matching Metal's final-alpha rounding. Browser and showcase now resolve the same local renderer as desktop, including the glow and corner fixes; their lockfiles also reflect the existing v0.6.1 workspace packages. Changes remain uncommitted.
+* **Fix**: Extended local Metal, WGPU, and DirectX blurred-shadow geometry to follow superellipse corners. The earlier contour fix covered only unblurred shadows; the pane's 2px outer shadow still used circular corners. Added a Metal GPU regression for all four corners, circular shapes, and fully rounded shapes.
+* **Update**: Added a soft, asymmetric active-pane glow to v0.6.1 through shared `PaneChrome::active` styling. Pane backgrounds, gap painting, Settings, and alpha blend factors retain their release behavior. A local Metal shader change dithers the glow; its GPU regression checks banding, noise size, and brightness. The transparency experiment was discarded.
 * **Update**: Corrected the architecture data-flow page to describe daemon startup config precedence: explicit files or discovered tmux candidates, followed by zz/mux.conf.
 
 ## 2026-09-07

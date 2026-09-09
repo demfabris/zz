@@ -426,6 +426,7 @@ fn pane_leaf(
             cx.theme().background,
             shadow,
         )
+        .active(active)
         .dimmed(!active, 0.7),
         cx,
     ))

@@ -284,7 +284,12 @@ ignored; `window-background-blur` owns the native compositor request.
 Each chrome region paints its tint once; 0.93 over 0.93 becomes 0.995 and hides the
 backdrop. During active blur the workspace root leaves pane rectangles unpainted. The outer margin,
 split gaps, and rounded corner wedges paint chrome around opaque pane interiors. The Settings
-route paints an opaque background over the workspace.
+route supplies its own chrome background.
+
+Active panes add a rounded inset foreground glow above content and below status overlays:
+3.2% opacity, 96px blur, (16px, 24px) offset, and -8px spread. The local Metal, WGPU, and
+DirectX renderers dither the fade to reduce banding. This highlight does not change pane background opacity
+or introduce configuration keys.
 
 Linux window geometry starts from `window-corner-radius` (default 13.5px, targeting the macOS 27
 window radius . ~13.5pt tangent-circle equivalent, measured from a macOS 27 screenshot against the

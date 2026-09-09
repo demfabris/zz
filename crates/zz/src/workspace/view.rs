@@ -2275,6 +2275,7 @@ impl AppView {
                         gap_background,
                         config::pane_gaps(cx),
                     )
+                    .active(active)
                     .dimmed(surface_dimmed, inactive_opacity),
                     cx,
                 )

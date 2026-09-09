@@ -17,6 +17,7 @@ pub struct PaneChrome {
     pub border_color: Hsla,
     pub gap_background: Hsla,
     pub shadow: bool,
+    pub active: bool,
     pub inactive_opacity: f32,
 }
 
@@ -35,8 +36,15 @@ impl PaneChrome {
             border_color,
             gap_background,
             shadow,
+            active: false,
             inactive_opacity: 1.0,
         }
+    }
+
+    #[must_use]
+    pub const fn active(mut self, active: bool) -> Self {
+        self.active = active;
+        self
     }
 
     #[must_use]
@@ -86,6 +94,9 @@ pub fn pane_surface(
                 .border_color(chrome.border_color)
                 .shadow(pane_surface_shadow_style(chrome.shadow, cx))
                 .child(content)
+                .when(chrome.active, |surface| {
+                    surface.child(pane_focus_glow(chrome.radii, cx))
+                })
                 .when(chrome.inactive_opacity < 1.0, |surface| {
                     surface.child(pane_inactive_scrim(
                         chrome.radii,
@@ -103,6 +114,23 @@ fn pane_surface_shadow_style(shadow: bool, cx: &App) -> Vec<BoxShadow> {
     } else {
         Vec::new()
     }
+}
+
+fn pane_focus_glow(radii: Corners<Pixels>, cx: &App) -> gpui::Div {
+    div()
+        .absolute()
+        .inset_0()
+        .rounded_tl(radii.top_left)
+        .rounded_tr(radii.top_right)
+        .rounded_bl(radii.bottom_left)
+        .rounded_br(radii.bottom_right)
+        .shadow(vec![BoxShadow {
+            color: cx.theme().foreground.opacity(0.032),
+            offset: point(px(16.0), px(24.0)),
+            blur_radius: px(96.0),
+            spread_radius: px(-8.0),
+            inset: true,
+        }])
 }
 
 fn pane_corner_notches(chrome: PaneChrome) -> Option<gpui::Div> {

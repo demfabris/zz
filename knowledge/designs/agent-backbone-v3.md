@@ -2,7 +2,7 @@
 type: Design Plan
 title: Agent backbone v3 - browser over CDP, typed agent state, headless completeness
 description: Handoff plan from the 2026-09-09 headless audit of what an AI agent can drive through the zz CLI - the verified working set, the verified gaps, the locked decisions (zz is the browser process and the agent brings its own CLI, no MCP server, no native snapshot verbs before measurement), and three lanes of work with file pointers, acceptance checks, and traps.
-status: Lanes A1, B1, B2, B3, B4, C1 shipped 2026-09-09 (commits 7c4ba1a0, 62e5b802, d9b3e072, 48ccf3e1); C2 in progress; A2 belongs to the TUI rework session; A3 is a decision gate
+status: Shipped 2026-09-09 - lanes 0, A1, B1, B2, B3, B4, C1, C2 on main (7c4ba1a0, 62e5b802, d9b3e072, 48ccf3e1, bd2277b7, 856e9687); CDP attach verified live with agent-browser; A2 belongs to the TUI rework session; A3 stays a decision gate
 tags:
 - agent
 - browser
@@ -84,9 +84,9 @@ zz kill-server                       # when done
    PowerShell hooks now emit A, B, C, and D marks. Apple's `/bin/bash` 3.2 stays excluded because it never
    reads `ENV`. The scroll-on-clear rewrite re-marks a prompt row it scrolls away, which zsh's per-prompt
    erase-below at the origin otherwise stripped.
-8. **`zz tools` undersells the surface.** `WORKSPACE_TOOLS` (`daemon.rs:37212`) omits `wait-for`,
-   `set-hook`, `run-shell -b -d`, `pipe-pane`, `show-options -p`, and `list-panes -F '#{pane_kind}'`.
-   The skill at `.claude/skills/zz-workspace/SKILL.md` covers them and drifts from the catalog.
+8. **`zz tools` undersells the surface (implemented 2026-09-09 by C2).** `WORKSPACE_TOOLS` is now the
+   markdown the skill ships; `zz tools --skill` adds the frontmatter, `just tools-skill` regenerates
+   `.agents/skills/zz-workspace/SKILL.md`, and a daemon test fails on drift or on a verb nothing implements.
 9. **Adapter pins (updated 2026-09-09).** `DEFAULT_AGENT_COMMAND` pins `codex-acp@1.11.0`;
    `DEFAULT_AGENT_CLAUDE_CODE_COMMAND` pins `claude-agent-acp@0.76.0`
    (`crates/zz-protocol/src/message.rs`). The Claude adapter depends on SDK `0.3.257`, whose
@@ -193,6 +193,10 @@ route. Bind stays loopback (Chromium default). Off by default.
   pane with a CDP target from `/json/list`, which only carries URL and title.
 - Docs: a "Drive the browser from an agent" section in the zz-workspace skill and
   `knowledge/browser/` with the three attach recipes.
+
+**Verified 2026-09-09** with the dev bundle on a fresh socket and `ZZ_BROWSER_REMOTE_DEBUGGING_PORT=9222`:
+`/json/list` showed the pane's page, `agent-browser --cdp 9222 snapshot -i` returned refs, `get title` and
+`get url` matched `#{browser_url}` before and after a `set-browser-url`, and `capture-browser` still wrote its PNG.
 
 **Acceptance.**
 ```sh

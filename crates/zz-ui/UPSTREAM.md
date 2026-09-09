@@ -40,7 +40,7 @@ so the fork never moved a call site.
 The app-owned `shell`, `navigation`, and `pane` modules share one background at
 `app_shell_surface`. Fixed chrome inherits it; panes paint their own surfaces
 above it using `Theme::pane_background_opacity`, defaulting to 50%. The Agent composer
-card and footer use the same factor, with no duplicate footer backing strip.
+card uses the same factor; the footer inherits the pane background without repainting it.
 Margins, split gaps, and rounded pane corners need no separate fill.
 
 ## Ported modules and local deltas

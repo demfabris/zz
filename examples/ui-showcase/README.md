@@ -38,7 +38,7 @@ Interface → Window blur makes the chrome translucent and blurs the wallpaper
 behind the app. The preview and desktop paint one continuous app background at
 93% opacity beneath the sidebar, status bar, Settings, and pane surfaces.
 Use Panes → Pane background opacity to adjust backgrounds from 0% to 100%,
-including the Agent canvas, composer card, and footer. The default is 50%.
+including the Agent canvas and composer card. The footer inherits the canvas background. The default is 50%.
 Browser panes apply it only to the toolbar. Copy link preserves this setting. The
 browser uses a 160px CSS backdrop blur to simulate macOS's
 background blur. CSS and the native compositor use different filters, so the

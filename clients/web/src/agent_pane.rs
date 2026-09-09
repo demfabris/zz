@@ -7,8 +7,8 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use gpui::{
-    Anchor, AnyElement, App, Context, Corners, Entity, FocusHandle, Focusable, IntoElement,
-    ListAlignment, ListState, MouseButton, Render, Subscription, Window, div, prelude::*, px,
+    Anchor, AnyElement, App, Context, Entity, FocusHandle, Focusable, IntoElement, ListAlignment,
+    ListState, MouseButton, Render, Subscription, Window, div, prelude::*, px,
 };
 use serde_json::Value;
 use zz_client::agent_completion::{
@@ -1855,8 +1855,6 @@ impl Render for AgentPane {
                         ))
                         .into_any_element()
                 }),
-                radii: Corners::all(px(0.0)),
-                background: cx.theme().background.opaque(),
             };
         let pane = self.pane;
         let connection = self.connection.clone();

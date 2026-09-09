@@ -214,14 +214,12 @@ struct NativeWorkspace: View {
             let colors = dark ? preset.dark : preset.light
             theme.background = ZZColor(hex: colors[0]) ?? theme.background
             theme.foreground = ZZColor(hex: colors[1]) ?? theme.foreground
-            theme.border = ZZColor(hex: colors[2]) ?? theme.border
-            theme.success = ZZColor(hex: colors[3]) ?? theme.success
-            theme.warning = ZZColor(hex: colors[4]) ?? theme.warning
-            theme.danger = ZZColor(hex: colors[5]) ?? theme.danger
+            theme.success = ZZColor(hex: colors[2]) ?? theme.success
+            theme.warning = ZZColor(hex: colors[3]) ?? theme.warning
+            theme.danger = ZZColor(hex: colors[4]) ?? theme.danger
         }
         theme.background = ZZColor(hex: settings.text("chrome-background")) ?? theme.background
         theme.foreground = ZZColor(hex: settings.text("chrome-foreground")) ?? theme.foreground
-        theme.border = ZZColor(hex: settings.text("chrome-border")) ?? theme.border
         theme.success = ZZColor(hex: settings.text("chrome-success")) ?? theme.success
         theme.warning = ZZColor(hex: settings.text("chrome-warning")) ?? theme.warning
         theme.danger = ZZColor(hex: settings.text("chrome-danger")) ?? theme.danger

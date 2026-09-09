@@ -194,7 +194,7 @@ impl Render for Notification {
             .w(DEFAULT_WIDTH)
             .items_center()
             .border_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().border())
             .bg(cx.theme().background.raised(1).opaque())
             .rounded(cx.theme().radius)
             .shadow_md()

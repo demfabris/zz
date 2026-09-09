@@ -1822,7 +1822,7 @@ impl AgentView {
                 .flex_none()
                 .gap(px(CHROME_GAP))
                 .border_t_1()
-                .border_color(cx.theme().border)
+                .border_color(cx.theme().border())
                 .py(px(CHROME_GAP))
                 .pl_4()
                 .pr(px(CHROME_GAP))
@@ -2167,8 +2167,6 @@ impl AgentView {
         let directory = self.render_directory_picker(state, view.clone(), local_host);
         let command_hint = active_command_hint(&self.last_input, &state.available_commands);
         let completions = self.render_completions(view, cx);
-        let pane_radii = pane_content_radii(cx, self.window_corners);
-
         zz_ui::agent::composer::AgentComposer {
             input: self.input.clone(),
             action: action.into_any_element(),
@@ -2194,8 +2192,6 @@ impl AgentView {
             attachments: self
                 .render_attachments(view, cx)
                 .map(IntoElement::into_any_element),
-            radii: pane_radii,
-            background: crate::theme::app_pane_background(cx).opaque(),
         }
     }
 }
@@ -2696,6 +2692,7 @@ mod completion_tests {
 
     use super::*;
 
+    #[cfg(not(target_os = "macos"))]
     fn command(name: &str) -> AgentCommand {
         AgentCommand {
             name: name.to_owned(),

@@ -2,17 +2,15 @@
 pub enum ChromeColor {
     Background,
     Foreground,
-    Border,
     Success,
     Warning,
     Danger,
 }
 
 impl ChromeColor {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 5] = [
         Self::Background,
         Self::Foreground,
-        Self::Border,
         Self::Success,
         Self::Warning,
         Self::Danger,
@@ -22,7 +20,6 @@ impl ChromeColor {
         match self {
             Self::Background => "chrome-background",
             Self::Foreground => "chrome-foreground",
-            Self::Border => "chrome-border",
             Self::Success => "chrome-success",
             Self::Warning => "chrome-warning",
             Self::Danger => "chrome-danger",
@@ -37,7 +34,6 @@ impl ChromeColor {
         match self {
             Self::Background => "Background",
             Self::Foreground => "Foreground",
-            Self::Border => "Border",
             Self::Success => "Success",
             Self::Warning => "Warning",
             Self::Danger => "Danger",
@@ -51,10 +47,7 @@ impl ChromeColor {
                  raised."
             }
             Self::Foreground => {
-                "Default text, and the source of muted text, focus rings, links and selection."
-            }
-            Self::Border => {
-                "Every edge: panel borders, dividers, input outlines, the window frame."
+                "Default text, and the source of muted text, focus rings, links, selection and every edge."
             }
             Self::Success => "Something completed or is healthy.",
             Self::Warning => "Something needs attention but still works.",
@@ -182,112 +175,68 @@ pub const CHROME_PRESETS: [ChromePreset; 11] = [
     ChromePreset {
         id: ChromePresetId::TokyoNight,
         name: "Tokyo Night",
-        light: [
-            "#e1e2e7", "#3760bf", "#b4b5b9", "#587539", "#8c6c3e", "#f52a65",
-        ],
-        dark: [
-            "#1a1b26", "#c0caf5", "#292e42", "#9ece6a", "#e0af68", "#f7768e",
-        ],
+        light: ["#e1e2e7", "#3760bf", "#587539", "#8c6c3e", "#f52a65"],
+        dark: ["#1a1b26", "#c0caf5", "#9ece6a", "#e0af68", "#f7768e"],
     },
     ChromePreset {
         id: ChromePresetId::Catppuccin,
         name: "Catppuccin",
-        light: [
-            "#eff1f5", "#4c4f69", "#ccd0da", "#40a02b", "#df8e1d", "#d20f39",
-        ],
-        dark: [
-            "#1e1e2e", "#cdd6f4", "#313244", "#a6e3a1", "#f9e2af", "#f38ba8",
-        ],
+        light: ["#eff1f5", "#4c4f69", "#40a02b", "#df8e1d", "#d20f39"],
+        dark: ["#1e1e2e", "#cdd6f4", "#a6e3a1", "#f9e2af", "#f38ba8"],
     },
     ChromePreset {
         id: ChromePresetId::Gruvbox,
         name: "Gruvbox",
-        light: [
-            "#fbf1c7", "#3c3836", "#e0d0aa", "#79740e", "#b57614", "#9d0006",
-        ],
-        dark: [
-            "#282828", "#ebdbb2", "#3c3836", "#b8bb26", "#fabd2f", "#fb4934",
-        ],
+        light: ["#fbf1c7", "#3c3836", "#79740e", "#b57614", "#9d0006"],
+        dark: ["#282828", "#ebdbb2", "#b8bb26", "#fabd2f", "#fb4934"],
     },
     ChromePreset {
         id: ChromePresetId::Nord,
         name: "Nord",
-        light: [
-            "#eceff4", "#2e3440", "#d0d6e1", "#a3be8c", "#ebcb8b", "#bf616a",
-        ],
-        dark: [
-            "#2e3440", "#eceff4", "#434c5e", "#a3be8c", "#ebcb8b", "#bf616a",
-        ],
+        light: ["#eceff4", "#2e3440", "#a3be8c", "#ebcb8b", "#bf616a"],
+        dark: ["#2e3440", "#eceff4", "#a3be8c", "#ebcb8b", "#bf616a"],
     },
     ChromePreset {
         id: ChromePresetId::Breeze,
         name: "Breeze",
-        light: [
-            "#eff0f1", "#232629", "#d0d2d3", "#27ae60", "#f67400", "#da4453",
-        ],
-        dark: [
-            "#202326", "#fcfcfc", "#31363b", "#27ae60", "#f67400", "#da4453",
-        ],
+        light: ["#eff0f1", "#232629", "#27ae60", "#f67400", "#da4453"],
+        dark: ["#202326", "#fcfcfc", "#27ae60", "#f67400", "#da4453"],
     },
     ChromePreset {
         id: ChromePresetId::Adwaita,
         name: "Adwaita",
-        light: [
-            "#fafafb", "#323237", "#dcdcdd", "#007c3d", "#905400", "#c30000",
-        ],
-        dark: [
-            "#222226", "#ffffff", "#36363a", "#78e9ab", "#ffc252", "#ff938c",
-        ],
+        light: ["#fafafb", "#323237", "#007c3d", "#905400", "#c30000"],
+        dark: ["#222226", "#ffffff", "#78e9ab", "#ffc252", "#ff938c"],
     },
     ChromePreset {
         id: ChromePresetId::Ubuntu,
         name: "Ubuntu",
-        light: [
-            "#fafafa", "#3d3d3d", "#cccccc", "#109b26", "#f99b11", "#c7162b",
-        ],
-        dark: [
-            "#2c2c2c", "#f7f7f7", "#4d4d4d", "#50c856", "#f99b11", "#ff5c5d",
-        ],
+        light: ["#fafafa", "#3d3d3d", "#109b26", "#f99b11", "#c7162b"],
+        dark: ["#2c2c2c", "#f7f7f7", "#50c856", "#f99b11", "#ff5c5d"],
     },
     ChromePreset {
         id: ChromePresetId::RosePine,
         name: "Rosé Pine",
-        light: [
-            "#faf4ed", "#464261", "#dfdad9", "#286983", "#ea9d34", "#b4637a",
-        ],
-        dark: [
-            "#191724", "#e0def4", "#2e2c3c", "#31748f", "#f6c177", "#eb6f92",
-        ],
+        light: ["#faf4ed", "#464261", "#286983", "#ea9d34", "#b4637a"],
+        dark: ["#191724", "#e0def4", "#31748f", "#f6c177", "#eb6f92"],
     },
     ChromePreset {
         id: ChromePresetId::Ayu,
         name: "Ayu",
-        light: [
-            "#f8f9fa", "#5c6166", "#dce0e5", "#6cbf43", "#f29718", "#e65050",
-        ],
-        dark: [
-            "#0d1017", "#bfbdb6", "#1e242f", "#70bf56", "#e6b450", "#d95757",
-        ],
+        light: ["#f8f9fa", "#5c6166", "#6cbf43", "#f29718", "#e65050"],
+        dark: ["#0d1017", "#bfbdb6", "#70bf56", "#e6b450", "#d95757"],
     },
     ChromePreset {
         id: ChromePresetId::Solarized,
         name: "Solarized",
-        light: [
-            "#fdf6e3", "#586e75", "#dfdccb", "#859900", "#b58900", "#dc322f",
-        ],
-        dark: [
-            "#002b36", "#93a1a1", "#16404b", "#859900", "#b58900", "#dc322f",
-        ],
+        light: ["#fdf6e3", "#586e75", "#859900", "#b58900", "#dc322f"],
+        dark: ["#002b36", "#93a1a1", "#859900", "#b58900", "#dc322f"],
     },
     ChromePreset {
         id: ChromePresetId::MacosClassic,
         name: "macOS Classic",
-        light: [
-            "#ffffff", "#1a1a1a", "#e0e0e0", "#036a07", "#9e7008", "#c5060b",
-        ],
-        dark: [
-            "#131313", "#caccca", "#272727", "#62ba46", "#b0a878", "#d2602d",
-        ],
+        light: ["#ffffff", "#1a1a1a", "#036a07", "#9e7008", "#c5060b"],
+        dark: ["#131313", "#caccca", "#62ba46", "#b0a878", "#d2602d"],
     },
 ];
 

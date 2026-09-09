@@ -9,7 +9,7 @@ use gpui::{Anchor, App, Edges, Global, Hsla, Pixels, SharedString, Window, Windo
 
 use crate::{BASE_UI_FONT_SIZE, TITLE_BAR_HEIGHT, highlighter::HighlightTheme};
 
-use super::{Colorize as _, ThemeColor};
+use super::{Colorize as _, ThemeColor, color};
 
 /// The one gap in chrome: how far a control sits from the edge of the bar it
 /// lives in, and from its neighbours. A bar pads by this and spaces its
@@ -87,6 +87,7 @@ pub struct Theme {
     pub mono_font_size: Pixels,
     /// Corner radius, for *every* element that has one.
     pub radius: Pixels,
+    pub contrast: f32,
     pub shadow: bool,
     pub shadow_strength: f32,
     pub pane_background_opacity: f32,
@@ -119,6 +120,11 @@ impl DerefMut for Theme {
 impl Global for Theme {}
 
 impl Theme {
+    pub fn set_contrast(&mut self, value: f32) {
+        color::set_contrast(value);
+        self.contrast = color::contrast();
+    }
+
     #[inline(always)]
     pub fn global(cx: &App) -> &Theme {
         cx.global::<Theme>()
@@ -204,6 +210,7 @@ impl From<&ThemeColor> for Theme {
             },
             mono_font_size: px(13.),
             radius: px(6.),
+            contrast: 1.0,
             shadow: true,
             shadow_strength: 1.0,
             pane_background_opacity: 0.5,

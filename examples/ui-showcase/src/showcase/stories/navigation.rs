@@ -172,7 +172,7 @@ fn native_status_rail(cx: &App) -> AnyElement {
         .overflow_hidden()
         .bg(cx.theme().background)
         .border_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .text_color(foreground)
         .child(
             div()

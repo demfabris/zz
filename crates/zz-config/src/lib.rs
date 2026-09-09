@@ -46,6 +46,7 @@ pub const DEFAULT_PANE_BORDER_WIDTH: f32 = 0.5;
 // The zz-ui theme's own default radius, restated here because the theme now reads it from here.
 pub const DEFAULT_WIDGET_CORNER_RADIUS: f32 = 6.0;
 pub const DEFAULT_SHADOW_STRENGTH: f32 = 1.0;
+pub const DEFAULT_CHROME_CONTRAST: f32 = 1.0;
 pub const DEFAULT_USE_SYSTEM_TITLEBAR: bool = false;
 pub const DEFAULT_WINDOW_BACKGROUND_BLUR: bool = false;
 pub const DEFAULT_ANIMATIONS: bool = true;
@@ -124,6 +125,7 @@ pub enum ConfigKey {
     PaneMargin,
     PaneBorderWidth,
     WidgetCornerRadius,
+    ChromeContrast,
     ShadowStrength,
     EditorFontSize,
     EditorLineNumbers,
@@ -168,6 +170,7 @@ impl ConfigKey {
             Self::PaneMargin => "pane-margin",
             Self::PaneBorderWidth => "pane-border-width",
             Self::WidgetCornerRadius => "widget-corner-radius",
+            Self::ChromeContrast => "chrome-contrast",
             Self::ShadowStrength => "shadow-strength",
             Self::EditorFontSize => "editor-font-size",
             Self::EditorLineNumbers => "editor-line-numbers",
@@ -212,6 +215,7 @@ impl ConfigKey {
             "pane-margin" => Some(Self::PaneMargin),
             "pane-border-width" => Some(Self::PaneBorderWidth),
             "widget-corner-radius" => Some(Self::WidgetCornerRadius),
+            "chrome-contrast" => Some(Self::ChromeContrast),
             "shadow-strength" => Some(Self::ShadowStrength),
             "editor-font-size" => Some(Self::EditorFontSize),
             "editor-line-numbers" => Some(Self::EditorLineNumbers),
@@ -233,7 +237,7 @@ impl ConfigKey {
     /// is not numeric.
     pub const fn numeric_range(self) -> Option<(f32, f32)> {
         match self {
-            Self::PaneBackgroundOpacity => Some((0.0, 1.0)),
+            Self::PaneBackgroundOpacity | Self::ShadowStrength => Some((0.0, 1.0)),
             Self::PaneInactiveOpacity => {
                 Some((MIN_PANE_INACTIVE_OPACITY, MAX_PANE_INACTIVE_OPACITY))
             }
@@ -241,7 +245,7 @@ impl ConfigKey {
             Self::PaneCornerRadius => Some((0.0, MAX_PANE_CORNER_RADIUS)),
             Self::PaneBorderWidth => Some((0.0, MAX_PANE_BORDER_WIDTH)),
             Self::WidgetCornerRadius => Some((0.0, MAX_WIDGET_CORNER_RADIUS)),
-            Self::ShadowStrength => Some((0.0, 1.0)),
+            Self::ChromeContrast => Some((0.5, 2.0)),
             Self::WindowCornerRadius => Some((0.0, MAX_WINDOW_CORNER_RADIUS)),
             Self::EditorFontSize => Some((MIN_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE)),
             Self::UseSystemTitlebar
@@ -357,6 +361,7 @@ pub struct AppConfig {
     pub pane_margin: ConfigValue<f32>,
     pub pane_border_width: ConfigValue<f32>,
     pub widget_corner_radius: ConfigValue<f32>,
+    pub chrome_contrast: ConfigValue<f32>,
     pub shadow_strength: ConfigValue<f32>,
     pub editor_font_size: ConfigValue<f32>,
     pub editor_line_numbers: ConfigValue<bool>,
@@ -403,6 +408,7 @@ impl Default for AppConfig {
             pane_margin: ConfigValue::from_default(DEFAULT_PANE_MARGIN),
             pane_border_width: ConfigValue::from_default(DEFAULT_PANE_BORDER_WIDTH),
             widget_corner_radius: ConfigValue::from_default(DEFAULT_WIDGET_CORNER_RADIUS),
+            chrome_contrast: ConfigValue::from_default(DEFAULT_CHROME_CONTRAST),
             shadow_strength: ConfigValue::from_default(DEFAULT_SHADOW_STRENGTH),
             editor_font_size: ConfigValue::from_default(DEFAULT_EDITOR_FONT_SIZE),
             editor_line_numbers: ConfigValue::from_default(DEFAULT_EDITOR_LINE_NUMBERS),
@@ -451,6 +457,7 @@ impl AppConfig {
             | ConfigKey::PaneMargin
             | ConfigKey::PaneBorderWidth
             | ConfigKey::WidgetCornerRadius
+            | ConfigKey::ChromeContrast
             | ConfigKey::ShadowStrength
             | ConfigKey::EditorFontSize
             | ConfigKey::BrowserElementSelectorHotkey
@@ -957,6 +964,7 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
             ConfigKey::PaneMargin => &mut parsed.config.pane_margin,
             ConfigKey::PaneBorderWidth => &mut parsed.config.pane_border_width,
             ConfigKey::WidgetCornerRadius => &mut parsed.config.widget_corner_radius,
+            ConfigKey::ChromeContrast => &mut parsed.config.chrome_contrast,
             ConfigKey::ShadowStrength => &mut parsed.config.shadow_strength,
             ConfigKey::EditorFontSize => &mut parsed.config.editor_font_size,
             ConfigKey::UseSystemTitlebar
@@ -1174,7 +1182,9 @@ pub fn parse_numeric_value(
 ) -> Result<f32, String> {
     let unit = if matches!(
         key,
-        ConfigKey::PaneInactiveOpacity | ConfigKey::PaneBackgroundOpacity
+        ConfigKey::PaneInactiveOpacity
+            | ConfigKey::PaneBackgroundOpacity
+            | ConfigKey::ChromeContrast
     ) {
         ""
     } else {

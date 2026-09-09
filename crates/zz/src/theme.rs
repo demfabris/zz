@@ -126,7 +126,7 @@ fn resolve_tmux_colour(colour: TmuxColour, cx: &App) -> Option<Hsla> {
         TmuxColour::Theme(index) => Some(match index {
             0 => cx.theme().background,
             1 | 7..=9 => cx.theme().foreground,
-            2 => cx.theme().border,
+            2 => cx.theme().border(),
             3 => cx.theme().background.raised(1).opaque(),
             4 => cx.theme().success,
             5 => cx.theme().warning,
@@ -250,6 +250,7 @@ fn apply_zz_overrides(cx: &mut App) {
         .value
         .map_or_else(|| gpui::Font::default().family, SharedString::from);
     let widget_corner_radius = config::widget_corner_radius(cx);
+    let chrome_contrast = config::chrome_contrast(cx);
     let shadow_strength = config::shadow_strength(cx);
     let pane_background_opacity = config::pane_background_opacity(cx);
     let chrome_preset = config::chrome_preset(cx);
@@ -263,6 +264,7 @@ fn apply_zz_overrides(cx: &mut App) {
     }
 
     theme.radius = widget_corner_radius;
+    theme.set_contrast(chrome_contrast);
     theme.shadow_strength = shadow_strength;
     theme.pane_background_opacity = pane_background_opacity;
 }
@@ -307,8 +309,7 @@ mod tests {
             let colors = inherited_chrome_colors(Some(preset.id), mode);
             assert_eq!(zz_ui::to_hex(colors.background), expected[0]);
             assert_eq!(zz_ui::to_hex(colors.foreground), expected[1]);
-            assert_eq!(zz_ui::to_hex(colors.border), expected[2]);
-            assert_eq!(zz_ui::to_hex(colors.danger), expected[5]);
+            assert_eq!(zz_ui::to_hex(colors.danger), expected[4]);
         }
     }
 
@@ -327,7 +328,7 @@ mod tests {
                 };
                 let colors = preset.colors(mode.is_dark());
                 let plane = zz_ui::parse_hex(colors[0]).expect("preset background parses");
-                let hairline = zz_ui::parse_hex(colors[2]).expect("preset border parses");
+                let hairline = inherited_chrome_colors(Some(preset.id), mode).border();
                 let delta =
                     (zz_ui::oklab_lightness(hairline) - zz_ui::oklab_lightness(plane)).abs();
 
@@ -335,7 +336,7 @@ mod tests {
                     (floor..=SEPARATOR_DELTA_CEILING).contains(&delta),
                     "{} {mode:?}: border {} is {:.1}% from background {}, outside {:.1}%..={:.1}%",
                     preset.name,
-                    colors[2],
+                    zz_ui::to_hex(hairline),
                     delta * 100.0,
                     colors[0],
                     floor * 100.0,
@@ -403,7 +404,7 @@ mod tests {
         cx.update(|cx| {
             set_terminal_appearance(
                 Arc::new(TerminalAppearance {
-                    background_opacity: 0.5,
+                    background_opacity: 0.25,
                     ..TerminalAppearance::default()
                 }),
                 cx,
@@ -414,7 +415,7 @@ mod tests {
             assert!(!chrome_blur(cx));
             assert_alpha(Theme::global(cx).background, 1.0);
             assert_alpha(chrome_background(cx), 1.0);
-            assert_alpha(app_pane_background(cx), 1.0);
+            assert_alpha(app_pane_background(cx), 0.5);
         });
 
         cx.update(|cx| {
@@ -428,7 +429,7 @@ mod tests {
             assert!(chrome_blur(cx));
             assert_alpha(Theme::global(cx).background, 1.0);
             assert_alpha(chrome_background(cx), 0.93);
-            assert_alpha(app_pane_background(cx), 1.0);
+            assert_alpha(app_pane_background(cx), 0.5);
         });
     }
 
@@ -440,7 +441,7 @@ mod tests {
                 zz_ui::parse_hex("#10203066").expect("test background parses");
 
             assert_alpha(Theme::global(cx).background, 0.4);
-            assert_alpha(app_pane_background(cx), 1.0);
+            assert_alpha(app_pane_background(cx), 0.5);
         });
     }
 

@@ -1,24 +1,11 @@
-/* zz chrome presets. The app ships eleven paired light/dark palettes
-   (zz/src/theme.rs:226 CHROME_PRESETS); the demo is a dark capture, so only the
-   `dark` half of each pair is transcribed here.
+/* zz chrome presets. The app ships eleven paired light/dark palettes in
+   crates/zz-client/src/chrome_palette.rs::CHROME_PRESETS; this dark demo uses
+   five roots per preset: background, foreground, success, warning, danger.
+   The block below mirrors Colorize at its default contrast. Border is an
+   Oklab mix of 86% background and 14% foreground.
 
-   A preset only ever moves six roots — [background, foreground, border, success,
-   warning, danger], in ChromeColor::ALL order (theme.rs:23-30). Everything else
-   the chrome paints is derived from those six with Colorize
-   (zz-ui/src/widget/foundation/color.rs:247-298), so this file mirrors the app:
-   one derivation block, then six hex values per preset.
-
-   The derivations are Oklab mixes toward a contrast pole, which is exactly CSS
-   `color-mix(in oklab, ..)` (color.rs:149). Checked against the shipped defaults:
-   feeding #0a0a0a / #fafafa / #262626 through the block below reproduces
-   zz.css's raised planes (#111111 #191919 #212121 #292929), hover (#151515),
-   muted text (#8c8c8c #4c4c4c) and divider (#353535) byte for byte.
-
-   Nothing here applies until a scheme is chosen: `Default` removes the
-   attribute, so the shipped achromatic palette in zz.css is never re-expressed
-   through a derivation that could round differently. Terminal, ANSI and Claude
-   Code tokens are absent on purpose — a chrome preset restyles chrome, and pane
-   content keeps its own colors. */
+   Default removes the scheme attribute and uses zz.css. Terminal and ANSI
+   colors keep their own palette. */
 
 /* ── derivations ─────────────────────────────────────────────────────────── */
 .stage[data-scheme] {
@@ -47,6 +34,7 @@
 
 	/* Edges: subtle() 0.75 alpha, the sidebar divider border.raised(2), the
 	   indent guide muted text at wash() 0.28 (color.rs:66-70). */
+	--zz-border: color-mix(in oklab, var(--zz-bg) 86%, var(--zz-fg));
 	--zz-border-subtle: color-mix(in oklab, var(--zz-border) 75%, transparent);
 	--zz-divider: color-mix(in oklab, var(--zz-border) 92%, #fff);
 	--zz-guide: color-mix(in oklab, var(--zz-fg-muted) 28%, transparent);
@@ -76,7 +64,6 @@
 .stage[data-scheme='tokyo-night'] {
 	--zz-bg: #1a1b26;
 	--zz-fg: #c0caf5;
-	--zz-border: #292e42;
 	--zz-success: #9ece6a;
 	--zz-warning: #e0af68;
 	--zz-danger: #f7768e;
@@ -86,7 +73,6 @@
 .stage[data-scheme='catppuccin'] {
 	--zz-bg: #1e1e2e;
 	--zz-fg: #cdd6f4;
-	--zz-border: #313244;
 	--zz-success: #a6e3a1;
 	--zz-warning: #f9e2af;
 	--zz-danger: #f38ba8;
@@ -96,7 +82,6 @@
 .stage[data-scheme='gruvbox'] {
 	--zz-bg: #282828;
 	--zz-fg: #ebdbb2;
-	--zz-border: #3c3836;
 	--zz-success: #b8bb26;
 	--zz-warning: #fabd2f;
 	--zz-danger: #fb4934;
@@ -106,7 +91,6 @@
 .stage[data-scheme='nord'] {
 	--zz-bg: #2e3440;
 	--zz-fg: #eceff4;
-	--zz-border: #434c5e;
 	--zz-success: #a3be8c;
 	--zz-warning: #ebcb8b;
 	--zz-danger: #bf616a;
@@ -116,7 +100,6 @@
 .stage[data-scheme='breeze'] {
 	--zz-bg: #202326;
 	--zz-fg: #fcfcfc;
-	--zz-border: #31363b;
 	--zz-success: #27ae60;
 	--zz-warning: #f67400;
 	--zz-danger: #da4453;
@@ -126,7 +109,6 @@
 .stage[data-scheme='adwaita'] {
 	--zz-bg: #222226;
 	--zz-fg: #ffffff;
-	--zz-border: #36363a;
 	--zz-success: #78e9ab;
 	--zz-warning: #ffc252;
 	--zz-danger: #ff938c;
@@ -136,7 +118,6 @@
 .stage[data-scheme='ubuntu'] {
 	--zz-bg: #2c2c2c;
 	--zz-fg: #f7f7f7;
-	--zz-border: #4d4d4d;
 	--zz-success: #50c856;
 	--zz-warning: #f99b11;
 	--zz-danger: #ff5c5d;
@@ -146,7 +127,6 @@
 .stage[data-scheme='rose-pine'] {
 	--zz-bg: #191724;
 	--zz-fg: #e0def4;
-	--zz-border: #2e2c3c;
 	--zz-success: #31748f;
 	--zz-warning: #f6c177;
 	--zz-danger: #eb6f92;
@@ -156,7 +136,6 @@
 .stage[data-scheme='ayu'] {
 	--zz-bg: #0d1017;
 	--zz-fg: #bfbdb6;
-	--zz-border: #1e242f;
 	--zz-success: #70bf56;
 	--zz-warning: #e6b450;
 	--zz-danger: #d95757;
@@ -166,7 +145,6 @@
 .stage[data-scheme='solarized'] {
 	--zz-bg: #002b36;
 	--zz-fg: #93a1a1;
-	--zz-border: #16404b;
 	--zz-success: #859900;
 	--zz-warning: #b58900;
 	--zz-danger: #dc322f;
@@ -176,7 +154,6 @@
 .stage[data-scheme='macos-classic'] {
 	--zz-bg: #131313;
 	--zz-fg: #caccca;
-	--zz-border: #272727;
 	--zz-success: #62ba46;
 	--zz-warning: #b0a878;
 	--zz-danger: #d2602d;

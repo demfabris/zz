@@ -20,28 +20,22 @@ use zz_ui::{
     switch::Switch,
 };
 
-const PRESET_FIXTURES: [(&str, [&str; 6]); 3] = [
+const PRESET_FIXTURES: [(&str, [&str; 5]); 3] = [
     (
         "Tokyo Night",
-        [
-            "#1a1b26", "#c0caf5", "#292e42", "#9ece6a", "#e0af68", "#f7768e",
-        ],
+        ["#1a1b26", "#c0caf5", "#9ece6a", "#e0af68", "#f7768e"],
     ),
     (
         "Catppuccin Mocha",
-        [
-            "#1e1e2e", "#cdd6f4", "#313244", "#a6e3a1", "#f9e2af", "#f38ba8",
-        ],
+        ["#1e1e2e", "#cdd6f4", "#a6e3a1", "#f9e2af", "#f38ba8"],
     ),
     (
         "Rosé Pine Dawn",
-        [
-            "#faf4ed", "#575279", "#dfdad9", "#286983", "#ea9d34", "#b4637a",
-        ],
+        ["#faf4ed", "#575279", "#286983", "#ea9d34", "#b4637a"],
     ),
 ];
 
-fn swatches(colors: &'static [&'static str; 6], cx: &App) -> gpui::Div {
+fn swatches(colors: &'static [&'static str; 5], cx: &App) -> gpui::Div {
     div()
         .flex()
         .flex_none()
@@ -50,7 +44,7 @@ fn swatches(colors: &'static [&'static str; 6], cx: &App) -> gpui::Div {
             div()
                 .size(px(6.0))
                 .rounded_full()
-                .bg(zz_ui::parse_hex(hex).unwrap_or_else(|_| cx.theme().border))
+                .bg(zz_ui::parse_hex(hex).unwrap_or_else(|_| cx.theme().border()))
         }))
 }
 

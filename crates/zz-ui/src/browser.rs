@@ -63,7 +63,7 @@ impl RenderOnce for BrowserToolbar {
             .gap_1()
             .px_2()
             .border_b_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().border())
             .text_color(cx.theme().foreground)
             .child(
                 browser_toolbar_cluster()
@@ -1011,7 +1011,7 @@ impl RenderOnce for BrowserPickStatus {
 pub fn browser_surface_shadow(cx: &App) -> Vec<BoxShadow> {
     vec![
         BoxShadow {
-            color: cx.theme().border.subtle(),
+            color: cx.theme().border().subtle(),
             offset: point(px(0.0), px(0.0)),
             blur_radius: px(0.0),
             spread_radius: px(1.0),

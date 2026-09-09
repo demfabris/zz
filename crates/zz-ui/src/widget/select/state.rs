@@ -280,7 +280,7 @@ impl<D: SelectDelegate> SelectState<D> {
 fn trigger_colors(disabled: bool, cx: &App) -> (Hsla, Hsla) {
     if disabled {
         (
-            cx.theme().border.mix_oklab(cx.theme().transparent, 0.8),
+            cx.theme().border().mix_oklab(cx.theme().transparent, 0.8),
             cx.theme().foreground.muted(),
         )
     } else {

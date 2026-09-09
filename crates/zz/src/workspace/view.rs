@@ -2518,7 +2518,7 @@ impl AppView {
         let foreground =
             crate::theme::tmux_style_colour(&state.style, "fg", cx.theme().foreground, cx);
         let border_color =
-            crate::theme::tmux_style_colour(&state.border_style, "fg", cx.theme().border, cx);
+            crate::theme::tmux_style_colour(&state.border_style, "fg", cx.theme().border(), cx);
         Some(
             div()
                 .absolute()
@@ -2561,7 +2561,7 @@ impl AppView {
         let foreground =
             crate::theme::tmux_style_colour(&state.style, "fg", cx.theme().foreground, cx);
         let border_color =
-            crate::theme::tmux_style_colour(&state.border_style, "fg", cx.theme().border, cx);
+            crate::theme::tmux_style_colour(&state.border_style, "fg", cx.theme().border(), cx);
         Some(
             div()
                 .absolute()

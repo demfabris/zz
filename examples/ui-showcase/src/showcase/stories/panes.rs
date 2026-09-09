@@ -337,7 +337,7 @@ fn connection_stage(message: impl IntoElement, cx: &App) -> AnyElement {
         .overflow_hidden()
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .bg(cx.theme().background)
         .child(message)
         .into_any_element()

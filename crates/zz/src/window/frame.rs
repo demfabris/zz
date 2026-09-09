@@ -123,7 +123,7 @@ impl RenderOnce for RoundedWindowFrame {
                     .map(|surface| match decorations {
                         Decorations::Server => surface,
                         Decorations::Client { tiling } => {
-                            surface.child(border_ring(tiling, window_radius, cx.theme().border))
+                            surface.child(border_ring(tiling, window_radius, cx.theme().border()))
                         }
                     }),
             )

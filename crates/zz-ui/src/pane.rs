@@ -163,7 +163,7 @@ impl FloatingSurface {
             inset_y: Pixels::ZERO,
             background: cx.theme().background.raised(1).opaque(),
             foreground: cx.theme().foreground,
-            border_color: cx.theme().border,
+            border_color: cx.theme().border(),
             bordered: true,
         }
     }
@@ -263,7 +263,7 @@ pub fn pane_drag_overlay(
     cx: &App,
 ) -> Stateful<gpui::Div> {
     let (tint, cursor) = match state {
-        PaneDragOverlayState::Armed => (cx.theme().border.opacity(0.08), CursorStyle::OpenHand),
+        PaneDragOverlayState::Armed => (cx.theme().border().opacity(0.08), CursorStyle::OpenHand),
         PaneDragOverlayState::Source => (
             cx.theme()
                 .background
@@ -315,7 +315,7 @@ pub fn pane_drag_chip(
         .overflow_hidden()
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .bg(cx.theme().background.opaque().raised(1))
         .shadow(floating_surface_shadow(cx))
         .text_size(crate::rems_from_px(12.0))
@@ -459,7 +459,7 @@ pub fn pane_split_surface(
                 .bg(if resizing {
                     cx.theme().foreground.wash()
                 } else {
-                    hairline.unwrap_or_else(|| cx.theme().border)
+                    hairline.unwrap_or_else(|| cx.theme().border())
                 })
                 .when(axis == PaneSplitAxis::Horizontal, |line| {
                     line.left(relative(0.5))
@@ -561,7 +561,7 @@ pub fn frame_rate_badge(label: &'static str, fps: Option<f64>, cx: &App) -> gpui
         .items_center()
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border.subtle())
+        .border_color(cx.theme().border().subtle())
         .bg(cx.theme().background.floating())
         .font_family(cx.theme().mono_font_family.clone())
         .text_size(crate::rems_from_px(10.0))
@@ -648,7 +648,7 @@ pub fn pane_indicator_card(
         .bg(background)
         .shadow(vec![
             BoxShadow {
-                color: cx.theme().border.subtle(),
+                color: cx.theme().border().subtle(),
                 offset: point(px(0.0), px(0.0)),
                 blur_radius: px(0.0),
                 spread_radius: px(1.0),

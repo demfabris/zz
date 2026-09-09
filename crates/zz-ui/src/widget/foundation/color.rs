@@ -1,6 +1,7 @@
 //! Color math shared by the theme and every widget that tints something.
 
 use gpui::{Hsla, Rgba, hsla};
+use std::cell::Cell;
 
 /// Create a [`gpui::Hsla`] color from CSS-style components: `h` in 0.0..360.0,
 /// `s` and `l` in 0.0..100.0.
@@ -38,6 +39,7 @@ pub fn oklab_lightness(color: Hsla) -> f32 {
 }
 
 const RAISE_STEP: f32 = 0.04;
+const EDGE_WEIGHT: f32 = 0.14;
 const HOVER: f32 = 0.06;
 const ACTIVE: f32 = 0.12;
 const MUTED: f32 = 0.35;
@@ -48,9 +50,38 @@ const GLOW_ALPHA: f32 = 0.35;
 const WASH_ALPHA: f32 = 0.28;
 const FLOATING_ALPHA: f32 = 0.90;
 
-/// Presentation transforms on a color. Each is a pure function of the receiver's
-/// own lightness, moving it toward whichever contrast pole it is further from,
-/// so one rule covers light mode, dark mode and colored controls alike.
+thread_local! {
+    static CONTRAST: Cell<f32> = const { Cell::new(1.0) };
+}
+
+pub fn set_contrast(value: f32) {
+    CONTRAST.set(if value.is_nan() {
+        1.0
+    } else {
+        value.clamp(0.5, 2.0)
+    });
+}
+
+pub fn contrast() -> f32 {
+    CONTRAST.get()
+}
+
+fn scaled(value: f32) -> f32 {
+    (value * contrast()).clamp(0.0, 1.0)
+}
+
+fn muted_weight() -> f32 {
+    (MUTED / contrast()).clamp(0.0, 1.0)
+}
+
+pub(super) fn edge_weight() -> f32 {
+    scaled(EDGE_WEIGHT)
+}
+
+/// Presentation transforms on a color. Each is a function of the receiver's
+/// own lightness and the theme contrast, moving it toward whichever contrast
+/// pole it is further from, so one rule covers light mode, dark mode and
+/// colored controls alike.
 pub trait Colorize: Sized {
     /// Move `level` elevation steps away from this color's own lightness: a dark
     /// plane raises lighter, a light plane raises darker. Alpha is preserved.
@@ -225,23 +256,23 @@ fn toward_contrast(color: Hsla, amount: f32) -> Hsla {
 
 impl Colorize for Hsla {
     fn raised(&self, level: u8) -> Self {
-        toward_contrast(*self, RAISE_STEP * f32::from(level))
+        toward_contrast(*self, scaled(RAISE_STEP) * f32::from(level))
     }
 
     fn washed(&self, level: u8) -> Self {
-        contrast_pole(*self).opacity(RAISE_STEP * f32::from(level))
+        contrast_pole(*self).opacity(scaled(RAISE_STEP) * f32::from(level))
     }
 
     fn hover(&self) -> Self {
-        toward_contrast(*self, HOVER)
+        toward_contrast(*self, scaled(HOVER))
     }
 
     fn active(&self) -> Self {
-        toward_contrast(*self, ACTIVE)
+        toward_contrast(*self, scaled(ACTIVE))
     }
 
     fn muted(&self) -> Self {
-        toward_contrast(*self, MUTED)
+        toward_contrast(*self, muted_weight())
     }
 
     fn on(&self) -> Self {
@@ -253,7 +284,7 @@ impl Colorize for Hsla {
     }
 
     fn fill(&self) -> Self {
-        self.opacity(FILL_ALPHA)
+        self.opacity(scaled(FILL_ALPHA))
     }
 
     fn outline(&self) -> Self {
@@ -265,11 +296,11 @@ impl Colorize for Hsla {
     }
 
     fn glow(&self) -> Self {
-        self.opacity(GLOW_ALPHA)
+        self.opacity(scaled(GLOW_ALPHA))
     }
 
     fn wash(&self) -> Self {
-        self.opacity(WASH_ALPHA)
+        self.opacity(scaled(WASH_ALPHA))
     }
 
     fn floating(&self) -> Self {
@@ -420,6 +451,91 @@ mod tests {
             (actual - expected).abs() < 0.001,
             "expected {expected}, got {actual}"
         );
+    }
+
+    #[test]
+    fn contrast_scales_surfaces_edges_and_muted_text_in_both_modes() {
+        for palette in [crate::ThemeColor::light(), crate::ThemeColor::dark()] {
+            set_contrast(1.0);
+            let distance = |first, second| (oklab_lightness(first) - oklab_lightness(second)).abs();
+            let raised = distance(palette.background.raised(1), palette.background);
+            let hovered = distance(palette.background.hover(), palette.background);
+            let active = distance(palette.background.active(), palette.background);
+            let muted = distance(palette.foreground.muted(), palette.foreground);
+            let edge = distance(palette.border(), palette.background);
+            for value in [0.5, 2.0] {
+                set_contrast(value);
+                let higher = value > 1.0;
+                assert_eq!(
+                    distance(palette.background.raised(1), palette.background) > raised,
+                    higher
+                );
+                assert_eq!(
+                    distance(palette.background.hover(), palette.background) > hovered,
+                    higher
+                );
+                assert_eq!(
+                    distance(palette.background.active(), palette.background) > active,
+                    higher
+                );
+                assert_eq!(
+                    distance(palette.foreground.muted(), palette.foreground) < muted,
+                    higher
+                );
+                assert_eq!(
+                    distance(palette.border(), palette.background) > edge,
+                    higher
+                );
+                assert_close(palette.background.washed(2).a, 0.08 * value);
+                assert_close(palette.foreground.fill().a, 0.12 * value);
+                assert_close(palette.foreground.glow().a, 0.35 * value);
+                assert_close(palette.foreground.wash().a, 0.28 * value);
+                assert_close(palette.border().a, 1.0);
+            }
+        }
+        set_contrast(1.0);
+    }
+
+    #[test]
+    fn contrast_leaves_fixed_derivations_and_explicit_color_math_unchanged() {
+        let color = hsl(210.0, 50.0, 40.0).opacity(0.6);
+        let other = hsl(30.0, 60.0, 70.0);
+        let samples = || {
+            [
+                color.on(),
+                color.outline(),
+                color.subtle(),
+                color.floating(),
+                color.opacity(0.1),
+                color.divide(0.4),
+                color.mix(other, 0.3),
+                color.mix_oklab(other, 0.3),
+                color.lighten(0.2),
+                color.darken(0.2),
+                color.hue(0.3),
+                color.saturation(0.3),
+                color.lightness(0.3),
+            ]
+        };
+        set_contrast(1.0);
+        let baseline = samples();
+        for value in [0.5, 2.0] {
+            set_contrast(value);
+            assert_eq!(samples(), baseline);
+            assert_close(color.washed(u8::MAX).a, 1.0);
+        }
+        set_contrast(1.0);
+    }
+
+    #[test]
+    fn theme_contrast_clamps_and_keeps_the_stored_value_in_sync() {
+        let mut theme = crate::Theme::default();
+        for (value, expected) in [(-1.0, 0.5), (4.0, 2.0), (f32::NAN, 1.0)] {
+            theme.set_contrast(value);
+            assert_close(theme.contrast, expected);
+            assert_close(contrast(), expected);
+        }
+        theme.set_contrast(1.0);
     }
 
     #[test]

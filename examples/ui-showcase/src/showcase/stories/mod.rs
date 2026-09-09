@@ -49,7 +49,7 @@ pub(super) fn gallery(title: &'static str, description: &'static str, cx: &App) 
         .p_5()
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .bg(cx.theme().background.raised(1))
         .child(
             v_flex()
@@ -90,7 +90,7 @@ pub(super) fn specimen_over_terminal(
         .overflow_hidden()
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .font_family(cx.theme().mono_font_family.clone())
         .child(mock_terminal(cx))
         .child(
@@ -125,7 +125,7 @@ fn stage(cx: &App) -> Div {
         .py_3()
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border.subtle())
+        .border_color(cx.theme().border().subtle())
         .bg(cx.theme().background)
 }
 

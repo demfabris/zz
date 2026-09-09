@@ -233,7 +233,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
 
     log::info!(
         target: "zz::config",
-        "application configuration path={} pane_gaps={} pane_inactive_opacity={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} animations={} tray={} show_fps={} quit_daemon_on_exit={} auto_restart_stale_daemon={} check_for_updates={} agent_working_directory={:?} daemon_override_entries={}",
+        "application configuration path={} pane_gaps={} pane_inactive_opacity={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} chrome_contrast={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} animations={} tray={} show_fps={} quit_daemon_on_exit={} auto_restart_stale_daemon={} check_for_updates={} agent_working_directory={:?} daemon_override_entries={}",
         path.display(),
         parsed.config.pane_gaps.value,
         parsed.config.pane_inactive_opacity.value,
@@ -241,6 +241,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
         parsed.config.pane_margin.value,
         parsed.config.pane_border_width.value,
         parsed.config.widget_corner_radius.value,
+        parsed.config.chrome_contrast.value,
         parsed.config.window_corner_radius.value,
         parsed.config.editor_font_size.value,
         parsed.config.editor_line_numbers.value,
@@ -372,6 +373,10 @@ pub(crate) fn pane_border_width(cx: &App) -> Pixels {
 /// The corner every widget turns. `zz::theme` pushes it onto the zz-ui theme.
 pub(crate) fn widget_corner_radius(cx: &App) -> Pixels {
     px(resolved_config(cx).widget_corner_radius.value)
+}
+
+pub(crate) fn chrome_contrast(cx: &App) -> f32 {
+    resolved_config(cx).chrome_contrast.value
 }
 
 pub(crate) fn shadow_strength(cx: &App) -> f32 {
@@ -1189,8 +1194,7 @@ mod tests {
              chrome-preset = tokyo-night\n\
              chrome-background = #1a1b26\n\
              chrome-foreground = #c0caf5\n\
-             chrome-border = #292e42 # trailing comments still work\n\
-             chrome-success = #9ece6a\n\
+             chrome-success = #9ece6a # trailing comments still work\n\
              chrome-warning = #e0af68\n\
              chrome-danger = #f7768e\n",
         );
@@ -2333,6 +2337,51 @@ mod tests {
     }
 
     #[gpui::test]
+    fn chrome_contrast_validates_reloads_survives_mode_changes_and_resets(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        for value in ["0.49", "2.01", "NaN", "inf", "invalid"] {
+            let parsed = parse_config(&format!("chrome-contrast = {value}\n"));
+            assert_eq!(parsed.diagnostics.len(), 1);
+            assert_f32_eq(parsed.config.chrome_contrast.value, 1.0);
+        }
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(CONFIG_FILE_NAME);
+        cx.update(zz_ui::init);
+        for (value, expected) in [(Some("1.5"), 1.5), (None, 1.0)] {
+            write_config_edit_at(&path, ConfigKey::ChromeContrast.as_str(), value)
+                .expect("write contrast");
+            cx.update(|cx| {
+                install_config(Some(&path), Some(load_config(&path)), cx);
+                crate::theme::refresh_current_theme(cx);
+                assert_f32_eq(chrome_contrast(cx), expected);
+                assert_f32_eq(zz_ui::Theme::global(cx).contrast, expected);
+                assert_f32_eq(
+                    zz_ui::Colorize::wash(&zz_ui::Theme::global(cx).foreground).a,
+                    0.28 * expected,
+                );
+                assert_eq!(
+                    resolved_config(cx).chrome_contrast.provenance,
+                    if value.is_some() {
+                        ConfigProvenance::Override
+                    } else {
+                        ConfigProvenance::Default
+                    }
+                );
+                for mode in [zz_ui::ThemeMode::Dark, zz_ui::ThemeMode::Light] {
+                    zz_ui::Theme::change(mode, None, cx);
+                    assert_f32_eq(zz_ui::Theme::global(cx).contrast, expected);
+                    assert_f32_eq(
+                        zz_ui::Colorize::wash(&zz_ui::Theme::global(cx).foreground).a,
+                        0.28 * expected,
+                    );
+                }
+            });
+        }
+        cx.update(|cx| zz_ui::Theme::global_mut(cx).set_contrast(1.0));
+    }
+
+    #[gpui::test]
     fn pane_background_opacity_validates_reloads_and_resets_without_changing_shadows(
         cx: &mut gpui::TestAppContext,
     ) {
@@ -2979,6 +3028,7 @@ mod tests {
             "pane-margin",
             "pane-border-width",
             "widget-corner-radius",
+            "chrome-contrast",
             "shadow-strength",
             "editor-font-size",
             "editor-line-numbers",
@@ -2993,7 +3043,7 @@ mod tests {
             "app-icon",
             "chrome-preset",
         ];
-        assert_eq!(ChromeColor::ALL.len(), 6);
+        assert_eq!(ChromeColor::ALL.len(), 5);
         for key in named {
             assert_eq!(ConfigKey::parse(key).map(ConfigKey::as_str), Some(key));
         }

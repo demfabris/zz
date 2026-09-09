@@ -91,7 +91,7 @@ impl RenderOnce for CodeEditor {
         let border = if focused && self.focus_bordered {
             cx.theme().foreground.outline()
         } else {
-            cx.theme().border
+            cx.theme().border()
         };
 
         div()

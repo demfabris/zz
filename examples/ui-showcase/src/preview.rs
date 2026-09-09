@@ -50,6 +50,7 @@ pub(crate) struct PreviewOptions {
     pub blur: bool,
     pub macos: bool,
     pub radius: f32,
+    pub contrast: f32,
     pub shadow_strength: f32,
     pub pane_background_opacity: f32,
     pub pane_margin: f32,
@@ -57,7 +58,7 @@ pub(crate) struct PreviewOptions {
     pub pane_border: f32,
     pub inactive_opacity: f32,
     pub settings_section: String,
-    pub chrome_colors: [Option<String>; 6],
+    pub chrome_colors: [Option<String>; zz_ui::chrome_palette::ChromeColor::ALL.len()],
     pub ui_font: String,
     pub mono_font: String,
 }
@@ -75,6 +76,7 @@ impl Default for PreviewOptions {
             blur: false,
             macos: cfg!(target_os = "macos"),
             radius: 6.0,
+            contrast: 1.0,
             shadow_strength: 1.0,
             pane_background_opacity: 0.5,
             pane_margin: 6.0,
@@ -108,6 +110,11 @@ impl PreviewOptions {
         } else {
             1.0
         };
+        self.contrast = if self.contrast.is_finite() {
+            self.contrast.clamp(0.5, 2.0)
+        } else {
+            1.0
+        };
         self.radius = if self.radius.is_finite() {
             self.radius.clamp(0.0, 24.0)
         } else {
@@ -134,13 +141,13 @@ impl PreviewOptions {
     }
 
     fn apply_colors(&self, cx: &mut App) {
+        zz_ui::Theme::global_mut(cx).set_contrast(self.contrast);
         zz_ui::Theme::global_mut(cx).pane_background_opacity = self.pane_background_opacity;
         let mode = zz_ui::Theme::global(cx).mode;
         let base = zz_ui::ThemeColor::for_mode(mode);
         let defaults = [
             base.background,
             base.foreground,
-            base.border,
             base.success,
             base.warning,
             base.danger,
@@ -149,7 +156,6 @@ impl PreviewOptions {
         for (index, color) in [
             &mut colors.background,
             &mut colors.foreground,
-            &mut colors.border,
             &mut colors.success,
             &mut colors.warning,
             &mut colors.danger,
@@ -779,11 +785,6 @@ impl Preview {
     }
 
     fn agent(&self, cx: &App) -> AnyElement {
-        let radius = px(if self.options.gaps {
-            self.options.pane_radius
-        } else {
-            0.0
-        });
         let composer = AgentComposer {
             input: self.input.clone(),
             action: Button::compact_icon("preview-send", IconName::ArrowUp)
@@ -814,8 +815,6 @@ impl Preview {
             command_hint: None,
             prefix: Vec::new(),
             attachments: None,
-            radii: Corners::all(radius),
-            background: cx.theme().background.opaque(),
         };
         div()
             .relative()

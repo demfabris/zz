@@ -46,18 +46,14 @@ fn app_icon(dark: bool) -> Arc<Image> {
     ICONS[usize::from(dark)].clone()
 }
 
-const COLORS: [(&str, &str); 6] = [
+const COLORS: [(&str, &str); 5] = [
     (
         "Background",
         "The window's base plane. Every panel, popover and hover state is this color, raised.",
     ),
     (
         "Foreground",
-        "Default text, and the source of muted text, focus rings, links and selection.",
-    ),
-    (
-        "Border",
-        "Every edge: panel borders, dividers, input outlines, the window frame.",
+        "Default text, and the source of muted text, focus rings, links, selection and every edge.",
     ),
     ("Success", "Something completed or is healthy."),
     ("Warning", "Something needs attention but still works."),
@@ -100,6 +96,7 @@ impl SettingsFixture {
         let numbers = [
             ("zoom", options.zoom * 100.0, 50.0, 300.0, 5.0),
             ("radius", options.radius, 0.0, 24.0, 1.0),
+            ("contrast", options.contrast * 100.0, 50.0, 200.0, 5.0),
             (
                 "shadow-strength",
                 options.shadow_strength * 100.0,
@@ -136,6 +133,11 @@ impl SettingsFixture {
                 {
                     match key {
                         "zoom" => this.options.zoom = value / 100.0,
+                        "contrast" => {
+                            this.options.contrast = value / 100.0;
+                            Theme::global_mut(cx).set_contrast(this.options.contrast);
+                            cx.refresh_windows();
+                        }
                         "radius" => {
                             this.options.radius = value;
                             Theme::global_mut(cx).radius = px(value);
@@ -167,7 +169,7 @@ impl SettingsFixture {
             |items: Vec<SettingsSelectItem>, window: &mut Window, cx: &mut Context<Preview>| {
                 cx.new(|cx| SelectState::new(items, Some(IndexPath::default()), window, cx))
             };
-        let colors = (0..6)
+        let colors = (0..COLORS.len())
             .map(|index| {
                 let picker = cx.new(|cx| {
                     ColorPickerState::new(
@@ -380,7 +382,7 @@ self.number("border", "Pane border width", "Border width for gapped panes, in lo
         } else {
             let view = cx.entity();
             appearance_page(
-                appearance_page_items(0..6, self.options.macos, self.options.macos),
+                appearance_page_items(0..COLORS.len(), self.options.macos, self.options.macos),
                 move |item, position, _, cx| {
                     view.update(cx, |this, cx| {
                         this.appearance_entry(item, cx)
@@ -509,7 +511,6 @@ self.number("border", "Pane border width", "Border width for gapped panes, in lo
                 let color = [
                     cx.theme().background,
                     cx.theme().foreground,
-                    cx.theme().border,
                     cx.theme().success,
                     cx.theme().warning,
                     cx.theme().danger,
@@ -520,6 +521,29 @@ self.number("border", "Pane border width", "Border width for gapped panes, in lo
                         ColorPicker::new(&self.settings_state.colors[i], color).label(COLORS[i].0),
                     )
             }
+            AppearancePageItem::ChromeContrast => self
+                .number(
+                    "contrast",
+                    "Contrast",
+                    "Adjust surface, text, and edge contrast from 50% to 200%.",
+                    cx,
+                )
+                .title_actions(
+                    settings_reset_button(
+                        "preview-contrast-reset",
+                        "Reset contrast to 100%",
+                        self.options.contrast != 1.0,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.options.contrast = 1.0;
+                        Theme::global_mut(cx).set_contrast(1.0);
+                        this.settings_state.numbers["contrast"].update(cx, |input, cx| {
+                            input.set_value("100", window, cx);
+                        });
+                        this.remember(cx);
+                        cx.refresh_windows();
+                    })),
+                ),
             AppearancePageItem::Animations => self.toggle(
                 "animations",
                 "Animations",

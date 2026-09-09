@@ -120,7 +120,7 @@ fn family_gallery(
                     .p_4()
                     .rounded(cx.theme().radius)
                     .border_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().border())
                     .bg(cx.theme().background)
                     .child(
                         div()

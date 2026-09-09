@@ -67,7 +67,7 @@ impl Render for Tooltip {
                 .bg(cx.theme().background.raised(1).opaque())
                 .text_color(cx.theme().foreground)
                 .border_1()
-                .border_color(cx.theme().border)
+                .border_color(cx.theme().border())
                 .rounded(cx.theme().radius)
                 .shadow_md()
                 .refine_style(&self.style)

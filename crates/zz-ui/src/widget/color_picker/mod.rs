@@ -162,7 +162,7 @@ impl ColorPicker {
                                     .rounded(radius)
                                     .bg(color)
                                     .border_1()
-                                    .border_color(cx.theme().border)
+                                    .border_color(cx.theme().border())
                                     .cursor_pointer()
                                     .hover(|this| this.border_color(cx.theme().foreground))
                                     .tooltip(move |window, cx| {
@@ -221,7 +221,7 @@ impl RenderOnce for ColorPicker {
                     .rounded(cx.theme().radius)
                     .bg(shown)
                     .border_1()
-                    .border_color(cx.theme().border),
+                    .border_color(cx.theme().border()),
             );
 
         Popover::new(("zz-color-picker-popover", self.state.entity_id()))

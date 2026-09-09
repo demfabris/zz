@@ -427,7 +427,7 @@ impl Showcase {
             .h_full()
             .flex_shrink_0()
             .border_r_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().border())
             .bg(cx.theme().background.raised(1))
             .text_color(cx.theme().foreground)
             .child(
@@ -438,7 +438,7 @@ impl Showcase {
                     .h(px(64.0))
                     .px_4()
                     .border_b_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().border())
                     .child(
                         div()
                             .flex()
@@ -504,7 +504,7 @@ impl Showcase {
                     .h(px(40.0))
                     .px_4()
                     .border_t_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().border())
                     .text_xs()
                     .text_color(cx.theme().foreground.muted())
                     .child(format!("{visible_count} / {} pieces", StoryId::ALL.len()))
@@ -525,7 +525,7 @@ impl Showcase {
             .px_5()
             .py_3()
             .border_b_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().border())
             .bg(cx.theme().background)
             .child(
                 div()

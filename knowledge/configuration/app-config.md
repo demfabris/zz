@@ -9,7 +9,7 @@ tags:
 - window
 - appearance
 - mux
-timestamp: 2026-09-07T00:00:00-03:00
+timestamp: 2026-09-09T00:00:00Z
 ---
 
 # Overview
@@ -128,10 +128,10 @@ The client-local schema includes these scalar settings and chrome colors.
 | `ui-font-family` | System default | Installed font family, or `.SystemUIFont` | Interface text across desktop windows; applies live and stays separate from terminal and editor fonts |
 | `theme-mode` | `system` | `system`, `light`, `dark` | Follow the OS appearance, or pin one mode |
 | `app-icon` | `automatic` | `automatic`, `light`, `dark` | Which render of `assets/zz.icon` the macOS Dock tile wears; `automatic` defers to the bundle's compiled icon when packaged (so tinted/clear dock styles work) and follows the OS appearance in bare builds, independently of `theme-mode` |
+| `chrome-contrast` | `1.0` | `0.5`–`2.0` | Scales the chrome derivations; out-of-range or invalid values are reported and fall back to `1.0`. Settings shows it as 50–200% in steps of 5. |
 | `chrome-preset` | unset | `tokyo-night`, `catppuccin`, `gruvbox`, `nord`, `breeze`, `adwaita`, `ubuntu`, `rose-pine`, `ayu`, `solarized`, `macos-classic` | Select a paired light/dark chrome family; the active variant follows the effective `theme-mode` |
 | `chrome-background` | unset | `#rgb`, `#rrggbb`, `#rrggbbaa` | zz-ui's `ThemeColor::background` . the window's base plane |
 | `chrome-foreground` | unset | same | `ThemeColor::foreground` . default text, and the source of muted text, rings, links |
-| `chrome-border` | unset | same | `ThemeColor::border` . every edge |
 | `chrome-success` | unset | same | `ThemeColor::success` |
 | `chrome-warning` | unset | same | `ThemeColor::warning` |
 | `chrome-danger` | unset | same | `ThemeColor::danger` |
@@ -141,7 +141,7 @@ normal watched-config refresh. The clock never shows seconds. `AppShell` aligns 
 the next minute boundary, then requests one redraw per minute while the bar and clock are visible;
 `time-date` renders `%H:%M · %b %d`.
 
-`widget-corner-radius`, `shadow-strength`, `pane-background-opacity`, and the theme keys land on the **zz-ui theme** rather than being read
+`widget-corner-radius`, `chrome-contrast`, `shadow-strength`, `pane-background-opacity`, and the theme keys land on the **zz-ui theme** rather than being read
 per-frame by a renderer: `zz::theme::apply_zz_overrides` pushes them onto the `Theme` global, and
 every widget already reads from there, so no component is plumbed individually. Because the preset
 and overrides are reapplied on every theme rebuild, they survive a light/dark switch, the same
@@ -185,10 +185,10 @@ preference, so macOS, Linux, and Windows follow this key directly.
 
 ## Chrome theming
 
-The six `chrome-*` keys overwrite zz-ui's **palette roots** (`ThemeColor`, seven fields). Every other
-color the UI paints (elevations, hover and pressed fills, muted text, focus rings, status washes)
+The five chrome color keys overwrite zz-ui's **palette roots** (`ThemeColor`, five configurable
+roots plus scrim). Other colors the UI paints (elevations, hover and pressed fills, muted text, focus rings, status washes)
 is derived from those roots by `Colorize` at paint time, so setting a root recolors everything built
-on it with no further plumbing. That is also why there are six knobs and not a table: `scrim` is
+on it with no further plumbing. That is also why there are five knobs and not a table: `scrim` is
 omitted because it is black in both modes and only its alpha is meaningful, and a larger table could
 disagree with itself.
 
@@ -198,11 +198,16 @@ zz-ui base. `AppConfig` stores `Option<Hsla>` per root rather than a default col
 labels a preset-inherited root accordingly.
 
 The built-ins in `zz::theme::CHROME_PRESETS` pair light and dark variants under one stable family
-ID. Applying one atomically removes the six explicit roots and writes `chrome-preset`; it does not
+ID. Applying one atomically removes the five explicit roots and writes `chrome-preset`; it does not
 change `theme-mode`. Switching System/Light/Dark, or an OS appearance change while on System, picks
 the matching variant. A subsequent per-root edit is an override on both modes, and Reset returns
-that root to the active preset variant. Existing configs containing only `chrome-*` remain valid as
-fixed overrides.
+that root to the active preset variant. At the default contrast, `border()` derives an opaque Oklab
+mix of 86% background and 14% foreground. The removed
+`chrome-border` key remains visible as an unrecognized key in the config editor.
+
+`chrome-contrast` adjusts derived surfaces, muted text, fills, and edges without storing colors.
+The default is 1.0; desktop and browser Settings show it as 100%. Reset removes the override.
+The native macOS client keeps the default derivation strengths and does not show this control.
 
 Chrome chroma comes from `zz/config` alone, never from the terminal's palette: there is no key that
 makes application chrome follow terminal colors.
@@ -277,9 +282,10 @@ pane frame paints borders, shadows, and focus effects above the continuous app b
 Terminal, Agent, Editor, picker, and waiting surfaces use this factor. Browser panes apply
 it only to the toolbar; page, blank, loading, and error backgrounds stay opaque.
 
-The Agent main surface, raised composer card, and footer each use the chosen opacity.
+The Agent main surface and raised composer card each use the chosen opacity.
+The footer inherits the main pane background and adds no fill of its own.
 Shadow strength remains independent.
-The extra footer backing strip is removed. These are separate overlapping layers; text
+The pane and composer card are separate overlapping layers; text
 keeps its own opacity. The composer can reveal timeline content underneath while scrolling.
 
 A terminal first blends its Ghostty background color with the theme base using
@@ -537,7 +543,7 @@ always-live inactive-opacity factor.
 
 | Page | Groups |
 | --- | --- |
-| Interface | **Theme** (`theme-mode` as three drawn window previews, `UI font`, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Tweaks** (`animations`, `widget-corner-radius`, `shadow-strength`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
+| Interface | **Theme** (`theme-mode` as three drawn window previews, `UI font`, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the five `chrome-*` pickers, `chrome-contrast`) · **Tweaks** (`animations`, `widget-corner-radius`, `shadow-strength`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
 | Status bar | Title-bar items shown when the sidebar is retracted (`status-show-session`, `status-badges`, `status-align`, `status-agents`, `status-host`, `status-update`, `status-clock`) |
 | Browser | **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |

@@ -130,6 +130,10 @@ fn value(parsed: &ParsedConfig, key: ConfigKey) -> (Value, ConfigProvenance) {
             let setting = &parsed.config.pane_border_width;
             (json!(setting.value), setting.provenance)
         }
+        ConfigKey::ChromeContrast => {
+            let setting = &parsed.config.chrome_contrast;
+            (json!(setting.value), setting.provenance)
+        }
         ConfigKey::WidgetCornerRadius => {
             let setting = &parsed.config.widget_corner_radius;
             (json!(setting.value), setting.provenance)
@@ -278,6 +282,7 @@ fn section(key: ConfigKey) -> &'static str {
 fn title(key: ConfigKey) -> String {
     match key {
         ConfigKey::UiFontFamily => "Interface font".to_owned(),
+        ConfigKey::ChromeContrast => "Contrast".to_owned(),
         ConfigKey::BrowserElementSelectorHotkey => "Element selector shortcut".to_owned(),
         ConfigKey::BrowserEgress => "Route remote browsing through SSH".to_owned(),
         ConfigKey::ShowFps => "Show frame rate".to_owned(),
@@ -325,6 +330,7 @@ pub fn settings(parsed: &ParsedConfig) -> Vec<Setting> {
         ConfigKey::PaneMargin,
         ConfigKey::PaneBorderWidth,
         ConfigKey::WidgetCornerRadius,
+        ConfigKey::ChromeContrast,
         ConfigKey::ShadowStrength,
         ConfigKey::EditorFontSize,
         ConfigKey::EditorLineNumbers,
@@ -652,6 +658,51 @@ impl SettingsModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contrast_settings_persist_validate_and_reset_with_provenance() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config");
+        let mut model = SettingsModel::new("System".to_owned(), Some(path.clone()), None);
+        let set = |model: &mut SettingsModel, value: f64| {
+            model.action(
+                SettingsAction::Set {
+                    key: "chrome-contrast".to_owned(),
+                    value: json!(value),
+                },
+                &[],
+            )
+        };
+        set(&mut model, 1.5).unwrap();
+        for value in [4.0, -1.0] {
+            assert!(set(&mut model, value).is_err(), "{value}");
+        }
+        let loaded = load_config(&path, "System").unwrap();
+        assert_eq!(loaded.config.chrome_contrast.value, 1.5);
+        let setting = settings(&loaded)
+            .into_iter()
+            .find(|setting| setting.key == "chrome-contrast")
+            .unwrap();
+        assert!(setting.overridden);
+        assert_eq!(setting.range, Some((0.5, 2.0)));
+        model
+            .action(
+                SettingsAction::Reset {
+                    key: "chrome-contrast".to_owned(),
+                },
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            model.parsed.config.chrome_contrast,
+            ConfigValue::from_default(1.0)
+        );
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("chrome-contrast")
+        );
+    }
 
     #[test]
     fn native_settings_validate_before_writing_and_preserve_other_surfaces() {

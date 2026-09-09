@@ -32,9 +32,10 @@ pub(super) struct Preferences {
     pub dark: bool,
     pub mode: Option<String>,
     pub preset: Option<String>,
-    pub colors: [Option<String>; 6],
+    pub colors: [Option<String>; ChromeColor::ALL.len()],
     pub zoom: f32,
     pub radius: f32,
+    pub contrast: f32,
     pub pane_background_opacity: f32,
     pub pane_inactive_opacity: f32,
     pub pane_margin: f32,
@@ -53,6 +54,7 @@ impl Default for Preferences {
             colors: Default::default(),
             zoom: 1.0,
             radius: 6.0,
+            contrast: 1.0,
             pane_background_opacity: 0.5,
             pane_inactive_opacity: 0.7,
             pane_margin: 6.0,
@@ -78,6 +80,7 @@ impl Preferences {
     fn sanitized(mut self) -> Self {
         self.zoom = bounded(self.zoom, 0.5, 3.0, 1.0);
         self.radius = bounded(self.radius, 0.0, 24.0, 6.0);
+        self.contrast = bounded(self.contrast, 0.5, 2.0, 1.0);
         for control in PaneControl::ALL {
             let (min, max, _) = control.limits();
             let fallback = *control.value(&mut Self::default());
@@ -112,6 +115,7 @@ impl Preferences {
                 .map(|color| color.and_then(|value| zz_ui::parse_hex(&value).ok())),
         );
         Theme::global_mut(cx).radius = px(self.radius);
+        Theme::global_mut(cx).set_contrast(self.contrast);
         Theme::global_mut(cx).pane_background_opacity = self.pane_background_opacity;
         cx.set_global(UiZoom(self.zoom));
         window.set_zoom(self.zoom);
@@ -145,6 +149,7 @@ impl Preferences {
 pub(super) struct Controls {
     zoom: Entity<InputState>,
     radius: Entity<InputState>,
+    contrast: Entity<InputState>,
     panes: [Entity<InputState>; 5],
     colors: Vec<Entity<ColorPickerState>>,
     search_engine: Entity<SelectState<Vec<SettingsSelectItem>>>,
@@ -171,8 +176,15 @@ impl Controls {
                 .min(0.0)
                 .max(24.0)
         });
+        let contrast = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value((preferences.contrast * 100.0).to_string())
+                .step(5.0)
+                .min(50.0)
+                .max(200.0)
+        });
         let mut subscriptions = Vec::new();
-        for (input, is_zoom) in [(&zoom, true), (&radius, false)] {
+        for (input, key) in [(&zoom, "zoom"), (&radius, "radius"), (&contrast, "contrast")] {
             subscriptions.push(cx.subscribe_in(
                 input,
                 window,
@@ -181,10 +193,10 @@ impl Controls {
                     if !commit && !matches!(event, InputEvent::Change) {
                         return;
                     }
-                    let (min, max, previous) = if is_zoom {
-                        (50.0, 300.0, this.preferences.zoom * 100.0)
-                    } else {
-                        (0.0, 24.0, this.preferences.radius)
+                    let (min, max, previous) = match key {
+                        "zoom" => (50.0, 300.0, this.preferences.zoom * 100.0),
+                        "contrast" => (50.0, 200.0, this.preferences.contrast * 100.0),
+                        _ => (0.0, 24.0, this.preferences.radius),
                     };
                     let parsed = input
                         .read(cx)
@@ -198,10 +210,10 @@ impl Controls {
                         _ if commit => previous,
                         _ => return,
                     };
-                    if is_zoom {
-                        this.preferences.zoom = value / 100.0;
-                    } else {
-                        this.preferences.radius = value;
+                    match key {
+                        "zoom" => this.preferences.zoom = value / 100.0,
+                        "contrast" => this.preferences.contrast = value / 100.0,
+                        _ => this.preferences.radius = value,
                     }
                     if commit {
                         input.update(cx, |input, cx| {
@@ -297,6 +309,7 @@ impl Controls {
         Self {
             zoom,
             radius,
+            contrast,
             panes,
             colors,
             search_engine: cx.new(|cx| SelectState::new(Vec::new(), None, window, cx)),
@@ -455,6 +468,26 @@ impl WebClient {
                         ),
                     );
                 }
+                rows.push(
+                    SettingEntry::new("Contrast", "Adjust surface, text, and edge contrast from 50% to 200%.")
+                        .title_actions(settings_reset_button(
+                            "web-contrast-reset",
+                            "Reset contrast to 100%",
+                            self.preferences.contrast != 1.0,
+                        ).on_click(cx.listener(|this, _, window, cx| {
+                            this.preferences.contrast = 1.0;
+                            this.settings_controls.contrast.update(cx, |input, cx| {
+                                input.set_value("100", window, cx);
+                            });
+                            this.preferences.save();
+                            this.preferences.apply(window, cx);
+                        })))
+                        .control(div().w(px(120.0)).flex_none().child(
+                            NumberInput::new(&self.settings_controls.contrast)
+                                .small()
+                                .bg(settings_control_fill(cx)),
+                        )),
+                );
                 rows.push(
                     SettingEntry::new(
                         "Widget corner radius",
@@ -838,6 +871,18 @@ fn bounded(value: f32, min: f32, max: f32, fallback: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::Preferences;
+
+    #[test]
+    fn contrast_defaults_clamps_and_round_trips_with_preferences() {
+        let defaults = serde_json::from_str::<Preferences>("{}").unwrap();
+        assert_eq!(defaults.contrast, 1.0);
+        for (value, expected) in [(0.1, 0.5), (3.0, 2.0), (1.5, 1.5), (f32::NAN, 1.0)] {
+            let preferences = Preferences { contrast: value, ..Preferences::default() }.sanitized();
+            assert_eq!(preferences.contrast, expected);
+            let saved = serde_json::to_string(&preferences).unwrap();
+            assert_eq!(serde_json::from_str::<Preferences>(&saved).unwrap().contrast, expected);
+        }
+    }
 
     #[test]
     fn older_preferences_gain_pane_controls_and_values_remain_bounded() {

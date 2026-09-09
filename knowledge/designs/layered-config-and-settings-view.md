@@ -10,7 +10,7 @@ tags:
 - theme
 - provenance
 - design-plan
-timestamp: 2026-07-30T00:00:00Z
+timestamp: 2026-09-09T00:00:00Z
 last_updated: 2026-09-06
 ---
 
@@ -55,7 +55,7 @@ place that already owns each grammar.
 
 | Group | Owner | Where the grammar lives |
 |-------|-------|-------------------------|
-| Window chrome, pane geometry, widget radius, theme mode, paired `chrome-preset`, six optional `chrome-*` roots | GUI client | `crates/zz/src/config/mod.rs` |
+| Window chrome, pane geometry, widget radius, theme mode, paired `chrome-preset`, five optional `chrome-*` roots | GUI client | `crates/zz/src/config/mod.rs` |
 | Browser-local element-selector hotkey | GUI client | `crates/zz/src/config/mod.rs` |
 | Repeatable `chrome-keybind` / `chrome-unbind` overrides for `ui`, `sidebar`, `browser`, and `terminal` actions | GUI client | `crates/zz/src/config/mod.rs` + `crates/zz-client/src/chrome.rs` |
 | Three ACP launch keys (`agent-command`, `agent-claude-code-command`, `agent-working-directory`) | GUI client | `crates/zz/src/config/mod.rs`; file-only, no settings row |

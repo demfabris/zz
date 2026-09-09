@@ -1523,7 +1523,7 @@ impl BlockNode {
                         .px_2()
                         .py_1()
                         .when(!is_last_col, |this| {
-                            this.border_r_1().border_color(cx.theme().border)
+                            this.border_r_1().border_color(cx.theme().border())
                         })
                         .refine_style(&style.table_cell)
                         .child(cell.children.render(node_cx, window, cx)),
@@ -1534,7 +1534,7 @@ impl BlockNode {
                     .id("row")
                     .w_full()
                     .when(row_ix < row_count - 1, |this| this.border_b_1())
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().border())
                     .flex()
                     .flex_row()
                     .children(cells),
@@ -1552,7 +1552,7 @@ impl BlockNode {
                     .min_w_full()
                     .w(px(total_w))
                     .border_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().border())
                     .rounded(cx.theme().radius)
                     .children(rows),
             ))
@@ -1594,7 +1594,7 @@ impl BlockNode {
                         .px_2()
                         .py_1()
                         .when(!is_last_col, |this| {
-                            this.border_r_1().border_color(cx.theme().border)
+                            this.border_r_1().border_color(cx.theme().border())
                         })
                         .refine_style(&style.table_cell)
                         .child(cell.children.render(node_cx, window, cx)),
@@ -1606,7 +1606,7 @@ impl BlockNode {
                     .id("row")
                     .w_full()
                     .when(row_ix < row_count - 1, |this| this.border_b_1())
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().border())
                     .flex()
                     .flex_row()
                     .children(cells),
@@ -1621,7 +1621,7 @@ impl BlockNode {
                     .id(("table", options.ix))
                     .w_full()
                     .border_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().border())
                     .rounded(cx.theme().radius)
                     .overflow_hidden()
                     .children(rows)
@@ -1753,7 +1753,12 @@ impl BlockNode {
             }
             BlockNode::HorizontalRule { .. } => div()
                 .pb(mb)
-                .child(div().id("horizontal-rule").bg(cx.theme().border).h(px(2.)))
+                .child(
+                    div()
+                        .id("horizontal-rule")
+                        .bg(cx.theme().border())
+                        .h(px(2.)),
+                )
                 .into_any_element(),
             BlockNode::Break { .. } => div().id("break").into_any_element(),
             BlockNode::Unknown { .. } | BlockNode::Definition { .. } => div().into_any_element(),

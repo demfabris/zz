@@ -8,7 +8,6 @@ pub const fn read_chrome_color(color: ChromeColor, colors: &ThemeColor) -> Hsla 
     match color {
         ChromeColor::Background => colors.background,
         ChromeColor::Foreground => colors.foreground,
-        ChromeColor::Border => colors.border,
         ChromeColor::Success => colors.success,
         ChromeColor::Warning => colors.warning,
         ChromeColor::Danger => colors.danger,
@@ -19,7 +18,6 @@ pub const fn write_chrome_color(color: ChromeColor, colors: &mut ThemeColor, val
     match color {
         ChromeColor::Background => colors.background = value,
         ChromeColor::Foreground => colors.foreground = value,
-        ChromeColor::Border => colors.border = value,
         ChromeColor::Success => colors.success = value,
         ChromeColor::Warning => colors.warning = value,
         ChromeColor::Danger => colors.danger = value,

@@ -71,7 +71,7 @@ pub fn suggestion_list(rows: impl IntoElement, cx: &App) -> Div {
         .w_full()
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .bg(cx.theme().background.raised(1))
         .p_1()
         .shadow_md()

@@ -353,7 +353,7 @@ impl RenderOnce for Dialog {
             .track_focus(&self.focus_handle)
             .bg(cx.theme().background.opaque())
             .border_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().border())
             .rounded(cx.theme().radius)
             .min_h(MIN_HEIGHT)
             .pt(CONTENT_PADDING)

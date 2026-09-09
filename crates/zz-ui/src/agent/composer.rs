@@ -2,8 +2,7 @@ use super::AGENT_CONTENT_MAX_WIDTH;
 use crate::input::{Input, InputState};
 use crate::{ActiveTheme as _, CHROME_GAP, Colorize as _, h_flex, v_flex};
 use gpui::{
-    AnyElement, App, Corners, Entity, Hsla, IntoElement, Pixels, RenderOnce, SharedString, Window,
-    div, prelude::*, px,
+    AnyElement, App, Entity, IntoElement, RenderOnce, SharedString, Window, div, prelude::*, px,
 };
 
 pub const COMPOSER_MIN_HEIGHT: f32 = 86.0;
@@ -36,8 +35,6 @@ pub struct AgentComposer {
     pub command_hint: Option<SharedString>,
     pub prefix: Vec<AnyElement>,
     pub attachments: Option<AnyElement>,
-    pub radii: Corners<Pixels>,
-    pub background: Hsla,
 }
 
 impl RenderOnce for AgentComposer {
@@ -66,7 +63,7 @@ impl RenderOnce for AgentComposer {
                                     .min_h(px(COMPOSER_MIN_HEIGHT))
                                     .rounded(cx.theme().radius)
                                     .border_1()
-                                    .border_color(cx.theme().border)
+                                    .border_color(cx.theme().border())
                                     .bg(cx
                                         .theme()
                                         .background
@@ -123,9 +120,6 @@ impl RenderOnce for AgentComposer {
             .child(
                 v_flex()
                     .w_full()
-                    .bg(self.background.opacity(cx.theme().pane_background_opacity))
-                    .rounded_bl(self.radii.bottom_left)
-                    .rounded_br(self.radii.bottom_right)
                     .px(px(COMPOSER_OUTER_PADDING))
                     .pt(px(COMPOSER_SECTION_GAP))
                     .pb(px(COMPOSER_OUTER_PADDING))

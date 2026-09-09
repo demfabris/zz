@@ -1360,7 +1360,7 @@ impl WebClient {
             );
             let foreground = floating::style_color(&popup.style, "fg", cx.theme().foreground, cx);
             let border_color =
-                floating::style_color(&popup.border_style, "fg", cx.theme().border, cx);
+                floating::style_color(&popup.border_style, "fg", cx.theme().border(), cx);
             return Some(
                 div()
                     .absolute()

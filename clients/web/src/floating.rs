@@ -69,7 +69,7 @@ impl WebClient {
                 cx,
             );
             let foreground = style_color(&state.style, "fg", cx.theme().foreground, cx);
-            let border_color = style_color(&state.border_style, "fg", cx.theme().border, cx);
+            let border_color = style_color(&state.border_style, "fg", cx.theme().border(), cx);
             let selected_background = style_color(
                 &state.selected_style,
                 "bg",
@@ -298,7 +298,7 @@ pub(super) fn style_color(style: &str, key: &str, fallback: Hsla, cx: &App) -> H
             return match index {
                 0 => cx.theme().background,
                 1 | 7..=9 => cx.theme().foreground,
-                2 => cx.theme().border,
+                2 => cx.theme().border(),
                 3 => cx.theme().background.raised(1).opaque(),
                 4 => cx.theme().success,
                 5 => cx.theme().warning,

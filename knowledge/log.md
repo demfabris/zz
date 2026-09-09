@@ -1,6 +1,9 @@
 # Update Log
 
 ## 2026-09-09
+* **Fix**: Removed the Agent footer background that stacked pane opacity and produced a dark bar beneath the composer. The footer now inherits the pane fill; the raised composer card keeps its own opacity.
+* **Update**: Added `chrome-contrast` with a 1.0 default and a 0.5–2.0 range. Desktop, browser, and showcase expose a 50–200% control with reset. The scalar scales elevation, hover, active, fill, glow, wash, and derived borders; muted text moves closer to foreground as contrast rises. Native macOS keeps the default strengths.
+* **Update**: Removed the configurable border root. Desktop, browser, showcase, and native macOS borders now derive from an opaque Oklab mix of 86% background and 14% foreground; presets carry five colors, and `chrome-border` is unrecognized.
 * **Update**: Added Panes → Appearance → Background opacity with live 0–100% edits, persistence, and reset to 50%. Shared theme opacity drives pane and Agent composer fills while shadow strength stays independent; web and showcase use the same control.
 * **Update**: Added a fixed 50% pane-background experiment above the continuous root. Agent canvas, composer card, and footer follow it; removed duplicate footer backing. Browser pages stay opaque. Corrected renderer source-over alpha and verified it with a Metal GPU test.
 * **Update**: Simplified app background painting to one continuous root surface beneath panes. Removed separate margin, split-gap, and rounded-corner fills; fixed sidebar, titlebar, and Settings inherit the root. Desktop, web, and showcase share this composition.

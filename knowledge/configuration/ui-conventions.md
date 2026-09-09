@@ -4,7 +4,7 @@ title: UI design conventions
 description: The component, palette, and styling rules that keep zz application chrome consistent and theme-aware.
 resource: crates/zz/src/command/palette.rs
 tags: [ui, gpui, zz-ui, theme, chrome, clippy]
-timestamp: 2026-09-06T00:00:00Z
+timestamp: 2026-09-09T00:00:00Z
 ---
 
 # Overview
@@ -29,8 +29,8 @@ page backgrounds, simulated window blur, and the font/renderer differences that 
 # Rules
 
 1. Every application-chrome color comes from a `cx.theme()` root or a `Colorize` derivation of one.
-   The palette is seven roots (`background`, `foreground`, `border`, `success`, `warning`, `danger`,
-   `scrim`) in `crates/zz-ui/src/widget/foundation/theme_color.rs`; panels, hover fills, muted text, and
+   The palette has five roots (`background`, `foreground`, `success`, `warning`, `danger`)
+   plus the fixed per-mode `scrim` in `crates/zz-ui/src/widget/foundation/theme_color.rs`; panels, hover fills, muted text, and
    focus rings are derived at paint time by `Colorize` in
    `crates/zz-ui/src/widget/foundation/color.rs`. Choose the nearest derivation, such as
    `background.raised(1)`, `background.hover()`, or `foreground.muted()`; do not color-match an old
@@ -159,13 +159,23 @@ the desktop and browser clients. `crates/zz/src/theme.rs` applies desktop config
 detach action, not to color anything). `apply_zz_overrides` layers these values over the zz-ui base:
 
 - the active light or dark variant of `chrome-preset`, when selected;
-- the six optional `chrome-*` palette roots from `zz/config`, written over the preset so every
+- the five optional `chrome-*` palette roots from `zz/config`, written over the preset so every
   elevation, hover, and focus ring derived from them at paint time follows the user's roots;
 - `font_family` from `ui-font-family`, with the system UI font as the default;
 - `mono_font_family` from the terminal's resolved primary family, so Agent Markdown and code blocks
   match the terminal typeface;
 - `theme.radius` from `widget-corner-radius`, so one radius reaches every widget and survives a
-  light/dark switch.
+  light/dark switch;
+- `theme.contrast` from `chrome-contrast`, preserved across the same refreshes.
+
+`chrome-contrast` defaults to 1.0 and accepts 0.5–2.0; other values are reported like any numeric
+key. The Appearance page shows 50–200%, in steps of 5. It scales the elevation step in `raised()` and `washed()`, the amounts in `hover()` and
+`active()`, the alpha factors in `fill()`, `glow()`, and `wash()`, and the foreground weight in
+`border()`. It divides the `muted()` amount, keeping muted text closer to foreground as contrast
+rises. Those factors clamp to 0–1. `on()`, `outline()`, `subtle()`, `floating()`, explicit opacity,
+and color math keep their existing values; literals such as `foreground.opacity(0.1)` stay fixed.
+The Rust derivations read a thread-local scalar set by `Theme::set_contrast`. The native macOS
+client keeps the default derivation strengths.
 
 Icon-only chrome controls use `Button::compact_icon`: a 24px hover surface around a Small 14px
 glyph with a 0.5px downward optical adjustment. The titlebar, sidebar row actions, browser pane,
@@ -207,15 +217,17 @@ theme,” `Ghostty` → “From Ghostty,” `Override` → “Overridden.” Tho
 appearance provenance; chrome colors carry the client-local `Default`/`Overridden` provenance
 instead, with “Preset” shown when an otherwise-unset root inherits from the selected family.
 
-`ThemeColor` is seven roots and every other color is derived through `Colorize` at paint time, so
+`ThemeColor` holds five palette roots plus the per-mode scrim. `border()` is an opaque Oklab mix
+of 86% background and 14% foreground at the default contrast. Other colors derive through `Colorize` at paint time, so
 overriding a root needs no parallel token table kept in step. Views read
 `cx.theme()` and never receive a copied palette or local color literals.
 The app shell paints one continuous chrome background beneath the pane layout. Fixed sidebar,
 titlebar, Settings, margins, split gaps, and rounded pane corners inherit that fill. The slideover
 sidebar paints its own overlay surface. App-owned pane roots use `theme::app_pane_background`
-with `Theme::pane_background_opacity`, controlled by Panes settings and defaulting to 50%. The Agent composer card and footer
-use the same factor; the shared pane frame adds no background fill. The terminal blends its
-Ghostty tint with the theme base before applying the factor. Browser pages remain opaque.
+with `Theme::pane_background_opacity`, controlled by Panes settings and defaulting to 50%.
+The Agent composer card uses the same factor. The footer inherits the pane background, and
+the shared pane frame adds no background fill. The terminal blends its Ghostty tint with the
+theme base before applying the factor. Browser pages remain opaque.
 
 # Related
 

@@ -546,7 +546,7 @@ impl Element for TextElement {
         let selection = cx.theme().foreground.wash();
         let caret = cx.theme().foreground;
         let gutter = background.raised(1).opaque();
-        let divider = cx.theme().border;
+        let divider = cx.theme().border();
         let radii = self.state.read(cx).corner_radii;
         let background_opacity = self.state.read(cx).background_opacity;
         let text_radii = if layout.gutter_width > Pixels::ZERO {

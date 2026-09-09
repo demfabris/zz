@@ -29,7 +29,7 @@ impl TagVariant {
     fn border(self, cx: &App) -> Hsla {
         match self {
             Self::Primary => cx.theme().foreground,
-            Self::Secondary => cx.theme().border,
+            Self::Secondary => cx.theme().border(),
             Self::Success => cx.theme().success,
         }
     }

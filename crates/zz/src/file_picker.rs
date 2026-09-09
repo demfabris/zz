@@ -689,7 +689,7 @@ impl Render for FilePickerView {
                             .items_center()
                             .gap(px(CHROME_GAP))
                             .border_t_1()
-                            .border_color(cx.theme().border)
+                            .border_color(cx.theme().border())
                             .py(px(CHROME_GAP))
                             .pl_4()
                             .pr(px(CHROME_GAP))

@@ -106,7 +106,7 @@ fn timeline(showcase: &Showcase, fixture: ThreadFixture, cx: &App) -> AnyElement
         .overflow_hidden()
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .bg(cx.theme().background)
         .child(AgentTimeline::new(
             showcase.agent_rows(fixture),

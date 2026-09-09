@@ -172,7 +172,7 @@ impl RenderOnce for CommandPaletteSurface {
             .children(self.rows.map(|rows| {
                 div()
                     .border_t_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().border())
                     .px(px(5.0))
                     .py(px(4.0))
                     .child(rows)
@@ -187,7 +187,7 @@ impl RenderOnce for CommandPaletteSurface {
                     .gap(px(12.0))
                     .px(px(10.0))
                     .border_t_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().border())
                     .text_size(crate::rems_from_px(9.0))
                     .text_color(cx.theme().foreground.muted())
                     .children(self.hints.into_iter().map(palette_hint)),
@@ -227,7 +227,7 @@ pub fn palette_shortcut_hint(
 fn command_palette_shadow(cx: &App) -> Vec<BoxShadow> {
     vec![
         BoxShadow {
-            color: cx.theme().border.subtle(),
+            color: cx.theme().border().subtle(),
             offset: point(px(0.0), px(0.0)),
             blur_radius: px(0.0),
             spread_radius: px(1.0),

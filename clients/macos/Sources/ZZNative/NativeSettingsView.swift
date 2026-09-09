@@ -64,7 +64,7 @@ struct NativeSettingsView: View {
                             ZZSettingsStack {
                                 ForEach(
                                     model.snapshot?.settings.filter {
-                                        $0.section == model.section && $0.key != "chrome-preset"
+                                        $0.section == model.section && $0.key != "chrome-preset" && $0.key != "chrome-contrast"
                                     } ?? []
                                 ) { setting in
                                     NativeSettingRow(setting: setting, model: model)

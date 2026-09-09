@@ -161,7 +161,7 @@ impl RenderOnce for WindowBorder {
                             .when(!(tiling.top || tiling.left), |div| {
                                 div.rounded_tl(BORDER_RADIUS)
                             })
-                            .border_color(cx.theme().border)
+                            .border_color(cx.theme().border())
                             .when(!tiling.top, |div| div.border_t(BORDER_SIZE))
                             .when(!tiling.bottom, |div| div.border_b(BORDER_SIZE))
                             .when(!tiling.left, |div| div.border_l(BORDER_SIZE))

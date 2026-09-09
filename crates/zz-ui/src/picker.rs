@@ -34,7 +34,7 @@ pub fn picker_modal(id: impl Into<ElementId>, cx: &App) -> Stateful<Div> {
         .overflow_hidden()
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .bg(cx.theme().background.raised(1))
         .shadow_lg()
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -45,7 +45,7 @@ pub fn picker_header(cx: &App) -> Div {
         .flex_none()
         .gap(px(CHROME_GAP))
         .border_b_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .p(px(CHROME_GAP))
 }
 
@@ -55,7 +55,7 @@ pub fn picker_search(input: &Entity<InputState>, cx: &App) -> Div {
         .h(px(32.0))
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .bg(cx.theme().background.raised(1))
         .px_2p5()
         .child(
@@ -103,7 +103,7 @@ pub fn picker_footer(cx: &App) -> Div {
         .flex_none()
         .gap(px(CHROME_GAP))
         .border_t_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .py(px(CHROME_GAP))
         .pl_4()
         .pr(px(CHROME_GAP))

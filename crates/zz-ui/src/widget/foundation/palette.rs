@@ -35,8 +35,6 @@ fn scrim(alpha: f32) -> Hsla {
 fn palette(mode: ThemeMode) -> ThemeColor {
     // shadcn/Tailwind scale values, as `hsl(deg, %, %)`.
     let neutral_50 = hsl(0., 0., 98.);
-    let neutral_200 = hsl(0., 0., 89.8);
-    let neutral_800 = hsl(0., 0., 14.9);
     let neutral_950 = hsl(0., 0., 3.9);
     let white = hsl(0., 0., 100.);
     let red_400 = hsl(0., 90.6, 70.8);
@@ -57,7 +55,6 @@ fn palette(mode: ThemeMode) -> ThemeColor {
     ThemeColor {
         background: per_mode!(white, neutral_950),
         foreground: per_mode!(neutral_950, neutral_50),
-        border: per_mode!(neutral_200, neutral_800),
         success: per_mode!(green_500, green_400),
         warning: per_mode!(yellow_500, yellow_400),
         danger: per_mode!(red_500, red_400),
@@ -78,9 +75,28 @@ mod tests {
     #[test]
     fn the_chrome_is_achromatic() {
         for palette in [ThemeColor::light(), ThemeColor::dark()] {
-            for neutral in [palette.background, palette.foreground, palette.border] {
+            for neutral in [palette.background, palette.foreground] {
                 assert_eq!(neutral.s, 0.0);
             }
+        }
+    }
+
+    #[test]
+    fn borders_sit_between_background_and_foreground() {
+        for palette in [ThemeColor::light(), ThemeColor::dark()] {
+            let lightness = super::super::color::oklab_lightness;
+            let background = lightness(palette.background);
+            let foreground = lightness(palette.foreground);
+            let border = lightness(palette.border());
+            assert!(border > background.min(foreground));
+            assert!(border < background.max(foreground));
+            assert_eq!(palette.border().a, 1.0);
+            let translucent = ThemeColor {
+                background: palette.background.opacity(0.5),
+                foreground: palette.foreground.opacity(0.5),
+                ..*palette
+            };
+            assert_eq!(translucent.border().a, 1.0);
         }
     }
 

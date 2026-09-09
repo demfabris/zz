@@ -190,7 +190,7 @@ impl RenderOnce for ChooserModal {
                         .px(px(12.0))
                         .py(px(9.0))
                         .border_b_1()
-                        .border_color(cx.theme().border)
+                        .border_color(cx.theme().border())
                         .bg(cx.theme().background.raised(2))
                         .font_family(self.font_family.clone())
                         .text_size(crate::rems_from_px(11.0))
@@ -204,7 +204,7 @@ impl RenderOnce for ChooserModal {
                     .px(px(12.0))
                     .py(px(9.0))
                     .border_b_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().border())
                     .bg(cx.theme().background.raised(2))
                     .font_family(self.font_family.clone())
                     .text_size(crate::rems_from_px(11.0))
@@ -568,7 +568,7 @@ fn chooser_hint(hint: ChooserHint) -> impl IntoElement {
 fn chooser_shadow(cx: &App) -> Vec<BoxShadow> {
     vec![
         BoxShadow {
-            color: cx.theme().border.subtle(),
+            color: cx.theme().border().subtle(),
             offset: point(px(0.0), px(0.0)),
             blur_radius: px(0.0),
             spread_radius: px(1.0),

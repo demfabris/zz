@@ -383,7 +383,7 @@ impl RenderOnce for TitleBar {
                 .h(TITLE_BAR_HEIGHT)
                 .pl(title_bar_left_padding(cx))
                 .border_b_1()
-                .border_color(cx.theme().border)
+                .border_color(cx.theme().border())
                 .bg(cx.theme().background)
                 .refine_style(&self.style)
                 .when(is_linux, |this| {

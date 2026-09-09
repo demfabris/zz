@@ -6,12 +6,26 @@ import Testing
 @Test func paletteMatchesGPUIRoots() {
     #expect(ZZTheme.light.background.hex == "#ffffff")
     #expect(ZZTheme.light.foreground.hex == "#0a0a0a")
-    #expect(ZZTheme.light.border.hex == "#e5e5e5")
     #expect(ZZTheme.dark.background.hex == "#0a0a0a")
     #expect(ZZTheme.dark.foreground.hex == "#fafafa")
-    #expect(ZZTheme.dark.border.hex == "#262626")
     #expect(ZZTheme.light.scrim.alpha == 0.05)
     #expect(ZZTheme.dark.scrim.alpha == 0.2)
+}
+
+@Test func bordersSitBetweenBackgroundAndForeground() {
+    for theme in [ZZTheme.light, ZZTheme.dark] {
+        let background = theme.background.oklabLightness
+        let foreground = theme.foreground.oklabLightness
+        let border = theme.border.oklabLightness
+        #expect(border > min(background, foreground))
+        #expect(border < max(background, foreground))
+        #expect(abs((border - background) / (foreground - background) - 0.14) < 0.0001)
+        #expect(theme.border.alpha == 1)
+        var translucent = theme
+        translucent.background = theme.background.opacity(0.5)
+        translucent.foreground = theme.foreground.opacity(0.5)
+        #expect(translucent.border.alpha == 1)
+    }
 }
 
 @Test func hexInputRoundTripsAndRejectsMalformedValues() {

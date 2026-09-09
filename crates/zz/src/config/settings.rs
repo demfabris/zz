@@ -145,6 +145,7 @@ pub(crate) struct SettingsView {
     editor_font_size: Entity<InputState>,
     pane_border_width: Entity<InputState>,
     widget_corner_radius: Entity<InputState>,
+    chrome_contrast: Entity<InputState>,
     shadow_strength: Entity<InputState>,
     window_corner_radius: Entity<InputState>,
     chrome_pickers: BTreeMap<ChromeColor, Entity<ColorPickerState>>,
@@ -233,6 +234,13 @@ impl SettingsView {
             window,
             cx,
         );
+        let chrome_contrast = numeric_value_input(
+            ConfigKey::ChromeContrast,
+            observed.chrome_contrast.value,
+            5.0,
+            window,
+            cx,
+        );
         let shadow_strength = numeric_value_input(
             ConfigKey::ShadowStrength,
             observed.shadow_strength.value,
@@ -285,6 +293,7 @@ impl SettingsView {
                 window,
                 cx,
             ),
+            numeric_input_subscription(&chrome_contrast, ConfigKey::ChromeContrast, window, cx),
             numeric_input_subscription(&shadow_strength, ConfigKey::ShadowStrength, window, cx),
             numeric_input_subscription(
                 &window_corner_radius,
@@ -314,6 +323,7 @@ impl SettingsView {
             editor_font_size,
             pane_border_width,
             widget_corner_radius,
+            chrome_contrast,
             shadow_strength,
             window_corner_radius,
             chrome_pickers,
@@ -505,6 +515,18 @@ impl SettingsView {
                 window,
                 cx,
             );
+            if !numeric_input_matches_value(
+                ConfigKey::ChromeContrast,
+                &self.chrome_contrast.read(cx).value(),
+                resolved.chrome_contrast.value,
+            ) {
+                synchronize_text_input(
+                    &self.chrome_contrast,
+                    &numeric_input_text(ConfigKey::ChromeContrast, resolved.chrome_contrast.value),
+                    window,
+                    cx,
+                );
+            }
             if !numeric_input_matches_value(
                 ConfigKey::ShadowStrength,
                 &self.shadow_strength.read(cx).value(),
@@ -788,6 +810,14 @@ impl SettingsView {
             AppearancePageItem::ChromeColor(color) => {
                 self.chrome_color_setting(color, resolved, inherited)
             }
+            AppearancePageItem::ChromeContrast => Self::numeric_setting(
+                ConfigKey::ChromeContrast,
+                "Contrast",
+                "Adjust surface, text, and edge contrast from 50% to 200%.",
+                resolved.chrome_contrast,
+                &self.chrome_contrast,
+                cx,
+            ),
             AppearancePageItem::Animations => Self::boolean_setting(
                 ConfigKey::Animations,
                 "Animations",
@@ -1620,7 +1650,7 @@ impl SettingsView {
                             .overflow_hidden()
                             .p(px(CONFIG_EDITOR_PADDING))
                             .border_1()
-                            .border_color(cx.theme().border)
+                            .border_color(cx.theme().border())
                             .bg(cx.theme().editor_background())
                             .font_family(cx.theme().mono_font_family.clone())
                             .text_size(px(CONFIG_EDITOR_FONT_SIZE))
@@ -2274,7 +2304,9 @@ fn numeric_input_subscription(
                 settings.commit_numeric_input(key, input, true, window, cx);
             } else if matches!(
                 key,
-                ConfigKey::ShadowStrength | ConfigKey::PaneBackgroundOpacity
+                ConfigKey::ShadowStrength
+                    | ConfigKey::PaneBackgroundOpacity
+                    | ConfigKey::ChromeContrast
             ) && matches!(event, InputEvent::Change)
             {
                 settings.commit_numeric_input(key, input, false, window, cx);
@@ -2319,7 +2351,7 @@ fn numeric_range(key: ConfigKey) -> (f32, f32) {
 fn numeric_input_scale(key: ConfigKey) -> f32 {
     if matches!(
         key,
-        ConfigKey::ShadowStrength | ConfigKey::PaneBackgroundOpacity
+        ConfigKey::ShadowStrength | ConfigKey::PaneBackgroundOpacity | ConfigKey::ChromeContrast
     ) {
         100.0
     } else {
@@ -2330,7 +2362,7 @@ fn numeric_input_scale(key: ConfigKey) -> f32 {
 fn numeric_input_text(key: ConfigKey, value: f32) -> String {
     if matches!(
         key,
-        ConfigKey::ShadowStrength | ConfigKey::PaneBackgroundOpacity
+        ConfigKey::ShadowStrength | ConfigKey::PaneBackgroundOpacity | ConfigKey::ChromeContrast
     ) {
         format!("{:.2}", value * numeric_input_scale(key))
             .trim_end_matches('0')
@@ -2364,6 +2396,7 @@ fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
         ConfigKey::PaneMargin => config.pane_margin.value,
         ConfigKey::PaneBorderWidth => config.pane_border_width.value,
         ConfigKey::WidgetCornerRadius => config.widget_corner_radius.value,
+        ConfigKey::ChromeContrast => config.chrome_contrast.value,
         ConfigKey::ShadowStrength => config.shadow_strength.value,
         ConfigKey::WindowCornerRadius => config.window_corner_radius.value,
         ConfigKey::EditorFontSize => config.editor_font_size.value,
@@ -2465,7 +2498,7 @@ fn preset_swatches(preset: &'static ChromePreset, cx: &App) -> gpui::Div {
                     div()
                         .size(px(6.0))
                         .rounded_full()
-                        .bg(zz_ui::parse_hex(hex).unwrap_or(cx.theme().border))
+                        .bg(zz_ui::parse_hex(hex).unwrap_or(cx.theme().border()))
                 }))
         }),
     )
@@ -2660,6 +2693,32 @@ fn report_write_error(operation: &str, key: &str, error: &std::io::Error, cx: &m
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contrast_input_uses_50_to_200_percent_after_the_color_rows() {
+        let key = ConfigKey::ChromeContrast;
+        assert_eq!(numeric_range(key), (50.0, 200.0));
+        for (factor, text) in [(0.5, "50"), (1.0, "100"), (1.05, "105"), (2.0, "200")] {
+            assert_eq!(numeric_input_text(key, factor), text);
+            assert!(numeric_input_matches_value(key, text, factor));
+        }
+        for value in ["49", "201", "NaN", "invalid"] {
+            assert!(validate_numeric_value(key, value).is_err());
+        }
+        assert_eq!(
+            numeric_input_text(key, numeric_config_value(&AppConfig::default(), key)),
+            "100"
+        );
+        let items = appearance_page_items(true);
+        let last_color = items
+            .iter()
+            .rposition(|item| matches!(item, AppearancePageItem::ChromeColor(_)))
+            .unwrap();
+        assert!(matches!(
+            items.get(last_color + 1),
+            Some(AppearancePageItem::ChromeContrast)
+        ));
+    }
 
     #[test]
     fn percentage_inputs_convert_and_reject_invalid_edits() {

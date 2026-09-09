@@ -49,7 +49,7 @@ pub fn menu_separator(id: impl Into<ElementId>, row_height: Pixels, cx: &App) ->
         .flex()
         .items_center()
         .px(px(8.0))
-        .child(div().h(px(1.0)).w_full().bg(cx.theme().border))
+        .child(div().h(px(1.0)).w_full().bg(cx.theme().border()))
 }
 
 pub fn confirm_prompt(

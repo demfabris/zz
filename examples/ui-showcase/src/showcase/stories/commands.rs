@@ -302,7 +302,7 @@ fn footer(search: Option<ChooserSearch>, cx: &App) -> impl IntoElement {
         .overflow_hidden()
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .child(chooser_footer(
             search,
             hints,

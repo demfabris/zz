@@ -683,12 +683,12 @@ impl ButtonVariant {
             (Self::Default, ButtonStyleState::Normal) => cx.theme().background.raised(1).into(),
             (Self::Default, ButtonStyleState::Hovered) => cx
                 .theme()
-                .border
+                .border()
                 .mix_oklab(cx.theme().transparent, 0.5)
                 .into(),
             (Self::Default, ButtonStyleState::Active) => cx
                 .theme()
-                .border
+                .border()
                 .mix_oklab(cx.theme().transparent, 0.7)
                 .into(),
             (Self::Primary, ButtonStyleState::Normal) => cx.theme().foreground.opacity(0.1),
@@ -785,8 +785,8 @@ impl ButtonVariant {
 
     fn border_color(&self, outline: bool, cx: &mut App) -> Hsla {
         match self {
-            Self::Default => cx.theme().border,
-            Self::Secondary => cx.theme().border,
+            Self::Default => cx.theme().border(),
+            Self::Secondary => cx.theme().border(),
             Self::Primary => cx.theme().foreground,
             Self::Danger => {
                 if outline {
@@ -1023,7 +1023,7 @@ impl ButtonVariant {
         } else if let Self::Default = self {
             (
                 cx.theme().background.raised(1).opacity(0.5).into(),
-                cx.theme().border.opacity(0.5),
+                cx.theme().border().opacity(0.5),
             )
         } else {
             let border = match self {

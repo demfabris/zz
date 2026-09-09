@@ -42,6 +42,7 @@ pub enum AppearancePageItem<C> {
     AppIcon,
     Preset,
     ChromeColor(C),
+    ChromeContrast,
     Animations,
     WidgetCornerRadius,
     ShadowStrength,
@@ -80,13 +81,14 @@ pub fn appearance_page_items<C>(
         AppearancePageItem::Group {
             title: "Chroma Colors",
             description: Some(
-                "Recolors the application chrome. Every panel, hover state, muted label and focus \
-                 ring is derived from these six, so nothing else needs setting.",
+                "Choose the five base colors for application surfaces, text, and status. \
+                 Edges follow the background and foreground.",
             ),
         },
         AppearancePageItem::Preset,
     ]);
     items.extend(colors.into_iter().map(AppearancePageItem::ChromeColor));
+    items.push(AppearancePageItem::ChromeContrast);
     items.extend([
         AppearancePageItem::Group {
             title: "Tweaks",
@@ -273,7 +275,7 @@ fn theme_preview_contents(colors: &ThemeColor) -> gpui::Div {
                 .w(px(THEME_PREVIEW_SIDEBAR_WIDTH))
                 .flex_none()
                 .border_r_1()
-                .border_color(colors.border),
+                .border_color(colors.border()),
         )
         .child(
             div()

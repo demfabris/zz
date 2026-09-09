@@ -1557,7 +1557,7 @@ pub fn agent_attachment_thumbnail(
         .overflow_hidden()
         .rounded(cx.theme().radius)
         .border_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .bg(cx.theme().background.raised(2))
         .cursor_pointer()
         .child(
@@ -1659,7 +1659,7 @@ fn render_entry(
                     .py_2()
                     .rounded(cx.theme().radius)
                     .border_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().border())
                     .bg(cx.theme().background.raised(1))
                     .text_size(crate::rems_from_px(13.0))
                     .when(!images.is_empty(), |this| {
@@ -1755,7 +1755,7 @@ fn render_entry(
                             .pl_4()
                             .py_1()
                             .border_l_1()
-                            .border_color(cx.theme().border)
+                            .border_color(cx.theme().border())
                             .text_size(crate::rems_from_px(12.0))
                             .text_color(cx.theme().foreground.muted())
                             .child(markdown_view(store, id, MarkdownSlot::Body, markdown, cx)),
@@ -1769,7 +1769,7 @@ fn render_entry(
             .gap_2()
             .rounded(cx.theme().radius)
             .border_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().border())
             .px_3()
             .py_2()
             .child(
@@ -2069,7 +2069,7 @@ fn render_tool_content(
     div()
         .w_full()
         .border_t_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .child(tool_content_scroll_area(
             ("agent-tool-content-scroll", id),
             &scroll_handle,
@@ -2705,7 +2705,7 @@ impl MarkdownPlugin for MermaidPlugin {
             .p_3()
             .rounded(cx.theme().radius)
             .border_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().border())
             .bg(cx.theme().background)
             .overflow_hidden()
             .child(content)
@@ -2758,7 +2758,7 @@ impl MermaidTheme {
                 muted: cx.theme().background.hover(),
                 foreground: cx.theme().foreground,
                 muted_foreground: cx.theme().foreground.muted(),
-                border: cx.theme().border,
+                border: cx.theme().border(),
                 primary: cx.theme().foreground,
                 primary_foreground: cx.theme().foreground.on(),
                 success: cx.theme().success,
@@ -3086,7 +3086,7 @@ fn mermaid_theme_key(cx: &App) -> u64 {
         cx.theme().background.hover(),
         cx.theme().foreground,
         cx.theme().foreground.muted(),
-        cx.theme().border,
+        cx.theme().border(),
         cx.theme().foreground,
         cx.theme().foreground.on(),
         cx.theme().success,
@@ -3268,7 +3268,7 @@ pub fn agent_pane_header(
         .gap_3()
         .px(px(CHROME_GAP))
         .border_b_1()
-        .border_color(cx.theme().border)
+        .border_color(cx.theme().border())
         .child(div().min_w_0().child(leading))
         .child(div().flex_none().child(trailing))
 }

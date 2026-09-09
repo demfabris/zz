@@ -821,7 +821,7 @@ impl RenderOnce for SettingEntry {
                         .flex_none()
                         .h(px(1.0))
                         .mx(px(SETTINGS_STACK_PADDING))
-                        .bg(cx.theme().border),
+                        .bg(cx.theme().border()),
                 )
             })
             .child(body);

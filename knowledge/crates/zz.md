@@ -4,7 +4,7 @@ title: zz crate (the GPUI client)
 description: The long-lived GPUI desktop client. Reconciles recursive pane layouts and hosts stable terminal, Chromium browser, and native Agent pane entities.
 resource: crates/zz/src/lib.rs
 tags: [gpui, crate, client, terminal, browser, agent, ui]
-timestamp: 2026-08-30T00:00:00-03:00
+timestamp: 2026-09-09T00:00:00Z
 ---
 
 # Overview
@@ -276,13 +276,14 @@ effect without a restart.
 
 `apply_zz_overrides` writes, in this order:
 
-- the six `chrome-*` palette roots (`ChromeColor::ALL`) that are set. Only the roots are written;
+- the five `chrome-*` palette roots (`ChromeColor::ALL`) that are set. Only the roots are written;
   every elevation, hover state, muted text, and focus ring derives from them at paint time, so
-  recoloring reaches the whole UI with no per-component plumbing. `CHROME_PRESETS` ships ten
-  ready-made mode + roots pairs;
+  recoloring reaches the whole UI with no per-component plumbing. `CHROME_PRESETS` ships eleven
+  paired light/dark palettes;
 - `mono_font_family` from the terminal's resolved primary family, so Agent Markdown, tool previews,
   and code blocks match the terminal typeface;
-- `radius` from `widget-corner-radius`, which reaches every widget through the theme.
+- `radius` from `widget-corner-radius`, which reaches every widget through the theme;
+- `contrast` from `chrome-contrast`, which scales derived colors and survives mode changes.
 
 The font is the sole terminal→chrome crossover: a typeface, never chroma. Terminal alpha is resolved
 at the terminal pane's own paint boundary.

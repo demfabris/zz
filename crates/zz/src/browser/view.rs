@@ -464,7 +464,7 @@ fn element_picker_appearance(theme: &zz_ui::Theme, page_zoom: f64) -> ElementPic
         highlight_contrast: to_hex(theme.background.opaque()),
         preview_background: to_hex(theme.background.raised(1).opaque()),
         preview_foreground: to_hex(theme.foreground),
-        preview_border: to_hex(theme.border),
+        preview_border: to_hex(theme.border()),
         shadow: theme.shadow.then(|| to_hex(theme.scrim)),
         radius: f32::from(theme.radius),
         font_family: theme.mono_font_family.to_string(),
@@ -3914,7 +3914,6 @@ mod tests {
         let mut theme = zz_ui::Theme::default();
         theme.colors.background = zz_ui::parse_hex("#102030").unwrap();
         theme.colors.foreground = zz_ui::parse_hex("#abcdef").unwrap();
-        theme.colors.border = zz_ui::parse_hex("#345678").unwrap();
         theme.colors.scrim = zz_ui::parse_hex("#01020366").unwrap();
         theme.radius = px(17.0);
         theme.shadow = true;
@@ -3930,7 +3929,7 @@ mod tests {
             to_hex(theme.background.raised(1).opaque())
         );
         assert_eq!(appearance.preview_foreground, "#abcdef");
-        assert_eq!(appearance.preview_border, "#345678");
+        assert_eq!(appearance.preview_border, to_hex(theme.border()));
         assert_eq!(appearance.shadow.as_deref(), Some("#01020366"));
         assert_eq!(appearance.radius, 17.0);
         assert_eq!(appearance.font_family, "Iosevka");

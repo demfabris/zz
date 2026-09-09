@@ -52,7 +52,7 @@ impl Styled for Separator {
 
 impl RenderOnce for Separator {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let color = self.color.unwrap_or(cx.theme().border);
+        let color = self.color.unwrap_or(cx.theme().border());
         let vertical = self.axis == Axis::Vertical;
 
         div()

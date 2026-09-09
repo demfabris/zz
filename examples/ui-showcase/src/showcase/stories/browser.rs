@@ -157,7 +157,7 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
                             .overflow_hidden()
                             .rounded(cx.theme().radius)
                             .border_1()
-                            .border_color(cx.theme().border)
+                            .border_color(cx.theme().border())
                             .child(mock_browser_page(cx))
                             .child(BrowserPickStatus::new("Select an element · Esc to cancel")),
                         cx,

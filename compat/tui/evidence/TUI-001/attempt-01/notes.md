@@ -19,56 +19,85 @@ cores) from the worktree `/home/demfabris/dev/zz-tui-lane` at
 | `attached-client.stdout.txt` | `compat/attached-client.sh`, exit 0, `attached-client compatibility: PASS` |
 | `timeout-diagnostics/` | a deliberately sabotaged run, kept as proof that the new dump fires and as the shape a real timeout leaves behind |
 
+`environment.txt`'s zz sha256 identifies the artifact that produced these runs;
+it does not attest it. A cargo debug build of zz is not bit-reproducible on this
+box: the cycle-18 reviewer rebuilt `-p zz` at this same worktree path from the
+same source and got a different hash, and a third from a different worktree. The
+pin's hash does verify exactly. Provenance here is carried by reproduction
+instead, which is the stronger check: the reviewer's independently built zz
+reproduced this attempt's fixture results and TUI-002's 195 capture files byte
+for byte. `environment.txt` was also captured before this attempt's
+timeout-diagnostics change, so its `git status --short` line describes the tree
+that produced `geometry-run-1..3`, not `geometry-run-4..6`; both shapes are
+named in the table above. A later cycle that wants an attestable hash should
+take it from a release build, or write a second `environment.txt` after the last
+fixture edit.
+
 ## The recorded timeout
 
 The ledger recorded an exploratory run on 2026-09-09 that exited 2 on `zz
 geometry report did not happen within 10 seconds`, on macOS, with an existing
 `target/debug/zz` that was neither rebuilt nor revision-attested.
 
-That macOS run cannot be re-run on this box, so this attempt explains it rather
-than reproducing it, which is what the clause allows. The explanation rests on
-four measurements, not on a narrowing:
+That macOS run cannot be re-run on this box. **This attempt does not explain it
+either, and clause 2 is not satisfied here.** An earlier draft of this file
+claimed it was, on a stale-pre-fix-binary story that the campaign's own registry
+refutes. What follows is what was measured, including that refutation.
 
 1. **The fixture and the runtime at `576b6b74` are sound here.** A zz built in
-   this worktree, sha256
-   `3cb6e28437cd028b49c2c2eb07c4414a69226518bf2f287e7c52123d5bf70a38`, passes
-   `compat/tui-pane-geometry.sh` six times out of six across two shapes of the
-   fixture, in 4 to 5 seconds a run against a 10 second bound. The wait that
-   fired in the record is the one at `measure()`, and it is nowhere near its
-   bound at this revision.
+   this worktree passes `compat/tui-pane-geometry.sh` six times out of six
+   across two shapes of the fixture, in 4 to 5 seconds a run against a 10 second
+   bound. The wait that fired in the record is the one at `measure()`, and it is
+   nowhere near its bound at this revision.
 
-2. **The wait that fired names the input path, and the fixture the closed gap
-   cites is the same one.** `tui.client-input-backpressure` (closed 2026-09-07,
-   commit `0bed7fe7`) lists `file:compat/tui-pane-geometry.sh` among its
-   evidence. Its recorded cause is exact: `crates/zz-tui/src/render.rs`
-   `flush_output` took `io::stdout().lock()` and did a blocking `write_all` plus
-   `flush` on the main event loop, the same loop that drains the `MainEvent`
-   channel the stdin reader thread feeds, so a client whose own terminal output
-   backed up stopped acting on input entirely — measured at `012b4dcc` as "did
-   not act at all within the fixture's 10 second bound", against 0.020 s on the
-   pin.
-
-3. **The timeline puts a stale binary on the wrong side of that fix.** The
-   fixture reached its current shape at `314c55e0` (2026-09-07T00:15:42-03:00);
-   the backpressure fix landed at `0bed7fe7` (2026-09-07T13:31:08-03:00),
-   thirteen hours later, and did not touch the fixture. A `target/debug/zz` left
-   over from anywhere in that window, or before it, runs the current fixture
-   with the stalling client. That is what "not rebuilt or revision-attested"
-   admits.
-
-4. **The named cause is measurably absent at this tip.**
+2. **The named backpressure cause is measurably absent at this tip.**
    `compat/run.sh --strict-geometry smoke/tui-client-input-backpressure` exits 0
-   with 0 divergences here, so the mechanism that would produce that timeout is
-   not present in the binary this attempt attests.
+   with 0 divergences here, so the mechanism `tui.client-input-backpressure`
+   named is not present in the binary this attempt attests.
 
-What this explanation does **not** establish: it does not measure the macOS pty
-write buffer that would decide how quickly a pre-fix client's `write_all` parks,
-and it does not identify the exact revision of the binary that timed out,
-because that binary was overwritten. `/home/demfabris/dev/zz/target/debug/zz`
-was rebuilt on this box at 18:25 on 2026-09-09, before this attempt started, so
-it is not the artifact from the record and its hash proves nothing about it. The
-falsifier is stated plainly: build a zz at `0bed7fe7^` on macOS and run this
-fixture. If it passes there, the explanation is wrong.
+3. **The stale-pre-fix-binary hypothesis is refuted, by the very gap that was
+   cited for it.** `tui.client-input-backpressure` (closed 2026-09-07 at
+   `0bed7fe7`) does list `file:compat/tui-pane-geometry.sh` among its evidence,
+   and its recorded cause is exact — `crates/zz-tui/src/render.rs`
+   `flush_output` did a blocking `write_all` plus `flush` on the main event
+   loop. But that same resolution rules the stall out as the cause of a macOS
+   geometry expiry, verbatim:
+
+   > It also exited 0 at origin/main 012b4dcc before the fix, so the macbook
+   > expiry the cycle-17 gate recorded is not this stall reproducing there: that
+   > script drives the pane through the CLI's send-keys, not through the
+   > client's stdin, and its inner clients run inside an outer pinned tmux that
+   > reads their output continuously, so no backpressure ever builds. What
+   > remains on the macbook is unexplained and belongs to whoever next runs the
+   > tool there.
+
+   Two refutations, either one sufficient.
+
+   **Empirical.** `012b4dcc` is 2026-09-07T10:45:51-03:00, after the fixture
+   reached its current shape at `314c55e0` (00:15:42) and before the fix at
+   `0bed7fe7` (13:31:08) — exactly the window a stale binary would have to come
+   from — and the registry records this fixture exiting 0 there. A pre-fix
+   binary running this fixture is measured as passing, so a pre-fix stale binary
+   does not produce this timeout.
+
+   **Mechanism, and it is platform-independent.** The fixture's inner clients
+   run inside an outer pinned tmux that drains their output continuously, so the
+   backpressure `flush_output` stalled on never builds in this fixture at all.
+   If no backpressure builds, the size of the macOS pty write buffer is
+   irrelevant and the pre-fix stall cannot fire on any platform. The pty-buffer
+   hedge the earlier draft offered does not reach this half.
+
+**So what clause 2 still needs.** The registry names this exact clause as open
+work: "What remains on the macbook is unexplained and belongs to whoever next
+runs the tool there." Neither measurement (1) nor (2) above explains a macOS
+expiry — they establish that the fixture and the runtime are sound on Linux at
+this revision and that one candidate cause is gone. The recorded timeout stays
+unexplained, and closing clause 2 needs a run of `compat/tui-pane-geometry.sh`
+on macOS with an attested binary, with the timeout dump this attempt added
+retained if it fires. The timed-out binary's own revision is unrecoverable:
+`/home/demfabris/dev/zz/target/debug/zz` was rebuilt on this box at 18:25 on
+2026-09-09, before this attempt started, so its hash says nothing about the
+record.
 
 ## What the timeout dump now retains
 

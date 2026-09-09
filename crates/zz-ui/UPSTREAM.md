@@ -38,7 +38,9 @@ Everything is reached through `zz_ui::<widget>`, mirroring upstream's namespace,
 so the fork never moved a call site.
 
 The app-owned `shell`, `navigation`, and `pane` modules share one background at
-`app_shell_surface`. Fixed chrome inherits it; panes paint their own surfaces
+`app_shell_surface`. The Linux client-decorated window paints that background at
+`RoundedWindowFrame`, beneath its border, and leaves the inset shell transparent.
+Fixed chrome inherits it; panes paint their own surfaces
 above it using `Theme::pane_background_opacity`, defaulting to 50%. The Agent composer
 card uses the same factor; the footer inherits the pane background without repainting it.
 Margins, split gaps, and rounded pane corners need no separate fill.
@@ -53,7 +55,7 @@ Margins, split gaps, and rounded pane corners need no separate fill.
 | `kbd` | trimmed | one muted pill: upstream's `appearance(false)` plain-text mode and its outline/primary treatments are dropped, since every hint reads as a caption beside its label. Added `lowercase()` for hints that read as prose (`t`, `b`, `a`) rather than as a keycap legend. |
 | `switch` | trimmed | dropped inline label/`Side`/custom color; kept the animated thumb |
 | `menu` | close-to-source | item text `text_sm` → **`text_xs`** (the change that started the fork); owns its actions (`zz_menu`), key context (`ZzPopupMenu`) and `init()`; upstream's native `AppMenuBar` not carried over |
-| `icon` | trimmed | `IconName` is a **hand-written** enum instead of upstream's build-time proc-macro codegen; SVGs live in `assets/icons` and are embedded by our own `Assets`, replacing `gpui-component-assets`; `Globe` uses Tabler’s round `world` artwork |
+| `icon` | trimmed | `IconName` is a **hand-written** enum instead of upstream's build-time proc-macro codegen; SVGs live in `assets/icons` and are embedded by our own `Assets`, replacing `gpui-component-assets`; `Globe` uses Tabler’s round `world` artwork. The dedicated `window-close` glyph extends the Tabler X to the same 18-unit span as maximize, keeping its 2-unit stroke and the general-purpose `xmark` unchanged |
 | `tooltip` | trimmed | hangs off gpui's `.tooltip()` rather than upstream's `Root`-owned overlay; dropped `ComponentTooltip` after nothing adopted it |
 | `popover` | trimmed | owns its `Cancel` action and `ZzPopover` context |
 | `list` | trimmed | `ListItem` only; upstream's virtualized delegate `List` is unused |

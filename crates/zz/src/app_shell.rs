@@ -248,7 +248,16 @@ impl Render for AppShell {
             .collect::<Vec<_>>();
         let shell = app_shell_surface(
             "app-shell",
-            crate::theme::chrome_background(cx),
+            if cfg!(target_os = "linux")
+                && matches!(
+                    window.window_decorations(),
+                    gpui::Decorations::Client { .. }
+                )
+            {
+                gpui::transparent_black()
+            } else {
+                crate::theme::chrome_background(cx)
+            },
             sidebar,
             titlebar,
             self.workspace.clone(),

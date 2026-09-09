@@ -4,14 +4,14 @@ title: GPUI revision pin
 description: Where the patched Zed revision zz builds against is defined, how to read it, and what the carried GPUI patches do. gpui-component is not a dependency.
 resource: Cargo.toml
 tags: [gpui, zed, pin, reference, git-dependency]
-timestamp: 2026-07-27T00:00:00Z
+timestamp: 2026-09-09T00:00:00Z
 ---
 
 # Overview
 
 zz's GPUI application layer comes from the `demfabris/zed` `zz-patches` branch rather than a
-published crate. Desktop, browser, and showcase currently use local paths for the pane-shadow
-changes described below.
+published crate. Desktop, browser, and showcase pin the same published fork revision through
+their manifests and lockfiles.
 On Linux, `gpui_platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
 selects the native macOS and Windows backends automatically.
 
@@ -42,16 +42,14 @@ zz-patches  main  gpui,gpui_platform`), which is what `just forks` and `just for
 outside `gpui` itself is left. The fork's source revision and per-module port notes live in
 `crates/zz-ui/UPSTREAM.md`, not here.
 
-# Local pane renderer changes
+# Pane renderer changes
 
-Desktop, browser, and showcase currently override `gpui` and `gpui_platform` with local paths under
-`/Users/demfabris/.cache/zz-forks/zed/crates`, based on v0.6.1's pinned revision
-`3263264d6455a8f282268697377199864a81f7a4`. Metal, WGPU, and DirectX blurred inset shadows
+Fork commit `37d0b352ed` carries the pane renderer changes. Metal, WGPU, and DirectX blurred inset shadows
 use position-seeded stochastic alpha rounding in 1/128 steps to reduce banding. WGPU applies
 this before any required premultiplication. Dithering changes only alpha.
 The GPU test `faint_inset_shadows_dither_dark_composites` checks variation, noise size,
-brightness, and opaque composition. All three workspaces resolve the same local renderer
-through their manifests and lockfiles. These changes remain uncommitted.
+brightness, and opaque composition. All three workspaces resolve these changes
+through their shared Git revision pin.
 
 Blurred shadows also follow the element's superellipse cross-section in Metal, WGPU, and
 DirectX. The earlier carried smoothing fix covered only unblurred shadows, leaving the 2px
@@ -134,6 +132,12 @@ Each is upstream-able as a small Zed PR; if Zed merges an equivalent, drop it. I
     buffer-to-surface ratios, resubmits xdg geometry after zoom changes, and compensates for KWin's
     content-local effect coordinates. While ext blur is active, GPUI clips the incompatible outer
     shadow to the scene mask so raw rails and blurred corner tips cannot appear.
+
+WGPU window-frame antialiasing (`c8135f5b6b`) applies outer coverage once when a quad and the
+window mask have identical bounds, radii, and corner smoothing. Other intersections retain their
+mask multiplication, and material opacity remains independent. GPU pixel comparisons cover
+opaque and translucent fills, borders, circular and smoothed corners, partial tiling, and fractional
+positions. The user confirmed the correction in a native GNOME window on 2026-09-09.
 
 The comment block above the `[patch]` section in `Cargo.toml` narrates the same list; treat the
 branch's `git log` as the tiebreaker (it currently carries more commits than this list numbers,

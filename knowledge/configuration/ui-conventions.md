@@ -221,7 +221,10 @@ instead, with “Preset” shown when an otherwise-unset root inherits from the 
 of 86% background and 14% foreground at the default contrast. Other colors derive through `Colorize` at paint time, so
 overriding a root needs no parallel token table kept in step. Views read
 `cx.theme()` and never receive a copied palette or local color literals.
-The app shell paints one continuous chrome background beneath the pane layout. Fixed sidebar,
+The app shell paints one continuous chrome background beneath the pane layout. On Linux with
+client-side decorations, `RoundedWindowFrame` paints that background through the outer frame and
+`AppShell` leaves its inset surface transparent. This keeps the background beneath the antialiased
+border instead of exposing the shadow at the join, without stacking translucent fills. Fixed sidebar,
 titlebar, Settings, margins, split gaps, and rounded pane corners inherit that fill. The slideover
 sidebar paints its own overlay surface. App-owned pane roots use `theme::app_pane_background`
 with `Theme::pane_background_opacity`, controlled by Panes settings and defaulting to 50%.

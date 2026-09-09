@@ -93,6 +93,7 @@ impl RenderOnce for RoundedWindowFrame {
                                     .flex_1()
                                     .min_h_0()
                                     .min_w_0()
+                                    .bg(crate::theme::chrome_background(cx))
                                     .overflow_hidden()
                                     .when(!tiling.top, |surface| {
                                         surface.pt(WINDOW_FRAME_BORDER_SIZE)

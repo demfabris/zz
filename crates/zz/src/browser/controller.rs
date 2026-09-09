@@ -2027,6 +2027,11 @@ impl BrowserController {
         let Some(mut runtime) = self.detach_runtime(RuntimePhase::Initializing) else {
             return;
         };
+        runtime.set_remote_debugging_port(
+            crate::config::browser_config(cx)
+                .remote_debugging_port
+                .value,
+        );
         cx.spawn(async move |this, cx| {
             let result = runtime.start();
             let mut payload = Some((runtime, result));

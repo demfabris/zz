@@ -133,6 +133,7 @@ pub enum ConfigKey {
     EditorSoftWrap,
     EditorVimMode,
     BrowserElementSelectorHotkey,
+    BrowserRemoteDebuggingPort,
     BrowserSearchProvider,
     BrowserEgress,
     ThemeMode,
@@ -178,6 +179,7 @@ impl ConfigKey {
             Self::EditorSoftWrap => "editor-soft-wrap",
             Self::EditorVimMode => "editor-vim-mode",
             Self::BrowserElementSelectorHotkey => "browser-element-selector-hotkey",
+            Self::BrowserRemoteDebuggingPort => "browser-remote-debugging-port",
             Self::BrowserSearchProvider => "browser-search-provider",
             Self::BrowserEgress => "browser-egress",
             Self::ThemeMode => "theme-mode",
@@ -223,6 +225,7 @@ impl ConfigKey {
             "editor-soft-wrap" => Some(Self::EditorSoftWrap),
             "editor-vim-mode" => Some(Self::EditorVimMode),
             "browser-element-selector-hotkey" => Some(Self::BrowserElementSelectorHotkey),
+            "browser-remote-debugging-port" => Some(Self::BrowserRemoteDebuggingPort),
             "browser-search-provider" => Some(Self::BrowserSearchProvider),
             "browser-egress" => Some(Self::BrowserEgress),
             "theme-mode" => Some(Self::ThemeMode),
@@ -271,6 +274,7 @@ impl ConfigKey {
             | Self::EditorSoftWrap
             | Self::EditorVimMode
             | Self::BrowserElementSelectorHotkey
+            | Self::BrowserRemoteDebuggingPort
             | Self::BrowserSearchProvider
             | Self::BrowserEgress
             | Self::ThemeMode
@@ -307,6 +311,7 @@ impl<T> ConfigValue<T> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BrowserConfig {
     pub element_selector_hotkey: ConfigValue<String>,
+    pub remote_debugging_port: ConfigValue<Option<u16>>,
     pub search_provider: ConfigValue<SearchProvider>,
 }
 
@@ -316,6 +321,7 @@ impl Default for BrowserConfig {
             element_selector_hotkey: ConfigValue::from_default(
                 DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY.to_owned(),
             ),
+            remote_debugging_port: ConfigValue::from_default(None),
             search_provider: ConfigValue::from_default(DEFAULT_BROWSER_SEARCH_PROVIDER),
         }
     }
@@ -461,6 +467,7 @@ impl AppConfig {
             | ConfigKey::ShadowStrength
             | ConfigKey::EditorFontSize
             | ConfigKey::BrowserElementSelectorHotkey
+            | ConfigKey::BrowserRemoteDebuggingPort
             | ConfigKey::BrowserSearchProvider
             | ConfigKey::StatusAlign
             | ConfigKey::StatusClock
@@ -896,6 +903,23 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
             continue;
         }
 
+        if key == ConfigKey::BrowserRemoteDebuggingPort {
+            let target = &mut parsed.browser.remote_debugging_port;
+            target.provenance = ConfigProvenance::Override;
+            match value.parse::<u16>() {
+                Ok(0) => target.value = None,
+                Ok(port @ 1024..=65535) => target.value = Some(port),
+                _ => parsed.diagnostics.push(ConfigDiagnostic {
+                    line: line_number,
+                    message: format!(
+                        "invalid `{}`: expected 0 or an integer from 1024 to 65535",
+                        key.as_str(),
+                    ),
+                }),
+            }
+            continue;
+        }
+
         if key == ConfigKey::BrowserSearchProvider {
             let target = &mut parsed.browser.search_provider;
             target.provenance = ConfigProvenance::Override;
@@ -985,6 +1009,7 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
             | ConfigKey::EditorSoftWrap
             | ConfigKey::EditorVimMode
             | ConfigKey::BrowserElementSelectorHotkey
+            | ConfigKey::BrowserRemoteDebuggingPort
             | ConfigKey::BrowserSearchProvider
             | ConfigKey::BrowserEgress
             | ConfigKey::StatusAlign
@@ -1855,5 +1880,65 @@ mod tests {
             [("experimental-agent-pane".to_owned(), "off".to_owned())]
         );
         assert!(parsed.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn browser_remote_debugging_port_defaults_to_disabled() {
+        let parsed = parse_config("", "monospace");
+        assert_eq!(
+            parsed.browser.remote_debugging_port,
+            ConfigValue::from_default(None),
+        );
+        assert_eq!(
+            ConfigKey::parse(ConfigKey::BrowserRemoteDebuggingPort.as_str()),
+            Some(ConfigKey::BrowserRemoteDebuggingPort),
+        );
+    }
+
+    #[test]
+    fn browser_remote_debugging_port_accepts_zero_and_allowed_ports() {
+        for (source, expected) in [
+            ("0", None),
+            ("1024", Some(1024)),
+            ("9222", Some(9222)),
+            ("65535", Some(65535)),
+        ] {
+            let parsed = parse_config(
+                &format!("browser-remote-debugging-port = {source}\n"),
+                "monospace",
+            );
+            assert!(parsed.diagnostics.is_empty(), "{source}");
+            assert_eq!(parsed.browser.remote_debugging_port.value, expected);
+            assert_eq!(
+                parsed.browser.remote_debugging_port.provenance,
+                ConfigProvenance::Override
+            );
+        }
+        let parsed = parse_config(
+            "browser-remote-debugging-port = 9222\nbrowser-remote-debugging-port = 0\n",
+            "monospace",
+        );
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.browser.remote_debugging_port.value, None);
+    }
+
+    #[test]
+    fn browser_remote_debugging_port_rejects_invalid_values_and_retains_previous_port() {
+        for source in ["1", "1023", "65536", "-1", "9222.0", "\"9222\"", "port", ""] {
+            let parsed = parse_config(
+                &format!(
+                    "browser-remote-debugging-port = 9222\nbrowser-remote-debugging-port = {source}\n"
+                ),
+                "monospace",
+            );
+            assert_eq!(parsed.diagnostics.len(), 1, "{source}");
+            assert_eq!(parsed.diagnostics[0].line, 2);
+            assert!(
+                parsed.diagnostics[0]
+                    .message
+                    .contains("invalid `browser-remote-debugging-port`")
+            );
+            assert_eq!(parsed.browser.remote_debugging_port.value, Some(9222));
+        }
     }
 }

@@ -123,6 +123,7 @@ The client-local schema includes these scalar settings and chrome colors.
 | `editor-soft-wrap` | `true` | `true` or `false` | Wrap long lines at the pane edge instead of scrolling horizontally |
 | `editor-vim-mode` | `true` | `true` or `false` | Modal vim editing in editor panes: normal, insert, visual and visual-line modes |
 | `browser-element-selector-hotkey` | `cmd-shift-c` on macOS; `ctrl-shift-c` elsewhere | One GPUI keystroke containing Control, Alt, Command/Super, or Function; Shift is optional | Toggle the element selector while a Browser pane owns the Browser key context |
+| `browser-remote-debugging-port` | `0` (off) | Bare integer: `0` or `1024..=65535` | Loopback CDP endpoint; `ZZ_BROWSER_REMOTE_DEBUGGING_PORT` overrides this value at CEF startup. Restart the client after changing an initialized runtime; no Settings control |
 | `browser-search-provider` | `google` | `google`, `duckduckgo`, `brave` | Where a Browser pane's address bar sends an entry that is not an address |
 | `browser-egress` | `true` | `true` or `false` | Whether a Browser pane opened while attached to a remote ssh host routes its traffic through that host; panes already open keep the route they were created with |
 | `ui-font-family` | System default | Installed font family, or `.SystemUIFont` | Interface text across desktop windows; applies live and stays separate from terminal and editor fonts |
@@ -175,6 +176,11 @@ pane, so an edit reaches every open Browser pane on the next Enter. The engine s
 `zz_browser::SearchProvider`, which owns the query endpoints; the address bar's decision between
 navigating and searching is `zz_browser::resolve_address` (see
 [input translation](/browser/input-translation.md)).
+
+`browser-remote-debugging-port` shares `BrowserConfig`. The GUI passes it to CEF before the first
+browser operation initializes the runtime. An invalid file value produces a config diagnostic and
+keeps the preceding/default value; an invalid environment override prevents CEF startup. See
+[Agent access through CDP](/browser/agent-cdp.md) for attach commands and local access risks.
 
 `animations = false` sets GPUI's reduced-motion state. GPUI transitions, spinners, switches,
 dialogs, notifications, and animated UI images settle on a static frame; the custom scrollbar holds

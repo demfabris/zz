@@ -8,7 +8,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc, Mutex as StdMutex, Weak,
-        atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU64, Ordering},
     },
     time::Instant,
 };
@@ -337,6 +337,8 @@ pub enum BrowserError {
     Profile(#[from] BrowserProfileError),
     #[error("CEF could not parse the process command line")]
     CommandLine,
+    #[error("browser configuration error: {0} must be 0 or an integer from 1024 through 65535")]
+    RemoteDebuggingPort(&'static str),
     #[error("CEF returned an unexpected subprocess result: {0}")]
     ExecuteProcess(i32),
     #[error("CEF initialization failed; verify that its libraries and resources are installed")]
@@ -488,6 +490,7 @@ pub struct BrowserRuntime {
     signals: Receiver<RuntimeSignal>,
     args: Args,
     app: cef::App,
+    remote_debugging_port: Arc<AtomicU16>,
     sandbox_info: *mut u8,
     profile_paths: BrowserProfilePaths,
     profile_contexts: BTreeMap<String, ProfileContext>,
@@ -512,6 +515,13 @@ struct ProfileContext {
 }
 
 impl BrowserRuntime {
+    pub fn set_remote_debugging_port(&mut self, port: Option<u16>) {
+        if self.phase() == RuntimePhase::Uninitialized {
+            self.remote_debugging_port
+                .store(port.unwrap_or(0), Ordering::Relaxed);
+        }
+    }
+
     pub fn set_background_color(&mut self, color: u32) {
         self.background_color = color;
     }
@@ -585,6 +595,11 @@ impl BrowserRuntime {
             return Ok(());
         }
 
+        let port = resolve_remote_debugging_port(
+            std::env::var_os("ZZ_BROWSER_REMOTE_DEBUGGING_PORT").as_deref(),
+            self.remote_debugging_port.load(Ordering::Relaxed),
+        )?;
+        self.remote_debugging_port.store(port, Ordering::Relaxed);
         let started = diagnostic_timer();
         let settings = Settings {
             no_sandbox: 0,
@@ -1912,8 +1927,10 @@ fn bootstrap_args_with_paths(
     // and never `CEF_API_VERSION_LAST`.
     let _ = api_hash(cef::sys::CEF_API_VERSION, 0);
     let (signal_tx, signal_rx) = async_channel::unbounded();
+    let remote_debugging_port = Arc::new(AtomicU16::new(0));
     let mut app = RuntimeApp::new(
         signal_tx.clone(),
+        Arc::clone(&remote_debugging_port),
         RuntimeRenderProcessHandler::new(RendererSideRouter::new(element_picker_router_config())),
     );
     let result = execute_process(Some(args.as_main_args()), Some(&mut app), sandbox_info);
@@ -1975,6 +1992,7 @@ fn bootstrap_args_with_paths(
         signals: signal_rx,
         args,
         app,
+        remote_debugging_port,
         sandbox_info,
         profile_paths,
         profile_contexts: BTreeMap::new(),
@@ -2022,6 +2040,7 @@ pub fn run_subprocess() -> i32 {
     let (signal_tx, _signal_rx) = async_channel::unbounded();
     let mut app = RuntimeApp::new(
         signal_tx,
+        Arc::new(AtomicU16::new(0)),
         RuntimeRenderProcessHandler::new(RendererSideRouter::new(element_picker_router_config())),
     );
     let result = execute_process(Some(args.as_main_args()), Some(&mut app), ptr::null_mut());
@@ -2035,6 +2054,23 @@ fn owned_cef_string(value: &CefStringUserfree) -> Option<Arc<str>> {
 
 fn path_to_cef_string(path: &Path) -> CefString {
     CefString::from(path.to_string_lossy().as_ref())
+}
+
+fn resolve_remote_debugging_port(
+    environment: Option<&OsStr>,
+    configured: u16,
+) -> Result<u16, BrowserError> {
+    let (port, source) = match environment {
+        Some(value) => (
+            value
+                .to_str()
+                .and_then(|value| value.trim().parse::<u16>().ok()),
+            "ZZ_BROWSER_REMOTE_DEBUGGING_PORT",
+        ),
+        None => (Some(configured), "browser-remote-debugging-port"),
+    };
+    port.filter(|port| *port == 0 || *port >= 1024)
+        .ok_or(BrowserError::RemoteDebuggingPort(source))
 }
 
 fn configured_browser_frame_rate() -> Option<i32> {
@@ -3594,6 +3630,7 @@ impl BrowserSideHandler for ElementPickerQueryHandler {
 cef::wrap_app! {
     struct RuntimeApp {
         signals: Sender<RuntimeSignal>,
+        remote_debugging_port: Arc<AtomicU16>,
         render_process_handler: RenderProcessHandler,
     }
 
@@ -3625,6 +3662,13 @@ cef::wrap_app! {
             }
             let is_browser_process = process_type.is_none_or(|value| value.to_string().is_empty());
             if is_browser_process {
+                let port = self.remote_debugging_port.load(Ordering::Relaxed);
+                if port != 0 {
+                    command_line.append_switch_with_value(
+                        Some(&CefString::from("remote-debugging-port")),
+                        Some(&CefString::from(port.to_string().as_str())),
+                    );
+                }
                 // Chromium 151's Immersive Reading Mode crashes the browser process on
                 // any SPA navigation in a windowless WebContents.
                 let disable_features = CefString::from("disable-features");
@@ -4695,6 +4739,53 @@ fn ensure_no_active_data_operations(active_operations: &AtomicU64) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_debugging_port_defaults_and_environment_precedence() {
+        assert_eq!(resolve_remote_debugging_port(None, 0).unwrap(), 0);
+        assert_eq!(resolve_remote_debugging_port(None, 9222).unwrap(), 9222);
+        assert_eq!(
+            resolve_remote_debugging_port(Some(OsStr::new("9333")), 9222).unwrap(),
+            9333
+        );
+        assert_eq!(
+            resolve_remote_debugging_port(Some(OsStr::new("0")), 9222).unwrap(),
+            0
+        );
+        for port in ["1024", "65535"] {
+            assert_eq!(
+                resolve_remote_debugging_port(Some(OsStr::new(port)), 0)
+                    .unwrap()
+                    .to_string(),
+                port
+            );
+        }
+    }
+
+    #[test]
+    fn remote_debugging_port_rejects_invalid_configuration() {
+        for value in ["", "abc", "-1", "1", "1023", "65536", "9222.0"] {
+            assert!(matches!(
+                resolve_remote_debugging_port(Some(OsStr::new(value)), 9222),
+                Err(BrowserError::RemoteDebuggingPort(
+                    "ZZ_BROWSER_REMOTE_DEBUGGING_PORT"
+                ))
+            ));
+        }
+        assert!(matches!(
+            resolve_remote_debugging_port(None, 1023),
+            Err(BrowserError::RemoteDebuggingPort(
+                "browser-remote-debugging-port"
+            ))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_debugging_port_rejects_non_unicode_environment() {
+        use std::os::unix::ffi::OsStrExt;
+        assert!(resolve_remote_debugging_port(Some(OsStr::from_bytes(&[0xff])), 9222).is_err());
+    }
 
     #[test]
     fn popup_disposition_preserves_background_tab_intent() {

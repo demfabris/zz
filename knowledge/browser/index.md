@@ -1,6 +1,7 @@
 <!-- okf:listing:start (managed by okf.py index — edit prose outside this fence) -->
 # Concepts
 
+* [Agent access through CDP](agent-cdp.md) - Enable a loopback CDP endpoint for browser agents and correlate targets with zz browser panes.
 * [CEF runtime & subprocess dispatch](cef-runtime.md) - CEF Alloy OSR bootstrap with deferred initialization, single-binary subprocess dispatch, frame-rate policy, external BeginFrames, message pumping, and safe foreground command dispatch.
 * [In-page element picker](element-picker.md) - A token-guarded, single-use overlay that lets the user pick a DOM element in the page and returns a bounded, sanitized source-context string plus an optional screenshot of the picked area.
 * [Browser history & omnibox autocomplete](history-autocomplete.md) - Profile-scoped browser history, recent-use ranking, learned selections, and Chrome-like URL-bar autocomplete.

@@ -62970,6 +62970,100 @@ set-option -g @alias-mixed-next yes
     }
 
     #[test]
+    fn browser_url_formats_follow_active_tab_and_subscription_changes() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, terminal, browser) = {
+            let mut inner = shared.inner.lock();
+            let (session, window, terminal) = inner.engine.state.create_session("urls").unwrap();
+            let browser = inner
+                .engine
+                .state
+                .split_pane(
+                    terminal,
+                    zz_protocol::Axis::Horizontal,
+                    PaneKind::Browser(zz_protocol::BrowserDescriptor {
+                        tabs: vec![
+                            "https://example.com/first".to_owned(),
+                            "https://example.com/active".to_owned(),
+                        ],
+                        active_tab: 1,
+                        profile: "default".to_owned(),
+                    }),
+                )
+                .unwrap();
+            (session, window, terminal, browser)
+        };
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared.attach(control, session).unwrap();
+        let run = |args: &[&str]| {
+            let mut context = ExecutionContext::new(Some(session), Some(window), Some(browser));
+            shared
+                .execute(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .unwrap()
+                .output
+        };
+        assert_eq!(
+            run(&[
+                "display-message",
+                "-p",
+                "-t",
+                &browser.to_string(),
+                "#{browser_url}"
+            ]),
+            "https://example.com/active"
+        );
+        assert_eq!(
+            run(&[
+                "display-message",
+                "-p",
+                "-t",
+                &terminal.to_string(),
+                "url=#{browser_url}"
+            ]),
+            "url="
+        );
+        let listed = run(&["list-panes", "-F", "#{pane_id}|#{browser_url}"]);
+        assert!(
+            listed
+                .lines()
+                .any(|line| line == format!("{browser}|https://example.com/active"))
+        );
+        assert!(listed.lines().any(|line| line == format!("{terminal}|")));
+        run(&[
+            "refresh-client",
+            "-B",
+            &format!("url:{browser}:#{{browser_url}}"),
+        ]);
+        take_reliable_messages(&mailbox);
+        shared.refresh_control_subscriptions();
+        let changed_url = |expected: &str| {
+            take_reliable_messages(&mailbox).iter().any(|message| matches!(message,
+                ProtocolMessage::Event(Event { payload: EventPayload::SubscriptionChanged { name, value, .. }, .. })
+                if name == "url" && value == expected))
+        };
+        assert!(changed_url("https://example.com/active"));
+        shared.refresh_control_subscriptions();
+        assert!(take_reliable_messages(&mailbox).is_empty());
+        {
+            let mut inner = shared.inner.lock();
+            let pane = inner.engine.state.pane_mut(browser).unwrap();
+            let PaneKind::Browser(descriptor) = &mut pane.kind else {
+                panic!("browser pane");
+            };
+            descriptor.active_tab = 0;
+        }
+        shared.refresh_control_subscriptions();
+        assert!(changed_url("https://example.com/first"));
+    }
+
+    #[test]
     fn formats_expand_pane_kind_and_user_options() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();

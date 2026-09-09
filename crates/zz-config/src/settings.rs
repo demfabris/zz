@@ -166,6 +166,10 @@ fn value(parsed: &ParsedConfig, key: ConfigKey) -> (Value, ConfigProvenance) {
             let setting = &parsed.browser.element_selector_hotkey;
             (json!(setting.value), setting.provenance)
         }
+        ConfigKey::BrowserRemoteDebuggingPort => {
+            let setting = &parsed.browser.remote_debugging_port;
+            (json!(setting.value), setting.provenance)
+        }
         ConfigKey::BrowserSearchProvider => {
             let setting = &parsed.browser.search_provider;
             (json!(setting.value.as_str()), setting.provenance)

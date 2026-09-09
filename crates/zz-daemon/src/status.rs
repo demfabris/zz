@@ -1410,6 +1410,13 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 .mux
                 .pane_kind(&context.pane_id)
                 .map(str::to_owned),
+            "browser_url" => Some(
+                self.facts
+                    .mux
+                    .browser_url(&context.pane_id)
+                    .unwrap_or_default()
+                    .to_owned(),
+            ),
             "buffer_created" => Some(
                 self.facts
                     .buffer
@@ -1973,6 +1980,37 @@ mod tests {
                 &zz_protocol::CommandInvocation::new(args[0], args[1..].iter().copied()),
             )
             .unwrap_or_else(|error| panic!("{args:?}: {error:?}"));
+    }
+
+    #[test]
+    fn browser_url_status_uses_active_tab_and_is_empty_for_terminal() {
+        let mut engine = MuxEngine::default();
+        let (_, _, terminal) = engine.state.create_session("urls").unwrap();
+        let browser = engine
+            .state
+            .split_pane(
+                terminal,
+                Axis::Horizontal,
+                PaneKind::Browser(zz_protocol::BrowserDescriptor {
+                    tabs: vec![
+                        "https://example.com/first".to_owned(),
+                        "https://example.com/active".to_owned(),
+                    ],
+                    active_tab: 1,
+                    profile: "default".to_owned(),
+                }),
+            )
+            .unwrap();
+        let mut request = request(1, "url=#{browser_url}", "");
+        request.facts.mux = Arc::new(engine.format_facts());
+        let mut renderer = StatusRenderer::default();
+        request.context.pane_id = browser.to_string();
+        assert_eq!(
+            renderer.render_initial(&request).left,
+            "url=https://example.com/active"
+        );
+        request.context.pane_id = terminal.to_string();
+        assert_eq!(renderer.render_initial(&request).left, "url=");
     }
 
     #[test]

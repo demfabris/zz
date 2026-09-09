@@ -115,6 +115,11 @@ quit-daemon-on-exit = false
 # google, duckduckgo, or brave.
 browser-search-provider = google
 
+# Loopback Chrome DevTools Protocol port for browser agents (agent-browser,
+# Playwright MCP, Chrome DevTools MCP). 0 keeps it off. Anything that can
+# reach the port can drive your logged-in browser.
+browser-remote-debugging-port = 0
+
 # Keystroke that toggles a browser pane's element picker. Unset uses the
 # platform default: cmd-shift-c on macOS, ctrl-shift-c elsewhere.
 #

@@ -1605,6 +1605,7 @@ type UserOptions = BTreeMap<String, String>;
 #[derive(Clone, Debug, Default)]
 pub struct FormatFacts {
     pane_kinds: BTreeMap<String, &'static str>,
+    browser_urls: BTreeMap<String, String>,
     pane_windows: BTreeMap<String, String>,
     server: UserOptions,
     global_session: UserOptions,
@@ -1618,6 +1619,11 @@ impl FormatFacts {
     #[must_use]
     pub fn pane_kind(&self, pane: &str) -> Option<&'static str> {
         self.pane_kinds.get(pane).copied()
+    }
+
+    #[must_use]
+    pub fn browser_url(&self, pane: &str) -> Option<&str> {
+        self.browser_urls.get(pane).map(String::as_str)
     }
 
     /// A user option as `#{@name}` sees it: pane, then the pane's window,
@@ -15312,10 +15318,14 @@ impl MuxEngine {
     #[must_use]
     pub fn format_facts(&self) -> FormatFacts {
         let mut pane_kinds = BTreeMap::new();
+        let mut browser_urls = BTreeMap::new();
         let mut pane_windows = BTreeMap::new();
         for (window, entry) in &self.state.windows {
             for (pane, entry) in &entry.panes {
                 pane_kinds.insert(pane.to_string(), pane_kind_name(&entry.kind));
+                if let PaneKind::Browser(browser) = &entry.kind {
+                    browser_urls.insert(pane.to_string(), browser.url().to_owned());
+                }
                 pane_windows.insert(pane.to_string(), window.to_string());
             }
         }
@@ -15330,6 +15340,7 @@ impl MuxEngine {
         }
         FormatFacts {
             pane_kinds,
+            browser_urls,
             pane_windows,
             server: self.server_user_options.clone(),
             global_session: self.global_session_user_options.clone(),

@@ -2423,6 +2423,7 @@ fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
         | ConfigKey::EditorSoftWrap
         | ConfigKey::EditorVimMode
         | ConfigKey::BrowserElementSelectorHotkey
+        | ConfigKey::BrowserRemoteDebuggingPort
         | ConfigKey::BrowserSearchProvider
         | ConfigKey::BrowserEgress
         | ConfigKey::ThemeMode

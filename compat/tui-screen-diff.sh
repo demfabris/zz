@@ -110,8 +110,9 @@ ZZ_BIN="$(resolve_binary "$ZZ_INPUT")" || { printf 'error: zz binary not found: 
 TMUX_BIN="$(resolve_binary "$TMUX_INPUT")" || { printf 'error: tmux binary not found: %s\n' "$TMUX_INPUT" >&2; exit 2; }
 
 # SIZE|MODE|ALTERNATE. ALTERNATE is the width the resize case moves to and back
-# from; it stays on the same side of the 109 column sidebar threshold as SIZE so
-# an asserted size never invokes the sidebar mid-case.
+# from. For every `same` size it stays below the 109 column sidebar threshold,
+# so an asserted size can never invoke the sidebar mid-case. The 120x24 record
+# deliberately crosses it, to measure what hiding the sidebar leaves behind.
 SIZES=(80x24\|same\|100 100x24\|same\|80 80x10\|same\|100 109x24\|record\|120 120x24\|record\|100)
 PANE_TITLE="screentitle"
 WINDOW_NAME="win"

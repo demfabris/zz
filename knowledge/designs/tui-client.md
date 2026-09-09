@@ -10,9 +10,15 @@ tags:
 - kitty-graphics
 - remote
 timestamp: 2026-08-26T00:00:00-03:00
+last_updated: 2026-09-09
 ---
 
 # Overview
+
+The [TUI parity contract](/designs/tui-parity.md), agreed on 2026-09-09, supersedes this
+page's automatic-sidebar product direction. This page records the existing implementation;
+the [campaign report](/tmux/tui-parity.md) tracks the work to make ordinary tmux behavior the
+terminal baseline while preserving zz additions as superset commands.
 
 The TUI is not a port of zz — it is a **second presentation backend for the client
 stack that already exists**. The daemon owns all mux state (layout, key tables,
@@ -49,9 +55,11 @@ Ship each rung independently; never let a higher rung block a lower one.
    `zz attach` in a TTY dispatches to it) and live-smoked end to end: attach,
    typing, prefix engine + PREFIX indicator, command prompt, `split-window <cmd>`,
    pane navigation, detach-client push, Ctrl-\ detach, reattach with layout
-   intact, fresh empty-daemon lazy-create on Interactive attach. Known gap: a bare `split-window` opens a
-   Picker pane the TUI can only placeholder — use the command prompt's
-   `split-window <cmd>` form, or teach the daemon a TUI-kind default later.
+   intact, fresh empty-daemon lazy-create on Interactive attach. As verified on
+   2026-09-09, `split-window` without a command creates a terminal; native
+   `split-picker` creates the pane-kind picker. The daemon test
+   `configured_split_window_binding_creates_a_terminal_without_rewriting_the_command`
+   in `crates/zz-daemon/src/daemon.rs` covers configured split bindings.
 2. **Agent panes as text.** ACP transcripts are structured data; a terminal is
    their native habitat. Composer input, permission prompts, and the attention
    rollup map to plain TUI affordances.
@@ -81,8 +89,8 @@ remains presentation work, and client chrome resolves through `ChromeKeymap`.
 # Chrome direction (settled 2026-08-09, after rung 1)
 
 The TUI mirrors the zz app's UI structure, not tmux's: a toggleable left
-sidebar tree (host → sessions → windows → panes, `+ new pane` row, tmux status
-line at the sidebar bottom), the pane canvas in the center, and the pane-kind
+sidebar tree (host → sessions → windows → panes, `+ new pane` row, sidebar
+status details at the bottom), the pane canvas in the center, and the pane-kind
 picker as a floating card with key hints — "the gpui app rendered in TUI
 symbols." The tree is a pure view over the `MuxSnapshot` the client already
 holds (same source the GUI sidebar reads), which also gives session switching
@@ -97,7 +105,12 @@ app)". Focus model: sidebar-focus toggle (`EventPayload::FocusSidebar`
 exists), arrows + Enter, mouse on tree rows; sidebar auto-hides under a
 minimum width like the GUI slideover. Sidebar Up/k, Down/j, Enter, r, Escape, and
 q now come from the TUI `sidebar` chrome table instead of inline chord matches.
-tmux muscle memory is untouched because the prefix engine and pane key tables stay daemon-side. Deferred: multi-host tree
+The prefix engine and pane key tables stay daemon-side, while the TUI handles local
+chrome bindings first. As verified on 2026-09-09, `crates/zz-tui/src/sidebar.rs`
+(`State::visible`) shows the sidebar automatically at 109 columns and permits
+manual display from 50 columns. The renderer also paints the daemon's tmux status
+block in the main canvas, honoring its row count and top or bottom placement.
+Deferred: multi-host tree
 (one `InteractiveClient` per host side by side, a later rung, not a v1
 compromise).
 
@@ -180,10 +193,11 @@ canonical summary remain outside this proof.
 
 # Sequencing
 
-Rung 1 after the Tier 2 review lands — it hardens the same "non-GUI client of the
-daemon" seams the [native iPhone client](/designs/ios-client.md) now consumes.
-Kitty graphics in the VT landed 2026-08-09 (protocol 48), so rung 3 now waits only
-on rung 1 plus the CEF-headless decision.
+Rungs 1 and 3 have landed, as verified on 2026-09-09. The TUI enables browser
+surfaces after a successful kitty graphics probe in `crates/zz-tui/src/app.rs`;
+`BrowserState::reconcile_surfaces` in `crates/zz-tui/src/browser.rs` also requires
+a browser provider. Without both, browser panes retain their placeholder cards.
+Rung 2, Agent transcript interaction, remains proposed.
 
 # Citations
 

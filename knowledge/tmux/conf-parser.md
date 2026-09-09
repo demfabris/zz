@@ -5,7 +5,7 @@ description: A single-pass tmux-style tokenizer plus the daemon replay layer tha
 resource: crates/zz-mux/src/parser.rs
 tags: [tmux, parser, config, tokenizer, mux-conf]
 timestamp: 2026-08-26T00:00:00-03:00
-last_updated: 2026-09-06
+last_updated: 2026-09-09
 last_updated_by: Claude
 ---
 
@@ -57,7 +57,9 @@ the option grammar and normal effects (`ModeKeysChanged`, `WordSeparatorsChanged
 `BufferLimitChanged`, and snapshot publication) in the command path. Invalid values log a diagnostic
 and are skipped while later entries continue.
 
-Replay resolution is `built-in default < zz/mux.conf < zz/config override`. `load_config_file`
+Startup and reload precedence is
+`built-in default < tmux roots or explicit -f files < zz/mux.conf < zz/config override`.
+`load_config_file`
 labels successful option writes as `tmux-config` (the wire tier kept its name; it now means "from
 the sourced mux config file"); after the complete startup, `reload-config`, or
 interactive `source-file` replay, the daemon reapplies its stored mux overrides and labels them

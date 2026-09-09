@@ -12,4 +12,5 @@
 * [Key tables (key.rs)](key-tables.md) - Root/prefix/copy-mode/chooser key resolution with the default C-b prefix and optional prefix2, canonical and shifted key encoding, bind/unbind, send-prefix (-2), numeric vi counts, pending jump-key capture, and wire publication of every table.
 * [tmux status rows and format expansion](status-line.md) - The daemon expands tmux status formats per client for the cell-faithful TUI; GUI clients build native bars from snapshots and app settings without consuming StatusLine.
 * [tmux compatibility philosophy](tmux-compat.md) - The contract for a tmux-compatible zz CLI: tmux spellings keep tmux meaning or fail loudly, native GUI behavior uses zz-only verbs, and compatibility is measured against one pinned upstream commit.
+* [TUI parity campaign](tui-parity.md) - TUI parity obligations, their proof status, and progress against the fixed baseline.
 <!-- okf:listing:end -->

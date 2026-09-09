@@ -5,8 +5,7 @@ description: "The contract for a tmux-compatible zz CLI: tmux spellings keep tmu
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, philosophy, reimplementation, cli]
 timestamp: 2026-08-24T00:00:00-03:00
-last_updated: 2026-09-03
-last_updated_by: Claude
+last_updated: 2026-09-09
 ---
 
 # Overview
@@ -559,13 +558,17 @@ This is a presentation divergence, not permission to reinterpret a tmux command.
 
 # Config ownership
 
-By default the daemon sources the first existing zz-owned platform candidate for `zz/mux.conf`:
-XDG config, the home config directory, macOS Application Support, or Windows AppData in platform
-order. One or more top-level startup `-f` files replace that default for the initial load and remain
-visible through `#{config_files}`. `reload-config` returns to the first existing platform candidate
-and updates the fact to that path, or to empty when no candidate exists. The import flow copies a
-donor `.tmux.conf` to the first existing or first constructible candidate. The daemon does not read
-`~/.tmux.conf` directly on every boot.
+By default the daemon reads tmux configuration in place, in this order: `/etc/tmux.conf`,
+`~/.tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf`, and `~/.config/tmux/tmux.conf`, without
+duplicating the home config path when it matches the XDG path. Top-level startup `-f` files
+replace those tmux roots. The daemon then appends the first existing zz-owned platform candidate
+for `zz/mux.conf`: XDG config, the home config directory, macOS Application Support, or Windows
+AppData in platform order. `reload-config` uses the same discovery or retained explicit roots,
+followed by the selected zz file; `#{config_files}` records that ordered selection.
+`import-tmux-config` prints an explanation of in-place loading and performs no copy. See
+`crates/zz-daemon/src/paths.rs` (`tmux_config_candidates`, `default_mux_config`) and
+`crates/zz-daemon/src/daemon.rs` (`startup_mux_config_files`, `selected_mux_config_files`,
+`replay_mux_config_files`, `reload_user_config_with_source_base`).
 
 The config parser implements tmux grammar and reports unsupported commands. Its whole-file lexer
 and parser path latches the first diagnostic, clears the commands built from that file, and stops

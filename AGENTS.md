@@ -24,6 +24,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `clients/macos` - native SwiftUI/AppKit terminal, ACP agent, CEF browser, shared settings, and component gallery over `zz-client-ffi`
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `compat/` — tmux compat campaign: differential harness (`run.sh`), gap registry (`tmux-gaps.json`), dispatch-board client (`board.py`), progress meter, orchestration handoff (`orchestration/`)
+- `compat/tui/` — TUI parity campaign: proof ledger (`campaign.json`), validator and report generator (`tracker.py`), cycle runner (`run-1.js`)
 - `knowledge/` — OKF knowledge bundle for the whole system (start at `index.md`)
 - `scripts/` — build, packaging, profiling, and fork-maintenance scripts (`forks.conf`)
 - `bench/` — terminal throughput benchmark harness
@@ -35,6 +36,11 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 ## Knowledge bundle
 
 `knowledge/` documents architecture, the wire protocol, tmux compat, the terminal engine, the CEF browser, designs, and operational playbooks. Read `knowledge/index.md` before digging into an unfamiliar subsystem — it beats cold grepping. The bundle is a map, not ground truth: load-bearing facts cite `resource:` source files; verify those before acting on them.
+
+For TUI parity campaign work, start with `compat/tui/README.md` and
+`knowledge/playbooks/tui-parity-campaign.md`. `python3 compat/tui/tracker.py check` validates the
+ledger and its generated report; `ready` lists the dependency-ready obligations. Only verified proof
+counts as TUI progress; accepted tmux gaps do not.
 
 <important if="you need to build, run, test, lint, package, profile, or release">
 

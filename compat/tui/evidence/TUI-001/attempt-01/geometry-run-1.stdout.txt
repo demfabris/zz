@@ -1,0 +1,8 @@
+pane geometry differential (pin tmux)
+ok    80x24 columns: both 80
+ok    80x24 rows: both 23
+ok    100x24 columns: both 100
+ok    100x24 rows: both 23
+note  120x24 columns recorded, not asserted: tmux 120, zz 91 (zz shows its sidebar here)
+ok    120x24 rows: both 23
+all 5 asserted measurements identical

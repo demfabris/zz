@@ -1,0 +1,37 @@
+TUI-001 attempt-01 environment
+captured: 2026-09-09T18:34:19-03:00
+
+[binaries]
+zz: 3cb6e28437cd028b49c2c2eb07c4414a69226518bf2f287e7c52123d5bf70a38  target/debug/zz
+tmux (pin, shared cache): df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+tmux (pin, worktree cache): 2ad1ebd2258b47ddd10f9efc23407ff39250e206cbe8a13b4dc2809d3da06e77  compat/.cache/tmux-src/tmux
+zz --version: zz 0.6.1
+tmux -V: tmux next-3.8
+pin commit (ledger tmux_commit): d77c9dc6aa021e4bc61f0da128c591af695e6466
+pin commit (checked out): d77c9dc6aa021e4bc61f0da128c591af695e6466
+
+[source revision]
+worktree: /home/demfabris/dev/zz-tui-lane
+git rev-parse HEAD: 576b6b745821856d9c00b3a62d6a1982fd8571e1
+git status --short:
+?? compat/tui/evidence/
+(end git status)
+
+[host]
+uname -a: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+os-release: NAME="CachyOS Linux" PRETTY_NAME="CachyOS" 
+TERM: xterm-ghostty
+SHELL: /bin/bash
+bash on PATH: /usr/bin/bash -- GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+sh on PATH: /usr/bin/sh
+nproc: 16
+outer tmux driver sizes used by tui-pane-geometry.sh: 80x24, 100x24, 120x24
+outer tmux driver size used by status-row.sh: 80x24 and 100x24 band, then 79x24
+
+[locale, as the fixtures inherit it]
+LANG=en_US.UTF-8
+LC_ALL=<unset>
+LC_TIME=pt_BR.UTF-8
+XDG_STATE_HOME=<unset>
+ZZ_LOG_DIR=<unset>
+note: LC_TIME is why compat/status-row.sh exits 1 here; see notes.md.

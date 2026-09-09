@@ -1,0 +1,1 @@
+pane geometry differential (pin tmux)

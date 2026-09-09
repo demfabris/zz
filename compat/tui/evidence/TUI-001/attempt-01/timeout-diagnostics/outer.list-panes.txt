@@ -1,0 +1,2 @@
+zz 80x24 dead=0
+tmux 80x24 dead=0

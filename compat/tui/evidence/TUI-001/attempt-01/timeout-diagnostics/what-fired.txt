@@ -1,0 +1,8 @@
+wait that ran out: zz geometry report
+at: 2026-09-09T18:41:10-03:00
+size under test: 80x24
+zz: /home/demfabris/dev/zz-tui-lane/target/debug/zz
+tmux: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+zz socket: /tmp/zzgeo-FwR5Os.sock
+outer socket: zzgeoo-FwR5Os
+inner tmux socket: zzgeoi-FwR5Os

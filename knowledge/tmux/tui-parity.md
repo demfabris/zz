@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **0/12 verified**. Added scope: **0/0 verified**.
 
-Status counts: unmeasured: 6, different: 6, active: 0, review: 0, blocked: 0, verified: 0.
+Status counts: unmeasured: 6, different: 5, active: 0, review: 1, blocked: 0, verified: 0.
 
 Dependency-ready obligations, by priority: TUI-001.
 
@@ -27,7 +27,7 @@ Dependency-ready obligations, by priority: TUI-001.
 
 | Obligation | Status | Priority | Dependencies |
 | --- | --- | ---: | --- |
-| TUI-001: Reliable attached-client baseline | different | 1 | none |
+| TUI-001: Reliable attached-client baseline | review | 1 | none |
 | TUI-002: Complete screen and interaction comparison | unmeasured | 2 | TUI-001 |
 | TUI-003: Stock launcher, command and key behavior | different | 3 | TUI-002 |
 | TUI-004: Default canvas, status and pane borders | different | 4 | TUI-002 |
@@ -54,7 +54,7 @@ Dependency-ready obligations, by priority: TUI-001.
 
 ### TUI-001: Reliable attached-client baseline
 
-Status: different.
+Status: review.
 
 Acceptance:
 
@@ -71,9 +71,9 @@ Sources:
 
 Tmux gap references: `harness.proof-holes`, `tui.client-input-backpressure`, `tui.sidebar-auto-hide`.
 
-Exploratory run on 2026-09-09 with existing target/debug/zz exited 2: zz geometry report did not happen within 10 seconds. The binary was not rebuilt or revision-attested. Earlier closed evidence records a Linux pass; neither result establishes a current portable baseline.
+MEASURED 2026-09-09 on alienware (CachyOS, 16 cores, Linux) from worktree /home/demfabris/dev/zz-tui-lane at 576b6b745821856d9c00b3a62d6a1982fd8571e1, clean apart from this attempt's own files. zz built fresh in that worktree, sha256 3cb6e28437cd028b49c2c2eb07c4414a69226518bf2f287e7c52123d5bf70a38; pinned tmux d77c9dc6, sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5, tmux -V next-3.8. TERM=xterm-ghostty, bash 5.3.15, LANG=en_US.UTF-8 with LC_TIME=pt_BR.UTF-8. GEOMETRY: compat/tui-pane-geometry.sh exits 0 SIX times out of six, 4 to 5 seconds a run against its own 10 second bound - three runs of the fixture as it stands at origin/main and three of the fixture after this attempt's timeout-diagnostics change. 80x24 both 80 columns, 100x24 both 100, rows 23 on both sides at all three sizes. THE RECORDED TIMEOUT is explained, not reproduced: it happened on macOS and this box cannot run that binary. The explanation rests on four measurements. (1) The wait that fired, measure()'s 'zz geometry report', is nowhere near its bound at this revision. (2) The gap tui.client-input-backpressure, closed 2026-09-07 at 0bed7fe7, cites compat/tui-pane-geometry.sh as its own evidence and records the exact cause: crates/zz-tui/src/render.rs flush_output did a blocking write_all plus flush on the main event loop, the loop that drains the MainEvent channel, so a client whose output backed up did not act at all within a 10 second bound at 012b4dcc against 0.020 s on the pin. (3) The fixture reached its current shape at 314c55e0 (2026-09-07T00:15:42-03:00) and the fix landed at 0bed7fe7 (2026-09-07T13:31:08-03:00) without touching the fixture, so a target/debug/zz that was 'not rebuilt or revision-attested' sits on the wrong side of it. (4) The named cause is measurably absent here: compat/run.sh --strict-geometry smoke/tui-client-input-backpressure exits 0 with 0 divergences at this tip. WHAT REMAINS: the timed-out binary's revision is unrecoverable (the shared checkout's target/debug/zz was rebuilt at 18:25 on 2026-09-09, so its hash says nothing about the record), and the macOS pty buffer that would set the pre-fix stall's threshold is not measured. Falsifier stated in the evidence: build zz at 0bed7fe7^ on macOS and run this fixture; a pass there refutes the explanation. FIXTURE CHANGE, in zone: a bounded wait that runs out now copies out, before the scratch tree is removed, which wait fired, both outer screens via capture-pane -p -e -S -, both servers' client and pane lists, the zz daemon's stdout and stderr, and each attached client's own stderr teed out of its pane; the fixture also pins ZZ_LOG_DIR into its scratch tree and scrubs XDG_STATE_HOME so it can no longer write into the box's real state directory. Proved by sabotage: file_has_two_fields was made to demand three fields, the fixture exited 2 with the record's own text 'zz geometry report did not happen within 10 seconds' and left fourteen files, retained under timeout-diagnostics/; the edit was reverted and runs 4 to 6 are the unsabotaged fixture. CLAUSE 3 RECORD, for TUI-004: at 120x24 the pin hands its pane 120 columns and zz hands its pane 91, rows 23 on both. The 29 column difference is the sidebar's 28 plus its 1 column border, the same arithmetic as AUTO_HIDE_COLUMNS = 80 + 28 + 1 = 109 in crates/zz-tui/src/sidebar.rs. Recorded, not asserted: tui.sidebar-auto-hide is a standing decision and TUI-004 owns changing it. FIXTURE LIMITATION AND A NEW DIVERGENCE: compat/status-row.sh exits 1 on this box, 2 of 11 comparisons, and the cause is the locale rather than the status row. Only the two steps that still carry the default status-right differ, and only in %b: the pin prints '09-set-26' and zz prints '09-Sep-26'. The pin expands %b through libc strftime(3), which honours LC_TIME=pt_BR.UTF-8; zz expands it in crates/zz-mux/src/formats.rs:4707 format_datetime through chrono StrftimeItems and format_with_items, which is locale-independent and always English. Control run settles it: LC_ALL=C LC_TIME=C, same fixture, same binaries, exit 0, all 11 identical. No gap in compat/tmux-gaps.json records this, so it needs a registry owner; the fix would land in crates/zz-mux, which this cycle's wire rule puts out of reach, so it is measured and left. It is also a limitation of status-row.sh as a baseline: the fixture pins the pane title but not LC_TIME, so its default-row comparison carries the caller's locale; pinning the locale would hide the divergence rather than record it. OTHER PROOFS AT THIS TIP: compat/attached-client.sh exits 0, 'attached-client compatibility: PASS'.
 
-Next action: Read the geometry fixture, build and identify both binaries, then reproduce the timeout with retained diagnostics before changing runtime behavior.
+Next action: gate: re-run the proof commands at the merged tip and record the proof.
 
 ### TUI-002: Complete screen and interaction comparison
 

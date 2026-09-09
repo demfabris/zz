@@ -1,0 +1,31 @@
+status-left band below the sidebar auto-hide threshold (pin tmux)
+ok    status-left band at 80 columns
+ok    status-left band at 100 columns
+status row differential at 79x24 (pin tmux)
+DIFF  defaults
+      tmux:  033 [ 3 8 ; 2 ; 1 3 ; 1 3 ; 1 3 m 033 [ 4 8 ; 2 ; 1 5 4 ; 2 0 5 ; 5 0 m [ r o w s ] 033 [ 4 m 0 : b a s h * 033 [ 0 m 033 [ 3 8 ; 2 ; 1 3 ; 1 3 ; 1 3 m 033 [ 4 8 ; 2 ; 1 5 4 ; 2 0 5 ; 5 0 m * " r o w t i t l e " 1 8 : 3 5 0 9 - s e t - 2 6 
+      zz:    033 [ 3 8 ; 2 ; 1 3 ; 1 3 ; 1 3 m 033 [ 4 8 ; 2 ; 1 5 4 ; 2 0 5 ; 5 0 m [ r o w s ] 033 [ 4 m 0 : b a s h * 033 [ 0 m 033 [ 3 8 ; 2 ; 1 3 ; 1 3 ; 1 3 m 033 [ 4 8 ; 2 ; 1 5 4 ; 2 0 5 ; 5 0 m * " r o w t i t l e " 1 8 : 3 5 0 9 - S e p - 2 6 
+      tmux: $'\E[38;2;13;13;13m\E[48;2;154;205;50m[rows] \E[4m0:bash*\E[0m\E[38;2;13;13;13m\E[48;2;154;205;50m                                       "rowtitle" 18:35 09-set-26'
+      zz:   $'\E[38;2;13;13;13m\E[48;2;154;205;50m[rows] \E[4m0:bash*\E[0m\E[38;2;13;13;13m\E[48;2;154;205;50m                                       "rowtitle" 18:35 09-Sep-26'
+note  -s dark-theme-green = colour124: presentation:tui-status-row-theme-colours-per-client, open
+      tmux: $'\E[38;2;13;13;13m\E[48;5;124m[rows] \E[4m0:bash*\E[0m\E[38;2;13;13;13m\E[48;5;124m                                       "rowtitle" 18:35 09-set-26'
+      zz:   $'\E[38;2;13;13;13m\E[48;2;154;205;50m[rows] \E[4m0:bash*\E[0m\E[38;2;13;13;13m\E[48;2;154;205;50m                                       "rowtitle" 18:35 09-Sep-26'
+note  -s dark-theme-black = colour231: presentation:tui-status-row-theme-colours-per-client, open
+      tmux: $'\E[38;5;231m\E[48;5;124m[rows] \E[4m0:bash*\E[0m\E[38;5;231m\E[48;5;124m                                       "rowtitle" 18:35 09-set-26'
+      zz:   $'\E[38;2;13;13;13m\E[48;2;154;205;50m[rows] \E[4m0:bash*\E[0m\E[38;2;13;13;13m\E[48;2;154;205;50m                                       "rowtitle" 18:35 09-Sep-26'
+note  -s theme = light: presentation:tui-status-row-theme-colours-per-client, open
+      tmux: $'\E[38;2;26;26;26m\E[48;2;46;139;87m[rows] \E[4m0:bash*\E[0m\E[38;2;26;26;26m\E[48;2;46;139;87m                                       "rowtitle" 18:35 09-set-26'
+      zz:   $'\E[38;2;13;13;13m\E[48;2;154;205;50m[rows] \E[4m0:bash*\E[0m\E[38;2;13;13;13m\E[48;2;154;205;50m                                       "rowtitle" 18:35 09-Sep-26'
+DIFF  status-left = [#{session_name}]
+      tmux:  033 [ 3 8 ; 2 ; 1 3 ; 1 3 ; 1 3 m 033 [ 4 8 ; 2 ; 1 5 4 ; 2 0 5 ; 5 0 m [ r o w s ] 033 [ 4 m 0 : b a s h * 033 [ 0 m 033 [ 3 8 ; 2 ; 1 3 ; 1 3 ; 1 3 m 033 [ 4 8 ; 2 ; 1 5 4 ; 2 0 5 ; 5 0 m * " r o w t i t l e " 1 8 : 3 5 0 9 - s e t - 2 6 
+      zz:    033 [ 3 8 ; 2 ; 1 3 ; 1 3 ; 1 3 m 033 [ 4 8 ; 2 ; 1 5 4 ; 2 0 5 ; 5 0 m [ r o w s ] 033 [ 4 m 0 : b a s h * 033 [ 0 m 033 [ 3 8 ; 2 ; 1 3 ; 1 3 ; 1 3 m 033 [ 4 8 ; 2 ; 1 5 4 ; 2 0 5 ; 5 0 m * " r o w t i t l e " 1 8 : 3 5 0 9 - S e p - 2 6 
+      tmux: $'\E[38;2;13;13;13m\E[48;2;154;205;50m[rows]\E[4m0:bash*\E[0m\E[38;2;13;13;13m\E[48;2;154;205;50m                                        "rowtitle" 18:35 09-set-26'
+      zz:   $'\E[38;2;13;13;13m\E[48;2;154;205;50m[rows]\E[4m0:bash*\E[0m\E[38;2;13;13;13m\E[48;2;154;205;50m                                        "rowtitle" 18:35 09-Sep-26'
+ok    status-right = #{window_width}x#{window_height} #{client_width}
+ok    window-status-format = #I:#W#F
+ok    window-status-current-format = #I:#W#F*
+ok    status-style = bg=blue,fg=white
+ok    status-left-style = bold
+ok    status-justify = centre
+ok    status-position = bottom
+2 of 11 comparisons differ

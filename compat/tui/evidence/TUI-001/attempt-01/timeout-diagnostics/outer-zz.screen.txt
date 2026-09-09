@@ -1,0 +1,24 @@
+[demfabris@alienware zz-tui-lane]$ printf '%s %s\n' "$(tput cols)" "$(tput lines
+)" >/tmp/zzgeo.FwR5Os/zz.geometry
+[demfabris@alienware zz-tui-lane]$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[38;2;13;13;13m[48;2;154;205;50m[geo] [4m0:bash*[0m[38;2;13;13;13m[48;2;154;205;50m                                             "bash" 18:40 09-Sep-26

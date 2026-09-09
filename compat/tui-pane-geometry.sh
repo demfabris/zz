@@ -12,6 +12,15 @@
 # line and nothing on pane chrome while pane-border-status is off, so the pane
 # gets 23; the raw TUI has to hand over the same 23 whether its sidebar shows
 # or not.
+#
+# Every wait here is bounded, and a wait that runs out is the only way this
+# fixture reports a runtime that never answered. A bare "did not happen within
+# 10 seconds" cannot be diagnosed after the fact, and the scratch tree that
+# holds the answer is removed on exit, so a timeout now copies out everything
+# needed to explain it before that happens: which wait fired, both outer
+# screens with their escapes and their scrollback, the zz daemon's own output,
+# each client's stderr, and each server's client and pane lists. The directory
+# is printed on stderr; ZZ_GEO_DIAGNOSTICS_DIR names it instead.
 set -eEuo pipefail
 
 usage() {
@@ -54,13 +63,23 @@ INNER_SESSION="geo"
 ZZ_HOME="$SCRATCH_DIR/zz-home"
 TMUX_HOME="$SCRATCH_DIR/tmux-home"
 OUTER_HOME="$SCRATCH_DIR/outer-home"
+# crates/zz/src/diagnostics/mod.rs platform_log_dir reads ZZ_LOG_DIR first,
+# then XDG_STATE_HOME, then HOME. Naming it here keeps the daemon's ring log
+# inside the scratch tree whatever the caller's state directory is, and puts it
+# where a timeout can copy it out.
+ZZ_LOG_DIR="$SCRATCH_DIR/zz-logs"
+ZZ_CLIENT_STDERR="$SCRATCH_DIR/zz-client.err"
+TMUX_CLIENT_STDERR="$SCRATCH_DIR/tmux-client.err"
+DIAGNOSTICS_DIR=""
+SIZE_UNDER_TEST=""
 ZZ_PID=""
 FAILURES=0
 CHECKS=0
-mkdir -p "$ZZ_HOME" "$TMUX_HOME" "$OUTER_HOME"
+mkdir -p "$ZZ_HOME" "$TMUX_HOME" "$OUTER_HOME" "$ZZ_LOG_DIR"
 
 scrubbed() {
   env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL \
+    -u XDG_STATE_HOME -u ZZ_LOG_DIR \
     TMUX_TMPDIR=/tmp "$@"
 }
 tmux_outer_command() {
@@ -68,7 +87,7 @@ tmux_outer_command() {
     "$TMUX_BIN" -L "$OUTER_SOCKET_NAME" "$@"
 }
 zz_command() {
-  scrubbed HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_HOME/config" \
+  scrubbed HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_HOME/config" ZZ_LOG_DIR="$ZZ_LOG_DIR" \
     "$ZZ_BIN" --socket "$ZZ_SOCKET" "$@"
 }
 tmux_inner_command() {
@@ -108,6 +127,61 @@ die() {
   exit 2
 }
 
+diagnostics_dir() {
+  if [ -z "$DIAGNOSTICS_DIR" ]; then
+    DIAGNOSTICS_DIR="${ZZ_GEO_DIAGNOSTICS_DIR:-$(mktemp -d /tmp/zzgeo-diag.XXXXXX)}"
+    mkdir -p "$DIAGNOSTICS_DIR"
+  fi
+  printf '%s\n' "$DIAGNOSTICS_DIR"
+}
+
+# Called from the only place a bounded wait gives up. Every command is allowed
+# to fail: a wait can run out before the outer session exists, and a diagnostic
+# that cannot be taken must not replace the timeout with its own error.
+dump_diagnostics() {
+  local label="$1"
+  local dir side log
+  dir="$(diagnostics_dir)"
+  {
+    printf 'wait that ran out: %s\n' "$label"
+    printf 'at: %s\n' "$(date -Is 2>/dev/null || date)"
+    printf 'size under test: %s\n' "${SIZE_UNDER_TEST:-none yet}"
+    printf 'zz: %s\n' "$ZZ_BIN"
+    printf 'tmux: %s\n' "$TMUX_BIN"
+    printf 'zz socket: %s\n' "$ZZ_SOCKET"
+    printf 'outer socket: %s\n' "$OUTER_SOCKET_NAME"
+    printf 'inner tmux socket: %s\n' "$INNER_SOCKET_NAME"
+    # A foreground `zz daemon` logs to its own stderr rather than to the ring
+    # file, so an empty listing here means the daemon log is in
+    # zz-daemon.stderr.txt, not that a log was lost.
+    printf 'ZZ_LOG_DIR (%s) holds:\n' "$ZZ_LOG_DIR"
+    ls -1 -- "$ZZ_LOG_DIR" 2>&1 || true
+  } >"$dir/what-fired.txt" 2>&1 || true
+  for side in zz tmux; do
+    tmux_outer_command capture-pane -p -e -S - -t "=$OUTER_SESSION:$side" \
+      >"$dir/outer-$side.screen.txt" 2>&1 || true
+    side_command "$side" list-clients \
+      -F '#{client_name} session=#{client_session} #{client_width}x#{client_height} flags=#{client_flags}' \
+      >"$dir/$side.list-clients.txt" 2>&1 || true
+    side_command "$side" list-panes -a \
+      -F '#{session_name}:#{window_index}.#{pane_index} #{pane_width}x#{pane_height} dead=#{pane_dead}' \
+      >"$dir/$side.list-panes.txt" 2>&1 || true
+  done
+  tmux_outer_command list-panes -a \
+    -F '#{window_name} #{pane_width}x#{pane_height} dead=#{pane_dead}' \
+    >"$dir/outer.list-panes.txt" 2>&1 || true
+  cp -f -- "$SCRATCH_DIR/zz-daemon.out" "$dir/zz-daemon.stdout.txt" 2>/dev/null || true
+  cp -f -- "$SCRATCH_DIR/zz-daemon.err" "$dir/zz-daemon.stderr.txt" 2>/dev/null || true
+  cp -f -- "$ZZ_CLIENT_STDERR" "$dir/zz-client.stderr.txt" 2>/dev/null || true
+  cp -f -- "$TMUX_CLIENT_STDERR" "$dir/tmux-client.stderr.txt" 2>/dev/null || true
+  for log in "$ZZ_LOG_DIR"/*; do
+    [ -f "$log" ] || continue
+    cp -f -- "$log" "$dir/ring-$(basename -- "$log").txt" 2>/dev/null || true
+  done
+  printf 'diagnostics retained in %s:\n' "$dir" >&2
+  ls -1 -- "$dir" >&2 || true
+}
+
 wait_for() {
   local label="$1"
   local attempt
@@ -118,6 +192,7 @@ wait_for() {
     fi
     sleep 0.05
   done
+  dump_diagnostics "$label"
   die "$label did not happen within 10 seconds"
 }
 
@@ -137,12 +212,15 @@ write_attach() {
   local side="$1"
   local destination="$2"
   printf '#!/usr/bin/env bash\n' >"$destination"
+  # The client's own stderr is one of the four things a timeout needs, and a
+  # pane merges it into the pty where the next repaint overwrites it. tee keeps
+  # the screen copy and adds a file the dump can carry out of the scratch tree.
   if [ "$side" = zz ]; then
-    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -t %q\n' \
-      "$ZZ_HOME" "$ZZ_HOME/config" "$ZZ_BIN" "$ZZ_SOCKET" "=$INNER_SESSION" >>"$destination"
+    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME HOME=%q XDG_CONFIG_HOME=%q ZZ_LOG_DIR=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -t %q 2> >(tee -a %q >&2)\n' \
+      "$ZZ_HOME" "$ZZ_HOME/config" "$ZZ_LOG_DIR" "$ZZ_BIN" "$ZZ_SOCKET" "=$INNER_SESSION" "$ZZ_CLIENT_STDERR" >>"$destination"
   else
-    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -t %q\n' \
-      "$TMUX_HOME" "$TMUX_HOME/config" "$TMUX_BIN" "$INNER_SOCKET_NAME" "=$INNER_SESSION" >>"$destination"
+    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -t %q 2> >(tee -a %q >&2)\n' \
+      "$TMUX_HOME" "$TMUX_HOME/config" "$TMUX_BIN" "$INNER_SOCKET_NAME" "=$INNER_SESSION" "$TMUX_CLIENT_STDERR" >>"$destination"
   fi
   chmod +x "$destination"
 }
@@ -172,6 +250,7 @@ for entry in "${SIZES[@]}"; do
   mode="${entry##*|}"
   columns="${size%x*}"
   rows="${size#*x}"
+  SIZE_UNDER_TEST="$size"
   zz_command kill-session -t "=$INNER_SESSION" >/dev/null 2>&1 || true
   tmux_inner_command kill-session -t "=$INNER_SESSION" >/dev/null 2>&1 || true
   tmux_outer_command kill-server >/dev/null 2>&1 || true

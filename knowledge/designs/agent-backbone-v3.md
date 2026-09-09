@@ -153,6 +153,14 @@ rejection becomes a compat item in `compat/tmux-gaps.json` before lane B starts.
 Claude Code may parse `tmux -V` (`tmux 3.8-zz`) and may use `-t` targets in `session:window.pane`
 form; both are covered by the compat corpus, so a failure here is news.
 
+**Result 2026-09-09: passed with no setup.** Claude Code 2.1.267 in a zz pane, `--teammate-mode tmux`,
+asked for teammates alpha and beta: both appeared as new zz panes (`%2`, `%3`) within 15 s, ran their
+commands, reported back, approved the shutdown request, and their panes were gone by 40 s. The team
+config recorded `tmuxPaneId` values. `calls.log` stayed empty because the daemon already prepends its
+own `tmux` shim directory to every pane's PATH (`TmuxShimGuard` in `crates/zz-daemon/src/daemon.rs`,
+`tmux_shim_environment` in `crates/zz-daemon/src/lib.rs`), so Claude Code drove zz through that shim,
+ahead of the wrapper on PATH. No compat items came out of it.
+
 # Lane A - browser
 
 ## A1. CDP endpoint (about one day)
@@ -244,7 +252,7 @@ is the `--until` idiom; put it in the skill.
 that builds `HostCommand::RespondPermission` (`crates/zz-daemon/src/agent/host.rs:50`, handled at
 `:719`) for the oldest entry in `pending_permissions` (`host.rs:181`) when no id is given. A read
 twin `show-agent-permission -t %N` prints the pending request JSON (`AgentPaneWire.pending_permission`).
-`agent-send --wait` gains `--on-block fail|wait` (default `fail`): when the turn enters
+`agent-send --wait` gains `--on-block wait|fail` (default `wait`, today's behavior): with `fail`, when the turn enters
 AwaitingPermission, settle the waiter (`settle_active_turn`, `host.rs:1093`) with a new
 `AgentTurnFailure::Blocked { payload }`, print the payload JSON on stdout, exit with a distinct
 code (suggest 3), and leave the turn running so `agent-respond` can continue it.

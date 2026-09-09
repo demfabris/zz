@@ -98,9 +98,9 @@ the most recently focused Agent pane in the same window. This is the "explain
 this error" path, and it is bound to `<prefix> e` by default.
 
 Requires a shell that emits **OSC 133** prompt marks. Ghostty, kitty, WezTerm,
-and Starship shell integrations all do; zz's own bundled bash/zsh integration
-currently emits only OSC 2/7, so users who rely on it need one of the above on
-top. Output is capped at the last 200 lines or 256 KiB, whichever bites first,
+and Starship shell integrations all do; zz's bundled Bash/zsh integration now
+emits them too, with best-effort PowerShell support through its read-line hook.
+Output is capped at the last 200 lines or 256 KiB, whichever bites first,
 with a truncation note.
 
 ### Reading another agent pane

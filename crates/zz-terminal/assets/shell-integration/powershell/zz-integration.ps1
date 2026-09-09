@@ -14,6 +14,7 @@
 if (Test-Path -LiteralPath 'Variable:__ZZ_TITLE_INTEGRATION_INSTALLED') { return }
 $global:__ZZ_TITLE_INTEGRATION_INSTALLED = 1
 $global:__ZZ_PREEXEC_INSTALLED = 0
+$global:__ZZ_COMMAND_RUNNING = $false
 
 # Windows PowerShell 5.1 has no "`e" escape, so the control bytes are named once.
 $global:__ZZ_ESC = [char]27
@@ -63,6 +64,8 @@ function global:__zz_title_preexec {
     if ([string]::IsNullOrWhiteSpace($Command)) { return }
     [Console]::Write("$($global:__ZZ_ESC)[0 q")
     __zz_write_title $Command
+    $global:__ZZ_COMMAND_RUNNING = $true
+    [Console]::Write("$($global:__ZZ_ESC)]133;C$($global:__ZZ_BEL)")
 }
 
 # PowerShell has no preexec hook. PSReadLine owns PSConsoleHostReadLine, which
@@ -93,14 +96,27 @@ if (Test-Path -LiteralPath 'Function:prompt') {
 }
 
 function global:prompt {
-    # The previous prompt runs first and untouched: anything zz does ahead of it
-    # would overwrite the $? and $LASTEXITCODE the user's prompt reads.
+    $__zz_success = $global:?
+    $__zz_native_exit = $global:LASTEXITCODE
+    if ($global:__ZZ_COMMAND_RUNNING) {
+        $__zz_exit = 0
+        if (-not $__zz_success) {
+            $__zz_exit = 1
+            if ($null -ne $__zz_native_exit -and $__zz_native_exit -ne 0) {
+                $__zz_exit = $__zz_native_exit
+            }
+        }
+        [Console]::Write("$($global:__ZZ_ESC)]133;D;$__zz_exit$($global:__ZZ_BEL)")
+        $global:__ZZ_COMMAND_RUNNING = $false
+    }
+    [Console]::Write("$($global:__ZZ_ESC)]133;A$($global:__ZZ_BEL)")
+    if (-not $__zz_success) { Write-Error 'command failed' -ErrorAction Ignore }
     $__zz_rendered = & $global:__ZZ_PROMPT_ORIGINAL
     try {
         __zz_install_preexec_hook
         __zz_title_precmd
     } catch { }
-    $__zz_rendered
+    "$__zz_rendered$($global:__ZZ_ESC)]133;B$($global:__ZZ_BEL)"
 }
 
 Remove-Item -LiteralPath 'Env:ZZ_SHELL_INTEGRATION_ACTIVE' -ErrorAction SilentlyContinue

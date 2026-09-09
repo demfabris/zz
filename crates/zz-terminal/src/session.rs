@@ -675,6 +675,7 @@ fn write_engine_csi(
     let private = sequence
         .first()
         .is_some_and(|byte| (0x3c..0x40).contains(byte));
+    let mut scrolled_prompt = false;
     if knobs.scroll_on_clear
         && final_byte == b'J'
         && !private
@@ -684,6 +685,7 @@ fn write_engine_csi(
             .is_ok_and(|screen| screen == Screen::Primary)
         && let Some(rows) = used_screen_rows(terminal)
     {
+        scrolled_prompt = cursor_row_semantic_prompt(terminal) == Some(RowSemanticPrompt::Prompt);
         terminal.vt_write(format!("\x1b[{rows}S").as_bytes());
     }
     if !knobs.alternate_screen
@@ -713,6 +715,27 @@ fn write_engine_csi(
     raw.extend_from_slice(sequence);
     raw.push(final_byte);
     terminal.vt_write(&raw);
+    if scrolled_prompt {
+        terminal.vt_write(b"\x1b]133;A\x07");
+    }
+}
+
+/// The semantic prompt flag of the row under the cursor. A shell that marks its
+/// prompt start and then erases the screen from the origin (zsh does this on
+/// every prompt) would otherwise lose the mark to the scroll-on-clear rewrite,
+/// which sends that row into history before the prompt is drawn.
+fn cursor_row_semantic_prompt(terminal: &Terminal<'_, '_>) -> Option<RowSemanticPrompt> {
+    let row = terminal.cursor_y().ok()?;
+    terminal
+        .grid_ref(Point::Active(PointCoordinate {
+            x: 0,
+            y: u32::from(row),
+        }))
+        .ok()?
+        .row()
+        .ok()?
+        .semantic_prompt()
+        .ok()
 }
 
 fn engine_parameter(parameter: &[u8]) -> Option<u32> {
@@ -17600,6 +17623,61 @@ mod tests {
     }
 
     #[test]
+    fn scroll_on_clear_keeps_the_prompt_mark_of_the_erased_origin_row() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 20,
+            rows: 4,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        let mut filter = EngineFilter::default();
+        let mut renames = Vec::new();
+        let mut bar = None;
+        for chunk in [
+            b"banner\r\n\x1b[H".as_slice(),
+            b"\x1b]133;A\x07\r\x1b[J$ \x1b]133;B\x07echo hi\r\n",
+            b"\x1b]133;C\x07hi\r\n\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07",
+        ] {
+            filter.write(
+                chunk,
+                EngineKnobs::default(),
+                &mut terminal,
+                &mut renames,
+                &mut bar,
+            );
+        }
+        let capture = capture_last_command(&terminal).expect("marks survive the scroll");
+        assert_eq!(capture.command, "echo hi");
+        assert_eq!(capture.output, "hi");
+    }
+
+    #[test]
+    fn last_command_capture_tolerates_duplicate_osc133_marks() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 80,
+            rows: 8,
+            max_scrollback: 64,
+        })
+        .expect("terminal");
+        terminal.vt_write(
+            b"\x1b]133;A\x07\x1b]133;A\x07$ \x1b]133;B\x07\x1b]133;B\x07echo hi\r\n\
+              \x1b]133;C\x07\x1b]133;C\x07hi\r\n\x1b]133;D;0\x07\x1b]133;D;0\x07\
+              \x1b]133;A\x07\x1b]133;A\x07$ \x1b]133;B\x07\x1b]133;B\x07",
+        );
+
+        let capture = capture_last_command(&terminal).expect("last command with duplicate marks");
+        assert_eq!(capture.command, "echo hi");
+        assert_eq!(capture.output, "hi");
+        assert_eq!(capture.truncated_rows, 0);
+
+        terminal.vt_write(b"\r\n\x1b]133;A\x07\x1b]133;A\x07$ \x1b]133;B\x07\x1b]133;B\x07");
+        assert_eq!(
+            capture_last_command(&terminal).expect("empty prompt"),
+            capture
+        );
+    }
+
+    #[test]
     fn last_command_capture_reports_missing_shell_integration() {
         let mut terminal = Terminal::new(TerminalOptions {
             cols: 24,
@@ -20469,6 +20547,191 @@ mod tests {
             )
             .contains("ZZ_TERM:override")
         );
+    }
+
+    #[cfg(unix)]
+    fn wait_for_last_command(
+        session: &TerminalSession,
+        accept: impl Fn(&LastCommandCapture) -> bool,
+    ) -> LastCommandCapture {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let capture = session.capture_last_command();
+            if let Ok(capture) = &capture
+                && accept(capture)
+            {
+                return capture.clone();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "last command capture never converged: {capture:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[cfg(unix)]
+    fn shell_integration_command_lifecycle(shell: &str) {
+        if !std::path::Path::new(shell).is_file() {
+            eprintln!("skipping shell integration fixture: {shell} is not installed");
+            return;
+        }
+        if matches!(
+            std::env::var("ZZ_SHELL_INTEGRATION")
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "none" | "false" | "0"
+        ) {
+            eprintln!("skipping shell integration fixture: ZZ_SHELL_INTEGRATION disables it");
+            return;
+        }
+        let temporary = tempfile::tempdir().expect("shell integration fixture home");
+        let home = temporary.path();
+        let setup = r#"__zz_fixture_prompt=0
+__zz_fixture_precmd() {
+  __zz_fixture_status=$?
+  __zz_fixture_prompt=$((__zz_fixture_prompt + 1))
+  PS1="zz-fixture-${__zz_fixture_prompt}:${__zz_fixture_status}> "
+}
+"#;
+        let hooks = if shell.ends_with("bash") {
+            r#"PROMPT_COMMAND='__zz_fixture_precmd;'
+trap 'printf "%s\n" "$BASH_COMMAND" >> "$HOME/debug-commands"' DEBUG
+"#
+        } else {
+            r#"precmd() { __zz_fixture_precmd; }
+__zz_fixture_preexec() { print -r -- "$1" >> "$HOME/debug-commands"; }
+preexec_functions+=(__zz_fixture_preexec)
+"#
+        };
+        for name in [".bash_profile", ".zshrc"] {
+            std::fs::write(home.join(name), format!("{setup}{hooks}"))
+                .expect("isolated shell startup");
+        }
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                shell: Some(shell.to_owned()),
+                working_directory: Some(home.to_path_buf()),
+                env: vec![
+                    ("HOME".into(), Some(home.as_os_str().to_owned())),
+                    (
+                        "HISTFILE".into(),
+                        Some(home.join("history").into_os_string()),
+                    ),
+                    ("ZZ_ZSH_ZDOTDIR".into(), Some(home.as_os_str().to_owned())),
+                    ("PROMPT_COMMAND".into(), None),
+                    ("PS1".into(), None),
+                    ("PS0".into(), None),
+                ],
+                ..TerminalSpawn::default()
+            },
+        );
+        session.attach_view(TerminalViewId(144));
+        wait_for_test_capture(&session, |capture| capture.contains("zz-fixture-1:"));
+        assert_eq!(
+            session
+                .capture_last_command()
+                .expect("initial prompt marks"),
+            LastCommandCapture::default()
+        );
+        let (tap, output) = TerminalSession::raw_output_tap_channel();
+        session
+            .arm_raw_output_tap(133, tap)
+            .expect("arm shell output tap");
+        let submit = |line: &str, prompt: &str| {
+            session.send_text(line);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut bytes = Vec::new();
+            let end = format!("{prompt}\x1b]133;B\x07");
+            while !bytes
+                .windows(end.len())
+                .any(|window| window == end.as_bytes())
+            {
+                let chunk = output.recv_deadline(deadline).unwrap_or_else(|error| {
+                    panic!(
+                        "{shell}: waiting for {prompt:?}: {error}; output: {:?}",
+                        String::from_utf8_lossy(&bytes)
+                    )
+                });
+                bytes.extend_from_slice(&chunk);
+            }
+            let visible = prompt.trim_end();
+            wait_for_test_capture(&session, |capture| capture.contains(visible));
+            String::from_utf8(bytes).expect("fixture output is UTF-8")
+        };
+        let completed = |bytes: &str, status: u8| {
+            let end = format!("\x1b]133;D;{status}\x07");
+            assert_eq!(bytes.matches("\x1b]133;C\x07").count(), 1, "{bytes:?}");
+            assert_eq!(bytes.matches("\x1b]133;D;").count(), 1, "{bytes:?}");
+            let start = bytes.find("\x1b]133;C\x07").expect("command start");
+            let finish = bytes.find(&end).expect("command exit status");
+            let prompt = bytes.find("\x1b]133;A\x07").expect("prompt start");
+            let input = bytes.rfind("\x1b]133;B\x07").expect("prompt end");
+            assert!(
+                start < finish && finish < prompt && prompt < input,
+                "{bytes:?}"
+            );
+        };
+
+        let bytes = submit("echo hi\n", "zz-fixture-2:0> ");
+        completed(&bytes, 0);
+        let first = wait_for_last_command(&session, |capture| capture.command == "echo hi");
+        assert_eq!(first.output, "hi");
+        assert_eq!(first.truncated_rows, 0);
+
+        let bytes = submit("\n", "zz-fixture-3:0> ");
+        assert!(!bytes.contains("\x1b]133;C"), "{bytes:?}");
+        assert!(!bytes.contains("\x1b]133;D"), "{bytes:?}");
+        assert_eq!(
+            wait_for_last_command(&session, |capture| capture.command == "echo hi"),
+            first
+        );
+
+        let bytes = submit("false\n", "zz-fixture-4:1> ");
+        completed(&bytes, 1);
+        let failed = wait_for_last_command(&session, |capture| capture.command == "false");
+        assert_eq!(failed.output, "");
+
+        let bytes = submit("echo one; echo two\n", "zz-fixture-5:0> ");
+        completed(&bytes, 0);
+        let compound =
+            wait_for_last_command(&session, |capture| capture.command == "echo one; echo two");
+        assert_eq!(compound.output, "one\ntwo");
+        let hooks = std::fs::read_to_string(home.join("debug-commands"))
+            .expect("preserved user execution hook");
+        assert!(hooks.contains("echo hi"), "{hooks:?}");
+        assert!(hooks.contains("false"), "{hooks:?}");
+        session
+            .disarm_raw_output_tap(133)
+            .expect("disarm shell output tap");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bash_shell_integration_marks_command_lifecycle() {
+        let candidates: &[&str] = if cfg!(target_os = "macos") {
+            &["/opt/homebrew/bin/bash", "/usr/local/bin/bash"]
+        } else {
+            &["/bin/bash", "/usr/bin/bash"]
+        };
+        let Some(shell) = candidates
+            .iter()
+            .find(|shell| std::path::Path::new(shell).is_file())
+        else {
+            eprintln!("skipping bash shell integration fixture: no supported bash installed");
+            return;
+        };
+        shell_integration_command_lifecycle(shell);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zsh_shell_integration_marks_command_lifecycle() {
+        shell_integration_command_lifecycle("/bin/zsh");
     }
 
     #[cfg(unix)]

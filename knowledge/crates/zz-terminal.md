@@ -47,17 +47,26 @@ work, and retains libghostty-generated PTY replies in `PtyEffects` until the wri
 their combined admission charge. See
 [pty-worker](/concepts/pty-worker.md) for the actor lifecycle in depth.
 
-On Unix, `run_terminal` obtains its default shell command from `shell_integration.rs`. zsh and modern
-Bash receive original zz-owned startup hooks that publish the exact interactive command as OSC 2
-immediately before execution, then replace it with the compact current directory at the next
+On Unix, `run_terminal` obtains its default shell command from `shell_integration.rs`. zsh and
+Bash receive zz-owned startup hooks; Apple's `/bin/bash` 3.2 is skipped because it never reads
+`ENV`, the injection path. On zsh and Bash 4.4+, these publish
+the interactive command as OSC 2 before execution, then replace it with the shell name at the next
 prompt. A program's own later OSC 0/2 title wins while it runs. Shell resources are embedded in the
 binary and materialized into a versioned private cache on every spawn, never once per process: the
 cache root is a purgeable OS cache directory, and a daemon that memoized it would hand later panes an
 `ENV` path that no longer exists, leaving Bash in `--posix` with no startup files at all. Unsupported
 shells, a purged-and-unwritable cache, and explicit opt-out (`ZZ_SHELL_INTEGRATION=none`) all fall
-back to `portable_pty`'s unchanged default login shell. These hooks emit
-**OSC 2, OSC 7, and cursor shape only**, not OSC 133. Semantic prompt marks come from the user's own
-shell integration (ghostty, kitty, wezterm, starship), and `capture_last_command` needs them.
+back to `portable_pty`'s unchanged default login shell.
+
+The bundled Bash, zsh, and PowerShell hooks emit OSC 133: A before the prompt, B before command
+input, C before execution, and D with the exit status before the next prompt. `show-last-output`
+and `send-last-output` use these marks through `capture_last_command` to extract command and output
+text. Empty Enter submissions do not emit C/D. Bash preserves user prompt commands and DEBUG traps;
+its first prompt hook saves the command status before user hooks run. PowerShell emits C through
+the existing `PSConsoleHostReadLine` wrapper when that function is available, so command detection
+there is best-effort. It reports success as 0 and failure using a nonzero `$LASTEXITCODE`, falling
+back to 1. Without the read-line hook, it emits A/B but cannot delimit command output. OSC 2 titles,
+OSC 7 working directories, and cursor resets continue alongside the prompt marks.
 
 The worker retains one `active_view` (`Option<(TerminalViewId, Box<TerminalViewState>)>`) plus a map of
 `inactive_views`. Only the active view drives the published frame; `attach_view` makes a client the

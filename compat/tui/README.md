@@ -42,49 +42,45 @@ RGB) stays part of the cell, as `tui.status-row` in `compat/tmux-gaps.json` esta
 
 ## State
 
-Cycle 1 integrated at `38c22b9e` (2026-09-09, the alienware Linux box, workflow `wf_c9486b5d-863`:
-one Opus lane, one reject, one fix pass, one approve, one gate), and the deferral records commit
-followed the same day: **2/12 baseline verified, added scope 0/1**.
+Cycle 3 integrated at `ce74bab7` (2026-09-10, alienware, workflow `wf_a9b2e831-bc8`: three Opus
+lanes in parallel, no rejects, one serialized gate, 11.1 hours). The orchestrator's close-out
+reopened one over-promotion, so the honest count is **4/12 baseline verified** (TUI-001, TUI-002,
+TUI-003, TUI-010), added scope 0/1.
 
-- `TUI-001` and `TUI-002` are `verified` on cycle 1's banked, thrice-reproduced proof. The macOS
-  half of TUI-001's clause 2 was split out on 2026-09-09: fabrico had no macbook access and
-  decided the campaign continues now with the macOS test recorded for later (dated in both
-  ledger records; reversible). The split obligation is `TUI-013` (added scope, so the baseline
-  number never counts it as quietly done): reproduce or explain the recorded macOS
-  geometry-report timeout with an attested build. The refutation history it opens on: the
-  stale-pre-fix-binary story is refuted by `tui.client-input-backpressure`'s own resolution
-  (the fixture exited 0 at pre-fix `012b4dcc`, and the outer pinned tmux drains continuously, so
-  the stalled backpressure can never build in this fixture on any platform).
-- What cycle 1 banked: `compat/tui-screen-diff.sh` with 65 checkpoints (80x24, 100x24, 80x10
-  asserted; 109x24, 120x24 recorded; attach, status off/on, split, zoom, resize round-trip,
-  status 2, status-position top), `--self-check` sabotages that each fail one-sided while the
-  named-vs-indexed colour equivalence collapses, timeout-diagnostic retention in the geometry
-  fixture (proven by a driven failure), and six exit-0 geometry runs in 4-5s against the 10s
-  bound. Worker, reviewer and gate each built their own zz and reproduced all 195 capture files
-  byte for byte.
-- The 109/120 recordings `TUI-004` opens on: at 120x24 the pin's pane is 120 columns, zz's is 91
-  (the 28-column sidebar plus its 1-column border; `AUTO_HIDE_COLUMNS = 80+28+1 = 109` in
-  `crates/zz-tui/src/sidebar.rs`); resizing 120x24 down to 100x24 makes both screens identical
-  cell for cell, so the sidebar is the entire >=109 difference. Rows match at every size.
-- Divergences measured with no registry owner (all on the cycle-1 TRIAGE residual): cursor
-  shape/blink/colour differ at all 65 checkpoints (zz writes DECSCUSR and OSC 12 from
-  `crates/zz-tui/src/render.rs` where the pin writes neither; the screen-diff prints that channel
-  but does not gate it, since a sabotage would be indistinguishable from the standing
-  divergence); the pane body promotes named/indexed colours to RGB where the status row no
-  longer does; an explicit default foreground under a non-default status-style; and
-  `compat/status-row.sh` exits 1 under `LC_TIME=pt_BR.UTF-8` because the pin expands `%b`
-  through libc strftime while zz's `crates/zz-mux/src/formats.rs` uses locale-independent chrono
-  (the `LC_ALL=C LC_TIME=C` control exits 0).
-- Machine facts (alienware: CachyOS, 16 cores, 15 GB + 15 GB zram, btrfs): first campaign box
-  with no prior corpus stamp; `formats` clean at baseline; cold debug build 5m34s; a debug build
-  is NOT bit-reproducible here (four distinct sha256 for identical source across worker, reviewer,
-  gate and the pre-cycle environment record), so a recorded hash identifies an artifact but
-  cannot attest it -- reproduction is the proof. `~/dev/zz-gate-target` (24G) and
-  `~/dev/zz-tui-lane` stay warm for the next cycle on that box.
+- Cycle 1 (`38c22b9e`, plus the same-day deferral records `ccab35ce`): the fixture baseline.
+  TUI-001 and TUI-002 verified on banked, thrice-reproduced proof; the macOS half of TUI-001's
+  clause 2 lives in `TUI-013` (fabrico's 2026-09-09 deferral; `compat/tui/run-2.js` is its ready
+  macbook runner and it blocks nothing).
+- Cycle 3 (`ce74bab7`): TUI-003 verified -- stock split/chooser/rename/selection/zoom/detach
+  bindings produce the pinned result through real stdin (`compat/tui-stock-keys.sh`, 50 cases),
+  the launcher compared on empty and live servers, and chrome no longer consumes root or
+  application keys outside its owning context. TUI-010 verified -- a drop-and-redraw path
+  replaces parking past the 4 MiB writer budget, detach under backlog leaks no queued paint,
+  simultaneous/read-only/reattach clients asserted; `tui.client-output-queue-budget` closed.
+  The sidebar decision landed: width never invokes the sidebar, and the 109/120-column cases of
+  `tui-screen-diff.sh` and `tui-pane-geometry.sh` now assert instead of record. Cursor
+  attributes match the pin (no DECSCUSR or OSC 12 by default) and that channel asserts too.
+- `TUI-004` is `review`, REOPENED at this close-out: the cycle-3 gate promoted it to verified
+  while its own evidence note says clause 3 is open (copy/view/prefix indicators and
+  message/prompt restoration undriven; the three theme status rows still recorded). Clauses 1
+  and 2 keep their whole-screen evidence at `4cd23eb3`. Cycle 4's canvas-close lane finishes
+  clause 3, including the theme landing the gate measured: a 21-name roster (not the 11 the
+  cycle-18 handoff recorded), `TMUX_OPTION_CONSUMERS` 118 to 139, the consumer half closing 21
+  items of the accepted `options.theme-palette` gap (so the lane owns it), the wire half a
+  `TmuxColour` field on `StatusLine` at protocol 99 to 100 -- one landing, never half.
+- PROTOCOL_VERSION is still 99; cycle 3's allowed bump was deliberately unspent. Upstream note
+  for fabrico: the gate repaired two reds that arrived with the thirteen mid-cycle main commits
+  (the `tools [--skill]` list-commands assertion, and `commands.native-superset` item order) --
+  revert either if the intent differed.
+- Box facts added: four corpus rows are environmental on alienware (micro-flags %b locale,
+  show-options-hooks and lane2-store through lock-command defaulting to vlock,
+  smoke/plugin-runtime-resurrect-restore), each proved red at origin/main;
+  `compat/tui-stock-keys.sh` root-binding-detaches can flake on a wall-clock second boundary
+  because it compares a row carrying a timestamp -- worth pinning.
 
-The ready set is `TUI-003`, `TUI-004` and `TUI-010`; cycle 3 runs them as parallel lanes from
-`compat/tui/run-3.js` on the alienware box (the auto-roll policy of 2026-09-09: a clean gate
-rolls the next cycle without waiting). `TUI-013` waits on macbook access and blocks nothing.
+Cycle 4 (`compat/tui/run-4.js`, launched from the alienware session): canvas-close (TUI-004
+clause 3 plus the theme landing), copy (TUI-005), caps (TUI-009). TUI-006 and TUI-007 return to
+ready when TUI-004 verifies; TUI-008, TUI-011 and TUI-012 follow their dependencies.
 
 ## Launching the deferred macOS run (macbook)
 

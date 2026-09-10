@@ -2,7 +2,7 @@
 type: Design Plan
 title: TUI parity campaign
 description: "The terminal-client parity contract: tmux observable behavior by default, zz additions through superset commands, and proof tied to the tested revision."
-status: Contract agreed 2026-09-09; cycle 1 (fixture baseline) integrated 2026-09-09 at 38c22b9e; TUI-001/TUI-002 verified 2026-09-09 under fabrico's amendment splitting the macOS timeout clause to TUI-013 (added scope, deferred); runtime parity work starts with cycle 3
+status: Contract agreed 2026-09-09; cycles 1 and 3 integrated (4/12 verified: TUI-001/002/003/010 at ce74bab7); the sidebar width threshold is gone per the contract; TUI-004 at review pending clause 3 and the theme landing; TUI-013 (the macOS timeout) deferred as added scope
 resource: compat/tui/campaign.json
 tags:
 - tui

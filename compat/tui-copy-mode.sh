@@ -893,7 +893,7 @@ run_movement() {
   type_both "$KEY_DOWN"
   type_both "$KEY_COUNT"
   type_both "$KEY_RIGHT"
-  copy_case "$table-rectangle-inside-line" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
+  copy_case "$table-rectangle-inside-line" format '#{copy_cursor_x}=5' text,cursor,facts,view,buffer "$SELECTION_REASON"
   assert_mode_formats "$table-rectangle-inside-line"
   type_both "$KEY_COPY"
   copy_case "$table-rectangle-inside-line-copy" format '#{pane_in_mode}=0'
@@ -916,7 +916,7 @@ run_movement() {
     type_both "$KEY_COUNT"
     type_both "$KEY_RIGHT"
   done
-  copy_case "$table-rectangle-past-end-of-line" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
+  copy_case "$table-rectangle-past-end-of-line" format '#{copy_cursor_x}=20' text,cursor,facts,view,buffer "$SELECTION_REASON"
   assert_mode_formats "$table-rectangle-past-end-of-line"
   type_both "$KEY_COPY"
   copy_case "$table-rectangle-past-end-of-line-copy" format '#{pane_in_mode}=0'

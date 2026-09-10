@@ -26,7 +26,8 @@ limit retain their existing command behavior.
 
 Both plain `agent-send` and `--submit` send a message on this route; Claude Code has no remote
 composer draft. `--wait` collects a reply through a temporary daemon peer, as described below.
-Without a matching terminal peer, the command follows its existing Agent-pane target resolution.
+Without a matching Claude Code terminal peer, the daemon checks for Codex as described below,
+then follows its existing Agent-pane target resolution for other targets.
 Claude Code processes received messages between tool calls or starts a turn when idle, subject to
 its own inbound policy.
 
@@ -82,6 +83,7 @@ A pane-scoped `@name@%N` option signal triggers registration. The daemon uses th
 record keep that registration. Agent panes retain their existing registration lifecycle.
 
 The inbox passes each user message verbatim, including its attribution wrapper, to
+`Shared::deliver_to_terminal_pane`. For the typed delivery path, it calls
 `Shared::paste_and_submit`. That method uses the same paste, echo polling, and Enter path as
 `send-text`, with a 2000 ms deadline and no daemon lock held during the poll. Failures produce a
 warning. Terminal peers ignore control lines.
@@ -90,12 +92,73 @@ Messages submit input to the terminal, so do not name a bare shell pane. Changin
 `name` and `nameSince` in place. Unsetting the option or closing the pane removes its peer record
 and socket.
 
-This typed path is the whole story for Codex, Gemini, and any other terminal agent, by decision on
-2026-09-10. A version of zz hosted Codex's app-server per pane behind a `split-codex` verb, which
+The initial typed path covered Codex, Gemini, and other terminal agents on 2026-09-10, before
+the Codex queue route below. A version of zz hosted Codex's app-server per pane behind a `split-codex` verb, which
 gave steering, typed state, and approvals from the CLI; it was withdrawn the same day because it
 embedded one vendor's loop and its own verb into zz. The archive tag `archive/codex-host` keeps
-that work. What remains vendor-neutral: name the pane, deliver by verified paste, read state from
+that work. Name the pane, deliver through the agent's existing input, read state from
 the bell and the title, and let the human answer approvals in the pane.
+
+### Codex through its own queue
+
+On 2026-09-10, live probes with Codex CLI 0.154.0 on macOS verified delivery through
+`codex queue --thread <id> --message TEXT`. It prints
+`Queued message <id> for thread <id>.` and exits 0. Codex polls its durable queue every ten
+seconds and starts the message as a user turn when idle. Messages received during a turn wait
+for the next idle. Use the same `CODEX_HOME` as the pane (default `~/.codex`) and no `-c`
+configuration overrides. The daemon inherits its Codex home environment and uses the ACP
+login-shell PATH capture to find and launch the installed CLI.
+
+Codex sets the terminal title to `<thread name> | <project>`. Before its first prompt it sets
+only `<project>`. The name comes from its first-prompt auto-title or `/rename`. The observed
+sequence was `zz`, `Reply pong-title | zz`, then `titleprobe-42 | zz` after `/rename titleprobe-42`.
+The daemon reads the pane title, as printed by `#{pane_title}`, and takes the nonempty segment
+before the first ` | `. Title updates require `allow-set-title`, which defaults to on. The pane's
+`@name` identifies its peer registration; it does not identify the Codex thread.
+
+The CLI's Node wrapper can make `#{pane_current_command}` report `node`. In
+`crates/zz-daemon/src/agent/codex_queue.rs`, `pane_runs_codex` checks the pane process and its
+descendants for an executable basename of `codex`, using the shared descendant walk in
+`claude_peers.rs`. It reads executable paths through `ps` on macOS and `/proc` on Linux.
+
+For each delivery, `resolve_thread` launches a short-lived `codex app-server` subprocess over
+stdio to list threads. It sends newline-delimited JSON in this order, waiting for the initialize
+response before the next two messages:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"zz","title":"zz","version":"0.7.0"},"capabilities":{"experimentalApi":true}}}
+{"jsonrpc":"2.0","method":"initialized","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"thread/list","params":{"limit":50,"archived":false,"cwd":"/Users/x/dev/zz","useStateDbOnly":true}}
+```
+
+The implementation sends the daemon package version in `clientInfo`. Responses omit `jsonrpc`;
+the daemon matches request IDs and skips unrelated notifications such as
+`remoteControl/status/changed`. It follows `nextCursor` for up to four pages and accepts exactly
+one thread whose name and cwd match the pane's title name and current path, falling back to its
+start path. It refuses an incomplete listing after four pages. It uses the resulting ID for
+`codex queue`, since Codex can reject a session name it cannot prove unique. It reads no private
+Codex files and makes no guesses from timestamps. Earlier live attempts that guessed from file
+timestamps selected the wrong session.
+
+The lookup has a ten-second overall deadline, and the queue command has a separate ten-second
+deadline. The daemon closes lookup stdin, terminates the child, and waits for it on completion
+or failure. It hosts no persistent vendor server, adds no vendor verb, and leaves the interactive
+Codex process in control of turns and approvals.
+
+Direct `agent-send` and `--submit` both queue the payload and print the pane ID for a
+noninteractive caller. Errors exit 1 and do not route the message to an Agent pane:
+
+- No title name: `Codex session in %N has no name yet; send it a first prompt in the pane or run /rename there`.
+- No matching thread: `no Codex session named X in DIR for %N; run /rename in the pane`.
+- Several matching threads: `N Codex sessions named X in DIR; run /rename in the pane`.
+- Missing executable: `codex executable not found on the login-shell PATH`.
+- Queue failure: Codex's trimmed stderr, with the target pane ID.
+- `--wait`: `agent-send --wait needs a reply channel; Codex terminal panes have none, use an Agent pane`.
+
+A named terminal peer running Codex receives its full attributed message through the same queue.
+If the session has no title name yet, the daemon logs the reason at info level and uses the
+existing paste-and-submit path for that peer message. Other queue errors produce a warning and
+leave the message unsubmitted. Other terminal agents retain typed delivery.
 
 ## Waiting for a reply
 
@@ -178,8 +241,8 @@ ignores `type: auth` lines and unrecognized messages, and accepts `type: user` l
 `message.content`. The listener applies a 30-second idle deadline to connections and reads sockets
 without holding the daemon lock. It logs the sender and byte count at info level, then passes the
 content verbatim, including its wrapper, to `submit_agent_prompt` for Agent peers. That existing
-path queues the prompt while the Agent pane is busy. Terminal peers use the paste path; the
-daemon peer routes replies to pending waits.
+path queues the prompt while the Agent pane is busy. Terminal peers use the Codex queue or
+paste path described above; the daemon peer routes replies to pending waits.
 
 ## Lifecycle and limits
 
@@ -207,5 +270,6 @@ advisory instead of dropping the connection.
 The module requires Unix and the daemon's `agent` feature, which belongs to the default feature
 set. Windows retains the previous outbound routing. Plain sends from callers without a registered
 peer still omit a reply address; socket waits provide the transient daemon address. This protocol
-has no durable mailbox or cross-machine transport. It does not change the `send-text` command
+has no durable peer mailbox or cross-machine transport; Codex owns the durable queue used for
+Codex terminal delivery. It does not change the `send-text` command
 surface, install hooks, or host Codex app-server sessions.

@@ -419,7 +419,7 @@ fn proc_start(pid: u32) -> io::Result<String> {
     Ok(start)
 }
 
-fn descendants_by_depth(parents: &[(u32, u32)], root: u32) -> Vec<u32> {
+pub(super) fn descendants_by_depth(parents: &[(u32, u32)], root: u32) -> Vec<u32> {
     let mut ordered = Vec::new();
     let mut frontier = vec![root];
     while !frontier.is_empty() {
@@ -443,7 +443,7 @@ fn env_marks_pane(environment: impl Iterator<Item = Vec<u8>>, pane: &str) -> boo
 }
 
 #[cfg(target_os = "linux")]
-fn adapter_pid(pane: &str) -> io::Result<u32> {
+pub(super) fn process_parents() -> io::Result<Vec<(u32, u32)>> {
     let mut parents = Vec::new();
     for entry in fs::read_dir("/proc")? {
         let entry = entry?;
@@ -468,7 +468,12 @@ fn adapter_pid(pane: &str) -> io::Result<u32> {
             parents.push((pid, parent));
         }
     }
-    for pid in descendants_by_depth(&parents, std::process::id()) {
+    Ok(parents)
+}
+
+#[cfg(target_os = "linux")]
+fn adapter_pid(pane: &str) -> io::Result<u32> {
+    for pid in descendants_by_depth(&process_parents()?, std::process::id()) {
         let Ok(environment) = fs::read(format!("/proc/{pid}/environ")) else {
             continue;
         };
@@ -486,7 +491,7 @@ fn adapter_pid(pane: &str) -> io::Result<u32> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn adapter_pid(pane: &str) -> io::Result<u32> {
+pub(super) fn process_parents() -> io::Result<Vec<(u32, u32)>> {
     let output = Command::new("ps").args(["-axo", "pid=,ppid="]).output()?;
     let parents: Vec<(u32, u32)> = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -495,7 +500,12 @@ fn adapter_pid(pane: &str) -> io::Result<u32> {
             Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
         })
         .collect();
-    for pid in descendants_by_depth(&parents, std::process::id()) {
+    Ok(parents)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn adapter_pid(pane: &str) -> io::Result<u32> {
+    for pid in descendants_by_depth(&process_parents()?, std::process::id()) {
         let environment = Command::new("ps")
             .args(["-E", "-o", "command=", "-p", &pid.to_string()])
             .output()?;

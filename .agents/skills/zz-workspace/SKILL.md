@@ -44,7 +44,7 @@ zz list-panes -F '#{pane_id} #{pane_kind} #{agent_state} #{@agent_state}'
 
 Draft into another Agent pane's composer for its user to review. An omitted or
 non-agent target routes to that window's most recently focused Agent pane,
-except for Claude Code terminal peers described below.
+except for Claude Code terminal peers and Codex terminal panes described below.
 Read stdin when TEXT is omitted: `git diff | zz agent-send`.
 `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
 
@@ -63,6 +63,13 @@ expires, or drops the message, the session exits, or the timeout passes. Held
 and delivered status updates keep the wait open. A plain send carries no reply
 address unless you are a registered peer: a caller that needs the answer uses
 `--wait`, and a pane that should be reachable sets `@name`.
+
+A terminal pane running Codex is also a valid target. The daemon reads the session
+name from the pane title and queues the text through Codex's own `codex queue`.
+Codex runs it at its next idle, with polling taking up to ten seconds. Plain sends
+and `--submit` both queue the message and print the pane ID for command clients.
+A fresh session has no name until its first prompt; `/rename` inside Codex resolves
+a name collision. `--wait` is not available for Codex terminal panes.
 
 ### `zz show-agent-permission [-t %N]`
 
@@ -192,10 +199,11 @@ Code refuses idle subscriptions to these peers; wait with
 `zz wait-for agent_state@%N` instead.
 
 A terminal pane becomes a peer when you set its pane `@name` option:
-`zz set-option -p -t %3 @name codex-1`. Messages to it are pasted into the pane
-and submitted, so do not name a bare shell pane. This is how Codex, Gemini, and
-every other terminal agent join the bus; the daemon hosts no vendor's server
-and reads their state only from the bell and the window title. Claude Code
+`zz set-option -p -t %3 @name codex-1`. A Codex pane with a session name receives
+peer messages through the same Codex queue described above. Other terminal peers,
+and Codex sessions without a name yet, receive pasted and submitted text, so do
+not name a bare shell pane. A queue lookup or delivery failure leaves the message
+unsubmitted and logs the reason. The daemon hosts no vendor's server. Claude Code
 terminal sessions keep their own registration.
 
 ## Foreign agents in terminal panes

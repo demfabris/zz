@@ -12586,10 +12586,14 @@ impl Shared {
                 .then_some(pane)
             };
             if let Some(pane) = target {
-                let records = claude_peers::read_records().unwrap_or_else(|error| {
+                let codex = self.codex_terminal_context(pane);
+                let mut records = claude_peers::read_records().unwrap_or_else(|error| {
                     log::warn!(target: "zz::agent", "could not read Claude peers: {error}");
                     Vec::new()
                 });
+                if codex.is_some() {
+                    records.retain(|record| record.zz.is_none());
+                }
                 if let Some(record) = claude_peers::record_for_pane(&records, &pane.to_string()) {
                     let (name, socket) = {
                         let peers = self.agent_peers.lock();
@@ -12630,6 +12634,26 @@ impl Shared {
                             pane.to_string().into()
                         } else {
                             RawText::default()
+                        },
+                        effects: Vec::new(),
+                    });
+                }
+                if let Some((pid, title, cwd)) = codex {
+                    if parsed.wait {
+                        return Err(ServerError::InvalidCommand(
+                            "agent-send --wait needs a reply channel; Codex terminal panes have none, use an Agent pane".to_owned(),
+                        ).into());
+                    }
+                    let delivered = crate::agent::codex_queue::deliver(pid, &title, &cwd, &payload)
+                        .map_err(|error| {
+                            ServerError::InvalidCommand(error.for_pane(pane, &title, &cwd))
+                        })?;
+                    log::info!(target: "zz::agent", "queued Codex message {} for thread {} in {pane}", delivered.message_id, delivered.thread_id);
+                    return Ok(Execution {
+                        output: if kind == ClientKind::Interactive {
+                            RawText::default()
+                        } else {
+                            pane.to_string().into()
                         },
                         effects: Vec::new(),
                     });
@@ -12917,6 +12941,48 @@ impl Shared {
         )?;
         self.paste_and_submit(pane, &text, parsed.timeout_ms, !parsed.no_enter)?;
         Ok(Execution::default())
+    }
+
+    #[cfg(all(feature = "agent", unix))]
+    fn codex_terminal_context(&self, pane: PaneId) -> Option<(u32, String, PathBuf)> {
+        let (pid, title, cwd) = {
+            let inner = self.inner.lock();
+            let state = inner.engine.state.pane(pane)?;
+            if !matches!(state.kind, PaneKind::Terminal) {
+                return None;
+            }
+            let runtime = inner.engine.pane_runtime_facts(pane)?;
+            let path = if runtime.current_path.is_empty() {
+                &runtime.start_path
+            } else {
+                &runtime.current_path
+            };
+            (runtime.pid?, state.title.clone(), PathBuf::from(path))
+        };
+        crate::agent::codex_queue::pane_runs_codex(pid).then_some((pid, title, cwd))
+    }
+
+    #[cfg(all(feature = "agent", unix))]
+    fn deliver_to_terminal_pane(&self, pane: PaneId, text: &str) -> Result<(), DaemonError> {
+        use crate::agent::codex_queue::{self, QueueError};
+
+        if let Some((pid, title, cwd)) = self.codex_terminal_context(pane) {
+            match codex_queue::deliver(pid, &title, &cwd, text) {
+                Ok(delivered) => {
+                    log::info!(target: "zz::agent", "queued Codex peer message {} for thread {} in {pane}", delivered.message_id, delivered.thread_id);
+                    return Ok(());
+                }
+                Err(error @ QueueError::NoName) => {
+                    log::info!(target: "zz::agent", "{}; delivering peer prompt through the terminal", error.for_pane(pane, &title, &cwd));
+                }
+                Err(error) => {
+                    return Err(
+                        ServerError::InvalidCommand(error.for_pane(pane, &title, &cwd)).into(),
+                    );
+                }
+            }
+        }
+        self.paste_and_submit(pane, text, 2000, true)
     }
 
     fn paste_and_submit(
@@ -25543,7 +25609,7 @@ impl Shared {
         match PeerInbox::register(metadata, move |event| {
             if let PeerEvent::Message { content, .. } = event
                 && let Some(shared) = owner.upgrade()
-                && let Err(error) = shared.paste_and_submit(pane, &content, 2000, true)
+                && let Err(error) = shared.deliver_to_terminal_pane(pane, &content)
             {
                 log::warn!(target: "zz::agent", "could not submit terminal peer prompt to {pane}: {error}");
             }
@@ -37916,7 +37982,7 @@ zz list-panes -F '#{pane_id} #{pane_kind} #{agent_state} #{@agent_state}'
 
 Draft into another Agent pane's composer for its user to review. An omitted or
 non-agent target routes to that window's most recently focused Agent pane,
-except for Claude Code terminal peers described below.
+except for Claude Code terminal peers and Codex terminal panes described below.
 Read stdin when TEXT is omitted: `git diff | zz agent-send`.
 `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
 
@@ -37935,6 +38001,13 @@ expires, or drops the message, the session exits, or the timeout passes. Held
 and delivered status updates keep the wait open. A plain send carries no reply
 address unless you are a registered peer: a caller that needs the answer uses
 `--wait`, and a pane that should be reachable sets `@name`.
+
+A terminal pane running Codex is also a valid target. The daemon reads the session
+name from the pane title and queues the text through Codex's own `codex queue`.
+Codex runs it at its next idle, with polling taking up to ten seconds. Plain sends
+and `--submit` both queue the message and print the pane ID for command clients.
+A fresh session has no name until its first prompt; `/rename` inside Codex resolves
+a name collision. `--wait` is not available for Codex terminal panes.
 
 ### `zz show-agent-permission [-t %N]`
 
@@ -38064,10 +38137,11 @@ Code refuses idle subscriptions to these peers; wait with
 `zz wait-for agent_state@%N` instead.
 
 A terminal pane becomes a peer when you set its pane `@name` option:
-`zz set-option -p -t %3 @name codex-1`. Messages to it are pasted into the pane
-and submitted, so do not name a bare shell pane. This is how Codex, Gemini, and
-every other terminal agent join the bus; the daemon hosts no vendor's server
-and reads their state only from the bell and the window title. Claude Code
+`zz set-option -p -t %3 @name codex-1`. A Codex pane with a session name receives
+peer messages through the same Codex queue described above. Other terminal peers,
+and Codex sessions without a name yet, receive pasted and submitted text, so do
+not name a bare shell pane. A queue lookup or delivery failure leaves the message
+unsubmitted and logs the reason. The daemon hosts no vendor's server. Claude Code
 terminal sessions keep their own registration.
 
 ## Foreign agents in terminal panes

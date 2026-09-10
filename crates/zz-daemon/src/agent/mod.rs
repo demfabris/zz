@@ -8,6 +8,8 @@
 
 #[cfg(unix)]
 pub(crate) mod claude_peers;
+#[cfg(unix)]
+pub(crate) mod codex_queue;
 pub(crate) mod environment;
 pub(crate) mod fanout;
 #[cfg(test)]

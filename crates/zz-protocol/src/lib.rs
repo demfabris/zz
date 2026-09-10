@@ -73,9 +73,10 @@ pub use snapshot::{
     PaneSnapshot, SessionSnapshot, SessionViewer, WindowSnapshot, normalize_browser_profile_name,
 };
 pub use style::{
-    StyledSegment, TmuxAlign, TmuxAttributeState, TmuxAttributes, TmuxColour, TmuxDefaultType,
-    TmuxList, TmuxRange, TmuxStyle, TmuxWidth, apply_style, display_width, indexed_colour_rgb,
-    parse_style, parse_styled_segments, parse_tmux_colour, valid_style,
+    COLOUR_THEME_COUNT, DEFAULT_DARK_THEME_COLOURS, StyledSegment, ThemeColours, TmuxAlign,
+    TmuxAttributeState, TmuxAttributes, TmuxColour, TmuxDefaultType, TmuxList, TmuxRange,
+    TmuxStyle, TmuxWidth, apply_style, display_width, indexed_colour_rgb, parse_style,
+    parse_styled_segments, parse_tmux_colour, valid_style,
 };
 pub use terminal_codec::{
     decode_protocol_frame, encode_protocol_message, encode_protocol_message_into,

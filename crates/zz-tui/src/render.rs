@@ -7,12 +7,12 @@ use std::{
 use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
     PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
-    PopupBorderLines, StyledSegment, TmuxAttributeState, TmuxColour, TmuxStyle, parse_style,
-    parse_styled_segments,
+    PopupBorderLines, StyledSegment, ThemeColours, TmuxAttributeState, TmuxColour, TmuxStyle,
+    parse_style, parse_styled_segments,
 };
 use zz_terminal::{
-    CellWidth, Color, Glyph, KittyPlacement, PackedCell, PackedStyle, SearchDirection,
-    SearchQuery, TerminalAppearance, TerminalMode, TerminalViewport, UnderlineStyle,
+    CellWidth, Color, Glyph, KittyPlacement, PackedCell, PackedStyle, SearchDirection, SearchQuery,
+    TerminalAppearance, TerminalMode, TerminalViewport, UnderlineStyle,
 };
 
 use crate::{
@@ -112,6 +112,34 @@ impl StyledLine {
     fn append(&mut self, other: &Self) {
         for segment in &other.segments {
             self.push_segment(&segment.text, segment.style.clone());
+        }
+    }
+
+    /// Every `themeX` colour in this line, replaced by the colour the daemon
+    /// resolved for THIS client. `server_client_update_theme_colours` resolves
+    /// the ten slots per client from the `theme` option and the roster, so a
+    /// client that resolved them from a table of its own could not follow a
+    /// user-set `dark-theme-green` and could not follow `theme light` at all.
+    /// The class survives the substitution, which is the point of carrying
+    /// `TmuxColour` on the wire: `colour124` leaves as `\e[48;5;124m`.
+    ///
+    /// The status row only. Every other surface that can name a theme colour -
+    /// a pane border, the sidebar's own chrome - keeps zz's theme under the
+    /// recorded presentation:tui-status-row-theme-defaults decision, whose
+    /// scope is exactly that.
+    fn resolve_theme(&mut self, theme: &ThemeColours) {
+        for segment in &mut self.segments {
+            for slot in [
+                &mut segment.style.fg,
+                &mut segment.style.bg,
+                &mut segment.style.us,
+            ] {
+                if let Some(TmuxColour::Theme(index)) = slot
+                    && let Some(resolved) = theme.slot(*index)
+                {
+                    *slot = Some(resolved);
+                }
+            }
         }
     }
 
@@ -1449,6 +1477,7 @@ impl Renderer {
                     None => {}
                 }
             }
+            line.resolve_theme(&model.status.theme);
             lines.push(line);
         }
         let geometry = (x, origin, width);
@@ -1469,9 +1498,10 @@ impl Renderer {
         self.status_rows = lines;
         self.status_geometry = Some(geometry);
         if block == 0
-            && let Some(StatusOverlay::Row(line)) = overlay
+            && let Some(StatusOverlay::Row(mut line)) = overlay
             && let Some(y) = model.message_row_y()
         {
+            line.resolve_theme(&model.status.theme);
             write_styled_text(
                 &mut self.output,
                 x,
@@ -1979,11 +2009,12 @@ fn sidebar_status_lines(model: &Model) -> Vec<StyledLine> {
         return lines;
     }
 
-    let base = combine_status(
+    let mut base = combine_status(
         &base_status_left(model),
         &StyledLine::parsed(&model.status.right),
         sidebar::WIDTH,
     );
+    base.resolve_theme(&model.status.theme);
     let indicators = padded_styled(
         &StyledLine::plain(&status_indicators(model)),
         sidebar::WIDTH,
@@ -3520,6 +3551,57 @@ mod tests {
         assert_eq!(painted, "/界e\u{301}  ");
         assert_eq!(text_display_width(&painted), 6);
         assert_eq!(cursor, 4);
+    }
+
+    #[test]
+    fn the_published_theme_defaults_are_the_table_the_client_used_to_hard_code() {
+        let published = zz_protocol::ThemeColours::default();
+        for (index, name) in DARK_THEME_COLOURS.iter().enumerate() {
+            let packed = zz_terminal::parse_x11_color(name)
+                .unwrap_or_else(|| panic!("{name} is an X11 colour"))
+                .packed();
+            assert_eq!(
+                published.slot(u8::try_from(index).expect("ten slots")),
+                Some(TmuxColour::Rgb(packed)),
+                "slot {index} ({name}) drifted from the wire default"
+            );
+        }
+    }
+
+    #[test]
+    fn the_status_row_resolves_theme_colours_through_the_published_table_and_keeps_the_class() {
+        let mut model = block_model(40, 10);
+        let mut status = block_status(vec!["#[fg=themegreen,bg=themeblack]ROW"], true);
+        status.theme = zz_protocol::ThemeColours([
+            TmuxColour::Indexed(124),
+            TmuxColour::Rgb(0x0011_2233),
+            TmuxColour::Basic(2),
+            TmuxColour::Basic(3),
+            TmuxColour::Indexed(231),
+            TmuxColour::Basic(5),
+            TmuxColour::Basic(6),
+            TmuxColour::Basic(7),
+            TmuxColour::Basic(1),
+            TmuxColour::Basic(4),
+        ]);
+        model.set_status(status);
+        let mut renderer = Renderer::new();
+        renderer.paint_status_block(&model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+
+        assert!(output.contains("\x1b[38;5;231m"), "themegreen: {output:?}");
+        assert!(output.contains("\x1b[48;5;124m"), "themeblack: {output:?}");
+        assert!(
+            !output.contains("\x1b[38;2;154;205;50m"),
+            "the hard-coded dark table must not win: {output:?}"
+        );
+
+        let mut line = StyledLine::from_segments(parse_styled_segments("#[fg=themewhite]W"));
+        line.resolve_theme(&zz_protocol::ThemeColours::default());
+        assert_eq!(
+            line.segments[0].style.fg,
+            Some(TmuxColour::Rgb(0x00e5_e5e5))
+        );
     }
 
     #[test]

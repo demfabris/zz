@@ -272,11 +272,15 @@ attach_both_at "$COLUMNS_UNDER_TEST"
 # Each step names the option and the value; the row is captured after both
 # sides have repainted at least once. Keep the values free of clocks and of
 # anything host-specific so the bytes can be equal at all.
-# Recorded, not asserted, while presentation:tui-status-row-theme-colours-per-
-# client is open: the daemon does not publish the ten resolved theme colours,
-# so the raw TUI resolves themeX from the pin's dark defaults and cannot follow
-# a user-set dark-theme-* or a forced `theme`. The rows print both sides so the
-# lane that closes the item has the bytes without re-deriving them.
+# ASSERTED since 2026-09-10, when the daemon began publishing the ten resolved
+# theme colours on StatusLine and presentation:tui-status-row-theme-colours-per-
+# client closed. Before that the raw TUI resolved themeX from a hard-coded copy
+# of the pin's dark defaults, so it could not follow a user-set dark-theme-* and
+# could not follow a forced `theme` at all, and these three rows only printed
+# both sides. They are whole-row byte comparisons like the rest now, and the
+# COLOUR CLASS is the point of them: `colour124` has to leave as \e[48;5;124m on
+# both sides and not as truecolor, which is why the wire carries a TmuxColour
+# per slot rather than an RGB triple.
 SERVER_CORPUS=(
   "dark-theme-green|colour124"
   "dark-theme-black|colour231"
@@ -293,23 +297,6 @@ CORPUS=(
   "status-justify|centre"
   "status-position|bottom"
 )
-
-# The registered-divergence twin of compare_step: prints both rows and never
-# raises FAILURES, so an open item stays visible without turning the tool red.
-record_step() {
-  local step="$1"
-  local zz_row tmux_row
-  sleep 0.3
-  zz_row="$(last_row_bytes zz)"
-  tmux_row="$(last_row_bytes tmux)"
-  if [ "$zz_row" = "$tmux_row" ]; then
-    printf 'note  %s: identical, presentation:tui-status-row-theme-colours-per-client may be closed\n' "$step"
-    return 0
-  fi
-  printf 'note  %s: presentation:tui-status-row-theme-colours-per-client, open\n' "$step"
-  printf '      tmux: %q\n' "$tmux_row"
-  printf '      zz:   %q\n' "$zz_row"
-}
 
 # The default status-right carries a clock, and the two sides are captured one
 # after the other, so a minute boundary between the captures is a difference
@@ -340,7 +327,7 @@ for entry in "${SERVER_CORPUS[@]}"; do
   option="${entry%%|*}"
   value="${entry#*|}"
   set_server_on_both "$option" "$value"
-  record_step "-s $option = $value"
+  compare_step "-s $option = $value"
 done
 for entry in "${SERVER_CORPUS[@]}"; do
   unset_server_on_both "${entry%%|*}"
@@ -352,8 +339,9 @@ for entry in "${CORPUS[@]}"; do
   compare_step "$option = $value"
 done
 
+TOTAL_CHECKS=$((${#CORPUS[@]} + ${#SERVER_CORPUS[@]} + 1 + BAND_CHECKS))
 if [ "$FAILURES" -ne 0 ]; then
-  printf '%s of %s comparisons differ\n' "$FAILURES" "$((${#CORPUS[@]} + 1 + BAND_CHECKS))"
+  printf '%s of %s comparisons differ\n' "$FAILURES" "$TOTAL_CHECKS"
   exit 1
 fi
-printf 'all %s comparisons identical, %s rows recorded not asserted\n' "$((${#CORPUS[@]} + 1 + BAND_CHECKS))" "${#SERVER_CORPUS[@]}"
+printf 'all %s comparisons identical, none recorded\n' "$TOTAL_CHECKS"

@@ -6,4 +6,5 @@
 * [Rendering multi-harness agent output — industry survey](2026-08-15-agent-harness-rendering-survey.md) - How comet, opencode, t3code, Zed, and other agent clients render multi-harness output, followed by zz's decision to adopt a flat ACP v1 contract.
 * [Codebase Audit for Code Smells, Rust Antipatterns, and Performance Issues](2026-08-17-codebase-audit.md) - Revalidation at 758dac0 found nine confirmed issues, four qualified or latent findings, one intentional ABI contract, and one overstated impact claim.
 * [tmux CLI compatibility and alias boundary](2026-08-22-tmux-cli-compatibility-audit.md) - A commit-pinned inventory of the tmux command, flag, option, format, hook, key, packaging, and native zz command surfaces, with the exact boundary around alias tmux=zz.
+* [Agent-to-agent messaging survey](2026-09-10-agent-messaging-survey.md) - How Claude Code, Codex, Gemini CLI, herdr, gastown, MCP Agent Mail, A2A, and ACP let one coding agent message another, with Claude Code's peer bus verified live on this machine, the delivery-timing taxonomy every tool converged on, and what it means for a zz message backbone.
 <!-- okf:listing:end -->

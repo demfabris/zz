@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 100;
+pub const PROTOCOL_VERSION: u16 = 101;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -1956,6 +1956,7 @@ pub enum InputMessage {
     ClientFocus {
         focused: bool,
     },
+    DismissClientMessage,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2557,6 +2558,8 @@ pub struct DisplayPanesState {
     pub window: WindowId,
     pub duration_ms: u32,
     pub indicators: Vec<PaneIndicator>,
+    pub colour: Option<crate::TmuxColour>,
+    pub active_colour: Option<crate::TmuxColour>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2564,6 +2567,7 @@ pub enum DisplayPanesAction {
     Key(KeyInput),
     Select(PaneId),
     Close,
+    Dismiss,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -4713,7 +4717,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 100);
+        assert_eq!(super::PROTOCOL_VERSION, 101);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

@@ -103,6 +103,8 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "visual-bell",
     "display-time",
     "display-panes-time",
+    "display-panes-colour",
+    "display-panes-active-colour",
     "message-limit",
     "buffer-limit",
     "set-clipboard",
@@ -34218,7 +34220,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 139);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 141);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

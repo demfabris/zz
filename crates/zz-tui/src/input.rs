@@ -50,6 +50,7 @@ pub(crate) fn handle(
     pixel_mouse: bool,
     key_releases: bool,
 ) -> Result<InputOutcome, String> {
+    crate::overlay::dismiss_client_message(model, client, &event)?;
     let menu_box = model.menu_box();
     let event = match menu_input_route(
         model.menu.as_ref(),

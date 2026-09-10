@@ -158,6 +158,7 @@ pub(crate) struct StatusRenderer {
     tmux_shim: Option<PathBuf>,
     zz_executable: Option<PathBuf>,
     job_waker: Option<thread::Thread>,
+    pending_modes: BTreeSet<ClientId>,
 }
 
 pub(crate) struct StatusRequest {
@@ -179,6 +180,64 @@ pub(crate) struct StatusRequest {
     /// scheme only for a client that reported one, so `None` here is the pin's
     /// unknown and resolves dark.
     pub(crate) client_scheme: Option<TerminalColorScheme>,
+    pub(crate) message_styles: (String, String),
+    pub(crate) modes: Vec<ModeRequest>,
+}
+
+pub(crate) struct ModeRequest {
+    pub(crate) pane: PaneId,
+    pub(crate) view: bool,
+    pub(crate) context: StatusContext,
+    pub(crate) position: u32,
+    pub(crate) limit: u32,
+    pub(crate) vi_keys: bool,
+}
+
+fn expand_style(format: &str, context: &StatusContext, hooks: &mut DaemonFormatHooks<'_>) -> String {
+    let style = clamp_status_text(expand_status(format, context, hooks));
+    if zz_protocol::parse_style(&style).is_some() {
+        style
+    } else {
+        String::new()
+    }
+}
+
+pub(crate) fn expand_modes(
+    requests: &[ModeRequest],
+    facts: &FormatHookFacts,
+    engine: &MuxEngine,
+) -> Vec<zz_protocol::ModePresentation> {
+    requests
+        .iter()
+        .take(zz_protocol::MAX_MODE_PRESENTATIONS)
+        .map(|mode| {
+            let variables = BTreeMap::from([
+                ("copy_position".to_owned(), mode.position.to_string()),
+                ("copy_position_limit".to_owned(), mode.limit.to_string()),
+            ]);
+            let mut hooks = DaemonFormatHooks::command_with_variables(facts, &variables)
+                .with_option_engine(engine);
+            mode_presentation(mode, &mut hooks)
+        })
+        .collect()
+}
+
+fn mode_presentation(
+    mode: &ModeRequest,
+    hooks: &mut DaemonFormatHooks<'_>,
+) -> zz_protocol::ModePresentation {
+    zz_protocol::ModePresentation {
+        pane: mode.pane,
+        view: mode.view,
+        position: clamp_status_text(expand_status(
+            "#{E:copy-mode-position-format}",
+            &mode.context,
+            hooks,
+        )),
+        position_style: expand_style("#{E:copy-mode-position-style}", &mode.context, hooks),
+        selection_style: expand_style("#{E:copy-mode-selection-style}", &mode.context, hooks),
+        vi_keys: mode.vi_keys,
+    }
 }
 
 /// The ten theme slots in `colour_theme_table` order (colour.c:35): the option
@@ -614,6 +673,30 @@ impl StatusRenderer {
         self.job_waker = Some(waker);
     }
 
+    pub(crate) fn request_mode_refresh(&mut self, clients: BTreeSet<ClientId>) {
+        self.pending_modes.extend(clients);
+        if let Some(waker) = &self.job_waker {
+            waker.unpark();
+        }
+    }
+
+    pub(crate) fn take_pending_modes(&mut self) -> BTreeSet<ClientId> {
+        std::mem::take(&mut self.pending_modes)
+    }
+
+    pub(crate) fn republish_modes(
+        &mut self,
+        client: ClientId,
+        modes: Vec<zz_protocol::ModePresentation>,
+    ) -> Option<StatusLine> {
+        let published = self.published.get_mut(&client)?;
+        if published.modes == modes {
+            return None;
+        }
+        published.modes = modes;
+        Some(published.clone())
+    }
+
     pub(crate) fn poll_jobs(&mut self) -> BTreeSet<ClientId> {
         let now = shell_second();
         self.shell_cache
@@ -830,12 +913,66 @@ fn render(
         );
         resolve_theme_colours(request, &mut hooks)
     };
+    let (message_style, message_command_style) = {
+        let mut hooks = DaemonFormatHooks::status(
+            request.client,
+            &request.facts,
+            &request.context,
+            Some(&request.option_snapshot),
+            cache,
+            touched,
+            refresh,
+            now,
+            &request.environment,
+            &request.default_terminal,
+            request.startup,
+            tmux_shim,
+            zz_executable,
+            job_waker,
+        );
+        (
+            expand_style(&request.message_styles.0, &request.context, &mut hooks),
+            expand_style(&request.message_styles.1, &request.context, &mut hooks),
+        )
+    };
+    let modes = request
+        .modes
+        .iter()
+        .take(zz_protocol::MAX_MODE_PRESENTATIONS)
+        .map(|mode| {
+            let variables = BTreeMap::from([
+                ("copy_position".to_owned(), mode.position.to_string()),
+                ("copy_position_limit".to_owned(), mode.limit.to_string()),
+            ]);
+            let mut hooks = DaemonFormatHooks::status(
+                request.client,
+                &request.facts,
+                &mode.context,
+                Some(&request.option_snapshot),
+                cache,
+                touched,
+                refresh,
+                now,
+                &request.environment,
+                &request.default_terminal,
+                request.startup,
+                tmux_shim,
+                zz_executable,
+                job_waker,
+            )
+            .with_variables(&variables);
+            mode_presentation(mode, &mut hooks)
+        })
+        .collect::<Vec<_>>();
     if !request.formats.enabled {
         return StatusLine {
             title,
             position: request.formats.position,
             customized: request.customized,
             theme,
+            message_style,
+            message_command_style,
+            modes,
             ..StatusLine::default()
         };
     }
@@ -917,6 +1054,9 @@ fn render(
         message_line,
         customized: request.customized,
         theme,
+        message_style,
+        message_command_style,
+        modes,
     }
 }
 
@@ -1184,6 +1324,11 @@ impl<'a> DaemonFormatHooks<'a> {
 
     pub(crate) fn with_command_item(mut self, command: &'a str) -> Self {
         self.command_item = Some(command);
+        self
+    }
+
+    fn with_variables(mut self, variables: &'a BTreeMap<String, String>) -> Self {
+        self.variables = Some(variables);
         self
     }
 
@@ -2063,6 +2208,8 @@ mod tests {
             },
             facts: FormatHookFacts::default(),
             client_scheme: None,
+            message_styles: (String::new(), String::new()),
+            modes: Vec::new(),
         }
     }
 
@@ -2087,6 +2234,8 @@ mod tests {
             context: status_context(&snapshot, engine, session, None),
             facts: FormatHookFacts::default(),
             client_scheme: None,
+            message_styles: engine.message_styles_for_session(session),
+            modes: Vec::new(),
         }
     }
 

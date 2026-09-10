@@ -181,6 +181,9 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "copy-mode-match-style",
     "copy-mode-current-match-style",
     "copy-mode-mark-style",
+    "copy-mode-position-format",
+    "copy-mode-position-style",
+    "copy-mode-selection-style",
     "theme",
     "dark-theme-black",
     "dark-theme-white",
@@ -2602,6 +2605,22 @@ impl MuxEngine {
                 pane.map_or(TmuxOptionTarget::GlobalWindow, TmuxOptionTarget::Pane)
             }
         }
+    }
+
+    #[must_use]
+    pub fn message_styles_for_session(&self, session: Option<SessionId>) -> (String, String) {
+        session.map_or_else(
+            || {
+                (
+                    self.global_session_options.message_style.clone(),
+                    self.global_session_options.message_command_style.clone(),
+                )
+            },
+            |session| {
+                let knobs = self.session_knobs(session);
+                (knobs.message_style, knobs.message_command_style)
+            },
+        )
     }
 
     #[must_use]
@@ -12145,13 +12164,21 @@ impl MuxEngine {
         }
         let message_line_before =
             (option == SessionOption::MessageLine).then(|| self.message_line_for_session(session));
+        let restyles_messages = matches!(
+            option,
+            SessionOption::MessageStyle | SessionOption::MessageCommandStyle
+        );
         if unset {
             if let Some(session) = session {
                 remove_option_override(&mut self.session_options, session, option);
             } else {
                 self.global_session_options.reset(option);
             }
-            return Ok(self.session_option_execution(session, message_line_before));
+            return Ok(self.session_option_execution(
+                session,
+                message_line_before,
+                restyles_messages,
+            ));
         }
         let previous = session.map_or_else(
             || self.global_session_options.clone(),
@@ -12176,16 +12203,22 @@ impl MuxEngine {
         } else {
             self.global_session_options = next;
         }
-        Ok(self.session_option_execution(session, message_line_before))
+        Ok(self.session_option_execution(
+            session,
+            message_line_before,
+            restyles_messages,
+        ))
     }
 
     fn session_option_execution(
         &self,
         session: Option<SessionId>,
         message_line_before: Option<u8>,
+        restyles_messages: bool,
     ) -> Execution {
-        if message_line_before
-            .is_some_and(|before| self.message_line_for_session(session) != before)
+        if restyles_messages
+            || message_line_before
+                .is_some_and(|before| self.message_line_for_session(session) != before)
         {
             Execution::effect(MuxEffect::StatusFormatsChanged { session })
         } else {
@@ -13296,7 +13329,14 @@ fn stored_scalar_execution(name: &str, target: TmuxOptionTarget) -> Execution {
             },
         });
     }
-    if matches!(name, "set-titles" | "set-titles-string") {
+    if matches!(
+        name,
+        "set-titles"
+            | "set-titles-string"
+            | "copy-mode-position-format"
+            | "copy-mode-position-style"
+            | "copy-mode-selection-style"
+    ) {
         let session = match target {
             TmuxOptionTarget::Session(session) => Some(session),
             _ => None,
@@ -34218,7 +34258,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 139);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 142);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

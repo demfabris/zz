@@ -2179,7 +2179,7 @@ mod tests {
         assert!(matches!(
             replacement,
             InputMessage::ResizeCommandOutput { columns, rows, .. }
-                if columns == content.width && rows == content.height
+                if columns == geometry.0 && rows == geometry.1
         ));
     }
 

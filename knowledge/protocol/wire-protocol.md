@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v100)
+title: zz wire protocol (v101)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 100`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 101`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (100) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (101) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -615,12 +615,26 @@ every `StatusLine` field, including `title`. Every string field and each row is 
 and `message_line` must be `0` with no rows or under `rows.len()` otherwise; `StatusChanged` payloads
 now validate on both encode and decode. v100 appends `theme: ThemeColours` after `customized`, the
 ten theme slots resolved for this client, and validation rejects a slot carrying a theme colour.
+v101 appends `message_style`, `message_command_style` and `modes: Vec<ModePresentation>` after
+`theme`; the two style strings must be empty or parse as a style, and `modes` is capped at
+`MAX_MODE_PRESENTATIONS` (2) with a third rejected during deserialization.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 100`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 101`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v101 carries the raw TUI's mode and message presentation. `StatusLine` gains `message_style` and
+  `message_command_style`, the two session options expanded for this client, and `modes`, one
+  `ModePresentation` per mode screen the client holds (its copy session and its command output):
+  `pane`, `view` (true for the view-mode screen `run-shell` output opens), `position` (the
+  expanded `copy-mode-position-format`, with `#{copy_position}` and `#{copy_position_limit}` bound
+  to the view's oy and history size), `position_style` and `selection_style` (the expanded
+  `copy-mode-position-style` and `copy-mode-selection-style`) and `vi_keys` (the pane's mode keys,
+  which decide whether the selection keeps its bottom-right cell). The raw TUI draws the position
+  cells over the pane's first row, paints selected cells in the selection style, and paints the
+  message row and the prompt in the message style; GUI clients ignore all three fields. Pure
+  appends; the cycle's gate folds every lane's 101 appends into one entry.
 - v100 carries the resolved theme palette. `StatusLine` gains `theme: ThemeColours` appended after
   `customized`, where `ThemeColours` is a new `crates/zz-protocol/src/style.rs` type wrapping
   `[TmuxColour; COLOUR_THEME_COUNT]` (10) in the pin's own `colour_theme_table` order:

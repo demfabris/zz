@@ -6,6 +6,7 @@ mod clipboard;
 mod input;
 mod kitty;
 mod layout;
+mod mode_view;
 mod picker;
 mod render;
 mod sidebar;

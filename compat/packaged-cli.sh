@@ -232,7 +232,7 @@ detach_outer_client() {
   local outer="$2"
   local session="$3"
 
-  outer_command "$outer" send-keys -t driver:0.0 "C-\\"
+  outer_command "$outer" send-keys -t driver:0.0 C-b d
   wait_for_outer_exit "$name" "$outer" 0 "[detached (from session $session)]"
 }
 

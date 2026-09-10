@@ -1,5 +1,5 @@
 use zz_client::{
-    ChromeAction, ChromeKeymap, MenuKeyResult, MenuPointerKind, SIDEBAR_TABLE, resolve_menu_key,
+    ChromeAction, MenuKeyResult, MenuPointerKind, SIDEBAR_TABLE, resolve_menu_key,
 };
 use zz_daemon::{
     Endpoint, InteractiveClient, configured_fleet_hosts, validate_fleet_host, write_fleet_host,
@@ -38,7 +38,6 @@ pub(crate) enum InputOutcome {
     Resize(crate::tty::TerminalSize),
     AttachRequested,
     SwitchHost(HostSwitch),
-    Detach,
 }
 
 const MAX_COMMAND_OUTPUT_SEARCH_BYTES: usize = 4096;
@@ -487,31 +486,11 @@ fn handle_key(
     browser: &mut BrowserState,
     event: KeyEvent,
 ) -> Result<InputOutcome, String> {
-    let global_route = global_key_route(
-        &model.chrome,
-        model.sidebar.focused && model.command_output.is_none(),
-        event,
-    );
-    if global_route == GlobalKeyRoute::Detach {
-        client.detach().map_err(|error| error.to_string())?;
-        return Ok(InputOutcome::Detach);
-    }
     if model.sidebar_edit.is_some() && model.command_output.is_none() {
         return handle_sidebar_edit_key(model, client, event);
     }
-    match global_route {
-        GlobalKeyRoute::Detach => {
-            unreachable!("detach handled before the sidebar editor")
-        }
-        GlobalKeyRoute::ToggleSidebar => {
-            return Ok(if model.toggle_sidebar_focus() {
-                InputOutcome::RepaintAll
-            } else {
-                InputOutcome::Repaint
-            });
-        }
-        GlobalKeyRoute::Sidebar => return handle_sidebar_key(model, client, event),
-        GlobalKeyRoute::Other => {}
+    if model.sidebar.focused && model.command_output.is_none() {
+        return handle_sidebar_key(model, client, event);
     }
 
     if model.command_prompt.is_some() {
@@ -762,33 +741,6 @@ const fn should_forward_key(
     kitty_keyboard: bool,
 ) -> bool {
     !matches!(kind, KeyEventKind::Release) || browser_surface || kitty_keyboard
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum GlobalKeyRoute {
-    Detach,
-    ToggleSidebar,
-    Sidebar,
-    Other,
-}
-
-fn global_key_route(
-    chrome: &ChromeKeymap,
-    sidebar_focused: bool,
-    event: KeyEvent,
-) -> GlobalKeyRoute {
-    if event.kind == KeyEventKind::Press {
-        match chrome.resolve("ui", &key_input(event)) {
-            Some(ChromeAction::Detach) => return GlobalKeyRoute::Detach,
-            Some(ChromeAction::ToggleSidebar) => return GlobalKeyRoute::ToggleSidebar,
-            _ => {}
-        }
-    }
-    if sidebar_focused {
-        GlobalKeyRoute::Sidebar
-    } else {
-        GlobalKeyRoute::Other
-    }
 }
 
 fn handle_sidebar_key(
@@ -1735,6 +1687,9 @@ mod tests {
             (b"\x1b[1;2R".as_slice(), "S-F3"),
             (b"\x1b[1;2S".as_slice(), "S-F4"),
             (b"\x1b[24;2~".as_slice(), "S-F12"),
+            (b"\x1bs".as_slice(), "M-s"),
+            (b"\x1bS".as_slice(), "M-S"),
+            (b"\x1c".as_slice(), "C-\\"),
         ] {
             let mut parser = crate::terminal_event::EventParser::default();
             let mut events = Vec::new();
@@ -3135,33 +3090,28 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_focus_routes_regular_keys_locally_before_daemon_input() {
-        let ordinary = KeyEvent::new(TerminalKeyCode::Char('x'), KeyModifiers::NONE);
-        let alt_s = KeyEvent::new(TerminalKeyCode::Char('s'), KeyModifiers::ALT);
-        let detach = KeyEvent::new(TerminalKeyCode::Char('\\'), KeyModifiers::CONTROL);
-
-        let chrome = ChromeKeymap::new();
+    fn chrome_leaves_every_pane_key_to_the_daemon() {
+        let chrome = zz_client::ChromeKeymap::new();
+        for event in [
+            KeyEvent::new(TerminalKeyCode::Char('\\'), KeyModifiers::CONTROL),
+            KeyEvent::new(TerminalKeyCode::Char('s'), KeyModifiers::ALT),
+            KeyEvent::new(TerminalKeyCode::Char('S'), KeyModifiers::ALT),
+            KeyEvent::new(TerminalKeyCode::Char('x'), KeyModifiers::NONE),
+        ] {
+            assert_eq!(chrome.resolve("ui", &key_input(event)), None);
+        }
         assert_eq!(
-            global_key_route(&chrome, true, ordinary),
-            GlobalKeyRoute::Sidebar
-        );
-        assert_eq!(
-            global_key_route(&chrome, true, alt_s),
-            GlobalKeyRoute::ToggleSidebar
-        );
-        assert_eq!(
-            global_key_route(&chrome, true, detach),
-            GlobalKeyRoute::Detach
-        );
-        assert_eq!(
-            global_key_route(&chrome, false, ordinary),
-            GlobalKeyRoute::Other
+            chrome.resolve(
+                SIDEBAR_TABLE,
+                &key_input(KeyEvent::new(TerminalKeyCode::Char('q'), KeyModifiers::NONE))
+            ),
+            Some(ChromeAction::ToggleSidebar)
         );
     }
 
     #[test]
     fn sidebar_keys_come_from_the_chrome_table() {
-        let mut chrome = ChromeKeymap::new();
+        let mut chrome = zz_client::ChromeKeymap::new();
         let key = KeyEvent::new(TerminalKeyCode::Char('k'), KeyModifiers::NONE);
         assert_eq!(
             chrome.resolve(SIDEBAR_TABLE, &key_input(key)),

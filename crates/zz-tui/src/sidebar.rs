@@ -39,14 +39,6 @@ impl State {
         self.focused = true;
     }
 
-    pub fn toggle_focus(&mut self, columns: u16) {
-        if self.focused {
-            self.focused = false;
-        } else {
-            self.focus(columns);
-        }
-    }
-
     pub fn hide(&mut self) {
         self.focused = false;
         self.shown = false;

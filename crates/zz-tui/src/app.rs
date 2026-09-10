@@ -773,9 +773,6 @@ pub(crate) fn run(
                             }
                         }
                     }
-                    InputOutcome::Detach => {
-                        break Ok(TuiExit::Detached(attached_session_name(&model)));
-                    }
                 }
             }
             MainEvent::Terminal(Err(error)) => break Err(error),

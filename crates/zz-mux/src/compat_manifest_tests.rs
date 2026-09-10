@@ -111,7 +111,7 @@ struct OracleKey {
 }
 
 const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] =
-    &[("copy-mode", 61), ("copy-mode-vi", 72), ("prefix", 52)];
+    &[("copy-mode", 61), ("copy-mode-vi", 72), ("prefix", 56)];
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -1392,12 +1392,12 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         divergent_bindings.len(),
-        41,
+        37,
         "divergent shared binding count changed"
     );
     assert_eq!(
         structurally_matching_bindings.len(),
-        185,
+        189,
         "structurally matching shared binding count changed"
     );
     assert_eq!(

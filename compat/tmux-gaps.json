@@ -682,9 +682,7 @@
       ],
       "owner": "protocol",
       "items": [
-        "binding:prefix:\"",
         "binding:prefix:$",
-        "binding:prefix:%",
         "binding:prefix:,",
         "binding:prefix:0",
         "binding:prefix:1",
@@ -703,8 +701,6 @@
         "binding:prefix:M-Left",
         "binding:prefix:M-Up",
         "binding:prefix:r",
-        "binding:prefix:s",
-        "binding:prefix:w",
         "key:prefix:*",
         "key:prefix:/",
         "key:prefix:<",
@@ -736,7 +732,7 @@
         "The former blanket acceptance \"The native defaults stay documented; imported tmux bindings retain exact tmux command semantics.\" no longer covers x & ] ? d PPage f . ( ) L m M i ~ # - apostrophe M-n M-p; their pin-derived command and attached behavior contract moved to keys.prefix-stock-commands."
       ],
       "depends_on": [],
-      "reason": "The old clause \"Picker and sidebar bindings are part of the zz GUI experience.\" covered 33 missing stock keys and four changed commands as well as genuine native replacements. Pinned d77c9dc6 key-bindings.c and smoke/keys-prefix-stock measure x/& as confirm-before, ] as paste-buffer -p, ? as list-keys -N, d as detach-client, and PPage f . ( ) L m M i ~ # - apostrophe M-n M-p as stock commands. Those 20 keys left this group for keys.prefix-stock-commands (the 16 missing key:prefix items were promoted to binding:prefix contracts); the new stance adopts their exact stored commands and notes; keys.prefix-stock-commands proves 17 attached bindings and remains open for f, M-n and M-p after measured find-window and activity-alert execution failures. Native replacements retained: % and double-quote open split-picker; s and w focus-sidebar; r reload-config; e send-last-output remains in keys.native-defaults. Native omissions retained: t (clock UI), D (client chooser), C (option editor), C-z (desktop suspension), Tab/BTab (window/session switcher), */@ (floating pane creation/toggle), g (floating pane navigation), </> (floating-pane size) defer to native desktop chrome rather than seeding unsupported tmux modes. / uses native binding help; DC and S-Up/S-Down/S-Left/S-Right use native viewport geometry rather than tmux client panning. Existing text-only differences for $ and comma, 0-9 and tiled-only resize variants C-Up/C-Down/C-Left/C-Right/M-Up/M-Left remain explicitly tracked here; this batch does not claim these strings match. Picker/sidebar extension keys remain owned by keys.native-defaults. decided 2026-09-05 by the orchestrator under fabrico's instruction to continue the campaign past the frozen scope; reversible."
+      "reason": "The old clause \"Picker and sidebar bindings are part of the zz GUI experience.\" covered 33 missing stock keys and four changed commands as well as genuine native replacements. Pinned d77c9dc6 key-bindings.c and smoke/keys-prefix-stock measure x/& as confirm-before, ] as paste-buffer -p, ? as list-keys -N, d as detach-client, and PPage f . ( ) L m M i ~ # - apostrophe M-n M-p as stock commands. Those 20 keys left this group for keys.prefix-stock-commands (the 16 missing key:prefix items were promoted to binding:prefix contracts); the new stance adopts their exact stored commands and notes; keys.prefix-stock-commands proves 17 attached bindings and remains open for f, M-n and M-p after measured find-window and activity-alert execution failures. Native replacements retained: % and double-quote open split-picker; s and w focus-sidebar; r reload-config; e send-last-output remains in keys.native-defaults. Native omissions retained: t (clock UI), D (client chooser), C (option editor), C-z (desktop suspension), Tab/BTab (window/session switcher), */@ (floating pane creation/toggle), g (floating pane navigation), </> (floating-pane size) defer to native desktop chrome rather than seeding unsupported tmux modes. / uses native binding help; DC and S-Up/S-Down/S-Left/S-Right use native viewport geometry rather than tmux client panning. Existing text-only differences for $ and comma, 0-9 and tiled-only resize variants C-Up/C-Down/C-Left/C-Right/M-Up/M-Left remain explicitly tracked here; this batch does not claim these strings match. Picker/sidebar extension keys remain owned by keys.native-defaults. decided 2026-09-05 by the orchestrator under fabrico's instruction to continue the campaign past the frozen scope; reversible. TUI measurement appended 2026-09-09 by the TUI stock-keys lane: prefix %, double quote, s and w left this list because the bindings changed, not the record. Measured on throwaway servers against this pin: the pin binds % to `split-window -h`, double quote to `split-window`, s to `choose-tree -Zs` and w to `choose-tree -Zw`; zz bound % and double quote to `split-picker` (a Picker pane, never a shell) and s and w to `focus-sidebar` (the client's own sidebar), so every stock split and chooser key reached a native surface where the pin shows its own. New stance: the stock binding produces the pinned result and the native surfaces stay reachable through their own commands (`split-picker`, `focus-sidebar`) and any user binding of them; decided 2026-09-09 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible. Retained in this group: r (reload-config) and the text-only differences for $, comma, 0-9 and the tiled-only resize variants."
     },
     {
       "id": "keys.move-table",

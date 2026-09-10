@@ -1,0 +1,9 @@
+clippy at the final tip, one call per touched crate
+cargo clippy -p zz-tui --all-targets --all-features --jobs 5 -- -D warnings  exit: 0
+cargo clippy -p zz --all-targets --all-features --jobs 5 -- -D warnings      exit: 0
+
+tails:
+      version. This may also occur with an optional dependency that is not enabled.
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+    Checking zz-chrome-import v0.6.1 (/home/demfabris/dev/zz-tui-canvas/crates/zz-chrome-import)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4m 19s

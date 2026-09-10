@@ -1,5 +1,5 @@
 TUI-004 attempt-01 environment
-recorded: 2026-09-09T22:52:17-03:00
+recorded: 2026-09-09T23:44:23-03:00
 box: alienware
 os: NAME="CachyOS Linux" PRETTY_NAME="CachyOS" 
 kernel: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
@@ -7,21 +7,32 @@ shell: GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
 TERM: xterm-ghostty
 locale LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8 LC_ALL=unset
 worktree: /home/demfabris/dev/zz-tui-canvas
-revision: bfd05821c00eac75cf6a8418394681295caf7aab
+tip: 5e96347476b954ee3cee783ca594797fd2a4355f
 base: origin/main bfd05821c00eac75cf6a8418394681295caf7aab
-worktree dirty files at this recording:
- M compat/tui-pane-geometry.sh
- M compat/tui-screen-diff.sh
- M crates/zz-tui/src/render.rs
- M crates/zz-tui/src/sidebar.rs
- M crates/zz-tui/src/state.rs
- M crates/zz/tests/cli_binary.rs
-?? compat/tui/evidence/TUI-004/
-zz binary: 65833d5391cea30eeaf2b100d2884082eadb9d35672dd7594a27279194f2f90f  target/debug/zz
+worktree state at this recording (only this attempt files are untracked):
+ M compat/tui/evidence/TUI-004/attempt-01/environment.txt
+ M compat/tui/evidence/TUI-004/attempt-01/zz-integration-tests.txt
+?? compat/tui/evidence/TUI-004/attempt-01/attached-client-tip.txt
+?? compat/tui/evidence/TUI-004/attempt-01/clippy-tip.txt
+?? compat/tui/evidence/TUI-004/attempt-01/pane-geometry-tip-1.txt
+?? compat/tui/evidence/TUI-004/attempt-01/pane-geometry-tip-2.txt
+?? compat/tui/evidence/TUI-004/attempt-01/pane-geometry-tip-3.txt
+?? compat/tui/evidence/TUI-004/attempt-01/proofs-at-tip.txt
+?? compat/tui/evidence/TUI-004/attempt-01/screen-diff-tip-1.txt
+?? compat/tui/evidence/TUI-004/attempt-01/screen-diff-tip-2.txt
+?? compat/tui/evidence/TUI-004/attempt-01/screen-diff-tip-self-check.txt
+?? compat/tui/evidence/TUI-004/attempt-01/status-row-tip.txt
+?? compat/tui/evidence/TUI-004/attempt-01/unit-tests-tip.txt
+zz binary at the proofs: 718ac012952573f614005611c2b22a69cd9a7663fcc65d480d4b3f7dbf280d8f  target/debug/zz
 zz build: cargo build -p zz --jobs 5 (debug)
-NOTE: a cargo debug build of zz is not bit-reproducible on this box; the hash identifies this artifact, it does not attest it. Attestation is the revision plus a clean worktree; provenance is reproduction.
+A CARGO DEBUG BUILD OF ZZ IS NOT BIT-REPRODUCIBLE ON THIS BOX, and this attempt measured it again
+rather than repeating it: the same source produced 65833d53..., then 97a60b05... twice across a
+revert and rebuild, then 718ac012... after cargo test -p zz relinked it. The hash identifies an
+artifact; it cannot attest it. Attestation is the revision above plus a clean worktree, and
+provenance is reproduction: rebuild -p zz here and run the commands in proofs-at-tip.txt.
 pin: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
 pin -V: tmux next-3.8
 pin commit: d77c9dc6aa021e4bc61f0da128c591af695e6466 (next-3.8)
-outer sizes driven by tui-screen-diff.sh: 80x24 100x24 80x10 109x24 120x24, plus 120x24 for the sidebar case; alternates 120 80 100 120 100
+outer sizes driven by tui-screen-diff.sh: 80x24 100x24 80x10 80x6 109x24 120x24, alternates 120 80 100 100 120 100, plus 120x24 for the sidebar case
 outer sizes driven by tui-pane-geometry.sh: 80x24 100x24 120x24
+outer size driven by status-row.sh: 79x24, plus its 80 and 100 column band checks

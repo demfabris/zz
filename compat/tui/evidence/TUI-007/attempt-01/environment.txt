@@ -1,18 +1,13 @@
-TUI-007 attempt-01 environment, recorded 2026-09-10T17:09:47-03:00
-zz revision: 36fb9f7c0ade5acac5acc11fbbc3a0304d8bc6df
-zz tracked tree: clean
-zz binary: /home/demfabris/dev/zz-tui-overlays/target/debug/zz
-zz binary sha256: 989ef6497a9037930768738a912f899e460a34b8bfcaa965f2c8249da50655b7 (a debug build is not bit-reproducible on this box; the revision plus the clean tree is the attestation)
-tmux binary: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
-tmux binary sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
-tmux version: tmux next-3.8
-tmux pin: d77c9dc6aa021e4bc61f0da128c591af695e6466
+zz revision: e9600323de8a6f27121be09ef9ae0f0084400fb9 (tracked tree clean outside compat/tui/evidence/TUI-007/attempt-01/, which these runs rewrite: yes)
+zz binary: /home/demfabris/dev/zz-tui-overlays/target/debug/zz sha256 f2acb6e226d4d73ad4c1578a7858b4bb719e4a477bdc93e85bd08833123e5c0d (cargo build -p zz --jobs 3 at e9600323de8a6f27121be09ef9ae0f0084400fb9)
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 (tmux next-3.8, source d77c9dc6)
+pre-fix binary for tui-overlays-prefix: built from b451b74a, sha256 f9fd5e9fe0ea2c382a18e9fafb89e1c5fb024c15c3e7da279c83e30634547bfd
 os: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
-os-release: NAME="CachyOS Linux"
-os-release: PRETTY_NAME="CachyOS"
-TERM (driver shell): xterm-ghostty
-outer tmux: status off, windows 80x24 unless a case resizes them
-shell: /bin/bash; inner panes run ENV= PS1='$ ' exec /bin/sh (/usr/bin/bash)
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+TERM: xterm-ghostty
+shell: /bin/bash
 bash: 5.3.15(1)-release
-locale: LANG=en_US.UTF-8 LC_ALL=unset LC_TIME=pt_BR.UTF-8
-cpu: 16 cores; five campaign lanes share the box
+outer size: each fixture sets its own outer tmux window size (80x24, 60x20, 100x30, 80x30, 79x23)
+locale: LANG=en_US.UTF-8 LC_ALL= LC_TIME=pt_BR.UTF-8
+date: 2026-09-10T19:07:44-03:00

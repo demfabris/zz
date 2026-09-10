@@ -39,5 +39,41 @@ ok    self-check popup, a border only one side draws rounded
       cursor tmux: 11,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
       cursor zz:   9,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
 ok    self-check prompt, a cursor only one side moves
+      case self-check-style
+      7 of 24 rows differ, first 5
+        row 5 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@OVERLAY-MENUM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m
+        row 5 zz:       ^[[38;5;208mM-bM-^TM-^LM-bM-^TM-^@OVERLAY-MENUM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m
+        row 6 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;13;13;13m^[[48;2;184;134;11m First item  (f) ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 6 zz:       ^[[38;5;208mM-bM-^TM-^B^[[38;2;13;13;13m^[[48;2;184;134;11m First item  (f) ^[[38;5;208m^[[49mM-bM-^TM-^B^[[39m
+        row 7 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 7 zz:       ^[[38;5;208mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m
+        row 8 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Second item (s) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 8 zz:       ^[[38;5;208mM-bM-^TM-^B^[[38;2;229;229;229m^[[48;2;38;38;38m Second item (s) ^[[38;5;208m^[[49mM-bM-^TM-^B^[[39m
+        row 9 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m ^[[2mDisabled item^[[0m^[[38;2;229;229;229m^[[48;2;38;38;38m   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 9 zz:       ^[[38;5;208mM-bM-^TM-^B^[[38;2;229;229;229m^[[48;2;38;38;38m ^[[2mDisabled item^[[0m^[[38;2;229;229;229m^[[48;2;38;38;38m   ^[[38;5;208m^[[49mM-bM-^TM-^B^[[39m
+        row 10 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Third item  (t) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 10 zz:       ^[[38;5;208mM-bM-^TM-^B^[[38;2;229;229;229m^[[48;2;38;38;38m Third item  (t) ^[[38;5;208m^[[49mM-bM-^TM-^B^[[39m
+        row 11 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m
+        row 11 zz:       ^[[38;5;208mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m
+      cursor tmux: 6,6 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   6,6 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check style, an fg-only menu-border-style only one side sets, message row left out
 ok    self-check equivalence: the same menu on both sides
+      case self-check-panes-colour
+      6 of 24 rows differ, first 0
+        row 0 tmux: MARK-colour                        ^[[38;2;205;92;92m40x23M-bM-^TM-^B$                                 ^[[38;2;108;166;205m39x23
+        row 0 zz:   MARK-colour                        ^[[38;5;124m40x23M-bM-^TM-^B$                                 ^[[38;2;108;166;205m39x23
+        row 9 tmux:                  ^[[48;2;205;92;92m     ^[[49m                  M-bM-^TM-^B                    ^[[48;2;108;166;205m ^[[49m
+        row 9 zz:                    ^[[48;5;124m     ^[[49m                  M-bM-^TM-^B                    ^[[48;2;108;166;205m ^[[49m
+        row 10 tmux:                  ^[[48;2;205;92;92m ^[[49m   ^[[48;2;205;92;92m ^[[49m                  M-bM-^TM-^B                    ^[[48;2;108;166;205m ^[[49m
+        row 10 zz:                    ^[[48;5;124m ^[[49m   ^[[48;5;124m ^[[49m                  M-bM-^TM-^B                    ^[[48;2;108;166;205m ^[[49m
+        row 11 tmux:                  ^[[48;2;205;92;92m ^[[49m   ^[[48;2;205;92;92m ^[[49m                  M-bM-^TM-^B                    ^[[48;2;108;166;205m ^[[49m
+        row 11 zz:                    ^[[48;5;124m ^[[49m   ^[[48;5;124m ^[[49m                  M-bM-^TM-^B                    ^[[48;2;108;166;205m ^[[49m
+        row 12 tmux:                  ^[[48;2;205;92;92m ^[[49m   ^[[48;2;205;92;92m ^[[49m                  M-bM-^TM-^B                    ^[[48;2;108;166;205m ^[[49m
+        row 12 zz:                    ^[[48;5;124m ^[[49m   ^[[48;5;124m ^[[49m                  M-bM-^TM-^B                    ^[[48;2;108;166;205m ^[[49m
+        row 13 tmux:                  ^[[48;2;205;92;92m     ^[[49m                  M-bM-^TM-^B                    ^[[48;2;108;166;205m ^[[49m
+        row 13 zz:                    ^[[48;5;124m     ^[[49m                  M-bM-^TM-^B                    ^[[48;2;108;166;205m ^[[49m
+      cursor tmux: 0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check display-panes, a display-panes-active-colour only one side sets
 self-check complete: every sabotage was caught and the equivalence passed

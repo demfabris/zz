@@ -1,0 +1,57 @@
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-copy/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+   Compiling zz-daemon v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.22s
+     Running unittests src/lib.rs (target/debug/deps/zz_daemon-a9db643d43e262df)
+
+running 44 tests
+test status::terminfo_tests::the_infocmp_reader_speaks_both_ncurses_generations ... ok
+test status::terminfo_tests::the_infocmp_reader_finds_the_extended_section ... ok
+test status::tests::a_disabled_status_renders_empty ... ok
+test status::terminfo_tests::the_stock_arrays_move_the_other_terms_the_way_the_pin_does ... ok
+test status::tests::a_tick_forgets_commands_no_format_names_any_more ... ok
+test status::tests::a_running_job_publishes_lines_and_is_cancelled_on_forget ... ok
+test status::tests::an_unparseable_expanded_status_style_degrades_instead_of_dropping_the_event ... ok
+test status::tests::agent_formats_cover_phases_permissions_and_other_panes ... ok
+test status::tests::base_style_applies_status_style_then_fg_bg_overrides ... ok
+test status::tests::browser_url_status_uses_active_tab_and_is_empty_for_terminal ... ok
+test status::tests::buffer_samples_preserve_utf8_and_escape_control_and_invalid_bytes ... ok
+test status::tests::attached_status_jobs_start_in_each_clients_working_directory ... ok
+test status::tests::content_search_reads_visible_terminal_rows ... ok
+test status::tests::copy_mode_toggle_selection_and_search_formats_answer_from_the_copy_view ... ok
+test status::tests::daemon_delegated_format_consumers_match_mux_inventory ... ok
+test status::tests::message_line_clamps_against_the_published_row_count ... ok
+test status::tests::only_changed_clients_are_published ... ok
+test status::tests::commands_run_once_and_then_come_from_the_cache ... ok
+test status::tests::oversized_row_title_and_base_style_stay_inside_the_wire_limit ... ok
+test status::tests::per_window_status_overrides_style_the_rendered_row ... ok
+test status::tests::personalized_rows_expand_per_session_and_dedupe ... ok
+test status::tests::sparse_session_status_formats_keep_blank_rows_without_compaction ... ok
+test status::tests::status_command_cache_keeps_attached_clients_independent ... ok
+test status::tests::status_command_cache_prunes_clients_missing_from_a_full_refresh ... ok
+test status::tests::status_command_cache_survives_transient_clients_in_the_same_directory ... ok
+test status::tests::status_commands_receive_tmux_and_working_directory_without_tmux_pane ... ok
+test status::tests::status_commands_resolve_literal_tmux_through_the_private_zz_shim ... ok
+test status::tests::set_titles_expands_per_client_and_survives_status_off ... ok
+test status::tests::status_context_uses_the_attached_format_client ... ok
+test status::tests::status_job_output_wakes_the_renderer_before_the_sampler_tick ... ok
+test status::tests::status_jobs_keep_the_last_line_and_trailing_spaces ... ok
+test status::tests::status_jobs_preserve_complete_long_lines_in_the_cache ... ok
+test status::tests::status_commands_use_global_only_clean_environment_and_the_startup_gate ... ok
+test status::tests::status_pane_index_uses_effective_pane_base_and_pane_order ... ok
+test status::tests::status_option_snapshot_retargets_every_loop_after_the_engine_is_released ... ok
+test status::tests::status_sides_carry_base_then_side_styles ... ok
+test status::tests::status_sides_left_trim_display_width_without_counting_styles ... ok
+test status::tests::status_style_wrapping_stays_inside_the_wire_limit ... ok
+test status::tests::strftime_and_shell_failures_degrade_to_text ... ok
+test status::tests::the_same_job_in_two_status_formats_runs_once ... ok
+test status::tests::status_row_counts_follow_the_status_option ... ok
+test status::tests::window_cell_metrics_default_to_the_pin_size_and_follow_a_reporting_client ... ok
+test status::tests::window_status_separator_uses_each_item_scope_and_skips_the_trailing_item ... ok
+test status::tests::the_status_line_publishes_the_theme_the_way_the_pin_resolves_it_per_client ... ok
+
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 818 filtered out; finished in 1.39s
+

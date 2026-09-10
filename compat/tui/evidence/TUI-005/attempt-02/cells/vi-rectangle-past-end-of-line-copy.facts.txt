@@ -1,0 +1,16 @@
+cursor zz:   2,23 flag=1 pane=80x24
+cursor tmux: 2,23 flag=1 pane=80x24
+facts zz:   mode= in=0 column= selection= line=[]
+facts tmux: mode= in=0 column= selection= line=[]
+view zz:    row= scroll=
+view tmux:  row= scroll=
+buffer zz:
+0000000   l   i   n   e   -   5   8       f   i   l   l   e   r   -   5
+0000020   8  \n   l   i   n   e   -   5   9       f   i   l   l   e   r
+0000040   -   5   9  \n
+0000044
+buffer tmux:
+0000000   l   i   n   e   -   5   8       f   i   l   l   e   r   -   5
+0000020   8  \n   l   i   n   e   -   5   9       f   i   l   l   e   r
+0000040   -   5   9  \n
+0000044

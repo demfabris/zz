@@ -11,8 +11,9 @@ use zz_protocol::{
     parse_style, parse_styled_segments,
 };
 use zz_terminal::{
-    CellWidth, Color, Glyph, KittyPlacement, PackedCell, PackedStyle, SearchDirection, SearchQuery,
-    TerminalAppearance, TerminalMode, TerminalViewport, UnderlineStyle,
+    CellWidth, Color, Glyph, KittyPlacement, OverlayKind, OverlaySpan, PackedCell, PackedStyle,
+    SearchDirection, SearchQuery, TerminalAppearance, TerminalMode, TerminalViewport,
+    UnderlineStyle,
 };
 
 use crate::{
@@ -806,7 +807,7 @@ impl Renderer {
         for overlay in viewport
             .overlays
             .iter()
-            .filter(|overlay| overlay.row == row)
+            .filter(|overlay| overlay.row == row && overlay.kind() != OverlayKind::CopyCursor)
         {
             let start = usize::from(overlay.start.min(rect.width));
             let end = usize::from(overlay.end.min(rect.width));
@@ -1828,6 +1829,19 @@ impl Renderer {
         rect: Rect,
         _model: &Model,
     ) {
+        if let Some(overlay) = copy_cursor_overlay(viewport) {
+            if overlay.start >= rect.width || overlay.row >= rect.height {
+                self.hide_cursor();
+                return;
+            }
+            write_cursor_position(
+                &mut self.output,
+                rect.x.saturating_add(overlay.start),
+                rect.y.saturating_add(overlay.row),
+            );
+            self.output.extend_from_slice(b"\x1b[?25h");
+            return;
+        }
         let Some(cursor) = viewport.cursor.filter(|cursor| cursor.visible()) else {
             self.hide_cursor();
             return;
@@ -1850,6 +1864,14 @@ impl Renderer {
     fn hide_cursor(&mut self) {
         self.output.extend_from_slice(b"\x1b[?25l");
     }
+}
+
+fn copy_cursor_overlay(viewport: &TerminalViewport) -> Option<OverlaySpan> {
+    viewport
+        .overlays
+        .iter()
+        .copied()
+        .find(|overlay| overlay.kind() == OverlayKind::CopyCursor)
 }
 
 fn row_changed(
@@ -2820,6 +2842,43 @@ mod tests {
         assert_eq!(output.matches("\x1b[38;2;").count(), 2);
         assert!(output.contains("ab"));
         assert!(output.contains('c'));
+    }
+
+    #[test]
+    fn the_copy_cursor_is_the_terminal_cursor_and_not_a_reversed_cell() {
+        let mut viewport = styled_viewport();
+        viewport.overlays = Arc::from([OverlaySpan::new(0, 1, 2, OverlayKind::Selection)]);
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 3,
+            height: 1,
+        };
+
+        let mut renderer = Renderer::new();
+        renderer.blit_row(&viewport, 0, rect);
+        assert!(String::from_utf8(renderer.output).unwrap().contains("\x1b[7m"));
+
+        viewport.overlays = Arc::from([OverlaySpan::new(0, 1, 2, OverlayKind::CopyCursor)]);
+        let mut renderer = Renderer::new();
+        renderer.blit_row(&viewport, 0, rect);
+        assert!(
+            !String::from_utf8(renderer.output)
+                .unwrap()
+                .contains("\x1b[7m")
+        );
+
+        let model = block_model(3, 1);
+        let mut renderer = Renderer::new();
+        renderer.place_viewport_cursor(PaneId(1), &viewport, rect, &model);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.contains("\x1b[1;2H"));
+        assert!(output.contains("\x1b[?25h"));
+
+        viewport.overlays = Arc::from([OverlaySpan::new(0, 3, 4, OverlayKind::CopyCursor)]);
+        let mut renderer = Renderer::new();
+        renderer.place_viewport_cursor(PaneId(1), &viewport, rect, &model);
+        assert_eq!(String::from_utf8(renderer.output).unwrap(), "\x1b[?25l");
     }
 
     #[test]

@@ -43,11 +43,12 @@
 # (window-copy.c:5737: in the vi table the pin keeps the final newline there).
 #
 # THE MODE FORMATS. selection_active, rectangle_toggle and pane_search_string
-# are asserted by assert_mode_formats at named copy-mode checkpoints, both
-# sides through display-message -p. Outside a mode the pin keeps
-# pane_search_string on the pane while zz drops it with the per-client copy
-# session (formats.pane-runtime, accepted), so record_pane_search_string prints
-# both answers there as an inventory line and never as a case.
+# are asserted by assert_mode_formats at named checkpoints, both sides through
+# display-message -p, inside copy mode and outside it. The pin keeps the last
+# search on the pane (window-copy.c:4508, format.c:2418), so pane_search_string
+# answers it after the mode is gone and on the next entry too, and that entry's
+# n searches UP for it (window-copy.c:566). Both are asserted, in both tables,
+# after a backward search and after a forward one.
 #
 # CONTROLLED PANE CONTENT. Both panes clear their screen and scrollback and
 # then `cat` the SAME numbered file: 60 lines `line-NN filler-NN`, with
@@ -354,16 +355,6 @@ assert_mode_formats() {
   printf 'DIFF  %s-formats\n' "$label"
   printf '      formats tmux: %s\n' "$tmux_formats"
   printf '      formats zz:   %s\n' "$zz_formats"
-}
-# An inventory line, never an assertion: pane_search_string outside a mode,
-# where the accepted formats.pane-runtime stance keeps zz's answer empty.
-record_pane_search_string() {
-  local label="$1"
-  local side
-  for side in zz tmux; do
-    printf 'note  %s %s pane_search_string outside the mode: [%s]\n' "$label" "$side" \
-      "$(side_command "$side" display-message -p -t "=$SESSION_NAME:0.0" '#{pane_search_string}' 2>/dev/null || printf 'no answer')"
-  done
 }
 # Bytes, not a string: `$(…)` eats trailing newlines and a copied line's
 # terminator is exactly the kind of difference this channel exists to catch.
@@ -739,7 +730,12 @@ copy_case() {
 # rectangle past the end of the last selected line (window-copy.c:5737 keeps
 # the final newline, 36 bytes where zz used to copy 35) and the prefix inside a
 # copy table (server-client.c:1417). The fixes are in crates/zz-terminal and
-# crates/zz-protocol.
+# crates/zz-protocol. Closed the same day: the search that outlives the mode.
+# zz kept the string on the per-client copy session, so after q it answered
+# #{pane_search_string} empty where the pin answered the last search, and a
+# fresh entry's n did nothing where the pin searched up for it; the pane's
+# terminal now keeps it (crates/zz-terminal) and the daemon answers the format
+# from there (crates/zz-daemon status.rs).
 #
 # SELECTION_REASON. The pin paints the selected cells with
 # copy-mode-selection-style, which defaults to #{E:mode-style}; the raw TUI
@@ -1002,7 +998,39 @@ run_search() {
 
   type_both q
   copy_case "$table-ordinary-pane-search-cancel" format '#{pane_in_mode}=0'
-  record_pane_search_string "$table-ordinary-pane-search-cancel"
+  assert_mode_formats "$table-ordinary-pane-search-cancel"
+
+  # THE SEARCH OUTLIVES THE MODE. window_copy_search leaves the string on the
+  # pane (window-copy.c:4508) and window_copy_common_init hands it to the next
+  # entry with the direction UP (window-copy.c:566), so n on a fresh entry
+  # searches up from the bottom for the last string searched on the pane.
+  type_prefix_both '['
+  copy_case "$table-ordinary-pane-search-reentry" format '#{pane_in_mode}=1'
+  assert_mode_formats "$table-ordinary-pane-search-reentry"
+  type_both n
+  copy_case "$table-ordinary-pane-search-reentry-again" format '#{copy_cursor_line}=line-30 filler-30' \
+    text,cursor,facts,view,buffer "$MATCH_REASON"
+
+  # The last search above ran backward, so that landing cannot tell the UP rule
+  # from a kept direction. A FORWARD search next, sent through the command path
+  # on both sides as a setup step, then a fresh entry: n has to search up and
+  # land on needle-48, where a kept forward direction would wrap to needle-12.
+  reenter_copy_mode "$table forward search"
+  side_command zz send-keys -t "=$SESSION_NAME:0.0" -X search-forward needle ||
+    die 'zz refused search-forward'
+  side_command tmux send-keys -t "=$SESSION_NAME:0.0" -X search-forward needle ||
+    die 'tmux refused search-forward'
+  await_observable zz format '#{copy_cursor_line}=line-12 needle-12' || true
+  await_observable tmux format '#{copy_cursor_line}=line-12 needle-12' || true
+  reenter_copy_mode "$table forward search re-entry"
+  copy_case "$table-forward-search-reentry" format '#{pane_in_mode}=1'
+  assert_mode_formats "$table-forward-search-reentry"
+  type_both n
+  copy_case "$table-forward-search-reentry-searches-up" format '#{copy_cursor_line}=line-48 needle-48' \
+    text,cursor,facts,view,buffer "$MATCH_REASON"
+  type_both q
+  copy_case "$table-forward-search-cancel" format '#{pane_in_mode}=0'
+  assert_mode_formats "$table-forward-search-cancel"
 }
 
 # THE DEFECT TUI-005 OPENED ON, measured rather than argued. zz carries a
@@ -1409,6 +1437,70 @@ run_self_check() {
   await_observable zz screen '(search down)' || true
   self_check_compare one-sided-open-prompt
   self_check_case 'text: a search prompt open on the zz side only' text
+
+  # formats after the mode and on a fresh entry: a search on one side only,
+  # then a cancel and a re-entry on both, the answers zz used to give.
+  attach_both_at
+  set_on_both mode-keys vi
+  seed_pane
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_side zz /
+  type_side zz -l needle
+  type_side zz Enter
+  await_observable zz format '#{copy_cursor_line}=line-12 needle-12' || true
+  type_both q
+  await_observable zz format '#{pane_in_mode}=0' || true
+  await_observable tmux format '#{pane_in_mode}=0' || true
+  assert_mode_formats one-sided-search-after-cancel
+  self_check_case 'formats: pane_search_string after cancel, searched on the zz side only' formats
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  assert_mode_formats one-sided-search-on-reentry
+  self_check_case 'formats: pane_search_string on a fresh entry, searched on the zz side only' formats
+
+  # cursor and facts: the same search and re-entry on both sides, then n on the
+  # pin side only, which is what zz's fresh entry used to do with n: nothing.
+  attach_both_at
+  set_on_both mode-keys vi
+  seed_pane
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_both /
+  type_both -l needle
+  type_both Enter
+  await_observable zz format '#{copy_cursor_line}=line-12 needle-12' || true
+  await_observable tmux format '#{copy_cursor_line}=line-12 needle-12' || true
+  type_both q
+  await_observable zz format '#{pane_in_mode}=0' || true
+  await_observable tmux format '#{pane_in_mode}=0' || true
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_side tmux n
+  await_observable tmux format '#{copy_cursor_line}=line-48 needle-48' || true
+  self_check_compare one-sided-reentry-search-again
+  self_check_case 'cursor: n on a fresh entry on the pin side only' cursor
+  self_check_case 'facts: n on a fresh entry on the pin side only' facts
+
+  # facts: the direction. On the same fresh entry after a forward search, n on
+  # the pin side searches up to needle-48 and N on the zz side searches down
+  # and wraps to needle-12, the landing a kept forward direction would give.
+  type_both q
+  await_observable zz format '#{pane_in_mode}=0' || true
+  await_observable tmux format '#{pane_in_mode}=0' || true
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_side tmux n
+  type_side zz N
+  await_observable tmux format '#{copy_cursor_line}=line-48 needle-48' || true
+  await_observable zz format '#{copy_cursor_line}=line-12 needle-12' || true
+  self_check_compare reentry-direction
+  self_check_case 'facts: n (up) on the pin side, N (down) on the zz side on a fresh entry' facts
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"

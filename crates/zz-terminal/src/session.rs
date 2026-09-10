@@ -1249,6 +1249,7 @@ struct PublishedViewports {
     frozen: Option<Arc<FrozenHistory>>,
     bar: ProgressBar,
     facts: TerminalFacts,
+    search_string: String,
 }
 
 impl PublishedViewports {
@@ -1260,6 +1261,7 @@ impl PublishedViewports {
             frozen: None,
             bar: ProgressBar::default(),
             facts: TerminalFacts::default(),
+            search_string: String::new(),
         }
     }
 }
@@ -1305,7 +1307,6 @@ pub struct CopyModeFacts {
     pub search_match: String,
     pub rectangle_toggle: bool,
     pub selection_active: bool,
-    pub search_string: String,
 }
 
 /// `data->selx`, `sely`, `endselx` and `endsely`: grid rows counted from the
@@ -1796,6 +1797,11 @@ impl TerminalSession {
     #[must_use]
     pub fn copy_mode_facts(&self, view: TerminalViewId) -> Option<Arc<CopyModeFacts>> {
         self.latest.read().copy_facts.get(&view).cloned()
+    }
+
+    #[must_use]
+    pub fn pane_search_string(&self) -> String {
+        self.latest.read().search_string.clone()
     }
 
     /// Copy one stored Kitty image from the actor-owned VT as premultiplied BGRA8.
@@ -2762,6 +2768,7 @@ struct CopyModeState {
     /// search the mode last ran, which `search-again` and `search-reverse`
     /// re-run and which the incremental spellings compare against.
     search: Option<CopyModeSearch>,
+    search_all: bool,
 }
 
 /// `data->searchx`, `data->searchy` and `data->searcho`.
@@ -3857,6 +3864,13 @@ impl Publisher {
         self.latest.write().copy_facts = facts;
     }
 
+    fn publish_search_string(&self, search: Option<&CopyModeSearch>) {
+        let text = search.map_or("", |search| search.text.as_str());
+        if self.latest.read().search_string != text {
+            text.clone_into(&mut self.latest.write().search_string);
+        }
+    }
+
     fn publish_frozen_history(&self, revision: Arc<ModeRevision>) {
         self.latest.write().frozen = Some(Arc::new(FrozenHistory { revision }));
     }
@@ -4490,6 +4504,7 @@ fn run_output_view(
                         &word_separators,
                         &bound_pasted_images,
                         &mut None,
+                        &mut None,
                     ))?;
                     let closed = frozen && state.copy_mode.is_none();
                     match result {
@@ -5062,6 +5077,7 @@ fn run_terminal(
     let mut passthrough = PassthroughFilter::default();
     let mut engine_knobs = spawn.knobs;
     let mut pending_copy_source: Option<Box<CapturedCopySource>> = None;
+    let mut pane_search: Option<CopyModeSearch> = None;
     let mut engine_filter = EngineFilter::default();
     let mut engine_renames = Vec::new();
     let mut engine_bar: Option<ProgressBar> = None;
@@ -5674,8 +5690,10 @@ fn run_terminal(
                                 &word_separators,
                                 pasted_image_bindings.bound_numbers(),
                                 &mut pending_copy_source,
+                                &mut pane_search,
                             ))?
                         };
+                        publisher.publish_search_string(pane_search.as_ref());
                         let is_in_copy_mode = active_views
                             .get(&view)
                             .is_some_and(|state| state.copy_mode.is_some());
@@ -6634,6 +6652,7 @@ fn apply_view_action(
     word_separators: &WordSeparators,
     bound_pasted_images: &HashSet<u32>,
     pending_copy_source: &mut Option<Box<CapturedCopySource>>,
+    pane_search: &mut Option<CopyModeSearch>,
 ) -> Result<ViewActionResult, WorkerError> {
     let view_screen = view.screen;
     let TerminalScreenViewState {
@@ -6861,7 +6880,8 @@ fn apply_view_action(
         enter_action @ (TerminalViewAction::EnterCopyMode
         | TerminalViewAction::EnterCopyModeScrollExit
         | TerminalViewAction::EnterCopyModeWith { .. }) => {
-            if copy_mode.is_none() {
+            let fresh = copy_mode.is_none();
+            if fresh {
                 drop_view_search(
                     view_id,
                     search_worker,
@@ -6892,6 +6912,12 @@ fn apply_view_action(
                 pending_copy_source.take(),
                 mode_keys_vi,
             )?;
+            if fresh && let Some(mode) = copy_mode.as_deref_mut() {
+                mode.search = pane_search.clone().map(|stored| CopyModeSearch {
+                    direction: SearchDirection::Backward,
+                    ..stored
+                });
+            }
             Ok(ViewActionResult::Snapshot)
         }
         TerminalViewAction::CopyModeCounted { action, count } => {
@@ -6907,6 +6933,7 @@ fn apply_view_action(
                     count,
                     mode_keys_vi,
                     wrap_search,
+                    pane_search,
                 );
                 ViewActionResult::Snapshot
             } else if let CopyModeAction::SearchAgain { reverse } = action {
@@ -6921,6 +6948,7 @@ fn apply_view_action(
                         count,
                         mode_keys_vi,
                         wrap_search,
+                        pane_search,
                     );
                 } else {
                     let forward = search
@@ -6968,6 +6996,7 @@ fn apply_view_action(
                 1,
                 mode_keys_vi,
                 wrap_search,
+                pane_search,
             );
             Ok(ViewActionResult::Snapshot)
         }
@@ -6983,6 +7012,7 @@ fn apply_view_action(
                     1,
                     mode_keys_vi,
                     wrap_search,
+                    pane_search,
                 );
             } else {
                 let forward = search
@@ -7015,6 +7045,7 @@ fn apply_view_action(
                     1,
                     mode_keys_vi,
                     wrap_search,
+                    pane_search,
                 );
                 Ok(ViewActionResult::Snapshot)
             } else {
@@ -7439,6 +7470,7 @@ fn enter_copy_mode(
         search_count: Some((0, false)),
         incremental_origin: None,
         search: None,
+        search_all: true,
     }));
     Ok(())
 }
@@ -11485,6 +11517,7 @@ fn run_copy_mode_search(
     count: u32,
     mode_keys_vi: bool,
     wrap: bool,
+    pane_search: &mut Option<CopyModeSearch>,
 ) -> bool {
     let Some(mode) = copy_mode.as_deref_mut() else {
         return false;
@@ -11522,15 +11555,21 @@ fn run_copy_mode_search(
     }
 
     let regex = spec.regex && spec.text.contains(|c| "^$*+()?[].\\".contains(c));
-    let visible_only = mode
-        .search
-        .as_ref()
-        .is_some_and(|previous| previous.text == spec.text && previous.regex == spec.regex);
+    let visible_only = !mode.search_all
+        && pane_search
+            .as_ref()
+            .is_some_and(|stored| stored.text == spec.text && stored.regex == regex);
+    mode.search_all = false;
     if !visible_only && mode.search_marks {
         mode.search_marks = false;
         mode.search_count = None;
     }
     mode.search = Some(spec.clone());
+    *pane_search = Some(CopyModeSearch {
+        regex,
+        incremental: false,
+        ..spec.clone()
+    });
     let query = SearchQuery {
         text: spec.text.clone(),
         mode: if regex {
@@ -12654,11 +12693,6 @@ fn copy_mode_facts(
         },
         rectangle_toggle: mode.rectangle,
         selection_active: mode.selection.is_some() && mode.selecting,
-        search_string: mode
-            .search
-            .as_ref()
-            .map(|search| search.text.clone())
-            .unwrap_or_default(),
     }
 }
 
@@ -21705,6 +21739,81 @@ preexec_functions+=(__zz_fixture_preexec)
         };
         scroll_copy_view_to_cursor(mode);
         assert_eq!(mode.viewport_offset, bottom);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_pane_keeps_its_last_search_and_a_fresh_entry_searches_up_for_it() {
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(vec![
+                    "printf 'alpha\\r\\nmatch-1\\r\\nbeta\\r\\nmatch-2\\r\\nomega\\r\\nZZ_SEARCH_READY'; sleep 30"
+                        .to_owned(),
+                ]),
+                ..TerminalSpawn::default()
+            },
+        );
+        let view = TerminalViewId(3);
+        session.attach_view(view);
+        wait_for_test_viewport(&session, |viewport| {
+            let mut contents = String::new();
+            for cell in viewport.cells.iter() {
+                viewport.push_glyph(*cell, &mut contents);
+            }
+            contents.contains("ZZ_SEARCH_READY")
+        });
+        let wait_for_facts = |expected: &str, predicate: &dyn Fn(Option<&CopyModeFacts>) -> bool| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            loop {
+                let facts = session.copy_mode_facts(view);
+                if predicate(facts.as_deref()) {
+                    return facts;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "timed out waiting for {expected}; last facts: {facts:?}"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+        let on_line = |line: &'static str| {
+            move |facts: Option<&CopyModeFacts>| facts.is_some_and(|facts| facts.cursor_line == line)
+        };
+        assert_eq!(session.pane_search_string(), "");
+
+        session.view_action(view, TerminalViewAction::EnterCopyMode);
+        wait_for_facts("copy mode", &on_line("ZZ_SEARCH_READY"));
+        session.view_action(
+            view,
+            TerminalViewAction::CopyMode(CopyModeAction::Search(Box::new(CopyModeSearch {
+                text: "match".to_owned(),
+                direction: SearchDirection::Forward,
+                regex: true,
+                incremental: false,
+            }))),
+        );
+        wait_for_facts("the forward search to wrap", &on_line("match-1"));
+        assert_eq!(session.pane_search_string(), "match");
+
+        session.view_action(view, TerminalViewAction::CopyMode(CopyModeAction::Cancel));
+        wait_for_facts("the mode to close", &|facts| facts.is_none());
+        assert_eq!(session.pane_search_string(), "match");
+
+        session.view_action(view, TerminalViewAction::EnterCopyMode);
+        let entered = wait_for_facts("a fresh entry", &on_line("ZZ_SEARCH_READY"))
+            .expect("fresh entry facts");
+        assert!(!entered.search_present);
+        assert_eq!(session.pane_search_string(), "match");
+        session.view_action(
+            view,
+            TerminalViewAction::CopyMode(CopyModeAction::SearchAgain { reverse: false }),
+        );
+        let again = wait_for_facts("search-again to search up", &on_line("match-2"))
+            .expect("search-again facts");
+        assert!(again.search_present);
+        assert_eq!(again.search_count, Some((2, false)));
     }
 
     #[test]

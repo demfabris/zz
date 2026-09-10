@@ -1,0 +1,36 @@
+TUI-003 attempt-01 environment
+==============================
+
+host          alienware, CachyOS Linux (Arch-based)
+uname -a      Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+os-release    NAME="CachyOS Linux" / PRETTY_NAME="CachyOS"
+shell         GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+TERM          xterm-ghostty (the driving shell; every fixture runs its clients
+              inside an outer pinned tmux, so the clients under test see the
+              outer tmux's TERM, not this one)
+outer size    80x24 and 100x24 (tui-stock-keys.sh), 80x24 (tui-launch-diff.sh)
+locale        LANG=en_US.UTF-8, LC_CTYPE=en_US.UTF-8, LC_NUMERIC=pt_BR.UTF-8,
+              LC_TIME=pt_BR.UTF-8. Neither fixture expands a date: both pin
+              status-right to the empty string, which is the channel the box's
+              LC_TIME divergence lives in (status-row.sh owns it).
+
+pin           /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+              d77c9dc6 ("Tweak BIDI test.", next-3.8)
+              sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+
+zz            /home/demfabris/dev/zz-tui-keys/target/debug/zz
+              sha256 a817fc3f8393181d7f6a06d4e0282e1b10ecb1a3c24be621b1b2a6fdf3b12b1f
+              built from this worktree with `cargo build -p zz --jobs 5`.
+              A debug build of zz is not bit-reproducible on this box (cycle 1
+              measured four sha256 for identical source), so the hash names the
+              artifact and does not attest it: the attestation is the revision
+              below plus a clean worktree, and the provenance is reproduction.
+
+revision      see revision.txt in this directory (written at the tip that ran
+              the proofs, together with `git status --short`).
+
+zz socket     every fixture uses its own /tmp/zz*.sock and its own throwaway
+              tmux -L socket; no default socket is touched.
+config roots  every side runs with a scratch HOME and a scratch XDG_CONFIG_HOME,
+              both, because config discovery is first-existing-file-wins. The
+              box's real ~/.tmux.conf and ~/.config/zz/mux.conf are never read.

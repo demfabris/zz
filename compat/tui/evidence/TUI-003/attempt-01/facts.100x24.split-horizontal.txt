@@ -1,0 +1,8 @@
+cursor zz:   52,0 flag=1 pane=100x24
+cursor tmux: 53,0 flag=1 pane=100x24
+facts zz:
+keys:0.0 50x23 active=0 zoomed=0 window=win panes=2
+keys:0.1 49x23 active=1 zoomed=0 window=win panes=2
+facts tmux:
+keys:0.0 50x23 active=0 zoomed=0 window=win panes=2
+keys:0.1 49x23 active=1 zoomed=0 window=win panes=2

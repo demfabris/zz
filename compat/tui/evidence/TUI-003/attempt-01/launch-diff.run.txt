@@ -1,0 +1,46 @@
+launch surface differential (pin tmux)
+ok    attach-empty cli
+ok    new-detached cli
+ok    attach-missing-target cli
+ok    new-duplicate cli
+ok    new-duplicate facts
+ok    new-attach-existing-detached cli
+ok    new-attach-existing-detached facts
+ok    new-window-detached cli
+ok    split-detached cli
+ok    split-window facts
+ok    list-panes-after-split cli
+ok    new-window-missing-target cli
+ok    split-missing-target cli
+ok    attach-live screen
+ok    attach-live cursor
+ok    attach-live facts
+ok    new-session-attached screen
+ok    new-session-attached cursor
+ok    new-session-attached facts
+      case bare-empty, channel screen
+        tmux: row 0: $
+        zz:   row 0: ck fallback retained)
+note  bare-empty screen recorded, not asserted: zz with no arguments starts the native desktop client, the pin paints a session in the terminal it was run from
+      case bare-empty, channel cursor
+        tmux: 2,0 flag=1 pane=80x24
+        zz:   0,23 flag=1 pane=80x24
+note  bare-empty cursor recorded, not asserted: zz with no arguments starts the native desktop client, the pin paints a session in the terminal it was run from
+ok    bare-empty facts
+      case bare-existing, channel facts
+        tmux: 1 windows=1 attached=1|existing windows=1 attached=0
+        zz:   existing windows=1 attached=1
+note  bare-existing facts recorded, not asserted: semantic:bare-launcher-attach-current: zz launches new-session -A, the pin launches new-session
+ok    launch-scrollback log records on the terminal
+ok    config-home-tmux-conf option
+ok    config-xdg-tmux-conf option
+ok    config-explicit-file option
+      case config-mux-conf-layer, channel option
+        tmux: EXPLICIT
+        zz:   MUXCONF
+note  config-mux-conf-layer option recorded, not asserted: semantic:explicit-config-keeps-mux-conf-layer, fabrico 2026-09-05: zz layers zz/mux.conf after an explicit -f
+      case config-devnull, channel option
+        tmux: [#{session_name}] 
+        zz:   MUXCONF
+note  config-devnull option recorded, not asserted: semantic:explicit-config-keeps-mux-conf-layer, fabrico 2026-09-05: -f /dev/null still leaves zz with its mux.conf layer
+all 29 comparisons agree where they assert, 5 recorded not asserted

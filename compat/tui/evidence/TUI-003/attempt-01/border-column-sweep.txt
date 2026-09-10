@@ -1,0 +1,25 @@
+Drawn vertical border column after a horizontal split, against the daemon's own
+#{pane_left}/#{pane_right}, zz attached inside an outer pinned tmux at each width.
+Byte index is 1-based from capture-pane, so column = index - 1.
+
+w=80   border byte-index=41   model=0-39 41-79    -> drawn 40, model 40   ok
+w=88   border byte-index=45   model=0-43 45-87    -> drawn 44, model 44   ok
+w=90   border byte-index=46   model=0-44 46-89    -> drawn 45, model 45   ok
+w=96   border byte-index=49   model=0-47 49-95    -> drawn 48, model 48   ok
+w=98   border byte-index=49   model=0-48 50-97    -> drawn 48, model 49   OFF BY ONE
+w=99   border byte-index=50   model=0-48 50-98    -> drawn 49, model 49   ok
+w=100  border byte-index=50   model=0-49 51-99    -> drawn 49, model 50   OFF BY ONE
+w=101  border byte-index=51   model=0-49 51-100   -> drawn 50, model 50   ok
+w=102  border byte-index=52   model=0-50 52-101   -> drawn 51, model 51   ok
+w=104  border byte-index=53   model=0-51 53-103   -> drawn 52, model 52   ok
+w=108  border byte-index=55   model=0-53 55-107   -> drawn 54, model 54   ok
+
+98 and 100 repeated three times each, deterministic. The daemon's geometry
+matches the pin at every width measured (80, 100, 101, 120):
+  w=100 zz : 0 left=0 right=49 w=50 | 1 left=51 right=99 w=49
+  w=100 pin: 0 left=0 right=49 w=50 | 1 left=51 right=99 w=49
+
+crates/zz-tui/src/layout.rs:519 scaled_extent computes
+  (f32::from(available) * ratio).floor() as u16
+with available = width - 1 and ratio an f32 carried in the layout snapshot, so
+a ratio whose f32 round-trip lands just under the integer loses a column.

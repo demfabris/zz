@@ -1,0 +1,29 @@
+self-check: one deliberate one-sided difference per channel, plus two the fixture must not report
+      case one-sided-chord at 80x24-one-sided-chord
+      first differing row 0 of 24
+        tmux: $
+        zz:   $                                       ^[[38;2;127;127;127m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+      cursor tmux: 2,0 flag=1 pane=80x24
+      cursor zz:   43,0 flag=1 pane=80x24
+      facts tmux: keys:0.0 80x23 active=1 zoomed=0 window=win panes=1
+      facts zz:   keys:0.0 40x23 active=0 zoomed=0 window=win panes=2|keys:0.1 39x23 active=1 zoomed=0 window=win panes=2
+ok    self-check rows: prefix % typed on one side only
+      case active-pane at 80x24-active-pane
+      first differing row 0 of 24
+        tmux: $                                       ^[[38;2;127;127;127m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                       ^[[38;2;0;175;0m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+      cursor tmux: 43,0 flag=1 pane=80x24
+      cursor zz:   2,0 flag=1 pane=80x24
+      facts tmux: keys:0.0 40x23 active=0 zoomed=0 window=win panes=2|keys:0.1 39x23 active=1 zoomed=0 window=win panes=2
+      facts zz:   keys:0.0 40x23 active=1 zoomed=0 window=win panes=2|keys:0.1 39x23 active=0 zoomed=0 window=win panes=2
+ok    self-check facts: the active pane moved on one side
+      case cursor at 80x24-cursor
+      first differing row 0 of 24
+        tmux: $ printf CURSORMARK
+        zz:   $ printf CURSORMARK-WITH-A-LONGER-TAIL
+      cursor tmux: 12,1 flag=1 pane=80x24
+      cursor zz:   31,1 flag=1 pane=80x24
+ok    self-check cursor: a different-length unterminated line
+ok    self-check equivalence: the prefix and the key in one write or two
+ok    self-check equivalence: -n and -T root name the same table
+self-check complete: every sabotage was caught in its own channel and every equivalence passed

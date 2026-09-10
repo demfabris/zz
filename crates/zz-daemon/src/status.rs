@@ -1764,7 +1764,22 @@ fn buffer_full(data: &[u8]) -> String {
 }
 
 fn buffer_sample(data: &[u8]) -> String {
-    let prefix = &data[..data.len().min(200)];
+    let mut output = vis_escape(&data[..data.len().min(200)]);
+    let shortened = data.len() > 200 || output.len() > 200;
+    if output.len() > 200 {
+        let boundary = (0..=200)
+            .rev()
+            .find(|index| output.is_char_boundary(*index))
+            .unwrap_or_default();
+        output.truncate(boundary);
+    }
+    if shortened {
+        output.push_str("...");
+    }
+    output
+}
+
+pub(crate) fn vis_escape(prefix: &[u8]) -> String {
     let mut output = String::new();
     let mut index = 0;
     while index < prefix.len() {
@@ -1809,17 +1824,6 @@ fn buffer_sample(data: &[u8]) -> String {
             }
         }
         index += 1;
-    }
-    let shortened = data.len() > 200 || output.len() > 200;
-    if output.len() > 200 {
-        let boundary = (0..=200)
-            .rev()
-            .find(|index| output.is_char_boundary(*index))
-            .unwrap_or_default();
-        output.truncate(boundary);
-    }
-    if shortened {
-        output.push_str("...");
     }
     output
 }

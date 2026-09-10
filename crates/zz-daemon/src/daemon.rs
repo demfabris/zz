@@ -19,6 +19,8 @@ use std::{
 };
 
 use parking_lot::{Condvar, Mutex};
+
+mod chooser_presentation;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     CellLayout, CommandAliasResolution, CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic,
@@ -34,24 +36,24 @@ use zz_mux::{
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
-    ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientExitAction,
-    ClientFileOperation, ClientFileRequest, ClientFileResponse, ClientHello, ClientId,
-    ClientInstanceId, ClientKind, ClientMessageKind, ClientPath, ClipboardProducer,
-    CommandInvocation, CommandPromptAction, CommandPromptKind, CommandPromptMode,
-    CommandPromptState, CommandPromptType, CommandRequest, CommandResolution, CommandResponse,
-    ConfigOverrideEntry, ConfirmAction, ConfirmState, ControlSourceFileEvent, DisplayPanesAction,
-    DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES,
-    MAX_BROWSER_KEY_REPEAT, MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES,
-    MAX_CHOOSE_ITEM_TEXT_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES, MAX_ENCODED_FRAME_BYTES,
-    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES,
-    MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction,
-    MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
-    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
-    PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer,
-    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
-    ProtocolMessage, RawText, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
-    SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId, canonical_key,
-    encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
+    ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget,
+    ChooserPreviewSize, ChooserRow, ClientExitAction, ClientFileOperation, ClientFileRequest,
+    ClientFileResponse, ClientHello, ClientId, ClientInstanceId, ClientKind, ClientMessageKind,
+    ClientPath, ClipboardProducer, CommandInvocation, CommandPromptAction, CommandPromptKind,
+    CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest, CommandResolution,
+    CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState, ControlSourceFileEvent,
+    DisplayPanesAction, DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage,
+    MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT, MAX_CHOOSE_BUFFER_QUERY_BYTES,
+    MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_ITEM_TEXT_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
+    MAX_ENCODED_FRAME_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES,
+    MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
+    MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions,
+    MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator,
+    PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines,
+    PopupPointer, PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult,
+    ProtocolError, ProtocolMessage, RawText, SPLIT_RATIO_BASIS, ServerError, ServerHello,
+    SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
+    canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
     layout_menu_row, menu_row_cells, menu_row_width, read_protocol_message_into, resolve_command,
     terminal_patch_frame_len, terminal_viewport_frame_len,
 };
@@ -8396,6 +8398,12 @@ impl Shared {
                         let state = chooser.rendered.clone();
                         inner.choose_trees.insert(client, chooser);
                         direct_events.push(EventPayload::ChooseTree { state: Some(state) });
+                        direct_events.push(EventPayload::ChooserPresentation {
+                            presentation: chooser_presentation::chooser_presentation(
+                                &inner, client,
+                            )
+                            .map(Box::new),
+                        });
                     }
                     MuxEffect::ChooseBuffer {
                         pane,
@@ -8448,6 +8456,12 @@ impl Shared {
                         let state = chooser.rendered.clone();
                         inner.choose_buffers.insert(client, chooser);
                         direct_events.push(EventPayload::ChooseBuffer { state: Some(state) });
+                        direct_events.push(EventPayload::ChooserPresentation {
+                            presentation: chooser_presentation::chooser_presentation(
+                                &inner, client,
+                            )
+                            .map(Box::new),
+                        });
                     }
                     MuxEffect::DisplayPanes {
                         pane,
@@ -17782,7 +17796,10 @@ impl Shared {
                     };
                     Some(ChooserPromptStep::Single(answer))
                 }
-                (ChooseTreeAction::Key(input), Some(ChooserPromptKind::Command)) => {
+                (
+                    ChooseTreeAction::Key(input),
+                    Some(ChooserPromptKind::Command | ChooserPromptKind::Filter),
+                ) => {
                     let Some(edit) = chooser_prompt_edit(input) else {
                         inner.choose_trees.insert(client, chooser);
                         return Ok(());
@@ -17798,6 +17815,7 @@ impl Shared {
             }
             let attached_session = client_attached_session(&inner, client);
             let facts = format_hook_facts(&inner);
+            let filter_before = chooser.filter.clone();
             let result = if let Some(step) = prompt_step {
                 match step {
                     ChooserPromptStep::Single(answer) => chooser.answer_kill_prompt(answer),
@@ -17835,6 +17853,22 @@ impl Shared {
                     }
                 }
             };
+            if chooser.filter != filter_before {
+                let previous = (chooser.rendered.selected, chooser.selected);
+                chooser.rebuild(&inner.engine, attached_session, &facts);
+                if previous.1.is_some_and(|target| {
+                    !chooser
+                        .rendered
+                        .items
+                        .iter()
+                        .any(|item| item.target == target)
+                }) {
+                    let last = chooser.rendered.items.len().saturating_sub(1);
+                    let index = usize::try_from(previous.0).unwrap_or(usize::MAX).min(last);
+                    chooser.rendered.selected = u32::try_from(index).unwrap_or(0);
+                    chooser.selected = chooser.rendered.items.get(index).map(|item| item.target);
+                }
+            }
             let state = (result == ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full))
                 .then(|| chooser.rendered.clone());
             let delta = (result == ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta))
@@ -17888,13 +17922,16 @@ impl Shared {
         match result {
             ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full) => {
                 self.publish_to_client(client, EventPayload::ChooseTree { state });
+                self.publish_chooser_presentation(client);
             }
             ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta) => {
                 let (selected, search) = delta.expect("updated chooser retains cursor state");
                 self.publish_to_client(client, EventPayload::ChooseTreeUpdate { search, selected });
+                self.publish_chooser_presentation(client);
             }
             ChooseTreeResult::Close => {
                 self.publish_to_client(client, EventPayload::ChooseTree { state: None });
+                self.publish_chooser_presentation(client);
             }
             ChooseTreeResult::Kill(_) | ChooseTreeResult::Command { .. } => {
                 {
@@ -18140,9 +18177,11 @@ impl Shared {
                     client,
                     EventPayload::ChooseBufferUpdate { search, selected },
                 );
+                self.publish_chooser_presentation(client);
             }
             ChooseBufferInputOutcome::Full(state) => {
                 self.publish_to_client(client, EventPayload::ChooseBuffer { state });
+                self.publish_chooser_presentation(client);
                 self.refresh_choose_buffers_except(Some(client));
             }
             ChooseBufferInputOutcome::Select {
@@ -20124,6 +20163,7 @@ impl Shared {
             command_prompt,
             choose_tree,
             choose_buffer,
+            chooser_presentation,
             display_panes,
             popup,
             menu,
@@ -20192,6 +20232,7 @@ impl Shared {
                 command_prompt,
                 choose_tree,
                 choose_buffer,
+                chooser_presentation::chooser_presentation(&inner, client).map(Box::new),
                 display_panes,
                 popup,
                 menu,
@@ -20218,6 +20259,12 @@ impl Shared {
             outbound,
             EventPayload::ChooseBuffer {
                 state: choose_buffer,
+            },
+        );
+        Self::send_event(
+            outbound,
+            EventPayload::ChooserPresentation {
+                presentation: chooser_presentation,
             },
         );
         Self::send_event(
@@ -21900,6 +21947,7 @@ impl Shared {
         };
         for (client, state) in updates {
             self.publish_to_client(client, EventPayload::ChooseTree { state });
+            self.publish_chooser_presentation(client);
         }
     }
 
@@ -21949,6 +21997,7 @@ impl Shared {
         };
         for (client, state) in updates {
             self.publish_to_client(client, EventPayload::ChooseBuffer { state });
+            self.publish_chooser_presentation(client);
         }
     }
 
@@ -22179,6 +22228,14 @@ impl Shared {
         for subscriber in subscribers {
             let _ = subscriber.enqueue_reliable(&message);
         }
+    }
+
+    fn publish_chooser_presentation(&self, client: ClientId) {
+        let presentation = {
+            let inner = self.inner.lock();
+            chooser_presentation::chooser_presentation(&inner, client).map(Box::new)
+        };
+        self.publish_to_client(client, EventPayload::ChooserPresentation { presentation });
     }
 
     fn publish_to_client(&self, client: ClientId, payload: EventPayload) {
@@ -27367,6 +27424,8 @@ struct ChooseBufferSession {
     search: Option<ChooseBufferSearchState>,
     last_search: Option<ChooseBufferSearchState>,
     rendered: ChooseBufferState,
+    presentation_rows: Vec<ChooserRow>,
+    preview_size: ChooserPreviewSize,
 }
 
 impl ChooseBufferSession {
@@ -27412,6 +27471,8 @@ impl ChooseBufferSession {
                 filter_no_matches: false,
                 help: false,
             },
+            presentation_rows: Vec::new(),
+            preview_size: ChooserPreviewSize::Normal,
         };
         chooser.rebuild(engine, buffers, attached_session, facts);
         Ok(Some(chooser))
@@ -27543,6 +27604,16 @@ impl ChooseBufferSession {
             filter_no_matches,
             help: self.help,
         };
+        self.presentation_rows = chooser_presentation::buffer_rows(
+            engine,
+            buffers,
+            &self.names,
+            &self.rendered.items,
+            self.format.is_some(),
+            source_context.as_ref(),
+            attached_session,
+            facts,
+        );
     }
 
     fn apply(
@@ -27677,6 +27748,10 @@ impl ChooseBufferSession {
             ChooseBufferAction::Help => {
                 self.help = true;
                 return Ok(ChooseBufferResult::Rebuild);
+            }
+            ChooseBufferAction::PreviewCycle => {
+                self.preview_size = chooser_presentation::next_preview_size(self.preview_size);
+                return Ok(ChooseBufferResult::Updated);
             }
             ChooseBufferAction::CollapseAll | ChooseBufferAction::ExpandAll => {
                 return Ok(ChooseBufferResult::Rebuild);
@@ -27965,6 +28040,7 @@ enum ChooseTreeResult {
 enum ChooserPromptKind {
     Kill,
     Command,
+    Filter,
 }
 
 /// `mode_tree_set_prompt`'s state: the string the pin builds from the rows it
@@ -28033,6 +28109,8 @@ struct ChooseTreeSession {
     search: Option<ChooseTreeSearchState>,
     last_search: Option<ChooseTreeSearchState>,
     rendered: ChooseTreeState,
+    presentation_rows: Vec<ChooserRow>,
+    preview_size: ChooserPreviewSize,
 }
 
 impl ChooseTreeSession {
@@ -28109,6 +28187,8 @@ impl ChooseTreeSession {
                 prompt: String::new(),
                 help: false,
             },
+            presentation_rows: Vec::new(),
+            preview_size: ChooserPreviewSize::Normal,
         };
         chooser.rebuild(engine, attached_session, facts);
         Ok(chooser)
@@ -28496,6 +28576,13 @@ impl ChooseTreeSession {
                 .any(|item| item.target == *target)
         });
         self.mark_tagged_rows();
+        self.presentation_rows = chooser_presentation::tree_rows(
+            engine,
+            &self.rendered.items,
+            self.format.is_some(),
+            attached_session,
+            facts,
+        );
     }
 
     fn mark_tagged_rows(&mut self) {
@@ -28695,6 +28782,20 @@ impl ChooseTreeSession {
                 self.rendered.help = true;
                 update = ChooseTreeUpdateKind::Full;
             }
+            ChooseTreeAction::PreviewCycle => {
+                self.preview_size = chooser_presentation::next_preview_size(self.preview_size);
+            }
+            ChooseTreeAction::FilterPrompt => {
+                let prompt = ChooserPrompt {
+                    kind: ChooserPromptKind::Filter,
+                    text: "(filter) ".to_owned(),
+                    input: self.filter.clone().unwrap_or_default(),
+                    targets: Vec::new(),
+                };
+                self.rendered.prompt = prompt.line();
+                self.prompt = Some(prompt);
+                update = ChooseTreeUpdateKind::Full;
+            }
             ChooseTreeAction::CollapseAll | ChooseTreeAction::ExpandAll => {
                 let expanded = matches!(action, ChooseTreeAction::ExpandAll);
                 let roots = self
@@ -28887,6 +28988,10 @@ impl ChooseTreeSession {
             ChooserPromptEdit::Accept => {
                 let prompt = self.prompt.take().expect("the prompt was just borrowed");
                 self.rendered.prompt.clear();
+                if matches!(prompt.kind, ChooserPromptKind::Filter) {
+                    self.filter = (!prompt.input.is_empty()).then_some(prompt.input);
+                    return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full);
+                }
                 if prompt.input.is_empty() {
                     return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full);
                 }

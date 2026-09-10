@@ -12,14 +12,15 @@ binary="$target/Contents/MacOS/zz"
 [[ -d "$bundle/Contents" ]] || die "application bundle does not exist: $bundle (run: just build mac)"
 
 # The GUI instance of the installed bundle, and only that: the daemon runs the
-# same binary (`… --socket … daemon`) but must survive the swap. It keeps the
-# sessions and, unlike the GUI, never loads CEF helpers by bundle path, so it
-# is safe with its binary unlinked. dist/zz-dev instances don't match either.
+# same binary (`… --socket … daemon --bootstrap-server-id …`), so do the tray
+# helper (`--bootstrap-tray`), CLI invocations, and agent adapters, and all of
+# those must survive the swap. The daemon keeps the sessions and, unlike the
+# GUI, never loads CEF helpers by bundle path, so it is safe with its binary
+# unlinked. dist/zz-dev instances don't match either.
 gui_pids() {
     pgrep -f "^$binary" 2>/dev/null | while read -r pid; do
         case "$(ps -o command= -p "$pid" 2>/dev/null)" in
-            *" daemon") ;;
-            *) echo "$pid" ;;
+            "$binary" | "$binary app" | "$binary --verbose" | "$binary app --verbose") echo "$pid" ;;
         esac
     done
 }

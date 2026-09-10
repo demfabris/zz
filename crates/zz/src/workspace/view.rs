@@ -612,7 +612,7 @@ impl AppView {
         }
         let mut observed_revision = AppRevision::for_mux(mux.read(cx));
         let mut observed_snapshot = mux.read(cx).snapshot();
-        cx.observe(&mux, move |view, mux, cx| {
+        cx.observe_in(&mux, window, move |view, mux, window, cx| {
             view.drain_gui_requests(cx);
             let snapshot = mux.read(cx).snapshot();
             let snapshot_arrived = !Arc::ptr_eq(&snapshot, &observed_snapshot);
@@ -627,6 +627,7 @@ impl AppView {
                 view.register_agent_panes(cx);
             }
             if revision_changed || snapshot_arrived {
+                view.synchronize_panes(window, cx);
                 cx.notify();
             }
             view.drain_agent_events(cx);

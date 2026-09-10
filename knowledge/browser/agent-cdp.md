@@ -48,6 +48,20 @@ These recipes use the attach flags documented by [agent-browser](https://agent-b
 [Playwright MCP](https://github.com/microsoft/playwright-mcp#configuration), and
 [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp#connecting-to-a-running-chrome-instance).
 
+Install agent-browser rather than running it through `npx` per call. Measured on 2026-09-10 against
+a zz pane with its daemon warm: the native binary answers `snapshot -i`, `get title`, and
+`wait --load load` in 40-55 ms each, so the snapshot, click, wait, snapshot loop costs about
+230 ms; `npx agent-browser@0.37.1` adds 330 ms of resolver time to every one of those calls.
+`wait --load networkidle` costs 0.7-1.7 s because the idle window is real network time; prefer
+`--load load` or `--text` unless the page keeps loading after the load event. Raw CDP on the same
+pane answers `Runtime.evaluate` and `Accessibility.getFullAXTree` in under a millisecond on small
+pages and in about 30 ms on a Wikipedia article, so the tool's process startup is the whole cost.
+
+Attach to the pane's existing target. Never create pages: `Target.createTarget`, Playwright's
+`newPage`, and any tool that opens a fresh tab on connect make CEF open a native Chromium window
+beside zz, not a pane. Six `chrome://newtab/` windows appeared this way during the measurement
+run. List them with `/json/list` and close each with `curl http://127.0.0.1:PORT/json/close/ID`.
+
 # Match a pane to a CDP target
 
 ```sh

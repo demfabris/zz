@@ -2,7 +2,7 @@
 type: Design Plan
 title: Agent backbone v3 - browser over CDP, typed agent state, headless completeness
 description: Handoff plan from the 2026-09-09 headless audit of what an AI agent can drive through the zz CLI - the verified working set, the verified gaps, the locked decisions (zz is the browser process and the agent brings its own CLI, no MCP server, no native snapshot verbs before measurement), and three lanes of work with file pointers, acceptance checks, and traps.
-status: Shipped 2026-09-09 - lanes 0, A1, B1, B2, B3, B4, C1, C2 on main (7c4ba1a0, 62e5b802, d9b3e072, 48ccf3e1, bd2277b7, 856e9687); CDP attach verified live with agent-browser; A2 belongs to the TUI rework session; A3 stays a decision gate
+status: Shipped 2026-09-09 - lanes 0, A1, B1, B2, B3, B4, C1, C2 on main (7c4ba1a0, 62e5b802, d9b3e072, 48ccf3e1, bd2277b7, 856e9687); CDP attach verified live with agent-browser; A2 belongs to the TUI rework session; A3 measured and closed 2026-09-10 (native verbs would save 20 ms of a 50 ms step); the same day fixed the render-only snapshot reducer that stalled CLI browser control while the window was hidden
 tags:
 - agent
 - browser
@@ -230,12 +230,30 @@ session: keep CEF hosting in the TUI process behind the provider path, and leave
 TTY-less host mode (`zz attach --headless`: attach, host CEF, answer browser requests, render
 nothing). The headless mode does not ship in this plan.
 
-## A3. Native hot-loop verbs (decision gate, not scheduled)
+## A3. Native hot-loop verbs (decision gate: closed 2026-09-10, not worth building)
 
 Only if measurements after A1 say the agent-browser round trips cost too much: `browser-snapshot`,
 `browser-click`, `browser-wait`, each a client-answered request riding the `capture-browser`
 GuiRequest path and calling `execute_dev_tools_method` in process. Write the numbers down before
 opening this.
+
+**Numbers (2026-09-10, installed app, M-series macbook, medians).** Raw CDP over one persistent
+WebSocket: `Runtime.evaluate` 0.2 ms, `DOM.getDocument` 0.3 ms, `Accessibility.getFullAXTree`
+0.4 ms, mouse event 33 ms, `Page.captureScreenshot` 58 ms on example.com; on the Wikipedia tmux
+article the tree calls grow to 29-33 ms for roughly 500 KB each and the screenshot to 128 ms.
+agent-browser 0.37.1 through its native binary with its daemon warm: `snapshot -i` 46 ms
+(66 ms on Wikipedia, 176 lines), `get title` 40 ms, `screenshot` 115 ms, `click` 60-185 ms,
+`wait --load load` 55 ms, `wait --load networkidle` 0.7-1.7 s because the idle window is real
+network time. The four-call hot loop snapshot, click, wait load, snapshot lands at 220-240 ms.
+The in-process path the native verbs would ride: `capture-browser` 28 ms, `display-message
+'#{browser_url}'` 20 ms, bare CLI round trip 15 ms. A native verb would therefore save about 20 ms
+of a 50 ms step while the model turn around it costs seconds. Closed; nothing to build.
+
+Two things did matter and neither is a verb. Calling agent-browser through `npx` adds 330 ms per
+call (379 ms warm, 693 ms cold), so the skill must say to install the binary. And the GUI only
+applied pane snapshots inside `render`, so with the zz window hidden, minimized, or fully covered,
+CLI-driven browser creation and `set-browser-url` stalled until the window drew again while CDP
+kept working; see the trap below and `knowledge/browser/agent-cdp.md`.
 
 # Lane B - agent panes as an orchestration target
 
@@ -353,6 +371,22 @@ Every new verb in lanes A and B touches all of these, or a test fails:
   `knowledge/log.md` dirty as of 2026-09-09 17:00 -03). Never `git stash`, reset, or clean. Stage
   your own hunks only (`git diff -U0 FILE | git apply --cached` after filtering), and run rustfmt
   on files you own, never `cargo fmt --all` while others have unformatted work in flight.
+- **Browser panes need a drawn window.** CEF initializes when the GUI paints its first browser
+  pane, so with the app running windowless (window closed, tray alive) a CLI `new-browser` sits
+  unhosted until `open -a zz`. Until 2026-09-10 the workspace applied daemon snapshots only from
+  `render`, so a hidden, minimized, or fully covered window also stalled `set-browser-url` and
+  browser creation while CDP kept working; `AppView` now synchronizes panes from the mux observer
+  too (`crates/zz/src/workspace/view.rs`), verified on the installed build with the window hidden:
+  navigation applied and a new browser pane got its CEF browser in 15 ms.
+- **Bare `zz` launches the desktop app.** Weak agents typed `zz -T agent` and `zz -T features`
+  while probing for help, and each spawned a full GUI instance attached to the eval daemon. The
+  tools catalog now says so; a startup guard for `ZZ_PANE`-bearing environments is still open.
+- **CDP-created pages are native windows.** `Target.createTarget`, Playwright `newPage`, and any
+  tool that opens a tab on connect produce top-level Chromium windows next to zz, not panes; close
+  them with `/json/close/ID`. Agents attach to the pane's existing target only.
+- **Second GUI instance.** A `dist/zz-dev` instance on its own socket never started CEF for its
+  browser panes while the installed app had CEF up; the cause was not established. Test browser
+  behavior on one GUI instance at a time.
 - **Sockets.** Unix socket paths cap near 104 bytes on macOS; put test sockets directly under `/tmp`.
 - **HOME.** A hermetic daemon needs `HOME` overridden as well as `XDG_*`; the config writers prefer
   the first existing candidate and will write into the real `~/.config/zz/mux.conf`. Never

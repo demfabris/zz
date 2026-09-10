@@ -1707,6 +1707,13 @@ impl Renderer {
             self.output.extend_from_slice(b"\x1b[?25h");
             return;
         }
+        self.place_pane_cursor(model);
+        if client_message_hides_the_cursor(model) {
+            self.hide_cursor();
+        }
+    }
+
+    fn place_pane_cursor(&mut self, model: &Model) {
         let Some(pane) = model.active_pane() else {
             self.hide_cursor();
             return;
@@ -2007,6 +2014,23 @@ enum StatusOverlay {
     Right(StyledLine),
 }
 
+/// A message on the status row takes the cursor off the screen. Measured
+/// 2026-09-10 against the pin inside one outer tmux: with `display-message` up,
+/// the pin reports `cursor_flag` 0 at the pane cursor's own position and the raw
+/// TUI reported 1, so the two screens differed in the cursor for as long as the
+/// message lasted. `server_client_reset_state` drops `MODE_CURSOR` for a client
+/// whose status screen is the one being drawn and which has no prompt; a prompt
+/// keeps its cursor, which is why this is checked after the prompt branch. It
+/// still calls `tty_cursor`, so the hidden cursor stays AT the pane cursor and
+/// does not park wherever the last write left it - which is why the caller
+/// places the pane cursor first and only then hides it. The guard mirrors
+/// `status_overlay`: with the sidebar up and no command output the message is a
+/// sidebar row and the status row is untouched, so the cursor is not this
+/// message's to take.
+fn client_message_hides_the_cursor(model: &Model) -> bool {
+    model.client_message.is_some() && !(model.sidebar_visible() && model.command_output.is_none())
+}
+
 fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
     let style = overlay_style(&model.appearance);
     if let Some(confirm) = &model.confirm {
@@ -2039,7 +2063,7 @@ fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
         line.push_segment(&padded_segment(&message.text, width, ' '), style);
         return Some(StatusOverlay::Row(line));
     }
-    let right = status_indicators(model);
+    let right = mode_indicators(model);
     if right.is_empty() {
         return None;
     }
@@ -2306,7 +2330,12 @@ fn mode_indicator(mode: TerminalMode) -> String {
     }
 }
 
-fn status_indicators(model: &Model) -> String {
+/// The mode and search badges, without the armed-prefix hint. status.c redraws
+/// the status row from the same formats whether or not the prefix is armed and
+/// no default format reads `#{client_prefix}`, so the pin paints nothing there
+/// while a user holds the prefix. The status ROW is the row the pin also draws,
+/// so it carries these two and not the hint.
+fn mode_indicators(model: &Model) -> String {
     let mut indicators = String::new();
     let viewport = model
         .command_output
@@ -2328,6 +2357,14 @@ fn status_indicators(model: &Model) -> String {
                 .expect("writing to String cannot fail");
         }
     }
+    indicators
+}
+
+/// The sidebar's indicator row: the mode badges plus the armed-prefix hint. The
+/// sidebar is client-local chrome with no counterpart in the pin and only
+/// focus-sidebar or a user binding shows it, so the hint lives here.
+fn status_indicators(model: &Model) -> String {
+    let mut indicators = mode_indicators(model);
     if model.prefix_armed {
         if !indicators.is_empty() {
             indicators.push_str("  ");
@@ -3483,6 +3520,61 @@ mod tests {
         assert_eq!(painted, "/界e\u{301}  ");
         assert_eq!(text_display_width(&painted), 6);
         assert_eq!(cursor, 4);
+    }
+
+    #[test]
+    fn the_status_row_never_carries_the_armed_prefix_hint() {
+        let mut model = block_model(40, 10);
+        model.set_status(block_status(vec!["ROW"], false));
+        model.prefix_armed = true;
+        assert_eq!(mode_indicators(&model), "");
+        assert_eq!(status_indicators(&model), "PREFIX");
+        assert!(status_overlay(&model, 40).is_none());
+        let mut renderer = Renderer::new();
+        renderer.paint_status_block(&model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(!output.contains("PREFIX"), "{output:?}");
+
+        let mut sidebar_model = block_model(120, 10);
+        sidebar_model.focus_sidebar();
+        assert!(sidebar_model.sidebar_visible());
+        sidebar_model.set_status(block_status(vec!["ROW"], false));
+        sidebar_model.prefix_armed = true;
+        let mut renderer = Renderer::new();
+        renderer.paint_sidebar(&sidebar_model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.contains("PREFIX"), "{output:?}");
+    }
+
+    #[test]
+    fn a_status_row_message_takes_the_cursor_and_a_prompt_keeps_it() {
+        let mut model = block_model(40, 10);
+        model.set_status(block_status(vec!["ROW"], false));
+        assert!(!client_message_hides_the_cursor(&model));
+        model.client_message = Some(ClientMessage::local("a message"));
+        assert!(client_message_hides_the_cursor(&model));
+
+        let mut sidebar_model = block_model(120, 10);
+        sidebar_model.focus_sidebar();
+        assert!(sidebar_model.sidebar_visible());
+        sidebar_model.set_status(block_status(vec!["ROW"], false));
+        sidebar_model.client_message = Some(ClientMessage::local("a sidebar message"));
+        assert!(!client_message_hides_the_cursor(&sidebar_model));
+
+        model.command_prompt = Some(zz_protocol::CommandPromptState {
+            prompt: ":".to_owned(),
+            input: "list".to_owned(),
+            cursor: 4,
+            kind: zz_protocol::CommandPromptKind::Command,
+            history: Vec::new(),
+            prompt_type: zz_protocol::CommandPromptType::Command,
+            mode: zz_protocol::CommandPromptMode::Text,
+            no_freeze: false,
+        });
+        let mut renderer = Renderer::new();
+        renderer.place_active_cursor(&model);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.ends_with("\x1b[?25h"), "{output:?}");
     }
 
     #[test]

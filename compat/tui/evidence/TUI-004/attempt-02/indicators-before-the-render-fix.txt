@@ -1,0 +1,56 @@
+indicator, message and prompt differential at 80x24 (pin tmux)
+ok    baseline
+ok    scrollback
+      case copy-mode-entered
+      first differing row 0 of 24
+        tmux: 43                                                                        ^[[38;2;13;13;13m^[[48;2;184;134;11m[0/45]
+        zz:   43
+      cursor tmux: 2,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   79,23 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  copy-mode-entered recorded, not asserted: options.native-mode-styles, accepted: the pin draws copy-mode-position-format into the pane grid at the top right and zz draws a native COPY badge on the status row instead
+ok    copy-mode-restored
+      case view-surface-shown
+      first differing row 0 of 24
+        tmux: VIEWLINE-1                                                                 ^[[38;2;13;13;13m^[[48;2;184;134;11m[0/0]
+        zz:   ^[[38;2;77;163;235m^[[48;2;16;19;24m command output M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+      cursor tmux: 0,0 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   79,23 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  view-surface-shown recorded, not asserted: options.native-mode-styles, accepted: run-shell output reaches the pin as a view-mode pane grid and zz as a native command-output overlay
+ok    view-surface-restored
+      case prefix-armed
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m                                                                 ^[[38;2;16;19;24m^[[48;2;216;222;233m PREFIX
+      cursor tmux: 2,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  prefix-armed
+ok    prefix-released
+      case message-shown
+      all 24 rows identical
+      cursor tmux: 2,22 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  message-shown
+      case message-shown
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mINDICATOR-MESSAGE^[[39m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233mINDICATOR-MESSAGE
+      cursor tmux: 2,22 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  message-shown: styles recorded, not asserted: the pin resolves message-style (bg=themeyellow,fg=themeblack) and the raw TUI paints its own overlay appearance; the daemon publishes no resolved message style on StatusLine
+ok    message-restored
+      case prompt-opened
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m:^[[39m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m:
+      cursor tmux: 1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  prompt-opened
+      case prompt-typed
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m:list^[[39m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m:list
+      cursor tmux: 5,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   5,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  prompt-typed
+ok    prompt-cancelled
+4 of 11 asserted comparisons differ, 3 recorded

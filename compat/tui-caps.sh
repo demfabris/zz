@@ -332,7 +332,7 @@ side_pane() {
 scratch_pids() {
   local entry
   for entry in /proc/[0-9]*; do
-    if tr '\0' '\n' <"$entry/environ" 2>/dev/null | grep -qF -- "$SCRATCH_DIR"; then
+    if { tr '\0' '\n' <"$entry/environ"; } 2>/dev/null | grep -qF -- "$SCRATCH_DIR"; then
       printf '%s\n' "${entry#/proc/}"
     fi
   done

@@ -39,6 +39,14 @@ RGB) stays part of the cell, as `tui.status-row` in `compat/tmux-gaps.json` esta
 - `compat/status-row.sh`: the last row's bytes after each status option, at 79 columns.
 - `compat/attached-client.sh`: the large attached fixture the corpus summary stamp depends on.
 - `compat/tui-screen-diff.sh`: the whole-screen comparison at named checkpoints. TUI-002 builds it.
+- `compat/tui-stock-keys.sh`: stock prefix and root chords typed into the attached client's stdin,
+  50 cases (TUI-003).
+- `compat/tui-indicators.sh`: copy/view/prefix indicators and message/prompt restoration, whole
+  screen plus the cursor tuple (TUI-004).
+- `compat/tui-copy-mode.sh`: the stock emacs and vi copy tables typed through real input, six
+  channels per case including the paste-buffer bytes (TUI-005).
+- `compat/tui-caps.sh`: what an attached client asks of its outer terminal, decoded as pane state
+  by the outer pinned tmux (TUI-009).
 
 ## State
 
@@ -68,10 +76,18 @@ TUI-003, TUI-010), added scope 0/1.
   cycle-18 handoff recorded), `TMUX_OPTION_CONSUMERS` 118 to 139, the consumer half closing 21
   items of the accepted `options.theme-palette` gap (so the lane owns it), the wire half a
   `TmuxColour` field on `StatusLine` at protocol 99 to 100 -- one landing, never half.
-- PROTOCOL_VERSION is still 99; cycle 3's allowed bump was deliberately unspent. Upstream note
-  for fabrico: the gate repaired two reds that arrived with the thirteen mid-cycle main commits
-  (the `tools [--skill]` list-commands assertion, and `commands.native-superset` item order) --
-  revert either if the intent differed.
+- Cycle 4 (gated at `2b406cc1`, 2026-09-10, alienware: three lanes, the copy lane rejected once in
+  review and fixed, all three merged): no obligation verified, so the count stays 4/12. TUI-004,
+  TUI-005 and TUI-009 are `review` with every cited fixture green at the tip, and each record's
+  evidence note ends with the gate's reason. TUI-004 is one step away: clause 3's copy-mode and
+  view-surface indicator cells appear only in recorded cases, against the accepted
+  `options.native-mode-styles`, and recorded cases are never counted. The theme landing is whole:
+  `options.theme-palette` and `tui.status-row` closed, and `status-row.sh` asserts 14 of 14.
+- PROTOCOL_VERSION is 100 since cycle 4: `StatusLine` gains `theme: ThemeColours`, ten `TmuxColour`
+  slots in `colour_theme_table` order, a pure append. Cycle 3's upstream note for fabrico still
+  stands: that gate repaired two reds that arrived with the thirteen mid-cycle main commits (the
+  `tools [--skill]` list-commands assertion, and `commands.native-superset` item order) -- revert
+  either if the intent differed.
 - Box facts added: four corpus rows are environmental on alienware (micro-flags %b locale,
   show-options-hooks and lane2-store through lock-command defaulting to vlock,
   smoke/plugin-runtime-resurrect-restore), each proved red at origin/main;

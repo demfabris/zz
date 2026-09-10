@@ -56,7 +56,7 @@ cell (named, indexed, RGB) is preserved and compared, as the closed class-1 find
 `tui.status-row` established. Cursor position and geometry come from `display-message -p` on the
 outer pane. Whether cursor shape can be read that way is measured, not assumed.
 
-- `compat/tui-pane-geometry.sh`: pane columns and rows at 80, 100 (asserted) and 120 (recorded).
+- `compat/tui-pane-geometry.sh`: pane columns and rows at 80, 100 and 120, all asserted since cycle 3.
 - `compat/status-row.sh`: the last row's bytes after each status option at 79 columns.
 - `compat/attached-client.sh`: the large attached fixture; `compat/run.sh --attached-client`.
 - `compat/tui-screen-diff.sh`: the whole-screen comparison at named checkpoints, with a

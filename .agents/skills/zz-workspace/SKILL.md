@@ -58,7 +58,9 @@ and exits 3 while the turn continues.
 A terminal pane running Claude Code with cross-session messaging is a valid
 target. Plain sends and `--submit` deliver through Claude Code's inbox between
 its tool calls, attributed to your pane, or start a turn when it is idle.
-`--wait` is not supported for these targets.
+`--wait` prints the session's reply and exits non-zero if Claude Code refuses,
+expires, or drops the message, the session exits, or the timeout passes. Held
+and delivered status updates keep the wait open.
 
 ### `zz show-agent-permission [-t %N]`
 
@@ -183,7 +185,14 @@ refresh-client -B 'agent:%5:#{agent_state}'
 
 Agent panes register as Claude Code peers under their `@name` user option
 (default `zz-%N`). `ListAgents` in any Claude Code session lists them, and
-`SendMessage` queues a prompt into the pane while its adapter runs.
+`SendMessage` queues a prompt into the pane while its adapter runs. Claude
+Code refuses idle subscriptions to these peers; wait with
+`zz wait-for agent_state@%N` instead.
+
+A terminal pane becomes a peer when you set its pane `@name` option:
+`zz set-option -p -t %3 @name codex-1`. Messages to it are pasted into the pane
+and submitted, so do not name a bare shell pane. Claude Code terminal sessions
+keep their own registration.
 
 ## Foreign agents in terminal panes
 

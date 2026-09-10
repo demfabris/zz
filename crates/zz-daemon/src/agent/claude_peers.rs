@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
@@ -6,8 +7,8 @@ use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
@@ -28,6 +29,7 @@ pub(crate) struct PeerRecord {
     pub(crate) kind: String,
     pub(crate) entrypoint: String,
     pub(crate) pid_domain: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub(crate) tmux: String,
     pub(crate) messaging_socket_path: PathBuf,
     pub(crate) name: String,
@@ -40,7 +42,16 @@ pub(crate) struct PeerRecord {
     pub(crate) zz: Option<Value>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PeerKind {
+    Agent,
+    Terminal,
+    Daemon,
+}
+
 pub(crate) struct PeerMetadata {
+    pub(crate) pid: Option<u32>,
+    pub(crate) kind: PeerKind,
     pub(crate) pane: String,
     pub(crate) name: String,
     pub(crate) cwd: PathBuf,
@@ -123,7 +134,7 @@ fn now_ms() -> u64 {
 }
 
 #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
-fn pid_alive(pid: u32) -> bool {
+pub(crate) fn pid_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
         return false;
     };
@@ -198,17 +209,195 @@ fn wire_message(content: &str, from_name: &str, from_socket: Option<&Path>) -> i
     Ok(message)
 }
 
+pub(crate) struct PreparedMessage {
+    value: Value,
+    msg_id: String,
+}
+
+impl PreparedMessage {
+    pub(crate) fn msg_id(&self) -> &str {
+        &self.msg_id
+    }
+}
+
+pub(crate) fn prepare_message(
+    content: &str,
+    from_name: &str,
+    from_socket: Option<&Path>,
+) -> io::Result<PreparedMessage> {
+    let value = wire_message(content, from_name, from_socket)?;
+    let msg_id = value["msg_id"]
+        .as_str()
+        .ok_or_else(|| io::Error::other("peer message id missing"))?
+        .to_owned();
+    Ok(PreparedMessage { value, msg_id })
+}
+
+fn post_line(socket: &Path, value: &Value) -> io::Result<()> {
+    let mut stream = UnixStream::connect(socket)?;
+    stream.set_write_timeout(Some(Duration::from_secs(30)))?;
+    serde_json::to_writer(&mut stream, value).map_err(io::Error::other)?;
+    stream.write_all(b"\n")
+}
+
+pub(crate) fn post_prepared(record: &PeerRecord, message: &PreparedMessage) -> io::Result<()> {
+    post_line(&record.messaging_socket_path, &message.value)
+}
+
 pub(crate) fn post_message(
     record: &PeerRecord,
     content: &str,
     from_name: &str,
     from_socket: Option<&Path>,
 ) -> io::Result<()> {
-    let mut stream = UnixStream::connect(&record.messaging_socket_path)?;
-    stream.set_write_timeout(Some(Duration::from_secs(30)))?;
-    serde_json::to_writer(&mut stream, &wire_message(content, from_name, from_socket)?)
-        .map_err(io::Error::other)?;
-    stream.write_all(b"\n")
+    post_prepared(record, &prepare_message(content, from_name, from_socket)?)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PeerEvent {
+    Message {
+        from: Option<String>,
+        content: String,
+    },
+    NotifyWhenIdle {
+        from: String,
+        msg_id: String,
+    },
+    MessageStatus {
+        orig_msg_id: Option<String>,
+        status: String,
+        status_detail: Option<String>,
+        reason: Option<String>,
+        drop_reason: Option<String>,
+        dropped_msg_ids: Vec<String>,
+    },
+}
+
+fn parse_event(value: &Value) -> Option<PeerEvent> {
+    let string = |key: &str| value[key].as_str().map(str::to_owned);
+    match value["action"].as_str() {
+        Some("peer_message_status") => Some(PeerEvent::MessageStatus {
+            orig_msg_id: string("orig_msg_id"),
+            status: string("status").unwrap_or_default(),
+            status_detail: string("status_detail"),
+            reason: string("reason"),
+            drop_reason: string("drop_reason"),
+            dropped_msg_ids: value["dropped_msg_ids"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|id| id.as_str().map(str::to_owned))
+                .collect(),
+        }),
+        Some("notify_when_idle") if value["type"] == "control" => Some(PeerEvent::NotifyWhenIdle {
+            from: string("from")?,
+            msg_id: string("msg_id")?,
+        }),
+        _ if value["type"] == "user" => Some(PeerEvent::Message {
+            from: string("from"),
+            content: value["message"]["content"].as_str()?.to_owned(),
+        }),
+        _ => None,
+    }
+}
+
+fn reply_content(content: &str) -> String {
+    if content.starts_with("<cross-session-message")
+        && let Some((_, body)) = content.split_once('\n')
+        && let Some(inner) = body
+            .strip_suffix("</cross-session-message>")
+            .or_else(|| body.trim_end().strip_suffix("</cross-session-message>"))
+    {
+        return inner.trim().to_owned();
+    }
+    content.to_owned()
+}
+
+struct PendingWait {
+    msg_id: String,
+    target: String,
+    sender: Option<mpsc::Sender<Result<String, String>>>,
+}
+
+#[derive(Default)]
+pub(crate) struct PeerWaits {
+    pending: VecDeque<PendingWait>,
+}
+
+impl PeerWaits {
+    pub(crate) fn register(
+        &mut self,
+        msg_id: String,
+        target: String,
+    ) -> mpsc::Receiver<Result<String, String>> {
+        let (sender, receiver) = mpsc::channel();
+        self.pending.push_back(PendingWait {
+            msg_id,
+            target,
+            sender: Some(sender),
+        });
+        receiver
+    }
+
+    pub(crate) fn cancel(&mut self, msg_id: &str) {
+        self.pending.retain(|wait| wait.msg_id != msg_id);
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+
+    pub(crate) fn handle(&mut self, event: PeerEvent) {
+        match event {
+            PeerEvent::Message { from, content } => {
+                if let Some(wait) = self.pending.iter_mut().find(|wait| {
+                    wait.sender.is_some() && from.as_deref() == Some(wait.target.as_str())
+                }) {
+                    if let Some(sender) = wait.sender.take() {
+                        let _ = sender.send(Ok(reply_content(&content)));
+                    }
+                } else {
+                    log::info!(
+                        "dropping unmatched peer reply from={}",
+                        from.as_deref().unwrap_or("unknown")
+                    );
+                }
+            }
+            PeerEvent::MessageStatus {
+                orig_msg_id,
+                status,
+                status_detail,
+                reason,
+                drop_reason,
+                dropped_msg_ids,
+            } => {
+                let refused = status_detail.as_deref() == Some("refused");
+                if !refused && status != "expired" && status != "dropped" {
+                    return;
+                }
+                let status_name = if refused {
+                    format!("{status} (refused)")
+                } else {
+                    status
+                };
+                let detail = reason.or(drop_reason).unwrap_or_default();
+                let error = if detail.is_empty() {
+                    format!("peer message {status_name}")
+                } else {
+                    format!("peer message {status_name}: {detail}")
+                };
+                for wait in &mut self.pending {
+                    if (orig_msg_id.as_deref() == Some(wait.msg_id.as_str())
+                        || dropped_msg_ids.contains(&wait.msg_id))
+                        && let Some(sender) = wait.sender.take()
+                    {
+                        let _ = sender.send(Err(error.clone()));
+                    }
+                }
+            }
+            PeerEvent::NotifyWhenIdle { .. } => {}
+        }
+    }
 }
 
 fn trimmed_proc_start(output: &[u8]) -> String {
@@ -365,9 +554,12 @@ pub(crate) struct PeerInbox {
 impl PeerInbox {
     pub(crate) fn register(
         metadata: PeerMetadata,
-        callback: impl Fn(String) + Send + Sync + 'static,
+        callback: impl Fn(PeerEvent) + Send + Sync + 'static,
     ) -> io::Result<Self> {
-        let pid = adapter_pid(&metadata.pane)?;
+        let pid = match metadata.pid {
+            Some(pid) => pid,
+            None => adapter_pid(&metadata.pane)?,
+        };
         let start = proc_start(pid)?;
         let socket = socket_dir(&read_records()?)?.join(format!("{pid}.sock"));
         let record_path = registry_dir()?.join(format!("{pid}.json"));
@@ -397,7 +589,11 @@ impl PeerInbox {
             status: "idle".to_owned(),
             updated_at: now,
             status_updated_at: now,
-            zz: Some(json!({"pane": metadata.pane})),
+            zz: Some(match metadata.kind {
+                PeerKind::Agent => json!({"pane": metadata.pane, "kind":"agent"}),
+                PeerKind::Terminal => json!({"pane": metadata.pane, "kind":"terminal"}),
+                PeerKind::Daemon => json!({"daemon":true}),
+            }),
         };
         let _ = fs::remove_file(&socket);
         let listener = UnixListener::bind(&socket)?;
@@ -484,7 +680,7 @@ impl Drop for PeerInbox {
 fn serve_connection(
     stream: UnixStream,
     stopped: &AtomicBool,
-    callback: &impl Fn(String),
+    callback: &impl Fn(PeerEvent),
 ) -> io::Result<()> {
     stream.set_nonblocking(false)?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
@@ -498,27 +694,160 @@ fn serve_connection(
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
-        if value["type"] != "user" {
-            continue;
-        }
-        let Some(content) = value["message"]["content"].as_str() else {
+        let Some(event) = parse_event(&value) else {
             continue;
         };
         if stopped.load(Ordering::Acquire) {
             return Ok(());
         }
-        log::info!(
-            "agent peer message from={} bytes={}",
-            value["from"].as_str().unwrap_or("unknown"),
-            content.len()
-        );
-        callback(content.to_owned());
+        if let PeerEvent::Message { from, content } = &event {
+            log::info!(
+                "agent peer message from={} bytes={}",
+                from.as_deref().unwrap_or("unknown"),
+                content.len()
+            );
+        }
+        callback(event);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replies_strip_only_the_outer_wrapper() {
+        assert_eq!(
+            reply_content(
+                "<cross-session-message from-name=\"alice\">\n  hello\nworld  \n</cross-session-message>\n"
+            ),
+            "hello\nworld"
+        );
+        assert_eq!(reply_content("  raw reply\n"), "  raw reply\n");
+        assert_eq!(
+            reply_content("<cross-session-message>\nunfinished"),
+            "<cross-session-message>\nunfinished"
+        );
+    }
+
+    #[test]
+    fn inbound_lines_parse_messages_and_controls() {
+        assert_eq!(
+            parse_event(&json!({"type":"user", "from":"uds:/peer", "message":{"content":"hello"}})),
+            Some(PeerEvent::Message {
+                from: Some("uds:/peer".to_owned()),
+                content: "hello".to_owned()
+            })
+        );
+        assert_eq!(
+            parse_event(
+                &json!({"type":"control", "action":"notify_when_idle", "from":"uds:/peer", "msg_id":"notice"})
+            ),
+            Some(PeerEvent::NotifyWhenIdle {
+                from: "uds:/peer".to_owned(),
+                msg_id: "notice".to_owned()
+            })
+        );
+        assert_eq!(
+            parse_event(
+                &json!({"action":"peer_message_status", "orig_msg_id":"sent", "status":"dropped", "status_detail":"refused", "reason":"no", "drop_reason":"policy", "dropped_msg_ids":["other"]})
+            ),
+            Some(PeerEvent::MessageStatus {
+                orig_msg_id: Some("sent".to_owned()),
+                status: "dropped".to_owned(),
+                status_detail: Some("refused".to_owned()),
+                reason: Some("no".to_owned()),
+                drop_reason: Some("policy".to_owned()),
+                dropped_msg_ids: vec!["other".to_owned()]
+            })
+        );
+        assert!(
+            parse_event(
+                &json!({"type":"control", "action":"peer_idle_notice", "orig_msg_id":"notice", "state":"idle"})
+            )
+            .is_none()
+        );
+        assert!(
+            parse_event(
+                &json!({"type":"control", "action":"notify_when_idle", "from":"uds:/peer"})
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn waits_resolve_fifo_per_target_and_live_until_cancelled() {
+        let mut waits = PeerWaits::default();
+        let first = waits.register("1".to_owned(), "uds:/a".to_owned());
+        let other = waits.register("2".to_owned(), "uds:/b".to_owned());
+        let second = waits.register("3".to_owned(), "uds:/a".to_owned());
+        waits.handle(PeerEvent::Message {
+            from: Some("uds:/unknown".to_owned()),
+            content: "ignored".to_owned(),
+        });
+        waits.handle(PeerEvent::NotifyWhenIdle {
+            from: "uds:/a".to_owned(),
+            msg_id: "1".to_owned(),
+        });
+        assert_eq!(first.try_recv(), Err(mpsc::TryRecvError::Empty));
+        waits.handle(PeerEvent::Message {
+            from: Some("uds:/a".to_owned()),
+            content: "<cross-session-message>\nfirst\n</cross-session-message>".to_owned(),
+        });
+        assert_eq!(first.try_recv(), Ok(Ok("first".to_owned())));
+        assert_eq!(second.try_recv(), Err(mpsc::TryRecvError::Empty));
+        waits.handle(PeerEvent::Message {
+            from: Some("uds:/a".to_owned()),
+            content: "second".to_owned(),
+        });
+        assert_eq!(second.try_recv(), Ok(Ok("second".to_owned())));
+        assert_eq!(other.try_recv(), Err(mpsc::TryRecvError::Empty));
+        assert!(!waits.is_empty());
+        for id in ["1", "2", "3"] {
+            waits.cancel(id);
+        }
+        assert!(waits.is_empty());
+    }
+
+    #[test]
+    fn wait_statuses_keep_delivery_pending_and_fail_only_matching_messages() {
+        let mut waits = PeerWaits::default();
+        let first = waits.register("1".to_owned(), "uds:/a".to_owned());
+        let second = waits.register("2".to_owned(), "uds:/a".to_owned());
+        for status in ["held", "delivered"] {
+            waits.handle(
+                parse_event(
+                    &json!({"action":"peer_message_status", "orig_msg_id":"1", "status":status}),
+                )
+                .expect("status"),
+            );
+            assert_eq!(first.try_recv(), Err(mpsc::TryRecvError::Empty));
+        }
+        waits.handle(parse_event(&json!({"action":"peer_message_status", "orig_msg_id":"unknown", "status":"expired"})).expect("status"));
+        assert_eq!(first.try_recv(), Err(mpsc::TryRecvError::Empty));
+        waits.handle(parse_event(&json!({"action":"peer_message_status", "orig_msg_id":"1", "status":"held", "status_detail":"refused", "reason":"busy"})).expect("status"));
+        assert_eq!(
+            first.try_recv(),
+            Ok(Err("peer message held (refused): busy".to_owned()))
+        );
+        assert_eq!(second.try_recv(), Err(mpsc::TryRecvError::Empty));
+        waits.handle(parse_event(&json!({"action":"peer_message_status", "status":"dropped", "dropped_msg_ids":["2"], "drop_reason":"closed"})).expect("status"));
+        assert_eq!(
+            second.try_recv(),
+            Ok(Err("peer message dropped: closed".to_owned()))
+        );
+        let expired = waits.register("3".to_owned(), "uds:/b".to_owned());
+        waits.handle(
+            parse_event(
+                &json!({"action":"peer_message_status", "orig_msg_id":"3", "status":"expired"}),
+            )
+            .expect("status"),
+        );
+        assert_eq!(
+            expired.try_recv(),
+            Ok(Err("peer message expired".to_owned()))
+        );
+    }
 
     #[test]
     fn tmux_suffix_matches_the_exact_pane() {

@@ -33,6 +33,7 @@ pub use message::{
     AgentPaneWire, AgentPermissionWire, AgentSessionOpKind, BrowserCommand, ChooseBufferAction,
     ChooseBufferItem, ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem,
     ChooseTreeKind, ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget,
+    ChooserPresentation, ChooserPreview, ChooserPreviewSize, ChooserPreviewTile, ChooserRow,
     ClientExitAction, ClientFileOperation, ClientFileRequest, ClientFileResponse, ClientHello,
     ClientKind, ClientMessageKind, ClientPath, ClipboardProducer, CommandInvocation,
     CommandPromptAction, CommandPromptKind, CommandPromptMode, CommandPromptState,

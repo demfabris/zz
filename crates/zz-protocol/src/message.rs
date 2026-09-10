@@ -2539,6 +2539,8 @@ pub enum ChooseTreeAction {
     /// `(current) `, whose text runs against every tagged row or the current
     /// one.
     CommandPrompt,
+    PreviewCycle,
+    FilterPrompt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2577,6 +2579,58 @@ pub struct ChooseBufferState {
     /// outright, which is why `choose-tree -y` has no counterpart here.
     #[serde(default)]
     pub help: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChooserPresentation {
+    pub selected: u32,
+    pub rows: Vec<ChooserRow>,
+    pub sort: String,
+    pub view: String,
+    pub filter: bool,
+    pub selection_style: String,
+    pub border_style: String,
+    pub prompt_style: String,
+    pub preview_size: ChooserPreviewSize,
+    pub preview: Option<ChooserPreview>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChooserRow {
+    pub name: String,
+    pub text: String,
+    pub align: bool,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChooserPreviewSize {
+    #[default]
+    Normal,
+    Off,
+    Big,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ChooserPreview {
+    Tiles {
+        tiles: Vec<ChooserPreviewTile>,
+        current: u32,
+    },
+    Screen {
+        viewport: TerminalViewport,
+    },
+    Text {
+        lines: Vec<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChooserPreviewTile {
+    pub label: String,
+    pub label_style: String,
+    pub border_style: String,
+    pub viewport: Option<TerminalViewport>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2627,6 +2681,7 @@ pub enum ChooseBufferAction {
     /// `P`: `window_buffer_do_paste` over every tagged row, which closes the
     /// chooser the way a single paste does.
     PasteTagged,
+    PreviewCycle,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -3274,6 +3329,9 @@ pub enum EventPayload {
     /// `cfg_add_cause` decides in the pin.
     ControlConfigError {
         text: String,
+    },
+    ChooserPresentation {
+        presentation: Option<Box<ChooserPresentation>>,
     },
 }
 

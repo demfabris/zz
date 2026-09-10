@@ -1492,11 +1492,15 @@ fn handle_core_event(
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::ChooseTreeChanged => {
-            model.choose_tree = lock_core(core).choose_tree().cloned();
+            let core = lock_core(core);
+            model.choose_tree = core.choose_tree().cloned();
+            model.chooser_presentation = core.chooser_presentation().cloned();
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::ChooseBufferChanged => {
-            model.choose_buffer = lock_core(core).choose_buffer().cloned();
+            let core = lock_core(core);
+            model.choose_buffer = core.choose_buffer().cloned();
+            model.chooser_presentation = core.chooser_presentation().cloned();
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::DisplayPanesChanged => {

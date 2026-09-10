@@ -5,10 +5,11 @@ use std::{
 
 use zz_protocol::{
     AgentCommand, AgentPaneWire, BrowserCommand, ChooseBufferSearchState, ChooseBufferState,
-    ChooseTreeSearchState, ChooseTreeState, ClientExitAction, ClientMessageKind, ClipboardProducer,
-    CommandPromptState, CommandResponse, ConfirmState, DisplayPanesState, Event, EventPayload,
-    KeyBindingSnapshot, KeyTableSnapshot, MenuState, MuxOptions, MuxSnapshot, PaneId, PopupState,
-    ProtocolMessage, ServerHello, SessionId, StatusLine, TerminalUiCommand,
+    ChooseTreeSearchState, ChooseTreeState, ChooserPresentation, ClientExitAction,
+    ClientMessageKind, ClipboardProducer, CommandPromptState, CommandResponse, ConfirmState,
+    DisplayPanesState, Event, EventPayload, KeyBindingSnapshot, KeyTableSnapshot, MenuState,
+    MuxOptions, MuxSnapshot, PaneId, PopupState, ProtocolMessage, ServerHello, SessionId,
+    StatusLine, TerminalUiCommand,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, PackedCell, TerminalAppearance, TerminalDictionary,
@@ -267,6 +268,7 @@ pub struct ClientCore {
     command_output_watermark: u64,
     choose_tree: Option<ChooseTreeState>,
     choose_buffer: Option<ChooseBufferState>,
+    chooser_presentation: Option<ChooserPresentation>,
     display_panes: Option<DisplayPanesState>,
     popup: Option<PopupState>,
     menu: Option<MenuState>,
@@ -513,6 +515,11 @@ impl ClientCore {
     }
 
     #[must_use]
+    pub const fn chooser_presentation(&self) -> Option<&ChooserPresentation> {
+        self.chooser_presentation.as_ref()
+    }
+
+    #[must_use]
     pub const fn display_panes(&self) -> Option<&DisplayPanesState> {
         self.display_panes.as_ref()
     }
@@ -576,6 +583,7 @@ impl ClientCore {
         self.command_output = None;
         self.choose_tree = None;
         self.choose_buffer = None;
+        self.chooser_presentation = None;
         self.display_panes = None;
         self.popup = None;
         self.menu = None;
@@ -665,6 +673,14 @@ impl ClientCore {
             }
             EventPayload::ChooseBufferUpdate { search, selected } => {
                 self.update_choose_buffer(search, selected);
+            }
+            EventPayload::ChooserPresentation { presentation } => {
+                self.chooser_presentation = presentation.map(|presentation| *presentation);
+                if self.choose_tree.is_some() {
+                    self.events.push_back(CoreEvent::ChooseTreeChanged);
+                } else if self.choose_buffer.is_some() {
+                    self.events.push_back(CoreEvent::ChooseBufferChanged);
+                }
             }
             EventPayload::DisplayPanes { state } => {
                 self.display_panes = state;

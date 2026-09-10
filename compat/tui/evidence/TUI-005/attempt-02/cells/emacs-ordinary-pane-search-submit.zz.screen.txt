@@ -1,0 +1,24 @@
+$ cat /tmp/zzcm.rxZLLV/lines.txt
+line-01 filler-01
+line-02 filler-02
+line-03 filler-03
+line-04 filler-04
+line-05 filler-05
+line-06 filler-06
+line-07 filler-07
+line-08 filler-08
+line-09 filler-09
+line-10 filler-10
+line-11 filler-11
+line-12 [7mneedle[0m-12
+line-13 filler-13
+line-14 filler-14
+line-15 filler-15
+line-16 filler-16
+line-17 filler-17
+line-18 filler-18
+line-19 filler-19
+line-20 filler-20
+line-21 filler-21
+line-22 filler-22
+line-23 filler-23

@@ -1,0 +1,30 @@
+Proofs for TUI-005 attempt-02, alienware, 2026-09-10.
+Fixture, regression and integration runs: revision 66b23b5f68502a81797909be33c268af4fde8dd0, clean worktree.
+Environment for every fixture run: PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
+
+compat/tui-copy-mode.sh                      exit 0  copy-mode-tip-1.txt (ZZ_COPY_CAPTURE_DIR set, cells/ taken from it)
+compat/tui-copy-mode.sh                      exit 0  copy-mode-tip-2.txt
+compat/tui-copy-mode.sh                      exit 0  copy-mode-tip-3.txt
+compat/tui-copy-mode.sh --self-check         exit 0  copy-mode-self-check-tip.txt
+compat/tui-screen-diff.sh                    exit 0  screen-diff-tip.txt
+compat/tui-stock-keys.sh                     exit 0  stock-keys-tip.txt
+timeout 580 cargo test -p zz --jobs 3 -- --test-threads=2    exit 0  zz-integration-tests-tip.txt
+
+Unit tests and clippy, on the working tree whose content for each crate is 66b23b5f's:
+cargo test -p zz-terminal --jobs 3 -- --test-threads=2                                  exit 0  unit-tests-zz-terminal.txt
+cargo test -p zz-protocol --jobs 3 -- --test-threads=2                                  exit 0  unit-tests-zz-protocol.txt
+cargo test -p zz-mux --jobs 3 -- --test-threads=2                                       exit 0  unit-tests-zz-mux.txt
+cargo test -p zz-tui --jobs 3 -- --test-threads=2                                       exit 0  unit-tests-zz-tui.txt
+cargo test -p zz-daemon --jobs 3 --lib status:: -- --test-threads=2                     exit 0  unit-tests-zz-daemon-status.txt
+cargo test -p zz-daemon --jobs 3 --tests -- --test-threads=2 --skip status::            exit 0  unit-tests-zz-daemon-tests.txt
+cargo clippy -p zz-terminal --all-targets --all-features --jobs 3 -- -D warnings        exit 0  clippy-zz-terminal.txt
+cargo clippy -p zz-protocol --all-targets --all-features --jobs 3 -- -D warnings        exit 0  clippy-zz-protocol.txt
+cargo clippy -p zz-mux --all-targets --all-features --jobs 3 -- -D warnings             exit 0  clippy-zz-mux.txt
+cargo clippy -p zz-tui --all-targets --all-features --jobs 3 -- -D warnings             exit 0  clippy-zz-tui.txt
+cargo clippy -p zz-daemon --all-targets --all-features --jobs 3 -- -D warnings          exit 0  clippy-zz-daemon.txt
+python3 compat/tui/tracker.py check                                                     exit 0
+python3 compat/tmux-tracker.py check                                                    exit 0
+
+The evidence commit on top of 66b23b5f changes only compat/tui/ (this directory, the TUI-005
+record) and the regenerated knowledge/tmux/tui-parity.md. The binaries and the fixture are
+unchanged. The structured report lists the same commands re-run at that final tip.

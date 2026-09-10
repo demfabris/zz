@@ -1,0 +1,144 @@
+THE CAPABILITY MATRIX, declared from both sides' sources and measured where it
+can be driven. The same list is the header of compat/tui-caps.sh; this copy
+carries the measured values.
+
+SOURCES READ. Pin: tmux.c (the global flag loop), tty.c (tty_start_tty, what a
+client arms on attach and gives back on detach), tty-keys.c (what the terminal's
+replies add to a client's feature set), tty-features.c (the feature table and
+tty_add_features), tty-term.c (the capability table), input.c (what the pin
+DECODES from a client, which is what makes it usable as this fixture's decoder),
+format.c (the pane mode formats and format_cb_pane_key_mode),
+options-table.c (extended-keys and focus-events defaults). zz:
+crates/zz-tui/src/tty.rs (TerminalGuard::enter and Drop, the whole emitted set),
+crates/zz-tui/src/terminal_event.rs (what zz DECODES back),
+crates/zz-tui/src/render.rs (the pane-body colour path),
+crates/zz/src/lib.rs (the global flag loop),
+crates/zz-daemon/src/daemon.rs (client_uses_utf8, client_colour_count,
+client_term_features, the client facts), crates/zz-terminal/src/model.rs
+(PackedStyle).
+
+  channel                       driven?  measured (pin | zz)
+  ---------------------------------------------------------------------------
+  alternate screen              driven   alternate_on 1 | 1
+  alternate-screen restoration  driven   the whole 16-row mode tuple after
+                                         detach is identical on both sides,
+                                         alternate_on back to 0
+  bracketed paste               driven   bracket_paste_flag 1 | 1
+  cursor visibility             driven   cursor_flag 1 | 1
+  cursor shape                  driven   default | default
+  autowrap (DECAWM)             driven   wrap_flag 1 | 0            RECORDED
+  origin mode                   driven   origin_flag 0 | 0
+  synchronized output           driven   synchronized_output_flag 0 | 0
+  application keypad            driven   keypad_flag 1 | 0          RECORDED
+                                         keypad_cursor_flag 1 | 0   RECORDED
+  mouse arming                  driven   mouse_any_flag 1 | 1
+                                         mouse_sgr_flag 1 | 1
+                                         mouse_standard_flag 0 | 0
+                                         mouse_utf8_flag 0 | 0
+                                         mouse_all_flag 0 | 1       RECORDED
+                                         mouse_button_flag 1 | 0    RECORDED
+  legacy keys                   driven   pane_key_mode VT10x | VT10x
+                                         (extended-keys off, both sides)
+  extended keys                 driven   pane_key_mode Ext 2 | VT10x RECORDED
+                                         (extended-keys on, both sides)
+  client terminal name          driven   client_termname xterm | xterm
+  client feature negotiation    driven   client_colours 16777216 | 16 RECORDED
+                                         client_termfeatures differ    RECORDED
+  client UTF-8 from a locale    driven   client_utf8 1 | 1 and client_flags
+                                         gaining UTF-8 on both, under
+                                         LANG=C.UTF-8 with no flag
+  client UTF-8 from the flag    driven   client_utf8 0 | 0 unflagged
+                                         client_utf8 1 | 0 under -u   RECORDED
+  theme reply                   driven   client_theme (empty) | dark  RECORDED
+  global flag -2                driven   accepted on both; own-side delta
+                                         none | none (see the caveat in
+                                         08-client-flag-dispositions.txt)
+  global flag -u                driven   own-side client_flags delta
+                                         UTF-8 | none                 RECORDED
+  global flag -T                driven   own-side client_termfeatures delta
+                                         sixel | none                 RECORDED
+  flag diagnostics              driven   identical: missing argument, unknown
+                                         option, exit codes, usage block
+  colour class, stock palette   driven   named and indexed cells differ in
+                                         class, RGB cell identical     RECORDED
+  colour class, palette change  driven   identical on every cell the OSC 4
+                                         entry touches, and on the RGB cell
+  focus reporting               named    the pin publishes no pane format for
+                                         focus mode, so this decoder cannot
+                                         see either side arm it. From source,
+                                         NOT equal: tty.c tty_start_tty arms
+                                         Enfcs only when focus-events is on and
+                                         its default is 0
+                                         (options-table.c), while tty.rs
+                                         TerminalGuard::enter writes
+                                         \e[?1004h on every attach.
+  Unicode widths                driven   the outer cursor lands at 20,0 on
+                                         both and the decoded line is
+                                         identical, after a wide CJK pair, a
+                                         base letter with a combining acute
+                                         and an astral emoji, with UTF-8
+                                         clients on both sides.
+                                         options.terminal-engine-limits is
+                                         accepted on the grounds that zz keeps
+                                         its engine's own widths and takes no
+                                         override, which says nothing about
+                                         whether they agree with the pin's.
+                                         They do, on the three categories that
+                                         usually disagree.
+  user keys (User0..User9)      named    an option-store channel with no client
+                                         terminal behind it on zz; recorded on
+                                         options.client-terminal-negotiation
+  OSC 10/11 and DA replies      named    the reply path is what saturates the
+                                         pin's feature set, and the negotiation
+                                         row measures it as a whole; the
+                                         individual replies are not driven here
+
+WHY THE RECORDED EMISSION ROWS ARE WHAT THEY ARE, from source:
+
+  wrap_flag       crates/zz-tui/src/tty.rs TerminalGuard::enter writes
+                  \e[?1049h\e[?7l\e[?25l\e[?1004h. The \e[?7l is autowrap off,
+                  and Drop restores \e[?7h. A full-screen renderer that
+                  positions every cell explicitly needs autowrap off to write
+                  the last cell of the last row without scrolling; the pin
+                  keeps autowrap on and tracks that cell itself in tty.c. No
+                  decoded-screen consequence: compat/tui-screen-diff.sh is
+                  green at this tip, 111 asserted checkpoints identical.
+
+  mouse_all_flag  tty.rs mouse_enable_sequence writes \e[?1003h\e[?1006h and
+  mouse_button    adds \e[?1016h on a pixel-mouse terminal. \e[?1003h is
+  _flag           any-event tracking, so the outer terminal reports every
+                  motion for the whole attach. The pin arms \e[?1002h
+                  (button-event) and raises MODE_MOUSE_ALL only while a menu is
+                  up. zz's TUI does consume motion
+                  (crates/zz-tui/src/input.rs menu_pointer_kind maps
+                  MouseEventKind::Moved to MenuPointerKind::Motion), which is
+                  what the any-event mode is for, so this is a scope difference
+                  and not a bug: zz arms for the whole attach what the pin arms
+                  for the life of a menu. Narrowing it means arming and
+                  disarming per menu, which is app.rs, outside TUI-009's zones.
+
+  keypad_flag     the pin sends smkx on attach (application keypad and
+  keypad_cursor   application cursor keys); tty.rs sends neither. The
+  _flag           consequence is confined: the outer terminal sends normal-mode
+                  CSI arrows to zz, which is what
+                  crates/zz-tui/src/terminal_event.rs parse_csi decodes
+                  (b'A'..b'D' to Up/Down/Right/Left). zz never asks for the SS3
+                  spelling, so it never has to read one.
+
+  pane_key_mode   the pin arms extended keys through the Eneks capability,
+                  which is \e[>4;2m under `extended-keys on`, and input.c
+                  decodes it (INPUT_CSI_MODSET). zz arms the Kitty keyboard
+                  protocol, \e[>3u, when TERM or TERM_PROGRAM contains ghostty,
+                  kitty, wezterm, foot or zz (tty.rs supports_kitty_keyboard).
+                  The pin's CSI dispatch table has exactly one 'u' entry,
+                  { 'u', "", INPUT_CSI_RCP }, with NO intermediate, so
+                  \e[>3u is not in it: a pinned tmux outer terminal ignores
+                  zz's request entirely and the decoder records VT10x.
+                  ATTACHED TO A TMUX-CLASS OUTER TERMINAL, ZZ GETS NO EXTENDED
+                  KEYS AT ALL WHERE THE PIN GETS Ext 2. Meeting the pin means
+                  also arming modifyOtherKeys, and decoding the
+                  \e[27;<mod>;<key>~ form it produces, which
+                  terminal_event.rs does not do today - it decodes only the
+                  Kitty \e[<key>;<mod>u form (parse_kitty_key). That decoder is
+                  not in TUI-009's zone list, so it is named here rather than
+                  changed.

@@ -1,0 +1,11 @@
+the pin's client feature list under four TERM names, one outer pinned tmux
+run: /tmp/negotiation-probe.sh <pin>  (script body kept in notes.md)
+
+TERM=vt100         colours=16777216
+                   features=256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle
+TERM=xterm         colours=16777216
+                   features=256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle
+TERM=xterm-256color colours=16777216
+                   features=256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle
+TERM=screen-256color colours=16777216
+                   features=256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle

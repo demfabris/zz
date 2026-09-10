@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Is the pin's client feature list read from the terminal's terminfo entry or
+# negotiated from the terminal's replies? Attach the pin to the same outer
+# pinned tmux under four different TERM names and read client_termfeatures.
+set -eu
+T="${1:?pin}"
+D=/tmp/zznegprobe.$$; rm -rf "$D"; mkdir -p "$D/oh/config" "$D/ih/config"
+OS=zzprobe-no$$; IS=zzprobe-ni$$
+sc() { env -i HOME="$D/$1" XDG_CONFIG_HOME="$D/$1/config" LANG=C LC_ALL=C TERM="$2" PATH=/usr/bin:/bin TMUX_TMPDIR=/tmp "${@:3}"; }
+outer() { sc oh xterm-256color "$T" -L "$OS" "$@"; }
+inner() { sc ih xterm-256color "$T" -L "$IS" "$@"; }
+trap 'outer kill-server >/dev/null 2>&1 || true; inner kill-server >/dev/null 2>&1 || true; rm -rf "$D"' EXIT
+inner -f /dev/null new-session -d -s s -x 80 -y 24
+outer -f /dev/null new-session -d -s drv -n hold -x 80 -y 24 'sleep 600'
+outer set-option -g status off
+for term in vt100 xterm xterm-256color screen-256color; do
+  printf '#!/usr/bin/env bash\nexec env -i HOME=%s XDG_CONFIG_HOME=%s LANG=C LC_ALL=C TERM=%s PATH=/usr/bin:/bin TMUX_TMPDIR=/tmp %s -L %s attach-session -t =s\n' \
+    "$D/ih" "$D/ih/config" "$term" "$T" "$IS" >"$D/att.sh"
+  chmod +x "$D/att.sh"
+  outer new-window -d -n probe "$D/att.sh"
+  for _ in $(seq 1 200); do [ -n "$(inner list-clients -F x 2>/dev/null)" ] && break; sleep 0.05; done
+  printf '%-18s colours=%s\n                   features=%s\n' "TERM=$term" \
+    "$(inner list-clients -F '#{client_colours}' | head -1)" \
+    "$(inner list-clients -F '#{client_termfeatures}' | head -1)"
+  outer kill-window -t '=drv:probe' >/dev/null 2>&1 || true
+  for _ in $(seq 1 200); do [ -z "$(inner list-clients -F x 2>/dev/null)" ] && break; sleep 0.05; done
+done

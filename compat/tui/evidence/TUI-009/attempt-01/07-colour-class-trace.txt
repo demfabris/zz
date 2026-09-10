@@ -1,0 +1,102 @@
+Where the colour class is lost: one named cell traced from the program that
+wrote it to the bytes the raw TUI puts on the outer terminal.
+
+The measurement that starts it (compat/tui-caps.sh, colours case, 80x24,
+TERM=xterm-256color, both sides in one outer pinned tmux). The inner pane runs
+  printf 'CLR \033[31mR\033[0m \033[38;5;42mI\033[0m \033[38;2;10;20;30mX\033[0m \033[41mB\033[0m END\n'
+and the outer decoder's grid holds:
+
+  pin  CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+  zz   CLR ^[[38;2;205;0;0mR^[[39m ^[[38;2;0;215;135mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[48;2;205;0;0mB^[[49m END
+
+Three of the four cells decide it. `R` was written as SGR 31, a NAMED colour,
+and reaches the outer terminal as RGB 205,0,0 on zz. `I` was written as SGR
+38;5;42, an INDEXED colour, and reaches it as RGB 0,215,135 - which is exactly
+what the 6x6x6 cube says index 42 is (42-16=26; r=0, g=4, b=2; 0, 215, 135), so
+this is a resolution and not a corruption. `X` was written as explicit RGB and
+survives on both, which is what says the two sides agree about everything
+except the class.
+
+THE TRACE, in the order the bytes travel.
+
+1. The program writes ESC [ 31 m into the pane's pty.
+
+2. The terminal worker's VT engine resolves it. crates/zz-terminal/src/model.rs
+   holds the cell model, and the style a cell points at is
+
+     /// A resolved, interned terminal style referenced by [`PackedCell::style_id`].
+     pub struct PackedStyle {
+         foreground: u32,
+         background: u32,
+         underline_color: u32,
+         attributes: u16,
+         underline_kind: u8,
+         reserved: u8,
+     }
+
+   `foreground` is a packed 24-bit RGB (`Color::packed`, r<<16|g<<8|b in the
+   same file). There is no field for a palette index. The doc comment says
+   "resolved" and it means it: by the time a cell exists, SGR 31 has already
+   become 205,0,0. The one bit of provenance the model keeps is
+   ATTR_EXPLICIT_RGB (1 << 7), which distinguishes a colour the program spelled
+   out in RGB from one it named - but it does not keep WHICH name or index was
+   used, so it cannot spell the cell back.
+
+   THE CLASS IS LOST HERE. Everything after this point is faithful.
+
+3. The wire carries the resolved value. crates/zz-protocol/src/terminal_codec.rs
+   encodes the style with `push_u32(output, style.foreground_raw())` (lines 777
+   and 883) and the viewport's default ground with
+   `push_u32(output, patch.foreground.packed())` (lines 837 and 838).
+   `foreground_raw` returns the same packed u32. The wire is 32 bits of colour
+   with no class tag, but it is carrying a value that was already classless.
+
+4. The raw TUI writes what it was given. crates/zz-tui/src/render.rs, the pane
+   body path:
+
+     let foreground = style.foreground();
+     if foreground == default_foreground {
+         output.extend_from_slice(b"\x1b[39m");
+     } else {
+         write!(output, "\x1b[38;2;{};{};{}m", foreground.r, foreground.g, foreground.b)
+     }
+
+   38;2 is the only spelling available to it, because a `Color` is three bytes.
+
+5. The same file proves the TUI is not the problem. Chrome and status segments
+   do NOT travel as cells; they travel as `TmuxColour`, which is an enum with
+   Basic, Indexed, Rgb, Default, Terminal and Theme arms
+   (crates/zz-protocol/src/style.rs), and `write_ground` in render.rs turns
+   each arm back into its own class: `\x1b[31m` for a basic colour,
+   `\x1b[38;5;42m` for an indexed one, `\x1b[38;2;...` only for an RGB one.
+   The renderer already preserves every class it is handed. It is handed a
+   class for chrome and a resolved RGB for the pane body.
+
+WHAT IT WOULD TAKE, named rather than done. The wire is not this cycle's, and
+crates/zz-terminal is not TUI-009's zone, so this is recorded:
+
+  - crates/zz-terminal/src/model.rs `PackedStyle` would need the source class
+    per ground, not just the resolved value: a palette index 0..=255 or an
+    explicit RGB. ATTR_EXPLICIT_RGB already carries the explicit/named bit, so
+    what is missing is the index itself - two more bytes in a struct that
+    already has a `reserved: u8`, plus the same for the underline colour.
+  - crates/zz-protocol/src/terminal_codec.rs would need to carry it, which is a
+    wire change and therefore a PROTOCOL_VERSION bump.
+  - crates/zz-tui/src/render.rs would then choose the spelling the way
+    `write_ground` already does for chrome.
+
+WHAT A PALETTE CHANGE DOES, and why the fixture asserts it rather than
+recording it. With the same sample, after the pane is sent
+ESC ] 4 ; 1 ; rgb:00/ff/00 ESC \:
+
+  pin  CLR ^[[38;2;0;255;0mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[48;2;0;255;0mB^[[49m END
+  zz   CLR ^[[38;2;0;255;0mR^[[39m ^[[38;2;0;215;135mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[48;2;0;255;0mB^[[49m END
+
+The pin stops emitting the index for colour 1 as soon as an OSC 4 entry exists
+for it: tty.c resolves the cell through the pane palette
+(`window_pane_get_palette`) and writes RGB. So on the one channel where the
+class could actually change what the user sees, the two sides agree
+byte-for-byte, on the foreground AND on the background the entry paints, and
+the fixture asserts all three of those cells (R, B and the untouched X). The
+indexed cell the entry did not touch keeps each side's own class and is
+recorded beside them, so the case cannot pass by accident.

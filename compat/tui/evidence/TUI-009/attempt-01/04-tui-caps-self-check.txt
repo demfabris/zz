@@ -1,0 +1,9 @@
+outer-terminal capability differential (pin tmux)
+self-check: one deliberate one-sided difference per channel
+ok    self-check control, facts with no sabotage: no difference reported
+ok    self-check a one-sided flag, -u on the pin only: caught
+ok    self-check a one-sided palette entry: caught
+ok    self-check the legacy case driven with extended keys on the pin: caught
+ok    self-check a one-sided unknown CLI option: caught
+ok    self-check a one-sided wide codepoint: caught
+self-check: every sabotage caught in its own channel

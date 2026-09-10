@@ -1,0 +1,93 @@
+The three global client flags -2, -u and -T: what each binary parses, what it
+applies, and what its own daemon then records.
+
+PARSING AND DIAGNOSTICS - identical, and asserted by compat/tui-caps.sh's cli
+case (five rows, program name normalised because zz is not called tmux and
+nothing else is normalised except the version string, which is each binary's
+own name for itself).
+
+  -2 -V            both exit 0
+  -u -V            both exit 0
+  -T sixel -V      both exit 0
+  -T               both exit 1 with
+                     PROG: option requires an argument -- T
+                     usage: PROG [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name]
+                                 [-S socket-path] [-T features] [command [flags]]
+  -W -V            both exit 1 with
+                     PROG: unknown option -- W
+                     and the same usage block
+
+The usage synopsis matches the pin's tmux.c usage() string, including the fact
+that -T and -q appear in the body but not in the flag cluster [-2CDhlNuVv].
+
+APPLYING - measured on an attached client inside one outer pinned tmux, 80x24,
+TERM=xterm, LANG=C and LC_ALL=C on both sides. LC_ALL=C is what makes -u
+visible at all: the pin's own locale fallback (tmux.c, "tmux is a UTF-8
+terminal") would set CLIENT_UTF8 from this box's LANG and hide the flag.
+
+  flag        pin                                   zz
+  ------------------------------------------------------------------------
+  (none)      client_utf8 0                         client_utf8 0
+              client_flags attached,focused         client_flags attached,focused
+  -2          no change to any client fact          no change to any client fact
+  -u          client_utf8 0 -> 1                    no change
+              client_flags gains UTF-8              no change
+  -T sixel    client_termfeatures gains sixel       no change
+
+-2 IS THE ONE READING THAT NEEDS A CAVEAT. tmux.c's `case '2'` is
+`tty_add_features(&feat, "256", ":,")`, and on this driver the pin's client
+already has 256 before the flag is given, so its delta is empty and zz's empty
+delta matches it. The row therefore proves only that neither side removed
+anything; it is recorded, not asserted as parity. The reason 256 is already
+there is the next section.
+
+THE PIN NEGOTIATES, ZZ DERIVES. 06-pin-feature-negotiation.txt attaches the pin
+to the same outer pinned tmux under four TERM names and reads back
+client_termfeatures:
+
+  vt100            256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle
+  xterm            the same list
+  xterm-256color   the same list
+  screen-256color  the same list
+
+vt100's terminfo entry has neither 256 colours nor RGB, so that list cannot be
+coming from the entry. It is coming from the terminal's replies: tty-keys.c
+adds sixel, margins, rectfill and clipboard from the DA parameters, and the
+rest of the saturation follows the same reply path, which is why -2's "256" is
+redundant on any terminal that answers. zz builds its roster from TERM and
+COLORTERM alone (crates/zz-daemon/src/daemon.rs client_colour_count and
+client_term_features), so on TERM=xterm with no COLORTERM it answers
+client_colours 16 where the pin answers 16777216, and its roster carries osc7
+and sync where the pin's carries 256, RGB and progressbar. That is consistent
+with the accepted stance on options.client-terminal-negotiation - zz opens no
+terminfo database and drives no client terminal through a capability table -
+and it is recorded here rather than reopened.
+
+WHAT IT WOULD TAKE, named rather than done. All three flags are consumed by
+crates/zz/src/lib.rs and dropped there:
+
+  '2' | 'q' | 'u' | 'v' => {}                       (the -2 and -u arm)
+  'T' => { let _ = value(&mut arguments)?; break; }  (the -T arm, argument read
+                                                      and discarded)
+
+-q and -v are correct as they stand: -q is a no-op in the pin too, and -v is
+the pin's log level, which zz routes through its own diagnostics. -2, -u and -T
+are not. Applying them means the CLIENT telling the daemon something about its
+terminal, and today nothing on the wire says it:
+
+  - -u needs the attach to carry the client's UTF-8 flag. The daemon computes
+    it from the client's environment instead
+    (crates/zz-daemon/src/daemon.rs client_uses_utf8: TMUX set, else LC_ALL,
+    LC_CTYPE or LANG containing utf-8), which is exactly the pin's FALLBACK but
+    without the flag that overrides it. One bool on the attach message, read by
+    client_uses_utf8 before it falls back to the environment, is the whole fix.
+  - -2 and -T need the attach to carry a feature list the daemon merges into
+    client_term_features, which today derives the whole roster from TERM and
+    COLORTERM and takes nothing from the client.
+
+Both are crates/zz-protocol plus crates/zz-daemon, which is outside TUI-009's
+zones this cycle, and the first is a wire change. They stay visible obligations
+on TUI-009 rather than being worked around: nothing in crates/zz or
+crates/zz-tui can make client_utf8 answer 1 without either a wire field or
+fabricating the client's environment, and fabricating it would move
+#{client_environment_rows} and #{I/e:} with it.

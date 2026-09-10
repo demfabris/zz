@@ -1,0 +1,92 @@
+Every proof command below ran at e18f2a0b40071e384a93d4f4c47b95455b0b6d22, the
+last CODE commit of campaign/tui-canvas-close, against the zz binary built there
+(cargo build -p zz --jobs 5, exit 0). The only commit after it is the evidence
+commit that carries this file; it touches compat/tui/evidence/TUI-004/attempt-02
+and nothing else.
+
+Shared environment for the fixtures:
+  PATH=/opt/homebrew/bin:$PATH
+  ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+  ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
+
+FIXTURES
+
+compat/tui-indicators.sh                                    -> exit 0 (run 1)
+compat/tui-indicators.sh                                    -> exit 0 (run 2)
+compat/tui-indicators.sh                                    -> exit 0 (run 3)
+    all three: "all 11 asserted comparisons identical, 5 recorded not asserted"
+    files: indicators-run-1.txt, indicators-run-2.txt, indicators-run-3.txt
+
+compat/tui-indicators.sh --self-check                       -> exit 0
+    "self-check complete: every sabotage was caught and the equivalence passed"
+    three sabotages (a hint cell on one status row, a message whose text differs,
+    a prompt one side leaves open) and one equivalence that reported nothing.
+    file: indicators-self-check.txt
+
+LC_ALL=C LC_TIME=C compat/status-row.sh                     -> exit 0
+    "all 14 comparisons identical, none recorded"
+    The three theme rows are asserted here for the first time; the fixture has no
+    recorded path left. Run under LC_ALL=C LC_TIME=C because the pin expands %b
+    through libc strftime and zz expands it locale-independently, which under
+    this box's LC_TIME=pt_BR.UTF-8 is an environmental difference recorded in
+    TUI-001 and unchanged by this branch.
+    files: status-row-asserted.txt, and status-row-before-the-theme.txt for the
+    same fixture on this branch before the theme landed (11 asserted, 3 recorded)
+
+compat/tui-screen-diff.sh                                   -> exit 0
+    "all 111 asserted checkpoints identical, 42 recorded not asserted"
+    The regression proof for the render.rs cursor change, which touches every
+    checkpoint of this fixture.
+    file: screen-diff-regression.txt
+
+compat/tui-pane-geometry.sh                                 -> exit 0
+    "all 6 asserted measurements identical"
+    file: pane-geometry-regression.txt
+
+compat/attached-client.sh <zz> <pin>                        -> exit 0
+    "attached-client compatibility: PASS"
+    The regression proof for PROTOCOL_VERSION 99 -> 100.
+    file: attached-client-regression.txt
+
+CRATES TOUCHED BY THE DIFF
+
+cargo test -p zz-protocol --jobs 5 -- --test-threads=2      -> exit 0
+cargo test -p zz-mux      --jobs 5 -- --test-threads=2      -> exit 0
+cargo test -p zz-daemon   --jobs 5 -- --test-threads=2      -> exit 0
+cargo test -p zz-tui      --jobs 5 -- --test-threads=2      -> exit 0
+    files: zz-protocol-unit-tests.txt, zz-mux-unit-tests.txt,
+           zz-daemon-unit-tests.txt, zz-tui-unit-tests.txt
+
+cargo clippy -p zz-protocol --all-targets --all-features --jobs 5 -- -D warnings -> exit 0
+cargo clippy -p zz-mux      --all-targets --all-features --jobs 5 -- -D warnings -> exit 0
+cargo clippy -p zz-daemon   --all-targets --all-features --jobs 5 -- -D warnings -> exit 0
+cargo clippy -p zz-tui      --all-targets --all-features --jobs 5 -- -D warnings -> exit 0
+
+INTEGRATION-TEST RULE (the diff touches crates/)
+
+timeout 2400 cargo test -p zz --jobs 5 -- --test-threads=2  -> exit 0
+    11 "test result: ok" lines, no failures. The cli_binary integration tests
+    included.
+    file: zz-integration-tests.txt
+
+LEDGERS AND HARNESS
+
+python3 compat/tui/tracker.py check                         -> exit 0
+python3 -B compat/tui/tracker_test.py                       -> exit 0
+python3 compat/tmux-tracker.py check                        -> exit 0
+compat/check.sh                                             -> exit 0
+
+MEASUREMENT KEPT AS EVIDENCE
+
+theme-refresh-probe.txt is a real run at this tip of the throwaway probe that
+found the missing refresh trigger: it sets dark-theme-green BEFORE the client
+attaches, then dark-theme-black and theme light AFTER, and captures the zz
+client's status row each time through the outer pinned tmux. At this tip all
+three follow. Before the trigger landed the second and third produced no change
+at all, which is the finding. The pin's own bytes for the same three states are
+in compat/status-row.sh's asserted run: \e[38;2;13;13;13m\e[48;5;124m, then
+\e[38;5;231m\e[48;5;124m, then \e[38;2;26;26;26m\e[48;2;46;139;87m.
+
+indicators-before-the-render-fix.txt is the same fixture run on this branch
+before the two render.rs changes: 4 of 11 asserted comparisons differ. A fixture
+that only ever passed would have proved nothing.

@@ -17,9 +17,13 @@ Cycle 4, the canvas-close lane. Clauses 1 and 2 keep cycle 3's evidence in
 | `indicators-self-check.txt` | `compat/tui-indicators.sh --self-check`: exit 0, three sabotages each caught, one equivalence not reported. |
 | `screen-diff-regression.txt` | `compat/tui-screen-diff.sh`: exit 0, all 111 asserted checkpoints identical, 42 recorded. The render.rs cursor change touches every checkpoint of that fixture, so it ran before the commit and not only after it. |
 | `pane-geometry-regression.txt` | `compat/tui-pane-geometry.sh`: exit 0, all 6 asserted measurements identical. |
-| `status-row-regression.txt` | `compat/status-row.sh` under `LC_ALL=C LC_TIME=C`: exit 0, all 11 comparisons identical, 3 rows recorded. |
-| `zz-tui-unit-tests.txt` | `cargo test -p zz-tui`: 173 passed. |
-| `proofs-at-tip.txt` | every proof command re-run at the final tip, with exit codes. |
+| `indicators-run-2.txt`, `indicators-run-3.txt` | the second and third of the three consecutive exit-0 runs at the tip. |
+| `status-row-asserted.txt` | `compat/status-row.sh` after the theme landed: all 14 comparisons identical, none recorded. |
+| `status-row-before-the-theme.txt` | the same fixture earlier on this branch: 11 asserted, 3 recorded. The pin's bytes for the three theme rows are in it. |
+| `attached-client-regression.txt` | `compat/attached-client.sh`: PASS. The regression proof for PROTOCOL_VERSION 99 to 100. |
+| `theme-refresh-probe.txt` | a real run of the throwaway probe that found the missing refresh trigger. |
+| `zz-tui-unit-tests.txt`, `zz-daemon-unit-tests.txt`, `zz-mux-unit-tests.txt`, `zz-protocol-unit-tests.txt`, `zz-integration-tests.txt` | every touched crate's tests plus `cargo test -p zz`, all at the tip. |
+| `proofs-at-tip.txt` | every proof command re-run at the final tip, with exit codes. Read this second. |
 
 ## What the fixture found, and what was done with each finding
 
@@ -94,8 +98,17 @@ output as the whole screen and `[0/0]` at the top right; zz leaves
 `#{pane_in_mode}` at 0 and draws a client-side command-output overlay with a
 ` VIEW 1/21 ` badge. Recorded; `view-surface-restored` is asserted.
 
-**6. The three theme rows of `compat/status-row.sh`.** Still recorded. See the
-obligation's `evidence_note` for what did and did not land there this cycle.
+**6. The three theme rows of `compat/status-row.sh`. ASSERTED.** The theme arm
+landed whole in this branch's second commit, so clause 3's last sentence is met:
+`compat/status-row.sh` reports all 14 comparisons identical with none recorded
+and its `record_step` path is deleted. The obligation's `evidence_note` carries
+the six halves and the measurement. The one piece no cycle-3 plan named is worth
+repeating here because it is what made the arm look dead after the resolver and
+the wire were both in place: a write to a theme option raised no effect, so the
+status was never re-rendered and a running client never saw the change.
+`theme-refresh-probe.txt` is the run that separated the two - setting
+`dark-theme-green` BEFORE the client attached painted the pin's
+`\e[48;5;124m`, setting it after painted nothing.
 
 ## The fixture
 

@@ -1,26 +1,26 @@
 TUI-004 attempt-02 environment
-captured: 2026-09-10T10:03:36-03:00
+captured: 2026-09-10T10:56:08-03:00
 box: alienware
 os: NAME="CachyOS Linux" PRETTY_NAME="CachyOS" 
 kernel: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
 cores: 16
 bash: 5.3.15(1)-release
-shell: /bin/bash
 TERM: xterm-ghostty
 locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8 LC_ALL=unset
-outer size used by every fixture case: 80x24
+outer size driven by compat/tui-indicators.sh: 80x24
+outer size driven by compat/status-row.sh: 79x24 plus the 80 and 100 column band
 worktree: /home/demfabris/dev/zz-tui-canvas2
-zz revision: 46c606d9011f8dcec0a41e8336c1da74426922eb
-worktree clean (git status --short, empty means clean):
- M crates/zz-tui/src/render.rs
-?? compat/tui-indicators.sh
-?? compat/tui/evidence/TUI-004/attempt-02/
+branch: campaign/tui-canvas-close
+revision at which every proof below ran: e18f2a0b40071e384a93d4f4c47b95455b0b6d22
+tree at that revision: clean apart from this evidence directory, which is
+untracked until the evidence commit that carries it.
 zz binary: /home/demfabris/dev/zz-tui-canvas2/target/debug/zz
-zz sha256: 12eaccfa270359b8263f9284cf251c285e1901c3de8bbe467e28a4cab4e6725d
+zz sha256: 261927889adb489473acfac34aad1ead63a3ec2df57726779c3c43d0746ce8d0
 pin: tmux d77c9dc6aa021e4bc61f0da128c591af695e6466 (next-3.8)
 pin binary: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
 pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
 pin -V: tmux next-3.8
+PROTOCOL_VERSION at this revision: PROTOCOL_VERSION: u16 = 100
 
 A cargo debug build of zz is not bit-reproducible on this box, so the hash
 identifies the artifact and cannot attest it; the attestation is the revision
@@ -29,3 +29,9 @@ above plus a clean worktree, and provenance is reproduction.
 Every server started by these runs was a throwaway: the fixtures scrub HOME and
 XDG_CONFIG_HOME per side and use short /tmp sockets. The box owns a real
 ~/.tmux.conf and a real ~/.config/zz/mux.conf; neither was read or written.
+
+cargo fmt --all --check reports five files at this tip and none of them is this
+branch: crates/zz-client/src/chrome.rs, crates/zz/src/config/settings.rs,
+crates/zz/src/lib.rs, crates/zz/tests/cli_binary.rs and crates/zz-tui/src/input.rs
+are unformatted at origin/main and this branch reverted the formatting cargo fmt
+wanted to apply to them, so no unrelated edit rides along.

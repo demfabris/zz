@@ -1,0 +1,17 @@
+status-left band below the sidebar auto-hide threshold (pin tmux)
+ok    status-left band at 80 columns
+ok    status-left band at 100 columns
+status row differential at 79x24 (pin tmux)
+ok    defaults
+ok    -s dark-theme-green = colour124
+ok    -s dark-theme-black = colour231
+ok    -s theme = light
+ok    status-left = [#{session_name}]
+ok    status-right = #{window_width}x#{window_height} #{client_width}
+ok    window-status-format = #I:#W#F
+ok    window-status-current-format = #I:#W#F*
+ok    status-style = bg=blue,fg=white
+ok    status-left-style = bold
+ok    status-justify = centre
+ok    status-position = bottom
+all 14 comparisons identical, none recorded

@@ -1,0 +1,31 @@
+PROOFS AT THE FINAL TIP
+tip: 5e96347476b954ee3cee783ca594797fd2a4355f
+worktree clean apart from this file and its neighbours at the moment of running; see environment.txt
+zz binary: 718ac012952573f614005611c2b22a69cd9a7663fcc65d480d4b3f7dbf280d8f  target/debug/zz
+pin: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+prefix on every fixture: PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux (harmless on Linux, kept for the recorded command)
+
+compat/tui-screen-diff.sh                       exit 0   111 asserted checkpoints identical, 42 recorded   screen-diff-tip-1.txt
+compat/tui-screen-diff.sh                       exit 0   111 asserted checkpoints identical, 42 recorded   screen-diff-tip-2.txt
+compat/tui-screen-diff.sh --self-check          exit 0   12 expectations met                               screen-diff-tip-self-check.txt
+compat/tui-pane-geometry.sh                     exit 0   6 asserted measurements identical                 pane-geometry-tip-1.txt
+compat/tui-pane-geometry.sh                     exit 0   6 asserted measurements identical                 pane-geometry-tip-2.txt
+compat/tui-pane-geometry.sh                     exit 0   6 asserted measurements identical                 pane-geometry-tip-3.txt
+LC_ALL=C LC_TIME=C compat/status-row.sh         exit 0   11 comparisons identical, 3 rows recorded         status-row-tip.txt
+compat/attached-client.sh <zz> <pin>            exit 0   attached-client compatibility: PASS               attached-client-tip.txt
+cargo test -p zz-tui --jobs 5 -- --test-threads=2               exit 0   170 passed                        unit-tests-tip.txt
+cargo clippy -p zz-tui --all-targets --all-features --jobs 5 -- -D warnings   exit 0                       clippy-tip.txt
+cargo clippy -p zz --all-targets --all-features --jobs 5 -- -D warnings       exit 0                       clippy-tip.txt
+timeout 2400 cargo test -p zz --jobs 5 -- --test-threads=2      exit 0   630 + 125 + the rest, no failures  zz-integration-tests.txt
+python3 compat/tui/tracker.py check             exit 0
+python3 compat/tmux-tracker.py check            exit 0
+
+THE STATUS-ROW LOCALE NOTE: compat/status-row.sh exits 1 on this box under the box locale
+(LC_TIME=pt_BR.UTF-8), 2 of 11 rows, %b only, because the pin expands %b through libc strftime and
+zz expands it locale-independently. That red is environmental and predates this branch; the
+LC_ALL=C LC_TIME=C control above is the recorded way to run it here, and it exits 0.
+
+NO PROOF HERE RAN AGAINST A BINARY BUILT ANYWHERE BUT THIS WORKTREE, and the binary was rebuilt at
+the tip before the first of them. A cargo debug build of zz is not bit-reproducible on this box, so
+the hash identifies the artifact rather than attesting it; the attestation is the revision above
+plus a clean worktree, and provenance is reproduction.

@@ -1,0 +1,9 @@
+pane geometry differential (pin tmux)
+ok    80x24 columns: both 80
+ok    80x24 rows: both 23
+ok    100x24 columns: both 100
+ok    100x24 rows: both 23
+ok    120x24 columns: both 120
+ok    120x24 rows: both 23
+all 6 asserted measurements identical
+geometry run 2 exit=0

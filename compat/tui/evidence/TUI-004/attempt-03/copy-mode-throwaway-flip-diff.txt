@@ -1,0 +1,72 @@
+--- compat/tui-copy-mode.sh	2026-09-10 15:55:04.430947854 -0300
++++ /tmp/claude-1000/-home-demfabris-dev-zz/92f0e606-413d-4b37-9d72-867d86ccbf15/scratchpad/copy-flip.sh	2026-09-10 16:37:44.749902782 -0300
+@@ -106,7 +106,7 @@
+   printf '       ZZ_BIN=path TMUX_BIN=path compat/tui-copy-mode.sh\n' >&2
+ }
+ 
+-COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
++COMPAT_DIR=/home/demfabris/dev/zz-tui-modes/compat
+ REPO_DIR="$(cd -- "$COMPAT_DIR/.." && pwd)"
+ SELF_CHECK=0
+ POSITIONAL=()
+@@ -899,16 +899,16 @@
+   type_both "$KEY_SOL"
+   copy_case "$table-selection-start" none ''
+   type_both "$KEY_BEGINSEL"
+-  copy_case "$table-begin-selection" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
++  copy_case "$table-begin-selection" none '' rows,text,cursor,facts,view,buffer "$SELECTION_REASON"
+   type_both "$KEY_DOWN"
+   type_both "$KEY_EOL"
+-  copy_case "$table-selection-extends" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
++  copy_case "$table-selection-extends" none '' rows,text,cursor,facts,view,buffer "$SELECTION_REASON"
+   record_native_formats "$table-selection-extends"
+   type_both "$KEY_RECT"
+-  copy_case "$table-rectangle-on" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
++  copy_case "$table-rectangle-on" none '' rows,text,cursor,facts,view,buffer "$SELECTION_REASON"
+   record_native_formats "$table-rectangle-on"
+   type_both "$KEY_RECT"
+-  copy_case "$table-rectangle-off" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
++  copy_case "$table-rectangle-off" none '' rows,text,cursor,facts,view,buffer "$SELECTION_REASON"
+ 
+   # The copy leaves the mode and fills the paste buffer on both sides.
+   type_both "$KEY_COPY"
+@@ -930,7 +930,7 @@
+   type_both "$KEY_DOWN"
+   type_both "$KEY_COUNT"
+   type_both "$KEY_RIGHT"
+-  copy_case "$table-rectangle-inside-line" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
++  copy_case "$table-rectangle-inside-line" none '' rows,text,cursor,facts,view,buffer "$SELECTION_REASON"
+   record_native_formats "$table-rectangle-inside-line"
+   type_both "$KEY_COPY"
+   copy_case "$table-rectangle-inside-line-copy" format '#{pane_in_mode}=0'
+@@ -953,7 +953,7 @@
+     type_both "$KEY_COUNT"
+     type_both "$KEY_RIGHT"
+   done
+-  copy_case "$table-rectangle-past-end-of-line" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
++  copy_case "$table-rectangle-past-end-of-line" none '' rows,text,cursor,facts,view,buffer "$SELECTION_REASON"
+   record_native_formats "$table-rectangle-past-end-of-line"
+   type_both "$KEY_COPY"
+   copy_case "$table-rectangle-past-end-of-line-copy" format '#{pane_in_mode}=0' \
+@@ -1009,10 +1009,10 @@
+   copy_case "$table-ordinary-pane-enter" format '#{pane_in_mode}=1'
+ 
+   type_both "$KEY_SEARCHFWD"
+-  copy_case "$table-ordinary-pane-search-prompt" none '' text,cursor,facts,view,buffer "$PROMPT_REASON"
++  copy_case "$table-ordinary-pane-search-prompt" none '' rows,text,cursor,facts,view,buffer "$PROMPT_REASON"
+ 
+   type_both -l 'needlex'
+-  copy_case "$table-ordinary-pane-search-typed" none '' text,cursor,facts,view,buffer "$PROMPT_REASON"
++  copy_case "$table-ordinary-pane-search-typed" none '' rows,text,cursor,facts,view,buffer "$PROMPT_REASON"
+ 
+   type_both BSpace
+   copy_case "$table-ordinary-pane-search-backspace" none '' facts,buffer "$VIEW_REASON"
+@@ -1141,7 +1141,7 @@
+   copy_case 'presentation-live-status-row' none ''
+   type_prefix_both '['
+   copy_case 'presentation-copy-mode-position' format '#{pane_in_mode}=1' \
+-    cursor,facts,view,buffer "$POSITION_REASON"
++    rows,text,cursor,facts,view,buffer "$POSITION_REASON"
+   type_both q
+   copy_case 'presentation-cancel' format '#{pane_in_mode}=0'
+ }

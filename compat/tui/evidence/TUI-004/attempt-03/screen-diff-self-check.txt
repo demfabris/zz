@@ -1,0 +1,61 @@
+self-check: one deliberate difference per channel, plus three the pin collapses
+      checkpoint glyph at 80x24-glyph
+      first differing row 1 of 24
+        tmux: GLYPH-AB$ printf 'MARK-%s\n' glyph
+        zz:   GLYPH-AA$ printf 'MARK-%s\n' glyph
+      cursor tmux: 2,3 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,3 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check glyph, one character of output differs
+      checkpoint colour at 80x24-colour
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[38;2;216;222;233m^[[41mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[41m
+      cursor tmux: 2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check colour, status-style bg=red on one side
+      checkpoint cursor at 80x24-cursor
+      first differing row 1 of 24
+        tmux: CURSORMARK$
+        zz:   CURSORMARK-WITH-A-LONGER-TAIL$
+      cursor tmux: 12,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   31,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check cursor, a different-length unterminated line
+      checkpoint sidebar-shown at 120x24-sidebar-shown
+      first differing row 0 of 24
+        tmux: $ printf 'MARK-%s\n' sidebar-fresh
+        zz:   ^[[38;2;16;19;24m^[[48;2;77;163;235mzz at alienware             ^[[38;2;216;222;233m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$ printf 'MARK-%s\n' sidebar-fresh
+      cursor tmux: 2,2 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   119,23 flag=0 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check sidebar, focus-sidebar shown on one side
+      checkpoint text-mode-glyph at 80x24-text-mode-glyph, text and cursor
+      first differing row 1 of 24
+        tmux: TEXTMARK-B$
+        zz:   TEXTMARK-A$
+      cursor tmux: 12,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   12,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check text mode, glyph: caught one character of output
+ok    self-check text mode, style: a pure colour difference is not a text difference
+      checkpoint text-mode-style-styled at 80x24-text-mode-style
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[38;2;216;222;233m^[[41mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[41m
+      cursor tmux: 2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check text mode, the styled comparison still catches that colour
+      checkpoint cursor-shape at 80x24-cursor-shape
+      all 24 rows identical
+      cursor tmux: 8,1 flag=1 pane=80x24 shape=bar blinking=1 very_visible=0 colour=none
+      cursor zz:   8,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check cursor shape, DECSCUSR on one side
+      checkpoint geometry at 80x24-geometry
+      first differing row 0 of 24
+        tmux: $ printf 'MARK-%s\n' geometry
+        zz:   $
+      cursor tmux: 2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,14 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check geometry, split-window on one side
+ok    self-check equivalence: attribute order in a style
+ok    self-check equivalence: bg=red and bg=colour1 reach the same cell
+ok    self-check equivalence: two spellings of the same bold cell
+self-check complete: every sabotage was caught in its own channel and every equivalence passed
+exit=0

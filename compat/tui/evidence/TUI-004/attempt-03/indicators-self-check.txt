@@ -1,0 +1,53 @@
+self-check: one deliberate difference per channel, plus one the pin collapses
+      case self-check-prefix-hint
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m                                                                  PREFIX
+      cursor tmux: 2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check prefix, an extra hint cell on one status row
+      case self-check-message
+      first differing row 23 of 24
+        tmux: SABOTAGE-MSG-B
+        zz:   SABOTAGE-MSG-A
+      cursor tmux: 2,2 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check message, one character of the text differs
+      case self-check-prompt-residue
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[38;2;13;13;13m^[[48;2;184;134;11m:^[[39m
+      cursor tmux: 2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check prompt, one side leaves the prompt open as residue
+      case self-check-copy-position
+      first differing row 0 of 24
+        tmux: $ printf 'MARK-%s\n' position                                              ^[[38;2;13;13;13m^[[48;2;184;134;11m[0/0]
+        zz:   $ printf 'MARK-%s\n' position                                              ^[[37m^[[41m[0/0]
+      cursor tmux: 2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check copy mode, one side paints the position in another style
+      case self-check-view-position
+      first differing row 0 of 24
+        tmux: VIEWLINE-S                                                                 ^[[38;2;13;13;13m^[[48;2;184;134;11m[0/0]
+        zz:   VIEWLINE-S                                                                   ^[[38;2;13;13;13m^[[48;2;184;134;11m<0>
+      cursor tmux: 0,0 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,0 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check view surface, one side draws another position format
+      case self-check-message-style
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mSABOTAGE-STYLE^[[39m
+        zz:   ^[[37m^[[41mSABOTAGE-STYLE^[[38;2;13;13;13m^[[48;2;154;205;50m
+      cursor tmux: 2,2 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check message, one side paints the message in another style
+      case self-check-prompt-style
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m:^[[39m
+        zz:   ^[[37m^[[41m:^[[4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      cursor tmux: 1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check prompt, one side paints the prompt in another style
+ok    self-check equivalence: the same armed prefix on both sides
+self-check complete: every sabotage was caught and the equivalence passed
+exit=0

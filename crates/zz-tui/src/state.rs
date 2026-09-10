@@ -813,6 +813,11 @@ impl Model {
         }
     }
 
+    pub fn command_output_focus(&self) -> Option<PaneId> {
+        let (pane, _) = self.command_output.as_ref()?;
+        (self.active_pane() == Some(*pane)).then_some(*pane)
+    }
+
     pub fn command_output_content_rect(&self) -> Rect {
         if let Some(entry) = self
             .command_output

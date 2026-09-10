@@ -46,6 +46,25 @@
 #                        carries no clock.
 #   the inner shell      ENV= PS1='$ ' exec /bin/sh: no rc file, and a prompt
 #                        that carries no host, user, path or clock.
+#   the divider row      ONLY in view-inactive-opened and view-inactive-typed,
+#                        the two cases that need a second visible pane. That
+#                        row's GLYPHS are asserted and its STYLES are not: it
+#                        is the pane border, whose colour is the clause-2 record
+#                        tui-screen-diff.sh keeps as BORDER_STYLE_REASON (the
+#                        pin draws the default border styles on a default
+#                        ground; the raw TUI draws its own theme over an
+#                        explicit ground, and promotes an explicit indexed
+#                        border colour to RGB - measured 2026-09-10 with
+#                        pane-border-style fg=colour2 on both sides: \e[32m\e[49m
+#                        against \e[38;2;0;205;0m\e[48;2;16;19;24m). Every other
+#                        row of those two cases is asserted whole, and so is
+#                        the cursor. The row BELOW the divider is captured on
+#                        its own: capture-pane -e carries SGR state from one
+#                        line to the next, so in a whole-screen capture that
+#                        row's leading escapes restate the divider's colours
+#                        (\e[39m against \e[39m\e[49m) rather than its own
+#                        cells. Captured alone, it starts from the default
+#                        state and every one of its cells is compared.
 # Nothing else is masked. Anything not in that list is compared.
 #
 # SETTLED CHECKPOINTS, AND WHY THIS FIXTURE MARKS BEFORE IT ACTS. tui-screen-
@@ -76,10 +95,12 @@
 # --self-check runs the driver against a deliberate one-sided difference in each
 # channel - an extra hint cell on the status row, a message whose text differs,
 # a prompt that one side leaves open as residue, the copy position painted in
-# another style, the view surface drawn from another position format, and the
-# message and the prompt painted in another style - and requires the comparison
-# to report each one, plus one equivalence it must NOT report. A fixture that
-# only passes has proved nothing.
+# another style, the view surface drawn from another position format, the
+# message and the prompt painted in another style, a selection one side makes
+# with the vi table, and a view one side opens on the active pane so that it
+# swallows the typed keys - and requires the comparison to report each one,
+# plus one equivalence it must NOT report. A fixture that only passes has
+# proved nothing.
 #
 # A divergence is a finding, not a failure of this script: it exits 1 so a
 # caller can gate on it, and prints both sides so the next lane has the
@@ -474,6 +495,68 @@ verdict() {
   return 0
 }
 
+# The two-pane comparison: every row styled except the divider row, which is
+# compared by glyph, plus the cursor. Counted as asserted; the header's
+# CONTROLLED DYNAMIC VALUES says why that one row's styles are left out.
+compare_split_rows() {
+  local name="$1"
+  local divider="$2"
+  local zz_rows tmux_rows zz_plain tmux_plain zz_cursor tmux_cursor index differing
+  mapfile -t zz_rows < <(capture_screen zz)
+  mapfile -t tmux_rows < <(capture_screen tmux)
+  mapfile -t zz_plain < <(capture_plain zz)
+  mapfile -t tmux_plain < <(capture_plain tmux)
+  zz_cursor="$(cursor_tuple zz)"
+  tmux_cursor="$(cursor_tuple tmux)"
+  zz_rows[divider + 1]="$(tmux_outer_command capture-pane -p -e -S "$((divider + 1))" \
+    -E "$((divider + 1))" -t "=$OUTER_SESSION:zz")"
+  tmux_rows[divider + 1]="$(tmux_outer_command capture-pane -p -e -S "$((divider + 1))" \
+    -E "$((divider + 1))" -t "=$OUTER_SESSION:tmux")"
+  differing=-1
+  for ((index = 0; index < ROWS_UNDER_TEST; index++)); do
+    if [ "$index" -eq "$divider" ]; then
+      [ "${zz_plain[index]-}" = "${tmux_plain[index]-}" ] && continue
+    else
+      [ "${zz_rows[index]-}" = "${tmux_rows[index]-}" ] && continue
+    fi
+    differing="$index"
+    break
+  done
+  LAST_ROWS_DIFFERED=0
+  LAST_CURSOR_DIFFERED=0
+  [ "$differing" -lt 0 ] || LAST_ROWS_DIFFERED=1
+  [ "$zz_cursor" = "$tmux_cursor" ] || LAST_CURSOR_DIFFERED=1
+  if [ "$LAST_ROWS_DIFFERED" -eq 0 ] && [ "$LAST_CURSOR_DIFFERED" -eq 0 ]; then
+    return 0
+  fi
+  printf '      case %s (divider row %s by glyph)\n' "$name" "$divider"
+  if [ "$LAST_ROWS_DIFFERED" -eq 1 ]; then
+    printf '      first differing row %s of %s\n' "$differing" "$ROWS_UNDER_TEST"
+    printf '        tmux: %s\n' "$(printf '%s' "${tmux_rows[differing]-}" | cat -v)"
+    printf '        zz:   %s\n' "$(printf '%s' "${zz_rows[differing]-}" | cat -v)"
+  fi
+  printf '      cursor tmux: %s\n' "$tmux_cursor"
+  printf '      cursor zz:   %s\n' "$zz_cursor"
+  return 1
+}
+verdict_split() {
+  local name="$1"
+  local divider="$2"
+  CHECKS=$((CHECKS + 1))
+  if compare_split_rows "$name" "$divider"; then
+    printf 'ok    %s (divider row %s compared by glyph)\n' "$name" "$divider"
+    return 0
+  fi
+  FAILURES=$((FAILURES + 1))
+  printf 'DIFF  %s\n' "$name"
+}
+divider_row_below() {
+  local bottom
+  bottom="$(side_command tmux display-message -p -t "$1" '#{pane_bottom}')" ||
+    die 'tmux refused pane_bottom'
+  printf '%s\n' "$((bottom + 1))"
+}
+
 pane_in_mode_is() {
   [ "$(side_command "$1" display-message -p -t "$(active_pane "$1")" '#{pane_in_mode}' 2>/dev/null)" = "$2" ]
 }
@@ -703,6 +786,186 @@ prompt_case() {
   verdict prompt-cancelled same
 }
 
+# THE SELECTION. window_copy_update_selection paints the selection in
+# copy-mode-selection-style, merged the way screen_select_cell merges it, and
+# screen_check_selection drops the bottom-right-most cell of a non-rectangle
+# selection when the emacs table is in use, where the vi table keeps it. So the
+# one selection is compared three ways: the emacs table with the default style,
+# the vi table, and one custom style set on both sides. The selection is drawn
+# with send-keys -X on the pane: up to the marker line, to its start, begin,
+# then four cells right. The observable is the styled screen itself changing on
+# both sides, waited for before the settle.
+styled_screen_differs() {
+  [ "$(capture_screen "$1" 2>/dev/null)" != "$2" ]
+}
+select_on_both() {
+  local zz_before tmux_before
+  zz_before="$(capture_screen zz)"
+  tmux_before="$(capture_screen tmux)"
+  on_both_active send-keys -X -t PANE cursor-up
+  on_both_active send-keys -X -t PANE start-of-line
+  on_both_active send-keys -X -t PANE begin-selection
+  on_both_active send-keys -X -N 4 -t PANE cursor-right
+  wait_for 'the selection on the zz screen' styled_screen_differs zz "$zz_before"
+  wait_for 'the selection on the tmux screen' styled_screen_differs tmux "$tmux_before"
+}
+selection_case() {
+  local name="$1"
+  local keys="$2"
+  local style="$3"
+  CASE_LABEL="selection-$name"
+  set_on_both mode-keys "$keys"
+  [ -z "$style" ] || set_on_both copy-mode-selection-style "$style"
+  mark_both "sel$name"
+  on_both_active copy-mode -t PANE
+  both_pane_in_mode 1 'copy mode'
+  settle_both "MARK-sel$name" 'copy mode'
+  select_on_both
+  settle_both "MARK-sel$name" "the $name selection"
+  verdict "selection-$name" same
+  on_both_active send-keys -X -t PANE cancel
+  both_pane_in_mode 0 'copy mode left'
+  settle_both "MARK-sel$name" 'copy mode left'
+  run_on_both set-option -gu mode-keys
+  [ -z "$style" ] || run_on_both set-option -gu copy-mode-selection-style
+}
+
+# KEYS WHILE A VIEW SURFACE SITS ON ANOTHER PANE. The pin's view mode belongs to
+# the pane it was opened on: server_client_handle_key takes a mode's key table
+# only from the ACTIVE pane of the client's window, so keys typed while the view
+# sits on a pane the client is not in go to the active pane as usual.
+#
+# MEASURED 2026-09-10 (the reviewer's R9 and R10): run-shell -t on a pane in a
+# window the client is not showing, or on a visible pane that is not the active
+# one, and then typing through the client. The pin runs the typed command in the
+# active pane. zz at the first cycle-5 tip drew the output only inside its
+# pane's rectangle but kept the command output client-modal: the TUI sent every
+# key to it and the daemon swallowed every key that did not bind in the copy
+# table, so the screen never changed. The TUI now routes keys to the output only
+# while its pane is the active pane, and the daemon hands the client's key table
+# back while keys target another pane, so both screens run the command.
+#
+# Each case waits for the pin's pane to be in view mode, and for zz's client key
+# table to read a copy table, which is what zz sets when it opens an output, so
+# neither side is typed into before its surface exists.
+client_key_table_is_a_copy_table() {
+  case "$(side_command zz list-clients -F '#{client_key_table}' 2>/dev/null | head -n 1)" in
+  copy-mode | copy-mode-vi) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+pane_id_in_mode_is() {
+  [ "$(side_command "$1" display-message -p -t "$2" '#{pane_in_mode}' 2>/dev/null)" = "$3" ]
+}
+inactive_pane() {
+  side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_active} #{pane_id}' |
+    awk '$1 == 0 { print $2; exit }'
+}
+window_pane() {
+  side_command "$1" list-panes -t "=$INNER_SESSION:$2" -F '#{pane_id}' | head -n 1
+}
+window_count_is() {
+  [ "$(side_command "$1" list-windows -t "=$INNER_SESSION" -F x 2>/dev/null | wc -l)" = "$2" ]
+}
+pane_count_is() {
+  [ "$(side_command "$1" list-panes -t "=$INNER_SESSION" -F x 2>/dev/null | wc -l)" = "$2" ]
+}
+# The typed command's output is the marker: it exists only once the command ran
+# in the pane the keys reached. A side whose keys were swallowed never shows it,
+# so its wait is soft and the comparison reports the two screens instead.
+soft_settled() {
+  local side="$1"
+  local marker="$2"
+  local previous=""
+  local current attempt
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    current="$(capture_plain "$side" 2>/dev/null || true)"
+    if [ -n "$previous" ] && [ "$current" = "$previous" ] &&
+      printf '%s' "$current" | grep -Fq "$marker"; then
+      return 0
+    fi
+    previous="$current"
+    sleep 0.05
+  done
+  return 1
+}
+type_command_on_both() {
+  local marker="$1"
+  local fallback="$2"
+  local side
+  type_on_both -l "printf 'TYPED-%s\\n' $marker"
+  type_on_both Enter
+  wait_settled tmux "TYPED-$marker" "the typed command on the tmux screen"
+  if ! soft_settled zz "TYPED-$marker"; then
+    wait_settled zz "$fallback" "the zz screen after the typed command"
+  fi
+}
+open_view_on() {
+  local zz_pane="$1"
+  local tmux_pane="$2"
+  local text="$3"
+  side_command zz run-shell -t "$zz_pane" "printf $text" || die 'zz refused run-shell'
+  side_command tmux run-shell -t "$tmux_pane" "printf $text" || die 'tmux refused run-shell'
+  wait_for "the pin put $tmux_pane in view mode" pane_id_in_mode_is tmux "$tmux_pane" 1
+  wait_for 'zz opened the command output' client_key_table_is_a_copy_table
+}
+
+view_hidden_case() {
+  local zz_hidden tmux_hidden
+  CASE_LABEL=view-hidden
+  mark_both hidden
+  run_on_both new-window -d -n hid -t "=$INNER_SESSION:" "$INNER_SHELL"
+  wait_for 'the second zz window' window_count_is zz 2
+  wait_for 'the second tmux window' window_count_is tmux 2
+  zz_hidden="$(window_pane zz 1)"
+  tmux_hidden="$(window_pane tmux 1)"
+  [ -n "$zz_hidden" ] && [ -n "$tmux_hidden" ] || die 'no pane in the hidden window'
+  both_last_row_has '1:hid' 'the hidden window in the list'
+  settle_both MARK-hidden 'the hidden window'
+  open_view_on "$zz_hidden" "$tmux_hidden" HIDDENOUT
+  settle_both MARK-hidden 'the view on the hidden pane'
+  verdict view-hidden-opened same
+  type_command_on_both HIDDEN MARK-hidden
+  verdict view-hidden-typed same
+  run_on_both kill-window -t "=$INNER_SESSION:1"
+  wait_for 'the hidden zz window gone' window_count_is zz 1
+  wait_for 'the hidden tmux window gone' window_count_is tmux 1
+  both_last_row_lacks '1:hid' 'the hidden window'
+  settle_both TYPED-HIDDEN 'the hidden window withdrawn'
+}
+
+split_for_inactive() {
+  run_on_both split-window -v -t "=$INNER_SESSION:0" "$INNER_SHELL"
+  wait_for 'the zz split' pane_count_is zz 2
+  wait_for 'the tmux split' pane_count_is tmux 2
+  settle_both "$1" 'the split'
+}
+
+view_inactive_case() {
+  local zz_other tmux_other side divider
+  CASE_LABEL=view-inactive
+  mark_both inactive
+  split_for_inactive MARK-inactive
+  zz_other="$(inactive_pane zz)"
+  tmux_other="$(inactive_pane tmux)"
+  [ -n "$zz_other" ] && [ -n "$tmux_other" ] || die 'no inactive pane after the split'
+  divider="$(divider_row_below "$tmux_other")"
+  open_view_on "$zz_other" "$tmux_other" NONACTIVEOUT
+  settle_both NONACTIVEOUT 'the view on the inactive pane'
+  verdict_split view-inactive-opened "$divider"
+  type_command_on_both INACTIVE NONACTIVEOUT
+  verdict_split view-inactive-typed "$divider"
+  for side in zz tmux; do
+    side_command "$side" kill-pane -t "$(active_pane "$side")" || die "$side refused kill-pane"
+  done
+  wait_for 'the zz split withdrawn' pane_count_is zz 1
+  wait_for 'the tmux split withdrawn' pane_count_is tmux 1
+  run_on_both select-pane -t "=$INNER_SESSION:0.0" -T "$PANE_TITLE"
+  type_on_both q
+  wait_for 'the pin left view mode' pane_in_mode_is tmux 0
+  settle_both MARK-inactive 'the view withdrawn'
+}
+
 write_attach zz "$SCRATCH_DIR/attach-zz.sh"
 write_attach tmux "$SCRATCH_DIR/attach-tmux.sh"
 
@@ -727,6 +990,11 @@ run_cases() {
   prefix_case
   message_case
   prompt_case
+  selection_case emacs emacs ''
+  selection_case vi vi ''
+  selection_case styled emacs 'bg=red,fg=white,bold'
+  view_hidden_case
+  view_inactive_case
 
   if [ "$FAILURES" -ne 0 ]; then
     printf '%s of %s asserted comparisons differ, %s recorded\n' "$FAILURES" "$CHECKS" "$RECORDS"
@@ -882,6 +1150,54 @@ run_self_check() {
   type_on_both Escape
   both_last_row_starts_with L 'the cancelled prompt'
   side_command zz set-option -gu message-style || die 'zz refused -gu'
+
+  # The selection's table. The selection cases assert where the selection
+  # stops, so the sabotage is one side selecting with the vi table while the
+  # other keeps emacs: the same four cells right keep the cursor cell on one
+  # side and drop it on the other.
+  CASE_LABEL='self-check selection keys'
+  attach_both_at 80 24
+  side_command zz set-option -g mode-keys vi || die 'zz refused mode-keys'
+  mark_both selsab
+  on_both_active copy-mode -t PANE
+  both_pane_in_mode 1 'copy mode'
+  settle_both MARK-selsab 'copy mode'
+  select_on_both
+  settle_both MARK-selsab 'the one-sided vi selection'
+  compare_rows self-check-selection-keys styled || true
+  self_check_case 'selection, one side selects with the vi table' rows
+  on_both_active send-keys -X -t PANE cancel
+  both_pane_in_mode 0 'copy mode left'
+  side_command zz set-option -gu mode-keys || die 'zz refused -gu'
+
+  # The view's owner. The hidden-view cases assert that keys typed while a
+  # view sits on another pane reach the active pane, so the sabotage is one
+  # side opening its view on the ACTIVE pane, where the keys do go to the view.
+  CASE_LABEL='self-check view on the active pane'
+  attach_both_at 80 24
+  mark_both hidsab
+  run_on_both new-window -d -n hid -t "=$INNER_SESSION:" "$INNER_SHELL"
+  wait_for 'the second zz window' window_count_is zz 2
+  wait_for 'the second tmux window' window_count_is tmux 2
+  both_last_row_has '1:hid' 'the hidden window in the list'
+  settle_both MARK-hidsab 'the hidden window'
+  open_view_on "$(active_pane zz)" "$(window_pane tmux 1)" HIDDENOUT
+  type_command_on_both HIDDEN ''
+  compare_rows self-check-view-owner styled || true
+  self_check_case 'view, one side opens it on the active pane and swallows the keys' rows
+
+  # The same owner, through the two-pane comparison. view-inactive-* compare
+  # every row but the divider's styles, so the sabotage is one side opening the
+  # view on the active pane of the split while the other opens it on the
+  # inactive one: that side's typed keys go into the view.
+  CASE_LABEL='self-check view owner in a split'
+  attach_both_at 80 24
+  mark_both splitsab
+  split_for_inactive MARK-splitsab
+  open_view_on "$(active_pane zz)" "$(inactive_pane tmux)" NONACTIVEOUT
+  type_command_on_both INACTIVE ''
+  compare_split_rows self-check-view-owner-split "$(divider_row_below "$(inactive_pane tmux)")" || true
+  self_check_case 'view in a split, one side opens it on the active pane' rows
 
   # The equivalence: the same prefix, armed and released on both sides with
   # nothing planted, must report nothing at all. Without it the three sabotages

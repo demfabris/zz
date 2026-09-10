@@ -193,7 +193,11 @@ pub(crate) struct ModeRequest {
     pub(crate) vi_keys: bool,
 }
 
-fn expand_style(format: &str, context: &StatusContext, hooks: &mut DaemonFormatHooks<'_>) -> String {
+fn expand_style(
+    format: &str,
+    context: &StatusContext,
+    hooks: &mut DaemonFormatHooks<'_>,
+) -> String {
     let style = clamp_status_text(expand_status(format, context, hooks));
     if zz_protocol::parse_style(&style).is_some() {
         style

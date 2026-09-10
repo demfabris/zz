@@ -12203,11 +12203,7 @@ impl MuxEngine {
         } else {
             self.global_session_options = next;
         }
-        Ok(self.session_option_execution(
-            session,
-            message_line_before,
-            restyles_messages,
-        ))
+        Ok(self.session_option_execution(session, message_line_before, restyles_messages))
     }
 
     fn session_option_execution(

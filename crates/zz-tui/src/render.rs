@@ -24,7 +24,7 @@ use crate::{
     },
     picker, sidebar,
     state::Model,
-    writer::{Sink, TerminalWriter},
+    writer::{Sink, Submission, TerminalWriter, Wake},
 };
 
 pub(crate) use zz_client::ViewportDamage as FrameDamage;
@@ -188,6 +188,7 @@ pub(crate) struct Renderer {
     border_chrome: Option<(PaneBorderStatus, PaneBorderLines, PaneBorderIndicators)>,
     kitty: KittyBridge,
     writer: TerminalWriter,
+    control_replay: Vec<u8>,
 }
 
 impl Renderer {
@@ -213,6 +214,7 @@ impl Renderer {
             border_chrome: None,
             kitty: KittyBridge::default(),
             writer: TerminalWriter::spawn(sink),
+            control_replay: Vec::new(),
         }
     }
 
@@ -328,7 +330,7 @@ impl Renderer {
 
         if model.choose_tree.is_some() || model.choose_buffer.is_some() {
             self.paint_chooser(model);
-            self.output.append(&mut self.queued_control);
+            self.emit_queued_control();
             self.kitty.suspend(&mut self.output);
             self.hide_cursor();
         } else if let Some((pane, viewport)) = &model.command_output {
@@ -347,7 +349,7 @@ impl Renderer {
             );
             self.paint_terminal(*pane, viewport, rect, force, None);
             self.paint_status_block_in(model, 0, model.size.columns, force);
-            self.output.append(&mut self.queued_control);
+            self.emit_queued_control();
             self.kitty.suspend(&mut self.output);
             if !floating_input {
                 self.place_command_output_cursor(*pane, viewport, rect, model);
@@ -358,7 +360,7 @@ impl Renderer {
                 self.paint_sidebar(model, force);
             }
             self.paint_status_block(model, force);
-            self.output.append(&mut self.queued_control);
+            self.emit_queued_control();
             if !floating_input {
                 self.reconcile_kitty_images(model);
                 self.place_active_cursor(model);
@@ -402,7 +404,7 @@ impl Renderer {
             }
             self.output.clear();
             self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
-            self.output.append(&mut self.queued_control);
+            self.emit_queued_control();
             self.kitty.suspend(&mut self.output);
             self.paint_popup(model, false);
             self.reconcile_popup_kitty_images(model);
@@ -421,11 +423,11 @@ impl Renderer {
         {
             self.paint_workspace(model, false);
             self.paint_status_area(model);
-            self.output.append(&mut self.queued_control);
+            self.emit_queued_control();
             self.reconcile_kitty_images(model);
             self.place_active_cursor(model);
         } else {
-            self.output.append(&mut self.queued_control);
+            self.emit_queued_control();
             self.kitty.suspend(&mut self.output);
             self.hide_cursor();
         }
@@ -438,8 +440,45 @@ impl Renderer {
     /// The terminal is written from a thread of its own so a viewer that has
     /// stopped reading its pty costs the client queued bytes and never costs
     /// it the next keystroke: tty.c does the same with a libevent buffer.
+    ///
+    /// Past the writer's budget the paint is dropped instead, and what this
+    /// renderer believes the terminal is showing goes with it. Two things
+    /// follow. The painted state is thrown away, so the next paint is a full
+    /// one drawn from the model, which is `tty_invalidate`. The control bytes
+    /// this paint carried are put back in the queue, because a mode change or
+    /// a kitty transmission is not something a repaint reproduces: the pin's
+    /// blocked `tty_puts` loses the same bytes and it is a bug there too.
     fn flush_output(&mut self) -> io::Result<()> {
-        self.writer.submit(std::mem::take(&mut self.output))
+        let control = std::mem::take(&mut self.control_replay);
+        match self.writer.submit(std::mem::take(&mut self.output))? {
+            Submission::Queued => Ok(()),
+            Submission::Dropped => {
+                if !control.is_empty() {
+                    self.queued_control.splice(0..0, control);
+                }
+                self.invalidate();
+                Ok(())
+            }
+        }
+    }
+
+    /// Moves the queued control bytes into this paint, keeping a copy in case
+    /// the paint is dropped.
+    fn emit_queued_control(&mut self) {
+        self.control_replay.extend_from_slice(&self.queued_control);
+        self.output.append(&mut self.queued_control);
+    }
+
+    /// Installs the callback the writer uses to ask for a repaint once a
+    /// dropped-output block has cleared.
+    pub fn set_repaint_notifier(&self, wake: Wake) {
+        self.writer.set_wake(wake);
+    }
+
+    /// True once per block that has cleared: the terminal is reading again and
+    /// owes the model a full repaint.
+    pub fn take_repaint_request(&self) -> bool {
+        self.writer.take_unblocked()
     }
 
     /// Throws away whatever the writer has not painted yet.
@@ -450,6 +489,7 @@ impl Renderer {
     /// pane bytes on the user's shell.
     pub fn discard_queued_paints(&mut self) {
         self.output.clear();
+        self.control_replay.clear();
         self.writer.abandon();
     }
 

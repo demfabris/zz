@@ -1,0 +1,19 @@
+prolonged output backpressure (pin tmux)
+undrained=3 s deadline=1.000 s rss-growth-bound=16384 kB key-timeout=4 s size=80x24
+self-check: two deliberate sabotages, each caught in its own assertion
+      zz outer screen after the client exited was not just RELAY-DONE:
+        RELAY-DONE
+        RELAY-LATE-PAINT
+      zz wrote 3 escape bytes in the 71 bytes after leaving the alternate screen: b'[detached (from session backpressure)]\r\n\x1b[5;1H\x1b[41mRELAY-LATE-PAINT\x1b[0m'
+ok    sabotage caught in both channels: a paint after the restore and a paint after the marker
+zz    drained=0.023 undrained=0.025 rss_baseline=105120 kB rss_peak=107168 kB growth=2048 kB
+ok    zz drained key acted in 0.023 s
+ok    zz undrained key acted in 0.025 s after 3 s undrained
+ok    zz grew 2048 kB over the undrained window, bound is 16384 kB
+sabotage: the deadline halved to 0.0125 s, below the latency just measured
+zz    drained=0.025 undrained=0.024 rss_baseline=107168 kB rss_peak=107168 kB growth=0 kB
+FAIL  zz drained key did not act within 0.0125 s (got 0.025)
+FAIL  zz undrained key did not act within 0.0125 s after 3 s undrained (got 0.024)
+ok    zz grew 0 kB over the undrained window, bound is 16384 kB
+ok    sabotage caught: the response bound fires when the deadline is halved
+self-check complete: every sabotage was caught in its own assertion

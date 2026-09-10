@@ -1,0 +1,21 @@
+prolonged output backpressure (pin tmux)
+undrained=45 s deadline=1.000 s rss-growth-bound=16384 kB key-timeout=12 s size=80x24
+tmux  drained=0.024 undrained=0.033 rss_baseline=4892 kB rss_peak=4892 kB growth=0 kB
+ok    tmux drained key acted in 0.024 s
+ok    tmux undrained key acted in 0.033 s after 45 s undrained
+ok    tmux grew 0 kB over the undrained window, bound is 16384 kB
+zz    drained=0.024 undrained=0.025 rss_baseline=105244 kB rss_peak=111816 kB growth=6572 kB
+ok    zz drained key acted in 0.024 s
+ok    zz undrained key acted in 0.025 s after 45 s undrained
+ok    zz grew 6572 kB over the undrained window, bound is 16384 kB
+note  recorded cursor attributes after recovery
+        tmux: shape=default blinking=0 colour=none
+        zz:   shape=block blinking=1 colour=#e5c07b
+note  status row after recovery differs (explicit default foreground, no owner)
+        tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[48;2;154;205;50m
+        zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+ok    recovered screen identical on both sides above the status row, cursor 2,2 flag=1 pane=80x24
+note  tmux never left an alternate screen (restores=0), tail recorded at 1160882 bytes, 20968 of them escapes
+ok    tmux handed the terminal back with nothing queued behind it (restores=0 tail=1160882 escapes=20968)
+ok    zz handed the terminal back with nothing queued behind it (restores=1 tail=40 escapes=0)
+all 9 assertions passed, 3 recorded

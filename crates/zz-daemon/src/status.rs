@@ -20,9 +20,11 @@ use zz_mux::{
 };
 use zz_protocol::{
     ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, RawText, SessionId,
-    StatusLine, WindowId,
+    StatusLine, TmuxColour, WindowId,
 };
-use zz_terminal::{CellWidth, CopyModeFacts, ProgressBar, TerminalSession, TerminalViewport};
+use zz_terminal::{
+    CellWidth, CopyModeFacts, ProgressBar, TerminalColorScheme, TerminalSession, TerminalViewport,
+};
 
 use crate::{configure_shell_job_environment, paths::home_directory, shell_process};
 
@@ -171,6 +173,69 @@ pub(crate) struct StatusRequest {
     pub(crate) startup: bool,
     pub(crate) context: StatusContext,
     pub(crate) facts: FormatHookFacts,
+    /// What this client's terminal reported, for the `theme detect` arm. The
+    /// pin keeps `c->theme` `THEME_UNKNOWN` until the terminal answers its theme
+    /// query and falls back to the background it can see; the daemon records a
+    /// scheme only for a client that reported one, so `None` here is the pin's
+    /// unknown and resolves dark.
+    pub(crate) client_scheme: Option<TerminalColorScheme>,
+}
+
+/// The ten theme slots in `colour_theme_table` order (colour.c:35): the option
+/// suffix each slot reads and the ANSI index the pin falls back to under
+/// `theme terminal` (`colour_theme_terminal_colour`).
+const THEME_SLOTS: [(&str, u8); zz_protocol::COLOUR_THEME_COUNT] = [
+    ("black", 0),
+    ("white", 7),
+    ("light-grey", 7),
+    ("dark-grey", 0),
+    ("green", 2),
+    ("yellow", 3),
+    ("red", 1),
+    ("blue", 4),
+    ("cyan", 6),
+    ("magenta", 5),
+];
+
+/// `server_client_update_theme_colours` (server-client.c:1173), per client and
+/// per status line rather than on a client field, because that is where the
+/// daemon has the format tree the pin expands each option value through.
+///
+/// The `theme` option picks the half: `terminal` answers the fixed ANSI indices
+/// and reads no option at all, `light` and `dark` force their half, and
+/// `detect` follows what the client reported. Every other value is expanded as
+/// a FORMAT before it is parsed, which is not decoration - every default in the
+/// roster is `#{?#{e|>=:#{client_colours},256},<x11 name>,<basic name>}`, so an
+/// unexpanded value would parse as nothing. A value that does not parse, or one
+/// that names a theme colour and would resolve to itself, leaves the slot at
+/// colour 8, which is what the pin leaves it at.
+fn resolve_theme_colours(
+    request: &StatusRequest,
+    hooks: &mut DaemonFormatHooks<'_>,
+) -> zz_protocol::ThemeColours {
+    let mode = expand_status("#{theme}", &request.context, hooks);
+    if mode == "terminal" {
+        return zz_protocol::ThemeColours(THEME_SLOTS.map(|(_, index)| TmuxColour::Basic(index)));
+    }
+    let half = match mode.as_str() {
+        "light" => "light",
+        "dark" => "dark",
+        _ => match request.client_scheme {
+            Some(TerminalColorScheme::Light) => "light",
+            _ => "dark",
+        },
+    };
+    zz_protocol::ThemeColours(THEME_SLOTS.map(|(suffix, _)| {
+        let expanded = expand_status(
+            &format!("#{{E:{half}-theme-{suffix}}}"),
+            &request.context,
+            hooks,
+        );
+        match zz_protocol::parse_tmux_colour(&expanded) {
+            Some(TmuxColour::Theme(_)) | None => TmuxColour::Basic(8),
+            Some(colour) => colour,
+        }
+    }))
 }
 
 pub(crate) fn agent_state_name(phase: &zz_protocol::AgentConnectionPhase) -> &'static str {
@@ -746,11 +811,31 @@ fn render(
             );
             clamp_status_text(expand_status(format, &request.context, &mut hooks))
         });
+    let theme = {
+        let mut hooks = DaemonFormatHooks::status(
+            request.client,
+            &request.facts,
+            &request.context,
+            Some(&request.option_snapshot),
+            cache,
+            touched,
+            refresh,
+            now,
+            &request.environment,
+            &request.default_terminal,
+            request.startup,
+            tmux_shim,
+            zz_executable,
+            job_waker,
+        );
+        resolve_theme_colours(request, &mut hooks)
+    };
     if !request.formats.enabled {
         return StatusLine {
             title,
             position: request.formats.position,
             customized: request.customized,
+            theme,
             ..StatusLine::default()
         };
     }
@@ -831,6 +916,7 @@ fn render(
         position: request.formats.position,
         message_line,
         customized: request.customized,
+        theme,
     }
 }
 
@@ -1976,6 +2062,7 @@ mod tests {
                 ..StatusContext::default()
             },
             facts: FormatHookFacts::default(),
+            client_scheme: None,
         }
     }
 
@@ -1999,6 +2086,7 @@ mod tests {
             startup: false,
             context: status_context(&snapshot, engine, session, None),
             facts: FormatHookFacts::default(),
+            client_scheme: None,
         }
     }
 
@@ -2278,6 +2366,99 @@ mod tests {
             "{}",
             status.left
         );
+    }
+
+    #[test]
+    fn the_status_line_publishes_the_theme_the_way_the_pin_resolves_it_per_client() {
+        let mut engine = MuxEngine::default();
+        let mut context = zz_mux::ExecutionContext::default();
+        execute(
+            &mut engine,
+            &mut context,
+            &["new-session", "-s", "alpha", "-n", "main"],
+        );
+        let session = context.session;
+        let mut renderer = StatusRenderer::default();
+
+        // No client facts means no #{client_colours}, so every roster default
+        // takes its own `,<basic name>` arm - which is what the pin answers a
+        // client that has not reported its colour count.
+        let stock = renderer.render_initial(&engine_request(1, &engine, session));
+        assert_eq!(
+            stock.theme.slot(0),
+            Some(TmuxColour::Basic(0)),
+            "themeblack"
+        );
+        assert_eq!(
+            stock.theme.slot(4),
+            Some(TmuxColour::Basic(2)),
+            "themegreen"
+        );
+        assert!(!stock.theme.is_circular());
+
+        // The class the pin keeps: an indexed value stays indexed.
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-s", "dark-theme-green", "colour124"],
+        );
+        let indexed = renderer.render_initial(&engine_request(1, &engine, session));
+        assert_eq!(indexed.theme.slot(4), Some(TmuxColour::Indexed(124)));
+
+        // `theme light` reads the other half of the roster and nothing else.
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-s", "light-theme-green", "colour99"],
+        );
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-s", "theme", "light"],
+        );
+        let light = renderer.render_initial(&engine_request(1, &engine, session));
+        assert_eq!(light.theme.slot(4), Some(TmuxColour::Indexed(99)));
+
+        // `theme terminal` reads no option at all: colour_theme_terminal_colour
+        // answers the fixed column, so the user-set slots above do not show.
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-s", "theme", "terminal"],
+        );
+        let terminal = renderer.render_initial(&engine_request(1, &engine, session));
+        assert_eq!(
+            terminal.theme,
+            zz_protocol::ThemeColours([
+                TmuxColour::Basic(0),
+                TmuxColour::Basic(7),
+                TmuxColour::Basic(7),
+                TmuxColour::Basic(0),
+                TmuxColour::Basic(2),
+                TmuxColour::Basic(3),
+                TmuxColour::Basic(1),
+                TmuxColour::Basic(4),
+                TmuxColour::Basic(6),
+                TmuxColour::Basic(5),
+            ])
+        );
+
+        // A value that does not name a colour leaves the slot at colour 8,
+        // which is what server_client_update_theme_colours leaves it at.
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-s", "theme", "dark"],
+        );
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-s", "dark-theme-red", "themered"],
+        );
+        let circular = renderer.render_initial(&engine_request(1, &engine, session));
+        assert_eq!(circular.theme.slot(6), Some(TmuxColour::Basic(8)));
+        assert!(!circular.theme.is_circular());
+        assert_eq!(circular.validate(), Ok(()));
     }
 
     #[test]

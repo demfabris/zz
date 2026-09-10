@@ -31762,6 +31762,7 @@ fn status_request(
         startup: !startup_ready,
         context,
         facts,
+        client_scheme: inner.client_color_schemes.get(&client).copied(),
     }
 }
 

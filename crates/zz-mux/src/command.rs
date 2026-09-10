@@ -181,6 +181,27 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "copy-mode-match-style",
     "copy-mode-current-match-style",
     "copy-mode-mark-style",
+    "theme",
+    "dark-theme-black",
+    "dark-theme-white",
+    "dark-theme-light-grey",
+    "dark-theme-dark-grey",
+    "dark-theme-green",
+    "dark-theme-yellow",
+    "dark-theme-red",
+    "dark-theme-blue",
+    "dark-theme-cyan",
+    "dark-theme-magenta",
+    "light-theme-black",
+    "light-theme-white",
+    "light-theme-light-grey",
+    "light-theme-dark-grey",
+    "light-theme-green",
+    "light-theme-yellow",
+    "light-theme-red",
+    "light-theme-blue",
+    "light-theme-cyan",
+    "light-theme-magenta",
 ];
 
 const MAX_COPY_COMMAND_BYTES: usize = 8 * 1024;
@@ -13248,7 +13269,23 @@ fn pane_colours_execution(name: &str, changed: bool) -> Execution {
     Execution::default()
 }
 
+/// The `theme` choice plus the twenty `dark-theme-*` and `light-theme-*` slots
+/// that fill it. `theme` picks a half and every other name is one slot of one
+/// half, which is why the prefix test is the whole roster: the option catalog
+/// is pinned name for name against the oracle.
+fn is_theme_option(name: &str) -> bool {
+    name == "theme" || name.starts_with("dark-theme-") || name.starts_with("light-theme-")
+}
+
 fn stored_scalar_execution(name: &str, target: TmuxOptionTarget) -> Execution {
+    // server_client_update_theme_colours re-resolves all ten slots for every
+    // client whenever the roster or the `theme` choice changes, and the pin
+    // redraws from them on the next status redraw. A client reads the resolved
+    // ten off the status line, so a write here has to re-render it; these are
+    // server options, so the write is never scoped to one session.
+    if is_theme_option(name) {
+        return Execution::effect(MuxEffect::StatusFormatsChanged { session: None });
+    }
     if name == "prefix2" && target == TmuxOptionTarget::GlobalSession {
         return Execution::effect(MuxEffect::MuxOptionChanged {
             option: MuxOptionKey::Prefix2,
@@ -34186,7 +34223,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 118);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 139);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 99;
+pub const PROTOCOL_VERSION: u16 = 100;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -492,6 +492,13 @@ pub struct StatusLine {
     pub position: StatusPosition,
     pub message_line: u8,
     pub customized: bool,
+    /// The ten theme slots resolved for the client this line was rendered for,
+    /// the way `server_client_update_theme_colours` resolves them: the `theme`
+    /// option picks the dark or the light half of the roster, each chosen
+    /// option's value is expanded as a format, and the result keeps its colour
+    /// class. A client resolves `TmuxColour::Theme` through this and not
+    /// through a table of its own.
+    pub theme: crate::ThemeColours,
 }
 
 impl StatusLine {
@@ -531,6 +538,9 @@ impl StatusLine {
             }
         } else if usize::from(self.message_line) >= self.rows.len() {
             return Err("status message line names a row outside the published rows");
+        }
+        if self.theme.is_circular() {
+            return Err("status theme slot carries a theme colour");
         }
         Ok(())
     }
@@ -4159,6 +4169,7 @@ mod tests {
         position: super::StatusPosition,
         message_line: u8,
         customized: bool,
+        theme: crate::ThemeColours,
     }
 
     fn unbounded_status(rows: Vec<String>, message_line: u8) -> Vec<u8> {
@@ -4171,6 +4182,7 @@ mod tests {
             position: super::StatusPosition::Bottom,
             message_line,
             customized: false,
+            theme: crate::ThemeColours::default(),
         })
         .expect("status line shape")
     }
@@ -4701,7 +4713,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 99);
+        assert_eq!(super::PROTOCOL_VERSION, 100);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

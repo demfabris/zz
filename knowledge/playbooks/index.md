@@ -3,6 +3,7 @@
 <!-- okf:listing:start (managed by okf.py index — edit prose outside this fence) -->
 # Concepts
 
+* [Agent benchmarks](agent-benchmarks.md) - Measure zz as an agent target: browser-pane capability parity over CDP against standalone browser tools, and whether the zz-workspace skill helps weak agents; harness layout, prerequisites, results, and traps.
 * [Running the browser client](browser-client.md) - Build the shared GPUI browser client and connect it to a zz daemon through the local WebSocket gateway.
 * [Building and verifying a platform CEF bundle](build-cef-bundle.md) - Step-by-step use of cargo xtask and release recipes to assemble, sign, notarize, and validate platform CEF bundles.
 * [Running the tmux compatibility harness](compat-harness.md) - How to run the pinned tmux differential corpus, read topology, geometry, format, and query-stdout results, and record known divergences.

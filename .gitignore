@@ -44,3 +44,9 @@ __pycache__/
 
 # gh CLI state written when XDG_STATE_HOME pointed at the checkout.
 /.local/
+
+# agent benchmark outputs
+bench/agents/browser/out/
+bench/agents/browser/out-site.log
+bench/agents/browser/out-site.pid
+bench/agents/skill/out/

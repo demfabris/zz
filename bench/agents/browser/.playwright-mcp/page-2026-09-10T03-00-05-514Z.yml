@@ -1,0 +1,47 @@
+- generic [ref=f2e1]:
+  - navigation [ref=f2e2]:
+    - link "Home" [ref=f2e3] [cursor=pointer]:
+      - /url: /
+    - link "Form" [ref=f2e4] [cursor=pointer]:
+      - /url: /form
+    - link "Delayed" [ref=f2e5] [cursor=pointer]:
+      - /url: /delayed
+    - link "Dialogs" [ref=f2e6] [cursor=pointer]:
+      - /url: /dialogs
+    - link "Popup" [ref=f2e7] [cursor=pointer]:
+      - /url: /popup
+    - link "Download" [ref=f2e8] [cursor=pointer]:
+      - /url: /download
+    - link "Iframe" [ref=f2e9] [cursor=pointer]:
+      - /url: /iframe
+    - link "Shadow" [ref=f2e10] [cursor=pointer]:
+      - /url: /shadow
+    - link "Long" [ref=f2e11] [cursor=pointer]:
+      - /url: /long
+    - link "Upload" [ref=f2e12] [cursor=pointer]:
+      - /url: /upload
+    - link "Hover" [ref=f2e13] [cursor=pointer]:
+      - /url: /hover
+    - link "Keys" [ref=f2e14] [cursor=pointer]:
+      - /url: /keys
+    - link "Storage" [ref=f2e15] [cursor=pointer]:
+      - /url: /storage
+    - link "Console" [ref=f2e16] [cursor=pointer]:
+      - /url: /console
+    - link "Redirect" [ref=f2e17] [cursor=pointer]:
+      - /url: /redirect
+    - link "SPA" [ref=f2e18] [cursor=pointer]:
+      - /url: /spa
+    - link "Table" [ref=f2e19] [cursor=pointer]:
+      - /url: /table?page=1
+  - main [ref=f2e20]:
+    - heading "Bench Home" [level=1] [ref=f2e21]
+    - paragraph [ref=f2e22]: Fixture site for the zz browser agent benchmark.
+    - list [ref=f2e23]:
+      - listitem [ref=f2e24]: Aster keyboard $129
+      - listitem [ref=f2e25]: Basil mouse $49
+      - listitem [ref=f2e26]: Cedar monitor $389
+      - listitem [ref=f2e27]: Dahlia headset $99
+      - listitem [ref=f2e28]: Elm webcam $79
+    - paragraph [ref=f2e29]: The secret lives in a data attribute.
+    - button "Double-click me" [ref=f2e30]

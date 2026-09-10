@@ -29,20 +29,25 @@
 #   buffer  `show-buffer` from each side, byte for byte through cmp(1)
 # and NAMES the channels it asserts. A channel a case does not name is recorded
 # with the measurement that says why, so nothing is waived by omission. A case
-# that names `none` asserts NOTHING and is recorded in full: whole-page
-# movement is the only one, because the two engines move a different number of
-# lines and there is no channel left there that a key could move. The summary
-# line counts those separately so the headline never borrows their weight.
+# that names `none` asserts NOTHING and is recorded in full; no corpus case has
+# named it since the whole-page step was fixed on 2026-09-10, and the summary
+# line still counts such cases separately so the headline never borrows their
+# weight. A recorded reason that starts `SIBLING:<lane> ` is a divergence that
+# lane's landing closes; nothing else may be recorded.
 #
 # THE COPY CHANNEL LOOKS AT A RECTANGLE. The selection group toggles the
 # rectangle on and back OFF before it copies, so its bytes are an ordinary
 # selection's; the two rectangle groups after it copy with the rectangle still
 # ON, once with the right edge inside every selected line and once past the end
 # of the last one, which is where the pin's trailing-newline rule turns
-# (RECTANGLE_REASON).
-# selection_active, rectangle_toggle and pane_search_string are printed by
-# record_native_formats instead of compared: zz answers all three with an empty
-# string, which is an inventory line on every run rather than a silent hole.
+# (window-copy.c:5737: in the vi table the pin keeps the final newline there).
+#
+# THE MODE FORMATS. selection_active, rectangle_toggle and pane_search_string
+# are asserted by assert_mode_formats at named copy-mode checkpoints, both
+# sides through display-message -p. Outside a mode the pin keeps
+# pane_search_string on the pane while zz drops it with the per-client copy
+# session (formats.pane-runtime, accepted), so record_pane_search_string prints
+# both answers there as an inventory line and never as a case.
 #
 # CONTROLLED PANE CONTENT. Both panes clear their screen and scrollback and
 # then `cat` the SAME numbered file: 60 lines `line-NN filler-NN`, with
@@ -176,6 +181,7 @@ LAST_CURSOR_DIFFERED=0
 LAST_FACTS_DIFFERED=0
 LAST_VIEW_DIFFERED=0
 LAST_BUFFER_DIFFERED=0
+LAST_FORMATS_DIFFERED=0
 LAST_MISSING_OBSERVABLE=""
 INNER_SHELL="ENV= PS1='\$ ' exec /bin/sh"
 mkdir -p "$ZZ_HOME" "$TMUX_HOME" "$OUTER_HOME" "$ZZ_LOG_DIR"
@@ -294,16 +300,12 @@ CURSOR_FORMAT='#{cursor_x},#{cursor_y} flag=#{cursor_flag} pane=#{pane_width}x#{
 # THE LOGICAL POSITION, read from each side's own server. copy_cursor_line is
 # last because it is the only field that can carry a space.
 FACTS_FORMAT='mode=#{pane_mode} in=#{pane_in_mode} column=#{copy_cursor_x} selection=#{selection_present} line=[#{copy_cursor_line}]'
-# THE VIEW, kept apart from the logical position because the two answers come
-# apart: measured 2026-09-10, every action that has to move the viewport puts
-# the same logical line under the cursor on both engines and leaves the view
-# somewhere else. Its own channel, so a case that agrees on the view says so.
+# THE VIEW, kept apart from the logical position because the two answers can
+# come apart: an engine that moves the cursor row where the pin moves the view
+# lands on the same logical line with a different view. Its own channel, so
+# the self-check can show that exact split being caught.
 VIEW_FORMAT='row=#{copy_cursor_y} scroll=#{scroll_position}'
-# The copy-mode formats zz answers with an empty string, printed rather than
-# asserted. Measured 2026-09-10 against the pin at 80x24: the pin answers
-# selection_active 1, rectangle_toggle 1 and pane_search_string `needle` where
-# zz answers nothing at all for any of the three.
-UNIMPLEMENTED_FORMAT='selection_active=[#{selection_active}] rectangle_toggle=[#{rectangle_toggle}] pane_search_string=[#{pane_search_string}]'
+MODE_FORMATS='selection_active=[#{selection_active}] rectangle_toggle=[#{rectangle_toggle}] pane_search_string=[#{pane_search_string}]'
 
 outer_pane_is() {
   [ "$(tmux_outer_command display-message -p -t "$1" '#{pane_width}x#{pane_height}' 2>/dev/null)" = "$2" ]
@@ -330,27 +332,37 @@ side_view() {
   side_command "$1" display-message -p -t "=$SESSION_NAME:0.0" "$VIEW_FORMAT" 2>/dev/null ||
     printf 'no answer\n'
 }
-# An inventory line, never an assertion: it names what each engine answers for
-# the three copy-mode formats zz leaves empty, so the hole is measured on every
-# run instead of being argued about.
-record_native_formats() {
-  local label="$1"
-  local side
-  for side in zz tmux; do
-    printf 'note  %s %s formats: %s\n' "$label" "$side" \
-      "$(side_command "$side" display-message -p -t "=$SESSION_NAME:0.0" "$UNIMPLEMENTED_FORMAT" 2>/dev/null || printf 'no answer')"
-  done
+side_mode_formats() {
+  side_command "$1" display-message -p -t "=$SESSION_NAME:0.0" "$MODE_FORMATS" 2>/dev/null ||
+    printf 'no answer\n'
 }
-# A measurement line, never an assertion: the logical position and the view
-# each side reports at a checkpoint whose divergence is recorded, so the
-# numbers behind the reason string land in every run's output instead of living
-# only in a comment.
-record_position() {
+# Called straight after a copy_case, so it reads a settled checkpoint.
+assert_mode_formats() {
+  local label="$1"
+  local zz_formats tmux_formats
+  CHECKS=$((CHECKS + 1))
+  ASSERTING=$((ASSERTING + 1))
+  zz_formats="$(side_mode_formats zz)"
+  tmux_formats="$(side_mode_formats tmux)"
+  LAST_FORMATS_DIFFERED=0
+  if [ "$zz_formats" = "$tmux_formats" ]; then
+    printf 'ok    %s-formats %s\n' "$label" "$tmux_formats"
+    return 0
+  fi
+  LAST_FORMATS_DIFFERED=1
+  FAILURES=$((FAILURES + 1))
+  printf 'DIFF  %s-formats\n' "$label"
+  printf '      formats tmux: %s\n' "$tmux_formats"
+  printf '      formats zz:   %s\n' "$zz_formats"
+}
+# An inventory line, never an assertion: pane_search_string outside a mode,
+# where the accepted formats.pane-runtime stance keeps zz's answer empty.
+record_pane_search_string() {
   local label="$1"
   local side
   for side in zz tmux; do
-    printf 'note  %s %s position: %s / %s\n' "$label" "$side" \
-      "$(side_facts "$side")" "$(side_view "$side")"
+    printf 'note  %s %s pane_search_string outside the mode: [%s]\n' "$label" "$side" \
+      "$(side_command "$side" display-message -p -t "=$SESSION_NAME:0.0" '#{pane_search_string}' 2>/dev/null || printf 'no answer')"
   done
 }
 # Bytes, not a string: `$(…)` eats trailing newlines and a copied line's
@@ -715,58 +727,20 @@ copy_case() {
 
 # --- the corpus ------------------------------------------------------------
 
-# THE MEASURED DIVERGENCES the corpus records rather than asserts. Every one
-# was measured at this fixture's own checkpoints on 2026-09-10, at 80x24,
-# against tmux d77c9dc6.
+# THE MEASURED DIVERGENCES the corpus records rather than asserts, each
+# measured at this fixture's own checkpoints at 80x24 against tmux d77c9dc6.
+# Every one left is a mode-style, prompt or position surface the modes lane's
+# landing paints the pin's way, so each reason starts `SIBLING:modes `.
 #
-# VIEW_REASON, the HALF page and the search landing. Both engines put the same
-# LOGICAL line under the cursor and leave the VIEW somewhere else, so the facts
-# channel still asserts and only the view is recorded.
-# window_copy_pageup1 (window-copy.c) moves the VIEW by n = screen_size_y / 2
-# and keeps the cursor's screen row; zz keeps oy where it is and moves the
-# cursor's screen row instead. Measured from cursor row 17, oy 0, on line-56:
-# half-page-up left the pin at row 17 / scroll 12 / line-44 and zz at row 5 /
-# scroll 0 / line-44 - the same line on both. The same split shows after a
-# search: both find line-12 needle-12, the pin at row 12 / scroll 39 and zz at
-# row 0 / scroll 27. The engine is crates/zz-terminal, not this obligation's
-# zones.
-VIEW_REASON='the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line'
-# PAGE_REASON, the WHOLE page, which is a different and larger divergence: the
-# two engines do not agree on the logical line either, because they do not move
-# the same NUMBER of lines. window_copy_pageup1 uses n = screen_size_y - 2 = 22
-# at this size and zz moves screen_size_y = 24, so one whole page apart puts
-# them two lines apart. Measured at this fixture's own paging checkpoint, both
-# engines starting on line-60 at row 21 / scroll 0 with the same column: one
-# page-up left the pin on line-38 at row 21 / scroll 22 and zz on line-36 at
-# row 0 / scroll 3. The page-down after it lands both back on line-60, the pin
-# at row 21 / scroll 0 and zz at row 23 / scroll 2, because the seeded content
-# ends there and both clamp. Both the logical position and the view are
-# recorded here, so these two cases assert NOTHING and the summary counts them
-# apart from the cases that do; record_position prints each side's numbers on
-# every run.
-PAGE_REASON='the pin steps screen_size_y-2 = 22 lines and keeps the cursor row, zz steps screen_size_y = 24 and moves the cursor row: a different line AND a different view'
-# RECTANGLE_REASON, the paste-buffer bytes of a rectangle whose right edge runs
-# past the end of the last selected line. window_copy_get_selection
-# (window-copy.c:5737) says `/* Remove final \n (unless at end in vi mode). */`
-# and guards it with `if (keys == MODEKEY_EMACS || lastex <= ey_last)`, where
-# lastex is the rectangle's right edge (data->cx + 1 in vi) and ey_last is
-# window_copy_find_length of the last selected line. So in the vi table a
-# rectangle that reaches past the end of that line KEEPS the trailing newline
-# and in the emacs table it never does. zz strips it in both tables. The
-# emacs case therefore ASSERTS the buffer and the vi case records it, with the
-# two byte strings printed by the case itself on every run.
-# Measured 2026-09-10 on a two-line rectangle over line-58 and line-59 with the
-# right edge at column 20, past the 17 glyphs those lines carry: in the vi
-# table the pin copied `line-58 filler-58\nline-59 filler-59\n`, 36 bytes, and
-# zz copied the same 35 bytes without the terminator; in the emacs table the
-# same rectangle copied identically on both sides, and so did the narrower
-# rectangle whose right edge stays inside both lines. The bytes come out of
-# crates/zz-terminal, not this obligation's zones.
-# READING THE DUMP: the case prints the buffer through od -c, whose offsets are
-# OCTAL. The final offset of the pin's buffer reads |0000044| and that is 36
-# bytes, not 44; zz's |0000043| is 35. Corrected at the gate 2026-09-10 after
-# the first record quoted the octal offsets as byte counts.
-RECTANGLE_REASON='in the vi table the pin keeps the trailing newline of a rectangle whose right edge is past the end of the last selected line (window-copy.c:5737) and zz strips it'
+# CLOSED 2026-09-10 and asserted since: the half page and the search landing
+# (window_copy_pageup1 moves the view by screen_size_y/2 and keeps the cursor
+# row; window_copy_scroll_to lands a search a quarter screen above the bottom),
+# the whole page (screen_size_y-2 = 22 lines, cursor row kept), the vi
+# rectangle past the end of the last selected line (window-copy.c:5737 keeps
+# the final newline, 36 bytes where zz used to copy 35) and the prefix inside a
+# copy table (server-client.c:1417). The fixes are in crates/zz-terminal and
+# crates/zz-protocol.
+#
 # SELECTION_REASON. The pin paints the selected cells with
 # copy-mode-selection-style, which defaults to #{E:mode-style}; the raw TUI
 # paints an OverlaySpan of kind Selection in reverse video and never reads the
@@ -777,24 +751,20 @@ RECTANGLE_REASON='in the vi table the pin keeps the trailing newline of a rectan
 # one cell further along. That is options.native-mode-styles, accepted. The
 # BUFFER channel asserts straight through the divergence: the bytes the two
 # engines copy out of that selection are identical.
-SELECTION_REASON='the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further'
+SELECTION_REASON='SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further'
+# MATCH_REASON. The pin paints the current search match with
+# copy-mode-current-match-style, pinned here to bg=#cd00cd,fg=#101010; the raw
+# TUI paints it in reverse video. Measured 2026-09-10 on line-12 after `needle`:
+# the pin wrote \e[38;2;16;16;16m\e[48;2;205;0;205mneedle\e[39m\e[49m and zz
+# \e[7mneedle\e[0m, every glyph, the cursor, the view and the buffer identical.
+# The same options.native-mode-styles family as the selection.
+MATCH_REASON='SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video'
 # PROMPT_REASON. The same measurement tui-stock-keys.sh carries: the pin draws
 # command-prompt in message-style across the whole row and terminates it with
 # \e[39m\e[49m; zz paints the prompt from its own palette and stops at the
 # text. The prompt GLYPHS are identical on both sides and this fixture asserts
 # them through the cursor and the search that follows.
-PROMPT_REASON='zz paints the command prompt from its own palette and ignores message-style'
-# PREFIX_REASON. server-client.c:1409 works out the key table, using the pane's
-# mode table when the client sits in its default table, and then
-# server-client.c:1417 overrides it: "The prefix always takes precedence and
-# forces a switch to the prefix table, unless we are already there." So C-b
-# inside a copy table arms the prefix on the pin even though copy-mode binds it
-# to cursor-left and copy-mode-vi to page-up. Measured 2026-09-10 from cursor
-# row 21 on line-60: the pin stayed on line-60 at scroll 0 with the prefix
-# armed, and zz ran the copy binding, landing on line-36 at scroll 3 in the vi
-# table. The key engine is crates/zz-protocol and crates/zz-client, not this
-# obligation's zones.
-PREFIX_REASON='the pin gives the prefix precedence over a copy-table binding of the same key; zz runs the copy binding'
+PROMPT_REASON='SIBLING:modes zz paints the command prompt from its own palette and ignores message-style'
 
 table_keys() {
   case "$1" in
@@ -804,7 +774,7 @@ table_keys() {
     KEY_RIGHT=C-f
     KEY_BEGINSEL=C-Space KEY_RECT=R KEY_COPY=M-w KEY_CANCEL=q
     KEY_SEARCHFWD=C-s KEY_SEARCHBACK=C-r KEY_COUNT=M-5
-    RECT_COPY_CHANNELS=rows,text,cursor,facts,view,buffer
+    SEARCH_OPEN_REASON="$PROMPT_REASON, and the incremental search already paints the current match: ${MATCH_REASON#SIBLING:modes }"
     ;;
   vi)
     KEY_DOWN=j KEY_UP=k KEY_HALFDOWN=C-d KEY_HALFUP=C-u
@@ -812,7 +782,7 @@ table_keys() {
     KEY_RIGHT=l
     KEY_BEGINSEL=Space KEY_RECT=v KEY_COPY=Enter KEY_CANCEL=q
     KEY_SEARCHFWD=/ KEY_SEARCHBACK='?' KEY_COUNT=5
-    RECT_COPY_CHANNELS=rows,text,cursor,facts,view
+    SEARCH_OPEN_REASON="$PROMPT_REASON"
     ;;
   esac
 }
@@ -873,24 +843,17 @@ run_movement() {
   type_both "$KEY_UP"
   copy_case "$table-scroll-start" none ''
   type_both "$KEY_HALFUP"
-  copy_case "$table-halfpage-up" none '' facts,buffer "$VIEW_REASON"
+  copy_case "$table-halfpage-up" none ''
   type_both "$KEY_HALFDOWN"
-  copy_case "$table-halfpage-down" none '' facts,buffer "$VIEW_REASON"
-  # THE WHOLE PAGE asserts nothing: the two engines move a different number of
-  # lines, so the logical position comes apart with the view and there is no
-  # channel here a key could move that is not already recorded. The step
-  # measurement is printed instead.
+  copy_case "$table-halfpage-down" none ''
   reenter_copy_mode "$table paging"
   type_both "$KEY_UP"
   type_both "$KEY_UP"
   copy_case "$table-page-start" none ''
-  record_position "$table-page-start"
   type_both "$KEY_PAGEUP"
-  copy_case "$table-page-up" none '' none "$PAGE_REASON"
-  record_position "$table-page-up"
+  copy_case "$table-page-up" none ''
   type_both "$KEY_PAGEDOWN"
-  copy_case "$table-page-down" none '' none "$PAGE_REASON"
-  record_position "$table-page-down"
+  copy_case "$table-page-down" none ''
 
   # Selection, rectangle and the copy, from a fresh entry.
   reenter_copy_mode "$table selection"
@@ -903,10 +866,10 @@ run_movement() {
   type_both "$KEY_DOWN"
   type_both "$KEY_EOL"
   copy_case "$table-selection-extends" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
-  record_native_formats "$table-selection-extends"
+  assert_mode_formats "$table-selection-extends"
   type_both "$KEY_RECT"
   copy_case "$table-rectangle-on" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
-  record_native_formats "$table-rectangle-on"
+  assert_mode_formats "$table-rectangle-on"
   type_both "$KEY_RECT"
   copy_case "$table-rectangle-off" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
 
@@ -931,7 +894,7 @@ run_movement() {
   type_both "$KEY_COUNT"
   type_both "$KEY_RIGHT"
   copy_case "$table-rectangle-inside-line" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
-  record_native_formats "$table-rectangle-inside-line"
+  assert_mode_formats "$table-rectangle-inside-line"
   type_both "$KEY_COPY"
   copy_case "$table-rectangle-inside-line-copy" format '#{pane_in_mode}=0'
 
@@ -954,15 +917,13 @@ run_movement() {
     type_both "$KEY_RIGHT"
   done
   copy_case "$table-rectangle-past-end-of-line" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
-  record_native_formats "$table-rectangle-past-end-of-line"
+  assert_mode_formats "$table-rectangle-past-end-of-line"
   type_both "$KEY_COPY"
-  copy_case "$table-rectangle-past-end-of-line-copy" format '#{pane_in_mode}=0' \
-    "$RECT_COPY_CHANNELS" "$RECTANGLE_REASON"
+  copy_case "$table-rectangle-past-end-of-line-copy" format '#{pane_in_mode}=0'
   # The paste buffer is the one channel a case cannot resynchronise by moving:
   # it keeps the last copy's bytes until the next copy replaces them. Dropping
   # every buffer on both sides is this channel's equivalent of a fresh
-  # copy-mode entry, so the recorded rectangle divergence stops here instead of
-  # travelling into the cases after it.
+  # copy-mode entry, so no later case compares this copy's bytes again.
   delete_every_buffer zz
   delete_every_buffer tmux
 
@@ -977,9 +938,12 @@ run_movement() {
   copy_case "$table-terminal-input-returns" screen 'BACKALIVE'
 
   # THE PREFIX INSIDE A COPY TABLE. Both tables bind C-b (cursor-left in
-  # copy-mode, page-up in copy-mode-vi) and C-b is also the prefix. This case
-  # runs LAST because the pin ends it holding the prefix table, and the next
-  # group opens a fresh session.
+  # copy-mode, page-up in copy-mode-vi) and C-b is also the prefix, which
+  # server-client.c:1417 gives precedence. The checkpoint asserts the copy
+  # position and the view, which the copy binding would move (one column left
+  # in emacs, a page up in vi). The `[` after it spends the prefix on
+  # copy-mode, which the pin ignores for a pane already in the mode, and the
+  # next key has to reach the copy table again.
   type_prefix_both '['
   if ! await_observable zz format '#{pane_in_mode}=1' ||
     ! await_observable tmux format '#{pane_in_mode}=1'; then
@@ -987,7 +951,10 @@ run_movement() {
   fi
   type_both "$KEY_UP"
   type_both C-b
-  copy_case "$table-prefix-takes-precedence" none '' buffer "$PREFIX_REASON"
+  copy_case "$table-prefix-takes-precedence" none ''
+  type_both '['
+  type_both "$KEY_UP"
+  copy_case "$table-prefix-returns-to-the-copy-table" none ''
 }
 
 run_search() {
@@ -1015,26 +982,27 @@ run_search() {
   copy_case "$table-ordinary-pane-search-typed" none '' text,cursor,facts,view,buffer "$PROMPT_REASON"
 
   type_both BSpace
-  copy_case "$table-ordinary-pane-search-backspace" none '' facts,buffer "$VIEW_REASON"
+  copy_case "$table-ordinary-pane-search-backspace" none '' text,cursor,facts,view,buffer "$SEARCH_OPEN_REASON"
 
   type_both Enter
-  copy_case "$table-ordinary-pane-search-submit" none '' facts,buffer "$VIEW_REASON"
-  record_native_formats "$table-ordinary-pane-search-submit"
+  copy_case "$table-ordinary-pane-search-submit" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
+  assert_mode_formats "$table-ordinary-pane-search-submit"
 
   type_both n
-  copy_case "$table-ordinary-pane-search-again" none '' facts,buffer "$VIEW_REASON"
+  copy_case "$table-ordinary-pane-search-again" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
 
   type_both N
-  copy_case "$table-ordinary-pane-search-reverse" none '' facts,buffer "$VIEW_REASON"
+  copy_case "$table-ordinary-pane-search-reverse" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
 
   type_both "$KEY_SEARCHBACK"
   type_both -l 'filler-30'
   type_both Enter
-  copy_case "$table-ordinary-pane-search-backward" none '' facts,buffer "$VIEW_REASON"
+  copy_case "$table-ordinary-pane-search-backward" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
+  assert_mode_formats "$table-ordinary-pane-search-backward"
 
   type_both q
   copy_case "$table-ordinary-pane-search-cancel" format '#{pane_in_mode}=0'
-  record_native_formats "$table-ordinary-pane-search-cancel"
+  record_pane_search_string "$table-ordinary-pane-search-cancel"
 }
 
 # THE DEFECT TUI-005 OPENED ON, measured rather than argued. zz carries a
@@ -1129,7 +1097,7 @@ run_live_mode_keys() {
 # options.native-mode-styles (accepted) and the status-row badge is
 # presentation.native-status (accepted). They are measured here rather than
 # waived by omission.
-POSITION_REASON='the pin draws copy-mode-position-format into the pane top row and zz paints a COPY badge on the status row'
+POSITION_REASON='SIBLING:modes the pin draws copy-mode-position-format into the pane top row and zz paints a COPY badge on the status row'
 run_presentation() {
   attach_both_at
   set_on_both mode-keys emacs
@@ -1165,7 +1133,13 @@ self_check_case() {
   cursor) [ "$LAST_CURSOR_DIFFERED" -eq 1 ] || verdict='no cursor difference reported' ;;
   facts) [ "$LAST_FACTS_DIFFERED" -eq 1 ] || verdict='no copy-mode facts difference reported' ;;
   view) [ "$LAST_VIEW_DIFFERED" -eq 1 ] || verdict='no view difference reported' ;;
+  view-only)
+    if [ "$LAST_VIEW_DIFFERED" -ne 1 ] || [ "$LAST_FACTS_DIFFERED" -ne 0 ]; then
+      verdict='the same line under a different view did not land in the view channel alone'
+    fi
+    ;;
   buffer) [ "$LAST_BUFFER_DIFFERED" -eq 1 ] || verdict='no paste-buffer difference reported' ;;
+  formats) [ "$LAST_FORMATS_DIFFERED" -eq 1 ] || verdict='no mode-format difference reported' ;;
   none)
     if [ "$LAST_ROWS_DIFFERED" -ne 0 ] || [ "$LAST_TEXT_DIFFERED" -ne 0 ] ||
       [ "$LAST_CURSOR_DIFFERED" -ne 0 ] || [ "$LAST_FACTS_DIFFERED" -ne 0 ] ||
@@ -1315,6 +1289,126 @@ run_self_check() {
   await_observable tmux format '#{pane_in_mode}=1' || true
   self_check_compare chord-or-command
   self_check_case 'equivalence: prefix [ and the copy-mode command open the same mode' none
+
+  # view alone: a half page on one side and the same twelve lines by counted
+  # cursor-up on the other, which is the split the half-page and search cases
+  # used to record. Same logical line, different view.
+  attach_both_at
+  set_on_both mode-keys vi
+  seed_pane
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_both k
+  type_both k
+  type_side zz C-u
+  type_side tmux 1
+  type_side tmux 2
+  type_side tmux k
+  await_observable zz format '#{scroll_position}=12' || true
+  await_observable tmux format '#{copy_cursor_y}=9' || true
+  self_check_compare half-page-or-cursor-rows
+  self_check_case 'view alone: a half page on the zz side, twelve cursor-ups on the pin side' view-only
+
+  # facts: a whole page on one side and twenty-four counted cursor-ups on the
+  # other, the step the page cases used to record.
+  attach_both_at
+  set_on_both mode-keys vi
+  seed_pane
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_both k
+  type_both k
+  type_side zz PPage
+  type_side tmux 2
+  type_side tmux 4
+  type_side tmux k
+  await_observable zz format '#{scroll_position}=22' || true
+  await_observable tmux format '#{scroll_position}=3' || true
+  self_check_compare page-or-twenty-four-rows
+  self_check_case 'facts: a page on the zz side, twenty-four cursor-ups on the pin side' facts
+
+  # buffer: the vi rectangle past the end of the last line, copied with the
+  # pin's mode-keys switched to emacs just before the copy, so the pin strips
+  # the final newline the vi table keeps: the rectangle byte difference the
+  # corpus used to record.
+  attach_both_at
+  set_on_both mode-keys vi
+  seed_pane
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_both k
+  type_both k
+  type_both k
+  type_both k
+  type_both 0
+  type_both v
+  type_both Space
+  type_both j
+  local step
+  for step in 1 2 3 4; do
+    type_both 5
+    type_both l
+  done
+  await_observable zz format '#{copy_cursor_x}=20' || true
+  await_observable tmux format '#{copy_cursor_x}=20' || true
+  side_command tmux set-option -g mode-keys emacs || die 'tmux refused a one-sided mode-keys'
+  side_command zz send-keys -t "=$SESSION_NAME:0.0" -X copy-pipe-and-cancel ||
+    die 'zz refused copy-pipe-and-cancel'
+  side_command tmux send-keys -t "=$SESSION_NAME:0.0" -X copy-pipe-and-cancel ||
+    die 'tmux refused copy-pipe-and-cancel'
+  await_observable zz format '#{pane_in_mode}=0' || true
+  await_observable tmux format '#{pane_in_mode}=0' || true
+  self_check_compare rectangle-final-newline
+  self_check_case 'buffer: the vi rectangle final newline kept on the zz side only' buffer
+
+  # facts: the copy binding of C-b run on one side and the prefix on the other,
+  # the precedence the prefix case used to record.
+  attach_both_at
+  set_on_both mode-keys vi
+  seed_pane
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_both k
+  type_both k
+  type_side zz PPage
+  type_side tmux C-b
+  await_observable zz format '#{scroll_position}=22' || true
+  self_check_compare copy-binding-or-prefix
+  self_check_case 'facts: C-b as page-up on the zz side, as the prefix on the pin side' facts
+
+  # formats: a search, the rectangle toggle and a selection on one side only.
+  attach_both_at
+  set_on_both mode-keys vi
+  seed_pane
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_side zz /
+  type_side zz -l needle
+  type_side zz Enter
+  type_side zz v
+  type_side zz Space
+  await_observable zz format '#{selection_active}=1' || true
+  self_check_compare one-sided-mode-formats
+  assert_mode_formats one-sided-mode-formats
+  self_check_case 'formats: selection_active, rectangle_toggle and pane_search_string on the zz side only' formats
+
+  # text: a search prompt left open on one side, the stale prompt row the emacs
+  # search submit used to leave on zz.
+  attach_both_at
+  set_on_both mode-keys vi
+  seed_pane
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_side zz /
+  await_observable zz screen '(search down)' || true
+  self_check_compare one-sided-open-prompt
+  self_check_case 'text: a search prompt open on the zz side only' text
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"

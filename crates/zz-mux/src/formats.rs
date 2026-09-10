@@ -593,7 +593,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_pipe", Pane, StatusHook),
     variable!("pane_pipe_pid", Pane, StatusHook),
     variable!("pane_right", Pane, PaneRight),
-    variable!("pane_search_string", Pane, Empty),
+    variable!("pane_search_string", Pane, StatusHook),
     variable!("pane_start_command", Pane, PaneStartCommand),
     variable!("pane_start_command_list", Pane, PaneStartCommandList),
     variable!("pane_start_path", Pane, PaneStartPath),

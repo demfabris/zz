@@ -164,6 +164,14 @@ PROMPT_REASON='zz paints the command prompt from its own palette and ignores mes
 # The split geometry itself is asserted through each pane's width and height in
 # the facts line, which is where a key's effect actually lives.
 BORDER_REASON='the border cell has no background on the wire and layout.rs floors the split ratio'
+# The moment a pane's foreground child starts, the two servers disagree about
+# #{pane_current_command} for a beat: with default-command pinned to
+# `exec /bin/sh`, the pin already answers `cat` while zz still answers the
+# shell or an empty string, and zz has caught up by the next chord (every
+# later application case asserts the field and agrees). Measured 2026-09-10 at
+# the gate tip; the field is asserted everywhere else, where the pane is a
+# settled shell and the two agree exactly.
+COMMAND_SETTLE_REASON='zz reports #{pane_current_command} a beat later than the pin when a pane'"'"'s child starts'
 mkdir -p "$ZZ_HOME" "$TMUX_HOME" "$OUTER_HOME" "$ZZ_LOG_DIR"
 [ -z "$CAPTURE_DIR" ] || mkdir -p "$CAPTURE_DIR"
 
@@ -280,7 +288,7 @@ CURSOR_FORMAT='#{cursor_x},#{cursor_y} flag=#{cursor_flag} pane=#{pane_width}x#{
 # The facts a screen cannot show. Pane ids are left out on purpose: the two
 # servers number their panes from different origins and the campaign has never
 # claimed they match.
-FACTS_FORMAT='#{session_name}:#{window_index}.#{pane_index} #{pane_width}x#{pane_height} active=#{pane_active} zoomed=#{window_zoomed_flag} window=#{window_name} panes=#{window_panes}'
+FACTS_FORMAT='#{session_name}:#{window_index}.#{pane_index} #{pane_width}x#{pane_height} active=#{pane_active} zoomed=#{window_zoomed_flag} window=#{window_name} panes=#{window_panes} cmd=#{pane_current_command}'
 
 outer_pane_is() {
   [ "$(tmux_outer_command display-message -p -t "$1" '#{pane_width}x#{pane_height}' 2>/dev/null)" = "$2" ]
@@ -699,7 +707,7 @@ run_key_ownership() {
     die 'zz refused send-keys'
   side_command tmux send-keys -t "=$SESSION_NAME:0.0" 'stty -isig; cat -v' Enter ||
     die 'tmux refused send-keys'
-  key_case application-reader screen 'cat -v'
+  key_case application-reader screen 'cat -v' rows,cursor "$COMMAND_SETTLE_REASON"
   type_both 'C-\'
   key_case application-backslash screen '^\'
   type_both M-s
@@ -749,7 +757,7 @@ run_self_check() {
   SIZE_LABEL='80x24-one-sided-chord'
   attach_both_at 80 24
   type_side zz C-b '%'
-  await_observable zz fact 'panes=2' || true
+  await_observable zz format '#{window_panes}=2' || true
   self_check_compare one-sided-chord
   self_check_case 'rows: prefix % typed on one side only' rows
 
@@ -759,8 +767,8 @@ run_self_check() {
   SIZE_LABEL='80x24-active-pane'
   attach_both_at 80 24
   type_prefix_both '%'
-  await_observable zz fact 'panes=2' || true
-  await_observable tmux fact 'panes=2' || true
+  await_observable zz format '#{window_panes}=2' || true
+  await_observable tmux format '#{window_panes}=2' || true
   side_command zz select-pane -t "=$SESSION_NAME:0.0" || die 'zz refused select-pane'
   self_check_compare active-pane
   self_check_case 'facts: the active pane moved on one side' facts

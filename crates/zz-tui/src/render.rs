@@ -1952,7 +1952,7 @@ fn sidebar_status_lines(model: &Model) -> Vec<StyledLine> {
         &StyledLine::plain(if model.status.customized {
             ""
         } else {
-            "Ctrl-\\ detach"
+            "C-b d detach"
         }),
         sidebar::WIDTH,
     );
@@ -3247,7 +3247,7 @@ mod tests {
             let mut renderer = Renderer::new();
             renderer.paint_status_block(&model, true);
             let output = String::from_utf8(renderer.output).unwrap();
-            assert!(!output.contains("Ctrl-\\ detach"), "{output:?}");
+            assert!(!output.contains("C-b d detach"), "{output:?}");
             assert!(
                 output.contains("[rows] 0:bash*   \"ubuntu\" 11:11"),
                 "{output:?}"
@@ -3263,7 +3263,7 @@ mod tests {
         renderer.paint_sidebar(&sidebar_model, true);
         renderer.paint_status_block(&sidebar_model, true);
         let output = String::from_utf8(renderer.output).unwrap();
-        assert!(output.contains("Ctrl-\\ detach"), "{output:?}");
+        assert!(output.contains("C-b d detach"), "{output:?}");
         assert!(output.contains("ROW"), "{output:?}");
 
         sidebar_model.set_status(block_status(vec!["ROW"], true));
@@ -3271,7 +3271,7 @@ mod tests {
         renderer.paint_sidebar(&sidebar_model, true);
         renderer.paint_status_block(&sidebar_model, true);
         let output = String::from_utf8(renderer.output).unwrap();
-        assert!(!output.contains("Ctrl-\\ detach"), "{output:?}");
+        assert!(!output.contains("C-b d detach"), "{output:?}");
     }
 
     #[test]

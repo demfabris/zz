@@ -87,7 +87,7 @@ ok    vi-rectangle-on-formats selection_active=[1] rectangle_toggle=[1] pane_sea
       case vi-rectangle-off
       first differing row 21 of 24
         tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-60 filler-60
-        zz:   ^[[7mline-60 filler-60
+        zz:   ^[[7mline-60^[[0m filler-60
 note  vi-rectangle-off asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
 ok    vi-copy-and-cancel
       case vi-rectangle-inside-line

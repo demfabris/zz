@@ -1,8 +1,8 @@
-captured: 2026-09-10T16:59:45-03:00
-zz revision: 66b23b5f68502a81797909be33c268af4fde8dd0 on branch HEAD, base origin/main 3319cebab5d53d854199ae5e6c00d64b99c91e97
+captured: 2026-09-10T17:28:59-03:00
+zz revision: be67a0d50f85b6b1ef22e981bacb514b0966587e (branch campaign/tui-copy-close), base origin/main 3319cebab5d53d854199ae5e6c00d64b99c91e97
 worktree clean: yes
-zz binary: /home/demfabris/dev/zz-tui-copy/target/debug/zz
-zz sha256: fd9314c7e68723bd5e6b4c513f69909efee71f5765e7bc9f55d992c3e2bd6baf (debug build, not bit-reproducible on this box; attestation is the revision plus the clean tree)
+zz binary: /home/demfabris/dev/zz-tui-copy/target/debug/zz, last linked by `cargo test -p zz` from the 66b23b5f crate sources, which 3ced0ea6 and be67a0d5 do not change; its sha256 differs from the first capture at 66b23b5f (fd9314c7...) because debug builds on this box are not bit-reproducible
+zz sha256: 77e9f56cab968725233e82e0179da5e3aeb2184fd67f2f6c495c1db1853589bd (debug build, not bit-reproducible on this box; attestation is the revision plus the clean tree)
 pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
 pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
 pin version: tmux next-3.8

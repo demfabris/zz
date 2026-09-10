@@ -1,0 +1,43 @@
+self-check: one deliberate difference per channel, plus one equivalence
+      case self-check-menu-item
+      7 of 24 rows differ, first 4
+        row 4 tmux: 
+        row 4 zz:       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@OVERLAY-MENUM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m
+        row 5 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@OVERLAY-MENUM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m
+        row 5 zz:       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;13;13;13m^[[48;2;184;134;11m First item  (f) ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 6 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;13;13;13m^[[48;2;184;134;11m First item  (f) ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 6 zz:       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 7 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 7 zz:       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Second item (s) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 8 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Second item (s) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 8 zz:       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m ^[[2mDisabled item^[[0m^[[38;2;229;229;229m^[[48;2;38;38;38m   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 9 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m ^[[2mDisabled item^[[0m^[[38;2;229;229;229m^[[48;2;38;38;38m   ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 9 zz:       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Third item  (t) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 10 tmux:     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Third item  (t) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 10 zz:       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Extra item  (e) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+      cursor tmux: 6,6 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   6,5 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check menu, an item only one side has
+      case self-check-covered-pane
+      1 of 24 rows differ, first 1
+        row 1 tmux: $
+        row 1 zz:   $ z
+      cursor tmux: 2,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   3,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check covered pane, a keystroke only one side delivers under the menu
+      case self-check-popup-border
+      2 of 24 rows differ, first 6
+        row 6 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@OVERLAY-POPUPM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m
+        row 6 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^UM--M-bM-^TM-^@OVERLAY-POPUPM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^UM-.^[[39m^[[49m
+        row 14 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m
+        row 14 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^UM-0M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^UM-/^[[39m^[[49m
+      cursor tmux: 23,8 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   23,8 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check popup, a border only one side draws rounded
+      case self-check-prompt-cursor
+      all 24 rows identical
+      cursor tmux: 11,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   9,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check prompt, a cursor only one side moves
+ok    self-check equivalence: the same menu on both sides
+self-check complete: every sabotage was caught and the equivalence passed

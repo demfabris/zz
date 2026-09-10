@@ -1,0 +1,8 @@
+prolonged output backpressure (pin tmux)
+undrained=45 s deadline=1.000 s rss-growth-bound=16384 kB key-timeout=12 s size=80x24
+zz    drained=0.023 undrained=none rss_baseline=105956 kB rss_peak=112100 kB growth=6144 kB
+ok    zz drained key acted in 0.023 s
+FAIL  zz undrained key did not act within 1.000 s after 45 s undrained (got none)
+ok    zz grew 6144 kB over the undrained window, bound is 16384 kB
+ok    zz handed the terminal back with nothing queued behind it (restores=1 tail=40 escapes=0)
+1 of 4 assertions failed, 0 recorded

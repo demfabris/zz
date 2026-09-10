@@ -1,0 +1,23 @@
+TUI-010 attempt-01 environment
+captured: 2026-09-09T22:47:37-03:00
+box: alienware, Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+os: NAME="CachyOS Linux" PRETTY_NAME="CachyOS" 
+cores: 16  memory: 16153084 kB
+shell: GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+python: Python 3.14.6
+locale: LANG=en_US.UTF-8 LC_ALL=unset LC_TIME=pt_BR.UTF-8 charmap=UTF-8
+TERM at capture: xterm-ghostty
+TERM inside every fixture: xterm-256color (set by the attach scripts)
+outer pinned tmux size under test: 80x24, status off
+worktree: /home/demfabris/dev/zz-tui-flow
+base revision: bfd05821c00eac75cf6a8418394681295caf7aab (origin/main)
+branch: campaign/tui-client-lifecycle
+zz under test: 900bec3ec52c6ae17ba0b60949db05cc41ada47653e388f8450ca949fdc5330d  target/debug/zz
+zz before the change (origin/main build, kept for the sabotage): 873cbfc57a66fd1d38f1584fe803aba9520b7f1e4576de64ae11a85a4c0861b1  target/debug/zz-prefix-main
+pin: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+pin version: tmux next-3.8
+pin commit: d77c9dc6aa021e4bc61f0da128c591af695e6466
+
+note: a cargo debug build of zz is not bit-reproducible on this box, so a
+recorded hash identifies an artifact and cannot attest it. The attestation is
+the revision plus the branch diff; the provenance is reproduction.

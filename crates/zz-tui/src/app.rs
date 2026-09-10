@@ -47,6 +47,8 @@ enum MainEvent {
     },
     Resize,
     Signal,
+    /// The writer dropped output it could not paint and its block has cleared.
+    Repaint,
 }
 
 const KITTY_GATE_PROBING: u8 = 0;
@@ -532,6 +534,12 @@ pub(crate) fn run(
     browser.set_transport(kitty_probe.transport(), Instant::now());
     let kitty_gate = Arc::new(AtomicU8::new(KITTY_GATE_PROBING));
     let (events, incoming) = mpsc::channel();
+    renderer.set_repaint_notifier({
+        let events = events.clone();
+        Box::new(move || {
+            let _ = events.send(MainEvent::Repaint);
+        })
+    });
     let mut frames = Arc::new(FrameInbox::default());
     let mut kitty_images = Arc::new(KittyImageInbox::default());
     spawn_signal_reader(events.clone())?;
@@ -938,6 +946,17 @@ pub(crate) fn run(
                 }
             }
             MainEvent::Signal => break Ok(TuiExit::Detached(attached_session_name(&model))),
+            // tty_timer_callback's CLIENT_ALLREDRAWFLAGS: the terminal is
+            // reading again after output was dropped, so the screen is redrawn
+            // from the model rather than from what the renderer last painted.
+            MainEvent::Repaint => {
+                if renderer.take_repaint_request() {
+                    renderer.invalidate();
+                    renderer
+                        .paint(&model, true)
+                        .map_err(|error| error.to_string())?;
+                }
+            }
         }
         remembered_session = model.attached_session.or(remembered_session);
     };

@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **2/12 verified**. Added scope: **0/1 verified**.
 
-Status counts: unmeasured: 6, different: 5, active: 0, review: 0, blocked: 0, verified: 2.
+Status counts: unmeasured: 6, different: 4, active: 1, review: 0, blocked: 0, verified: 2.
 
 Dependency-ready obligations, by priority: TUI-003, TUI-004, TUI-010, TUI-013.
 
@@ -47,7 +47,7 @@ Dependency-ready obligations, by priority: TUI-003, TUI-004, TUI-010, TUI-013.
 | Obligation | Status | Priority | Dependencies |
 | --- | --- | ---: | --- |
 | TUI-009: Outer-terminal capabilities and fidelity | unmeasured | 9 | TUI-002, TUI-003 |
-| TUI-010: Slow output, recovery and client lifecycle | different | 10 | TUI-001, TUI-002 |
+| TUI-010: Slow output, recovery and client lifecycle | active | 10 | TUI-001, TUI-002 |
 | TUI-011: Remaining stock client command inventory | unmeasured | 11 | TUI-003, TUI-006, TUI-007 |
 | TUI-012: Superset commands beside tmux behavior | unmeasured | 12 | TUI-003, TUI-004, TUI-008, TUI-009, TUI-010 |
 
@@ -302,7 +302,7 @@ Next action: Write the capability matrix from the pin and tty setup, starting wi
 
 ### TUI-010: Slow output, recovery and client lifecycle
 
-Status: different.
+Status: active.
 
 Acceptance:
 
@@ -313,16 +313,17 @@ Acceptance:
 Sources:
 
 - `crates/zz-tui/src/writer.rs`
-- `crates/zz-tui/src/tty.rs`
+- `crates/zz-tui/src/render.rs`
 - `crates/zz-tui/src/app.rs`
-- `crates/zz-tui/src/state.rs`
+- `compat/tui-output-backpressure.sh`
+- `compat/tui-output-relay.py`
 - `compat/attached-client.sh`
 
 Tmux gap references: `tui.client-output-queue-budget`, `tui.client-input-backpressure`, `clients.attach-sizing`.
 
-The short-backlog stdin fix is closed. The open queue-budget gap records 4 MiB saturation where zz input waits for drain after prolonged backlog; this campaign has not remeasured it.
+Clauses 1 and 2 are measured and proved; clause 3 is in progress. MEASURED FIRST on this box (alienware, CachyOS, 16 cores, 2026-09-09) with compat/tui-output-backpressure.sh, whose relay is a pty in an outer pinned tmux pane that stops reading on command while keys keep flowing, at 80x24 with the registry's 45 s undrained window and a bound F5. BEFORE, at origin/main bfd05821: pinned tmux d77c9dc6 answered in 0.033 s and grew 0 kB over the window from a 4892 kB baseline, zz did not answer within the 12 s the registry recorded and grew 6144 kB from a 105956 kB baseline. AFTER: zz answers in 0.025 s and grows 6572 kB. Memory was bounded on both sides before and after, so the 4 MiB budget was never what cost the client its liveness and the budget did not move; what changed is the behaviour past it. crates/zz-tui/src/writer.rs now drops the whole queue the way tty.c tty_block_maybe drains its out buffer, keeps dropping for the pin's 100 ms TTY_BLOCK_INTERVAL, and clears the block on the first interval that dropped less than BLOCK_STOP, keeping the pin's 64:1 START:STOP ratio against a whole-paint queue. Clearing it repaints from the model the way tty_timer_callback sets CLIENT_ALLREDRAWFLAGS and calls tty_invalidate: render.rs throws away its painted state on a drop and app.rs takes a MainEvent::Repaint from the writer's timer. Control bytes a dropped paint carried go back to the front of the next paint, because a mode change is not something a repaint reproduces. The declared response deadline is 1.000 s, twenty times the 0.050 s the registry recorded for the pin, and the pin runs as a side of the fixture so every run proves the deadline is achievable here. Clause 2: after the relay resumes, the recovered screen is identical to the pin cell for cell above the status row with the same cursor tuple, and after a detach taken while undrained zz wrote 40 bytes and zero escape bytes after leaving the alternate screen. RECORDED, not asserted: the cursor shape/blink/colour divergence (canvas lane owns it); the status row's explicit default foreground, which is byte for byte the same before this change and after it; and that the pin's client never leaves an alternate screen at all, so its escape tail has no restoration point to be after. tui.client-output-queue-budget is closed on this proof.
 
-Next action: Reuse the registered prolonged-backpressure reproduction and record current reference/zz behavior before choosing an output recovery change.
+Next action: Clause 3: different-sized simultaneous clients, read-only input refusal with a live screen, detach/reattach and transport recovery in compat/attached-client.sh.
 
 ### TUI-011: Remaining stock client command inventory
 

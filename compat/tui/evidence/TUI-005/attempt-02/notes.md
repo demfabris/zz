@@ -2,8 +2,10 @@
 
 Pane copy mode and search, cycle 5, copy lane. This attempt closes the divergences
 attempt-01 measured. The adversarial review of b050b375 rejected it on one blocker:
-the search did not outlive the copy mode. The fix pass is 221484cd, and every run
-in this directory ran there unless its section says otherwise.
+the search did not outlive the copy mode. The fix pass is 221484cd. b8eecde3 then
+makes the fixture settle on the cursor tuple too (see the cursor settle race below).
+The four copy-mode runs ran at b8eecde3; every other run in this directory ran at
+221484cd, whose crates, binary and other fixtures b8eecde3 does not change.
 
 ## What changed
 
@@ -61,7 +63,7 @@ Fix pass (221484cd), the review's blocker and must-fix 1:
 - `environment.txt`: both binary sha256s, the revision (221484cd, clean tree), the
   pin, the OS line, TERM, shell, bash, outer size and locale.
 
-### The fixture at 221484cd
+### The fixture at b8eecde3
 
 - `copy-mode-tip-1.txt`, `copy-mode-tip-2.txt`, `copy-mode-tip-3.txt`: three corpus
   runs, exit 0 each, run concurrently. All 115 cases agree on every channel they
@@ -113,6 +115,18 @@ Fix pass (221484cd), the review's blocker and must-fix 1:
 - `proofs-at-tip.txt`: every command above with its exit code and revision.
 
 ### Earlier revisions, kept for history
+
+- `copy-mode-cursor-settle-race-at-63acab72.txt`: one of four concurrent fixture runs
+  at 63acab72, run beside a cargo test and clippy chain. It exited 1 on
+  `emacs-prefix-takes-precedence` in the cursor channel alone: zz's outer cursor at
+  2,23 against the pin's 9,22, with the rows, glyphs, logical position, view and
+  buffer identical. 2,23 is where a repaint's last cell write leaves the cursor
+  (the copy view's bottom row is the `$ ` prompt), and arming the prefix makes the
+  raw TUI repaint identical cells. crates/zz-tui render.rs places the cursor from
+  the pane viewport and does not read the armed prefix. So two identical plain
+  captures straddled a frame the outer tmux read in two chunks. b8eecde3 makes
+  `wait_settled` require the screen and the cursor tuple to hold still between two
+  polls; the three corpus runs and the self-check at b8eecde3 are green.
 
 - `copy-mode-settle-race-before-the-fix.txt`: a corpus run at 3ced0ea6. It reported
   `emacs-rectangle-past-end-of-line` with zz's copy cursor at column 5 against the

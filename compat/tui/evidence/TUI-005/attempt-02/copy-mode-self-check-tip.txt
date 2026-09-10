@@ -84,10 +84,10 @@ ok    self-check facts: C-b as page-up on the zz side, as the prefix on the pin 
       case one-sided-mode-formats
       first differing row 0 of 24
         tmux: line-39 filler-39
-        zz:   $ cat /tmp/zzcm.0Vecno/lines.txt
+        zz:   $ cat /tmp/zzcm.CGUvWO/lines.txt
       first differing glyph row 0 of 24
         tmux text: line-39 filler-39
-        zz text:   $ cat /tmp/zzcm.0Vecno/lines.txt
+        zz text:   $ cat /tmp/zzcm.CGUvWO/lines.txt
       cursor tmux: 2,23 flag=1 pane=80x24
       cursor zz:   8,12 flag=1 pane=80x24
       facts tmux: mode=copy-mode in=1 column=2 selection=0 line=[$]
@@ -131,10 +131,10 @@ ok    self-check facts: n on a fresh entry on the pin side only
       case reentry-direction
       first differing row 0 of 24
         tmux: line-39 filler-39
-        zz:   $ cat /tmp/zzcm.0Vecno/lines.txt
+        zz:   $ cat /tmp/zzcm.CGUvWO/lines.txt
       first differing glyph row 0 of 24
         tmux text: line-39 filler-39
-        zz text:   $ cat /tmp/zzcm.0Vecno/lines.txt
+        zz text:   $ cat /tmp/zzcm.CGUvWO/lines.txt
       cursor tmux: 8,9 flag=1 pane=80x24
       cursor zz:   8,12 flag=1 pane=80x24
       facts tmux: mode=copy-mode in=1 column=8 selection=0 line=[line-48 needle-48]

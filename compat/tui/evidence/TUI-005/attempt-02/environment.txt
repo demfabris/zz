@@ -1,7 +1,7 @@
-captured: 2026-09-10T19:52:06-03:00
-zz revision: 221484cd1c6d28b97fba853bff400210e3288c0c (branch campaign/tui-copy-close), base origin/main 3319cebab5d53d854199ae5e6c00d64b99c91e97
-worktree clean: yes
-zz binary: /home/demfabris/dev/zz-tui-copy/target/debug/zz, built by cargo build -p zz --jobs 3 at that revision
+captured: 2026-09-10T20:33:19-03:00
+zz revision: b8eecde3b0670bc88e066ee7d2e5e43395573f50 (branch campaign/tui-copy-close), base origin/main 3319cebab5d53d854199ae5e6c00d64b99c91e97
+worktree clean: yes (before this directory was refreshed)
+zz binary: /home/demfabris/dev/zz-tui-copy/target/debug/zz, built by cargo build -p zz --jobs 3 at 221484cd; b8eecde3 and 63acab72 change no crate file
 zz sha256: 301f0fe7b938dcb7fb064a55bd0d421ccdb1e31e16723d9d48069ec56d576d4e (debug build, not bit-reproducible on this box; attestation is the revision plus the clean tree)
 pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
 pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5

@@ -1,0 +1,14 @@
+server death, measured 2026-09-09T23:07:35-03:00
+--- tmux: server pid 761286 ---
+attached before: /dev/pts/4 
+elapsed: 0.0 s of a 30 s window
+last rows after the server died: $ [server exited unexpectedly]|                              CLIENT-EXIT-1|[probe] 0:sh*                                        "alienware" 23:07 09-set-26|
+outer pane dead: 0
+--- zz: server pid 761237 ---
+attached before: /dev/pts/3 
+elapsed: 0.1 s of a 30 s window
+last rows after the server died: ack retained)|[server exited unexpectedly]|CLIENT-EXIT-1|
+outer pane dead: 0
+zz socket still present: yes
+daemon processes on that socket: 
+client answers a command: no server running on /tmp/zztr-TRKheX.sock|

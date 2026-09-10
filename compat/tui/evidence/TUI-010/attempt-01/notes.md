@@ -47,12 +47,22 @@ pin's own column in the same run.
 - `07-tui-screen-diff.txt` — `compat/tui-screen-diff.sh`, exit 0, all 33
   asserted checkpoints identical: the drop path did not move the screen.
 - `08-tui-pane-geometry.txt` — `compat/tui-pane-geometry.sh`, exit 0.
-- `09-attached-client.txt` — `compat/attached-client.sh`, exit 0, with the
-  lifecycle cases this obligation adds.
-- `10-attached-client-sabotage-*.txt` — one deliberately broken expectation per
-  added lifecycle case, each caught by the case that owns it.
-- `11-zz-tui-tests.txt`, `12-clippy.txt`, `13-zz-integration.txt` — the crate
-  tests, the lint and the `zz` integration tests at the tip.
+- `09-attached-client.txt` — `compat/attached-client.sh`, exit 0, with the three
+  lifecycle cases this obligation adds. `--lifecycle` runs those three alone.
+- `10-attached-client-sabotage-sizes.txt` — window-size pinned to `smallest`
+  before the default-rule case: the fixture goes red at
+  `latest simultaneous sizing follows the second client ... last output: 70x20`,
+  so the case really does tell `latest` from `smallest`.
+- `10-attached-client-sabotage-readonly.txt` — the second client attached
+  WITHOUT `-r`: red at `pane unexpectedly contained ATTACHED_READONLY_TYPED`,
+  so the input refusal is asserted and not assumed.
+- `10-attached-client-sabotage-reattach.txt` — the client comes back looking at
+  a pane it was not on: red at `reattach selected target after cycle 0 ... last
+  output: attached:0.1`.
+- `11-transport-recovery.txt` — the server killed under both clients.
+- `12-zz-tui-zz-terminal-tests.txt`, `13-clippy-zz-tui.txt`,
+  `14-zz-integration-tests.txt` — the crate tests, the lint and the `zz`
+  integration tests at the tip.
 
 ## What the change is
 
@@ -76,6 +86,50 @@ One thing the pin gets wrong and this does not: bytes the pin drops while
 blocked include mode changes, which no repaint reproduces. `flush_output` keeps
 the control bytes a dropped paint carried and puts them back at the front of the
 next one, so a kitty transmission or a mouse-mode change survives a block.
+
+## Clause 3, and one premise it corrected
+
+The brief said the pin sizes a window to the smallest of its attached clients.
+It does not, by default: `options-table.c` gives `window-size` the default
+`WINDOW_SIZE_LATEST`, so an untouched window follows the most recently used
+client and `smallest` is one of four rules you have to ask for. The probe uses
+90x20 and 70x30 on purpose, crossed, so `smallest` is 70x20 and `largest` is
+90x30 and neither answer is a client that exists: a rule that just picked one of
+the two clients would pass a probe with 90x30 and 70x20 and fail this one.
+Measured on both binaries and identical on both, under every rule.
+
+Read-only is asserted in all four parts the pin's own contract has (`tmux.1`:
+"only keys bound to the detach-client or switch-client commands have any
+effect"): typed text never reaches the pane, a bound `run-shell` never runs, a
+bound `switch-client` does, and the screen keeps up with the session. Two things
+that run had to teach it:
+
+- The live-screen check has to come BEFORE any refused key. A refusal puts
+  `Client is read-only` on the message line, and `status.c status_message_set`
+  sets `TTY_FREEZE` on that client's terminal for the whole of `display-time`,
+  which earlier probes in this file leave at 20 seconds. With the order
+  reversed the check waits for a marker the pin is deliberately not painting.
+- Driving the pane with `send-keys` has to name the read-write client with
+  `-c`. `cmd-send-keys.c` refuses when the client it resolved is read-only, and
+  with a read-only client attached the one `cmd_find` picks for a command-line
+  caller can be that one.
+
+Neither is a divergence; both are the pin being precise, and both would have
+been a flaky fixture rather than a finding if the first green run had been
+trusted.
+
+Transport recovery is two things here. The one the cycle asserts is a detach the
+server starts rather than the client, `detach-client` against the tty, which is
+the transport closing under a client that did not ask for it: the reattach
+cycles alternate that with a client-key detach and assert the same four facts
+after each. The one that is measured and recorded is the server dying:
+`11-transport-recovery.txt` kills it under both clients and both print
+`[server exited unexpectedly]` and exit 1, the pin within 0.05 s and zz within
+0.1 s. Repeating that measurement needs one thing said out loud: the zz daemon
+forks, so the process that gets started is a launcher and the daemon that owns
+the socket is its child. Kill the launcher and nothing happens, which is what
+the first attempt at this measurement did before the pid was taken from the
+command line that names the socket.
 
 ## Recorded, not asserted
 

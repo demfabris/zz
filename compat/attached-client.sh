@@ -3,13 +3,17 @@ set -eEuo pipefail
 set +B
 
 usage() {
-  printf 'usage: compat/attached-client.sh [--command-output] [ZZ_BIN [TMUX_BIN]]\n' >&2
+  printf 'usage: compat/attached-client.sh [--command-output|--lifecycle] [ZZ_BIN [TMUX_BIN]]\n' >&2
   printf '       ZZ_BIN=path TMUX_BIN=path compat/attached-client.sh\n' >&2
 }
 
 COMMAND_OUTPUT_ONLY=0
+LIFECYCLE_ONLY=0
 if [ "${1:-}" = --command-output ]; then
   COMMAND_OUTPUT_ONLY=1
+  shift
+elif [ "${1:-}" = --lifecycle ]; then
+  LIFECYCLE_ONLY=1
   shift
 fi
 
@@ -349,19 +353,20 @@ write_attach() {
   local destination="$2"
   local session="${3:-$INNER_SESSION}"
   local selected="${4:-root-client}"
+  local extra="${5:-}"
 
   printf '#!/usr/bin/env bash\n' >"$destination"
   printf 'cd -- %q\n' "$COMMAND_CWD" >>"$destination"
   if [ "$side" = "zz" ]; then
-    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL %q=%q %q= %q=%q %q=%q HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -c %q -t %q\n' \
+    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL %q=%q %q= %q=%q %q=%q HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session %s-c %q -t %q\n' \
       "$ENV_SELECTED" "$selected" "$ENV_EMPTY" "$ENV_GLOB_A" root-glob \
       "$ENV_HIDDEN" root-hidden "$ZZ_HOME" "$ZZ_CONFIG_HOME" "$ZZ_BIN" \
-      "$ZZ_SOCKET" "$SESSION_CWD" "=$session" >>"$destination"
+      "$ZZ_SOCKET" "${extra:+$extra }" "$SESSION_CWD" "=$session" >>"$destination"
   else
-    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL %q=%q %q= %q=%q %q=%q HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -c %q -t %q\n' \
+    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL %q=%q %q= %q=%q %q=%q HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session %s-c %q -t %q\n' \
       "$ENV_SELECTED" "$selected" "$ENV_EMPTY" "$ENV_GLOB_A" root-glob \
       "$ENV_HIDDEN" root-hidden "$TMUX_HOME" "$TMUX_CONFIG_HOME" "$TMUX_BIN" \
-      "$INNER_SOCKET_NAME" "$SESSION_CWD" "=$session" >>"$destination"
+      "$INNER_SOCKET_NAME" "${extra:+$extra }" "$SESSION_CWD" "=$session" >>"$destination"
   fi
   chmod +x "$destination"
 }
@@ -3390,6 +3395,385 @@ probe_attached_client_sizing() {
   wait_for_client_state "$side" root
 }
 
+# --- TUI-010 clause 3: client lifecycle -------------------------------------
+#
+# Three things this file did not look at before: what two clients of DIFFERENT
+# sizes do to a window under each window-size rule, what a read-only client is
+# actually allowed to do, and whether a detach and reattach puts the client back
+# where it was. Every case here asserts the same literal on both binaries, so
+# the assertion is the comparison.
+
+outer_window_target() {
+  printf '=%s:%s\n' "$OUTER_SESSION" "$1"
+}
+
+wait_for_outer_window_marker() {
+  local target="$1"
+  local marker="$2"
+  local attempt
+  local screen
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    screen="$(tmux_outer_command capture-pane -p -S - -t "$target" 2>/dev/null || true)"
+    if grep -Fq -- "$marker" <<<"$screen"; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  printf '%s screen at the moment of the failure:\n' "$target" >&2
+  tmux_outer_command capture-pane -p -S - -t "$target" >&2 2>/dev/null || printf '<unavailable>\n' >&2
+  printf 'outer windows:\n' >&2
+  tmux_outer_command list-windows -t "=$OUTER_SESSION" \
+    -F '  #{window_index} #{window_name} #{pane_width}x#{pane_height} dead=#{pane_dead} tty=#{pane_tty}' >&2 2>/dev/null || true
+  printf 'inner windows:\n' >&2
+  zz_command list-windows -a -F '  zz #{session_name}:#{window_index} #{window_width}x#{window_height} size=#{window_size}' >&2 2>/dev/null || true
+  tmux_inner_command list-windows -a -F '  tmux #{session_name}:#{window_index} #{window_width}x#{window_height} size=#{window_size}' >&2 2>/dev/null || true
+  printf 'zz clients:\n' >&2
+  zz_command list-clients -F '  #{client_tty}|#{client_session}|#{client_flags}' >&2 2>/dev/null || true
+  printf 'tmux clients:\n' >&2
+  tmux_inner_command list-clients -F '  #{client_tty}|#{client_session}|#{client_flags}' >&2 2>/dev/null || true
+  fixture_failure "outer window $target did not show $marker within 10 seconds"
+}
+
+# #{client_readonly} is the one read-only fact both binaries answer for a named
+# tty. The flags string differs - the pin's -r implies ignore-size and zz's does
+# not - and that divergence already has a home in probe_requested_client_flags,
+# so it is not re-litigated here.
+wait_for_tty_client_readonly() {
+  local side="$1"
+  local client_tty="$2"
+  local expected="$3"
+  local attempt
+  local actual=""
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    actual="$(side_command "$side" list-clients -F '#{client_tty}|#{client_readonly}' 2>/dev/null |
+      awk -F '|' -v tty="$client_tty" '$1 == tty { print $2 }' || true)"
+    if [ "$actual" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side client $client_tty read-only flag did not become $expected within 10 seconds; last: ${actual:-<empty>}"
+}
+
+wait_for_existing_path() {
+  local side="$1"
+  local path="$2"
+  local label="$3"
+  local attempt
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    if [ -e "$path" ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side $label did not run within 10 seconds"
+}
+
+tty_client_session() {
+  local side="$1"
+  local client_tty="$2"
+
+  side_command "$side" list-clients -F '#{client_tty}|#{client_session}' 2>/dev/null |
+    awk -F '|' -v tty="$client_tty" '$1 == tty { print $2 }'
+}
+
+wait_for_tty_client_session() {
+  local side="$1"
+  local client_tty="$2"
+  local expected="$3"
+  local attempt
+  local actual=""
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    actual="$(tty_client_session "$side" "$client_tty" || true)"
+    if [ "$actual" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side client $client_tty did not reach session $expected within 10 seconds; last: ${actual:-<empty>}"
+}
+
+inner_window_count() {
+  side_command "$1" list-windows -t "=$INNER_SESSION" -F '#{window_id}' 2>/dev/null |
+    grep -c . || true
+}
+
+# Earlier probes in this file leave the session on whichever window they were
+# using, and every case below is about what a client is LOOKING AT, so each one
+# starts by naming the window and the pane rather than inheriting them.
+select_lifecycle_view() {
+  local side="$1"
+
+  side_command "$side" select-window -t "$INNER_WINDOW_TARGET" ||
+    fixture_failure "$side could not select its lifecycle window"
+  side_command "$side" select-pane -t "$INNER_PANE_TARGET" ||
+    fixture_failure "$side could not select its lifecycle pane"
+  wait_for_side_output "$side" "$INNER_SESSION:0.0" "lifecycle view" \
+    display-message -p '#{session_name}:#{window_index}.#{pane_index}'
+}
+
+# Two clients, neither of them the same size, and the window under each rule
+# the pin has. MEASURED against tmux d77c9dc6's own options-table.c: window-size
+# defaults to WINDOW_SIZE_LATEST, not smallest, so the untouched default follows
+# the most recently used client and only an explicit `smallest` takes the
+# componentwise minimum. The sizes are deliberately crossed - 90x20 and 70x30 -
+# so smallest is 70x20 and largest is 90x30 and neither answer is a client that
+# exists: a rule that just picked one client would fail here.
+probe_simultaneous_client_sizes() {
+  local side="$1"
+  local second_window="sizes-$side-second"
+  local second_target
+  local second_attach="$SCRATCH_DIR/attach-$second_window"
+  local primary_target="=$OUTER_SESSION:$side"
+
+  second_target="$(outer_window_target "$second_window")"
+  respawn_attached_client "$side"
+  select_lifecycle_view "$side"
+  side_command "$side" set-option -t "=$INNER_SESSION:" status off ||
+    fixture_failure "$side could not disable status for simultaneous sizing"
+
+  tmux_outer_command resize-window -t "$primary_target" -x 90 -y 20 ||
+    fixture_failure "$side could not size its primary simultaneous client"
+  wait_for_outer_pane_size "$primary_target" 90x20
+  wait_for_session_client_sizes "$side" "$INNER_SESSION" 90x20
+
+  write_attach "$side" "$second_attach"
+  tmux_outer_command new-window -d -t "$OUTER_SESSION:" -n "$second_window" 'sleep 600' ||
+    fixture_failure "$side could not create its second simultaneous window"
+  tmux_outer_command resize-window -t "$second_target" -x 70 -y 30 ||
+    fixture_failure "$side could not size its second simultaneous client"
+  wait_for_outer_pane_size "$second_target" 70x30
+  tmux_outer_command respawn-pane -k -t "$second_target" "$second_attach" ||
+    fixture_failure "$side could not attach its second simultaneous client"
+  wait_for_session_client_sizes "$side" "$INNER_SESSION" $'70x30\n90x20'
+
+  # The default rule, untouched on both sides: the window follows whichever
+  # client was used last, and a key press is what makes a client the last one.
+  # server-client.c updates w->latest at the `out:` label of every key it
+  # handles, so the key does not have to be bound to anything; Escape is used
+  # precisely because it is bound to nothing and leaves the key table at root.
+  tmux_outer_command send-keys -t "$second_target" Escape ||
+    fixture_failure "$side could not make its second client the latest"
+  wait_for_side_output "$side" 70x30 "latest simultaneous sizing follows the second client" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+  tmux_outer_command send-keys -t "$primary_target" Escape ||
+    fixture_failure "$side could not make its primary client the latest"
+  wait_for_side_output "$side" 90x20 "latest simultaneous sizing follows the primary client" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+
+  side_command "$side" set-window-option -t "$INNER_WINDOW_TARGET" window-size smallest ||
+    fixture_failure "$side could not select smallest simultaneous sizing"
+  wait_for_side_output "$side" 70x20 "smallest simultaneous sizing" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+  side_command "$side" set-window-option -t "$INNER_WINDOW_TARGET" window-size largest ||
+    fixture_failure "$side could not select largest simultaneous sizing"
+  wait_for_side_output "$side" 90x30 "largest simultaneous sizing" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+
+  # Both clients keep their own geometry whatever the window does, and the pane
+  # each of them is looking at is the window's, not their own.
+  side_command "$side" set-window-option -t "$INNER_WINDOW_TARGET" window-size smallest ||
+    fixture_failure "$side could not reselect smallest simultaneous sizing"
+  wait_for_session_client_sizes "$side" "$INNER_SESSION" $'70x30\n90x20'
+  wait_for_side_output "$side" 70x20 "pane geometry under smallest simultaneous sizing" \
+    display-message -p -t "$INNER_PANE_TARGET" '#{pane_width}x#{pane_height}'
+
+  side_command "$side" set-window-option -u -t "$INNER_WINDOW_TARGET" window-size ||
+    fixture_failure "$side could not restore inherited window-size"
+  tmux_outer_command kill-window -t "$second_target" ||
+    fixture_failure "$side could not remove its second simultaneous window"
+  wait_for_attached_client_count "$side" 1
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status ||
+    fixture_failure "$side could not restore inherited status after simultaneous sizing"
+  tmux_outer_command resize-window -t "$primary_target" -x 80 -y 24 ||
+    fixture_failure "$side could not restore its primary outer window size"
+  wait_for_outer_pane_size "$primary_target" 80x24
+  wait_for_session_client_sizes "$side" "$INNER_SESSION" 80x24
+  wait_for_client_state "$side" root
+}
+
+# The pin's read-only contract is exact and worth asserting in all four of its
+# parts. tmux.1: "When a client is read-only, only keys bound to the
+# detach-client or switch-client commands have any effect", and server-client.c
+# gates the pane key at the CLIENT_READONLY check before window_pane_key and the
+# command at the CMD_READONLY check before cmdq_get_command. So: typing never
+# reaches the pane, a binding that runs anything else never runs, a binding to
+# switch-client does run, and the screen stays live throughout.
+#
+# NOTHING HERE IS SLEPT FOR. The refusals are proved in order: the read-only
+# client's input is sent first, then the read-write client types a witness
+# through the same server, and the absence is only asserted once that witness is
+# on the pane. An absence asserted after a positive that was sent later is an
+# absence with a bound on it.
+probe_read_only_client() {
+  local side="$1"
+  local window="readonly-$side"
+  local target
+  local attach="$SCRATCH_DIR/attach-$window"
+  local typed=ATTACHED_READONLY_TYPED
+  local live=ATTACHED_READONLY_LIVE
+  local mark="$SCRATCH_DIR/readonly-$side.mark"
+  local witness_mark="$SCRATCH_DIR/readonly-witness-$side.mark"
+  local windows_before
+  local windows_after
+  local client_tty
+  local primary_tty
+
+  target="$(outer_window_target "$window")"
+  respawn_attached_client "$side"
+  select_lifecycle_view "$side"
+  primary_tty="$(tmux_outer_command display-message -p -t "=$OUTER_SESSION:$side" '#{pane_tty}')"
+  if [[ "$primary_tty" != /dev/* ]]; then
+    fixture_failure "$side outer pane did not expose its read-write client tty"
+  fi
+  rm -f -- "$mark" "$witness_mark"
+  side_command "$side" bind-key -n F7 run-shell -b "touch $mark" ||
+    fixture_failure "$side could not bind its read-only refusal key"
+  side_command "$side" bind-key -n F9 run-shell -b "touch $witness_mark" ||
+    fixture_failure "$side could not bind its read-only witness key"
+  side_command "$side" bind-key -n F8 switch-client -t "=$CHOOSER_SESSION" ||
+    fixture_failure "$side could not bind its read-only switch key"
+
+  write_attach "$side" "$attach" "$INNER_SESSION" readonly-client -r
+  tmux_outer_command new-window -d -t "$OUTER_SESSION:" -n "$window" "$attach" ||
+    fixture_failure "$side could not start its read-only client"
+  wait_for_attached_client_count "$side" 2
+  client_tty="$(tmux_outer_command display-message -p -t "$target" '#{pane_tty}')"
+  if [[ "$client_tty" != /dev/* ]]; then
+    fixture_failure "$side read-only outer pane did not expose a client tty"
+  fi
+  wait_for_tty_client_readonly "$side" "$client_tty" 1
+  windows_before="$(inner_window_count "$side")"
+
+  # THE LIVE SCREEN IS CHECKED FIRST, BEFORE ANY REFUSED KEY. A refused key
+  # puts "Client is read-only" on the client's message line, and status.c
+  # status_message_set sets TTY_FREEZE on that client's terminal for the whole
+  # of display-time: for the length of the message the pin draws nothing at all
+  # to that client, and earlier probes in this file leave display-time at 20
+  # seconds. Measured 2026-09-09: with the order reversed this check waits for a
+  # marker that the pin is deliberately not painting yet.
+  #
+  # The pane is cleared so the marker lands on the home row. A client whose
+  # terminal is smaller than the window sees the top-left of it, and a
+  # read-only client is the one client here that cannot influence the window's
+  # size, so a marker at the bottom of a tall window would be off its screen.
+  # -c names the read-write client on purpose. cmd-send-keys.c refuses when the
+  # client it resolved is read-only, and with a read-only client attached the
+  # one cmd_find picks for a command-line caller can be that one.
+  side_command "$side" send-keys -c "$primary_tty" -t "$INNER_PANE_TARGET" \
+    "printf '\\033[2J\\033[3J\\033[H%s\\n' $live" Enter ||
+    fixture_failure "$side could not drive its pane for the read-only screen"
+  wait_for_outer_window_marker "$target" "$live"
+
+  tmux_outer_command send-keys -l -t "$target" "$typed" ||
+    fixture_failure "$side could not type into its read-only client"
+  tmux_outer_command send-keys -t "$target" Enter F7 C-b c ||
+    fixture_failure "$side could not send refused keys to its read-only client"
+
+  # The witness is a bound key pressed by the READ-WRITE client, so what is
+  # waited for is a file the server touched and not a cell on a screen: a
+  # read-only client that was wrongly allowed to run C-b c would have moved the
+  # session's current window, and a witness typed into a pane would then be
+  # waited for in the wrong place and the failure would name the wrong thing.
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" F9 ||
+    fixture_failure "$side could not press its read-only witness key"
+  wait_for_existing_path "$side" "$witness_mark" "read-only witness key"
+
+  assert_pane_marker_absent "$side" "$typed"
+  if [ -e "$mark" ]; then
+    fixture_failure "$side ran a bound command for a read-only client"
+  fi
+  windows_after="$(inner_window_count "$side")"
+  if [ "$windows_after" != "$windows_before" ]; then
+    fixture_failure "$side read-only client changed the window count from $windows_before to $windows_after"
+  fi
+
+  tmux_outer_command send-keys -t "$target" F8 ||
+    fixture_failure "$side could not send switch-client to its read-only client"
+  wait_for_tty_client_session "$side" "$client_tty" "$CHOOSER_SESSION"
+  side_command "$side" switch-client -c "$client_tty" -t "=$INNER_SESSION" ||
+    fixture_failure "$side could not switch its read-only client back"
+  wait_for_tty_client_session "$side" "$client_tty" "$INNER_SESSION"
+
+  tmux_outer_command kill-window -t "$target" ||
+    fixture_failure "$side could not remove its read-only window"
+  wait_for_attached_client_count "$side" 1
+  side_command "$side" unbind-key -n F7 ||
+    fixture_failure "$side could not unbind its read-only refusal key"
+  side_command "$side" unbind-key -n F8 ||
+    fixture_failure "$side could not unbind its read-only switch key"
+  side_command "$side" unbind-key -n F9 ||
+    fixture_failure "$side could not unbind its read-only witness key"
+  wait_for_client_state "$side" root
+}
+
+# Puts the client back on the outer pane it already left. respawn_attached_client
+# detaches first and there is nothing to detach here.
+reattach_attached_client() {
+  local side="$1"
+  local attach_script
+
+  if [ "$side" = "zz" ]; then
+    attach_script="$ZZ_ATTACH"
+  else
+    attach_script="$TMUX_ATTACH"
+  fi
+  tmux_outer_command respawn-pane -k -t "=$OUTER_SESSION:$side" "$attach_script" ||
+    fixture_failure "$side could not reattach its client"
+  wait_for_client_state "$side" root
+}
+
+# Detach and reattach, three times, and a detach the SERVER starts rather than
+# the client: detach-client against the tty is the transport being closed under
+# a client that did not ask for it, which is the recovery both binaries support.
+# What has to survive is the selected target, the client's geometry, the focus
+# flag and the screen. The marker on the pane is what the reattached client has
+# to show, and it is on the pane before the first detach, so a client that came
+# back with an empty screen fails here.
+probe_detach_reattach_cycle() {
+  local side="$1"
+  local marker=ATTACHED_REATTACH_MARKER
+  local target="=$OUTER_SESSION:$side"
+  local selected="#{session_name}:#{window_index}.#{pane_index}"
+  local cycle
+  local client_tty
+
+  respawn_attached_client "$side"
+  select_lifecycle_view "$side"
+  side_command "$side" send-keys -t "$INNER_PANE_TARGET" "printf '%s\\n' $marker" Enter ||
+    fixture_failure "$side could not seed its reattach marker"
+  wait_for_pane_marker "$side" "$marker"
+  wait_for_side_output "$side" "$INNER_SESSION:0.0" "reattach selected target" \
+    display-message -p "$selected"
+  wait_for_session_client_sizes "$side" "$INNER_SESSION" 80x24
+
+  for ((cycle = 0; cycle < 3; cycle++)); do
+    if [ $((cycle % 2)) -eq 0 ]; then
+      tmux_outer_command send-keys -t "$target" C-b d ||
+        fixture_failure "$side could not detach its client with the key"
+    else
+      client_tty="$(tmux_outer_command display-message -p -t "$target" '#{pane_tty}')"
+      side_command "$side" detach-client -t "$client_tty" ||
+        fixture_failure "$side could not detach its client from the server"
+    fi
+    wait_for_attached_client_count "$side" 0
+    reattach_attached_client "$side"
+    wait_for_attached_client_count "$side" 1
+    wait_for_side_output "$side" "$INNER_SESSION:0.0" "reattach selected target after cycle $cycle" \
+      display-message -p "$selected"
+    wait_for_session_client_sizes "$side" "$INNER_SESSION" 80x24
+    wait_for_requested_client_state "$side" "$INNER_SESSION|"
+    wait_for_side_output "$side" 1 "reattached client focus after cycle $cycle" \
+      display-message -p '#{?#{m:*focused*,#{client_flags}},1,0}'
+    wait_for_marker "$side" "$marker"
+  done
+  wait_for_client_state "$side" root
+}
+
 probe_detach_client_tty() {
   local side="$1"
   local client_tty
@@ -3450,6 +3834,16 @@ tmux_outer_command new-window -d -t "$OUTER_SESSION" -n tmux "$TMUX_ATTACH" || f
 
 wait_for_client_state zz root
 wait_for_client_state tmux root
+if [ "$LIFECYCLE_ONLY" -eq 1 ]; then
+  probe_simultaneous_client_sizes tmux
+  probe_simultaneous_client_sizes zz
+  probe_read_only_client tmux
+  probe_read_only_client zz
+  probe_detach_reattach_cycle tmux
+  probe_detach_reattach_cycle zz
+  printf 'client lifecycle compatibility: PASS\n'
+  exit 0
+fi
 if [ "$COMMAND_OUTPUT_ONLY" -eq 1 ]; then
   zz_command delete-buffer -b drop
   tmux_inner_command delete-buffer -b drop
@@ -3534,6 +3928,12 @@ probe_client_event_hooks zz
 probe_client_event_hooks tmux
 probe_control_copy_pipe_error_delivery zz
 probe_control_copy_pipe_error_delivery tmux
+probe_simultaneous_client_sizes zz
+probe_simultaneous_client_sizes tmux
+probe_read_only_client zz
+probe_read_only_client tmux
+probe_detach_reattach_cycle zz
+probe_detach_reattach_cycle tmux
 probe_detach_client_tty zz
 probe_detach_client_tty tmux
 

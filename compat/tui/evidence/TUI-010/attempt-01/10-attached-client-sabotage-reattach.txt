@@ -1,0 +1,68 @@
+error: tmux reattach selected target after cycle 0 did not become attached:0.0 within 10 seconds; last output: attached:0.1
+zz screen:
+[2026-09-10T02:59:48Z INFO  zz_browser::cef_runtime] CEF OSR frame-rate ceiling:
+[2026-09-10T02:59:50Z INFO  zz_browser::cef_runtime] CEF OSR frame-rate ceiling:
+ATTACHED_READONLY_LIVE
+[demfabris@alienware client [literal]*? cwd]$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[attached]0:main*                                         "bash" 00:00 10-Sep-26
+tmux screen:
+[detached (from session attached)]
+[detached (from session attached)]
+[detached (from session attached)]
+[detached (from session attached)]
+ATTACHED_READONLY_LIVE
+[demfabris@alienware client [literal]*? cwd]$ printf '%s\n' ATTACHED_REATTACH_MA
+RKER
+ATTACHED_REATTACH_MARKER
+[demfabris@alienware client [literal]*? cwd]$
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+[demfabris@alienware zz-tui-flow]$
+
+
+
+
+
+
+
+
+
+
+[attached]0:main*                        "demfabris@alienware:/" 00:00 10-set-26
+zz daemon stderr:
+    [2026-09-10T02:59:43Z INFO  zz_daemon::diagnostics::appearance] loaded appearance reason=startup root=None scheme=dark supported=0 unsupported=0 invalid=0 diagnostics_dropped=0 bytes=0 hash=17034837676233703649 appearance=TerminalAppearance { color_scheme: Dark, font_families: ["Noto Sans Mono"], font_families_bold: [], font_families_italic: [], font_families_bold_italic: [], font_size_points: 13.0, font_weight: 400, font_features: [], font_synthetic_style: FontSyntheticStyle { bold: true, italic: true, bold_italic: true }, font_thicken: false, font_thicken_strength: 255, cell_height_adjustment: None, padding_left: 10.0, padding_right: 10.0, padding_top: 10.0, padding_bottom: 10.0, foreground: Color { r: 216, g: 222, b: 233 }, background: Color { r: 16, g: 19, b: 24 }, cursor_color: Color { r: 229, g: 192, b: 123 }, cursor_style: Block, selection_foreground: Color { r: 216, g: 222, b: 233 }, selection_background: AppearanceColor { r: 80, g: 125, b: 184, a: 148 }, search_match_color: AppearanceColor { r: 224, g: 171, b: 56, a: 107 }, search_current_color: AppearanceColor { r: 250, g: 194, b: 71, a: 173 }, link_color: Color { r: 77, g: 163, b: 235 }, copy_cursor_color: AppearanceColor { r: 184, g: 199, b: 224, a: 107 }, palette_hash: 2756364480396514756, minimum_contrast: 1.0, cursor_blink_policy: Terminal, cursor_blink_interval_ms: 500, rounded_selection: true, background_opacity: 1.0 }
+    [2026-09-10T02:59:43Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=startup-mux-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-10T02:59:43Z INFO  zz_daemon::daemon] zz daemon listening at /tmp/zza-aaQKw5.sock
+    [2026-09-10T02:59:59Z INFO  zz_daemon::diagnostics::input] key_decision client=c74 key=F7 table=root decision=Commands([CommandInvocation { name: "run-shell", args: ["-b", "touch /tmp/zza.aaQKw5/readonly-zz.mark"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-10T02:59:59Z INFO  zz_daemon::diagnostics::input] key_decision client=c74 key=C-b table=root decision=Prefix
+    [2026-09-10T02:59:59Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c74 armed=true
+    [2026-09-10T02:59:59Z INFO  zz_daemon::diagnostics::input] key_decision client=c74 key=c table=prefix decision=Commands([CommandInvocation { name: "new-window", args: [], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-10T02:59:59Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c74 armed=false
+    [2026-09-10T02:59:59Z INFO  zz_daemon::diagnostics::input] key_decision client=c64 key=F9 table=root decision=Commands([CommandInvocation { name: "run-shell", args: ["-b", "touch /tmp/zza.aaQKw5/readonly-witness-zz.mark"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-10T02:59:59Z INFO  zz_daemon::diagnostics::input] key_decision client=c74 key=F8 table=root decision=Commands([CommandInvocation { name: "switch-client", args: ["-t", "=chooser-target"], source: None, command_blocks: [], expanded_alias_group: false }])

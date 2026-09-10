@@ -7,10 +7,10 @@ use std::{
 use zz_client::ClientCore;
 use zz_daemon::{Endpoint, HostEntry};
 use zz_protocol::{
-    ChooseBufferState, ChooseTreeState, CommandPromptState, ConfirmState, DisplayPanesState,
-    InputMessage, MenuState, MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus,
-    PaneId, PaneKindSnapshot, PaneSnapshot, PopupState, SessionId, SessionSnapshot, StatusLine,
-    StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
+    ChooseBufferState, ChooseTreeState, ChooserPresentation, CommandPromptState, ConfirmState,
+    DisplayPanesState, InputMessage, MenuState, MuxSnapshot, PaneBorderIndicators, PaneBorderLines,
+    PaneBorderStatus, PaneId, PaneKindSnapshot, PaneSnapshot, PopupState, SessionId,
+    SessionSnapshot, StatusLine, StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
 };
 use zz_terminal::{KeyCode, SearchQuery, TerminalAppearance, TerminalViewport};
 
@@ -103,6 +103,7 @@ pub(crate) struct Model {
     pub command_output_swallowed_key: Option<KeyCode>,
     pub choose_tree: Option<ChooseTreeState>,
     pub choose_buffer: Option<ChooseBufferState>,
+    pub chooser_presentation: Option<ChooserPresentation>,
     pub display_panes: Option<DisplayPanesState>,
     pub popup: Option<PopupState>,
     pub popup_keys_down: Vec<(PaneId, KeyCode)>,
@@ -166,6 +167,7 @@ impl Model {
             command_output_swallowed_key: None,
             choose_tree: core.choose_tree().cloned(),
             choose_buffer: core.choose_buffer().cloned(),
+            chooser_presentation: core.chooser_presentation().cloned(),
             display_panes: core.display_panes().cloned(),
             popup: core.popup().cloned(),
             popup_keys_down: Vec::new(),
@@ -216,6 +218,7 @@ impl Model {
         self.command_output_swallowed_key = None;
         self.choose_tree = core.choose_tree().cloned();
         self.choose_buffer = core.choose_buffer().cloned();
+        self.chooser_presentation = core.chooser_presentation().cloned();
         self.display_panes = core.display_panes().cloned();
         self.popup = core.popup().cloned();
         self.popup_keys_down.clear();

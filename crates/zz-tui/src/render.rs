@@ -29,6 +29,8 @@ use crate::{
     writer::{Sink, Submission, TerminalWriter, Wake},
 };
 
+mod chooser;
+
 pub(crate) use zz_client::ViewportDamage as FrameDamage;
 
 /// Folds a coalesced frame's damage into the damage already pending for a pane.
@@ -227,6 +229,7 @@ pub(crate) struct Renderer {
         Vec<zz_protocol::PaneBorderPresentation>,
         zz_protocol::ThemeColours,
     )>,
+    mode_tree: chooser::ModeTree,
     kitty: KittyBridge,
     writer: TerminalWriter,
     control_replay: Vec<u8>,
@@ -260,6 +263,7 @@ impl Renderer {
             browser_painted: HashMap::new(),
             last_title: String::new(),
             border_chrome: None,
+            mode_tree: chooser::ModeTree::default(),
             kitty: KittyBridge::default(),
             writer: TerminalWriter::spawn(sink),
             control_replay: Vec::new(),
@@ -391,10 +395,23 @@ impl Renderer {
         }
 
         if model.choose_tree.is_some() || model.choose_buffer.is_some() {
-            self.paint_chooser(model);
-            self.emit_queued_control();
-            self.kitty.suspend(&mut self.output);
-            self.hide_cursor();
+            match self.paint_mode_tree(model) {
+                chooser::ModeTreePaint::Painted(cursor) => {
+                    self.emit_queued_control();
+                    self.kitty.suspend(&mut self.output);
+                    self.place_mode_tree_cursor(Some(cursor));
+                }
+                chooser::ModeTreePaint::Pending => {
+                    self.emit_queued_control();
+                    self.restore_mode_tree_cursor_now();
+                }
+                chooser::ModeTreePaint::Unavailable => {
+                    self.paint_chooser(model);
+                    self.emit_queued_control();
+                    self.kitty.suspend(&mut self.output);
+                    self.hide_cursor();
+                }
+            }
         } else {
             self.paint_workspace(model, force);
             if model.sidebar_visible() {
@@ -473,7 +490,7 @@ impl Renderer {
             } else if model.confirm.is_some() {
                 self.place_confirm_cursor(model);
             } else {
-                self.hide_cursor();
+                self.restore_mode_tree_cursor(model);
             }
         }
         self.output.extend_from_slice(b"\x1b[?2026l");

@@ -1,0 +1,308 @@
+copy mode and search through the client stdin at 80x24 (pin tmux)
+ok    emacs-enter
+ok    emacs-cursor-up
+ok    emacs-cursor-down
+ok    emacs-count-five-up
+ok    emacs-end-of-line
+ok    emacs-start-of-line
+ok    emacs-scroll-start
+      case emacs-halfpage-up
+      first differing row 0 of 24
+        tmux: line-27 filler-27
+        zz:   line-39 filler-39
+      first differing glyph row 0 of 24
+        tmux text: line-27 filler-27
+        zz text:   line-39 filler-39
+      cursor tmux: 17,21 flag=1 pane=80x24
+      cursor zz:   17,9 flag=1 pane=80x24
+      view tmux:  row=21 scroll=12
+      view zz:    row=9 scroll=0
+note  emacs-halfpage-up asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
+ok    emacs-halfpage-down
+ok    emacs-page-start
+note  emacs-page-start zz position: mode=copy-mode in=1 column=17 selection=0 line=[line-60 filler-60] / row=21 scroll=0
+note  emacs-page-start tmux position: mode=copy-mode in=1 column=17 selection=0 line=[line-60 filler-60] / row=21 scroll=0
+      case emacs-page-up
+      first differing row 0 of 24
+        tmux: line-17 filler-17
+        zz:   line-36 filler-36
+      first differing glyph row 0 of 24
+        tmux text: line-17 filler-17
+        zz text:   line-36 filler-36
+      cursor tmux: 17,21 flag=1 pane=80x24
+      cursor zz:   17,0 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=17 selection=0 line=[line-38 filler-38]
+      facts zz:   mode=copy-mode in=1 column=17 selection=0 line=[line-36 filler-36]
+      view tmux:  row=21 scroll=22
+      view zz:    row=0 scroll=3
+note  emacs-page-up asserts no channel, recorded in full: the pin steps screen_size_y-2 = 22 lines and keeps the cursor row, zz steps screen_size_y = 24 and moves the cursor row: a different line AND a different view
+note  emacs-page-up zz position: mode=copy-mode in=1 column=17 selection=0 line=[line-36 filler-36] / row=0 scroll=3
+note  emacs-page-up tmux position: mode=copy-mode in=1 column=17 selection=0 line=[line-38 filler-38] / row=21 scroll=22
+      case emacs-page-down
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-37 filler-37
+      first differing glyph row 0 of 24
+        tmux text: line-39 filler-39
+        zz text:   line-37 filler-37
+      cursor tmux: 17,21 flag=1 pane=80x24
+      cursor zz:   17,23 flag=1 pane=80x24
+      view tmux:  row=21 scroll=0
+      view zz:    row=23 scroll=2
+note  emacs-page-down asserts no channel, recorded in full: the pin steps screen_size_y-2 = 22 lines and keeps the cursor row, zz steps screen_size_y = 24 and moves the cursor row: a different line AND a different view
+note  emacs-page-down zz position: mode=copy-mode in=1 column=17 selection=0 line=[line-60 filler-60] / row=23 scroll=2
+note  emacs-page-down tmux position: mode=copy-mode in=1 column=17 selection=0 line=[line-60 filler-60] / row=21 scroll=0
+ok    emacs-selection-start
+ok    emacs-begin-selection
+ok    emacs-selection-extends
+note  emacs-selection-extends zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  emacs-selection-extends tmux formats: selection_active=[1] rectangle_toggle=[0] pane_search_string=[]
+ok    emacs-rectangle-on
+note  emacs-rectangle-on zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  emacs-rectangle-on tmux formats: selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    emacs-rectangle-off
+ok    emacs-copy-and-cancel
+ok    emacs-rectangle-inside-line
+note  emacs-rectangle-inside-line zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  emacs-rectangle-inside-line tmux formats: selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    emacs-rectangle-inside-line-copy
+ok    emacs-rectangle-past-end-of-line
+note  emacs-rectangle-past-end-of-line zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  emacs-rectangle-past-end-of-line tmux formats: selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    emacs-rectangle-past-end-of-line-copy
+ok    emacs-reenter
+ok    emacs-cancel
+ok    emacs-terminal-input-returns
+      case emacs-prefix-takes-precedence
+      cursor tmux: 9,22 flag=1 pane=80x24
+      cursor zz:   8,22 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=9 selection=0 line=[BACKALIVE]
+      facts zz:   mode=copy-mode in=1 column=8 selection=0 line=[BACKALIVE]
+note  emacs-prefix-takes-precedence asserted buffer, the rest recorded: the pin gives the prefix precedence over a copy-table binding of the same key; zz runs the copy binding
+ok    vi-enter
+ok    vi-cursor-up
+ok    vi-cursor-down
+ok    vi-count-five-up
+ok    vi-end-of-line
+ok    vi-start-of-line
+ok    vi-scroll-start
+      case vi-halfpage-up
+      first differing row 0 of 24
+        tmux: line-27 filler-27
+        zz:   line-39 filler-39
+      first differing glyph row 0 of 24
+        tmux text: line-27 filler-27
+        zz text:   line-39 filler-39
+      cursor tmux: 6,21 flag=1 pane=80x24
+      cursor zz:   6,9 flag=1 pane=80x24
+      view tmux:  row=21 scroll=12
+      view zz:    row=9 scroll=0
+note  vi-halfpage-up asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
+ok    vi-halfpage-down
+ok    vi-page-start
+note  vi-page-start zz position: mode=copy-mode in=1 column=6 selection=0 line=[line-60 filler-60] / row=21 scroll=0
+note  vi-page-start tmux position: mode=copy-mode in=1 column=6 selection=0 line=[line-60 filler-60] / row=21 scroll=0
+      case vi-page-up
+      first differing row 0 of 24
+        tmux: line-17 filler-17
+        zz:   line-36 filler-36
+      first differing glyph row 0 of 24
+        tmux text: line-17 filler-17
+        zz text:   line-36 filler-36
+      cursor tmux: 6,21 flag=1 pane=80x24
+      cursor zz:   6,0 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=6 selection=0 line=[line-38 filler-38]
+      facts zz:   mode=copy-mode in=1 column=6 selection=0 line=[line-36 filler-36]
+      view tmux:  row=21 scroll=22
+      view zz:    row=0 scroll=3
+note  vi-page-up asserts no channel, recorded in full: the pin steps screen_size_y-2 = 22 lines and keeps the cursor row, zz steps screen_size_y = 24 and moves the cursor row: a different line AND a different view
+note  vi-page-up zz position: mode=copy-mode in=1 column=6 selection=0 line=[line-36 filler-36] / row=0 scroll=3
+note  vi-page-up tmux position: mode=copy-mode in=1 column=6 selection=0 line=[line-38 filler-38] / row=21 scroll=22
+      case vi-page-down
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-37 filler-37
+      first differing glyph row 0 of 24
+        tmux text: line-39 filler-39
+        zz text:   line-37 filler-37
+      cursor tmux: 6,21 flag=1 pane=80x24
+      cursor zz:   6,23 flag=1 pane=80x24
+      view tmux:  row=21 scroll=0
+      view zz:    row=23 scroll=2
+note  vi-page-down asserts no channel, recorded in full: the pin steps screen_size_y-2 = 22 lines and keeps the cursor row, zz steps screen_size_y = 24 and moves the cursor row: a different line AND a different view
+note  vi-page-down zz position: mode=copy-mode in=1 column=6 selection=0 line=[line-60 filler-60] / row=23 scroll=2
+note  vi-page-down tmux position: mode=copy-mode in=1 column=6 selection=0 line=[line-60 filler-60] / row=21 scroll=0
+ok    vi-selection-start
+ok    vi-begin-selection
+ok    vi-selection-extends
+note  vi-selection-extends zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  vi-selection-extends tmux formats: selection_active=[1] rectangle_toggle=[0] pane_search_string=[]
+ok    vi-rectangle-on
+note  vi-rectangle-on zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  vi-rectangle-on tmux formats: selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    vi-rectangle-off
+ok    vi-copy-and-cancel
+ok    vi-rectangle-inside-line
+note  vi-rectangle-inside-line zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  vi-rectangle-inside-line tmux formats: selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    vi-rectangle-inside-line-copy
+ok    vi-rectangle-past-end-of-line
+note  vi-rectangle-past-end-of-line zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  vi-rectangle-past-end-of-line tmux formats: selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+      case vi-rectangle-past-end-of-line-copy
+      buffer tmux: 0000000   l   i   n   e   -   5   8       f   i   l   l   e   r   -   5|0000020   8  \n   l   i   n   e   -   5   9       f   i   l   l   e   r|0000040   -   5   9  \n|0000044|
+      buffer zz:   0000000   l   i   n   e   -   5   8       f   i   l   l   e   r   -   5|0000020   8  \n   l   i   n   e   -   5   9       f   i   l   l   e   r|0000040   -   5   9|0000043|
+note  vi-rectangle-past-end-of-line-copy asserted rows,text,cursor,facts,view, the rest recorded: in the vi table the pin keeps the trailing newline of a rectangle whose right edge is past the end of the last selected line (window-copy.c:5737) and zz strips it
+ok    vi-reenter
+ok    vi-cancel
+ok    vi-terminal-input-returns
+      case vi-prefix-takes-precedence
+      first differing row 0 of 24
+        tmux: line-41 filler-41
+        zz:   line-39 filler-39
+      first differing glyph row 0 of 24
+        tmux text: line-41 filler-41
+        zz text:   line-39 filler-39
+      cursor tmux: 8,22 flag=1 pane=80x24
+      cursor zz:   8,0 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=8 selection=0 line=[BACKALIVE]
+      facts zz:   mode=copy-mode in=1 column=8 selection=0 line=[line-39 filler-39]
+      view tmux:  row=22 scroll=0
+      view zz:    row=0 scroll=2
+note  vi-prefix-takes-precedence asserted buffer, the rest recorded: the pin gives the prefix precedence over a copy-table binding of the same key; zz runs the copy binding
+ok    emacs-ordinary-pane-enter
+ok    emacs-ordinary-pane-search-prompt
+ok    emacs-ordinary-pane-search-typed
+      case emacs-ordinary-pane-search-backspace
+      first differing row 0 of 24
+        tmux: $ cat /tmp/zzcm.39O0RW/lines.txt
+        zz:   line-12 ^[[7mneedle^[[0m-12
+      first differing glyph row 0 of 24
+        tmux text: $ cat /tmp/zzcm.39O0RW/lines.txt
+        zz text:   line-12 needle-12
+      view tmux:  row=12 scroll=39
+      view zz:    row=0 scroll=27
+note  emacs-ordinary-pane-search-backspace asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
+      case emacs-ordinary-pane-search-submit
+      first differing row 0 of 24
+        tmux: $ cat /tmp/zzcm.39O0RW/lines.txt
+        zz:   line-12 ^[[7mneedle^[[0m-12
+      first differing glyph row 0 of 24
+        tmux text: $ cat /tmp/zzcm.39O0RW/lines.txt
+        zz text:   line-12 needle-12
+      cursor tmux: 14,12 flag=1 pane=80x24
+      cursor zz:   14,0 flag=1 pane=80x24
+      view tmux:  row=12 scroll=39
+      view zz:    row=0 scroll=27
+note  emacs-ordinary-pane-search-submit asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
+note  emacs-ordinary-pane-search-submit zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  emacs-ordinary-pane-search-submit tmux formats: selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+      case emacs-ordinary-pane-search-again
+      first differing row 0 of 24
+        tmux: line-30 filler-30
+        zz:   line-25 filler-25
+      first differing glyph row 0 of 24
+        tmux text: line-30 filler-30
+        zz text:   line-25 filler-25
+      cursor tmux: 14,18 flag=1 pane=80x24
+      cursor zz:   14,23 flag=1 pane=80x24
+      view tmux:  row=18 scroll=9
+      view zz:    row=23 scroll=14
+note  emacs-ordinary-pane-search-again asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
+      case emacs-ordinary-pane-search-reverse
+      first differing row 0 of 24
+        tmux: line-30 filler-30
+        zz:   line-25 filler-25
+      first differing glyph row 0 of 24
+        tmux text: line-30 filler-30
+        zz text:   line-25 filler-25
+      cursor tmux: 8,18 flag=1 pane=80x24
+      cursor zz:   8,23 flag=1 pane=80x24
+      view tmux:  row=18 scroll=9
+      view zz:    row=23 scroll=14
+note  emacs-ordinary-pane-search-reverse asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
+      case emacs-ordinary-pane-search-backward
+      first differing row 0 of 24
+        tmux: line-12 needle-12
+        zz:   line-30 ^[[7mfiller-30^[[0m
+      first differing glyph row 0 of 24
+        tmux text: line-12 needle-12
+        zz text:   line-30 filler-30
+      cursor tmux: 8,18 flag=1 pane=80x24
+      cursor zz:   8,0 flag=1 pane=80x24
+      view tmux:  row=18 scroll=27
+      view zz:    row=0 scroll=9
+note  emacs-ordinary-pane-search-backward asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
+ok    emacs-ordinary-pane-search-cancel
+note  emacs-ordinary-pane-search-cancel zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  emacs-ordinary-pane-search-cancel tmux formats: selection_active=[] rectangle_toggle=[] pane_search_string=[filler-30]
+ok    vi-ordinary-pane-enter
+ok    vi-ordinary-pane-search-prompt
+ok    vi-ordinary-pane-search-typed
+ok    vi-ordinary-pane-search-backspace
+      case vi-ordinary-pane-search-submit
+      first differing row 0 of 24
+        tmux: $ cat /tmp/zzcm.39O0RW/lines.txt
+        zz:   line-12 ^[[7mneedle^[[0m-12
+      first differing glyph row 0 of 24
+        tmux text: $ cat /tmp/zzcm.39O0RW/lines.txt
+        zz text:   line-12 needle-12
+      cursor tmux: 8,12 flag=1 pane=80x24
+      cursor zz:   8,0 flag=1 pane=80x24
+      view tmux:  row=12 scroll=39
+      view zz:    row=0 scroll=27
+note  vi-ordinary-pane-search-submit asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
+note  vi-ordinary-pane-search-submit zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  vi-ordinary-pane-search-submit tmux formats: selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+      case vi-ordinary-pane-search-again
+      first differing row 0 of 24
+        tmux: line-30 filler-30
+        zz:   line-25 filler-25
+      first differing glyph row 0 of 24
+        tmux text: line-30 filler-30
+        zz text:   line-25 filler-25
+      cursor tmux: 8,18 flag=1 pane=80x24
+      cursor zz:   8,23 flag=1 pane=80x24
+      view tmux:  row=18 scroll=9
+      view zz:    row=23 scroll=14
+note  vi-ordinary-pane-search-again asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
+      case vi-ordinary-pane-search-reverse
+      first differing row 0 of 24
+        tmux: $ cat /tmp/zzcm.39O0RW/lines.txt
+        zz:   line-12 ^[[7mneedle^[[0m-12
+      first differing glyph row 0 of 24
+        tmux text: $ cat /tmp/zzcm.39O0RW/lines.txt
+        zz text:   line-12 needle-12
+      cursor tmux: 8,12 flag=1 pane=80x24
+      cursor zz:   8,0 flag=1 pane=80x24
+      view tmux:  row=12 scroll=39
+      view zz:    row=0 scroll=27
+note  vi-ordinary-pane-search-reverse asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
+      case vi-ordinary-pane-search-backward
+      first differing row 18 of 24
+        tmux: line-30 ^[[38;2;16;16;16m^[[48;2;205;0;205mfiller-30^[[39m^[[49m
+        zz:   line-30 ^[[7mfiller-30^[[0m
+note  vi-ordinary-pane-search-backward asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
+ok    vi-ordinary-pane-search-cancel
+note  vi-ordinary-pane-search-cancel zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  vi-ordinary-pane-search-cancel tmux formats: selection_active=[] rectangle_toggle=[] pane_search_string=[filler-30]
+note  native-search-command zz exit 0: <no output>
+note  native-search-command tmux exit 1: unknown command: copy-mode-search-prompt
+note  native-search-command zz last row: terminal search is unsupported here
+note  native-search-command tmux last row: L0:win*
+ok    live-mode-keys-emacs-entry
+ok    live-mode-keys-emacs-ignores-j
+ok    live-mode-keys-emacs-cancel
+ok    live-mode-keys-vi-entry
+ok    live-mode-keys-vi-moves-on-j
+ok    live-mode-keys-vi-cancel
+ok    live-binding-before-the-bind
+ok    live-binding-unbound-key-does-nothing
+ok    live-binding-runs-without-a-re-entry
+ok    live-binding-cancel
+ok    presentation-live-status-row
+ok    presentation-copy-mode-position
+ok    presentation-cancel
+all 83 cases agree on every channel they assert, 18 recorded a difference elsewhere
+79 of those cases assert at least one channel; 4 assert none and are recorded in full
+exit=0

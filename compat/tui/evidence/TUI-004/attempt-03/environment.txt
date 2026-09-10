@@ -1,0 +1,30 @@
+TUI-004 attempt-03 environment, captured 2026-09-10T17:54:27-03:00
+zz revision: f9bb4e53ae178b78e41796671ad906b7d145aea8 (Give the raw TUI the pin's copy, view and message presentation)
+worktree: /home/demfabris/dev/zz-tui-modes, git status --short outside this evidence directory: clean (the directory itself is the only untracked path while these runs are written)
+zz binary: target/debug/zz built in this worktree at that revision with cargo build -p zz --jobs 3
+zz sha256: 97b6a6e8c810df1c5656fa745597d198aa03c4d71aeaf7bc2e915f186c80dfb2 (a cargo debug build is not bit-reproducible on this box: the hash identifies this artifact; the attestation is the revision plus the clean tree)
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux, tmux next-3.8, commit d77c9dc6aa021e4bc61f0da128c591af695e6466
+pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+OS: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+TERM=xterm-ghostty SHELL=/bin/bash
+bash: GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+cores: 16, memory: 15Gi plus zram swap 15Gi
+outer size under test: 80x24 for tui-indicators.sh and tui-copy-mode.sh; each fixture declares its own
+locale:
+LANG=en_US.UTF-8
+LC_CTYPE="en_US.UTF-8"
+LC_NUMERIC=pt_BR.UTF-8
+LC_TIME=pt_BR.UTF-8
+LC_COLLATE="en_US.UTF-8"
+LC_MONETARY=pt_BR.UTF-8
+LC_MESSAGES="en_US.UTF-8"
+LC_PAPER=pt_BR.UTF-8
+LC_NAME=pt_BR.UTF-8
+LC_ADDRESS=pt_BR.UTF-8
+LC_TELEPHONE=pt_BR.UTF-8
+LC_MEASUREMENT=pt_BR.UTF-8
+LC_IDENTIFICATION=pt_BR.UTF-8
+LC_ALL=
+fixtures ran with PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=<pin> ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins; status-row.sh additionally under LC_ALL=C LC_TIME=C

@@ -1,0 +1,19 @@
+indicator, message and prompt differential at 80x24 (pin tmux)
+ok    baseline
+ok    scrollback
+ok    copy-mode-entered
+ok    copy-mode-restored
+ok    view-surface-shown
+ok    view-surface-restored
+ok    view-long-shown
+ok    view-long-down
+ok    view-long-restored
+ok    prefix-armed
+ok    prefix-released
+ok    message-shown
+ok    message-restored
+ok    prompt-opened
+ok    prompt-typed
+ok    prompt-cancelled
+all 16 asserted comparisons identical, 0 recorded not asserted
+exit=0

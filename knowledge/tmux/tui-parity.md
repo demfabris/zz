@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **5/12 verified**. Added scope: **0/1 verified**.
 
-Status counts: unmeasured: 5, different: 1, active: 2, review: 0, blocked: 0, verified: 5.
+Status counts: unmeasured: 5, different: 0, active: 3, review: 0, blocked: 0, verified: 5.
 
 Dependency-ready obligations, by priority: TUI-004, TUI-009, TUI-013.
 
@@ -38,7 +38,7 @@ Dependency-ready obligations, by priority: TUI-004, TUI-009, TUI-013.
 | Obligation | Status | Priority | Dependencies |
 | --- | --- | ---: | --- |
 | TUI-005: Pane copy mode and search | verified | 5 | TUI-002, TUI-003 |
-| TUI-006: Chooser and command-output presentation | different | 6 | TUI-002, TUI-003, TUI-004 |
+| TUI-006: Chooser and command-output presentation | active | 6 | TUI-002, TUI-003, TUI-004 |
 | TUI-007: Prompts, menus, popups and pane labels | unmeasured | 7 | TUI-002, TUI-003, TUI-004 |
 | TUI-008: Mouse, paste, focus and key ownership | unmeasured | 8 | TUI-003, TUI-005, TUI-007 |
 
@@ -300,7 +300,7 @@ Review: `compat/tui/evidence/TUI-005/attempt-03/review.md`.
 
 ### TUI-006: Chooser and command-output presentation
 
-Status: different.
+Status: active.
 
 Acceptance:
 
@@ -310,6 +310,7 @@ Acceptance:
 
 Sources:
 
+- `compat/tui-choosers.sh`
 - `crates/zz-tui/src/render.rs`
 - `crates/zz-tui/src/state.rs`
 - `crates/zz-tui/src/input.rs`
@@ -317,9 +318,9 @@ Sources:
 
 Tmux gap references: `choosers.native-presentation`, `clients.tui-command-output-navigation`, `clients.command-output-pane-prompt`.
 
-The renderer has custom chooser title/footer and output header/geometry. Existing attached checks use separate indicator expectations and one native search binding, so their navigation pass is not full presentation proof.
+CYCLE 5, MEASURED. New fixture compat/tui-choosers.sh, the outer-pinned-tmux driver of compat/tui-indicators.sh widened to the chooser surfaces: whole screen plus the cursor tuple at named settled checkpoints for choose-tree through prefix s and prefix w (rows, the preview box, t and T tagging, O sorting, / search, v preview off/big/normal, the help that does not fit at 80x24 and the help box at 100x40, G and g scrolling a tree longer than its rows), f filtering, choose-buffer through prefix = (rows, tagging, help), find-window through prefix f, choose-client through prefix D, run-shell output with its stock search, selection and copy, and the restoration of the pane after every surface. --self-check plants a one-sided tag mark, preview cell, tree row and cursor column and catches all four in their channels. BASELINE at 3319ceba (evidence compat/tui/evidence/TUI-006/attempt-01/): 39 asserted comparisons, 28 differ, 8 recorded, 7 of them for a sibling lane. Every restoration is identical (baseline, the five closes, output-closed, tall-closed). Every open chooser differs: the pin draws its mode tree in the pane - the key column (0)..(M-h) padded to the widest key plus three, the acs tree glyphs, +/- in themegreen/themered, right-aligned window and pane indices, the name, a tag * and the row format in themelightgrey, the selected row in mode-style, a tree-mode-border-style box under the rows titled ' name (sort: index) (view: preview) ' with the selected item's windows or panes side by side inside it, and the cursor hidden on the selected row - where the raw TUI clears the screen and draws its own 'Choose window' title, '> (0) cho  2 windows' rows, a footer and no status row. The find-window prompt's glyphs, columns and cursor are identical (its style is SIBLING:overlays). choose-client is recorded: zz does not implement it (commands.native-client-tools, accepted, outside this lane). The command-output cases are SIBLING:modes and the copied text is the same on both sides. Two findings outside the chooser drawing: zz's choose-tree ignores -Z, so a split current window would keep its borders where the pin zooms it (the scene keeps the attached window single-pane for that reason and for the recorded border colour of tui-screen-diff.sh); and at 80x24 the pin raises help but draws nothing because the box does not fit, then swallows the next key, where zz draws a help screen.
 
-Next action: Capture default choose-tree and long command output on both clients; classify differences in layout, content, style and input.
+Next action: Make the raw TUI draw the pin's mode-tree screens for the tree and buffer choosers from a daemon-published presentation (row names and row formats, the box title, the tree-mode styles, the preview panes), then flip the fixture's chooser cases to asserted at the tip.
 
 ### TUI-007: Prompts, menus, popups and pane labels
 

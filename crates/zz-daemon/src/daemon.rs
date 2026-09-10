@@ -32942,14 +32942,18 @@ fn popup_client_geometry(
         .get(&window_id)
         .ok_or_else(|| ServerError::MissingTarget(window_id.to_string()))?;
     let measured = client_format_geometry(inner, client, window_id);
-    let columns = inner
-        .engine
-        .window_extent(window_id, zz_protocol::Axis::Horizontal)
-        .unwrap_or(80);
-    let rows = inner
-        .engine
-        .window_extent(window_id, zz_protocol::Axis::Vertical)
-        .unwrap_or(24);
+    let (columns, rows) = inner.client_sizes.get(&client).copied().unwrap_or_else(|| {
+        (
+            inner
+                .engine
+                .window_extent(window_id, zz_protocol::Axis::Horizontal)
+                .unwrap_or(80),
+            inner
+                .engine
+                .window_extent(window_id, zz_protocol::Axis::Vertical)
+                .unwrap_or(24),
+        )
+    });
     Ok(Some(measured.map_or(
         TerminalGeometry {
             columns,
@@ -40454,6 +40458,27 @@ mod tests {
                 cell_height_px: CONTROL_CELL_HEIGHT_PX,
             }),
         );
+    }
+
+    #[test]
+    fn popup_geometry_takes_the_clients_full_terminal_height_like_tty_sy() {
+        let shared = Shared::new(1);
+        let mut inner = shared.inner.lock();
+        let (session, window, _terminal) = inner
+            .engine
+            .state
+            .create_session("popup-full-height")
+            .unwrap();
+        inner
+            .engine
+            .set_manual_window_extent(window, 79, 22)
+            .unwrap();
+        let client = ClientId(1);
+        inner.attached.insert(session, BTreeSet::from([client]));
+        inner.client_kinds.insert(client, ClientKind::Interactive);
+        inner.client_sizes.insert(client, (79, 23));
+        let geometry = popup_client_geometry(&inner, client).unwrap().unwrap();
+        assert_eq!((geometry.columns, geometry.rows), (79, 23));
     }
 
     #[test]

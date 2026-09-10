@@ -175,20 +175,20 @@ ok    emacs-ordinary-pane-search-prompt
 ok    emacs-ordinary-pane-search-typed
       case emacs-ordinary-pane-search-backspace
       first differing row 0 of 24
-        tmux: $ cat /tmp/zzcm.39O0RW/lines.txt
+        tmux: $ cat /tmp/zzcm.MJHlp7/lines.txt
         zz:   line-12 ^[[7mneedle^[[0m-12
       first differing glyph row 0 of 24
-        tmux text: $ cat /tmp/zzcm.39O0RW/lines.txt
+        tmux text: $ cat /tmp/zzcm.MJHlp7/lines.txt
         zz text:   line-12 needle-12
       view tmux:  row=12 scroll=39
       view zz:    row=0 scroll=27
 note  emacs-ordinary-pane-search-backspace asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
       case emacs-ordinary-pane-search-submit
       first differing row 0 of 24
-        tmux: $ cat /tmp/zzcm.39O0RW/lines.txt
+        tmux: $ cat /tmp/zzcm.MJHlp7/lines.txt
         zz:   line-12 ^[[7mneedle^[[0m-12
       first differing glyph row 0 of 24
-        tmux text: $ cat /tmp/zzcm.39O0RW/lines.txt
+        tmux text: $ cat /tmp/zzcm.MJHlp7/lines.txt
         zz text:   line-12 needle-12
       cursor tmux: 14,12 flag=1 pane=80x24
       cursor zz:   14,0 flag=1 pane=80x24
@@ -242,10 +242,10 @@ ok    vi-ordinary-pane-search-typed
 ok    vi-ordinary-pane-search-backspace
       case vi-ordinary-pane-search-submit
       first differing row 0 of 24
-        tmux: $ cat /tmp/zzcm.39O0RW/lines.txt
+        tmux: $ cat /tmp/zzcm.MJHlp7/lines.txt
         zz:   line-12 ^[[7mneedle^[[0m-12
       first differing glyph row 0 of 24
-        tmux text: $ cat /tmp/zzcm.39O0RW/lines.txt
+        tmux text: $ cat /tmp/zzcm.MJHlp7/lines.txt
         zz text:   line-12 needle-12
       cursor tmux: 8,12 flag=1 pane=80x24
       cursor zz:   8,0 flag=1 pane=80x24
@@ -268,10 +268,10 @@ note  vi-ordinary-pane-search-submit tmux formats: selection_active=[0] rectangl
 note  vi-ordinary-pane-search-again asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
       case vi-ordinary-pane-search-reverse
       first differing row 0 of 24
-        tmux: $ cat /tmp/zzcm.39O0RW/lines.txt
+        tmux: $ cat /tmp/zzcm.MJHlp7/lines.txt
         zz:   line-12 ^[[7mneedle^[[0m-12
       first differing glyph row 0 of 24
-        tmux text: $ cat /tmp/zzcm.39O0RW/lines.txt
+        tmux text: $ cat /tmp/zzcm.MJHlp7/lines.txt
         zz text:   line-12 needle-12
       cursor tmux: 8,12 flag=1 pane=80x24
       cursor zz:   8,0 flag=1 pane=80x24

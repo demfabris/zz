@@ -1,8 +1,8 @@
-TUI-004 attempt-03 environment, captured 2026-09-10T17:54:27-03:00
-zz revision: f9bb4e53ae178b78e41796671ad906b7d145aea8 (Give the raw TUI the pin's copy, view and message presentation)
-worktree: /home/demfabris/dev/zz-tui-modes, git status --short outside this evidence directory: clean (the directory itself is the only untracked path while these runs are written)
+TUI-004 attempt-03 environment, captured 2026-09-10T19:53:53-03:00 (reworked after the review; every run in this directory is at this revision unless its notes say otherwise)
+zz revision: 64204561de36a3ef4d093a94fbfe2d8405b17306 (Keep the view surface to its pane's keys)
+worktree: /home/demfabris/dev/zz-tui-modes, git status --short outside this evidence directory: clean
 zz binary: target/debug/zz built in this worktree at that revision with cargo build -p zz --jobs 3
-zz sha256: 97b6a6e8c810df1c5656fa745597d198aa03c4d71aeaf7bc2e915f186c80dfb2 (a cargo debug build is not bit-reproducible on this box: the hash identifies this artifact; the attestation is the revision plus the clean tree)
+zz sha256: eb005f25e7466f3b4020cfa8e7d46a512bd27b0a2e6f4f9d5dde9922fe0ad148 (a cargo debug build is not bit-reproducible on this box: the hash identifies this artifact; the attestation is the revision plus the clean tree)
 pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux, tmux next-3.8, commit d77c9dc6aa021e4bc61f0da128c591af695e6466
 pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
 OS: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux

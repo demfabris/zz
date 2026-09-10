@@ -1,4 +1,3 @@
-THROWAWAY FLIP, not a committed fixture: a copy of compat/tui/../tui-copy-mode.sh at f9bb4e53 with every case recorded under POSITION_REASON, SELECTION_REASON or PROMPT_REASON asserted on all six channels (rows,text,cursor,facts,view,buffer). The copy lane marks these SIBLING:modes; this run predicts the gate's flips. The flipped lines are in copy-mode-throwaway-flip-diff.txt.
 copy mode and search through the client stdin at 80x24 (pin tmux)
 ok    emacs-enter
 ok    emacs-cursor-up
@@ -176,20 +175,20 @@ ok    emacs-ordinary-pane-search-prompt
 ok    emacs-ordinary-pane-search-typed
       case emacs-ordinary-pane-search-backspace
       first differing row 0 of 24
-        tmux: $ cat /tmp/zzcm.WBjcMj/lines.txt
+        tmux: $ cat /tmp/zzcm.xTN6oq/lines.txt
         zz:   line-12 ^[[7mneedle^[[0m-12
       first differing glyph row 0 of 24
-        tmux text: $ cat /tmp/zzcm.WBjcMj/lines.txt
+        tmux text: $ cat /tmp/zzcm.xTN6oq/lines.txt
         zz text:   line-12 needle-12
       view tmux:  row=12 scroll=39
       view zz:    row=0 scroll=27
 note  emacs-ordinary-pane-search-backspace asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
       case emacs-ordinary-pane-search-submit
       first differing row 0 of 24
-        tmux: $ cat /tmp/zzcm.WBjcMj/lines.txt
+        tmux: $ cat /tmp/zzcm.xTN6oq/lines.txt
         zz:   line-12 ^[[7mneedle^[[0m-12
       first differing glyph row 0 of 24
-        tmux text: $ cat /tmp/zzcm.WBjcMj/lines.txt
+        tmux text: $ cat /tmp/zzcm.xTN6oq/lines.txt
         zz text:   line-12 needle-12
       cursor tmux: 14,12 flag=1 pane=80x24
       cursor zz:   14,0 flag=1 pane=80x24
@@ -243,10 +242,10 @@ ok    vi-ordinary-pane-search-typed
 ok    vi-ordinary-pane-search-backspace
       case vi-ordinary-pane-search-submit
       first differing row 0 of 24
-        tmux: $ cat /tmp/zzcm.WBjcMj/lines.txt
+        tmux: $ cat /tmp/zzcm.xTN6oq/lines.txt
         zz:   line-12 ^[[7mneedle^[[0m-12
       first differing glyph row 0 of 24
-        tmux text: $ cat /tmp/zzcm.WBjcMj/lines.txt
+        tmux text: $ cat /tmp/zzcm.xTN6oq/lines.txt
         zz text:   line-12 needle-12
       cursor tmux: 8,12 flag=1 pane=80x24
       cursor zz:   8,0 flag=1 pane=80x24
@@ -269,10 +268,10 @@ note  vi-ordinary-pane-search-submit tmux formats: selection_active=[0] rectangl
 note  vi-ordinary-pane-search-again asserted facts,buffer, the rest recorded: the pin moves the view by screen_size_y/2 and keeps the cursor row, zz moves the cursor row and leaves the view; both land on the same logical line
       case vi-ordinary-pane-search-reverse
       first differing row 0 of 24
-        tmux: $ cat /tmp/zzcm.WBjcMj/lines.txt
+        tmux: $ cat /tmp/zzcm.xTN6oq/lines.txt
         zz:   line-12 ^[[7mneedle^[[0m-12
       first differing glyph row 0 of 24
-        tmux text: $ cat /tmp/zzcm.WBjcMj/lines.txt
+        tmux text: $ cat /tmp/zzcm.xTN6oq/lines.txt
         zz text:   line-12 needle-12
       cursor tmux: 8,12 flag=1 pane=80x24
       cursor zz:   8,0 flag=1 pane=80x24

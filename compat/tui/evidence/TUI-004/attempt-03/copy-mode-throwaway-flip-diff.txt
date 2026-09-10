@@ -1,5 +1,5 @@
 --- compat/tui-copy-mode.sh	2026-09-10 15:55:04.430947854 -0300
-+++ /tmp/claude-1000/-home-demfabris-dev-zz/92f0e606-413d-4b37-9d72-867d86ccbf15/scratchpad/copy-flip.sh	2026-09-10 16:37:44.749902782 -0300
++++ <scratchpad>/tui-copy-mode-flip.sh	2026-09-10 20:02:33.639468662 -0300
 @@ -106,7 +106,7 @@
    printf '       ZZ_BIN=path TMUX_BIN=path compat/tui-copy-mode.sh\n' >&2
  }

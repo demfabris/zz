@@ -25,7 +25,7 @@ ok    self-check cursor, a different-length unterminated line
         tmux: $ printf 'MARK-%s\n' sidebar-fresh
         zz:   ^[[38;2;16;19;24m^[[48;2;77;163;235mzz at alienware             ^[[38;2;216;222;233m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$ printf 'MARK-%s\n' sidebar-fresh
       cursor tmux: 2,2 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   119,23 flag=0 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   29,22 flag=0 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
 ok    self-check sidebar, focus-sidebar shown on one side
       checkpoint text-mode-glyph at 80x24-text-mode-glyph, text and cursor
       first differing row 1 of 24

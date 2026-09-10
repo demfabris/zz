@@ -15,5 +15,12 @@ ok    message-restored
 ok    prompt-opened
 ok    prompt-typed
 ok    prompt-cancelled
-all 16 asserted comparisons identical, 0 recorded not asserted
+ok    selection-emacs
+ok    selection-vi
+ok    selection-styled
+ok    view-hidden-opened
+ok    view-hidden-typed
+ok    view-inactive-opened (divider row 11 compared by glyph)
+ok    view-inactive-typed (divider row 11 compared by glyph)
+all 23 asserted comparisons identical, 0 recorded not asserted
 exit=0

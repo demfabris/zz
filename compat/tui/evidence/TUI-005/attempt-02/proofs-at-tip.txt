@@ -1,14 +1,20 @@
 Proofs for TUI-005 attempt-02, alienware, 2026-09-10.
-Fixture, regression and integration runs: revision 66b23b5f68502a81797909be33c268af4fde8dd0, clean worktree.
+Fixture, regression and integration runs: revision be67a0d50f85b6b1ef22e981bacb514b0966587e, clean worktree.
+Code revision: 66b23b5f68502a81797909be33c268af4fde8dd0 (3ced0ea6 and be67a0d5 change no crate file).
 Environment for every fixture run: PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
 
 compat/tui-copy-mode.sh                      exit 0  copy-mode-tip-1.txt (ZZ_COPY_CAPTURE_DIR set, cells/ taken from it)
 compat/tui-copy-mode.sh                      exit 0  copy-mode-tip-2.txt
 compat/tui-copy-mode.sh                      exit 0  copy-mode-tip-3.txt
 compat/tui-copy-mode.sh --self-check         exit 0  copy-mode-self-check-tip.txt
-compat/tui-screen-diff.sh                    exit 0  screen-diff-tip.txt
+  (the four runs above ran at the same time)
+compat/tui-screen-diff.sh                    exit 0  screen-diff-tip.txt (run on its own)
+compat/tui-screen-diff.sh                    exit 2  screen-diff-loaded-run-that-lost-its-daemon.txt (run beside the two below; its own daemon socket was gone)
 compat/tui-stock-keys.sh                     exit 0  stock-keys-tip.txt
 timeout 580 cargo test -p zz --jobs 3 -- --test-threads=2    exit 0  zz-integration-tests-tip.txt
+
+At 3ced0ea6, before the settle fix:
+compat/tui-copy-mode.sh                      exit 1  copy-mode-settle-race-before-the-fix.txt (one of three concurrent runs)
 
 Unit tests and clippy, on the working tree whose content for each crate is 66b23b5f's:
 cargo test -p zz-terminal --jobs 3 -- --test-threads=2                                  exit 0  unit-tests-zz-terminal.txt
@@ -25,6 +31,6 @@ cargo clippy -p zz-daemon --all-targets --all-features --jobs 3 -- -D warnings  
 python3 compat/tui/tracker.py check                                                     exit 0
 python3 compat/tmux-tracker.py check                                                    exit 0
 
-The evidence commit on top of 66b23b5f changes only compat/tui/ (this directory, the TUI-005
+The evidence commit on top of be67a0d5 changes only compat/tui/ (this directory, the TUI-005
 record) and the regenerated knowledge/tmux/tui-parity.md. The binaries and the fixture are
 unchanged. The structured report lists the same commands re-run at that final tip.

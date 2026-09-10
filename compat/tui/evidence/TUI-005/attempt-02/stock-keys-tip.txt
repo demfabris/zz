@@ -153,12 +153,8 @@ ok    100x24 root-binding-backslash
 ok    100x24 root-binding-alt-s
 ok    100x24 root-binding-alt-shift-s
 ok    100x24 root-binding-detaches
-      case application-reader at 100x24
-      all 24 rows identical
-      facts tmux: keys:0.0 100x23 active=1 zoomed=0 window=win panes=1 cmd=cat
-      facts zz:   keys:0.0 100x23 active=1 zoomed=0 window=win panes=1 cmd=stty
-note  100x24 application-reader asserted rows,cursor, the rest recorded: zz reports #{pane_current_command} a beat later than the pin when a pane's child starts
+ok    100x24 application-reader
 ok    100x24 application-backslash
 ok    100x24 application-alt-s
 ok    100x24 application-alt-shift-s
-all 50 cases agree on every channel they assert, 23 recorded a difference elsewhere
+all 50 cases agree on every channel they assert, 22 recorded a difference elsewhere

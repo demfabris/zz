@@ -30,22 +30,30 @@ attempt-01 measured and left. It does not measure them again.
   - The SELECTION, PROMPT and POSITION reasons, plus the new MATCH reason, start with
     `SIBLING:modes `.
   - Six new self-check sabotages.
+  - At be67a0d5 the two rectangle checkpoints wait for `#{copy_cursor_x}` to reach the
+    typed column (see the settle race below).
+
+Revisions: the code is 66b23b5f. The first evidence commit is 3ced0ea6. The fixture's
+settle fix is be67a0d5, and every fixture, regression and integration run in this
+directory ran there.
 
 ## Files
 
 ### Environment
 
-- `environment.txt`: both binary sha256s, the revision (66b23b5f, clean tree), the pin,
-  the OS line, TERM, shell, bash, outer size and locale.
+- `environment.txt`: both binary sha256s, the revision (be67a0d5, clean tree), the pin,
+  the OS line, TERM, shell, bash, outer size and locale. It also explains why the zz
+  hash differs from the first capture at 66b23b5f: `cargo test -p zz` relinked the
+  binary from unchanged sources, and debug builds on this box are not bit-reproducible.
 
-### The fixture at the tip (66b23b5f)
+### The fixture at be67a0d5
 
 - `copy-mode-tip-1.txt`, `copy-mode-tip-2.txt`, `copy-mode-tip-3.txt`: three corpus
-  runs, exit 0 each. All 97 cases agree on every channel they assert, and the 27
-  recorded cases are all `SIBLING:modes`. Each run's stderr is in the `.stderr.txt`
-  file beside it.
+  runs, exit 0 each, all three run concurrently. All 97 cases agree on every channel
+  they assert, and the 27 recorded cases are all `SIBLING:modes`. Each run's stderr is
+  in the `.stderr.txt` file beside it.
 - `copy-mode-self-check-tip.txt` (and `.stderr.txt`): `--self-check`, exit 0, 16 of 16
-  expectations met. The six added this attempt:
+  expectations met, run beside the three corpus runs. The six added this attempt:
   - view alone: a half page on one side, twelve counted cursor-ups on the other.
   - facts: a page on one side, twenty-four counted cursor-ups on the other.
   - buffer: the vi rectangle final newline, with the pin's mode-keys switched to
@@ -63,19 +71,40 @@ attempt-01 measured and left. It does not measure them again.
   - the emacs search submit and the vi backward search (the current-match style is
     the only difference)
 
+### The settle race, found and fixed
+
+- `copy-mode-settle-race-before-the-fix.txt`: a corpus run at 3ced0ea6, one of three
+  fixture copies running at once. It reported `emacs-rectangle-past-end-of-line` with
+  zz's copy cursor at column 5 against the pin's 20. That checkpoint waited on no
+  observable, and each emacs `M-5 C-f` pair goes through the numeric prompt. zz's
+  screen held still for the 50 ms between two polls while pairs were still queued,
+  so the comparison ran early. An earlier run showed the same case at column 15; that
+  output was overwritten by another lane sharing the scratchpad and is not kept.
+  be67a0d5 makes both rectangle checkpoints wait for `#{copy_cursor_x}` to reach the
+  typed column on both sides. A side that never reaches it still counts as an
+  asserted difference. The three corpus runs above ran concurrently at be67a0d5 and
+  are green.
+
 ### Before the prompt repaint fix
 
-- `copy-mode-before-the-prompt-repaint-fix.txt`: a corpus run of the PREVIOUS fixture
-  revision (the attempt-01 file) against a binary that already had the engine fixes
-  but not the `app.rs` repaint. Its `emacs-ordinary-pane-search-submit` block shows
-  zz's last row still reading `(search down) needle` against the pin's
-  `line-23 filler-23`. That revision did not assert the text channel there, so it
-  counted the case as recorded.
+- `copy-mode-before-the-prompt-repaint-fix.txt`: a corpus run of the attempt-01
+  fixture revision against a binary that already had the engine fixes but not the
+  `app.rs` repaint. Its `emacs-ordinary-pane-search-submit` block shows zz's last row
+  still reading `(search down) needle` against the pin's `line-23 filler-23`. That
+  revision did not assert the text channel there, so it counted the case as
+  recorded.
 
-### Regressions at the tip
+### Regressions at be67a0d5
 
-- `screen-diff-tip.txt` (and `.stderr.txt`): `compat/tui-screen-diff.sh`, exit 0, all
-  111 asserted checkpoints identical.
+- `screen-diff-tip.txt` (and `.stderr.txt`): `compat/tui-screen-diff.sh` run on its
+  own, exit 0, all 111 asserted checkpoints identical.
+- `screen-diff-loaded-run-that-lost-its-daemon.txt` (and `.stderr.txt`): the same
+  fixture run beside `tui-stock-keys.sh` and `cargo test -p zz`. It exited 2 with
+  `error connecting to /tmp/zzsd-5TW6IV.sock (No such file or directory)` and then
+  `error: zz refused status-right`: its own daemon's socket file was gone before a
+  size group. The fixture's trap removed its scratch dir, so nothing further can be
+  read. The screen-diff fixture is not part of this lane's diff, the same fixture was
+  green at 66b23b5f, and the run on its own above is green.
 - `stock-keys-tip.txt` (and `.stderr.txt`): `compat/tui-stock-keys.sh`, exit 0, all 50
   cases agree.
 - `zz-integration-tests-tip.txt`: `cargo test -p zz --jobs 3 -- --test-threads=2`,
@@ -83,8 +112,8 @@ attempt-01 measured and left. It does not measure them again.
 
 ### Code
 
-These runs used the working tree before the commit. Its content for each crate is
-66b23b5f's.
+These runs used the working tree before 66b23b5f was committed. Its content for each
+crate is 66b23b5f's, and no later commit changes a crate file.
 
 - `unit-tests-zz-terminal.txt`: `cargo test -p zz-terminal`, 253 passed.
 - `unit-tests-zz-protocol.txt`: `cargo test -p zz-protocol`, 222 lib tests plus the
@@ -101,11 +130,3 @@ These runs used the working tree before the commit. Its content for each crate i
   --all-features --jobs 3 -- -D warnings`, exit 0 each.
 - `proofs-at-tip.txt`: every command above with its exit code and the revision it ran
   at.
-
-## Seen and not counted
-
-An early run under five-lane load reported `emacs-rectangle-past-end-of-line` with zz's
-copy cursor at column 15 against the pin's 20. The fourth counted cursor-right had not
-landed when the screen settled. The next four corpus runs, three of them at the tip,
-were green on that case. That run's output file was overwritten by another lane
-sharing the scratchpad and is not kept.

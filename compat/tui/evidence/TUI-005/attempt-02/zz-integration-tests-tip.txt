@@ -3,9 +3,7 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-   Compiling zz-ui v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-ui)
-   Compiling zz v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 46.22s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.33s
      Running unittests src/lib.rs (target/debug/deps/zz-2f801f40cc944225)
 
 running 634 tests
@@ -98,10 +96,10 @@ test app_icon::tests::embedded_icon_is_square_and_large_enough_for_x11 ... ok
 test app_icon::tests::every_setting_round_trips_through_its_config_value ... ok
 test app_icon::tests::only_automatic_follows_the_os_appearance ... ok
 test app_icon::tests::preview_filter_keeps_straight_alpha_edges_bright ... ok
-test agent::attachment::tests::an_oversized_screenshot_is_scaled_to_the_long_edge ... ok
+test app_icon::tests::settings_renders_are_prefiltered_at_retina_size ... ok
 test app_icon::tests::the_two_dock_renders_are_square_twins_with_different_artwork ... ok
 test app_shell::tests::clock_task_aligns_to_the_next_minute ... ok
-test app_icon::tests::settings_renders_are_prefiltered_at_retina_size ... ok
+test app_shell::tests::mux_notifications_reach_the_mounted_root_layer ... ok
 test browser::controller::tests::active_tab_flips_pending_session_visibility ... ok
 test browser::controller::tests::adaptive_begin_frame_throttle_does_not_flap_on_one_slow_frame ... ok
 test browser::controller::tests::adaptive_begin_frame_throttle_downshifts_after_sustained_shortfall ... ok
@@ -115,12 +113,11 @@ test browser::controller::tests::begin_frame_deadline_selects_earliest_browser_t
 test browser::controller::tests::begin_frame_deadline_sends_and_anchors_on_hot_edges ... ok
 test browser::controller::tests::begin_frame_deadline_skips_missed_intervals_without_bursting ... ok
 test browser::controller::tests::browser_egress_records_the_route_until_its_tabs_close ... ok
-test app_shell::tests::mux_notifications_reach_the_mounted_root_layer ... ok
 test browser::controller::tests::cef_work_runs_after_the_app_update_in_submission_order ... ok
+test browser::controller::tests::close_tab_and_close_pane_keep_other_tab_keys_isolated ... ok
 test browser::controller::tests::display_frame_rate_ceiling_clamps_to_cef_bounds ... ok
 test browser::controller::tests::display_frame_rate_ceiling_falls_back_without_reported_rates ... ok
 test browser::controller::tests::display_frame_rate_ceiling_retries_after_empty_probe ... ok
-test browser::controller::tests::close_tab_and_close_pane_keep_other_tab_keys_isolated ... ok
 test browser::controller::tests::display_frame_rate_ceiling_uses_fastest_reported_rate_and_rounds ... ok
 test browser::controller::tests::first_frame_watchdog_pauses_and_rearms_without_stale_timeouts ... ok
 test browser::controller::tests::pane_frame_rate_caps_unfocused_animation_unless_wheel_boosted ... ok
@@ -128,17 +125,18 @@ test browser::controller::tests::pump_fallback_policy_keeps_only_live_browser_wo
 test browser::controller::tests::pump_fallback_policy_leaves_inactive_states_lazy ... ok
 test browser::controller::tests::pump_fallback_policy_paces_animating_sessions_at_the_frame_interval ... ok
 test browser::screenshot::tests::bgra_is_swizzled_to_rgba_and_padding_is_dropped ... ok
+test browser::screenshot::tests::png_round_trips_through_the_image_crate ... ok
 test browser::screenshot::tests::short_or_empty_frames_are_refused ... ok
 test browser::tui::tests::address_and_popup_events_reduce_to_full_tab_descriptors ... ok
 test browser::tui::tests::pointer_coordinates_scale_to_logical_but_wheel_notches_do_not ... ok
-test browser::screenshot::tests::png_round_trips_through_the_image_crate ... ok
 test browser::tui::tests::pointer_up_clears_the_pressed_button_and_wheel_stays_discrete ... ok
 test browser::tui::tests::terminal_keys_preserve_actions_modifiers_and_repeat ... ok
 test browser::tui::tests::tui_cache_root_keeps_the_default_profile_as_an_immediate_child ... ok
 test browser::tui::tests::viewport_uses_the_outer_terminals_exact_pixel_size ... ok
-test browser::view::tests::browser_copy_outranks_window_text_copy ... ok
 test browser::view::tests::browser_context_leaves_tab_for_chromium_raw_key_input ... ok
+test browser::view::tests::browser_copy_outranks_window_text_copy ... ok
 test browser::view::tests::browser_keymap_matches_the_audited_supported_set ... ok
+test agent::attachment::tests::an_oversized_screenshot_is_scaled_to_the_long_edge ... ok
 test browser::view::tests::configured_element_selector_binding_is_browser_scoped_and_carries_its_chord ... ok
 test browser::view::tests::dedupes_recent_pages_by_display_url_before_applying_the_limit ... ok
 test browser::view::tests::digit_shortcuts_jump_straight_to_tab_slots ... ok
@@ -390,21 +388,21 @@ test mux::client::tests::history_backfill_debounce_rearms_while_mutations_contin
 test mux::client::tests::history_prefetch_bypasses_deferred_backfill ... ok
 test mux::client::tests::history_ring_matches_seeded_scrolls_eviction_and_invalidation ... ok
 test mux::client::tests::history_trickle_requests_nearest_chunks_until_budget_and_zero_disables ... ok
-test mux::client::tests::host_state_access_reconciles_changed_fleet_hosts_by_name ... ok
+test mux::client::tests::attached_remote_daemon_process_restart_reconnects_and_receives_new_frames ... ok
 test mux::client::tests::image_placeholders_route_back_to_their_own_pane ... ok
 test mux::client::tests::initial_connection_cannot_report_errors_after_detach ... ok
 test mux::client::tests::initial_connection_stays_pending_until_completion ... ok
 test mux::client::tests::initial_stale_daemon_state_is_structured_and_dismissal_adds_the_manual_hint ... ok
+test mux::client::tests::host_state_access_reconciles_changed_fleet_hosts_by_name ... ok
 test mux::client::tests::kitty_image_chunks_assemble_replace_remove_and_deduplicate ... ok
 test mux::client::tests::late_input_for_an_exited_last_pane_does_not_mask_the_empty_workspace ... ok
 test mux::client::tests::local_scroll_prefetch_is_bounded_and_coalesces_while_in_flight ... ok
-test mux::client::tests::missing_remembered_session_falls_back_to_default_without_an_error_banner ... ok
 test mux::client::tests::new_local_session_can_start_in_the_gui_working_directory ... ok
 test mux::client::tests::new_session_falls_back_to_an_explicit_attach_for_older_daemons ... ok
-test mux::client::tests::new_session_routes_to_the_requested_host_and_keeps_remote_creation_detached ... ok
+test mux::client::tests::missing_remembered_session_falls_back_to_default_without_an_error_banner ... ok
 test mux::client::tests::non_attached_host_disconnect_starts_a_capped_reconnect_loop ... ok
+test mux::client::tests::new_session_routes_to_the_requested_host_and_keeps_remote_creation_detached ... ok
 test mux::client::tests::non_attached_hosts_cache_snapshots_and_ignore_attached_only_events ... ok
-test mux::client::tests::non_attached_reconnect_stops_after_three_failures_and_manual_retry_rearms ... ok
 test mux::client::tests::pane_image_snapshots_use_daemon_observed_numbers ... ok
 test mux::client::tests::pasted_image_chunks_populate_replace_and_invalidate_the_daemon_number ... ok
 test mux::client::tests::quiet_history_backfill_debounce_resumes_and_applies_chunk ... ok
@@ -517,7 +515,7 @@ test tests::kill_server_only_classifies_absent_endpoints_as_missing ... ok
 test tests::native_attach_parser_keeps_the_zz_superset_and_tmux_target ... ok
 test tests::new_session_tui_routing_resolves_prefixes_and_tmux_argv_edges ... ok
 test tests::new_session_tui_routing_scans_the_complete_command_chain ... ok
-test mux::client::tests::attached_remote_daemon_process_restart_reconnects_and_receives_new_frames ... ok
+test mux::client::tests::non_attached_reconnect_stops_after_three_failures_and_manual_retry_rearms ... ok
 test tests::prepared_cli_routing_uses_canonical_identity_and_alias_match ... ok
 test tests::protocol_version_command_prints_only_the_wire_version ... ok
 test tests::refresh_client_detached_error_has_no_zz_prefix ... ok
@@ -650,7 +648,7 @@ test workspace::view::tests::the_revision_carries_the_window_the_focus_passes_re
 test workspace::view::tests::window_activation_is_the_only_workspace_client_focus_source ... ok
 test tray::host::tests::tray_quit_notifies_desktops_and_stops_all_sessions ... ok
 
-test result: ok. 634 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.27s
+test result: ok. 634 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.62s
 
      Running unittests src/main.rs (target/debug/deps/zz-05ba1019b191b3f5)
 
@@ -700,7 +698,7 @@ test a_relative_path_reads_the_clients_own_directory ... ok
 test a_tilde_path_hangs_from_the_daemons_home ... ok
 test an_absolute_path_is_read_as_written ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.77s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.98s
 
      Running tests/buffer_client_file_save.rs (target/debug/deps/buffer_client_file_save-2f4db994d78ed540)
 
@@ -711,7 +709,7 @@ test a_tilde_path_hangs_from_the_daemons_home ... ok
 test a_second_save_truncates_and_dash_a_appends ... ok
 test an_absolute_path_is_written_as_written ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.73s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.57s
 
      Running tests/cli_binary.rs (target/debug/deps/cli_binary-423bfdac64a09eda)
 
@@ -737,23 +735,23 @@ test daemon_autostart::control_mode::config_file_bytes_load_like_the_pinned_sign
 test daemon_autostart::control_mode::control_alias_groups_inherit_flags_and_continue_after_shell_status ... ok
 test daemon_autostart::control_mode::control_attached_eof_releases_the_queue_at_the_first_parked_command ... ok
 test daemon_autostart::control_mode::control_background_inserted_commands_use_flags_zero_after_later_input ... ok
+test daemon_autostart::control_mode::control_chains_frame_each_command_and_abort_only_the_failing_line ... ok
 test daemon_autostart::control_mode::control_background_malformed_lists_and_shell_jobs_stay_unframed ... ok
 test daemon_autostart::control_mode::control_command_error_uses_the_inner_server_message ... ok
-test daemon_autostart::control_mode::control_chains_frame_each_command_and_abort_only_the_failing_line ... ok
-test daemon_autostart::control_mode::control_command_hook_frames_are_inserted_and_retain_failure_status ... ok
 test daemon_autostart::control_mode::control_config_error_keeps_the_source_line_and_inner_message ... ok
+test daemon_autostart::control_mode::control_command_hook_frames_are_inserted_and_retain_failure_status ... ok
 test daemon_autostart::control_mode::control_config_file_bytes_keep_the_pinned_hidden_item_numbering ... ok
 test daemon_autostart::control_mode::control_disconnect_cancels_background_inserted_side_effects ... ok
 test daemon_autostart::control_mode::control_detach_aliases_follow_the_authoritative_self_victim ... ok
-test daemon_autostart::control_mode::control_first_sourced_construction_failure_uses_config_error ... ok
 test daemon_autostart::control_mode::control_eof_drops_a_parked_wrappers_later_failure_and_detach_eof_is_zero ... ok
+test daemon_autostart::control_mode::control_first_sourced_construction_failure_uses_config_error ... ok
 test daemon_autostart::control_mode::control_foreground_run_shell_closes_before_raw_output_and_continues ... ok
-test daemon_autostart::control_mode::control_if_shell_config_file_bytes_continue_the_root_file ... ok
 test daemon_autostart::control_mode::control_hook_source_diagnostics_keep_trigger_frames_and_status ... ok
+test daemon_autostart::control_mode::control_if_shell_config_file_bytes_continue_the_root_file ... ok
 test daemon_autostart::control_mode::control_immediate_eof_keeps_a_direct_source_failure_status ... ok
+test daemon_autostart::control_mode::control_kill_server_closes_its_block_before_exit ... ok
 test daemon_autostart::control_mode::control_initial_command_uses_a_live_daemon_alias ... ok
 test daemon_autostart::control_mode::control_list_commands_autostarts_and_frames_the_initial_command ... ok
-test daemon_autostart::control_mode::control_kill_server_closes_its_block_before_exit ... ok
 test daemon_autostart::control_mode::control_ls_with_a_daemon_frames_session_output ... ok
 test daemon_autostart::control_mode::control_nested_source_depth_limit_uses_sourced_command_guards ... ok
 test daemon_autostart::control_mode::control_notifications_layout_and_output_follow_the_live_socket_stream ... ok
@@ -792,6 +790,7 @@ test daemon_autostart::exact_native_attach_executes_a_valid_command_chain_tail_a
 test daemon_autostart::explicit_attach_can_fall_back_to_new_session ... ok
 test daemon_autostart::explicit_targetless_attach_autostarts_then_reports_no_sessions ... ok
 test daemon_autostart::failed_preflight_handshake_still_runs_the_cold_static_gate ... ok
+test daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix has been running for over 60 seconds
 test daemon_autostart::failing_kill_server_alias_does_not_enter_recovery ... ok
 test daemon_autostart::gui_style_default_attach_uses_its_working_directory_with_an_empty_daemon ... ok
 test daemon_autostart::has_session_on_a_fresh_socket_leaves_no_daemon ... ok
@@ -801,22 +800,21 @@ test daemon_autostart::headless_dash_a_ignores_detach_for_existing_but_not_new_s
 test daemon_autostart::invalid_startup_alias_shadows_abort_before_cold_effects ... ok
 test daemon_autostart::live_agent_send_aliases_control_stdin_capture ... ok
 test daemon_autostart::ls_or_new_session_idiom_starts_one_fresh_daemon ... ok
-test daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix has been running for over 60 seconds
 test daemon_autostart::mouse_option_gates_the_outer_terminal_mouse_modes ... ok
 test daemon_autostart::native_attach_accepts_targets_and_stops_options_at_positional_sessions ... ok
 test daemon_autostart::native_attach_e_preserves_the_session_environment ... ok
 test daemon_autostart::native_attach_flag_errors_match_tmux_for_both_spellings ... ok
 test daemon_autostart::native_attach_rejects_unsupported_x_like_the_engine ... ok
-test daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix ... ok
 test daemon_autostart::nested_attach_inside_a_pane_prints_the_pinned_refusal ... ok
+test daemon_autostart::new_session_immediately_after_kill_server_starts_a_fresh_daemon ... ok
 test daemon_autostart::no_start_server_suppresses_new_session_autostart ... ok
 test daemon_autostart::non_start_server_commands_do_not_spawn_a_daemon ... ok
-test daemon_autostart::new_session_immediately_after_kill_server_starts_a_fresh_daemon ... ok
+test daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix ... ok
 test daemon_autostart::prepared_cli_chain_rejects_later_alias_parse_errors_before_effects ... ok
 test daemon_autostart::option_value_errors_match_pinned_tmux_stderr ... ok
 test daemon_autostart::prepared_kill_server_stops_the_daemon_without_recovery ... ok
-test daemon_autostart::prepared_cli_chain_rejects_later_unaliased_argument_errors_before_effects ... ok
 test daemon_autostart::raw_kill_server_flag_ignores_the_live_alias_table ... ok
+test daemon_autostart::prepared_cli_chain_rejects_later_unaliased_argument_errors_before_effects ... ok
 test daemon_autostart::read_only_command_without_a_daemon_uses_the_pin_connect_error ... ok
 test daemon_autostart::reload_config_of_the_default_config_stays_silent_and_resets_keys ... ok
 test daemon_autostart::runtime_config_commands_keep_the_command_client_terminal_state ... ok
@@ -834,8 +832,8 @@ test daemon_autostart::startup_config_shares_a_fifty_source_command_budget ... o
 test daemon_autostart::startup_config_new_session_is_forced_detached ... ok
 test daemon_autostart::status_position_top_puts_the_status_block_at_row_zero ... ok
 test daemon_autostart::stock_eighty_column_attach_draws_the_whole_status_row ... ok
-test daemon_autostart::switch_client_from_a_plain_shell_reports_the_pinned_client_errors ... ok
 test daemon_autostart::styled_multi_row_status_renders_two_rows_without_literal_markers ... ok
+test daemon_autostart::switch_client_from_a_plain_shell_reports_the_pinned_client_errors ... ok
 test daemon_autostart::tty_new_session_error_is_bare_and_does_not_start_the_browser ... ok
 test daemon_autostart::target_and_unknown_command_errors_match_pinned_tmux_stderr ... ok
 test tmux_version_is_exact ... ok
@@ -843,7 +841,7 @@ test tmux_without_a_zz_socket_fails_before_dialing_a_foreign_server ... ok
 test unknown_tmux_flag_uses_tmux_usage_shape ... ok
 test daemon_autostart::tui_handoff_executes_the_prepared_alias_snapshot ... ok
 
-test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 140.72s
+test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 180.93s
 
    Doc-tests zz
 

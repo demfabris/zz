@@ -56,6 +56,7 @@ pub use agent::stream::{
 #[cfg(any(unix, windows))]
 pub use askpass::run_helper;
 pub use askpass::{ASKPASS_SOCKET_ENV, AskpassPrompt, AskpassPromptKind, AskpassReply, SshPrompts};
+pub use client::{ClientTerminalFlags, set_client_terminal_flags};
 pub use client::{CommandClient, CommandOutcome, InteractiveClient, short_device_name};
 #[cfg(feature = "daemon")]
 pub use daemon::{Daemon, agent_send_reads_stdin, load_buffer_reads_stdin, send_text_reads_stdin};

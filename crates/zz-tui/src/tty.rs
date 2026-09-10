@@ -9,6 +9,9 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(unix)]
 use rustix::termios::{OptionalActions, Termios};
 
+use zz_daemon::{CommandClient, Endpoint};
+use zz_protocol::CommandInvocation;
+
 use crate::kitty::{FILE_PROBE_IMAGE_ID, PROBE_IMAGE_ID, cleanup_frame_slot_files};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -59,6 +62,7 @@ fn pixel_cell_extent(pixels: u16, cells: u16, fallback: u32) -> u32 {
 pub(crate) struct TerminalGuard {
     pixel_mouse: bool,
     kitty_keyboard: bool,
+    extended_keys: bool,
     kitty_graphics: bool,
     file_probe: Option<PathBuf>,
     #[cfg(unix)]
@@ -66,6 +70,26 @@ pub(crate) struct TerminalGuard {
 }
 
 pub(crate) const MOUSE_DISABLE_SEQUENCE: &[u8] = b"\x1b[?1016l\x1b[?1006l\x1b[?1003l";
+const EXTENDED_KEYS_ENABLE: &[u8] = b"\x1b[>4;2m";
+const EXTENDED_KEYS_DISABLE: &[u8] = b"\x1b[>4m";
+
+pub(crate) fn extended_keys_option(endpoint: &Endpoint) -> bool {
+    let Endpoint::Local(path) = endpoint else {
+        return false;
+    };
+    CommandClient::connect(path)
+        .and_then(|mut client| {
+            client.execute(CommandInvocation::new(
+                "show-options",
+                ["-sv", "extended-keys"],
+            ))
+        })
+        .is_ok_and(|value| extended_keys_armed(&value))
+}
+
+fn extended_keys_armed(value: &str) -> bool {
+    !matches!(value.trim(), "" | "off")
+}
 
 pub(crate) fn mouse_enable_sequence(pixel_mouse: bool) -> Vec<u8> {
     let mut sequence = b"\x1b[?1003h\x1b[?1006h".to_vec();
@@ -77,7 +101,7 @@ pub(crate) fn mouse_enable_sequence(pixel_mouse: bool) -> Vec<u8> {
 
 impl TerminalGuard {
     #[cfg(unix)]
-    pub fn enter(mouse: bool) -> io::Result<Self> {
+    pub fn enter(mouse: bool, extended_keys: bool) -> io::Result<Self> {
         let original = rustix::termios::tcgetattr(io::stdin())?;
         let file_probe = probe_file_path();
         remove_file_if_present(&file_probe)?;
@@ -92,6 +116,7 @@ impl TerminalGuard {
         let guard = Self {
             pixel_mouse: supports_pixel_mouse(),
             kitty_keyboard: supports_kitty_keyboard(),
+            extended_keys,
             kitty_graphics: false,
             file_probe: Some(file_probe),
             original,
@@ -105,6 +130,9 @@ impl TerminalGuard {
         if guard.kitty_keyboard {
             output.write_all(b"\x1b[>3u")?;
         }
+        if guard.extended_keys {
+            output.write_all(EXTENDED_KEYS_ENABLE)?;
+        }
         write!(
             output,
             "\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi={FILE_PROBE_IMAGE_ID},s=1,v=1,a=q,t=f,f=32;{encoded_probe_path}\x1b\\\x1b[c"
@@ -115,7 +143,7 @@ impl TerminalGuard {
     }
 
     #[cfg(not(unix))]
-    pub fn enter(_mouse: bool) -> io::Result<Self> {
+    pub fn enter(_mouse: bool, _extended_keys: bool) -> io::Result<Self> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "zz-tui currently requires a Unix terminal",
@@ -152,6 +180,9 @@ impl Drop for TerminalGuard {
         }
         if self.kitty_keyboard {
             let _ = output.write_all(b"\x1b[<1u");
+        }
+        if self.extended_keys {
+            let _ = output.write_all(EXTENDED_KEYS_DISABLE);
         }
         let _ = output.write_all(
             b"\x1b[?2004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?1004l\x1b[?7h\x1b[?25h\x1b[?1049l",
@@ -213,5 +244,15 @@ mod tests {
             b"\x1b[?1003h\x1b[?1006h\x1b[?1016h"
         );
         assert_eq!(MOUSE_DISABLE_SEQUENCE, b"\x1b[?1016l\x1b[?1006l\x1b[?1003l");
+    }
+
+    #[test]
+    fn extended_keys_arm_for_every_value_but_off() {
+        assert!(extended_keys_armed("on\n"));
+        assert!(extended_keys_armed("always"));
+        assert!(!extended_keys_armed("off\n"));
+        assert!(!extended_keys_armed(""));
+        assert_eq!(EXTENDED_KEYS_ENABLE, b"\x1b[>4;2m");
+        assert_eq!(EXTENDED_KEYS_DISABLE, b"\x1b[>4m");
     }
 }

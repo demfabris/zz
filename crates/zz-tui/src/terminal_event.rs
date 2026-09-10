@@ -291,6 +291,9 @@ fn parse_csi(parameters: &str, final_byte: u8) -> Option<Event> {
             return parse_sgr_mouse(parameters, final_byte).map(Event::Mouse);
         }
         (_, b'u') => return parse_kitty_key(parameters).map(Event::Key),
+        (parameters, b'~') if parameters.starts_with("27;") => {
+            return parse_modify_other_keys(parameters).map(Event::Key);
+        }
         (parameters, b't') => return parse_cell_size(parameters),
         _ => {}
     }
@@ -402,6 +405,37 @@ fn parse_kitty_key(parameters: &str) -> Option<KeyEvent> {
         modifiers,
         kind,
     })
+}
+
+fn parse_modify_other_keys(parameters: &str) -> Option<KeyEvent> {
+    let mut fields = parameters.split(';');
+    if fields.next()? != "27" {
+        return None;
+    }
+    let modifiers = legacy_modifiers(fields.next()?.parse().ok()?);
+    let codepoint = fields.next()?.parse::<u32>().ok()?;
+    if fields.next().is_some() {
+        return None;
+    }
+    let code = kitty_key(codepoint);
+    let modifiers = match code {
+        KeyCode::Char(character)
+            if character > ' ' && character != '\u{7f}' && modifiers == KeyModifiers::SHIFT =>
+        {
+            if character.is_ascii_uppercase() {
+                KeyModifiers::SHIFT
+            } else {
+                KeyModifiers::NONE
+            }
+        }
+        _ => modifiers,
+    };
+    let code = if code == KeyCode::Tab && modifiers.contains(KeyModifiers::SHIFT) {
+        KeyCode::BackTab
+    } else {
+        code
+    };
+    Some(KeyEvent::new(code, modifiers))
 }
 
 fn kitty_key(codepoint: u32) -> KeyCode {
@@ -603,6 +637,27 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn modify_other_keys_reports_decode_as_the_pin_decodes_them() {
+        let events =
+            parse(b"\x1b[27;5;13~\x1b[27;2;65~\x1b[27;2;97~\x1b[27;6;97~\x1b[27;2;9~\x1b[27;3;32~");
+        assert_eq!(
+            events,
+            vec![
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
+                Event::Key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)),
+                Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+                Event::Key(KeyEvent::new(
+                    KeyCode::Char('a'),
+                    KeyModifiers::SHIFT | KeyModifiers::CONTROL
+                )),
+                Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)),
+                Event::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::ALT)),
+            ]
+        );
+        assert!(parse(b"\x1b[27;5~\x1b[27;5;13;1~").is_empty());
     }
 
     #[test]

@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 100;
+pub const PROTOCOL_VERSION: u16 = 101;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -26,6 +26,7 @@ pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
 pub const CLIENT_TTY_CAPABILITY_PREFIX: &str = "client-tty-v1:";
 /// Value-token prefix naming the caller's terminal size, `client-size-v1:80x24`.
 pub const CLIENT_SIZE_CAPABILITY_PREFIX: &str = "client-size-v1:";
+pub const CLIENT_FEATURES_CAPABILITY_PREFIX: &str = "client-features-v1:";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
 pub const MAX_CHOOSE_TREE_QUERY_BYTES: usize = 4 * 1024;
@@ -1425,6 +1426,7 @@ impl ClientHello {
     pub const CLIENT_NESTED_CAPABILITY: &'static str = CLIENT_NESTED_CAPABILITY;
     pub const CLIENT_TTY_CAPABILITY_PREFIX: &'static str = CLIENT_TTY_CAPABILITY_PREFIX;
     pub const CLIENT_SIZE_CAPABILITY_PREFIX: &'static str = CLIENT_SIZE_CAPABILITY_PREFIX;
+    pub const CLIENT_FEATURES_CAPABILITY_PREFIX: &'static str = CLIENT_FEATURES_CAPABILITY_PREFIX;
     pub const STARTUP_CONFIG_OWNER_CAPABILITY: &'static str = "startup-config-owner-v1";
     /// The client's terminal takes UTF-8, so the server hands it bytes
     /// untouched. tmux.c raises `CLIENT_UTF8` from `-u`, from `$TMUX` being set
@@ -4713,7 +4715,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 100);
+        assert_eq!(super::PROTOCOL_VERSION, 101);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

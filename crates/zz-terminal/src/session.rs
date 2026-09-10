@@ -41,6 +41,7 @@ use regex::RegexBuilder;
 use smallvec::SmallVec;
 use thiserror::Error;
 
+use crate::ColourClass;
 use crate::{
     ATTR_BLINK, ATTR_BOLD, ATTR_EXPLICIT_RGB, ATTR_FAINT, ATTR_HYPERLINK, ATTR_INVISIBLE,
     ATTR_ITALIC, ATTR_OVERLINE, ATTR_STRIKETHROUGH, CellWidth, ClipboardTarget, Color, CopyJump,
@@ -8089,6 +8090,7 @@ fn capture_history(
         .map_err(capture_failure)?
         .unwrap_or_default();
     let palette = terminal.color_palette().map_err(capture_failure)?.0;
+    let default_palette = terminal.default_color_palette().map_err(capture_failure)?.0;
     let default_style = PackedStyle::new(
         color(foreground),
         color(background),
@@ -8123,6 +8125,24 @@ fn capture_history(
                     color(raw_cell.bg_color_rgb().map_err(capture_failure)?)
                 }
                 CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => cell_background,
+            };
+            let classes = if raw_style.inverse {
+                (ColourClass::Resolved, ColourClass::Resolved)
+            } else {
+                (
+                    ground_class(raw_style.fg_color, &palette, &default_palette),
+                    match raw_cell.content_tag().map_err(capture_failure)? {
+                        CellContentTag::BgColorPalette => palette_class(
+                            raw_cell.bg_color_palette().map_err(capture_failure)?.0,
+                            &palette,
+                            &default_palette,
+                        ),
+                        CellContentTag::BgColorRgb => ColourClass::Rgb,
+                        CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
+                            ground_class(raw_style.bg_color, &palette, &default_palette)
+                        }
+                    },
+                )
             };
             if raw_style.inverse {
                 std::mem::swap(&mut cell_foreground, &mut cell_background);
@@ -8167,7 +8187,8 @@ fn capture_history(
                     raw_cell.has_hyperlink().map_err(capture_failure)?,
                 ),
                 underline_style(raw_style.underline),
-            );
+            )
+            .with_classes(classes.0, classes.1);
             output.push(PackedCell::new(
                 dictionary.encode_glyph(&grapheme_text),
                 dictionary.intern_style(style),
@@ -12845,6 +12866,7 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     let dirty = snapshot.dirty()?;
     let full_dirty = dirty == Dirty::Full;
     let colors = snapshot.colors()?;
+    let default_palette = terminal.default_color_palette()?.0;
     let columns = snapshot.cols()?;
     let row_count = snapshot.rows()?;
     let foreground = color(colors.foreground);
@@ -12941,6 +12963,28 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                     grapheme_scratch.clear();
                     cell.graphemes_utf8(&mut grapheme_scratch)?;
                     let raw_cell = cell.raw_cell()?;
+                    let classes = if raw_style.inverse {
+                        (ColourClass::Resolved, ColourClass::Resolved)
+                    } else {
+                        (
+                            ground_class(raw_style.fg_color, &colors.palette, &default_palette),
+                            match raw_cell.content_tag()? {
+                                CellContentTag::BgColorPalette => palette_class(
+                                    raw_cell.bg_color_palette()?.0,
+                                    &colors.palette,
+                                    &default_palette,
+                                ),
+                                CellContentTag::BgColorRgb => ColourClass::Rgb,
+                                CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
+                                    ground_class(
+                                        raw_style.bg_color,
+                                        &colors.palette,
+                                        &default_palette,
+                                    )
+                                }
+                            },
+                        )
+                    };
                     let width = match raw_cell.wide()? {
                         CellWide::Narrow => CellWidth::Narrow,
                         CellWide::Wide => CellWidth::Wide,
@@ -12967,7 +13011,8 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                             raw_cell.has_hyperlink()?,
                         ),
                         underline_style(raw_style.underline),
-                    );
+                    )
+                    .with_classes(classes.0, classes.1);
                     let style_id = dictionary.intern_style(style);
                     let glyph = dictionary.encode_glyph(&grapheme_scratch);
                     output_row[column] = PackedCell::new(glyph, style_id, width);
@@ -13310,6 +13355,27 @@ fn resolve_style_color(value: StyleColor, palette: &[RgbColor; 256]) -> Option<C
         StyleColor::None => None,
         StyleColor::Palette(index) => palette.get(usize::from(index.0)).copied().map(color),
         StyleColor::Rgb(value) => Some(color(value)),
+    }
+}
+
+fn ground_class(
+    value: StyleColor,
+    palette: &[RgbColor; 256],
+    defaults: &[RgbColor; 256],
+) -> ColourClass {
+    match value {
+        StyleColor::None => ColourClass::Default,
+        StyleColor::Palette(index) => palette_class(index.0, palette, defaults),
+        StyleColor::Rgb(_) => ColourClass::Rgb,
+    }
+}
+
+fn palette_class(index: u8, palette: &[RgbColor; 256], defaults: &[RgbColor; 256]) -> ColourClass {
+    let slot = usize::from(index);
+    if palette[slot] == defaults[slot] {
+        ColourClass::Palette(index)
+    } else {
+        ColourClass::Rgb
     }
 }
 
@@ -15451,6 +15517,48 @@ mod tests {
         assert_eq!(
             viewport.style(cell).expect("style").foreground(),
             Color::rgb(0x12, 0x34, 0x56)
+        );
+    }
+
+    #[test]
+    fn snapshot_cells_keep_the_colour_class_the_program_wrote() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 6,
+            rows: 1,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        apply_terminal_appearance(&mut terminal, &TerminalAppearance::default())
+            .expect("apply appearance");
+        terminal.vt_write(
+            b"\x1b[31mR\x1b[0m\x1b[38;5;42mI\x1b[0m\x1b[38;2;10;20;30mX\x1b[0m\x1b[41mB\x1b[0mD\x1b[7mV",
+        );
+        let viewport = snapshot_fixture(&terminal);
+        let row = viewport.row(0).expect("first row");
+        let classes = |column: usize| {
+            let style = viewport.style(row[column]).expect("style");
+            (style.foreground_class(), style.background_class())
+        };
+        assert_eq!(classes(0), (ColourClass::Palette(1), ColourClass::Default));
+        assert_eq!(classes(1), (ColourClass::Palette(42), ColourClass::Default));
+        assert_eq!(classes(2), (ColourClass::Rgb, ColourClass::Default));
+        assert_eq!(classes(3), (ColourClass::Default, ColourClass::Palette(1)));
+        assert_eq!(classes(4), (ColourClass::Default, ColourClass::Default));
+        assert_eq!(classes(5), (ColourClass::Resolved, ColourClass::Resolved));
+
+        terminal.vt_write(b"\x1b]4;1;rgb:00/ff/00\x1b\\");
+        let viewport = snapshot_fixture(&terminal);
+        let row = viewport.row(0).expect("first row");
+        let named = viewport.style(row[0]).expect("style");
+        assert_eq!(named.foreground_class(), ColourClass::Rgb);
+        assert_eq!(named.foreground(), Color::rgb(0, 255, 0));
+        assert_eq!(
+            viewport.style(row[3]).expect("style").background_class(),
+            ColourClass::Rgb
+        );
+        assert_eq!(
+            viewport.style(row[1]).expect("style").foreground_class(),
+            ColourClass::Palette(42)
         );
     }
 

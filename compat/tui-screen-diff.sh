@@ -13,8 +13,8 @@
 # own grid, so attribute order, batching, redundant resets and cursor-movement
 # spelling collapse on both sides before anything is compared. What does NOT
 # collapse is the colour CLASS: a named colour, an indexed one and an RGB one
-# stay three different cells in the pin's grid, and the recorded colour-classes
-# case below measures what each binary does with them.
+# stay three different cells in the pin's grid, and the colour-classes case
+# below asserts that each binary hands the outer terminal the class it was given.
 #
 # What the pin collapses was measured rather than assumed. colour.c
 # colour_fromstring gives `red` the value 1 and `colour1` the value
@@ -693,11 +693,11 @@ run_size() {
   checkpoint pane-border-off "$mode"
 
   # COLOUR CLASSES ON THE STATUS ROW, which is not the same channel as the
-  # recorded colour-classes case below: that one is an application writing SGR
+  # colour-classes case below: that one is an application writing SGR
   # into the pane body, this one is tty_colours deciding what a status option's
   # named, indexed and RGB colour leaves as. Both grounds are named in every
-  # case, because a style that sets only the background is the recorded
-  # default-fg divergence and an assertion must not be built on top of one.
+  # case, so the class is the only thing each case varies; a style that sets
+  # only the background is the default-fg case below.
   clear_both
   set_on_both status-style 'bg=red,fg=white'
   checkpoint status-style-named "$mode"
@@ -713,15 +713,12 @@ run_size() {
   side_command zz set-option -gu window-status-current-format >/dev/null 2>&1 || true
   side_command tmux set-option -gu window-status-current-format >/dev/null 2>&1 || true
 
-  # Two channels the corpus above never touches, both driven identically on the
-  # two sides and both RECORDED rather than asserted, because 2026-09-09
-  # measured a real divergence in each and neither has a registry owner yet.
-  #
   # colour-classes writes the same three cells as a NAMED colour, an INDEXED
-  # colour and an RGB one. The pin keeps the class it was given; zz resolves the
-  # named and the indexed one through its palette and hands the outer terminal
-  # RGB, so \e[31m arrives as \e[38;2;205;0;0m and \e[38;5;196m arrives as
-  # \e[38;2;255;0;0m, while the RGB cell passes through unchanged.
+  # colour and an RGB one. The pin keeps the class it was given, and so does zz
+  # since PROTOCOL 101 carries each style's colour class beside its resolved
+  # RGB: \e[31m, \e[38;5;196m and \e[38;2;1;2;3m reach the outer grid as three
+  # different cells on both sides. Until 2026-09-10 zz resolved the first two to
+  # RGB (\e[38;2;205;0;0m and \e[38;2;255;0;0m) and this case was recorded.
   # Cell widths, which the rest of the corpus never exercises: a CJK pair that
   # occupies two columns each, a base letter with a combining accent that
   # occupies none of its own, and an emoji. Both sides are sent the same bytes,
@@ -731,21 +728,25 @@ run_size() {
   send_both "printf 'W[%s][%s][%s]|\\n' '你好' 'éä' '🙂'"
   checkpoint wide-glyphs "$mode"
 
-  # Each of the two below clears the screen first: a recorded difference stays
-  # on the screen, and the report names the FIRST differing row, so without the
-  # clear the second case would report the first case's leftovers instead of
-  # its own.
+  # Each of the two below clears the screen first: a difference stays on the
+  # screen, and the report names the FIRST differing row, so without the clear
+  # the second case would report the first case's leftovers instead of its own.
+  #
+  # default-fg names a background and no foreground. The pin leaves the
+  # foreground at the terminal's default (tty_colours sends 39 for a default
+  # ground), and since 2026-09-10 so does the raw TUI: a style that names no
+  # colour resets the ground instead of painting zz's theme foreground, which
+  # it used to write as \e[38;2;216;222;233m. Decided 2026-09-10 by the
+  # orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible.
   clear_both
   set_on_both status-style bg=colour4
-  checkpoint default-fg record \
-    'zz writes an explicit RGB foreground where the pin leaves the foreground default'
+  checkpoint default-fg "$mode"
   side_command zz set-option -gu status-style >/dev/null 2>&1 || true
   side_command tmux set-option -gu status-style >/dev/null 2>&1 || true
 
   clear_both
   send_both "printf '\\033[31mNAMED\\033[0m \\033[38;5;196mINDEXED\\033[0m \\033[38;2;1;2;3mRGB\\033[0m\\n'"
-  checkpoint colour-classes record \
-    'zz resolves a named and an indexed colour to RGB before writing to the terminal'
+  checkpoint colour-classes "$mode"
 
   # THE SERVER THEME OPTION. options-table.c makes `theme` a server option and
   # server_client_update_theme_colours expands the ten dark-theme-*/light-theme-*
@@ -943,6 +944,29 @@ run_self_check() {
   self_check_checkpoint colour
   self_check_case 'colour, status-style bg=red on one side' rows
 
+  # The colour-classes channel: the same red, written as a named colour on one
+  # side and as the RGB it resolves to on a stock palette on the other. The
+  # decoder keeps the two classes apart, so the rows have to differ.
+  SIZE_LABEL='80x24-colour-class'
+  attach_both_at 80 24
+  plant zz class '\033[31mCLASS\033[0m'
+  plant tmux class '\033[38;2;205;0;0mCLASS\033[0m'
+  send_both 'printf "%b\\n" "$(cat $HOME/class)"'
+  self_check_checkpoint colour-class
+  self_check_case 'colour class, a named cell against the RGB it resolves to' rows
+
+  # The default-fg channel: a style that names only a background on one side,
+  # and the same background with an explicit foreground equal to zz's theme
+  # foreground on the other, which is what the raw TUI used to paint. The
+  # decoder keeps a default foreground and an RGB one apart.
+  SIZE_LABEL='80x24-default-fg'
+  attach_both_at 80 24
+  side_command zz set-option -g status-style bg=colour4 || die 'zz refused status-style'
+  side_command tmux set-option -g status-style 'bg=colour4,fg=#d8dee9' ||
+    die 'tmux refused status-style'
+  self_check_checkpoint default-fg
+  self_check_case 'default foreground, an explicit RGB foreground on one side' rows
+
   SIZE_LABEL='80x24-cursor'
   attach_both_at 80 24
   plant zz cursorline 'CURSORMARK-WITH-A-LONGER-TAIL'
@@ -1016,9 +1040,7 @@ run_self_check() {
 
   # The pin parses a style into a cell, so the order the attributes were written
   # in is gone by the time capture-pane re-emits it. The foreground is named on
-  # both sides on purpose: with the foreground left at default the two binaries
-  # already differ, which is the recorded default-fg case above, and an
-  # equivalence must not be built on top of a divergence.
+  # both sides so the equivalence varies the order and nothing else.
   SIZE_LABEL='80x24-style-order'
   attach_both_at 80 24
   side_command zz set-option -g status-style 'bg=colour1,fg=colour7,bold' ||

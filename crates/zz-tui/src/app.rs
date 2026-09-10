@@ -496,6 +496,7 @@ pub(crate) fn run(
         };
     let size = TerminalSize::detect().map_err(|error| error.to_string())?;
     let mut core = seeded_core(initial.server_hello().clone());
+    let extended_keys = crate::tty::extended_keys_option(&endpoint);
     let mut client = Arc::new(initial);
     if let Some(detach_others) = attach_request {
         client
@@ -511,8 +512,11 @@ pub(crate) fn run(
     let escape_time = Arc::new(AtomicU64::new(escape_timeout_ms(
         lock_core(&core).mux_options(),
     )));
-    let mut terminal = TerminalGuard::enter(mouse_option_enabled(lock_core(&core).mux_options()))
-        .map_err(|error| error.to_string())?;
+    let mut terminal = TerminalGuard::enter(
+        mouse_option_enabled(lock_core(&core).mux_options()),
+        extended_keys,
+    )
+    .map_err(|error| error.to_string())?;
     let pixel_mouse = terminal.pixel_mouse();
     let key_releases = terminal.kitty_keyboard();
     let mut model = Model::new(

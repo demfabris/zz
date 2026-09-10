@@ -45,8 +45,23 @@
 #   global flag -u                 accepted, and its own-side delta      driven
 #   global flag -T                 accepted, and its own-side delta      driven
 #   flag diagnostics               missing argument, unknown option      driven
-#   colour class, stock palette    a named, an indexed and an RGB cell   driven
-#   colour class, palette change   the same three cells after OSC 4      driven
+#   colour class, stock palette    a named, an indexed and an RGB        driven
+#                                  cell and a named background
+#   colour class, palette change   the same four cells after OSC 4 on a  driven
+#                                  named entry, after OSC 4 on an
+#                                  indexed entry, and after OSC 104
+#   colour class, an OSC 4 that    the pin substitutes any SET entry;     named
+#     sets an entry to exactly     zz sees a palette entry only when it
+#     its configured value         differs from the configured one,
+#                                  because libghostty-vt exposes the
+#                                  current and the default palette and no
+#                                  override mask. Not driven.
+#   colour class, pane-colours     zz applies pane-colours to the pane's  named
+#                                  default palette (crates/zz-daemon
+#                                  daemon.rs pane_palette), so a cell
+#                                  keeps its index where the pin's
+#                                  colour_palette_get substitutes the
+#                                  option's colour. Not driven.
 #   theme reply                    client_theme before any reply         driven
 #   focus reporting                the pin publishes no pane format for      named
 #                                  focus mode, so this decoder cannot see
@@ -102,10 +117,6 @@
 #                          under xterm-ghostty. So zz gets no extended keys
 #                          here because it never asks, not because the pin
 #                          ignored the request.
-#   colours/indexed cell   the indexed cell an OSC 4 entry does NOT touch keeps
-#     under a palette      each side's own class: the pin `\e[38;5;42m`, zz the
-#     change               RGB it resolved. Only the cells the entry touches
-#                          are asserted.
 #   client_termfeatures    the pin's list is negotiated from the terminal's
 #   client_colours         replies; zz derives its roster from TERM and
 #                          COLORTERM.
@@ -113,9 +124,6 @@
 #   client_flags under -u  drops it.
 #   client_termfeatures    the pin adds the named features; zz's CLI accepts
 #     under -2 and -T      both and drops them.
-#   the stock-palette      zz resolves a named or indexed cell to RGB in the
-#     colour classes       terminal engine's cell model before the frame is
-#                          published; the pin keeps the index.
 #   client_theme           a zz client always carries a theme and the pin's is
 #                          empty until its terminal answers. That is the
 #                          recorded stance on
@@ -132,6 +140,18 @@
 #                       pt_BR.UTF-8) and hide what -u does. The two cases that
 #                       need UTF-8 clients name C.UTF-8 explicitly.
 #   mouse               left at its default, which is `on` on both binaries.
+#   runtime and sockets XDG_RUNTIME_DIR is a directory inside the scratch
+#                       directory for every zz process, the env -i attach
+#                       scripts included, and the CLI diagnostics run with
+#                       TMUX_TMPDIR there too. The CLI diagnostics name no
+#                       socket, and a scrubbed environment without
+#                       XDG_RUNTIME_DIR resolves zz's default socket to
+#                       /tmp/zz-user/default.sock (with the caller's, to the
+#                       user's real one), so a connecting command there would
+#                       autostart a daemon outside the run. Inside the scratch
+#                       directory it cannot, and the cleanup stops it and reaps
+#                       every process whose environment names the scratch
+#                       directory, on a normal exit and on SIGINT or SIGTERM.
 #   the outer decoder   status off, and `extended-keys on` so the decoder
 #                       records an inner client's extended-key request at all
 #                       (input.c INPUT_CSI_MODSET returns early when its own
@@ -142,13 +162,23 @@
 # has reached the side's screen AND that screen has stopped changing between
 # two polls. No wait here is a sleep.
 #
-# --self-check drives FIVE deliberate one-sided differences and requires the
+# COLOUR CLASSES. The pane body keeps the class the program wrote: a named
+# colour leaves the raw TUI as 3n/4n or 9n/10n, an indexed one as 38;5;n or
+# 48;5;n, an RGB one as 38;2, and a default ground as 39/49, which is what
+# tty_colours_fg and tty_colours_bg send through xterm-256color's setaf and
+# setab. Once an OSC 4 entry exists for an index the pin resolves the cell
+# through the pane palette and sends RGB, and after OSC 104 it sends the index
+# again; zz does the same from the frame's per-style colour class (PROTOCOL
+# 101). Every cell of every colour stage asserts.
+#
+# --self-check drives EIGHT deliberate one-sided differences and requires the
 # comparison to report each in the channel that was sabotaged: a one-sided
-# client flag (-u on the pin only), a one-sided palette entry, the
-# legacy-terminal case driven with extended keys on one side, a one-sided
-# unknown CLI option, and a one-sided wide codepoint. A sixth case is a
-# CONTROL that sabotages nothing and must stay quiet. A fixture that only
-# passes has proved nothing.
+# client flag (-u on the pin only), a named cell spelled as the RGB colour it
+# resolves to on one side, a one-sided palette entry, an OSC 4 on an indexed
+# entry sent to one side, an OSC 104 sent to one side, the legacy-terminal case
+# driven with extended keys on one side, a one-sided unknown CLI option, and a
+# one-sided wide codepoint. A ninth case is a CONTROL that sabotages nothing
+# and must stay quiet. A fixture that only passes has proved nothing.
 #
 # ZZ_CAPS_DIAGNOSTICS_DIR names the directory a bounded wait that runs out
 # copies its evidence into; without it a fresh /tmp directory is made and named
@@ -209,6 +239,7 @@ ZZ_HOME="$SCRATCH_DIR/zz-home"
 TMUX_HOME="$SCRATCH_DIR/tmux-home"
 OUTER_HOME="$SCRATCH_DIR/outer-home"
 ZZ_LOG_DIR="$SCRATCH_DIR/zz-logs"
+RUNTIME_DIR="$SCRATCH_DIR/run"
 DIAGNOSTICS_DIR=""
 CASE_UNDER_TEST=""
 ZZ_PID=""
@@ -224,7 +255,8 @@ INNER_SHELL="ENV= PS1='\$ ' exec /bin/sh"
 CASE_LOCALE=C
 ZZ_PANE=""
 TMUX_PANE_ID=""
-mkdir -p "$ZZ_HOME/config" "$TMUX_HOME/config" "$OUTER_HOME/config" "$ZZ_LOG_DIR"
+mkdir -p "$ZZ_HOME/config" "$TMUX_HOME/config" "$OUTER_HOME/config" "$ZZ_LOG_DIR" "$RUNTIME_DIR"
+chmod 700 "$RUNTIME_DIR"
 
 # Every mode the outer decoder publishes for its own pane, plus the key mode.
 # The pin's own format names are the row names; nothing is invented here.
@@ -241,18 +273,25 @@ MODE_RECORDED="wrap_flag mouse_all_flag mouse_button_flag keypad_flag keypad_cur
 
 FACT_NAMES=(client_termname client_utf8 client_flags client_colours client_termfeatures client_theme)
 FACT_FORMAT='#{client_termname}|#{client_utf8}|#{client_flags}|#{client_colours}|#{client_termfeatures}|#{client_theme}'
-FACT_RECORDED="client_colours client_termfeatures client_theme delta-client_flags delta-client_termfeatures"
+FACT_RECORDED="client_colours client_termfeatures client_theme"
 # Each global flag adds its own rows: what the flag CHANGED on its own side,
 # against that side's own unflagged baseline. That delta is the flag's
 # disposition, and it is what makes an ignored flag visible instead of hidden
-# inside a roster the two sides never shared anyway.
+# inside a roster the two sides never shared anyway. The delta is compared
+# over the items both baselines agree on: an item only one baseline carries
+# (the pin negotiates 256, RGB and progressbar from its terminal's replies,
+# zz derives osc7 and sync from TERM) is the recorded client_termfeatures row,
+# and a flag re-adding it on one side is that same difference, not a new one.
+# A flag that names features adds a second row, whether each named feature is
+# in the side's roster after the flag, which is what -2 does on a terminal
+# whose pin baseline already carries 256.
 BASELINE_ZZ=""
 BASELINE_PIN=""
 
 scrubbed() {
   env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL \
     -u XDG_STATE_HOME -u ZZ_LOG_DIR -u COLORTERM -u TERM_PROGRAM \
-    LANG=C LC_ALL=C TMUX_TMPDIR=/tmp "$@"
+    LANG=C LC_ALL=C TMUX_TMPDIR=/tmp XDG_RUNTIME_DIR="$RUNTIME_DIR" "$@"
 }
 tmux_outer_command() {
   scrubbed HOME="$OUTER_HOME" XDG_CONFIG_HOME="$OUTER_HOME/config" TERM=xterm-256color \
@@ -284,6 +323,34 @@ side_pane() {
   esac
 }
 
+# Every process this run starts carries the scratch directory in its
+# environment: the daemon, the attach clients and their children through HOME,
+# and a client without a socket selector through XDG_RUNTIME_DIR too. That is
+# the reap list, so a daemon a stray client autostarted, an attach client the
+# outer server left behind or anything a sabotage spawned goes with the run,
+# and nothing else on the box is touched.
+scratch_pids() {
+  local entry
+  for entry in /proc/[0-9]*; do
+    if tr '\0' '\n' <"$entry/environ" 2>/dev/null | grep -qF -- "$SCRATCH_DIR"; then
+      printf '%s\n' "${entry#/proc/}"
+    fi
+  done
+}
+reap_scratch() {
+  local pids attempt
+  pids="$(scratch_pids)"
+  [ -n "$pids" ] || return 0
+  printf 'cleanup: reaping %s leftover processes of this run\n' "$(printf '%s\n' "$pids" | wc -l)" >&2
+  kill $pids >/dev/null 2>&1
+  for ((attempt = 0; attempt < 60; attempt++)); do
+    [ -n "$(scratch_pids)" ] || return 0
+    sleep 0.05
+  done
+  pids="$(scratch_pids)"
+  [ -z "$pids" ] || kill -KILL $pids >/dev/null 2>&1
+}
+
 cleanup() {
   local status=$?
   trap - EXIT ERR INT TERM
@@ -291,10 +358,14 @@ cleanup() {
   tmux_outer_command kill-server >/dev/null 2>&1
   zz_command kill-server >/dev/null 2>&1
   tmux_inner_command kill-server >/dev/null 2>&1
+  if [ -S "$RUNTIME_DIR/zz/default.sock" ]; then
+    scrubbed HOME="$ZZ_HOME" "$ZZ_BIN" --socket "$RUNTIME_DIR/zz/default.sock" kill-server >/dev/null 2>&1
+  fi
   if [ -n "$ZZ_PID" ]; then
     kill "$ZZ_PID" >/dev/null 2>&1
     wait "$ZZ_PID" >/dev/null 2>&1
   fi
+  reap_scratch
   rm -f -- "$ZZ_SOCKET" "/tmp/tmux-$(id -u)/$OUTER_SOCKET_NAME" "/tmp/tmux-$(id -u)/$INNER_SOCKET_NAME"
   rm -rf -- "$SCRATCH_DIR"
   exit "$status"
@@ -480,12 +551,12 @@ write_attach() {
   shift 3
   printf '#!/usr/bin/env bash\n' >"$destination"
   if [ "$side" = zz ]; then
-    printf 'exec env -i HOME=%q XDG_CONFIG_HOME=%q ZZ_LOG_DIR=%q LANG=%q LC_ALL=%q TERM=%q PATH=%q TMUX_TMPDIR=/tmp %q --socket %q %s attach-session -t %q\n' \
-      "$ZZ_HOME" "$ZZ_HOME/config" "$ZZ_LOG_DIR" "$CASE_LOCALE" "$CASE_LOCALE" "$term" \
-      "$PATH" "$ZZ_BIN" "$ZZ_SOCKET" "$*" "=$INNER_SESSION" >>"$destination"
+    printf 'exec env -i HOME=%q XDG_CONFIG_HOME=%q XDG_RUNTIME_DIR=%q ZZ_LOG_DIR=%q LANG=%q LC_ALL=%q TERM=%q PATH=%q TMUX_TMPDIR=/tmp %q --socket %q %s attach-session -t %q\n' \
+      "$ZZ_HOME" "$ZZ_HOME/config" "$RUNTIME_DIR" "$ZZ_LOG_DIR" "$CASE_LOCALE" "$CASE_LOCALE" \
+      "$term" "$PATH" "$ZZ_BIN" "$ZZ_SOCKET" "$*" "=$INNER_SESSION" >>"$destination"
   else
-    printf 'exec env -i HOME=%q XDG_CONFIG_HOME=%q LANG=%q LC_ALL=%q TERM=%q PATH=%q TMUX_TMPDIR=/tmp %q -L %q %s attach-session -t %q\n' \
-      "$TMUX_HOME" "$TMUX_HOME/config" "$CASE_LOCALE" "$CASE_LOCALE" "$term" \
+    printf 'exec env -i HOME=%q XDG_CONFIG_HOME=%q XDG_RUNTIME_DIR=%q LANG=%q LC_ALL=%q TERM=%q PATH=%q TMUX_TMPDIR=/tmp %q -L %q %s attach-session -t %q\n' \
+      "$TMUX_HOME" "$TMUX_HOME/config" "$RUNTIME_DIR" "$CASE_LOCALE" "$CASE_LOCALE" "$term" \
       "$PATH" "$TMUX_BIN" "$INNER_SOCKET_NAME" "$*" "=$INNER_SESSION" >>"$destination"
   fi
   chmod +x "$destination"
@@ -534,6 +605,40 @@ case_modes() {
   compare_tuple "$name" "$recorded" "$(read_modes zz)" "$(read_modes tmux)" "${MODE_NAMES[@]}"
 }
 
+# An extended key through the outer decoder. With an inner client's mode 2
+# armed, the outer tmux sends C-Enter as \e[27;5;13~ and the client has to
+# decode it; without mode 2 the key arrives as a plain Enter. A root binding on
+# each inner server records what its client decoded, and F9, bound on both and
+# sent after it through the same path, is the settle: once F9's binding has run
+# on a side, C-Enter has been handled there too.
+case_extended_key() {
+  local name="$1" side
+  for side in zz tmux; do
+    side_command "$side" set-option -gu @extkey >/dev/null 2>&1 || true
+    side_command "$side" set-option -gu @extdone >/dev/null 2>&1 || true
+    side_command "$side" bind-key -n C-Enter set-option -g @extkey C-Enter >/dev/null
+    side_command "$side" bind-key -n F9 set-option -g @extdone 1 >/dev/null
+  done
+  open_case "$name" xterm-256color '' ''
+  checkpoint "${name//[^a-zA-Z0-9]/}"
+  for side in zz tmux; do
+    tmux_outer_command send-keys -t "$(outer_window "$side")" C-Enter F9
+  done
+  for side in zz tmux; do
+    wait_for "$side decoded F9 for $name" extended_done "$side"
+  done
+  assert_row "$name @extkey" \
+    "$(side_command zz show-options -gqv @extkey 2>/dev/null)" \
+    "$(side_command tmux show-options -gqv @extkey 2>/dev/null)"
+  for side in zz tmux; do
+    side_command "$side" unbind-key -n C-Enter >/dev/null 2>&1 || true
+    side_command "$side" unbind-key -n F9 >/dev/null 2>&1 || true
+  done
+}
+extended_done() {
+  [ "$(side_command "$1" show-options -gqv @extdone 2>/dev/null)" = 1 ]
+}
+
 # Items in the second comma list that the first does not carry.
 list_delta() {
   local base="$1" now="$2" item out=""
@@ -546,6 +651,32 @@ list_delta() {
   done
   printf '%s\n' "${out:-none}"
 }
+# Items of the first comma list that the second does not carry, where `none`
+# is the empty list.
+list_without() {
+  local list="$1" exclude="$2" item out=""
+  [ "$list" = none ] && list=""
+  local IFS=,
+  for item in $list; do
+    case ",$exclude," in
+    *",$item,"*) ;;
+    *) out="${out:+$out,}$item" ;;
+    esac
+  done
+  printf '%s\n' "${out:-none}"
+}
+# Whether each named feature is in a roster, as name:yes or name:no.
+features_present() {
+  local roster="$1" names="$2" name out=""
+  local IFS=,
+  for name in $names; do
+    case ",$roster," in
+    *",$name,"*) out="${out:+$out,}$name:yes" ;;
+    *) out="${out:+$out,}$name:no" ;;
+    esac
+  done
+  printf '%s\n' "$out"
+}
 tuple_field() {
   local tuple="$1" index="$2"
   local -a fields
@@ -555,7 +686,7 @@ tuple_field() {
 
 case_facts() {
   local name="$1" term="$2" zz_flags="$3" tmux_flags="$4" recorded="${5:-$FACT_RECORDED}"
-  local baseline="${6:-}"
+  local baseline="${6:-}" named="${7:-}"
   open_case "$name" "$term" "$zz_flags" "$tmux_flags"
   checkpoint "${name//[^a-zA-Z0-9]/}"
   local zz_tuple pin_tuple
@@ -568,12 +699,19 @@ case_facts() {
     return 0
   fi
   [ -n "$BASELINE_ZZ" ] || return 0
-  local index
+  local index zz_base pin_base disagreed
   for index in 2 4; do
+    zz_base="$(tuple_field "$BASELINE_ZZ" "$index")"
+    pin_base="$(tuple_field "$BASELINE_PIN" "$index")"
+    disagreed="$(list_delta "$zz_base" "$pin_base"),$(list_delta "$pin_base" "$zz_base")"
     compare_row "$recorded" "delta-${FACT_NAMES[$index]}" "$name delta-${FACT_NAMES[$index]}" \
-      "$(list_delta "$(tuple_field "$BASELINE_ZZ" "$index")" "$(tuple_field "$zz_tuple" "$index")")" \
-      "$(list_delta "$(tuple_field "$BASELINE_PIN" "$index")" "$(tuple_field "$pin_tuple" "$index")")"
+      "$(list_without "$(list_delta "$zz_base" "$(tuple_field "$zz_tuple" "$index")")" "$disagreed")" \
+      "$(list_without "$(list_delta "$pin_base" "$(tuple_field "$pin_tuple" "$index")")" "$disagreed")"
   done
+  [ -n "$named" ] || return 0
+  assert_row "$name flag-features" \
+    "$(features_present "$(tuple_field "$zz_tuple" 4)" "$named")" \
+    "$(features_present "$(tuple_field "$pin_tuple" 4)" "$named")"
 }
 
 # Restoration is the one place a detached client is the subject: the outer pane
@@ -591,9 +729,14 @@ case_restore() {
 
 # The colour case reads the decoder's own grid, where the class survives. The
 # sample line carries one named cell, one indexed cell, one RGB cell and one
-# named background, and the glyphs are asserted on both sides whatever the
-# classes do.
+# named background, and every stage asserts all four cells and the whole line.
 COLOUR_SAMPLE="printf 'CLR \\033[31mR\\033[0m \\033[38;5;42mI\\033[0m \\033[38;2;10;20;30mX\\033[0m \\033[41mB\\033[0m END\\n'"
+# The same line with the named cell spelled as the RGB colour it resolves to on
+# a stock xterm palette: the same colour in a different class.
+COLOUR_SAMPLE_RGB="printf 'CLR \\033[38;2;205;0;0mR\\033[0m \\033[38;5;42mI\\033[0m \\033[38;2;10;20;30mX\\033[0m \\033[41mB\\033[0m END\\n'"
+PALETTE_NAMED='\033]4;1;rgb:00/ff/00\033\\'
+PALETTE_INDEXED='\033]4;42;rgb:ff/00/ff\033\\'
+PALETTE_RESET='\033]104\033\\'
 colour_line() {
   outer_screen "$1" | grep -a 'CLR ' | grep -a 'END' | tail -n 1
 }
@@ -608,45 +751,48 @@ cell_class() {
   found="$(printf '%s' "$line" | grep -ao $'\033\\[[0-9;]*m'"$glyph" | tail -n 1 | cat -v)"
   printf '%s\n' "${found:-none}"
 }
-case_colours() {
-  local zz_palette="$1" tmux_palette="$2"
-  local zz_line pin_line zz_after pin_after
-  open_case colours xterm-256color '' ''
-  send_both "clear; $COLOUR_SAMPLE"
-  checkpoint colourstock
+# One stage: each side runs its own escape (an OSC 4, an OSC 104 or nothing),
+# clears and prints its sample, and every cell of the line is compared. The
+# clear keeps a one-sided command line off the compared screen.
+colour_stage() {
+  local stage="$1" zz_escape="$2" pin_escape="$3" zz_sample="$4" pin_sample="$5"
+  local zz_line pin_line glyph
+  side_command zz send-keys -t "$(side_pane zz)" "printf '$zz_escape'; clear; $zz_sample" Enter
+  side_command tmux send-keys -t "$(side_pane tmux)" "printf '$pin_escape'; clear; $pin_sample" Enter
+  checkpoint "colour$stage"
   zz_line="$(colour_line zz)"
   pin_line="$(colour_line tmux)"
-  assert_row "colours/stock glyphs" "$(strip_escapes "$zz_line")" "$(strip_escapes "$pin_line")"
-  # An explicitly RGB cell has no class to lose, so it asserts on both sides
-  # even while the named and indexed cells beside it are recorded.
-  assert_row "colours/stock rgb cell" "$(cell_class "$zz_line" X)" "$(cell_class "$pin_line" X)"
-  record_row "colours/stock named cell" "$(cell_class "$zz_line" R)" "$(cell_class "$pin_line" R)"
-  record_row "colours/stock indexed cell" "$(cell_class "$zz_line" I)" "$(cell_class "$pin_line" I)"
-  record_row "colours/stock line" "$(printf '%s' "$zz_line" | cat -v)" \
+  assert_row "colours/$stage glyphs" "$(strip_escapes "$zz_line")" "$(strip_escapes "$pin_line")"
+  for glyph in R I X B; do
+    assert_row "colours/$stage cell $glyph" \
+      "$(cell_class "$zz_line" "$glyph")" "$(cell_class "$pin_line" "$glyph")"
+  done
+  assert_row "colours/$stage line" "$(printf '%s' "$zz_line" | cat -v)" \
     "$(printf '%s' "$pin_line" | cat -v)"
+}
 
-  side_command zz send-keys -t "$(side_pane zz)" \
-    "printf '\\033]4;1;$zz_palette\\033\\\\'; clear; $COLOUR_SAMPLE" Enter
-  side_command tmux send-keys -t "$(side_pane tmux)" \
-    "printf '\\033]4;1;$tmux_palette\\033\\\\'; clear; $COLOUR_SAMPLE" Enter
-  checkpoint colourpalette
-  zz_after="$(colour_line zz)"
-  pin_after="$(colour_line tmux)"
-  assert_row "colours/palette glyphs" "$(strip_escapes "$zz_after")" "$(strip_escapes "$pin_after")"
-  # THE ASSERTION CLAUSE 3 EARNS. Once an OSC 4 entry exists for colour 1, the
-  # pin stops emitting the index and resolves the cell through the pane palette
-  # (tty.c tty_check_fg over window_pane_get_palette), so both sides put the
-  # same RGB on the outer terminal for the foreground AND the background that
-  # entry paints. A side that ignored the entry, resolved it to a different
-  # value or applied it to the wrong ground is caught here. The untouched
-  # indexed cell and the untouched RGB cell are asserted alongside it, so a
-  # palette change that spilled onto its neighbours is caught too.
-  assert_row "colours/palette named cell" "$(cell_class "$zz_after" R)" "$(cell_class "$pin_after" R)"
-  assert_row "colours/palette named background" "$(cell_class "$zz_after" B)" "$(cell_class "$pin_after" B)"
-  assert_row "colours/palette rgb cell" "$(cell_class "$zz_after" X)" "$(cell_class "$pin_after" X)"
-  record_row "colours/palette indexed cell" "$(cell_class "$zz_after" I)" "$(cell_class "$pin_after" I)"
-  record_row "colours/palette line" "$(printf '%s' "$zz_after" | cat -v)" \
-    "$(printf '%s' "$pin_after" | cat -v)"
+# THE STAGES CLAUSE 3 NAMES. stock: the pin keeps each class it was given.
+# palette: once an OSC 4 entry exists for colour 1 the pin resolves the cell
+# through the pane palette (tty.c tty_check_fg and tty_check_bg over
+# colour_palette_get) and sends RGB, for the foreground AND the background the
+# entry paints, while the indexed cell keeps its index. indexed: the same for
+# an indexed entry. reset: OSC 104 clears every entry and both cells go back to
+# their index. A sabotage names the one thing it hands the pin's side alone.
+case_colours() {
+  local sabotage="${1:-none}"
+  local pin_sample="$COLOUR_SAMPLE" pin_named="$PALETTE_NAMED"
+  local pin_indexed="$PALETTE_INDEXED" pin_reset="$PALETTE_RESET"
+  case "$sabotage" in
+  named-as-rgb) pin_sample="$COLOUR_SAMPLE_RGB" ;;
+  named-entry) pin_named='\033]4;1;rgb:00/00/ff\033\\' ;;
+  indexed-entry) pin_indexed='' ;;
+  reset) pin_reset='' ;;
+  esac
+  open_case colours xterm-256color '' ''
+  colour_stage stock '' '' "$COLOUR_SAMPLE" "$pin_sample"
+  colour_stage palette "$PALETTE_NAMED" "$pin_named" "$COLOUR_SAMPLE" "$pin_sample"
+  colour_stage indexed "$PALETTE_INDEXED" "$pin_indexed" "$COLOUR_SAMPLE" "$pin_sample"
+  colour_stage reset "$PALETTE_RESET" "$pin_reset" "$COLOUR_SAMPLE" "$pin_sample"
 }
 
 # Unicode widths reach the outer terminal as the column the inner mux left its
@@ -659,7 +805,8 @@ case_colours() {
 WIDTH_SUFFIX=" \344\270\226\347\225\214 | e\314\201 | \360\237\230\200 |"
 case_widths() {
   local zz_suffix="${1:-$WIDTH_SUFFIX}" pin_suffix="${2:-$WIDTH_SUFFIX}"
-  open_case widths xterm-256color '' ''
+  local label="${3:-widths}" zz_flags="${4:-}" pin_flags="${5:-}"
+  open_case "$label" xterm-256color "$zz_flags" "$pin_flags"
   side_command zz send-keys -t "$(side_pane zz)" \
     "clear; printf 'W%s$zz_suffix' 1" Enter
   side_command tmux send-keys -t "$(side_pane tmux)" \
@@ -668,10 +815,10 @@ case_widths() {
   for side in zz tmux; do
     wait_settled "$side" 'W1'
   done
-  assert_row "widths/cursor" \
+  assert_row "$label/cursor" \
     "$(tmux_outer_command display-message -p -t "$(outer_window zz)" '#{cursor_x},#{cursor_y}')" \
     "$(tmux_outer_command display-message -p -t "$(outer_window tmux)" '#{cursor_x},#{cursor_y}')"
-  assert_row "widths/line" \
+  compare_row "${6:-}" line "$label/line" \
     "$(outer_screen zz | grep -a 'W1' | head -n 1 | cat -v)" \
     "$(outer_screen tmux | grep -a 'W1' | head -n 1 | cat -v)"
 }
@@ -694,7 +841,7 @@ run_cli() {
   [ "$side" = zz ] || binary=("$TMUX_BIN")
   local output status
   output="$(scrubbed HOME="$SCRATCH_DIR/cli-home" XDG_CONFIG_HOME="$SCRATCH_DIR/cli-home/config" \
-    TERM=xterm-256color "${binary[@]}" "$@" 2>&1)" && status=0 || status=$?
+    TMUX_TMPDIR="$RUNTIME_DIR" TERM=xterm-256color "${binary[@]}" "$@" 2>&1)" && status=0 || status=$?
   printf 'exit=%s\n%s\n' "$status" "$(printf '%s' "$output" | normalise_diagnostic)"
 }
 case_cli() {
@@ -734,15 +881,21 @@ printf 'outer-terminal capability differential (pin %s)\n' "$(basename -- "$TMUX
 if [ "$SELF_CHECK" -eq 0 ]; then
   case_modes 'legacy' xterm '' ''
   case_restore
+  case_extended_key 'keys/off'
   side_command zz set-option -s extended-keys on >/dev/null
   side_command tmux set-option -s extended-keys on >/dev/null
-  case_modes 'extended' xterm-256color '' '' "$MODE_RECORDED pane_key_mode"
+  case_modes 'extended' xterm-256color '' ''
+  case_extended_key 'keys/on'
+  side_command zz set-option -s extended-keys always >/dev/null
+  side_command tmux set-option -s extended-keys always >/dev/null
+  case_modes 'extended-always' xterm-256color '' ''
+  case_extended_key 'keys/always'
   side_command zz set-option -s extended-keys off >/dev/null
   side_command tmux set-option -s extended-keys off >/dev/null
   case_facts 'facts/bare' xterm '' '' "$FACT_RECORDED" baseline
-  case_facts 'facts/-2' xterm -2 -2
-  case_facts 'facts/-u' xterm -u -u "$FACT_RECORDED client_utf8 client_flags"
-  case_facts 'facts/-T' xterm '-T sixel' '-T sixel'
+  case_facts 'facts/-2' xterm -2 -2 "$FACT_RECORDED" '' 256
+  case_facts 'facts/-u' xterm -u -u
+  case_facts 'facts/-T' xterm '-T sixel' '-T sixel' "$FACT_RECORDED" '' sixel
   # A UTF-8 locale, where zz's fallback and the pin's are the same fallback:
   # both clients have to come up UTF-8 without any flag at all. It is the other
   # half of the -u measurement, and it says the gap is the flag and not the
@@ -751,7 +904,9 @@ if [ "$SELF_CHECK" -eq 0 ]; then
   case_facts 'facts/utf8-locale' xterm '' ''
   case_widths
   CASE_LOCALE=C
-  case_colours 'rgb:00/ff/00' 'rgb:00/ff/00'
+  case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/non-utf8 '' '' line
+  case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/-u -u -u
+  case_colours
   case_cli '' ''
 
   printf '%s asserted rows, %s recorded rows\n' "$CHECKS" "$RECORDED"
@@ -793,18 +948,42 @@ printf 'self-check: one deliberate one-sided difference per channel\n'
 
 # The control: the same case with nothing sabotaged has to be quiet, or a
 # sabotage that "catches" would prove nothing.
-self_check_case 'control, facts with no sabotage' quiet case_facts 'sc/control' xterm '' ''
+self_check_case 'control, facts with no sabotage' quiet \
+  case_facts 'sc/control' xterm '' '' "$FACT_RECORDED" baseline
 
 # A one-sided flag. -u is the flag whose own-side effect the pin publishes as a
-# client fact, so giving it to the pin alone has to show up in client_utf8 and
-# client_flags, both asserted rows.
+# client fact, so giving it to the pin alone has to show up in client_utf8,
+# client_flags and delta-client_flags, all asserted rows.
 self_check_case 'a one-sided flag, -u on the pin only' catches \
   case_facts 'sc/one-sided-u' xterm '' -u
 
+# -T on one side: delta-client_termfeatures and flag-features have to catch it.
+self_check_case 'a one-sided -T sixel on the pin only' catches \
+  case_facts 'sc/one-sided-T' xterm '' '-T sixel' "$FACT_RECORDED" '' sixel
+
+# -2 on one side: zz's TERM=xterm roster has no 256 of its own, so without the
+# flag flag-features has to report 256:no against the pin's 256:yes.
+self_check_case 'a one-sided -2 on the pin only' catches \
+  case_facts 'sc/one-sided-2' xterm '' -2 "$FACT_RECORDED" '' 256
+
+# The colour class itself: the pin's side writes the named cell as the RGB
+# colour it resolves to, the same colour in another class, and the stock stage
+# has to report it.
+self_check_case 'a named cell spelled as its RGB colour on the pin only' catches \
+  case_colours named-as-rgb
+
 # A one-sided palette entry. Both sides resolve a set palette entry to the same
 # RGB, so setting a different entry on one side has to break the palette line.
-self_check_case 'a one-sided palette entry' catches \
-  case_colours 'rgb:00/ff/00' 'rgb:00/00/ff'
+self_check_case 'a one-sided palette entry' catches case_colours named-entry
+
+# An indexed entry set on one side only: zz's indexed cell has to leave its
+# class for RGB while the pin's keeps 38;5;42, and the indexed stage catches it.
+self_check_case 'an OSC 4 on an indexed entry sent to zz only' catches \
+  case_colours indexed-entry
+
+# A reset on one side only: zz's named and indexed cells go back to their
+# index while the pin's stay RGB, and the reset stage catches it.
+self_check_case 'an OSC 104 sent to zz only' catches case_colours reset
 
 # The legacy-terminal case driven with extended keys on one side. With
 # extended-keys off on both, pane_key_mode is VT10x on both and asserts; turning
@@ -812,6 +991,10 @@ self_check_case 'a one-sided palette entry' catches \
 side_command tmux set-option -s extended-keys on >/dev/null
 self_check_case 'the legacy case driven with extended keys on the pin' catches \
   case_modes 'sc/legacy-extended' xterm '' ''
+# The decode channel: with extended keys on the pin alone, only the pin's client
+# arms mode 2 and receives C-Enter as \e[27;5;13~, so only its binding fires.
+self_check_case 'an extended key with extended keys on the pin only' catches \
+  case_extended_key 'sc/extended-key'
 side_command tmux set-option -s extended-keys off >/dev/null
 
 # A one-sided CLI flag, on the channel that needs no terminal.

@@ -252,7 +252,13 @@ fn run_startup(socket_path: PathBuf) -> Startup {
         login_shell,
         origin,
         early_output,
+        client_utf8,
+        client_features,
     } = arguments;
+    zz_daemon::set_client_terminal_flags(zz_daemon::ClientTerminalFlags {
+        utf8: client_utf8,
+        features: client_features,
+    });
     let implicit_tmux_conflict = implicit_tmux_endpoint_conflict(
         socket_source,
         std::env::var_os("ZZ_SOCKET").as_deref(),
@@ -495,6 +501,8 @@ struct ApplicationArguments {
     login_shell: bool,
     origin: CommandLineOrigin,
     early_output: Option<&'static str>,
+    client_utf8: bool,
+    client_features: Vec<String>,
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -541,6 +549,8 @@ fn application_arguments(
     let mut control_mode = 0_u8;
     let mut foreground_server = false;
     let mut origin = CommandLineOrigin::Application;
+    let mut client_utf8 = false;
+    let mut client_features = Vec::new();
     let mut parsing_tmux_options = true;
     let mut arguments = arguments.into_iter().collect::<Vec<_>>().into_iter();
     while let Some(argument) = arguments.next() {
@@ -607,7 +617,9 @@ fn application_arguments(
                     }
                 };
                 match option {
-                    '2' | 'q' | 'u' | 'v' => {}
+                    '2' => client_features.push("256".to_owned()),
+                    'q' | 'v' => {}
+                    'u' => client_utf8 = true,
                     'c' => {
                         shell_command = Some(value(&mut arguments)?.to_string());
                         break;
@@ -630,6 +642,8 @@ fn application_arguments(
                             shell_command: None,
                             login_shell: false,
                             origin: CommandLineOrigin::Application,
+                            client_utf8: false,
+                            client_features: Vec::new(),
                             early_output: Some(TMUX_USAGE),
                         });
                     }
@@ -647,7 +661,7 @@ fn application_arguments(
                         break;
                     }
                     'T' => {
-                        let _ = value(&mut arguments)?;
+                        client_features.push(value(&mut arguments)?.to_string());
                         break;
                     }
                     'V' => {
@@ -662,6 +676,8 @@ fn application_arguments(
                             shell_command: None,
                             login_shell: false,
                             origin: CommandLineOrigin::Application,
+                            client_utf8: false,
+                            client_features: Vec::new(),
                             early_output: Some(TMUX_VERSION_OUTPUT),
                         });
                     }
@@ -718,6 +734,8 @@ fn application_arguments(
         login_shell,
         origin,
         early_output: None,
+        client_utf8,
+        client_features,
     })
 }
 

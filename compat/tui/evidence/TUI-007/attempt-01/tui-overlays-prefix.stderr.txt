@@ -1,0 +1,58 @@
+wait that ran out: the clicked third item of the centred menu on zz (case odd-size)
+--- zz screen ---
+MARK-click
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+L0:win*
+--- zz clients ---
+/dev/pts/19 0 79x23
+--- zz panes ---
+%0 active=1 in_mode=0
+--- tmux screen ---
+MARK-click
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+L0:win*
+--- tmux clients ---
+/dev/pts/20 0 79x23
+--- tmux panes ---
+%0 active=1 in_mode=0
+error: the clicked third item of the centred menu on zz did not happen within 10 seconds

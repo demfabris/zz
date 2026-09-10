@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-09-09
+* **Update**: Recorded fabrico's deferral of the TUI campaign's macOS test: the macOS half of TUI-001's second clause split to the added-scope obligation TUI-013 (dated, reversible), TUI-001 and TUI-002 flipped to verified on cycle 1's banked, thrice-reproduced proof (2/12 baseline), `compat/tui/run-2.js` retargeted at TUI-013 for whenever the macbook is next available, and `compat/tui/run-3.js` written for cycle 3 (TUI-003, TUI-004, TUI-010 as parallel lanes on the alienware box).
 * **Update**: Integrated TUI parity cycle 1 on the alienware Linux box (`38c22b9e`): the whole-screen fixture `compat/tui-screen-diff.sh` (65 checkpoints, sabotage self-checks, the 109/120 sidebar recordings TUI-004 opens on), timeout-diagnostic retention in the geometry fixture, and banked proof for TUI-001 and TUI-002. Nothing verified yet: the recorded macOS geometry timeout stays unexplained after the adversarial review refuted the stale-binary story from the registry's own resolution text, so cycle 2 (`compat/tui/run-2.js`) is one attested macOS fixture run plus the records that flip both obligations to verified.
 * **Creation**: Added the TUI parity contract, the twelve-package proof ledger with its validator and generated report, the cycle-1 runner, and the campaign playbook. Runtime parity work has not started.
 * **Fix**: Removed the Agent footer background that stacked pane opacity and produced a dark bar beneath the composer. The footer now inherits the pane fill; the raised composer card keeps its own opacity.

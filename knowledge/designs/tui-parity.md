@@ -2,7 +2,7 @@
 type: Design Plan
 title: TUI parity campaign
 description: "The terminal-client parity contract: tmux observable behavior by default, zz additions through superset commands, and proof tied to the tested revision."
-status: Contract agreed 2026-09-09; cycle 1 (fixture baseline) integrated 2026-09-09 at 38c22b9e with proof banked and 0/12 verified pending the macOS clause of TUI-001; runtime parity work has not started
+status: Contract agreed 2026-09-09; cycle 1 (fixture baseline) integrated 2026-09-09 at 38c22b9e; TUI-001/TUI-002 verified 2026-09-09 under fabrico's amendment splitting the macOS timeout clause to TUI-013 (added scope, deferred); runtime parity work starts with cycle 3
 resource: compat/tui/campaign.json
 tags:
 - tui
@@ -116,6 +116,11 @@ affected proof before claiming it holds for the new revision. Keep the older art
 Reuse the existing differential fixtures and pinned reference. The first proof work is to diagnose
 the recorded geometry-fixture timeout and retain failure diagnostics. Extending full-screen
 comparison belongs to the second package; this setup does not claim that comparison already exists.
+
+Amendment 2026-09-09 (fabrico): the macOS reproduction half of TUI-001's second clause moved to
+the added-scope obligation TUI-013 so the campaign continues on Linux while the macbook is out of
+reach; TUI-001 verified under the amended clause (diagnostics retention proven by a driven
+failure), the deferral dated in both ledger records and reversible by folding TUI-013 back.
 
 # Scope boundary
 

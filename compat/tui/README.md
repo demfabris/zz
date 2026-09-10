@@ -43,24 +43,25 @@ RGB) stays part of the cell, as `tui.status-row` in `compat/tmux-gaps.json` esta
 ## State
 
 Cycle 1 integrated at `38c22b9e` (2026-09-09, the alienware Linux box, workflow `wf_c9486b5d-863`:
-one Opus lane, one reject, one fix pass, one approve, one gate). The fixture baseline is built and
-its proof banked; **nothing is verified yet** because `TUI-001`'s clause 2 is macOS-bound:
+one Opus lane, one reject, one fix pass, one approve, one gate), and the deferral records commit
+followed the same day: **2/12 baseline verified, added scope 0/1**.
 
-- `TUI-001` is `active`. What holds at `38c22b9e`: six geometry runs exit 0 in 4-5s against the
-  10s bound, `smoke/tui-client-input-backpressure` green, and the geometry fixture now retains
-  timeout diagnostics (outer capture, daemon ring log, client stderr, list-clients, which wait
-  fired). The recorded 2026-09-09 macOS geometry-report timeout stays UNEXPLAINED: the lane's
-  stale-pre-fix-binary story was refuted by `tui.client-input-backpressure`'s own resolution
+- `TUI-001` and `TUI-002` are `verified` on cycle 1's banked, thrice-reproduced proof. The macOS
+  half of TUI-001's clause 2 was split out on 2026-09-09: fabrico had no macbook access and
+  decided the campaign continues now with the macOS test recorded for later (dated in both
+  ledger records; reversible). The split obligation is `TUI-013` (added scope, so the baseline
+  number never counts it as quietly done): reproduce or explain the recorded macOS
+  geometry-report timeout with an attested build. The refutation history it opens on: the
+  stale-pre-fix-binary story is refuted by `tui.client-input-backpressure`'s own resolution
   (the fixture exited 0 at pre-fix `012b4dcc`, and the outer pinned tmux drains continuously, so
-  the stalled backpressure can never build in this fixture on any platform). Closing clause 2
-  needs one attested run of `compat/tui-pane-geometry.sh` on macOS; that run is cycle 2 and the
-  campaign's entire critical path.
-- `TUI-002` is `review`, finished as work: `compat/tui-screen-diff.sh` landed with 65 checkpoints
-  (80x24, 100x24, 80x10 asserted; 109x24, 120x24 recorded; attach, status off/on, split, zoom,
-  resize round-trip, status 2, status-position top), and `--self-check` proves each channel fails
-  one-sided while the named-vs-indexed colour equivalence collapses. Worker, reviewer and gate
-  each built their own zz and reproduced all 195 capture files byte for byte. It flips to
-  `verified` the moment `TUI-001` does (the tracker's verified-dependencies rule).
+  the stalled backpressure can never build in this fixture on any platform).
+- What cycle 1 banked: `compat/tui-screen-diff.sh` with 65 checkpoints (80x24, 100x24, 80x10
+  asserted; 109x24, 120x24 recorded; attach, status off/on, split, zoom, resize round-trip,
+  status 2, status-position top), `--self-check` sabotages that each fail one-sided while the
+  named-vs-indexed colour equivalence collapses, timeout-diagnostic retention in the geometry
+  fixture (proven by a driven failure), and six exit-0 geometry runs in 4-5s against the 10s
+  bound. Worker, reviewer and gate each built their own zz and reproduced all 195 capture files
+  byte for byte.
 - The 109/120 recordings `TUI-004` opens on: at 120x24 the pin's pane is 120 columns, zz's is 91
   (the 28-column sidebar plus its 1-column border; `AUTO_HIDE_COLUMNS = 80+28+1 = 109` in
   `crates/zz-tui/src/sidebar.rs`); resizing 120x24 down to 100x24 makes both screens identical
@@ -81,15 +82,15 @@ its proof banked; **nothing is verified yet** because `TUI-001`'s clause 2 is ma
   cannot attest it -- reproduction is the proof. `~/dev/zz-gate-target` (24G) and
   `~/dev/zz-tui-lane` stay warm for the next cycle on that box.
 
-After cycle 2 verifies TUI-001 and TUI-002, the ready set is `TUI-003`, `TUI-004` and `TUI-010`;
-cycle 3 runs them as parallel lanes (the auto-roll policy of 2026-09-09: a clean gate rolls the
-next cycle without waiting).
+The ready set is `TUI-003`, `TUI-004` and `TUI-010`; cycle 3 runs them as parallel lanes from
+`compat/tui/run-3.js` on the alienware box (the auto-roll policy of 2026-09-09: a clean gate
+rolls the next cycle without waiting). `TUI-013` waits on macbook access and blocks nothing.
 
-## Launching cycle 2 (macbook)
+## Launching the deferred macOS run (macbook)
 
-Cycle 2 is one attested macOS run of the geometry fixture plus the records that flip `TUI-001`
-and `TUI-002` to verified. `compat/tui/run-2.js` defaults to the macbook; every box fact is an
-`args` override (see `M` at its top).
+Whenever fabrico is next on the macbook: this closes `TUI-013` with one attested run of the
+geometry fixture. `compat/tui/run-2.js` defaults to the macbook; every box fact is an `args`
+override (see `M` at its top).
 
 1. Preflight: `gh auth status` answers; `~/.claude/settings.json` carries the `Bash(rm:*)` allow
    and the `guard-rm-home.py` hook (see the tmux handoff's "Resuming on another machine");
@@ -100,12 +101,12 @@ and `TUI-002` to verified. `compat/tui/run-2.js` defaults to the macbook; every 
    ```sh
    export ZZ_BOARD_HOLDER=macbook/orchestrator
    python3 compat/board.py claim TRIAGE --lease 1h
-   python3 compat/board.py front F-TUI-BASELINE-VERIFY --kind lock --priority 1 \
-     --contract "TUI-001 clause 2 and the TUI-001/TUI-002 verification records in compat/tui/campaign.json" \
+   python3 compat/board.py front F-TUI-MACOS-TIMEOUT --kind lock --priority 1 \
+     --contract "TUI-013 in compat/tui/campaign.json" \
      --zones raw-tui --path compat/tui/ --path compat/tui-pane-geometry.sh \
-     --notes "TUI parity cycle 2: the macOS geometry run TUI-001 clause 2 needs; runtime changes only under the declared zz-tui excursion"
-   python3 compat/board.py release TRIAGE --reason "minted F-TUI-BASELINE-VERIFY"
-   python3 compat/board.py claim F-TUI-BASELINE-VERIFY --lease 6h
+     --notes "TUI parity deferred macOS run: the attested geometry run TUI-013 needs; runtime changes only under the declared zz-tui excursion"
+   python3 compat/board.py release TRIAGE --reason "minted F-TUI-MACOS-TIMEOUT"
+   python3 compat/board.py claim F-TUI-MACOS-TIMEOUT --lease 6h
    ```
    `--holder` is a global flag and shell state does not persist between an agent's Bash calls;
    prefix `ZZ_BOARD_HOLDER=...` on every call when driving this from a session.
@@ -115,9 +116,8 @@ and `TUI-002` to verified. `compat/tui/run-2.js` defaults to the macbook; every 
    under one, gate about one).
 4. When the gate reports: verify `origin/main`, `python3 compat/tui/tracker.py check` and `ready`,
    `python3 compat/board.py status` (the lock INTEGRATED, MAIN and TRIAGE free). Write the
-   close-out into this section and `knowledge/log.md`. The next runner comes from a fresh `ready`
-   listing, the way `compat/orchestration/HANDOFF.md` does for the tmux campaign; the alienware
-   session watches `origin/main` and rolls cycle 3 itself if it is still alive.
+   close-out into this section and `knowledge/log.md`. This run gates nothing else: the main
+   campaign continues on its own cycles regardless of when it lands.
 
 A single unattended session can run the same loop by hand: claim the front, follow the runner's
 worker prompt in a worktree, get an independent review, run the gate stages, ledger, release.

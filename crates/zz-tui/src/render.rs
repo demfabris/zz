@@ -1207,7 +1207,7 @@ impl Renderer {
             return;
         };
         if force {
-            let style = parse_style(&state.style).unwrap_or_default();
+            let style = crate::overlay::grounded(parse_style(&state.style).unwrap_or_default());
             let mut line = StyledLine::default();
             line.push_segment(&" ".repeat(usize::from(layout.frame.width)), style);
             for row in 0..layout.frame.height {
@@ -1276,7 +1276,8 @@ impl Renderer {
             return;
         }
         let border = floating_border(state.border_lines);
-        let border_style = parse_style(&state.border_style).unwrap_or_default();
+        let border_style =
+            crate::overlay::grounded(parse_style(&state.border_style).unwrap_or_default());
         let horizontal = border
             .horizontal
             .repeat(usize::from(rect.width.saturating_sub(2)));
@@ -1355,12 +1356,14 @@ impl Renderer {
                             || item.name.clone(),
                             |key| format!("{}#[default] #[align=right]({key})", item.name),
                         );
-                    let padding_style = parse_style(if selected {
-                        &state.selected_style
-                    } else {
-                        &state.style
-                    })
-                    .unwrap_or_default();
+                    let padding_style = crate::overlay::grounded(
+                        parse_style(if selected {
+                            &state.selected_style
+                        } else {
+                            &state.style
+                        })
+                        .unwrap_or_default(),
+                    );
                     let content = crate::overlay::compose_over(
                         &content,
                         content_width,
@@ -1385,7 +1388,8 @@ impl Renderer {
                     );
                 }
                 None => {
-                    let base_style = parse_style(&state.style).unwrap_or_default();
+                    let base_style =
+                        crate::overlay::grounded(parse_style(&state.style).unwrap_or_default());
                     let mut line = StyledLine::default();
                     line.push_segment(border.vertical, border_style.clone());
                     line.push_segment(
@@ -2351,7 +2355,7 @@ fn paint_floating_border(
         return;
     }
     let border = floating_border(lines);
-    let style = parse_style(border_style).unwrap_or_default();
+    let style = crate::overlay::grounded(parse_style(border_style).unwrap_or_default());
     let top_text = floating_border_line(
         border.top_left,
         border.horizontal,
@@ -2402,7 +2406,7 @@ fn paint_floating_border(
             rect.width,
         );
         let mut bottom = StyledLine::default();
-        bottom.push_segment(&bottom_text, style);
+        bottom.push_segment(&bottom_text, style.clone());
         write_styled_text(
             output,
             rect.x,
@@ -2420,7 +2424,7 @@ fn paint_floating_border(
             title_width,
             border_style,
             border.horizontal,
-            &parse_style(border_style).unwrap_or_default(),
+            &style,
         );
         write_styled_text(
             output,

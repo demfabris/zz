@@ -107,6 +107,12 @@ pub(crate) fn prompt_view(prompt: &str, input: &str, index: u32, width: u16) -> 
     }
 }
 
+pub(crate) fn grounded(mut style: TmuxStyle) -> TmuxStyle {
+    style.fg.get_or_insert(TmuxColour::Default);
+    style.bg.get_or_insert(TmuxColour::Default);
+    style
+}
+
 pub(crate) fn compose_over(
     expanded: &str,
     width: u16,
@@ -117,12 +123,15 @@ pub(crate) fn compose_over(
     let marks = vec![UNWRITTEN.to_string(); usize::from(width)];
     let composed = zz_client::compose_status_row_over(expanded, &marks, base_style);
     let mut segments: Vec<StyledSegment> = Vec::new();
-    let mut push = |text: &str, style: &TmuxStyle| match segments.last_mut() {
-        Some(last) if last.style == *style => last.text.push_str(text),
-        _ => segments.push(StyledSegment {
-            text: text.to_owned(),
-            style: style.clone(),
-        }),
+    let mut push = |text: &str, style: &TmuxStyle| {
+        let style = grounded(style.clone());
+        match segments.last_mut() {
+            Some(last) if last.style == style => last.text.push_str(text),
+            _ => segments.push(StyledSegment {
+                text: text.to_owned(),
+                style,
+            }),
+        }
     };
     for segment in composed.segments {
         for character in segment.text.chars() {
@@ -400,6 +409,17 @@ mod tests {
         let view = prompt_view("abcdef", "zz", 2, 4);
         assert_eq!(view.text, "abcd");
         assert_eq!(view.cursor, 4);
+    }
+
+    #[test]
+    fn an_fg_only_overlay_style_leaves_the_terminal_ground_under_every_cell() {
+        let underlay = zz_protocol::parse_style("fg=colour208").expect("style");
+        assert_eq!(underlay.bg, None);
+        let segments = compose_over("TITLE", 10, "fg=colour208", "-", &underlay);
+        assert!(!segments.is_empty());
+        assert!(segments.iter().all(|segment| {
+            segment.style.bg == Some(TmuxColour::Default) && segment.style.fg == underlay.fg
+        }));
     }
 
     fn indicator(index: u32, active: bool) -> PaneIndicator {

@@ -68,11 +68,25 @@
 # return until the surface is answered.
 #
 # MODES. `same` asserts the whole decoded screen and the cursor. `text` asserts
-# every glyph, every column and the cursor and records only the styles, for a
-# surface whose colours belong to a sibling lane: the prompt and message STYLE
-# is the modes lane's this cycle (TUI-004, message-style and
-# message-command-style), so a prompt case red only on style says
-# SIBLING:modes. `record` asserts nothing and has to say why.
+# every glyph, every column, the cursor and the style of every row except the
+# prompt/message row (and, under status-position top, the row after it, which
+# only carries the SGR capture-pane continues from row 0), and records only that
+# row's style: the prompt and message STYLE is the modes lane's this cycle
+# (TUI-004, message-style and message-command-style), so a case red only on
+# that row's style says SIBLING:modes. `record` asserts nothing and has to say
+# why.
+#
+# ODD SIZE AND USER STYLES. The pin centres a popup and a -x C -y C menu on the
+# client's full height (cmd_display_menu_get_pos: tty->sy), which at an even
+# height rounds to the same row as the window's height and at an odd height
+# does not, and a user style with a foreground and no background leaves the
+# terminal's default ground under the cell. So the last section resizes to
+# 79x23 and opens a centred menu, a centred -M menu chosen by a click and a
+# centred popup of the default size, first with menu-style,
+# menu-selected-style, menu-border-style, popup-style and popup-border-style
+# set fg-only on both sides and then set fg plus bg, and shows display-panes
+# with display-panes-colour and display-panes-active-colour set to
+# non-default values on both sides.
 #
 # NO INPUT REACHES A COVERED PANE. Three cases type a key the surface does not
 # answer - `z` into an open menu, `z` into an open popup's job, `Z` into
@@ -81,9 +95,12 @@
 #
 # --self-check runs the driver against a deliberate one-sided difference in each
 # channel - a menu item only one side has, a popup border only one side draws
-# rounded, a prompt cursor only one side moves, and a keystroke only one side's
-# covered pane receives - and requires the comparison to report each one, plus
-# one equivalence it must NOT report. A fixture that only passes has proved
+# rounded, a prompt cursor only one side moves, a keystroke only one side's
+# covered pane receives, an fg-only menu-border-style only one side sets
+# (compared the way `text` compares, with the message row left out, so the
+# exclusion cannot hide a surface's style), and a display-panes-active-colour
+# only one side sets - and requires the comparison to report each one, plus one
+# equivalence it must NOT report. A fixture that only passes has proved
 # nothing.
 #
 # A divergence is a finding: the script exits 1 so a caller can gate on it, and
@@ -147,6 +164,8 @@ CHECKS=0
 RECORDS=0
 LAST_ROWS_DIFFERED=0
 LAST_CURSOR_DIFFERED=0
+EXCLUDE_ROWS=""
+STATUS_TOP=0
 MESSAGE_HOLD_MS=20000
 INNER_SHELL="ENV= PS1='\$ ' exec /bin/sh"
 POPUP_JOB="printf 'POPUP-BODY\\n'; read line; printf 'POPUP-GOT-%s\\n' \"\$line\"; read line"
@@ -515,6 +534,12 @@ compare_rows() {
   differing=-1
   count=0
   for ((index = 0; index < total; index++)); do
+    case " $EXCLUDE_ROWS " in
+    *" $index "*)
+      zz_rows[index]=""
+      tmux_rows[index]=""
+      ;;
+    esac
     if [ "${zz_rows[index]-}" != "${tmux_rows[index]-}" ]; then
       [ "$differing" -ge 0 ] || differing="$index"
       count=$((count + 1))
@@ -544,6 +569,14 @@ compare_rows() {
   return 1
 }
 
+message_rows() {
+  if [ "$STATUS_TOP" -eq 1 ]; then
+    printf '0 1'
+  else
+    printf '%s' "$((ROWS_UNDER_TEST - 1))"
+  fi
+}
+
 verdict() {
   local name="$1"
   local mode="$2"
@@ -552,8 +585,13 @@ verdict() {
     CHECKS=$((CHECKS + 1))
     RECORDS=$((RECORDS + 1))
     [ -n "$reason" ] || die "recorded style at $name says nothing about why"
-    if compare_rows "$name" plain; then
-      printf 'ok    %s: every glyph, column and the cursor identical\n' "$name"
+    local asserted=1
+    compare_rows "$name" plain || asserted=0
+    EXCLUDE_ROWS="$(message_rows)"
+    compare_rows "$name" styled || asserted=0
+    EXCLUDE_ROWS=""
+    if [ "$asserted" -eq 1 ]; then
+      printf 'ok    %s: every glyph, column, the cursor and every row style but the message row identical\n' "$name"
     else
       FAILURES=$((FAILURES + 1))
       printf 'DIFF  %s\n' "$name"
@@ -626,6 +664,7 @@ prompt_case() {
   verdict prompt-cancelled same
 
   set_on_both status-position top
+  STATUS_TOP=1
   mark_both top
   press_on_both ':'
   type_on_both -l 'TOPPROMPT'
@@ -639,6 +678,7 @@ prompt_case() {
   settle_both MARK-top 'the top prompt cancelled'
   verdict prompt-status-top-cancelled same
   set_on_both status-position bottom
+  STATUS_TOP=0
 }
 
 # CONFIRM-BEFORE is a prompt too (status_prompt_set with PROMPT_SINGLE), so its
@@ -842,6 +882,102 @@ display_panes_case() {
   DIVIDER_RULE=0
 }
 
+# ODD SIZE AND USER STYLES. cmd_display_menu_get_pos centres on tty->sy, the
+# client's full height, and clamps against it, so at 79x23 a centred menu and a
+# centred popup sit where (sy - 1) / 2 + h / 2 - h puts them. menu.c and
+# popup.c leave a user style's missing background as the terminal's default
+# ground. The split display-panes left behind is closed first and the pane
+# re-marked after the resize, so no residue of resizing a -h split reaches a
+# comparison. The popup takes display-popup's default size, half the client
+# each way. The display-panes part runs last because its divider rule strips
+# the SGR around every vertical line, a menu border's included.
+CENTRE_MENU_ITEMS=(
+  'First item' f 'set-option -g @overlay_menu first'
+  ''
+  'Second item' s 'set-option -g @overlay_menu second'
+  'Third item' t 'set-option -g @overlay_menu third'
+)
+style_on_both() {
+  set_on_both menu-style "$1"
+  set_on_both menu-selected-style "$2"
+  set_on_both menu-border-style "$3"
+  set_on_both popup-style "$4"
+  set_on_both popup-border-style "$5"
+}
+centred_surfaces() {
+  local label="$1"
+  mark_both "$label"
+  press_on_both C
+  both_screen_has CENTRE-MENU 'the centred menu'
+  settle_both "MARK-$label" 'the centred menu'
+  verdict "centre-menu-$label" same
+  type_on_both Down
+  settle_both "MARK-$label" 'the centred menu after Down'
+  verdict "centre-menu-$label-down" same
+  type_on_both Escape
+  both_screen_lacks CENTRE-MENU 'the cancelled centred menu'
+  settle_both "MARK-$label" 'the cancelled centred menu'
+  press_on_both O
+  both_screen_has CENTRE-POPUP 'the centred popup'
+  both_screen_has POPUP-BODY 'the centred popup job'
+  settle_both "MARK-$label" 'the centred popup'
+  verdict "centre-popup-$label" same
+  type_on_both z Enter
+  both_screen_has POPUP-GOT-z 'the centred popup job read z'
+  settle_both "MARK-$label" 'the centred popup after a line'
+  verdict "centre-popup-$label-typed" same
+  type_on_both Enter
+  both_screen_lacks CENTRE-POPUP 'the closed centred popup'
+  settle_both "MARK-$label" 'the closed centred popup'
+  verdict "centre-popup-$label-closed" same
+}
+odd_size_case() {
+  CASE_LABEL=odd-size
+  run_on_both kill-pane -t "=$INNER_SESSION:0.1"
+  resize_both_to 79 23
+  run_on_both bind-key -T prefix C display-menu -x C -y C -T CENTRE-MENU "${CENTRE_MENU_ITEMS[@]}"
+  run_on_both bind-key -T prefix D display-menu -M -x C -y C -T CENTRE-MENU "${CENTRE_MENU_ITEMS[@]}"
+  run_on_both bind-key -T prefix O display-popup -T CENTRE-POPUP -E "$POPUP_JOB"
+  style_on_both 'fg=colour33' 'fg=colour226' 'fg=colour208' 'fg=colour159' 'fg=colour46'
+  centred_surfaces fg
+  style_on_both 'fg=colour33,bg=colour17' 'fg=colour16,bg=colour226' 'fg=colour208,bg=colour52' \
+    'fg=colour159,bg=colour17' 'fg=colour46,bg=colour22'
+  centred_surfaces fgbg
+
+  set_on_both @overlay_menu none
+  mark_both click
+  press_on_both D
+  both_screen_has CENTRE-MENU 'the centred -M menu'
+  settle_both MARK-click 'the centred -M menu'
+  verdict centre-menu-mouse-opened same
+  click_item_on_both 'Third item'
+  both_option_is @overlay_menu third 'the clicked third item of the centred menu'
+  both_screen_lacks CENTRE-MENU 'the centred menu closed by the click'
+  settle_both MARK-click 'the centred menu closed by the click'
+  verdict centre-menu-click-closed same
+
+  set_on_both display-panes-colour colour33
+  set_on_both display-panes-active-colour colour124
+  run_on_both split-window -h -t "=$INNER_SESSION:0.0" "$INNER_SHELL"
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  DIVIDER_RULE=1
+  mark_both colours
+  local zz_before tmux_before
+  zz_before="$(capture_screen zz)"
+  tmux_before="$(capture_screen tmux)"
+  client_on_both display-panes -b -d 0 -t CLIENT
+  wait_for 'the zz coloured labels' screen_differs_from zz "$zz_before"
+  wait_for 'the tmux coloured labels' screen_differs_from tmux "$tmux_before"
+  settle_both MARK-colours 'the coloured pane labels'
+  verdict panes-coloured-shown same
+  type_on_both 1
+  wait_for 'zz selected pane 1 from the coloured labels' active_pane_index_is zz 1
+  wait_for 'tmux selected pane 1 from the coloured labels' active_pane_index_is tmux 1
+  settle_both MARK-colours 'the coloured labels closed by a digit'
+  verdict panes-coloured-selected same
+  DIVIDER_RULE=0
+}
+
 write_attach zz "$SCRATCH_DIR/attach-zz.sh"
 write_attach tmux "$SCRATCH_DIR/attach-tmux.sh"
 
@@ -861,6 +997,7 @@ run_cases() {
   menu_case
   popup_case
   display_panes_case
+  odd_size_case
 
   if [ "$FAILURES" -ne 0 ]; then
     printf '%s of %s asserted comparisons differ, %s recorded\n' "$FAILURES" "$CHECKS" "$RECORDS"
@@ -960,6 +1097,25 @@ run_self_check() {
   type_on_both Escape
   both_last_row_lacks CURSORTEXT 'the prompt cancelled'
 
+  CASE_LABEL='self-check style'
+  mark_both style
+  side_command zz set-option -g menu-border-style 'fg=colour208' || die 'zz refused set-option'
+  press_on_both M
+  both_screen_has OVERLAY-MENU 'the one-sided styled menu'
+  side_command zz display-message -c "$(client_name zz)" 'OVERLAY-MESSAGE' ||
+    die 'zz refused display-message'
+  side_command tmux display-message -c "$(client_name tmux)" 'OVERLAY-MESSAGE' ||
+    die 'tmux refused display-message'
+  both_last_row_has OVERLAY-MESSAGE 'the message over the styled menu'
+  settle_both MARK-style 'the one-sided styled menu'
+  EXCLUDE_ROWS="$(message_rows)"
+  compare_rows self-check-style styled || true
+  EXCLUDE_ROWS=""
+  self_check_case 'style, an fg-only menu-border-style only one side sets, message row left out' rows
+  type_on_both Escape
+  both_screen_lacks OVERLAY-MENU 'the styled menu cancelled'
+  side_command zz set-option -gu menu-border-style || die 'zz refused set-option -gu'
+
   CASE_LABEL='self-check equivalence'
   mark_both equal
   press_on_both M
@@ -968,6 +1124,25 @@ run_self_check() {
   compare_rows self-check-equivalence styled || true
   self_check_case 'equivalence: the same menu on both sides' none
   type_on_both Escape
+  both_screen_lacks OVERLAY-MENU 'the equivalent menu cancelled'
+
+  CASE_LABEL='self-check display-panes colour'
+  side_command zz set-option -g display-panes-active-colour colour124 || die 'zz refused set-option'
+  run_on_both split-window -h -t "=$INNER_SESSION:0.0" "$INNER_SHELL"
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  DIVIDER_RULE=1
+  mark_both colour
+  local zz_before tmux_before
+  zz_before="$(capture_screen zz)"
+  tmux_before="$(capture_screen tmux)"
+  client_on_both display-panes -b -d 0 -t CLIENT
+  wait_for 'the zz one-sided labels' screen_differs_from zz "$zz_before"
+  wait_for 'the tmux one-sided labels' screen_differs_from tmux "$tmux_before"
+  settle_both MARK-colour 'the one-sided pane colour'
+  compare_rows self-check-panes-colour styled || true
+  self_check_case 'display-panes, a display-panes-active-colour only one side sets' rows
+  type_on_both Escape
+  DIVIDER_RULE=0
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"

@@ -1,0 +1,138 @@
+stock bindings and key ownership through the client stdin (pin tmux)
+      case split-horizontal at 80x24
+      first differing row 0 of 24
+        tmux: $                                       ^[[38;2;127;127;127m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                       ^[[38;2;127;127;127m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+note  80x24 split-horizontal asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+      case split-vertical at 80x24
+      first differing row 0 of 24
+        tmux: $                                       ^[[38;2;127;127;127m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                       ^[[38;2;127;127;127m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+note  80x24 split-vertical asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+      case select-next-pane at 80x24
+      first differing row 0 of 24
+        tmux: $                                       ^[[38;2;0;175;0m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                       ^[[38;2;0;175;0m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+note  80x24 select-next-pane asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+      case select-pane-right at 80x24
+      first differing row 0 of 24
+        tmux: $                                       ^[[38;2;127;127;127m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                       ^[[38;2;127;127;127m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+note  80x24 select-pane-right asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+      case select-pane-down at 80x24
+      first differing row 0 of 24
+        tmux: $                                       ^[[38;2;0;175;0m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                       ^[[38;2;0;175;0m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+note  80x24 select-pane-down asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+      case select-pane-up at 80x24
+      first differing row 0 of 24
+        tmux: $                                       ^[[38;2;127;127;127m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                       ^[[38;2;127;127;127m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+note  80x24 select-pane-up asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+ok    80x24 zoom
+      case unzoom at 80x24
+      first differing row 0 of 24
+        tmux: $                                       ^[[38;2;127;127;127m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                       ^[[38;2;127;127;127m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+note  80x24 unzoom asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+ok    80x24 chooser-sessions
+ok    80x24 chooser-sessions-cancel
+ok    80x24 chooser-windows
+ok    80x24 chooser-windows-cancel
+      case rename-window-prompt at 80x24
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(rename-window) win^[[48;2;0;175;0m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(rename-window) win
+note  80x24 rename-window-prompt asserted facts, the rest recorded: zz paints the command prompt from its own palette and ignores message-style
+ok    80x24 rename-window
+      case rename-session-prompt at 80x24
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(rename-session) keys^[[48;2;0;175;0m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(rename-session) keys
+note  80x24 rename-session-prompt asserted facts, the rest recorded: zz paints the command prompt from its own palette and ignores message-style
+ok    80x24 rename-session
+ok    80x24 detach
+ok    80x24 root-binding-backslash
+ok    80x24 root-binding-alt-s
+ok    80x24 root-binding-alt-shift-s
+ok    80x24 root-binding-detaches
+ok    80x24 application-reader
+ok    80x24 application-backslash
+ok    80x24 application-alt-s
+ok    80x24 application-alt-shift-s
+      case split-horizontal at 100x24
+      first differing row 0 of 24
+        tmux: $                                                 ^[[38;2;127;127;127m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                                ^[[38;2;127;127;127m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+      cursor tmux: 53,0 flag=1 pane=100x24
+      cursor zz:   52,0 flag=1 pane=100x24
+note  100x24 split-horizontal asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+      case split-vertical at 100x24
+      first differing row 0 of 24
+        tmux: $                                                 ^[[38;2;127;127;127m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                                ^[[38;2;127;127;127m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+      cursor tmux: 53,12 flag=1 pane=100x24
+      cursor zz:   52,12 flag=1 pane=100x24
+note  100x24 split-vertical asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+      case select-next-pane at 100x24
+      first differing row 0 of 24
+        tmux: $                                                 ^[[38;2;0;175;0m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                                ^[[38;2;0;175;0m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+note  100x24 select-next-pane asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+      case select-pane-right at 100x24
+      first differing row 0 of 24
+        tmux: $                                                 ^[[38;2;127;127;127m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                                ^[[38;2;127;127;127m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+      cursor tmux: 53,12 flag=1 pane=100x24
+      cursor zz:   52,12 flag=1 pane=100x24
+note  100x24 select-pane-right asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+      case select-pane-down at 100x24
+      first differing row 0 of 24
+        tmux: $                                                 ^[[38;2;0;175;0m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                                ^[[38;2;0;175;0m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+      cursor tmux: 53,0 flag=1 pane=100x24
+      cursor zz:   52,0 flag=1 pane=100x24
+note  100x24 select-pane-down asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+      case select-pane-up at 100x24
+      first differing row 0 of 24
+        tmux: $                                                 ^[[38;2;127;127;127m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                                ^[[38;2;127;127;127m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+      cursor tmux: 53,12 flag=1 pane=100x24
+      cursor zz:   52,12 flag=1 pane=100x24
+note  100x24 select-pane-up asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+ok    100x24 zoom
+      case unzoom at 100x24
+      first differing row 0 of 24
+        tmux: $                                                 ^[[38;2;127;127;127m^[[48;2;16;16;16mM-bM-^TM-^B^[[39m^[[49m$
+        zz:   $                                                ^[[38;2;127;127;127m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$
+      cursor tmux: 53,12 flag=1 pane=100x24
+      cursor zz:   52,12 flag=1 pane=100x24
+note  100x24 unzoom asserted facts, the rest recorded: the border cell has no background on the wire and layout.rs floors the split ratio
+ok    100x24 chooser-sessions
+ok    100x24 chooser-sessions-cancel
+ok    100x24 chooser-windows
+ok    100x24 chooser-windows-cancel
+      case rename-window-prompt at 100x24
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(rename-window) win^[[48;2;0;175;0m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(rename-window) win
+note  100x24 rename-window-prompt asserted facts, the rest recorded: zz paints the command prompt from its own palette and ignores message-style
+ok    100x24 rename-window
+      case rename-session-prompt at 100x24
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(rename-session) keys^[[48;2;0;175;0m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(rename-session) keys
+note  100x24 rename-session-prompt asserted facts, the rest recorded: zz paints the command prompt from its own palette and ignores message-style
+ok    100x24 rename-session
+ok    100x24 detach
+ok    100x24 root-binding-backslash
+ok    100x24 root-binding-alt-s
+ok    100x24 root-binding-alt-shift-s
+ok    100x24 root-binding-detaches
+ok    100x24 application-reader
+ok    100x24 application-backslash
+ok    100x24 application-alt-s
+ok    100x24 application-alt-shift-s
+all 50 cases agree on every channel they assert, 18 recorded a difference elsewhere
+--- stderr (0 bytes)
+exit=0

@@ -59,8 +59,10 @@
 # not decoration: see wait_settled for the run that proved the marker alone is
 # not enough. No wait in this file is a sleep.
 #
-# SIZES AND MODES. `same` asserts; `record` prints the same report and keeps
-# going. Every size asserts. zz's sidebar used to appear on its own from 109
+# SIZES AND MODES. `same` asserts the whole decoded screen; `record` prints the
+# same report and keeps going; `text` splits the two, asserting every glyph,
+# every column and the cursor while recording only the styles, for a case whose
+# colours belong to a decision somebody else owns. Every size asserts. zz's sidebar used to appear on its own from 109
 # columns (crates/zz-tui/src/sidebar.rs AUTO_HIDE_COLUMNS = 80 + 28 + 1), so
 # 109 and 120 were recorded rather than waived by omission; width no longer
 # invokes it, the sidebar is client-local chrome that only focus-sidebar or a
@@ -123,7 +125,7 @@ TMUX_BIN="$(resolve_binary "$TMUX_INPUT")" || { printf 'error: tmux binary not f
 # from. 80 and 109 cross the retired 109 column threshold upwards and 120
 # crosses it downwards, so a width that once changed the canvas is asserted on
 # both sides of the move and on the way back.
-SIZES=(80x24\|same\|120 100x24\|same\|80 80x10\|same\|100 109x24\|same\|120 120x24\|same\|100)
+SIZES=(80x24\|same\|120 100x24\|same\|80 80x10\|same\|100 80x6\|same\|100 109x24\|same\|120 120x24\|same\|100)
 PANE_TITLE="screentitle"
 WINDOW_NAME="win"
 SCRATCH_DIR="$(mktemp -d /tmp/zzsd.XXXXXX)"
@@ -341,6 +343,24 @@ active_pane() {
   side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_active} #{pane_id}' |
     awk '$1 == 1 { print $2; exit }'
 }
+# The pane title reaches the screen twice: through status-right's default and,
+# once pane-border-status is on, through pane-border-format. attach_both_at
+# pins the first pane's title; a case that splits has a second pane whose title
+# neither side pinned, and the pin seeds it from gethostname while zz reports
+# the shell name through its shell integration. That is pane.runtime-facts, not
+# a divergence of this screen, so every pane's title is pinned before a border
+# case can put it on a border.
+pin_pane_titles() {
+  local side pane
+  for side in zz tmux; do
+    while read -r pane; do
+      [ -n "$pane" ] || continue
+      side_command "$side" select-pane -t "$pane" -T "$PANE_TITLE" ||
+        die "$side refused select-pane -T"
+    done < <(side_command "$side" list-panes -t "=$INNER_SESSION" -F '#{pane_id}')
+  done
+}
+
 # No terminfo dependency: the pane's shell writes the erase itself.
 clear_both() {
   send_both "printf '\\033[2J\\033[3J\\033[H'"
@@ -374,8 +394,9 @@ run_on_both() {
 # the declared values pinned again.
 OWNED_OPTIONS=(
   status status-position status-style status-left status-right status-justify
+  status-left-length status-right-length
   window-status-format window-status-current-format default-command
-  automatic-rename
+  automatic-rename pane-border-status pane-border-format pane-border-lines
 )
 reset_owned_options() {
   local side="$1"
@@ -515,15 +536,70 @@ compare_screens() {
   return 1
 }
 
+# The same comparison over the PLAIN capture: every cell's glyph and the cursor,
+# with the styles left out. It exists for the `text` mode below and for nothing
+# else, so a case whose colours are a recorded divergence still asserts every
+# glyph, every column those glyphs claim and the cursor they leave behind.
+compare_plain_screens() {
+  local name="$1"
+  local zz_rows tmux_rows zz_cursor tmux_cursor index differing total
+  mapfile -t zz_rows < <(capture_plain zz)
+  mapfile -t tmux_rows < <(capture_plain tmux)
+  zz_cursor="$(cursor_tuple zz)"
+  tmux_cursor="$(cursor_tuple tmux)"
+  total="$ROWS_UNDER_TEST"
+  differing=-1
+  for ((index = 0; index < total; index++)); do
+    if [ "${zz_rows[index]-}" != "${tmux_rows[index]-}" ]; then
+      differing="$index"
+      break
+    fi
+  done
+  if [ "$differing" -lt 0 ] && [ "$zz_cursor" = "$tmux_cursor" ]; then
+    return 0
+  fi
+  printf '      checkpoint %s at %s, text and cursor\n' "$name" "$SIZE_LABEL"
+  if [ "$differing" -ge 0 ]; then
+    printf '      first differing row %s of %s\n' "$differing" "$total"
+    printf '        tmux: %s\n' "$(printf '%s' "${tmux_rows[differing]-}" | cat -v)"
+    printf '        zz:   %s\n' "$(printf '%s' "${zz_rows[differing]-}" | cat -v)"
+  else
+    printf '      all %s rows identical\n' "$total"
+  fi
+  printf '      cursor tmux: %s\n' "$tmux_cursor"
+  printf '      cursor zz:   %s\n' "$zz_cursor"
+  return 1
+}
+
 # The named settled checkpoint: mark, wait for the mark on both sides, compare.
-# A recorded case says WHY it is recorded, in its own words: no size records any
-# more, so there is no default reason left to inherit.
+# `same` asserts the whole decoded screen. `record` asserts nothing and says WHY
+# in its own words; no size records any more, so there is no default reason left
+# to inherit. `text` is the split: every glyph, every column and the cursor are
+# ASSERTED, and only the styles are recorded, for a case whose colours are a
+# divergence somebody else owns and whose geometry is this obligation's claim.
 checkpoint() {
   local name="$1"
   local mode="$2"
   local reason="${3:-}"
   send_both "printf 'MARK-%s\\n' $name"
   settle_both "MARK-$name" "$name"
+  if [ "$mode" = text ]; then
+    CHECKS=$((CHECKS + 1))
+    RECORDS=$((RECORDS + 1))
+    [ -n "$reason" ] || die "recorded style at $name says nothing about why"
+    if compare_plain_screens "$name"; then
+      printf 'ok    %s %s every glyph, column and the cursor identical\n' "$SIZE_LABEL" "$name"
+    else
+      FAILURES=$((FAILURES + 1))
+      printf 'DIFF  %s %s\n' "$SIZE_LABEL" "$name"
+    fi
+    if compare_screens "$name"; then
+      printf 'note  %s %s styles identical too, the record can close\n' "$SIZE_LABEL" "$name"
+    else
+      printf 'note  %s %s styles recorded, not asserted: %s\n' "$SIZE_LABEL" "$name" "$reason"
+    fi
+    return 0
+  fi
   if [ "$mode" = same ]; then
     CHECKS=$((CHECKS + 1))
   else
@@ -590,6 +666,53 @@ run_size() {
   set_on_both status-position bottom
   set_on_both status on
 
+  # PANE BORDERS. screen-redraw.c draws a pane status line only while
+  # pane-border-status is on, and layout_fix_panes hands the row back to the
+  # pane while it is off, so this walks all three values with two panes on the
+  # screen and compares the borders, their text and the rows they cost.
+  #
+  # MEASURED 2026-09-09: the border TEXT and the rows it costs are the pin's,
+  # cell for cell, and the border COLOUR is not. The pin draws an active border
+  # as \e[38;2;154;205;50m, which is pane-active-border-style fg=themegreen
+  # resolved through the dark theme's yellowgreen; the raw TUI draws
+  # \e[38;2;77;163;235m\e[48;2;16;19;24m, its own blue plus an explicit
+  # background where the pin leaves the ground default. Both halves are somebody
+  # else's: the theme colour is inside the recorded
+  # presentation:tui-status-row-theme-defaults decision, whose scope keeps zz's
+  # theme for every TUI surface other than the status row, and the explicit
+  # ground is the same class as the default-fg record below. So these two run in
+  # `text` mode: every glyph, every column and the cursor asserted, the styles
+  # recorded with that reason.
+  BORDER_STYLE_REASON='the pin draws an active border in themegreen with a default ground; the raw TUI draws its own theme blue over an explicit background'
+  pin_pane_titles
+  set_on_both pane-border-status top
+  checkpoint pane-border-top text "$BORDER_STYLE_REASON"
+  set_on_both pane-border-status bottom
+  checkpoint pane-border-bottom text "$BORDER_STYLE_REASON"
+  set_on_both pane-border-status off
+  checkpoint pane-border-off "$mode"
+
+  # COLOUR CLASSES ON THE STATUS ROW, which is not the same channel as the
+  # recorded colour-classes case below: that one is an application writing SGR
+  # into the pane body, this one is tty_colours deciding what a status option's
+  # named, indexed and RGB colour leaves as. Both grounds are named in every
+  # case, because a style that sets only the background is the recorded
+  # default-fg divergence and an assertion must not be built on top of one.
+  clear_both
+  set_on_both status-style 'bg=red,fg=white'
+  checkpoint status-style-named "$mode"
+  set_on_both status-style 'bg=colour124,fg=colour231'
+  checkpoint status-style-indexed "$mode"
+  set_on_both status-style 'bg=#1e2030,fg=#c0caf5'
+  checkpoint status-style-rgb "$mode"
+  side_command zz set-option -gu status-style >/dev/null 2>&1 || true
+  side_command tmux set-option -gu status-style >/dev/null 2>&1 || true
+
+  set_on_both window-status-current-format '#[fg=red]N#[fg=colour196]I#[fg=#010203]R'
+  checkpoint format-colour-classes "$mode"
+  side_command zz set-option -gu window-status-current-format >/dev/null 2>&1 || true
+  side_command tmux set-option -gu window-status-current-format >/dev/null 2>&1 || true
+
   # Two channels the corpus above never touches, both driven identically on the
   # two sides and both RECORDED rather than asserted, because 2026-09-09
   # measured a real divergence in each and neither has a registry owner yet.
@@ -623,6 +746,23 @@ run_size() {
   send_both "printf '\\033[31mNAMED\\033[0m \\033[38;5;196mINDEXED\\033[0m \\033[38;2;1;2;3mRGB\\033[0m\\n'"
   checkpoint colour-classes record \
     'zz resolves a named and an indexed colour to RGB before writing to the terminal'
+
+  # THE SERVER THEME OPTION. options-table.c makes `theme` a server option and
+  # server_client_update_theme_colours expands the ten dark-theme-*/light-theme-*
+  # colours per client from it, so forcing it light changes what themegreen and
+  # themeblack resolve to on the pin's status row. zz's daemon cannot read the
+  # option at all: crates/zz-mux/src/command.rs parse_format_option gates by-name
+  # reads on TMUX_OPTION_CONSUMERS and neither `theme` nor the ten colours are in
+  # it. #{client_theme} answers empty on both binaries from a one-shot client, so
+  # the terminal's own light/dark REPORT is not a channel this fixture can drive;
+  # the forced option is, and it is recorded here for the whole screen where
+  # status-row.sh records it for one row.
+  clear_both
+  run_on_both set-option -s theme light
+  checkpoint theme-light record \
+    'the pin resolves the theme colours per client from the server theme option and zz does not read it'
+  side_command zz set-option -su theme >/dev/null 2>&1 || true
+  side_command tmux set-option -su theme >/dev/null 2>&1 || true
 
   # A STYLED status-left longer than status-left-length. The pin's status-left
   # is L everywhere else in this file, one character, which no length limit ever
@@ -824,6 +964,37 @@ run_self_check() {
   wait_settled zz "$SIDEBAR_MARKER" 'the sidebar settled on the zz screen'
   compare_screens sidebar-shown || true
   self_check_case 'sidebar, focus-sidebar shown on one side' rows
+
+  # The `text` mode reads the PLAIN capture, which is a second comparison and
+  # needs its own two cases: it has to catch a glyph difference, and it has to
+  # stay silent about a pure style difference, which is the whole reason it
+  # exists. Without both, a case that recorded its styles would assert nothing.
+  SIZE_LABEL='80x24-text-mode-glyph'
+  attach_both_at 80 24
+  plant zz textmode 'TEXTMARK-A'
+  plant tmux textmode 'TEXTMARK-B'
+  send_both 'cat $HOME/textmode'
+  settle_both 'TEXTMARK-' text-mode-glyph
+  if compare_plain_screens text-mode-glyph; then
+    SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES + 1))
+    printf 'FAIL  self-check text mode, glyph: the plain comparison reported no difference\n'
+  else
+    printf 'ok    self-check text mode, glyph: caught one character of output\n'
+  fi
+
+  SIZE_LABEL='80x24-text-mode-style'
+  attach_both_at 80 24
+  side_command zz set-option -g status-style bg=red || die 'zz refused status-style'
+  send_both "printf 'MARK-%s\\n' textstyle"
+  settle_both 'MARK-textstyle' text-mode-style
+  if compare_plain_screens text-mode-style; then
+    printf 'ok    self-check text mode, style: a pure colour difference is not a text difference\n'
+  else
+    SELF_CHECK_FAILURES=$((SELF_CHECK_FAILURES + 1))
+    printf 'FAIL  self-check text mode, style: the plain comparison reported a colour difference\n'
+  fi
+  compare_screens text-mode-style-styled || true
+  self_check_case 'text mode, the styled comparison still catches that colour' rows
 
   # The cursor tuple's shape half, now that it is asserted rather than recorded.
   # Both sides type the same command and each reads its own file; only one file

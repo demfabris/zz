@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v99)
+title: zz wire protocol (v100)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 99`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 100`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (99) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (100) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -613,13 +613,31 @@ every `StatusLine` field, including `title`. Every string field and each row is 
 `MAX_STATUS_TEXT_BYTES` (4 KiB) on encode and during deserialization, rows are capped at
 `MAX_STATUS_ROWS` (5) with a sixth rejected before allocation, `base_style` must parse as a style,
 and `message_line` must be `0` with no rows or under `rows.len()` otherwise; `StatusChanged` payloads
-now validate on both encode and decode.
+now validate on both encode and decode. v100 appends `theme: ThemeColours` after `customized`, the
+ten theme slots resolved for this client, and validation rejects a slot carrying a theme colour.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 99`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 100`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v100 carries the resolved theme palette. `StatusLine` gains `theme: ThemeColours` appended after
+  `customized`, where `ThemeColours` is a new `crates/zz-protocol/src/style.rs` type wrapping
+  `[TmuxColour; COLOUR_THEME_COUNT]` (10) in the pin's own `colour_theme_table` order:
+  `themeblack`, `themewhite`, `themelightgrey`, `themedarkgrey`, `themegreen`, `themeyellow`,
+  `themered`, `themeblue`, `themecyan`, `thememagenta`. The daemon resolves the slots per client the
+  way `server_client_update_theme_colours` does — the `theme` option picks the dark or the light
+  half of the roster, `theme detect` falls back to the scheme the client reported at hello, and each
+  chosen option is expanded and parsed — so a client renders the same `themeX` name the pin would.
+  The values are `TmuxColour` and not RGB triples on purpose: the pin keeps `colour124` indexed, and
+  a raw client has to spell the same class back, so `set -s dark-theme-green colour124` reaches the
+  terminal as `\e[48;5;124m` on both sides. `StatusLine::validate` rejects a slot that itself
+  carries a theme colour (`theme.is_circular()`), matching the pin skipping a `COLOUR_FLAG_THEME`
+  value and leaving the slot at 8, which is also what stops client-side resolution looping.
+  `ThemeColours` defaults to `DEFAULT_DARK_THEME_COLOURS`, the pin's dark set, so a client that has
+  not been published a status line keeps exactly what the raw TUI hard-coded. Nothing is inserted
+  and nothing is removed: one field is appended last inside one existing struct, so postcard's
+  positional encoding makes it a pure append and a v99 peer cannot decode it.
 - v99 carries three parse-and-ownership facts the pin keeps inside its own server and zz had been
   inferring. `CommandResponse::Success` gains `stdout_claim: StdoutClaim` appended after `stderr`,
   where `StdoutClaim` is a new three-variant enum (`None`, `Print`, `Raw`) naming which of the pin's

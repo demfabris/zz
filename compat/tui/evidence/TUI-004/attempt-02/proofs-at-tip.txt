@@ -87,6 +87,13 @@ at all, which is the finding. The pin's own bytes for the same three states are
 in compat/status-row.sh's asserted run: \e[38;2;13;13;13m\e[48;5;124m, then
 \e[38;5;231m\e[48;5;124m, then \e[38;2;26;26;26m\e[48;2;46;139;87m.
 
-indicators-before-the-render-fix.txt is the same fixture run on this branch
-before the two render.rs changes: 4 of 11 asserted comparisons differ. A fixture
-that only ever passed would have proved nothing.
+indicators-before-the-render-fix.txt is an EARLIER REVISION of the fixture run
+on this branch before the two render.rs changes: 4 of 11 asserted comparisons
+differ. It is not a run of the committed fixture — it asserts the two prompt
+cases whole where the committed fixture runs them in `text` mode, so it reports
+3 recorded where the committed one reports 5. Corrected at the gate 2026-09-10.
+The demonstration against the COMMITTED fixture is the reviewer's, reproduced at
+38d51b2b by reverting both render.rs changes in a scratch worktree and
+rebuilding: 2 of 11 asserted comparisons differ, prefix-armed red at row 23
+carrying ' PREFIX' on the zz side only and message-shown red on the cursor.
+A fixture that only ever passed would have proved nothing.

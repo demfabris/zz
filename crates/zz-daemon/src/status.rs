@@ -2380,9 +2380,6 @@ mod tests {
         let session = context.session;
         let mut renderer = StatusRenderer::default();
 
-        // No client facts means no #{client_colours}, so every roster default
-        // takes its own `,<basic name>` arm - which is what the pin answers a
-        // client that has not reported its colour count.
         let stock = renderer.render_initial(&engine_request(1, &engine, session));
         assert_eq!(
             stock.theme.slot(0),
@@ -2396,7 +2393,6 @@ mod tests {
         );
         assert!(!stock.theme.is_circular());
 
-        // The class the pin keeps: an indexed value stays indexed.
         execute(
             &mut engine,
             &mut context,
@@ -2405,7 +2401,6 @@ mod tests {
         let indexed = renderer.render_initial(&engine_request(1, &engine, session));
         assert_eq!(indexed.theme.slot(4), Some(TmuxColour::Indexed(124)));
 
-        // `theme light` reads the other half of the roster and nothing else.
         execute(
             &mut engine,
             &mut context,
@@ -2419,8 +2414,6 @@ mod tests {
         let light = renderer.render_initial(&engine_request(1, &engine, session));
         assert_eq!(light.theme.slot(4), Some(TmuxColour::Indexed(99)));
 
-        // `theme terminal` reads no option at all: colour_theme_terminal_colour
-        // answers the fixed column, so the user-set slots above do not show.
         execute(
             &mut engine,
             &mut context,

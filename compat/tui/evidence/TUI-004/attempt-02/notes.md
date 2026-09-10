@@ -12,8 +12,8 @@ Cycle 4, the canvas-close lane. Clauses 1 and 2 keep cycle 3's evidence in
 | file | what ran |
 |---|---|
 | `environment.txt` | both binaries' sha256, the revision, the pin, the OS line, TERM, shell, locale, outer size. Read this first. |
-| `indicators-before-the-render-fix.txt` | `compat/tui-indicators.sh` at the tip the fixture was written against, BEFORE the two render.rs changes: 4 of 11 asserted comparisons differ. This is the measurement the clause exists to produce. |
-| `indicators-run-1.txt` | the same fixture after the two render.rs changes: exit 0, all 11 asserted comparisons identical, 5 recorded. |
+| `indicators-before-the-render-fix.txt` | `compat/tui-indicators.sh` at the tip the fixture was written against, BEFORE the two render.rs changes: 4 of 11 asserted comparisons differ. NOTE, corrected at the gate: this is an EARLIER REVISION of the fixture, not the committed one — it runs the two prompt cases as whole-screen assertions where the committed fixture runs them in `text` mode, which is why it reports 4 differing and 3 recorded against the committed fixture's 5 recorded. The demonstration against the COMMITTED fixture is the reviewer's, reproduced at 38d51b2b by reverting both render.rs changes in a scratch worktree and rebuilding: 2 of 11 asserted comparisons differ, prefix-armed red at row 23 carrying ' PREFIX' on the zz side only, message-shown red on the cursor. |
+| `indicators-run-1.txt` | the committed fixture after the two render.rs changes: exit 0, all 11 asserted comparisons identical, 5 recorded. |
 | `indicators-self-check.txt` | `compat/tui-indicators.sh --self-check`: exit 0, three sabotages each caught, one equivalence not reported. |
 | `screen-diff-regression.txt` | `compat/tui-screen-diff.sh`: exit 0, all 111 asserted checkpoints identical, 42 recorded. The render.rs cursor change touches every checkpoint of that fixture, so it ran before the commit and not only after it. |
 | `pane-geometry-regression.txt` | `compat/tui-pane-geometry.sh`: exit 0, all 6 asserted measurements identical. |

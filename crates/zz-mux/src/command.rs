@@ -13278,11 +13278,6 @@ fn is_theme_option(name: &str) -> bool {
 }
 
 fn stored_scalar_execution(name: &str, target: TmuxOptionTarget) -> Execution {
-    // server_client_update_theme_colours re-resolves all ten slots for every
-    // client whenever the roster or the `theme` choice changes, and the pin
-    // redraws from them on the next status redraw. A client reads the resolved
-    // ten off the status line, so a write here has to re-render it; these are
-    // server options, so the write is never scoped to one session.
     if is_theme_option(name) {
         return Execution::effect(MuxEffect::StatusFormatsChanged { session: None });
     }

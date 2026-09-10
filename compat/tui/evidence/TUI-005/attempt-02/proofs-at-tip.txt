@@ -1,5 +1,8 @@
 Proofs for TUI-005 attempt-02, fix pass after the adversarial review, alienware, 2026-09-10.
-Every run below: revision 221484cd1c6d28b97fba853bff400210e3288c0c, clean worktree, zz built there.
+The four copy-mode runs: revision b8eecde3 (the cursor settle fix to the fixture), clean worktree.
+Every other run below: revision 221484cd1c6d28b97fba853bff400210e3288c0c, clean worktree, zz built
+there. b8eecde3 changes only compat/tui-copy-mode.sh and this directory, so the binary, the crates
+and the other fixtures are the same at both revisions.
 Environment for every fixture run: PATH=/opt/homebrew/bin:$PATH ZZ_BIN=/home/demfabris/dev/zz-tui-copy/target/debug/zz ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
 
 compat/tui-copy-mode.sh                      exit 0  copy-mode-tip-1.txt (ZZ_COPY_CAPTURE_DIR set, cells/ taken from it)
@@ -35,9 +38,10 @@ python3 compat/tui/tracker.py check                                             
 python3 compat/tmux-tracker.py check                                                    exit 0
 
 Earlier revisions, kept for history and labelled as such in notes.md:
+copy-mode-cursor-settle-race-at-63acab72.txt (exit 1, the run that led to b8eecde3),
 copy-mode-settle-race-before-the-fix.txt (3ced0ea6), copy-mode-before-the-prompt-repaint-fix.txt
 (the attempt-01 fixture revision), screen-diff-loaded-run-that-lost-its-daemon.txt (be67a0d5).
 
-The evidence commit on top of 221484cd changes only compat/tui/ (this directory and the TUI-005
+The evidence commit on top of b8eecde3 changes only compat/tui/ (this directory and the TUI-005
 record) and the regenerated knowledge/tmux/tui-parity.md. The binary and the fixture are unchanged.
 The structured report lists the same commands re-run at that final tip.

@@ -1,0 +1,104 @@
+THE SECOND RECORDED PANE-BODY DIVERGENCE: THE DEFAULT FOREGROUND
+================================================================
+
+Added at the gate, 2026-09-10. The batch's task 3 named TWO recorded
+pane-body divergences to measure. The lane measured the colour-class one
+(07-colour-class-trace.txt) and left this one unnamed, which the campaign's
+own rule forbids. This file is the missing half.
+
+
+WHAT IS RECORDED
+----------------
+
+compat/tui-screen-diff.sh, checkpoint `default-fg`, recorded not asserted:
+
+    "zz writes an explicit RGB foreground where the pin leaves the
+     foreground default"
+
+The checkpoint clears both screens, sets `status-style bg=colour4` on both
+sides - a style that names a BACKGROUND and no foreground - and compares.
+
+
+MEASURED AT THE ACCUMULATED CYCLE-4 TIP
+---------------------------------------
+
+    checkpoint default-fg at 80x24
+    first differing row 23 of 24
+      tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+      zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+    cursor tmux: 2,2 flag=1 ...
+    cursor zz:   2,2 flag=1 ...
+
+The glyphs, the columns and the cursor are identical. The pin emits the
+background alone and lets the foreground stay whatever the outer terminal's
+default is. zz prefixes every run with an explicit truecolor foreground,
+216;222;233, which is zz's own theme foreground and not the terminal's.
+
+
+THE EMISSION POINT, IN THIS LANE'S OWN ZONE
+-------------------------------------------
+
+crates/zz-tui/src/render.rs:
+
+  2616  write_ground(output, style.fg, default_foreground, Ground::Foreground);
+  2617  write_ground(output, style.bg, default_background, Ground::Background);
+
+  2632  fn write_ground(output, colour: Option<TmuxColour>, fallback: Color, ground) {
+  2633      let Some(colour) = colour else {
+  2634          write_rgb_ground(output, fallback, ground);   <-- HERE
+  2635          return;
+  2636      };
+        ...
+  2655      TmuxColour::Default | TmuxColour::Terminal => {
+  2656          output.extend_from_slice(match ground {
+  2657              Ground::Foreground => b"\x1b[39m",
+  2658              Ground::Background => b"\x1b[49m",
+  2659          });
+  2660      }
+
+  2665  fn write_rgb_ground(output, colour: Color, ground) {
+  2670      write!(output, "\x1b[{base};2;{};{};{}m", colour.r, colour.g, colour.b)
+
+So the divergence is one branch: a style that NAMES no colour takes the
+`None` arm and is painted as an explicit RGB fallback, where a style that
+names `default` or `terminal` already takes the `\e[39m` arm two arms below.
+The two spellings of "no colour I chose" are emitted differently.
+
+
+IS EMITTING \e[39m THERE SAFE? NO, NOT AS A ONE-LINE CHANGE
+-----------------------------------------------------------
+
+This is the question the reviewer asked, and the answer is why the trace
+stops here rather than turning into a fix.
+
+`\e[39m` means the OUTER TERMINAL's default foreground. The `fallback` this
+arm currently writes is `default_foreground`, which is zz's own
+TerminalAppearance foreground - the measurement above shows it as
+216;222;233. They are not the same colour and they are not the same
+CONTRACT: one is chosen by the user's terminal, the other by zz's theme.
+
+The raw TUI paints its own ground across the whole canvas. A cell that
+takes `\e[39m` for its glyph while zz has painted a zz-theme background
+under it gets the terminal's foreground on zz's background, which is the
+one combination nobody chose and which can land unreadable - a light
+terminal default on zz's dark ground. The explicit RGB fallback is what
+keeps the pane body legible against a ground zz painted itself.
+
+Meeting the pin here therefore is not "emit \e[39m at 2634". It needs a
+decision about what a zz client's default foreground MEANS when the client
+paints its own background, and that decision belongs beside
+presentation:tui-status-row-theme-defaults, the recorded decision that
+already says every TUI surface other than the status row keeps zz's theme.
+Emitting \e[39m for the status row alone, where the pin's own row is what
+zz is trying to reproduce, is the narrow version and is plausible; doing it
+for the pane body is not, on this evidence.
+
+
+DISPOSITION
+-----------
+
+Measured, traced to its line, and NOT fixed. It is not covered by
+options.native-mode-styles or by any other accepted decision, so unlike the
+copy-mode and view-surface indicator cells it does not have a home yet. The
+gate raises it as a cycle-4 residual rather than leaving it unnamed, and it
+is the second of the two divergences task 3 asked this lane to measure.

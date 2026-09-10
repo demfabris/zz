@@ -55,10 +55,22 @@ that overrides it.
 
 **2. zz gets no extended keys from a tmux-class outer terminal.** Under
 `extended-keys on` the pin arms the Eneks capability, `\e[>4;2m`, and the
-decoder records `Ext 2`. zz arms the Kitty keyboard protocol, `\e[>3u`, and the
-pin's CSI dispatch table carries exactly one `'u'` entry with no intermediate
-(`{ 'u', "", INPUT_CSI_RCP }`), so the request is ignored and the decoder
-records `VT10x`. Meeting the pin means also arming modifyOtherKeys and decoding
+decoder records `Ext 2`. zz arms **nothing** and the decoder records `VT10x`.
+
+> **Corrected at the gate, 2026-09-10.** This finding first said zz arms the
+> Kitty keyboard protocol `\e[>3u` and that the pin's CSI table ignores it.
+> That is not the mechanism behind the measurement. `tty.rs` writes `\e[>3u`
+> only when `guard.kitty_keyboard` is set, and `supports_kitty_keyboard` reads
+> `TERM`/`TERM_PROGRAM` for ghostty, kitty, wezterm, foot or zz. This fixture
+> attaches with `TERM=xterm-256color`, which matches none of them, so zz sends
+> no extended-key request at all. Measured by capturing the attach stream:
+> 0 occurrences of `\e[>3u` under `TERM=xterm-256color`, 1 under
+> `TERM=xterm-ghostty`; `\e[?1004h` present under both. The pin's single
+> `{ 'u', "", INPUT_CSI_RCP }` entry is still a true source read, but it
+> describes a kitty-class `TERM` this fixture does not drive.
+> The measurement itself is unchanged: `Ext 2` against `VT10x`.
+
+Meeting the pin means also arming modifyOtherKeys and decoding
 the `\e[27;<mod>;<key>~` form it produces, which
 `crates/zz-tui/src/terminal_event.rs` does not do — it decodes only the Kitty
 `\e[<key>;<mod>u` form. `terminal_event.rs` is not in TUI-009's zone list, so
@@ -73,8 +85,9 @@ does not speak. And `set -s extended-keys on` on zz visibly changes nothing,
 which is the accepted stance on `options.client-terminal-negotiation` (the
 option is store-only and the raw TUI arms its own fixed sequence set) confirmed
 rather than contradicted; what this adds to that stance is the consequence,
-which the gap does not record: on a tmux-class outer terminal zz's `\e[>3u` is
-a no-op, so the raw TUI has no extended-key channel there at all.
+which the gap does not record: on a tmux-class outer terminal the raw TUI never
+arms an extended-key protocol of any kind, so it has no extended-key channel
+there at all.
 
 **3. The colour class is lost in the terminal engine, not in the TUI.**
 `crates/zz-terminal/src/model.rs` `PackedStyle` stores `foreground: u32` and
@@ -167,6 +180,12 @@ and why `client_colours` reads 16777216 against zz's 16 on `TERM=xterm`.
 - `09-capability-matrix.txt` — the declared matrix with its measured values and
   the source citations behind every recorded row.
 - `10-tracker-check.txt` — the ledger validator at the final tip.
+- `11-default-foreground-trace.txt` — added at the gate 2026-09-10: the SECOND
+  recorded pane-body divergence the batch named and this attempt first left
+  unaddressed. zz writes an explicit RGB foreground where the pin leaves the
+  foreground default, measured at the accumulated tip, traced to
+  `render.rs` `write_ground`'s `None` arm, and left unfixed with the reason
+  emitting `\e[39m` there is not safe.
 
 ## The sabotages
 

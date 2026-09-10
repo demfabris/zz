@@ -90,12 +90,18 @@
 #   keypad_cursor_flag
 #   pane_key_mode          under `extended-keys on` the pin arms Eneks
 #     (extended case)      (`\e[>4;2m`, INPUT_CSI_MODSET) and the decoder
-#                          records Ext 2; zz arms the Kitty protocol
-#                          (`\e[>3u`), which the pin's input.c CSI table does
-#                          not carry (only `CSI u` with no intermediate is in
-#                          it, as INPUT_CSI_RCP), so the decoder records VT10x
-#                          and zz gets no extended keys from a tmux-class
-#                          outer terminal at all.
+#                          records Ext 2; zz arms NOTHING and the decoder
+#                          records VT10x. Under the TERM this case drives,
+#                          xterm-256color, tty.rs writes `\e[>3u` only when
+#                          guard.kitty_keyboard is set, and
+#                          supports_kitty_keyboard reads TERM/TERM_PROGRAM for
+#                          ghostty, kitty, wezterm, foot or zz - none of which
+#                          xterm-256color matches. Measured at the gate
+#                          2026-09-10 by capturing the attach stream: 0
+#                          occurrences of `\e[>3u` under xterm-256color, 1
+#                          under xterm-ghostty. So zz gets no extended keys
+#                          here because it never asks, not because the pin
+#                          ignored the request.
 #   colours/indexed cell   the indexed cell an OSC 4 entry does NOT touch keeps
 #     under a palette      each side's own class: the pin `\e[38;5;42m`, zz the
 #     change               RGB it resolved. Only the cells the entry touches
@@ -136,11 +142,13 @@
 # has reached the side's screen AND that screen has stopped changing between
 # two polls. No wait here is a sleep.
 #
-# --self-check drives three deliberate one-sided differences and requires the
-# comparison to report one in the channel that was sabotaged: a one-sided
-# client flag, a one-sided palette entry, and the legacy-terminal case driven
-# with extended keys on one side. A fixture that only passes has proved
-# nothing.
+# --self-check drives FIVE deliberate one-sided differences and requires the
+# comparison to report each in the channel that was sabotaged: a one-sided
+# client flag (-u on the pin only), a one-sided palette entry, the
+# legacy-terminal case driven with extended keys on one side, a one-sided
+# unknown CLI option, and a one-sided wide codepoint. A sixth case is a
+# CONTROL that sabotages nothing and must stay quiet. A fixture that only
+# passes has proved nothing.
 #
 # ZZ_CAPS_DIAGNOSTICS_DIR names the directory a bounded wait that runs out
 # copies its evidence into; without it a fresh /tmp directory is made and named
@@ -669,8 +677,11 @@ case_widths() {
 }
 
 # The flag diagnostics need no terminal at all: they are what each binary
-# prints and returns before it ever opens one. The program name is normalised
-# because zz is not called tmux; nothing else is.
+# prints and returns before it ever opens one. Two things are normalised and
+# nothing else is: the program name, because zz is not called tmux, and the
+# version line, because zz answers `tmux 3.8-zz` where the pin answers
+# `tmux next-3.8` - which is also what keeps a release bump from turning this
+# row red.
 normalise_diagnostic() {
   sed -e 's/^tmux: /PROG: /' -e 's/^zz: /PROG: /' \
     -e 's/^usage: tmux /usage: PROG /' -e 's/^usage: zz /usage: PROG /' \

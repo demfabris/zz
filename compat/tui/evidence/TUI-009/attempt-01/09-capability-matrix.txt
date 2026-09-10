@@ -127,15 +127,29 @@ WHY THE RECORDED EMISSION ROWS ARE WHAT THEY ARE, from source:
 
   pane_key_mode   the pin arms extended keys through the Eneks capability,
                   which is \e[>4;2m under `extended-keys on`, and input.c
-                  decodes it (INPUT_CSI_MODSET). zz arms the Kitty keyboard
-                  protocol, \e[>3u, when TERM or TERM_PROGRAM contains ghostty,
-                  kitty, wezterm, foot or zz (tty.rs supports_kitty_keyboard).
-                  The pin's CSI dispatch table has exactly one 'u' entry,
-                  { 'u', "", INPUT_CSI_RCP }, with NO intermediate, so
-                  \e[>3u is not in it: a pinned tmux outer terminal ignores
-                  zz's request entirely and the decoder records VT10x.
-                  ATTACHED TO A TMUX-CLASS OUTER TERMINAL, ZZ GETS NO EXTENDED
-                  KEYS AT ALL WHERE THE PIN GETS Ext 2. Meeting the pin means
+                  decodes it (INPUT_CSI_MODSET). zz ARMS NOTHING under the TERM
+                  this case drives, and the decoder records VT10x.
+                  CORRECTED AT THE GATE 2026-09-10. The first record said zz
+                  arms the Kitty protocol \e[>3u and the pin's CSI table
+                  ignores it. That is false for the case that measured this.
+                  tty.rs writes \e[>3u only when guard.kitty_keyboard is set,
+                  and supports_kitty_keyboard reads TERM/TERM_PROGRAM for
+                  ghostty, kitty, wezterm, foot or zz; this fixture attaches
+                  with TERM=xterm-256color, which matches none of them, so no
+                  extended-key request is written at all. Measured by capturing
+                  the attach stream against a throwaway daemon built from this
+                  tip: 0 occurrences of \e[>3u under TERM=xterm-256color, 1
+                  under TERM=xterm-ghostty; \e[?1004h present under both, which
+                  is the focus claim confirmed.
+                  The 'pin's CSI dispatch table has exactly one u entry,
+                  { 'u', "", INPUT_CSI_RCP }, with NO intermediate' reading is
+                  still true of the pin, but it describes what WOULD happen on
+                  a kitty-class TERM, which this fixture does not drive. It is
+                  a source read about an untested configuration, not the
+                  mechanism behind the measurement above.
+                  EITHER WAY THE MEASUREMENT STANDS: attached to a tmux-class
+                  outer terminal zz gets no extended keys where the pin gets
+                  Ext 2. Meeting the pin means
                   also arming modifyOtherKeys, and decoding the
                   \e[27;<mod>;<key>~ form it produces, which
                   terminal_event.rs does not do today - it decodes only the

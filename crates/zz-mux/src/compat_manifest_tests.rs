@@ -1105,10 +1105,10 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
-    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 142);
+    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 144);
     assert_eq!(
         consumers.len(),
-        142,
+        144,
         "option consumer roster contains duplicates"
     );
     assert!(
@@ -1127,13 +1127,13 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         };
         scope_counts[index] += 1;
     }
-    assert_eq!(scope_counts, [36, 44, 43, 19]);
+    assert_eq!(scope_counts, [36, 46, 43, 19]);
 
     let tracked = items
         .keys()
         .filter_map(|item| item.strip_prefix("option:"))
         .collect::<BTreeSet<_>>();
-    assert_eq!(tracked.len(), 38, "active option gap count changed");
+    assert_eq!(tracked.len(), 36, "active option gap count changed");
     assert!(
         consumers.is_disjoint(&tracked),
         "consumed and tracked option names overlap"

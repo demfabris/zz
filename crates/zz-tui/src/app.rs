@@ -925,7 +925,9 @@ pub(crate) fn run(
             }
             MainEvent::Resize => {
                 if let Ok(size) = TerminalSize::detect() {
+                    let previous = model.size;
                     model.set_size(size);
+                    crate::overlay::close_display_panes_on_resize(&model, &client, previous)?;
                     if size.columns > 0 && size.rows > 0 {
                         client
                             .send_input(InputMessage::ClientTerminalSize {

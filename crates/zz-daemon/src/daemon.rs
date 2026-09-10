@@ -16650,6 +16650,7 @@ impl Shared {
                 InputMessage::ClientFocus { focused } => {
                     self.input_client_focus(client, kind, context, focused)?;
                 }
+                InputMessage::DismissClientMessage => {}
                 InputMessage::ResizeCommandOutput {
                     columns,
                     rows,
@@ -18744,6 +18745,12 @@ impl Shared {
         ) {
             return Ok(());
         }
+        if matches!(action, DisplayPanesAction::Dismiss) {
+            if take_display_panes(&mut self.inner.lock(), client).is_some() {
+                self.publish_to_client(client, EventPayload::DisplayPanes { state: None });
+            }
+            return Ok(());
+        }
 
         let (source_pane, read_only, source_alive) = {
             let inner = self.inner.lock();
@@ -18778,7 +18785,9 @@ impl Shared {
                 DisplayPanesAction::Select(_) => {
                     self.note_terminal_input_without_bell(client, source_pane);
                 }
-                DisplayPanesAction::Key(_) | DisplayPanesAction::Close => {}
+                DisplayPanesAction::Key(_)
+                | DisplayPanesAction::Close
+                | DisplayPanesAction::Dismiss => {}
             }
             return Ok(());
         }
@@ -18796,6 +18805,7 @@ impl Shared {
             return Ok(());
         }
         match action {
+            DisplayPanesAction::Dismiss => {}
             DisplayPanesAction::Close => {
                 self.input_key(
                     client,
@@ -28144,6 +28154,17 @@ fn build_display_panes_state(
             }
         })
         .collect();
+    let colour_context = engine.format_status_context_for_client(
+        Some(window.session),
+        Some(window_id),
+        Some(window.active_pane),
+        format_client_session,
+    );
+    let colour = |name: &str| {
+        let value = engine.format_option_value(&colour_context, name)?;
+        zz_protocol::parse_tmux_colour(&value)
+            .or_else(|| zz_protocol::parse_style(&value).and_then(|style| style.fg))
+    };
     Ok((
         window.session,
         window_id,
@@ -28151,6 +28172,8 @@ fn build_display_panes_state(
             window: window_id,
             duration_ms,
             indicators,
+            colour: colour("display-panes-colour"),
+            active_colour: colour("display-panes-active-colour"),
         },
     ))
 }
@@ -35420,6 +35443,7 @@ fn command_is_read_only_safe(command: &CommandInvocation) -> bool {
 fn input_dismisses_client_message(input: &InputMessage) -> bool {
     match input {
         InputMessage::Key { input, .. } => input.action != zz_terminal::KeyAction::Release,
+        InputMessage::DismissClientMessage => true,
         InputMessage::TerminalView { action, .. } => {
             terminal_view_action_dismisses_display_panes(action)
         }
@@ -35435,7 +35459,8 @@ fn input_is_ignored_by_client_message(input: &InputMessage) -> bool {
             action: zz_terminal::TerminalViewAction::Paste(_),
             ..
         }
-        | InputMessage::ClientFocus { .. } => true,
+        | InputMessage::ClientFocus { .. }
+        | InputMessage::DismissClientMessage => true,
         InputMessage::TerminalView { action, .. } => {
             terminal_view_action_dismisses_display_panes(action)
         }
@@ -35555,7 +35580,8 @@ fn read_only_blocks_input(input: &InputMessage) -> bool {
         InputMessage::ResizeSplit { .. }
         | InputMessage::Popup { .. }
         | InputMessage::Menu { .. }
-        | InputMessage::Confirm { .. } => true,
+        | InputMessage::Confirm { .. }
+        | InputMessage::DismissClientMessage => true,
         InputMessage::TerminalView { action, .. } => {
             !terminal_view_action_is_read_only_safe(action)
         }

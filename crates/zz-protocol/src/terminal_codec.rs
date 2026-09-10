@@ -4691,6 +4691,8 @@ mod tests {
                         flags: crate::PaneIndicator::ACTIVE,
                         label: String::new(),
                     }],
+                    colour: None,
+                    active_colour: None,
                 }),
             },
         });

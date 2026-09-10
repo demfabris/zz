@@ -2071,6 +2071,7 @@ pub enum InputMessage {
     ClientFocus {
         focused: bool,
     },
+    DismissClientMessage,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2672,6 +2673,8 @@ pub struct DisplayPanesState {
     pub window: WindowId,
     pub duration_ms: u32,
     pub indicators: Vec<PaneIndicator>,
+    pub colour: Option<crate::TmuxColour>,
+    pub active_colour: Option<crate::TmuxColour>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2679,6 +2682,7 @@ pub enum DisplayPanesAction {
     Key(KeyInput),
     Select(PaneId),
     Close,
+    Dismiss,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

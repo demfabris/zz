@@ -1,0 +1,76 @@
+CARGO TESTS AND CLIPPY for the crates this attempt touches
+
+The Rust tree at 21c914e1 is the tree at ca790d6: git diff --stat ca790d6 21c914e1 lists
+   compat/tui-caps.sh | 2 +-
+   1 file changed, 1 insertion(+), 1 deletion(-)
+
+At 21c914e1, 2026-09-10T17:57:45-03:00:
+$ cargo test -p zz-terminal --jobs 3 -- --test-threads=2
+  test result: ok. 251 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.42s
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+  exit=0
+$ cargo test -p zz-protocol --jobs 3 -- --test-threads=2
+  test result: ok. 221 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.83s
+  test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+  test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+  exit=0
+$ cargo test -p zz-tui --jobs 3 -- --test-threads=2
+  test result: ok. 179 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+  exit=0
+
+At ca790d6 (same Rust tree), the integration-test rule and zz-daemon:
+$ timeout 580 cargo test -p zz --jobs 3 -- --test-threads=2   (17:32 to 17:38, one call)
+       Running unittests src/lib.rs (target/debug/deps/zz-2f801f40cc944225)
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 633 filtered out; finished in 0.00s
+  test result: ok. 634 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.62s
+       Running unittests src/main.rs (target/debug/deps/zz-05ba1019b191b3f5)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+       Running unittests src/bin/zz_browser_fixture.rs (target/debug/deps/zz_browser_fixture-ffc130852d2b2c4e)
+  test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+       Running unittests src/bin/zz_cli.rs (target/debug/deps/zz_cli-17ee0ff3aeb6849e)
+  test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+       Running unittests src/bin/zz_external_texture_fixture.rs (target/debug/deps/zz_external_texture_fixture-0e653368b06ce845)
+  test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+       Running unittests src/bin/zz_helper.rs (target/debug/deps/zz_helper-948b69e59dadcee9)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+       Running tests/buffer_client_file_load.rs (target/debug/deps/buffer_client_file_load-4a485a01e8f800f7)
+  test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.00s
+       Running tests/buffer_client_file_save.rs (target/debug/deps/buffer_client_file_save-2f4db994d78ed540)
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.90s
+       Running tests/cli_binary.rs (target/debug/deps/cli_binary-423bfdac64a09eda)
+  test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 165.64s
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+  exit=0
+$ cargo test -p zz-daemon --lib --jobs 3 -- --test-threads=2
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 861 filtered out; finished in 0.07s
+  test result: ok. 862 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 209.27s
+  exit=0
+$ cargo test -p zz-daemon --test '*' --jobs 3 -- --test-threads=2
+       Running tests/agent_soak.rs (target/debug/deps/agent_soak-37d80b9bd4a949ec)
+  test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 4.17s
+       Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-b4328572046a72f5)
+  test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.02s
+       Running tests/display_menu_resize_lifecycle.rs (target/debug/deps/display_menu_resize_lifecycle-2e61eb0cf6d5c7ca)
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.13s
+       Running tests/display_menu_shortcut_grammar.rs (target/debug/deps/display_menu_shortcut_grammar-8c648bdfb1fcb543)
+  test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.07s
+       Running tests/display_popup_resize_lifecycle.rs (target/debug/deps/display_popup_resize_lifecycle-32b06014ee41315c)
+  test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.56s
+       Running tests/format_client_loop_context.rs (target/debug/deps/format_client_loop_context-977536147af98c8e)
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.69s
+       Running tests/format_environment_loop_context.rs (target/debug/deps/format_environment_loop_context-bc667b6d7cc7a5f7)
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.88s
+       Running tests/format_modifier_client_loop.rs (target/debug/deps/format_modifier_client_loop-21dc2a4d5159fc2e)
+  test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.68s
+       Running tests/format_modifier_environment_loop.rs (target/debug/deps/format_modifier_environment_loop-397bdf63ef80bf7a)
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.30s
+  exit=0
+
+Clippy, on the pre-commit tree that became ca790d6 (the last edit before it, render.rs write_cell_ground's arm order, is included):
+$ cargo clippy -p zz-terminal -p zz-protocol --all-targets --all-features --jobs 3 -- -D warnings   exit=0
+$ cargo clippy -p zz-terminal -p zz-daemon -p zz-tui --all-targets --all-features --jobs 3 -- -D warnings   exit=0
+$ cargo clippy -p zz-tui -p zz --all-targets --all-features --jobs 3 -- -D warnings   exit=0
+$ rustfmt --edition 2024 --check <every touched .rs file>   exit=0

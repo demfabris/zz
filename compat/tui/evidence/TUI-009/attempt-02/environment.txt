@@ -1,0 +1,16 @@
+TUI-009 attempt-02 environment, recorded 2026-09-10T17:39:29-03:00
+box: alienware
+os: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+zz revision: ca790d6094ec0f92894793981f58cb7c4c879a3e (Keep the pane body's colour class, apply -2 -u -T, and arm extended keys in the raw TUI)
+worktree state at build: no tracked change (git status --short listed only this untracked evidence directory, created by the same command)
+zz binary: target/debug/zz sha256 e95fdde183c31886d309f4964abff5530ede07f084e8d3304472834574cae5f8 (debug builds are not bit-reproducible here; the revision plus a clean worktree is the attestation)
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+pin commit: d77c9dc6 (next-3.8), tmux next-3.8
+harness TERM: xterm-ghostty
+fixture TERM: xterm-256color and xterm per case, inside one outer pinned tmux at 80x24
+shell: /bin/bash; bash 5.3.15(1)-release
+locale: LANG=en_US.UTF-8 LC_ALL=unset LC_TIME=pt_BR.UTF-8; the fixture forces LANG=C LC_ALL=C per side except the two C.UTF-8 cases
+ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins

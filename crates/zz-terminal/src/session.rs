@@ -1303,6 +1303,9 @@ pub struct CopyModeFacts {
     pub search_timed_out: bool,
     /// `window_copy_match_at_cursor`: the marked text the cursor stands in.
     pub search_match: String,
+    pub rectangle_toggle: bool,
+    pub selection_active: bool,
+    pub search_string: String,
 }
 
 /// `data->selx`, `sely`, `endselx` and `endsely`: grid rows counted from the
@@ -9496,13 +9499,13 @@ fn move_copy_cursor(
         }
         CopyModeAction::Up => move_copy_cursor_row(mode, &mut point, false, vi),
         CopyModeAction::Down => move_copy_cursor_row(mode, &mut point, true, vi),
-        CopyModeAction::PageUp => point.y = point.y.saturating_sub(page),
+        CopyModeAction::PageUp => return page_copy_cursor(mode, true, false, vi),
         CopyModeAction::PageDown | CopyModeAction::PageDownScrollExit => {
-            point.y = point.y.saturating_add(page).min(total - 1);
+            return page_copy_cursor(mode, false, false, vi);
         }
-        CopyModeAction::HalfPageUp => point.y = point.y.saturating_sub((page / 2).max(1)),
-        CopyModeAction::HalfPageDown => {
-            point.y = point.y.saturating_add((page / 2).max(1)).min(total - 1);
+        CopyModeAction::HalfPageUp => return page_copy_cursor(mode, true, true, vi),
+        CopyModeAction::HalfPageDown | CopyModeAction::HalfPageDownScrollExit => {
+            return page_copy_cursor(mode, false, true, vi);
         }
         CopyModeAction::Top => {
             point.x = 0;
@@ -9649,6 +9652,66 @@ fn scroll_copy_cursor(mode: &mut CopyModeState, up: bool, vi: bool) {
                 .min(mode.revision.total_rows().saturating_sub(1));
         }
     }
+}
+
+fn page_copy_cursor(mode: &mut CopyModeState, up: bool, half: bool, vi: bool) {
+    let rows = u32::from(mode.revision.viewport_rows);
+    let length = revision_line_length(&mode.revision, mode.cursor.y);
+    if mode.cursor.x != length {
+        mode.last_cx = mode.cursor.x;
+        mode.last_sx = length;
+    }
+    let step = match (rows > 2, half) {
+        (false, _) => 1,
+        (true, true) => rows / 2,
+        (true, false) => rows - 2,
+    };
+    let history = mode.revision.maximum_offset();
+    let mut from_bottom = history.saturating_sub(mode.viewport_offset);
+    let mut row = mode.cursor.y.saturating_sub(mode.viewport_offset);
+    if up {
+        if from_bottom.saturating_add(step) > history {
+            from_bottom = history;
+            row = row.saturating_sub(step);
+        } else {
+            from_bottom += step;
+        }
+    } else if from_bottom < step {
+        from_bottom = 0;
+        row = row.saturating_add(step).min(rows.saturating_sub(1));
+    } else {
+        from_bottom -= step;
+    }
+    mode.viewport_offset = history - from_bottom;
+    let y = mode
+        .viewport_offset
+        .saturating_add(row)
+        .min(mode.revision.total_rows().saturating_sub(1));
+    let mut x = mode.last_cx;
+    if !(mode.selection.is_some() && mode.rectangle) {
+        let end = revision_line_length(&mode.revision, y);
+        if (x >= mode.last_sx && x != end) || x > end {
+            x = end;
+        }
+    }
+    place_copy_cursor(mode, PointCoordinate { x, y }, vi);
+}
+
+fn scroll_copy_view_to_cursor(mode: &mut CopyModeState) {
+    let rows = u32::from(mode.revision.viewport_rows);
+    let history = mode.revision.maximum_offset();
+    let y = mode.cursor.y;
+    if y >= mode.viewport_offset && y < mode.viewport_offset.saturating_add(rows) {
+        return;
+    }
+    let gap = rows / 4;
+    mode.viewport_offset = if y < rows {
+        0
+    } else if y > history.saturating_add(rows).saturating_sub(gap) {
+        history
+    } else {
+        y.saturating_add(gap).saturating_sub(rows).min(history)
+    };
 }
 
 fn reveal_copy_cursor(mode: &mut CopyModeState) {
@@ -11519,7 +11582,7 @@ fn run_copy_mode_search(
         mode.search_count = Some((total, false));
     }
     place_copy_cursor(mode, cursor, mode_keys_vi);
-    reveal_copy_cursor(mode);
+    scroll_copy_view_to_cursor(mode);
     if mode.selecting {
         update_copy_selection(mode, None);
     }
@@ -12589,6 +12652,13 @@ fn copy_mode_facts(
         } else {
             String::new()
         },
+        rectangle_toggle: mode.rectangle,
+        selection_active: mode.selection.is_some() && mode.selecting,
+        search_string: mode
+            .search
+            .as_ref()
+            .map(|search| search.text.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -18190,6 +18260,52 @@ mod tests {
     }
 
     #[test]
+    fn vi_copy_keeps_the_final_newline_when_the_right_edge_passes_the_last_line() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 12,
+            rows: 4,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"abc\r\ndef\r\n\r\nghi");
+        let revision = ModeRevision::capture(&mut terminal).expect("revision");
+        let first = (0..revision.total_rows())
+            .find(|row| revision.first_char(PointCoordinate { x: 0, y: *row }) == Some('a'))
+            .expect("first row");
+        let rectangle = |focus_x, vi| {
+            revision.format_selection(
+                ModeSelection {
+                    anchor: PointCoordinate { x: 0, y: first },
+                    focus: PointCoordinate {
+                        x: focus_x,
+                        y: first + 1,
+                    },
+                    mode: SelectionMode::Cell,
+                    rectangle: true,
+                },
+                vi,
+            )
+        };
+        assert_eq!(rectangle(5, true), "abc\ndef\n");
+        assert_eq!(rectangle(5, false), "abc\ndef");
+        assert_eq!(rectangle(1, true), "ab\nde");
+        assert_eq!(rectangle(2, true), "abc\ndef");
+        let onto_empty_line = |vi| {
+            revision.format_selection(
+                ModeSelection {
+                    anchor: PointCoordinate { x: 0, y: first + 1 },
+                    focus: PointCoordinate { x: 0, y: first + 2 },
+                    mode: SelectionMode::Cell,
+                    rectangle: false,
+                },
+                vi,
+            )
+        };
+        assert_eq!(onto_empty_line(true), "def\n\n");
+        assert_eq!(onto_empty_line(false), "def\n");
+    }
+
+    #[test]
     fn copy_mode_text_round_trips_through_the_paste_encoder() {
         let expected = "    let  x = 1";
         let mut terminal = Terminal::new(TerminalOptions {
@@ -21497,6 +21613,98 @@ preexec_functions+=(__zz_fixture_preexec)
             copy_mode_after_counted_action(CopyModeAction::CursorDownAndCancel, 3, true).is_none(),
             "a run stuck at the bottom exits"
         );
+    }
+
+    fn copy_mode_over_thirty_lines() -> CopyModeSlot {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 10,
+            rows: 6,
+            max_scrollback: 64,
+        })
+        .expect("terminal");
+        let lines = (0..30)
+            .map(|index| format!("l{index:02}"))
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        terminal.vt_write(lines.as_bytes());
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            false,
+            false,
+            None,
+            true,
+        )
+        .expect("copy mode");
+        copy_mode
+    }
+
+    #[test]
+    fn page_movement_moves_the_view_and_keeps_the_cursor_row() {
+        let mut copy_mode = copy_mode_over_thirty_lines();
+        let mode = copy_mode.as_mut().expect("mode");
+        let bottom = mode.viewport_offset;
+        assert_eq!(bottom, mode.revision.maximum_offset());
+        mode.cursor = PointCoordinate { x: 0, y: bottom + 4 };
+        let separators = WordSeparators::default();
+        move_copy_cursor(mode, &CopyModeAction::HalfPageUp, &separators, true);
+        assert_eq!(mode.viewport_offset, bottom - 3);
+        assert_eq!(mode.cursor, PointCoordinate { x: 0, y: bottom - 3 + 4 });
+        move_copy_cursor(mode, &CopyModeAction::PageUp, &separators, true);
+        assert_eq!(mode.viewport_offset, bottom - 7);
+        assert_eq!(mode.cursor, PointCoordinate { x: 0, y: bottom - 7 + 4 });
+        move_copy_cursor(mode, &CopyModeAction::PageDown, &separators, true);
+        assert_eq!(mode.viewport_offset, bottom - 3);
+        move_copy_cursor(mode, &CopyModeAction::HalfPageDown, &separators, true);
+        assert_eq!(mode.viewport_offset, bottom);
+        assert_eq!(mode.cursor, PointCoordinate { x: 0, y: bottom + 4 });
+    }
+
+    #[test]
+    fn page_movement_pinned_at_either_end_moves_the_cursor_instead() {
+        let mut copy_mode = copy_mode_over_thirty_lines();
+        let mode = copy_mode.as_mut().expect("mode");
+        let bottom = mode.viewport_offset;
+        let separators = WordSeparators::default();
+        mode.viewport_offset = 1;
+        mode.cursor = PointCoordinate { x: 0, y: 5 };
+        move_copy_cursor(mode, &CopyModeAction::PageUp, &separators, true);
+        assert_eq!(mode.viewport_offset, 0);
+        assert_eq!(mode.cursor, PointCoordinate { x: 0, y: 0 });
+        mode.viewport_offset = bottom - 2;
+        mode.cursor = PointCoordinate {
+            x: 0,
+            y: bottom - 2 + 1,
+        };
+        move_copy_cursor(mode, &CopyModeAction::PageDown, &separators, true);
+        assert_eq!(mode.viewport_offset, bottom);
+        assert_eq!(mode.cursor, PointCoordinate { x: 0, y: bottom + 5 });
+    }
+
+    #[test]
+    fn search_landing_scrolls_the_view_a_quarter_screen_above_the_bottom() {
+        let mut copy_mode = copy_mode_over_thirty_lines();
+        let mode = copy_mode.as_mut().expect("mode");
+        let bottom = mode.viewport_offset;
+        mode.cursor = PointCoordinate { x: 0, y: bottom + 2 };
+        scroll_copy_view_to_cursor(mode);
+        assert_eq!(mode.viewport_offset, bottom);
+        mode.cursor = PointCoordinate { x: 0, y: 2 };
+        scroll_copy_view_to_cursor(mode);
+        assert_eq!(mode.viewport_offset, 0);
+        mode.cursor = PointCoordinate { x: 0, y: 12 };
+        scroll_copy_view_to_cursor(mode);
+        assert_eq!(mode.viewport_offset, 7);
+        mode.viewport_offset = 0;
+        mode.cursor = PointCoordinate {
+            x: 0,
+            y: bottom + 5,
+        };
+        scroll_copy_view_to_cursor(mode);
+        assert_eq!(mode.viewport_offset, bottom);
     }
 
     #[test]

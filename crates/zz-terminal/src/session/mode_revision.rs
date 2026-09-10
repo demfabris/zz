@@ -524,8 +524,19 @@ impl ModeRevision {
                 }
             }
             let has_line_break = !self.row(row).wrapped() || selected_end < line_end;
+            let keeps_final_break = mode_keys_vi && row == end.y && {
+                let line_length = super::revision_line_length(self, row);
+                let last_exclusive = if selection.rectangle {
+                    right.saturating_add(1)
+                } else {
+                    end.x.min(line_length).saturating_add(1)
+                };
+                last_exclusive > line_length
+            };
             if has_line_break
-                && (row < end.y || (row == end.y && selection.mode == SelectionMode::Line))
+                && (row < end.y
+                    || (row == end.y
+                        && (selection.mode == SelectionMode::Line || keeps_final_break)))
             {
                 output.push('\n');
             }

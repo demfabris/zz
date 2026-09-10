@@ -1501,8 +1501,12 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 .to_owned(),
             ),
             "pane_search_string" => Some(
-                self.copy_mode_view(context)
-                    .map(|view| view.search_string.clone())
+                context
+                    .pane_id
+                    .parse::<PaneId>()
+                    .ok()
+                    .and_then(|pane| self.facts.terminals.get(&pane))
+                    .map(|terminal| terminal.pane_search_string())
                     .unwrap_or_default(),
             ),
             "pane_mode" => Some(
@@ -2269,7 +2273,7 @@ mod tests {
     }
 
     #[test]
-    fn copy_mode_toggle_selection_and_search_formats_answer_from_the_copy_view() {
+    fn copy_mode_toggle_and_selection_formats_answer_from_the_copy_view() {
         let pane = PaneId(1);
         let context = StatusContext {
             pane_id: pane.to_string(),
@@ -2277,7 +2281,7 @@ mod tests {
         };
         let answer = |facts: &FormatHookFacts| {
             zz_mux::expand_format_values(
-                "#{selection_active}:#{rectangle_toggle}:[#{pane_search_string}]",
+                "#{selection_active}:#{rectangle_toggle}",
                 &context,
                 &mut DaemonFormatHooks::command(facts),
             )
@@ -2290,14 +2294,13 @@ mod tests {
                     Arc::new(CopyModeFacts {
                         rectangle_toggle: true,
                         selection_active: true,
-                        search_string: "needle".to_owned(),
                         ..CopyModeFacts::default()
                     }),
                 )],
             )])),
             ..FormatHookFacts::default()
         };
-        assert_eq!(answer(&in_mode), "1:1:[needle]");
+        assert_eq!(answer(&in_mode), "1:1");
         let entered = FormatHookFacts {
             copy_modes: Arc::new(BTreeMap::from([(
                 pane,
@@ -2305,8 +2308,8 @@ mod tests {
             )])),
             ..FormatHookFacts::default()
         };
-        assert_eq!(answer(&entered), "0:0:[]");
-        assert_eq!(answer(&FormatHookFacts::default()), "::[]");
+        assert_eq!(answer(&entered), "0:0");
+        assert_eq!(answer(&FormatHookFacts::default()), ":");
     }
 
     #[test]

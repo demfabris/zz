@@ -1,0 +1,4 @@
+note  native-search-command zz exit 0: <no output>
+note  native-search-command tmux exit 1: unknown command: copy-mode-search-prompt
+note  native-search-command zz last row: terminal search is unsupported here
+note  native-search-command tmux last row: L0:win*

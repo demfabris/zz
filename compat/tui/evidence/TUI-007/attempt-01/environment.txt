@@ -1,0 +1,18 @@
+TUI-007 attempt-01 environment, recorded 2026-09-10T17:09:47-03:00
+zz revision: 36fb9f7c0ade5acac5acc11fbbc3a0304d8bc6df
+zz tracked tree: clean
+zz binary: /home/demfabris/dev/zz-tui-overlays/target/debug/zz
+zz binary sha256: 989ef6497a9037930768738a912f899e460a34b8bfcaa965f2c8249da50655b7 (a debug build is not bit-reproducible on this box; the revision plus the clean tree is the attestation)
+tmux binary: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+tmux binary sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+tmux version: tmux next-3.8
+tmux pin: d77c9dc6aa021e4bc61f0da128c591af695e6466
+os: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+os-release: NAME="CachyOS Linux"
+os-release: PRETTY_NAME="CachyOS"
+TERM (driver shell): xterm-ghostty
+outer tmux: status off, windows 80x24 unless a case resizes them
+shell: /bin/bash; inner panes run ENV= PS1='$ ' exec /bin/sh (/usr/bin/bash)
+bash: 5.3.15(1)-release
+locale: LANG=en_US.UTF-8 LC_ALL=unset LC_TIME=pt_BR.UTF-8
+cpu: 16 cores; five campaign lanes share the box

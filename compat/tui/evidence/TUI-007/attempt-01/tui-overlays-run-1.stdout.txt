@@ -1,0 +1,128 @@
+overlay differential at 80x24 (pin tmux)
+ok    baseline
+ok    prompt-opened: every glyph, column and the cursor identical
+      case prompt-opened
+      1 of 24 rows differ, first 23
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m:^[[39m
+        row 23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m:
+      cursor tmux: 1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  prompt-opened: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    prompt-typed: every glyph, column and the cursor identical
+      case prompt-typed
+      1 of 24 rows differ, first 23
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m:display-message PROMPTTEXT^[[39m
+        row 23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m:display-message PROMPTTEXT
+      cursor tmux: 27,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   27,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  prompt-typed: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    prompt-wrapped: every glyph, column and the cursor identical
+      case prompt-wrapped
+      1 of 24 rows differ, first 23
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m: abcdefghijklmnopqrstuvwxyz0123456789 abcdefghijklmnopqrstuvwxyz0123456789 END^[[39m
+        row 23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m: abcdefghijklmnopqrstuvwxyz0123456789 abcdefghijklmnopqrstuvwxyz0123456789 END
+      cursor tmux: 79,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   79,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  prompt-wrapped: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    prompt-cursor-home: every glyph, column and the cursor identical
+      case prompt-cursor-home
+      1 of 24 rows differ, first 23
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m:display-message PROMPTTEXT abcdefghijklmnopqrstuvwxyz0123456789 abcdefghijklmno
+        row 23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m:display-message PROMPTTEXT abcdefghijklmnopqrstuvwxyz0123456789 abcdefghijklmno
+      cursor tmux: 4,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   4,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  prompt-cursor-home: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    prompt-resized: every glyph, column and the cursor identical
+      case prompt-resized
+      1 of 20 rows differ, first 19
+        row 19 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m:display-message PROMPTTEXT abcdefghijklmnopqrstuvwxyz012345
+        row 19 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m:display-message PROMPTTEXT abcdefghijklmnopqrstuvwxyz012345
+      cursor tmux: 4,19 flag=1 pane=60x20 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   4,19 flag=1 pane=60x20 shape=default blinking=0 very_visible=0 colour=none
+note  prompt-resized: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    prompt-resized-back: every glyph, column and the cursor identical
+      case prompt-resized-back
+      1 of 24 rows differ, first 23
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m:display-message PROMPTTEXT abcdefghijklmnopqrstuvwxyz0123456789 abcdefghijklmno
+        row 23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m:display-message PROMPTTEXT abcdefghijklmnopqrstuvwxyz0123456789 abcdefghijklmno
+      cursor tmux: 4,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   4,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  prompt-resized-back: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    prompt-cancelled
+ok    prompt-status-top: every glyph, column and the cursor identical
+      case prompt-status-top
+      2 of 24 rows differ, first 0
+        row 0 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m:TOPPROMPT^[[39m
+        row 0 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m:TOPPROMPT
+        row 1 tmux: ^[[49mMARK-top
+        row 1 zz:   ^[[39m^[[49mMARK-top
+      cursor tmux: 10,0 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   10,0 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  prompt-status-top: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    prompt-status-top-cancelled
+ok    confirm-opened: every glyph, column and the cursor identical
+      case confirm-opened
+      1 of 24 rows differ, first 23
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-CONFIRM?^[[39m
+        row 23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233mOVERLAY-CONFIRM?
+      cursor tmux: 18,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   18,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  confirm-opened: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    confirm-resized: every glyph, column and the cursor identical
+      case confirm-resized
+      1 of 20 rows differ, first 19
+        row 19 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-CONFIRM?^[[39m
+        row 19 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233mOVERLAY-CONFIRM?
+      cursor tmux: 18,19 flag=1 pane=60x20 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   18,19 flag=1 pane=60x20 shape=default blinking=0 very_visible=0 colour=none
+note  confirm-resized: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    confirm-refused
+ok    menu-opened
+ok    menu-down
+ok    menu-down-separator
+ok    menu-unanswered-key
+ok    menu-under-message: every glyph, column and the cursor identical
+      case menu-under-message
+      1 of 24 rows differ, first 23
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-MESSAGE^[[39m
+        row 23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233mOVERLAY-MESSAGE
+      cursor tmux: 6,10 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   6,10 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  menu-under-message: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    menu-resized: every glyph, column and the cursor identical
+      case menu-resized
+      1 of 30 rows differ, first 29
+        row 29 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-MESSAGE^[[39m
+        row 29 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233mOVERLAY-MESSAGE
+      cursor tmux: 6,10 flag=0 pane=100x30 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   6,10 flag=0 pane=100x30 shape=default blinking=0 very_visible=0 colour=none
+note  menu-resized: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    menu-cancelled
+ok    menu-shortcut-closed
+ok    menu-mouse-opened
+ok    menu-click-closed
+ok    popup-opened
+ok    popup-typed
+ok    popup-under-message: every glyph, column and the cursor identical
+      case popup-under-message
+      1 of 24 rows differ, first 23
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-MESSAGE^[[39m
+        row 23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233mOVERLAY-MESSAGE
+      cursor tmux: 23,10 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   23,10 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  popup-under-message: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    popup-resized: every glyph, column and the cursor identical
+      case popup-resized
+      1 of 30 rows differ, first 29
+        row 29 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-MESSAGE^[[39m
+        row 29 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233mOVERLAY-MESSAGE
+      cursor tmux: 23,10 flag=0 pane=100x30 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   23,10 flag=0 pane=100x30 shape=default blinking=0 very_visible=0 colour=none
+note  popup-resized: styles recorded, not asserted: SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle
+ok    popup-closed
+ok    panes-split
+ok    panes-shown
+ok    panes-resized
+ok    panes-selected
+ok    panes-closed-by-key
+all 33 asserted comparisons identical, 13 recorded not asserted

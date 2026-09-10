@@ -806,7 +806,21 @@ impl Model {
             .collect()
     }
 
+    pub fn pane_viewport(&self, pane: PaneId) -> Option<&TerminalViewport> {
+        match &self.command_output {
+            Some((output, viewport)) if *output == pane => Some(viewport),
+            _ => self.viewports.get(&pane),
+        }
+    }
+
     pub fn command_output_content_rect(&self) -> Rect {
+        if let Some(entry) = self
+            .command_output
+            .as_ref()
+            .and_then(|(pane, _)| self.pane_rect(*pane))
+        {
+            return entry.content();
+        }
         let block = self.status_block_rows();
         let header_y = if self.status_top() { block } else { 0 };
         Rect {

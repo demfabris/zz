@@ -204,6 +204,9 @@ pub(crate) struct Renderer {
     output: Vec<u8>,
     queued_control: Vec<u8>,
     overlay_mask: Vec<bool>,
+    selection_mask: Vec<bool>,
+    selection_style: Option<TmuxStyle>,
+    selection_trim: Option<(u16, u16)>,
     painted: HashMap<PaneId, PaintedPane>,
     headers: HashMap<PaneId, String>,
     picker_cards: HashMap<PaneId, (Rect, usize)>,
@@ -230,6 +233,9 @@ impl Renderer {
             output: Vec::with_capacity(64 * 1024),
             queued_control: Vec::new(),
             overlay_mask: Vec::new(),
+            selection_mask: Vec::new(),
+            selection_style: None,
+            selection_trim: None,
             painted: HashMap::new(),
             headers: HashMap::new(),
             picker_cards: HashMap::new(),
@@ -362,27 +368,6 @@ impl Renderer {
             self.emit_queued_control();
             self.kitty.suspend(&mut self.output);
             self.hide_cursor();
-        } else if let Some((pane, viewport)) = &model.command_output {
-            let rect = model.command_output_content_rect();
-            self.paint_header_segment(
-                Rect {
-                    x: 0,
-                    y: rect.y.saturating_sub(1),
-                    width: model.size.columns,
-                    height: 1,
-                },
-                " command output ",
-                true,
-                None,
-                model,
-            );
-            self.paint_terminal(*pane, viewport, rect, force, None);
-            self.paint_status_block_in(model, 0, model.size.columns, force);
-            self.emit_queued_control();
-            self.kitty.suspend(&mut self.output);
-            if !floating_input {
-                self.place_command_output_cursor(*pane, viewport, rect, model);
-            }
         } else {
             self.paint_workspace(model, force);
             if model.sidebar_visible() {
@@ -409,10 +394,8 @@ impl Renderer {
             self.hide_cursor();
         } else if model.confirm.is_some() {
             self.kitty.suspend(&mut self.output);
-            if model.sidebar_visible() && model.command_output.is_none() {
+            if model.sidebar_visible() {
                 self.paint_sidebar(model, true);
-            } else if model.command_output.is_some() {
-                self.paint_status_block_in(model, 0, model.size.columns, true);
             } else {
                 self.paint_status_block(model, true);
             }
@@ -445,7 +428,6 @@ impl Renderer {
         self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
         if model.choose_tree.is_none()
             && model.choose_buffer.is_none()
-            && model.command_output.is_none()
             && model.popup.is_none()
             && model.menu.is_none()
             && model.confirm.is_none()
@@ -611,9 +593,24 @@ impl Renderer {
             match &pane.kind {
                 PaneKindSnapshot::Terminal => {
                     self.picker_cards.remove(&entry.pane);
-                    if let Some(viewport) = model.viewports.get(&entry.pane) {
+                    if let Some(viewport) = model.pane_viewport(entry.pane) {
                         let damage = self.damage.remove(&entry.pane);
+                        let mode = crate::mode_view::presentation(model, entry.pane, viewport);
+                        self.selection_style = mode.and_then(|mode| {
+                            crate::mode_view::resolved_style(
+                                &mode.selection_style,
+                                &model.status.theme,
+                            )
+                        });
+                        self.selection_trim = mode
+                            .filter(|mode| !mode.vi_keys)
+                            .and_then(|_| crate::mode_view::emacs_selection_trim(viewport));
                         self.paint_terminal(entry.pane, viewport, content, force, damage.as_ref());
+                        if let Some(mode) = mode {
+                            self.paint_mode_position(mode, viewport, content, model);
+                        }
+                        self.selection_style = None;
+                        self.selection_trim = None;
                     } else if force {
                         self.paint_card(
                             content,
@@ -735,7 +732,7 @@ impl Renderer {
             let pane = model.pane_snapshot(entry.pane)?;
             match &pane.kind {
                 PaneKindSnapshot::Terminal => {
-                    let viewport = model.viewports.get(&entry.pane)?;
+                    let viewport = model.pane_viewport(entry.pane)?;
                     Some((
                         entry.pane,
                         entry.content(),
@@ -804,6 +801,8 @@ impl Renderer {
         }
         self.overlay_mask.resize(usize::from(rect.width), false);
         self.overlay_mask.fill(false);
+        self.selection_mask.resize(usize::from(rect.width), false);
+        self.selection_mask.fill(false);
         for overlay in viewport
             .overlays
             .iter()
@@ -811,8 +810,19 @@ impl Renderer {
         {
             let start = usize::from(overlay.start.min(rect.width));
             let end = usize::from(overlay.end.min(rect.width));
-            self.overlay_mask[start..end].fill(true);
+            if overlay.kind() == OverlayKind::Selection && self.selection_style.is_some() {
+                let end = match self.selection_trim {
+                    Some((trim_row, trim_end)) if trim_row == row => {
+                        end.min(usize::from(trim_end)).max(start)
+                    }
+                    _ => end,
+                };
+                self.selection_mask[start..end].fill(true);
+            } else {
+                self.overlay_mask[start..end].fill(true);
+            }
         }
+        let selection_style = self.selection_style.take();
 
         let default_style = viewport.styles().first().copied().unwrap_or_else(|| {
             PackedStyle::new(
@@ -823,13 +833,22 @@ impl Renderer {
                 UnderlineStyle::None,
             )
         });
+        let clear_from = trailing_clear(
+            viewport,
+            row,
+            rect.width,
+            default_style,
+            &self.overlay_mask,
+            &self.selection_mask,
+        );
         write_cursor_position(&mut self.output, rect.x, rect.y.saturating_add(row));
         let mut current_style = None;
         let mut terminal_column = 0_u16;
-        for column in 0..rect.width {
+        for column in 0..clear_from.unwrap_or(rect.width) {
             let cell = viewport.cell(row, column).unwrap_or(PackedCell::EMPTY);
             let style = viewport.style(cell).unwrap_or(default_style);
             let reverse = self.overlay_mask[usize::from(column)];
+            let selected = self.selection_mask[usize::from(column)];
             if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
                 if terminal_column <= column {
                     if terminal_column != column {
@@ -839,7 +858,7 @@ impl Renderer {
                             rect.y.saturating_add(row),
                         );
                     }
-                    if current_style != Some((style, reverse)) {
+                    if current_style != Some((style, reverse, selected)) {
                         write_sgr(
                             &mut self.output,
                             style,
@@ -847,7 +866,10 @@ impl Renderer {
                             viewport.foreground,
                             viewport.background,
                         );
-                        current_style = Some((style, reverse));
+                        if selected && let Some(selection) = &selection_style {
+                            write_selection_sgr(&mut self.output, selection);
+                        }
+                        current_style = Some((style, reverse, selected));
                     }
                     self.output.push(b' ');
                     terminal_column = column.saturating_add(1);
@@ -861,7 +883,7 @@ impl Renderer {
                     rect.y.saturating_add(row),
                 );
             }
-            if current_style != Some((style, reverse)) {
+            if current_style != Some((style, reverse, selected)) {
                 write_sgr(
                     &mut self.output,
                     style,
@@ -869,7 +891,10 @@ impl Renderer {
                     viewport.foreground,
                     viewport.background,
                 );
-                current_style = Some((style, reverse));
+                if selected && let Some(selection) = &selection_style {
+                    write_selection_sgr(&mut self.output, selection);
+                }
+                current_style = Some((style, reverse, selected));
             }
             let advance = if cell.width() == CellWidth::Wide {
                 2
@@ -892,37 +917,45 @@ impl Renderer {
             }
             terminal_column = column.saturating_add(advance);
         }
+        if let Some(start) = clear_from {
+            if terminal_column != start {
+                write_cursor_position(
+                    &mut self.output,
+                    rect.x.saturating_add(start),
+                    rect.y.saturating_add(row),
+                );
+            }
+            write!(self.output, "\x1b[0m\x1b[{}X", rect.width - start)
+                .expect("writing to Vec cannot fail");
+        }
         self.output.extend_from_slice(b"\x1b[0m");
+        self.selection_style = selection_style;
     }
 
-    fn paint_header_segment(
+    fn paint_mode_position(
         &mut self,
+        mode: &zz_protocol::ModePresentation,
+        viewport: &TerminalViewport,
         rect: Rect,
-        title: &str,
-        active: bool,
-        border: Option<TmuxColour>,
         model: &Model,
     ) {
-        if rect.height == 0 || rect.width == 0 {
+        if rect.height == 0 {
             return;
         }
-        let fallback = if active {
-            model.appearance.link_color
-        } else {
-            model.appearance.foreground
-        };
-        let color = border.map_or(fallback, |colour| {
-            resolve_tmux_colour(colour, fallback, &model.appearance)
-        });
-        let line = padded_segment(title, rect.width, '─');
-        write_colored_text(
-            &mut self.output,
-            rect.x,
-            rect.y,
-            &line,
-            color,
-            model.appearance.background,
-        );
+        self.blit_row(viewport, 0, rect);
+        for (column, segments) in crate::mode_view::position_runs(mode, rect.width) {
+            let mut line = StyledLine::from_segments(segments);
+            line.resolve_theme(&model.status.theme);
+            write_styled_text(
+                &mut self.output,
+                rect.x.saturating_add(column),
+                rect.y,
+                &line,
+                viewport.foreground,
+                viewport.background,
+                &model.appearance,
+            );
+        }
     }
 
     /// `window_make_pane_status` fills the row with border cells first and then
@@ -1472,8 +1505,13 @@ impl Renderer {
             if usize::from(model.status.message_line).min(block.saturating_sub(1)) == index {
                 match &overlay {
                     Some(StatusOverlay::Row(full)) => line = full.clone(),
-                    Some(StatusOverlay::Right(right)) => {
-                        line = overlay_right(&line, right, usize::from(width));
+                    Some(StatusOverlay::Message { front, fill }) => {
+                        line = StyledLine::from_segments(crate::mode_view::over_underlay(
+                            &front.segments,
+                            *fill,
+                            &line.segments,
+                            width,
+                        ));
                     }
                     None => {}
                 }
@@ -1498,8 +1536,15 @@ impl Renderer {
         }
         self.status_rows = lines;
         self.status_geometry = Some(geometry);
+        let virtual_row = match overlay {
+            Some(StatusOverlay::Row(line)) => Some(line),
+            Some(StatusOverlay::Message { front, fill }) => Some(StyledLine::from_segments(
+                crate::mode_view::over_underlay(&front.segments, fill, &[], width),
+            )),
+            None => None,
+        };
         if block == 0
-            && let Some(StatusOverlay::Row(mut line)) = overlay
+            && let Some(mut line) = virtual_row
             && let Some(y) = model.message_row_y()
         {
             line.resolve_theme(&model.status.theme);
@@ -1738,6 +1783,13 @@ impl Renderer {
             self.output.extend_from_slice(b"\x1b[?25h");
             return;
         }
+        if model.command_output_search.is_some()
+            && let Some((pane, viewport)) = &model.command_output
+        {
+            let rect = model.command_output_content_rect();
+            self.place_command_output_cursor(*pane, viewport, rect, model);
+            return;
+        }
         self.place_pane_cursor(model);
         if client_message_hides_the_cursor(model) {
             self.hide_cursor();
@@ -1749,7 +1801,7 @@ impl Renderer {
             self.hide_cursor();
             return;
         };
-        let Some(viewport) = model.viewports.get(&pane) else {
+        let Some(viewport) = model.pane_viewport(pane) else {
             self.hide_cursor();
             return;
         };
@@ -2064,7 +2116,10 @@ fn sidebar_status_lines(model: &Model) -> Vec<StyledLine> {
 
 enum StatusOverlay {
     Row(StyledLine),
-    Right(StyledLine),
+    Message {
+        front: StyledLine,
+        fill: Option<TmuxColour>,
+    },
 }
 
 /// A message on the status row takes the cursor off the screen. Measured
@@ -2081,48 +2136,44 @@ enum StatusOverlay {
 /// sidebar row and the status row is untouched, so the cursor is not this
 /// message's to take.
 fn client_message_hides_the_cursor(model: &Model) -> bool {
-    model.client_message.is_some() && !(model.sidebar_visible() && model.command_output.is_none())
+    model.client_message.is_some() && !model.sidebar_visible()
 }
 
 fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
     let style = overlay_style(&model.appearance);
     if let Some(confirm) = &model.confirm {
-        if model.sidebar_visible() && model.command_output.is_none() {
+        if model.sidebar_visible() {
             return None;
         }
         let mut line = StyledLine::default();
         line.push_segment(&padded_segment(&confirm.prompt, width, ' '), style);
         return Some(StatusOverlay::Row(line));
     }
+    let message_style = crate::mode_view::message_style(model, false);
+    let message = |text: &str| StatusOverlay::Message {
+        front: StyledLine::from_segments(crate::mode_view::message_front(
+            text,
+            width,
+            &message_style,
+        )),
+        fill: message_style.fill,
+    };
     if let Some(query) = &model.command_output_search {
-        let mut line = StyledLine::default();
-        let (prompt, _) = command_output_search_display(query, width);
-        line.push_segment(&prompt, style);
-        return Some(StatusOverlay::Row(line));
+        return Some(message(&truncate(
+            &command_output_search_prompt(query),
+            width.saturating_sub(1),
+        )));
     }
-    if model.sidebar_visible() && model.command_output.is_none() {
+    if model.sidebar_visible() {
         return None;
     }
     if let Some(prompt) = &model.command_prompt {
-        let mut line = StyledLine::default();
-        line.push_segment(
-            &padded_segment(&format!("{}{}", prompt.prompt, prompt.input), width, ' '),
-            style,
-        );
-        return Some(StatusOverlay::Row(line));
+        return Some(message(&format!("{}{}", prompt.prompt, prompt.input)));
     }
-    if let Some(message) = &model.client_message {
-        let mut line = StyledLine::default();
-        line.push_segment(&padded_segment(&message.text, width, ' '), style);
-        return Some(StatusOverlay::Row(line));
-    }
-    let right = mode_indicators(model);
-    if right.is_empty() {
-        return None;
-    }
-    let mut line = StyledLine::default();
-    line.push_segment(&format!(" {right} "), style);
-    Some(StatusOverlay::Right(line))
+    model
+        .client_message
+        .as_ref()
+        .map(|client_message| message(&client_message.text))
 }
 
 #[derive(Clone, Copy)]
@@ -2308,16 +2359,6 @@ fn overlay_style(appearance: &TerminalAppearance) -> TmuxStyle {
         bg: Some(TmuxColour::Rgb(appearance.foreground.packed())),
         ..TmuxStyle::default()
     }
-}
-
-fn overlay_right(line: &StyledLine, overlay: &StyledLine, width: usize) -> StyledLine {
-    let overlay_width = overlay.len();
-    let keep = width.saturating_sub(overlay_width);
-    let mut merged = line.truncate(keep);
-    let padding = keep.saturating_sub(merged.len());
-    merged.push_plain(&" ".repeat(padding));
-    merged.append(overlay);
-    merged
 }
 
 fn base_status_left(model: &Model) -> StyledLine {
@@ -2713,6 +2754,73 @@ fn resolve_tmux_colour(
         TmuxColour::Rgb(value) => Color::from_packed(value),
         TmuxColour::Theme(index) => theme_colour(index).unwrap_or(fallback),
         TmuxColour::Default | TmuxColour::Terminal => fallback,
+    }
+}
+
+fn trailing_clear(
+    viewport: &TerminalViewport,
+    row: u16,
+    width: u16,
+    default_style: PackedStyle,
+    overlay_mask: &[bool],
+    selection_mask: &[bool],
+) -> Option<u16> {
+    let mut last_background = viewport.background;
+    let mut run = None;
+    for column in 0..width {
+        let cell = viewport.cell(row, column).unwrap_or(PackedCell::EMPTY);
+        let style = viewport.style(cell).unwrap_or(default_style);
+        let marked = overlay_mask[usize::from(column)] || selection_mask[usize::from(column)];
+        let blank = !marked
+            && cell.width() == CellWidth::Narrow
+            && style.background() == last_background
+            && !(style.bold()
+                || style.faint()
+                || style.italic()
+                || style.blink()
+                || style.invisible()
+                || style.strikethrough()
+                || style.overline()
+                || style.hyperlink()
+                || style.underline() != UnderlineStyle::None)
+            && matches!(viewport.glyph(cell), Glyph::Empty | Glyph::Scalar(' '));
+        if blank {
+            run.get_or_insert(column);
+        } else {
+            run = None;
+            last_background = style.background();
+        }
+    }
+    let start = run?;
+    (width - start >= 10 && last_background == viewport.background).then_some(start)
+}
+
+fn write_selection_sgr(output: &mut Vec<u8>, selection: &TmuxStyle) {
+    let attributes = &selection.attributes;
+    for (state, sequence) in [
+        (attributes.bold, b"\x1b[1m".as_slice()),
+        (attributes.dim, b"\x1b[2m".as_slice()),
+        (attributes.italics, b"\x1b[3m".as_slice()),
+        (attributes.underscore, b"\x1b[4m".as_slice()),
+        (attributes.blink, b"\x1b[5m".as_slice()),
+        (attributes.reverse, b"\x1b[7m".as_slice()),
+        (attributes.hidden, b"\x1b[8m".as_slice()),
+        (attributes.strikethrough, b"\x1b[9m".as_slice()),
+        (attributes.overline, b"\x1b[53m".as_slice()),
+    ] {
+        if state == TmuxAttributeState::On {
+            output.extend_from_slice(sequence);
+        }
+    }
+    for (colour, ground) in [
+        (selection.fg, Ground::Foreground),
+        (selection.bg, Ground::Background),
+    ] {
+        if let Some(colour) =
+            colour.filter(|colour| !matches!(colour, TmuxColour::Default | TmuxColour::Terminal))
+        {
+            write_ground(output, Some(colour), Color::default(), ground);
+        }
     }
 }
 
@@ -3585,10 +3693,17 @@ mod tests {
             command_output_search_prompt(model.command_output_search.as_ref().unwrap()),
             "?needle"
         );
-        let Some(StatusOverlay::Row(line)) = status_overlay(&model, 12) else {
+        let Some(StatusOverlay::Message { front, fill }) = status_overlay(&model, 12) else {
             panic!("command output search did not replace the status row");
         };
-        assert_eq!(line.plain_text(), "?needle     ");
+        assert_eq!(front.plain_text(), "?needle");
+        let row = StyledLine::from_segments(crate::mode_view::over_underlay(
+            &front.segments,
+            fill,
+            &[],
+            12,
+        ));
+        assert_eq!(row.plain_text(), "?needle     ");
 
         model.command_output_search.as_mut().unwrap().direction = SearchDirection::Forward;
         assert_eq!(
@@ -3602,7 +3717,7 @@ mod tests {
         sidebar_model.command_output_search = Some(SearchQuery::literal("visible"));
         assert!(matches!(
             status_overlay(&sidebar_model, 120),
-            Some(StatusOverlay::Row(_))
+            Some(StatusOverlay::Message { .. })
         ));
 
         let query = SearchQuery::literal("界e\u{301}界");
@@ -3719,7 +3834,7 @@ mod tests {
     }
 
     #[test]
-    fn command_output_viewport_owns_the_mode_indicator() {
+    fn the_mode_badge_lives_on_the_sidebar_and_never_on_the_status_row() {
         let mut model = block_model(120, 8);
         let mut viewport = TerminalViewport::blank(120, 6, SessionStatus::Running);
         viewport.mode = TerminalMode::View {
@@ -3727,13 +3842,11 @@ mod tests {
             total: 40,
         };
         model.command_output = Some((PaneId(9), viewport));
+        assert!(status_overlay(&model, 120).is_none());
         model.focus_sidebar();
         assert!(model.sidebar_visible());
         assert!(status_indicators(&model).starts_with("VIEW 3/40"));
-        let Some(StatusOverlay::Right(overlay)) = status_overlay(&model, 120) else {
-            panic!("command output mode indicator was suppressed with the hidden sidebar");
-        };
-        assert!(overlay.plain_text().contains("VIEW 3/40"));
+        assert!(status_overlay(&model, 120).is_none());
     }
 
     #[test]

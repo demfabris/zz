@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 100;
+pub const PROTOCOL_VERSION: u16 = 101;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -499,6 +499,47 @@ pub struct StatusLine {
     /// class. A client resolves `TmuxColour::Theme` through this and not
     /// through a table of its own.
     pub theme: crate::ThemeColours,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub message_style: String,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub message_command_style: String,
+    #[serde(deserialize_with = "deserialize_mode_presentations")]
+    pub modes: Vec<ModePresentation>,
+}
+
+pub const MAX_MODE_PRESENTATIONS: usize = 2;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModePresentation {
+    pub pane: PaneId,
+    pub view: bool,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub position: String,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub position_style: String,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub selection_style: String,
+    pub vi_keys: bool,
+}
+
+fn deserialize_mode_presentations<'de, D>(
+    deserializer: D,
+) -> Result<Vec<ModePresentation>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let modes = Vec::<ModePresentation>::deserialize(deserializer)?;
+    if modes.len() > MAX_MODE_PRESENTATIONS {
+        return Err(serde::de::Error::invalid_length(
+            modes.len(),
+            &"at most two mode presentations",
+        ));
+    }
+    Ok(modes)
+}
+
+fn style_or_empty_parses(value: &str) -> bool {
+    value.is_empty() || crate::parse_style(value).is_some()
 }
 
 impl StatusLine {
@@ -541,6 +582,32 @@ impl StatusLine {
         }
         if self.theme.is_circular() {
             return Err("status theme slot carries a theme colour");
+        }
+        if self.message_style.len() > MAX_STATUS_TEXT_BYTES
+            || self.message_command_style.len() > MAX_STATUS_TEXT_BYTES
+        {
+            return Err("status message style exceeds the wire byte limit");
+        }
+        if !style_or_empty_parses(&self.message_style)
+            || !style_or_empty_parses(&self.message_command_style)
+        {
+            return Err("status message style does not parse as a style");
+        }
+        if self.modes.len() > MAX_MODE_PRESENTATIONS {
+            return Err("status mode presentations exceed the wire limit");
+        }
+        for mode in &self.modes {
+            if mode.position.len() > MAX_STATUS_TEXT_BYTES
+                || mode.position_style.len() > MAX_STATUS_TEXT_BYTES
+                || mode.selection_style.len() > MAX_STATUS_TEXT_BYTES
+            {
+                return Err("status mode presentation exceeds the wire byte limit");
+            }
+            if !style_or_empty_parses(&mode.position_style)
+                || !style_or_empty_parses(&mode.selection_style)
+            {
+                return Err("status mode style does not parse as a style");
+            }
         }
         Ok(())
     }
@@ -4170,6 +4237,9 @@ mod tests {
         message_line: u8,
         customized: bool,
         theme: crate::ThemeColours,
+        message_style: String,
+        message_command_style: String,
+        modes: Vec<super::ModePresentation>,
     }
 
     fn unbounded_status(rows: Vec<String>, message_line: u8) -> Vec<u8> {
@@ -4183,6 +4253,9 @@ mod tests {
             message_line,
             customized: false,
             theme: crate::ThemeColours::default(),
+            message_style: String::new(),
+            message_command_style: String::new(),
+            modes: Vec::new(),
         })
         .expect("status line shape")
     }
@@ -4713,7 +4786,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 100);
+        assert_eq!(super::PROTOCOL_VERSION, 101);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

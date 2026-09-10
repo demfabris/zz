@@ -75,9 +75,11 @@
 #
 # --self-check runs the driver against a deliberate one-sided difference in each
 # channel - an extra hint cell on the status row, a message whose text differs,
-# a prompt that one side leaves open as residue - and requires the comparison to
-# report each one, plus one equivalence it must NOT report. A fixture that only
-# passes has proved nothing.
+# a prompt that one side leaves open as residue, the copy position painted in
+# another style, the view surface drawn from another position format, and the
+# message and the prompt painted in another style - and requires the comparison
+# to report each one, plus one equivalence it must NOT report. A fixture that
+# only passes has proved nothing.
 #
 # A divergence is a finding, not a failure of this script: it exits 1 so a
 # caller can gate on it, and prints both sides so the next lane has the
@@ -529,26 +531,24 @@ seed_scrollback() {
 # --- the cases -------------------------------------------------------------
 #
 # COPY MODE. window-copy.c:5228 draws copy-mode-position-format at the top right
-# of the pane's own grid whenever the mode screen's first line is written and
-# hide_position is off, so the pin's indicator is IN THE PANE and the status row
-# is untouched. Measured 2026-09-10 on this pair: the pin paints
-# `[0/39]` at columns 74..79 of row 0 in copy-mode-position-style, themeblack on
-# themeyellow, and leaves the status row alone; the raw TUI paints nothing in
-# the pane and ` COPY 62/62 ` at the right of the STATUS ROW instead, and
-# #{copy_position} and #{copy_position_limit} answer empty on zz where the pin
-# answers 0 and 39. Recorded against options.native-mode-styles, the accepted
-# gap that holds option:copy-mode-position-format: zz renders native mode
-# surfaces instead of tmux cell grids, so neither the indicator's cells nor its
-# numbers are this fixture's to assert. What IS asserted is the restoration:
-# once the mode is cancelled both screens have to be the same screen again.
-COPY_REASON='options.native-mode-styles, accepted: the pin draws copy-mode-position-format into the pane grid at the top right and zz draws a native COPY badge on the status row instead'
+# of the pane's own grid, in copy-mode-position-style, whenever the mode
+# screen's first line is written and hide_position is off, and leaves the status
+# row alone. Measured 2026-09-10 on this pair: the pin paints `[0/45]` at
+# columns 74..79 of row 0, themeblack on themeyellow, with its cursor in the
+# pane at the copy cursor. Until cycle 5 the raw TUI painted nothing in the pane
+# and a ` COPY 62/62 ` badge on the STATUS ROW. The daemon now expands the
+# format against the pane's mode - #{copy_position} is the rows below the view
+# and #{copy_position_limit} the history size, the pin's own oy and hsize - and
+# publishes it on StatusLine with the two resolved styles, and the raw TUI draws
+# exactly those cells over the pane's first row. Asserted whole, and so is the
+# restoration once the mode is cancelled.
 copy_mode_case() {
   CASE_LABEL=copy-mode
   mark_both copy
   on_both_active copy-mode -t PANE
   both_pane_in_mode 1 'copy mode'
   settle_both MARK-copy 'copy mode'
-  verdict copy-mode-entered record "$COPY_REASON"
+  verdict copy-mode-entered same
   on_both_active send-keys -X -t PANE cancel
   both_pane_in_mode 0 'copy mode left'
   settle_both MARK-copy 'copy mode left'
@@ -564,12 +564,16 @@ copy_mode_case() {
 # run-shell's, and that is what this case drives.
 #
 # MEASURED 2026-09-10: run-shell -t pane 'printf VIEWLINE-1' puts the pin's pane
-# in view-mode with the output as the pane's whole screen and `[0/0]` at the top
-# right; zz leaves #{pane_in_mode} at 0 and draws a client-side command-output
-# overlay - a ` command output ` rule across row 0 - with a ` VIEW 1/21 ` badge
-# on the status row. Same accepted gap, same reason. The restoration is
-# asserted: Escape into each client has to bring both screens back.
-VIEW_REASON='options.native-mode-styles, accepted: run-shell output reaches the pin as a view-mode pane grid and zz as a native command-output overlay'
+# in view-mode with the output as the pane's whole screen, `[0/0]` at the top
+# right and the cursor at the pane's origin; longer output opens at its top
+# (`[78/78]` for 101 lines in 23 rows) and Enter or q leaves it. Until cycle 5 zz
+# drew a client-side command-output overlay with a ` command output ` rule
+# across row 0 and a ` VIEW 1/21 ` badge on the status row. The raw TUI now draws
+# the output inside the target pane's own rectangle, sized to it, with the
+# position cells copy mode draws, and clears a trailing blank run the way
+# tty_draw_line does, which is what makes the row under `[0/0]` decode the same
+# on both sides. Asserted whole; Escape into each client brings both screens
+# back.
 view_surface_case() {
   CASE_LABEL=view-surface
   mark_both view
@@ -580,11 +584,34 @@ view_surface_case() {
   # before it is no longer on either screen. The output itself is what both
   # sides show, so it is what this checkpoint settles on.
   settle_both VIEWLINE-1 'the view surface'
-  verdict view-surface-shown record "$VIEW_REASON"
+  verdict view-surface-shown same
   type_on_both Escape
   wait_for 'the pin left view mode' pane_in_mode_is tmux 0
   settle_both MARK-view 'the view surface withdrawn'
   verdict view-surface-restored same
+}
+
+# LONG OUTPUT, the surface the choosers lane relies on. MEASURED 2026-09-10: the
+# pin opens a hundred-line run-shell output at its TOP, `[78/78]` in the first
+# row (oy is the whole history, the view scrolled all the way up), the cursor at
+# the pane's origin, and two Downs move the cursor two rows without moving the
+# view. q leaves it. The raw TUI now draws the same cells at each of those
+# checkpoints. Asserted whole at each.
+view_long_case() {
+  CASE_LABEL=view-long
+  mark_both vlong
+  on_both_active run-shell -t PANE "seq -f 'VIEWLONG-%g' 1 100"
+  both_screen_has VIEWLONG-1 'the long run-shell output'
+  wait_for 'the pin entered view mode' pane_in_mode_is tmux 1
+  settle_both VIEWLONG-1 'the long view surface'
+  verdict view-long-shown same
+  type_on_both Down Down
+  settle_both VIEWLONG-1 'the long view moved'
+  verdict view-long-down same
+  type_on_both q
+  wait_for 'the pin left view mode' pane_in_mode_is tmux 0
+  settle_both MARK-vlong 'the long view withdrawn'
+  verdict view-long-restored same
 }
 
 # THE PREFIX. The pin paints NOTHING when the prefix is armed: status.c redraws
@@ -615,17 +642,14 @@ prefix_case() {
 # formats. Both halves are compared: the row while the message is up, and the
 # row once it has expired.
 #
-# MEASURED 2026-09-10: the TEXT is the pin's on both sides and so is the cursor,
-# and the STYLE is not - the pin resolves message-style, bg=themeyellow,
-# fg=themeblack (options-table.c:941), and paints \e[38;2;13;13;13m
-# \e[48;2;184;134;11m; the raw TUI paints its own overlay appearance,
-# \e[38;2;16;19;24m\e[48;2;216;222;233m, and never reads message-style at all.
-# That is the same class as the recorded presentation:tui-status-row-theme-
-# defaults decision and it is a finding of this fixture, recorded here with the
-# field it would need: the daemon publishes no resolved message style on
-# StatusLine, so the client has nothing to dispatch on. The glyphs, the columns
-# and the cursor are asserted.
-MESSAGE_REASON='the pin resolves message-style (bg=themeyellow,fg=themeblack) and the raw TUI paints its own overlay appearance; the daemon publishes no resolved message style on StatusLine'
+# MEASURED 2026-09-10: status_message_redraw paints the text in message-style
+# (bg=themeyellow,fg=themeblack, options-table.c:941) and clears the rest of the
+# row to that background with the default foreground, which the decoder shows as
+# a trailing \e[39m. Until cycle 5 the raw TUI painted its own overlay
+# appearance, \e[38;2;16;19;24m\e[48;2;216;222;233m, because the daemon
+# published no resolved message style. StatusLine now carries message-style and
+# message-command-style resolved per client, and the raw TUI paints the pin's
+# cells. Asserted whole.
 message_case() {
   CASE_LABEL=display-message
   mark_both message
@@ -636,7 +660,7 @@ message_case() {
     die 'tmux refused display-message'
   both_last_row_has INDICATOR-MESSAGE 'the message'
   settle_both MARK-message 'the message'
-  verdict message-shown text "$MESSAGE_REASON"
+  verdict message-shown same
   set_on_both display-time "$MESSAGE_EXPIRE_MS"
   side_command zz display-message -c "$(client_name zz)" 'INDICATOR-EXPIRES' ||
     die 'zz refused display-message'
@@ -655,15 +679,11 @@ message_case() {
 # prompt is answered, so a fixture that drove it that way would deadlock. That
 # was measured, not assumed.
 #
-# MEASURED 2026-09-10: the prompt row's GLYPHS and the cursor are the pin's on
-# both sides - `:` alone, then `:list`, with the cursor at column 1 and then
-# column 5 of the last row - and the STYLE is not, for the same reason the
-# message row's is not: the pin resolves message-style and message-command-style
-# (options-table.c:910 and :941) and the raw TUI paints its own overlay
-# appearance. One finding, two rows; recorded here, asserted in glyphs, columns
-# and cursor. The CANCELLED prompt is asserted whole: once the prompt is gone
-# the row is the pin's again, style included.
-PROMPT_REASON='the pin resolves message-style and message-command-style for the prompt row and the raw TUI paints its own overlay appearance; the daemon publishes no resolved message style on StatusLine'
+# MEASURED 2026-09-10: `:` alone, then `:list`, with the cursor at column 1 and
+# then column 5 of the last row, in message-style and cleared to the row's end
+# the way the message row is. prompt.c prompt_draw takes message-command-style
+# only for a prompt in its vi command mode, which neither side is in here.
+# Asserted whole, and so is the cancelled prompt.
 prompt_case() {
   CASE_LABEL=command-prompt
   mark_both prompt
@@ -672,11 +692,11 @@ prompt_case() {
   type_on_both ':'
   both_last_row_starts_with ':' 'the command prompt'
   settle_both MARK-prompt 'the command prompt'
-  verdict prompt-opened text "$PROMPT_REASON"
+  verdict prompt-opened same
   type_on_both l i s t
   both_last_row_has ':list' 'the typed command'
   settle_both MARK-prompt 'the typed command'
-  verdict prompt-typed text "$PROMPT_REASON"
+  verdict prompt-typed same
   type_on_both Escape
   both_last_row_lacks ':list' 'the cancelled prompt'
   settle_both MARK-prompt 'the cancelled prompt'
@@ -703,6 +723,7 @@ run_cases() {
   verdict scrollback same
   copy_mode_case
   view_surface_case
+  view_long_case
   prefix_case
   message_case
   prompt_case
@@ -792,6 +813,75 @@ run_self_check() {
   settle_both MARK-residue 'the one-sided cancel'
   compare_rows self-check-prompt-residue styled || true
   self_check_case 'prompt, one side leaves the prompt open as residue' rows
+
+  # The copy position's style. The copy case asserts the cells
+  # window_copy_write_line draws over the pane's first row, so the sabotage is
+  # one side's copy-mode-position-style changed while both are in copy mode.
+  CASE_LABEL='self-check copy position style'
+  attach_both_at 80 24
+  side_command zz set-option -g copy-mode-position-style 'bg=red,fg=white' ||
+    die 'zz refused copy-mode-position-style'
+  mark_both position
+  on_both_active copy-mode -t PANE
+  both_pane_in_mode 1 'copy mode'
+  settle_both MARK-position 'copy mode with one side restyled'
+  compare_rows self-check-copy-position styled || true
+  self_check_case 'copy mode, one side paints the position in another style' rows
+  on_both_active send-keys -X -t PANE cancel
+  both_pane_in_mode 0 'copy mode left'
+  side_command zz set-option -gu copy-mode-position-style || die 'zz refused -gu'
+
+  # The view surface's position. The view case asserts the pin's view-mode
+  # cells, so the sabotage is one side drawing another position format there.
+  CASE_LABEL='self-check view position'
+  attach_both_at 80 24
+  side_command zz set-option -g copy-mode-position-format '#[align=right]<#{copy_position}>' ||
+    die 'zz refused copy-mode-position-format'
+  mark_both viewsab
+  on_both_active run-shell -t PANE 'printf VIEWLINE-S'
+  both_screen_has VIEWLINE-S 'the sabotaged run-shell output'
+  wait_for 'the pin entered view mode' pane_in_mode_is tmux 1
+  settle_both VIEWLINE-S 'the sabotaged view surface'
+  compare_rows self-check-view-position styled || true
+  self_check_case 'view surface, one side draws another position format' rows
+  type_on_both Escape
+  wait_for 'the pin left view mode' pane_in_mode_is tmux 0
+  side_command zz set-option -g copy-mode-position-format "$COPY_POSITION_FORMAT" ||
+    die 'zz refused copy-mode-position-format'
+
+  # The message style. The message case now asserts styles, so the sabotage is
+  # one side's message-style changed with the same text on both rows.
+  CASE_LABEL='self-check message style'
+  attach_both_at 80 24
+  side_command zz set-option -g message-style 'bg=red,fg=white' ||
+    die 'zz refused message-style'
+  mark_both mstyle
+  set_on_both display-time "$MESSAGE_HOLD_MS"
+  side_command zz display-message -c "$(client_name zz)" 'SABOTAGE-STYLE' ||
+    die 'zz refused display-message'
+  side_command tmux display-message -c "$(client_name tmux)" 'SABOTAGE-STYLE' ||
+    die 'tmux refused display-message'
+  both_last_row_has SABOTAGE-STYLE 'the restyled message'
+  settle_both MARK-mstyle 'the restyled message'
+  compare_rows self-check-message-style styled || true
+  self_check_case 'message, one side paints the message in another style' rows
+
+  # The prompt style, the same sabotage on the prompt row.
+  CASE_LABEL='self-check prompt style'
+  attach_both_at 80 24
+  side_command zz set-option -g message-style 'bg=red,fg=white' ||
+    die 'zz refused message-style'
+  mark_both pstyle
+  type_on_both C-b
+  both_client_prefix 1 'the armed'
+  type_on_both ':'
+  both_last_row_starts_with ':' 'the command prompt'
+  settle_both MARK-pstyle 'the restyled prompt'
+  compare_rows self-check-prompt-style styled || true
+  self_check_case 'prompt, one side paints the prompt in another style' rows
+  type_on_both Escape
+  both_last_row_starts_with L 'the cancelled prompt'
+  side_command zz set-option -gu message-style || die 'zz refused -gu'
 
   # The equivalence: the same prefix, armed and released on both sides with
   # nothing planted, must report nothing at all. Without it the three sabotages

@@ -499,7 +499,7 @@ struct OwnedClientMessagePublication {
 enum DeferredClientEvent {
     Unowned {
         client: ClientId,
-        payload: EventPayload,
+        payload: Box<EventPayload>,
     },
     Owned(OwnedClientMessagePublication),
 }
@@ -512,7 +512,10 @@ fn defer_unowned_client_events(
     deferred.extend(
         events
             .drain(..)
-            .map(|payload| DeferredClientEvent::Unowned { client, payload }),
+            .map(|payload| DeferredClientEvent::Unowned {
+                client,
+                payload: Box::new(payload),
+            }),
     );
 }
 
@@ -4729,6 +4732,35 @@ impl Shared {
         }
     }
 
+    fn refresh_modes(&self, clients: &BTreeSet<ClientId>) {
+        let updates = {
+            let inner = self.inner.lock();
+            let copy_modes = Arc::new(copy_mode_format_facts(&inner));
+            clients
+                .iter()
+                .filter_map(|client| {
+                    let session = client_attached_session(&inner, *client)?;
+                    let facts = FormatHookFacts {
+                        copy_modes: Arc::clone(&copy_modes),
+                        client: Some(client_format_facts(&inner, *client, session)),
+                        ..FormatHookFacts::default()
+                    };
+                    let requests = mode_requests(&inner, *client, session);
+                    Some((
+                        *client,
+                        crate::status::expand_modes(&requests, &facts, &inner.engine),
+                    ))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (client, modes) in updates {
+            let status = self.status.lock().republish_modes(client, modes);
+            if let Some(status) = status {
+                self.publish_to_client(client, EventPayload::StatusChanged { status });
+            }
+        }
+    }
+
     fn refresh_control_subscriptions(&self) {
         let events = {
             let mut inner = self.inner.lock();
@@ -4922,6 +4954,10 @@ impl Shared {
                     };
                     if shared.stopping.load(Ordering::Acquire) {
                         break;
+                    }
+                    let modes_changed = shared.status.lock().take_pending_modes();
+                    if !modes_changed.is_empty() {
+                        shared.refresh_modes(&modes_changed);
                     }
                     let jobs_changed = shared.status.lock().poll_jobs();
                     if !jobs_changed.is_empty() {
@@ -8595,7 +8631,7 @@ impl Shared {
                             } else {
                                 targeted_events.push(DeferredClientEvent::Unowned {
                                     client: message_client,
-                                    payload: event,
+                                    payload: Box::new(event),
                                 });
                             }
                         }
@@ -20643,6 +20679,7 @@ impl Shared {
                 if start.is_some_and(|start| start.recv().is_err()) {
                     return;
                 }
+                let mut presented = None;
                 loop {
                     let event = match prefetched.pop_front() {
                         Some(event) => event,
@@ -20659,6 +20696,18 @@ impl Shared {
                             if let Some(viewport) =
                                 terminal.latest_viewport_for(TerminalViewId(client.0))
                             {
+                                let key = (
+                                    mode_kind(viewport.mode),
+                                    viewport.scrollbar,
+                                    viewport.search,
+                                );
+                                if presented != Some(key) {
+                                    presented = Some(key);
+                                    shared
+                                        .status
+                                        .lock()
+                                        .request_mode_refresh(BTreeSet::from([client]));
+                                }
                                 if admitted_generation == Some(viewport_generation(&viewport)) {
                                     continue;
                                 }
@@ -21178,6 +21227,7 @@ impl Shared {
                 let mut previous_foreground = None::<Option<u32>>;
                 let mut current_command = String::new();
                 let mut diff_scratch = TerminalDiffScratch::default();
+                let mut mode_memo = BTreeMap::new();
                 while let Ok(event) = events.recv_blocking() {
                     let Some(terminal) = terminal.upgrade() else {
                         break;
@@ -21230,6 +21280,7 @@ impl Shared {
                                 .map(|(view, _)| *view)
                                 .collect::<BTreeSet<_>>();
                             let mut finished = false;
+                            let mut mode_clients = BTreeSet::new();
                             if active.is_empty() {
                                 let viewport = terminal.latest_viewport();
                                 if !projects_agent
@@ -21277,7 +21328,22 @@ impl Shared {
                                     &viewport,
                                     &terminal,
                                 );
+                                let key = (
+                                    mode_kind(viewport.mode),
+                                    viewport.scrollbar,
+                                    viewport.search,
+                                );
+                                let before = mode_memo.insert(view, key);
+                                if before != Some(key)
+                                    && (key.0 != 0 || before.is_some_and(|before| before.0 != 0))
+                                {
+                                    mode_clients.insert(ClientId(view.0));
+                                }
                                 previous.insert(view, viewport);
+                            }
+                            mode_memo.retain(|view, _| active.contains(view));
+                            if !mode_clients.is_empty() {
+                                shared.status.lock().request_mode_refresh(mode_clients);
                             }
                             previous.retain(|view, _| active.contains(view));
                             if finished {
@@ -22271,7 +22337,7 @@ impl Shared {
     fn publish_deferred_client_event(&self, event: DeferredClientEvent) {
         match event {
             DeferredClientEvent::Unowned { client, payload } => {
-                self.publish_to_client(client, payload);
+                self.publish_to_client(client, *payload);
             }
             DeferredClientEvent::Owned(publication) => {
                 self.publish_owned_client_message(publication);
@@ -31763,7 +31829,84 @@ fn status_request(
         context,
         facts,
         client_scheme: inner.client_color_schemes.get(&client).copied(),
+        message_styles: inner.engine.message_styles_for_session(attached),
+        modes: attached.map_or_else(Vec::new, |session| mode_requests(inner, client, session)),
     }
+}
+
+fn mode_requests(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+) -> Vec<crate::status::ModeRequest> {
+    let copy = inner
+        .copy_sessions
+        .get(&client)
+        .filter(|copy| !copy.exiting)
+        .and_then(|copy| {
+            let terminal = inner.terminals.get(&copy.pane)?;
+            mode_request(inner, client, session, copy.pane, terminal, false)
+        });
+    let view = inner.command_outputs.get(&client).and_then(|output| {
+        mode_request(inner, client, session, output.pane, &output.terminal, true)
+    });
+    copy.into_iter().chain(view).collect()
+}
+
+const fn mode_kind(mode: TerminalMode) -> u8 {
+    match mode {
+        TerminalMode::Live => 0,
+        TerminalMode::Copy {
+            hide_position: false,
+            ..
+        } => 1,
+        TerminalMode::Copy {
+            hide_position: true,
+            ..
+        } => 2,
+        TerminalMode::View { .. } => 3,
+    }
+}
+
+fn mode_request(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    pane: PaneId,
+    terminal: &TerminalSession,
+    view: bool,
+) -> Option<crate::status::ModeRequest> {
+    let viewport = terminal.latest_viewport_for(TerminalViewId(client.0))?;
+    let shown = match viewport.mode {
+        TerminalMode::Copy { hide_position, .. } => !view && !hide_position,
+        TerminalMode::View { .. } => view,
+        TerminalMode::Live => false,
+    };
+    if !shown {
+        return None;
+    }
+    let limit = viewport
+        .scrollbar
+        .total
+        .saturating_sub(viewport.scrollbar.len);
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let context = inner.engine.format_status_context_for_client(
+        Some(session),
+        Some(window),
+        Some(pane),
+        session,
+    );
+    Some(crate::status::ModeRequest {
+        pane,
+        view,
+        context,
+        position: limit.saturating_sub(viewport.scrollbar.offset),
+        limit,
+        vi_keys: inner
+            .engine
+            .copy_mode_table_for_pane(pane)
+            .is_ok_and(|table| table == "copy-mode-vi"),
+    })
 }
 
 fn resolve_popup_client(

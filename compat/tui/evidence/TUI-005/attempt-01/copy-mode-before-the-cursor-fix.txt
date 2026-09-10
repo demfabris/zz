@@ -1,0 +1,467 @@
+copy mode and search through the client stdin at 80x24 (pin tmux)
+      case emacs-enter
+      first differing row 23 of 24
+        tmux: $
+        zz:   $ ^[[7m ^[[0m
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  emacs-enter
+      case emacs-cursor-up
+      first differing row 21 of 24
+        tmux: line-60 filler-60
+        zz:   line-60 filler-60^[[7m ^[[0m
+      cursor tmux: 17,21 flag=1 pane=80x24
+      cursor zz:   79,22 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=17,21 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-60 filler-60]
+      facts zz:   mode=copy-mode in=1 cursor=17,21 scroll=0 selection=0/ rectangle= search=[] line=[line-60 filler-60]
+DIFF  emacs-cursor-up
+      case emacs-cursor-down
+      first differing row 22 of 24
+        tmux: SEEDEND
+        zz:   SEEDEND^[[7m ^[[0m
+      cursor tmux: 7,22 flag=1 pane=80x24
+      cursor zz:   79,22 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=7,22 scroll=0 selection=0/0 rectangle=0 search=[] line=[SEEDEND]
+      facts zz:   mode=copy-mode in=1 cursor=7,22 scroll=0 selection=0/ rectangle= search=[] line=[SEEDEND]
+DIFF  emacs-cursor-down
+      case emacs-count-five-up
+      first differing row 17 of 24
+        tmux: line-56 filler-56
+        zz:   line-56 filler-56^[[7m ^[[0m
+      cursor tmux: 17,17 flag=1 pane=80x24
+      cursor zz:   79,22 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=17,17 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=17,17 scroll=0 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  emacs-count-five-up
+      case emacs-halfpage-up
+      first differing row 0 of 24
+        tmux: line-27 filler-27
+        zz:   line-39 filler-39
+      cursor tmux: 17,17 flag=1 pane=80x24
+      cursor zz:   79,17 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=17,17 scroll=12 selection=0/0 rectangle=0 search=[] line=[line-44 filler-44]
+      facts zz:   mode=copy-mode in=1 cursor=17,5 scroll=0 selection=0/ rectangle= search=[] line=[line-44 filler-44]
+DIFF  emacs-halfpage-up
+      case emacs-halfpage-down
+      first differing row 17 of 24
+        tmux: line-56 filler-56
+        zz:   line-56 filler-56^[[7m ^[[0m
+      cursor tmux: 17,17 flag=1 pane=80x24
+      cursor zz:   79,17 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=17,17 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=17,17 scroll=0 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  emacs-halfpage-down
+      case emacs-page-up
+      first differing row 0 of 24
+        tmux: line-17 filler-17
+        zz:   line-32 filler-32^[[7m ^[[0m
+      cursor tmux: 17,17 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=17,17 scroll=22 selection=0/0 rectangle=0 search=[] line=[line-34 filler-34]
+      facts zz:   mode=copy-mode in=1 cursor=17,0 scroll=7 selection=0/ rectangle= search=[] line=[line-32 filler-32]
+DIFF  emacs-page-up
+      case emacs-page-down
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-33 filler-33
+      cursor tmux: 17,17 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=17,17 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=17,23 scroll=6 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  emacs-page-down
+      case emacs-end-of-line
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-33 filler-33
+      cursor tmux: 17,17 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=17,17 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=17,23 scroll=6 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  emacs-end-of-line
+      case emacs-start-of-line
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-33 filler-33
+      cursor tmux: 0,17 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=0,17 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=0,23 scroll=6 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  emacs-start-of-line
+      case emacs-begin-selection
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-33 filler-33
+      cursor tmux: 0,17 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=0,17 scroll=0 selection=0/1 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=0,23 scroll=6 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  emacs-begin-selection
+      case emacs-selection-extends
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-34 filler-34
+      cursor tmux: 17,18 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=17,18 scroll=0 selection=1/1 rectangle=0 search=[] line=[line-57 filler-57]
+      facts zz:   mode=copy-mode in=1 cursor=17,23 scroll=5 selection=1/ rectangle= search=[] line=[line-57 filler-57]
+DIFF  emacs-selection-extends
+      case emacs-rectangle-on
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-34 filler-34
+      cursor tmux: 17,18 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=17,18 scroll=0 selection=1/1 rectangle=1 search=[] line=[line-57 filler-57]
+      facts zz:   mode=copy-mode in=1 cursor=17,23 scroll=5 selection=1/ rectangle= search=[] line=[line-57 filler-57]
+DIFF  emacs-rectangle-on
+      case emacs-rectangle-off
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-34 filler-34
+      cursor tmux: 17,18 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=17,18 scroll=0 selection=1/1 rectangle=0 search=[] line=[line-57 filler-57]
+      facts zz:   mode=copy-mode in=1 cursor=17,23 scroll=5 selection=1/ rectangle= search=[] line=[line-57 filler-57]
+DIFF  emacs-rectangle-off
+ok    emacs-copy-and-cancel
+      case emacs-reenter
+      first differing row 23 of 24
+        tmux: $
+        zz:   $ ^[[7m ^[[0m
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  emacs-reenter
+ok    emacs-cancel
+ok    emacs-terminal-input-returns
+      case vi-enter
+      first differing row 23 of 24
+        tmux: $
+        zz:   $ ^[[7m ^[[0m
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  vi-enter
+      case vi-cursor-up
+      first differing row 21 of 24
+        tmux: line-60 filler-60
+        zz:   line-6^[[7m0^[[0m filler-60
+      cursor tmux: 6,21 flag=1 pane=80x24
+      cursor zz:   79,22 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=6,21 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-60 filler-60]
+      facts zz:   mode=copy-mode in=1 cursor=6,21 scroll=0 selection=0/ rectangle= search=[] line=[line-60 filler-60]
+DIFF  vi-cursor-up
+      case vi-cursor-down
+      first differing row 22 of 24
+        tmux: SEEDEND
+        zz:   SEEDEN^[[7mD^[[0m
+      cursor tmux: 6,22 flag=1 pane=80x24
+      cursor zz:   79,22 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=6,22 scroll=0 selection=0/0 rectangle=0 search=[] line=[SEEDEND]
+      facts zz:   mode=copy-mode in=1 cursor=6,22 scroll=0 selection=0/ rectangle= search=[] line=[SEEDEND]
+DIFF  vi-cursor-down
+      case vi-count-five-up
+      first differing row 17 of 24
+        tmux: line-56 filler-56
+        zz:   line-5^[[7m6^[[0m filler-56
+      cursor tmux: 6,17 flag=1 pane=80x24
+      cursor zz:   79,22 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=6,17 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=6,17 scroll=0 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  vi-count-five-up
+      case vi-halfpage-up
+      first differing row 0 of 24
+        tmux: line-27 filler-27
+        zz:   line-39 filler-39
+      cursor tmux: 6,17 flag=1 pane=80x24
+      cursor zz:   79,17 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=6,17 scroll=12 selection=0/0 rectangle=0 search=[] line=[line-44 filler-44]
+      facts zz:   mode=copy-mode in=1 cursor=6,5 scroll=0 selection=0/ rectangle= search=[] line=[line-44 filler-44]
+DIFF  vi-halfpage-up
+      case vi-halfpage-down
+      first differing row 17 of 24
+        tmux: line-56 filler-56
+        zz:   line-5^[[7m6^[[0m filler-56
+      cursor tmux: 6,17 flag=1 pane=80x24
+      cursor zz:   79,17 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=6,17 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=6,17 scroll=0 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  vi-halfpage-down
+      case vi-page-up
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-3^[[7m2^[[0m filler-32
+      cursor tmux: 6,17 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=6,17 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=6,0 scroll=7 selection=0/ rectangle= search=[] line=[line-32 filler-32]
+DIFF  vi-page-up
+      case vi-page-down
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-33 filler-33
+      cursor tmux: 6,17 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=6,17 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=6,23 scroll=6 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  vi-page-down
+      case vi-end-of-line
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-33 filler-33
+      cursor tmux: 16,17 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=16,17 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=16,23 scroll=6 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  vi-end-of-line
+      case vi-start-of-line
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-33 filler-33
+      cursor tmux: 0,17 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=0,17 scroll=0 selection=0/0 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=0,23 scroll=6 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  vi-start-of-line
+      case vi-begin-selection
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-33 filler-33
+      cursor tmux: 0,17 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=0,17 scroll=0 selection=0/1 rectangle=0 search=[] line=[line-56 filler-56]
+      facts zz:   mode=copy-mode in=1 cursor=0,23 scroll=6 selection=0/ rectangle= search=[] line=[line-56 filler-56]
+DIFF  vi-begin-selection
+      case vi-selection-extends
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-34 filler-34
+      cursor tmux: 16,18 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=16,18 scroll=0 selection=1/1 rectangle=0 search=[] line=[line-57 filler-57]
+      facts zz:   mode=copy-mode in=1 cursor=16,23 scroll=5 selection=1/ rectangle= search=[] line=[line-57 filler-57]
+DIFF  vi-selection-extends
+      case vi-rectangle-on
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-34 filler-34
+      cursor tmux: 16,18 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=16,18 scroll=0 selection=1/1 rectangle=1 search=[] line=[line-57 filler-57]
+      facts zz:   mode=copy-mode in=1 cursor=16,23 scroll=5 selection=1/ rectangle= search=[] line=[line-57 filler-57]
+DIFF  vi-rectangle-on
+      case vi-rectangle-off
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-34 filler-34
+      cursor tmux: 16,18 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=16,18 scroll=0 selection=1/1 rectangle=0 search=[] line=[line-57 filler-57]
+      facts zz:   mode=copy-mode in=1 cursor=16,23 scroll=5 selection=1/ rectangle= search=[] line=[line-57 filler-57]
+DIFF  vi-rectangle-off
+ok    vi-copy-and-cancel
+      case vi-reenter
+      first differing row 23 of 24
+        tmux: $
+        zz:   $ ^[[7m ^[[0m
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  vi-reenter
+ok    vi-cancel
+ok    vi-terminal-input-returns
+      case emacs-search-ordinary-pane-enter
+      first differing row 23 of 24
+        tmux: $
+        zz:   $ ^[[7m ^[[0m
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  emacs-search-ordinary-pane-enter
+      case emacs-search-forward-prompt
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) ^[[39m^[[49m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down)
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  emacs-search-forward-prompt
+      case emacs-search-forward-typed
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) needlex^[[39m^[[49m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down) needlex
+      facts tmux: mode=copy-mode in=1 cursor=1,23 scroll=0 selection=0/0 rectangle=0 search=[needlex] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=1,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  emacs-search-forward-typed
+      case emacs-search-forward-backspace
+      first differing row 0 of 24
+        tmux: $ cat /tmp/zzcm.5ObgmH/lines.txt
+        zz:   line-12 ^[[7mneedle-^[[0m12
+      facts tmux: mode=copy-mode in=1 cursor=14,12 scroll=39 selection=0/0 rectangle=0 search=[needle] line=[line-12 needle-12]
+      facts zz:   mode=copy-mode in=1 cursor=14,0 scroll=27 selection=0/ rectangle= search=[] line=[line-12 needle-12]
+DIFF  emacs-search-forward-backspace
+      case emacs-search-forward-submit
+      first differing row 0 of 24
+        tmux: $ cat /tmp/zzcm.5ObgmH/lines.txt
+        zz:   line-12 ^[[7mneedle-^[[0m12
+      cursor tmux: 14,12 flag=1 pane=80x24
+      cursor zz:   20,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=14,12 scroll=39 selection=0/0 rectangle=0 search=[needle] line=[line-12 needle-12]
+      facts zz:   mode=copy-mode in=1 cursor=14,0 scroll=27 selection=0/ rectangle= search=[] line=[line-12 needle-12]
+DIFF  emacs-search-forward-submit
+      case emacs-search-again
+      first differing row 0 of 24
+        tmux: line-30 filler-30
+        zz:   line-25 filler-25
+      cursor tmux: 14,18 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=14,18 scroll=9 selection=0/0 rectangle=0 search=[needle] line=[line-48 needle-48]
+      facts zz:   mode=copy-mode in=1 cursor=14,23 scroll=14 selection=0/ rectangle= search=[] line=[line-48 needle-48]
+DIFF  emacs-search-again
+      case emacs-search-reverse
+      first differing row 0 of 24
+        tmux: line-30 filler-30
+        zz:   line-25 filler-25
+      cursor tmux: 8,18 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=8,18 scroll=9 selection=0/0 rectangle=0 search=[needle] line=[line-48 needle-48]
+      facts zz:   mode=copy-mode in=1 cursor=8,23 scroll=14 selection=0/ rectangle= search=[] line=[line-48 needle-48]
+DIFF  emacs-search-reverse
+      case emacs-search-backward-submit
+      first differing row 0 of 24
+        tmux: line-12 needle-12
+        zz:   line-30 ^[[7mfiller-30^[[0m
+      cursor tmux: 8,18 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=8,18 scroll=27 selection=0/0 rectangle=0 search=[filler-30] line=[line-30 filler-30]
+      facts zz:   mode=copy-mode in=1 cursor=8,0 scroll=9 selection=0/ rectangle= search=[] line=[line-30 filler-30]
+DIFF  emacs-search-backward-submit
+      case emacs-search-cancel
+      facts tmux: mode= in=0 cursor=, scroll= selection=/ rectangle= search=[filler-30] line=[]
+      facts zz:   mode= in=0 cursor=, scroll= selection=/ rectangle= search=[] line=[]
+DIFF  emacs-search-cancel
+      case vi-search-ordinary-pane-enter
+      first differing row 23 of 24
+        tmux: $
+        zz:   $ ^[[7m ^[[0m
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  vi-search-ordinary-pane-enter
+      case vi-search-forward-prompt
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) ^[[39m^[[49m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down)
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  vi-search-forward-prompt
+      case vi-search-forward-typed
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) needlex^[[39m^[[49m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down) needlex
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  vi-search-forward-typed
+      case vi-search-forward-backspace
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) needle^[[39m^[[49m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down) needle
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  vi-search-forward-backspace
+      case vi-search-forward-submit
+      first differing row 0 of 24
+        tmux: $ cat /tmp/zzcm.5ObgmH/lines.txt
+        zz:   line-12 ^[[7mneedle^[[0m-12
+      cursor tmux: 8,12 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=8,12 scroll=39 selection=0/0 rectangle=0 search=[needle] line=[line-12 needle-12]
+      facts zz:   mode=copy-mode in=1 cursor=8,0 scroll=27 selection=0/ rectangle= search=[] line=[line-12 needle-12]
+DIFF  vi-search-forward-submit
+      case vi-search-again
+      first differing row 0 of 24
+        tmux: line-30 filler-30
+        zz:   line-25 filler-25
+      cursor tmux: 8,18 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=8,18 scroll=9 selection=0/0 rectangle=0 search=[needle] line=[line-48 needle-48]
+      facts zz:   mode=copy-mode in=1 cursor=8,23 scroll=14 selection=0/ rectangle= search=[] line=[line-48 needle-48]
+DIFF  vi-search-again
+      case vi-search-reverse
+      first differing row 0 of 24
+        tmux: $ cat /tmp/zzcm.5ObgmH/lines.txt
+        zz:   line-12 ^[[7mneedle^[[0m-12
+      cursor tmux: 8,12 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=8,12 scroll=39 selection=0/0 rectangle=0 search=[needle] line=[line-12 needle-12]
+      facts zz:   mode=copy-mode in=1 cursor=8,0 scroll=27 selection=0/ rectangle= search=[] line=[line-12 needle-12]
+DIFF  vi-search-reverse
+      case vi-search-backward-submit
+      first differing row 18 of 24
+        tmux: line-30 ^[[38;2;13;13;13m^[[48;2;147;112;219mfiller-30^[[39m^[[49m
+        zz:   line-30 ^[[7mfiller-30^[[0m
+      cursor tmux: 8,18 flag=1 pane=80x24
+      cursor zz:   79,18 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=8,18 scroll=27 selection=0/0 rectangle=0 search=[filler-30] line=[line-30 filler-30]
+      facts zz:   mode=copy-mode in=1 cursor=8,18 scroll=27 selection=0/ rectangle= search=[] line=[line-30 filler-30]
+DIFF  vi-search-backward-submit
+      case vi-search-cancel
+      facts tmux: mode= in=0 cursor=, scroll= selection=/ rectangle= search=[filler-30] line=[]
+      facts zz:   mode= in=0 cursor=, scroll= selection=/ rectangle= search=[] line=[]
+DIFF  vi-search-cancel
+      case live-mode-keys-emacs-entry
+      first differing row 23 of 24
+        tmux: $
+        zz:   $ ^[[7m ^[[0m
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  live-mode-keys-emacs-entry
+      case live-mode-keys-emacs-ignores-j
+      first differing row 23 of 24
+        tmux: $
+        zz:   $ ^[[7m ^[[0m
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  live-mode-keys-emacs-ignores-j
+ok    live-mode-keys-emacs-cancel
+      case live-mode-keys-vi-entry
+      first differing row 23 of 24
+        tmux: $
+        zz:   $ ^[[7m ^[[0m
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  live-mode-keys-vi-entry
+      case live-mode-keys-vi-moves-on-j
+      first differing row 23 of 24
+        tmux: $
+        zz:   ^[[7m$^[[0m
+      cursor tmux: 0,23 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=0,23 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=0,23 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  live-mode-keys-vi-moves-on-j
+ok    live-mode-keys-vi-cancel
+ok    presentation-live-status-row
+      case presentation-copy-mode-position
+      first differing row 0 of 24
+        tmux: line-40 filler-40                                                         ^[[38;2;16;16;16m^[[48;2;205;205;0m[0/40]
+        zz:   line-40 filler-40
+      cursor tmux: 2,22 flag=1 pane=80x24
+      cursor zz:   79,23 flag=0 pane=80x24
+      facts tmux: mode=copy-mode in=1 cursor=2,22 scroll=0 selection=0/0 rectangle=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 cursor=2,22 scroll=0 selection=0/ rectangle= search=[] line=[$]
+DIFF  presentation-copy-mode-position
+ok    presentation-cancel
+53 of 63 cases differ in a channel they assert, 0 recorded elsewhere

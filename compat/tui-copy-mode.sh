@@ -460,6 +460,8 @@ attach_both_at() {
   kill_every_session tmux
   delete_every_buffer zz
   delete_every_buffer tmux
+  side_command zz unbind-key -T copy-mode-vi Z >/dev/null 2>&1 || true
+  side_command tmux unbind-key -T copy-mode-vi Z >/dev/null 2>&1 || true
   zz_command new-session -d -s "$SESSION_NAME" -n "$WINDOW_NAME" -x "$columns" -y "$rows" \
     "$INNER_SHELL" || die "could not create the zz session"
   tmux_inner_command -f /dev/null new-session -d -s "$SESSION_NAME" -n "$WINDOW_NAME" \
@@ -699,15 +701,16 @@ copy_case() {
 # The engine is crates/zz-terminal, not this obligation's zones.
 VIEW_REASON='the pin moves the view by screen_size_y-2 (or /2) and keeps the cursor row; zz moves the cursor row and leaves the view'
 # SELECTION_REASON. The pin paints the selected cells with
-# copy-mode-selection-style, which defaults to #{E:mode-style}, and extends the
-# highlight one cell past the last glyph of every line but the last; the raw
-# TUI paints an OverlaySpan of kind Selection in reverse video and stops at the
-# last glyph. Measured on a two-line selection: the pin wrote
-# \e[38;2;16;16;16m\e[48;2;205;205;0mline-56 filler-56 \e[39m\e[49m and zz
-# wrote \e[7mline-56 filler-56. That is options.native-mode-styles, accepted.
-# The BUFFER channel asserts through the divergence: the bytes both engines
-# copy out of that selection are identical.
-SELECTION_REASON='the pin paints the selection with copy-mode-selection-style and one cell past each line; zz paints a reverse-video overlay to the last glyph'
+# copy-mode-selection-style, which defaults to #{E:mode-style}; the raw TUI
+# paints an OverlaySpan of kind Selection in reverse video and never reads the
+# option. Measured on a two-line selection with mode-style pinned to
+# bg=#cdcd00,fg=#101010: the pin opened the run with
+# \e[38;2;16;16;16m\e[48;2;205;205;0m and closed it with \e[39m\e[49m on the
+# last glyph of the last selected line, and zz opened \e[7m and closed \e[0m
+# one cell further along. That is options.native-mode-styles, accepted. The
+# BUFFER channel asserts straight through the divergence: the bytes the two
+# engines copy out of that selection are identical.
+SELECTION_REASON='the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further'
 # PROMPT_REASON. The same measurement tui-stock-keys.sh carries: the pin draws
 # command-prompt in message-style across the whole row and terminates it with
 # \e[39m\e[49m; zz paints the prompt from its own palette and stops at the
@@ -963,6 +966,27 @@ run_live_mode_keys() {
   copy_case 'live-mode-keys-vi-moves-on-j' none ''
   type_both q
   copy_case 'live-mode-keys-vi-cancel' format '#{pane_in_mode}=0'
+
+  # A BINDING changed while the client is attached, in the copy table the mode
+  # is about to use. Z is bound in neither stock table, so the key does nothing
+  # at all until the bind lands.
+  type_prefix_both '['
+  if ! await_observable zz format '#{pane_in_mode}=1' ||
+    ! await_observable tmux format '#{pane_in_mode}=1'; then
+    die 'live-binding could not enter copy mode'
+  fi
+  type_both '$'
+  copy_case 'live-binding-before-the-bind' none ''
+  type_both Z
+  copy_case 'live-binding-unbound-key-does-nothing' none ''
+  side_command zz bind-key -T copy-mode-vi Z send-keys -X start-of-line ||
+    die 'zz refused bind-key -T copy-mode-vi'
+  side_command tmux bind-key -T copy-mode-vi Z send-keys -X start-of-line ||
+    die 'tmux refused bind-key -T copy-mode-vi'
+  type_both Z
+  copy_case 'live-binding-runs-without-a-re-entry' format '#{copy_cursor_x}=0'
+  type_both q
+  copy_case 'live-binding-cancel' format '#{pane_in_mode}=0'
 }
 
 # The two surfaces the corpus pins away, measured at their defaults with the

@@ -4,7 +4,7 @@ title: "TUI parity campaign"
 description: "TUI parity obligations, their proof status, and progress against the fixed baseline."
 resource: compat/tui/campaign.json
 tags: [tmux, tui, compatibility, campaign]
-timestamp: 2026-09-09T00:00:00Z
+timestamp: 2026-09-10T00:00:00Z
 ---
 
 # TUI parity campaign
@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **4/12 verified**. Added scope: **0/1 verified**.
 
-Status counts: unmeasured: 6, different: 2, active: 0, review: 1, blocked: 0, verified: 4.
+Status counts: unmeasured: 6, different: 1, active: 0, review: 2, blocked: 0, verified: 4.
 
 Dependency-ready obligations, by priority: TUI-004, TUI-005, TUI-009, TUI-013.
 
@@ -37,7 +37,7 @@ Dependency-ready obligations, by priority: TUI-004, TUI-005, TUI-009, TUI-013.
 
 | Obligation | Status | Priority | Dependencies |
 | --- | --- | ---: | --- |
-| TUI-005: Pane copy mode and search | different | 5 | TUI-002, TUI-003 |
+| TUI-005: Pane copy mode and search | review | 5 | TUI-002, TUI-003 |
 | TUI-006: Chooser and command-output presentation | different | 6 | TUI-002, TUI-003, TUI-004 |
 | TUI-007: Prompts, menus, popups and pane labels | unmeasured | 7 | TUI-002, TUI-003, TUI-004 |
 | TUI-008: Mouse, paste, focus and key ownership | unmeasured | 8 | TUI-003, TUI-005, TUI-007 |
@@ -232,7 +232,7 @@ Review: `compat/tui/evidence/TUI-004/attempt-01/review.md`.
 
 ### TUI-005: Pane copy mode and search
 
-Status: different.
+Status: review.
 
 Acceptance:
 
@@ -249,9 +249,9 @@ Sources:
 
 Tmux gap references: `copy-mode.action-fidelity`, `copy-mode.command-fidelity`, `keys.copy-mode-native-numeric-prefix`, `options.native-mode-styles`.
 
-Command-output search editing works, but ordinary pane TerminalUiCommand search reports terminal search is unsupported here. Existing copy closures cover narrower contracts.
+Measured 2026-09-10 at 80x24 against pin d77c9dc6 with compat/tui-copy-mode.sh, which types the stock chords into both attached clients inside one outer pinned tmux and compares five channels: the decoded rows, the same rows without styles, the outer cursor tuple, the logical copy position, the viewport, and the paste buffer byte for byte. 73 cases, every asserted channel identical, 31 channels recorded with the measurement behind them; --self-check catches five one-sided sabotages in their own channels (an extra cursor-up in cursor/facts/view, a one-sided page-up in rows and text, a one-sided mode-style in rows ALONE with the glyphs still identical, and a paste-buffer byte difference) and passes two equivalences it must not report. FIXED HERE: the raw client painted the copy cursor as a reverse-video cell and hid the terminal cursor, where the pin leaves the pane's cursor on the copy cell and paints nothing; every copy-mode checkpoint differed twice (an extra \e[7m run and cursor_flag 0 at column 79). blit_row now skips the CopyCursor overlay and place_viewport_cursor puts the terminal cursor on it. That one change turned about forty red checkpoints green in rows and cursor at once. FOUR DIVERGENCES MEASURED AND LEFT, all outside this obligation's zones. (1) VIEW PLACEMENT: both engines put the same logical line under the cursor and leave the view somewhere else. window_copy_pageup1 moves the VIEW by n and keeps the cursor's screen row, with n = screen_size_y/2 for a half page and screen_size_y-2 for a whole one; zz keeps oy and moves the cursor row instead, and its whole page is screen_size_y. From cursor row 17, oy 0, on line-56: half-page-up left the pin at row 17 / scroll 12 / line-44 and zz at row 5 / scroll 0 / line-44; page-up left the pin at row 17 / scroll 22 / line-34 and zz at row 0 / scroll 7 / line-32. The same split follows a search: both find line-12 needle-12, the pin at row 12 / scroll 39, zz at row 0 / scroll 27. The engine is crates/zz-terminal. (2) PREFIX PRECEDENCE INSIDE A COPY TABLE: server-client.c:1417 says the prefix always takes precedence and forces a switch to the prefix table unless already there, so C-b inside a copy table arms the prefix on the pin even though copy-mode binds it to cursor-left and copy-mode-vi to page-up. Measured from cursor row 21 on line-60: the pin stayed put with the prefix armed, zz ran the copy binding (emacs column 9 -> 8; vi to line-39 at scroll 2). The key engine is crates/zz-protocol and crates/zz-client. (3) THREE COPY FORMATS ANSWER EMPTY ON ZZ: selection_active, rectangle_toggle and pane_search_string. The pin answered 1, 1 and needle where zz answered nothing at all; the fixture prints both sides' answers as an inventory line on every run. selection_present, copy_cursor_x, copy_cursor_y, copy_cursor_line, scroll_position, pane_mode and pane_in_mode all agree. (4) SELECTION AND MODE PRESENTATION: with mode-style pinned to bg=#cdcd00,fg=#101010 on both, the pin paints the selection with copy-mode-selection-style (default #{E:mode-style}) and zz paints a reverse-video Selection overlay and never reads the option; on a two-line selection the pin opened \e[38;2;16;16;16m\e[48;2;205;205;0m and closed \e[39m\e[49m on the last glyph of the last selected line, and zz opened \e[7m and closed \e[0m one cell further along. The BUFFER channel asserts straight through it: the bytes copied out of that selection are identical (line-60 filler-60\nSEEDEND on both). Same family, both measured with the status row on in the presentation group: the pin draws [0/40] into the pane's top row from copy-mode-position-format and zz paints a COPY badge on the status row instead. These are options.native-mode-styles and presentation.native-status, both accepted; nothing reopened. THE DEFECT THIS OBLIGATION OPENED ON: `terminal search is unsupported here` is NOT on the stock path. Both binaries bind the copy-table search keys to command-prompt -T search (key.rs bind_copy_mode_search_defaults on zz, key-bindings.c on the pin), and typing C-s / C-r / / / ? into an ORDINARY pane opens that prompt on both, edits the same (type, BSpace, Enter), finds the same lines and repeats the same way with n and N: every ordinary-pane search case asserts the logical position and the buffer. The message comes from zz's own `copy-mode-search-prompt` command, which has no pin counterpart: it emits MuxEffect::TerminalUi, reaches the client as EventPayload::TerminalUiCommand, and crates/zz-tui/src/app.rs answers every pane that is not the client's command-output overlay with that string. Measured in the native-search-command group: zz exits 0 and puts `terminal search is unsupported here` on its last row, the pin exits 1 with `unknown command: copy-mode-search-prompt`. A fix is client-contained but is a feature, not a repair: the TUI has no per-pane search overlay, so it needs model state beside command_output_search, an InputMessage::TerminalView { pane, action: TerminalViewAction::SearchBegin(query) } send (the daemon and crates/zz-terminal already accept it for an ordinary pane, which is the path crates/zz/src/terminal/view.rs takes), the editing keys in input.rs routed to it, and a prompt row in the shared render.rs. Left, because it proves no pinned behaviour: the pin has no such command and its own stock path already agrees. COVERED SUBSET, not complete table coverage. Typed in BOTH tables: entry (prefix [), cursor-up, cursor-down, start-of-line, end-of-line, halfpage-up, halfpage-down, page-up, page-down, the numeric prefix (M-5 in emacs, 5 in vi), begin-selection, rectangle-toggle on and off, copy-pipe-and-cancel, cancel, the forward and backward search prompts with editing (search-forward-incremental / search-backward-incremental in emacs, search-forward / search-backward in vi), search-again, search-reverse, the C-b prefix collision (cursor-left in emacs, page-up in vi), a live mode-keys change picked up by the next entry, a live bind-key -T copy-mode-vi picked up without a re-entry, and the return to terminal input after cancel. NOT typed here and still resting on copy-mode.action-fidelity's send-keys -X closure, which is the command path and never consults mode-keys or a copy table: the jump family (f F t T ; ,), word and space motions (w b e W B E), paragraphs, matching brackets, marks (X, M-x), history-top and history-bottom, top/middle/bottom line, the scroll family (C-y C-e J K C-Up C-Down z), other-end, select-line, select-word, append-selection-and-cancel, copy-pipe-end-of-line-and-cancel, back-to-indentation, goto-line, refresh-toggle, toggle-position, recentre-top-bottom, cursor-centre-horizontal, previous-prompt, next-prompt, and every mouse binding (keys.copy-mode-native-mouse, accepted). Flake seen once: compat/tui-stock-keys.sh reported 4 chooser cases red on cmd=bash against the pin's cmd=sh, the #{pane_current_command} settle the fixture's own COMMAND_SETTLE_REASON names. Proved not mine by stashing crates/zz-tui/src/render.rs, rebuilding and re-running (green), then restoring and re-running (green again).
 
-Next action: Reproduce stock forward/backward search in an ordinary pane, then identify existing proof for each pane-copy acceptance clause.
+Next action: Reviewer: the four recorded divergences each need an owner outside this obligation's zones - the view-placement rule in crates/zz-terminal, the prefix precedence in the key engine, the three empty copy formats, and the native mode presentation that is already accepted. Decide whether the view-placement rule becomes its own obligation before TUI-005 verifies.
 
 ### TUI-006: Chooser and command-output presentation
 

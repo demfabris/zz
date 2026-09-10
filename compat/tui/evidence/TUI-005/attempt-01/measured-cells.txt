@@ -1,0 +1,24 @@
+The measured cells behind the recorded divergences, taken from ZZ_COPY_CAPTURE_DIR on the
+run that produced them. cat -v rendering, one row per divergence.
+
+== selection, two lines selected, mode-style pinned bg=#cdcd00,fg=#101010 ==
+tmux: line-56 filler-56
+zz:   line-56 filler-56
+
+== the bytes that selection copies out, identical on both ==
+buffer zz:
+0000000   l   i   n   e   -   6   0       f   i   l   l   e   r   -   6
+0000020   0  \n   S   E   E   D   E   N   D
+0000031
+buffer tmux:
+0000000   l   i   n   e   -   6   0       f   i   l   l   e   r   -   6
+0000020   0  \n   S   E   E   D   E   N   D
+0000031
+
+== copy-mode-position-format at its default, status row on ==
+tmux: line-40 filler-40                                                         ^[[38;2;16;16;16m^[[48;2;205;205;0m[0/40]
+zz:   line-40 filler-40
+
+== the search prompt row ==
+tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) needlex^[[39m^[[49m
+zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down) needlex

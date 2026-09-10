@@ -73905,6 +73905,69 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[cfg(unix)]
     #[test]
+    fn pane_search_string_outlives_the_copy_session_and_seeds_the_next_entry() {
+        let (shared, client, mut context, pane, terminal, _mailbox) =
+            copy_mode_fixture("copy-pane-search", "printf 'needle\\r\\nfill\\r\\n'");
+        let target = pane.to_string();
+        let answer = |format: &str| {
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("display-message", ["-p", "-t", &target, format]),
+                )
+                .expect("display-message")
+                .output
+                .trim_end()
+                .to_owned()
+        };
+        let wait_for_answer = |format: &str, expected: &str| {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                let got = answer(format);
+                if got == expected {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "{format} stayed {got:?}, expected {expected:?}"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+        let copy_command = |context: &mut ExecutionContext, arguments: &[&str]| {
+            let mut full = vec!["-X", "-t", target.as_str()];
+            full.extend_from_slice(arguments);
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    &CommandInvocation::new("send-keys", full),
+                )
+                .expect("send-keys -X");
+        };
+        assert_eq!(answer("[#{pane_search_string}]"), "[]");
+
+        enter_observed_copy_mode(&shared, client, &mut context, pane, &terminal);
+        copy_command(&mut context, &["search-backward", "needle"]);
+        wait_for_answer("#{copy_cursor_line}", "needle");
+        assert_eq!(answer("[#{pane_search_string}]"), "[needle]");
+
+        copy_command(&mut context, &["cancel"]);
+        wait_for_answer("#{pane_in_mode}", "0");
+        assert_eq!(answer("[#{pane_search_string}]"), "[needle]");
+
+        enter_observed_copy_mode(&shared, client, &mut context, pane, &terminal);
+        assert_eq!(answer("[#{pane_search_string}]"), "[needle]");
+        assert_eq!(answer("#{copy_cursor_line}"), "");
+        copy_command(&mut context, &["search-again"]);
+        wait_for_answer("#{copy_cursor_line}", "needle");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn exiting_copy_session_stays_claimed_until_live_mode_is_published() {
         let (shared, client, _context, pane, _terminal, _mailbox) =
             copy_mode_fixture("copy-exit-order", ":");

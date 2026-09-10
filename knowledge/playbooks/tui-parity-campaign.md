@@ -38,8 +38,11 @@ dilute the number, the way `compat/progress.py` treats the tmux registry.
 Who writes what: a worker writes `status`, `evidence_note` and `next_action` of the obligations
 it owns and nothing else. The gate writes the `proof` block and sets `verified`, because
 `proof.revision` must name the candidate commit the gate re-ran the proof on. A worker never sets
-`verified`. Existing tmux gaps are not closed, relocated or reopened by this campaign; a
-contradicting measurement is appended to the gap's reason, dated.
+`verified`. Existing tmux gaps are not reopened by this campaign. A landing that makes the raw TUI
+honour an item of a gap closes that item with a dated measurement (cycle 4 closed
+`options.theme-palette` this way; an accepted native-presentation gap keeps its decision for the
+GUI, per the contract's 2026-09-10 triage). Any other contradicting measurement is appended to the
+gap's reason, dated.
 
 Evidence lives at `compat/tui/evidence/<ID>/<attempt>/`: `environment.txt` (both binary hashes,
 zz revision and dirty state, the pin, OS, TERM, shell, outer terminal size), fixture output and
@@ -62,6 +65,10 @@ outer pane. Whether cursor shape can be read that way is measured, not assumed.
 - `compat/tui-screen-diff.sh`: the whole-screen comparison at named checkpoints, with a
   `--self-check` that proves it fails on a one-sided glyph, colour, cursor or geometry change and
   passes on an equivalent spelling. TUI-002 builds it; later obligations extend its cases.
+- `compat/tui-stock-keys.sh` (TUI-003): stock bindings typed through real stdin.
+- `compat/tui-indicators.sh` (TUI-004), `compat/tui-copy-mode.sh` (TUI-005) and
+  `compat/tui-caps.sh` (TUI-009): one fixture per obligation since cycle 4, so parallel lanes do
+  not rebase over one file.
 
 The corpus runner and the [harness playbook](/playbooks/compat-harness.md) still apply for anything
 a detached differential can observe. A detached query never proves what an attached client draws.
@@ -90,6 +97,13 @@ the recorded revision, the fixture that proves it demonstrably fails when it sho
 independent review approved it. A timeout, a missing capability, a waived comparison or a skipped
 case is recorded, never counted. Split a large obligation into child ids when measurement warrants
 it; the parent stays and depends on the children.
+
+Since cycle 3 a cycle runs several lanes in parallel under one consolidated lock front (the board
+refuses sibling fronts whose zones overlap). When one lane's fixture case can only pass after a
+sibling lane's landing, the lane records it with a reason starting `SIBLING:<lane>`; the gate,
+merging in a declared order, flips each such case to asserted after that sibling merges and keeps
+the flip only if the fixture and its `--self-check` stay green. This lets a dependent obligation
+start in the same cycle as its dependency and verify in the same records commit.
 
 # Machine notes
 

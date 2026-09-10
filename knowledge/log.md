@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-09-10
+* **Update**: Integrated TUI parity cycle 4 (`62a3b957`, three lanes, one review reject fixed in its fix pass). The theme landed whole: protocol 100, `StatusLine` carries ten per-client theme colours, `options.theme-palette` and `tui.status-row` closed, and `status-row.sh` asserts 14/14. Three new attached fixtures landed: `tui-indicators.sh`, `tui-copy-mode.sh` (83 typed copy-table cases) and `tui-caps.sh`. Nothing verified: TUI-004, TUI-005 and TUI-009 stay at review on named recorded cases. The close-out decided that the raw TUI renders the pin's cells even where an accepted gap keeps a native GUI surface. Cycle 5 (`compat/tui/run-5.js`) runs five lanes: modes, copy, caps, overlays and choosers.
 * **Update**: Integrated TUI parity cycle 3 on the alienware box (`ce74bab7`, three parallel lanes, no rejects): stock bindings now produce the pinned result through real stdin (TUI-003 verified), the terminal client drops and redraws past its writer budget instead of parking (TUI-010 verified, `tui.client-output-queue-budget` closed), the sidebar no longer appears by terminal width (fabrico's contract; the 109/120-column fixture cases assert), and the raw TUI stops writing DECSCUSR/OSC 12 cursor attributes. The close-out reopened TUI-004 to review — the gate had promoted it with clause 3 open in its own evidence note — leaving 4/12 verified; cycle 4 (`compat/tui/run-4.js`) runs canvas-close (TUI-004 clause 3 plus the whole theme landing), copy (TUI-005) and caps (TUI-009).
 
 ## 2026-09-09

@@ -2,7 +2,7 @@
 type: Design Plan
 title: TUI parity campaign
 description: "The terminal-client parity contract: tmux observable behavior by default, zz additions through superset commands, and proof tied to the tested revision."
-status: Contract agreed 2026-09-09; cycles 1 and 3 integrated (4/12 verified: TUI-001/002/003/010 at ce74bab7); the sidebar width threshold is gone per the contract; TUI-004 at review pending clause 3 and the theme landing; TUI-013 (the macOS timeout) deferred as added scope
+status: Contract agreed 2026-09-09; cycles 1, 3 and 4 integrated (4/12 verified: TUI-001/002/003/010; main at 62a3b957); the sidebar width threshold is gone and the theme landed (protocol 100); TUI-004, TUI-005 and TUI-009 at review; the TUI portion of accepted native-presentation gaps follows this contract (triage 2026-09-10); TUI-013 (the macOS timeout) deferred as added scope
 resource: compat/tui/campaign.json
 tags:
 - tui
@@ -121,6 +121,14 @@ Amendment 2026-09-09 (fabrico): the macOS reproduction half of TUI-001's second 
 the added-scope obligation TUI-013 so the campaign continues on Linux while the macbook is out of
 reach; TUI-001 verified under the amended clause (diagnostics retention proven by a driven
 failure), the deferral dated in both ledger records and reversible by folding TUI-013 back.
+
+Triage 2026-09-10 (orchestrator, at the cycle-4 close-out): an accepted gap that keeps a native
+presentation (`options.native-mode-styles`, `options.native-overlay-styles`,
+`choosers.native-presentation`, `presentation.native-status`) does not waive the raw TUI's cells.
+Under the commands-and-presentation rule above, the raw TUI renders the pin's surface and the GUI
+keeps its native one. A landing that makes the raw TUI honour an item closes that item with a dated
+measurement, as cycle 4 closed `options.theme-palette`; the gap's decision stands for the GUI and for
+every item still open. Cycle 4's gate held TUI-004 over exactly this question.
 
 # Scope boundary
 

@@ -50,10 +50,11 @@ RGB) stays part of the cell, as `tui.status-row` in `compat/tmux-gaps.json` esta
 
 ## State
 
-Cycle 3 integrated at `ce74bab7` (2026-09-10, alienware, workflow `wf_a9b2e831-bc8`: three Opus
-lanes in parallel, no rejects, one serialized gate, 11.1 hours). The orchestrator's close-out
-reopened one over-promotion, so the honest count is **4/12 baseline verified** (TUI-001, TUI-002,
-TUI-003, TUI-010), added scope 0/1.
+Cycle 4 integrated at `62a3b957` (2026-09-10, alienware, workflow `wf_a1e4b9b9-8f3`: three Opus
+lanes, one review reject fixed in its fix pass, one serialized gate, 6.5 hours). That cycle verified
+nothing, so the count is still **4/12 baseline verified** (TUI-001, TUI-002, TUI-003, TUI-010),
+added scope 0/1. The close-out rebuilt `62a3b957` and re-ran every TUI fixture there: all exit 0
+(`status-row.sh` under `LC_ALL=C LC_TIME=C`).
 
 - Cycle 1 (`38c22b9e`, plus the same-day deferral records `ccab35ce`): the fixture baseline.
   TUI-001 and TUI-002 verified on banked, thrice-reproduced proof; the macOS half of TUI-001's
@@ -68,7 +69,7 @@ TUI-003, TUI-010), added scope 0/1.
   The sidebar decision landed: width never invokes the sidebar, and the 109/120-column cases of
   `tui-screen-diff.sh` and `tui-pane-geometry.sh` now assert instead of record. Cursor
   attributes match the pin (no DECSCUSR or OSC 12 by default) and that channel asserts too.
-- `TUI-004` is `review`, REOPENED at this close-out: the cycle-3 gate promoted it to verified
+- `TUI-004` is `review`, REOPENED at the cycle-3 close-out: the cycle-3 gate promoted it to verified
   while its own evidence note says clause 3 is open (copy/view/prefix indicators and
   message/prompt restoration undriven; the three theme status rows still recorded). Clauses 1
   and 2 keep their whole-screen evidence at `4cd23eb3`. Cycle 4's canvas-close lane finishes
@@ -94,9 +95,28 @@ TUI-003, TUI-010), added scope 0/1.
   `compat/tui-stock-keys.sh` root-binding-detaches can flake on a wall-clock second boundary
   because it compares a row carrying a timestamp -- worth pinning.
 
-Cycle 4 (`compat/tui/run-4.js`, launched from the alienware session): canvas-close (TUI-004
-clause 3 plus the theme landing), copy (TUI-005), caps (TUI-009). TUI-006 and TUI-007 return to
-ready when TUI-004 verifies; TUI-008, TUI-011 and TUI-012 follow their dependencies.
+Triage at the cycle-4 close-out (orchestrator, 2026-09-10): when an accepted gap keeps a native
+presentation (`options.native-mode-styles`, `options.native-overlay-styles`,
+`choosers.native-presentation`, `presentation.native-status`), the contract still decides the TUI
+portion. The raw TUI renders the pin's cells, the GUI keeps its native surface, and a landing
+closes exactly the items the raw TUI starts honouring (the `options.theme-palette` precedent).
+Cycle 4's gate held TUI-004 over this question, so this decision is what unblocks it
+(`knowledge/designs/tui-parity.md`, Proof and ownership).
+
+Cycle 5 (`compat/tui/run-5.js`, alienware) runs five lanes under one lock front,
+`F-TUI-CYCLE-5-LANES`:
+- modes (TUI-004): the copy-mode position indicator and selection style inside the pane, the
+  view-mode surface for command output, and message and prompt styles on `StatusLine`.
+- copy (TUI-005): half-page and page placement, the vi rectangle newline, prefix precedence over
+  copy tables, and three copy formats.
+- caps (TUI-009): colour class through the frame and wire, the default foreground, `-2`/`-u`/`-T`,
+  and extended keys.
+- overlays (TUI-007) and choosers (TUI-006): started in the same cycle because TUI-004 verifies in
+  the same gate.
+
+A case that a sibling lane's landing fixes is recorded as `SIBLING:<lane>`, and the gate flips it
+after that lane merges. Every wire append folds into one PROTOCOL_VERSION 101. After cycle 5,
+TUI-008 and TUI-011 unlock, then TUI-012.
 
 ## Launching the deferred macOS run (macbook)
 

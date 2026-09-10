@@ -1,0 +1,2 @@
+error connecting to /tmp/zzsd-5TW6IV.sock (No such file or directory)
+error: zz refused status-right

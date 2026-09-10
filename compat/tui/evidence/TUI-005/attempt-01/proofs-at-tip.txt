@@ -1,0 +1,40 @@
+TUI-005 attempt-01, proofs
+
+Every command below ran at c8e8c0ab47c35237d916019755d0e42a33a4ca59, which is this branch with all of its code, its
+fixture in place. The commit that follows adds the text files these commands
+wrote and one correction to the record's evidence_note so its numbers quote this
+run; no code and no fixture changed after them, and tracker.py check was re-run
+at the final tip.
+
+PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/tui-copy-mode.sh
+  run 1 exit 0  -> copy-mode-tip-1.txt   all 73 cases agree on every channel they assert, 31 recorded a difference elsewhere
+  run 2 exit 0  -> copy-mode-tip-2.txt   all 73 cases agree on every channel they assert, 31 recorded a difference elsewhere
+  run 3 exit 0  -> copy-mode-tip-3.txt   all 73 cases agree on every channel they assert, 31 recorded a difference elsewhere
+
+compat/tui-copy-mode.sh --self-check
+  exit 0  -> copy-mode-self-check-tip.txt   self-check complete: every sabotage was caught in its own channel and every equivalence passed
+
+compat/tui-screen-diff.sh
+  exit 0  -> screen-diff-tip.txt   all 111 asserted checkpoints identical, 42 recorded not asserted
+
+compat/tui-stock-keys.sh
+  exit 0  -> stock-keys-tip.txt   all 50 cases agree on every channel they assert, 22 recorded a difference elsewhere
+
+cargo test -p zz-tui --jobs 5 -- --test-threads=2
+  exit 0  -> unit-tests-tip.txt   test result: ok. 172 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+
+cargo clippy -p zz-tui --all-targets --all-features --jobs 5 -- -D warnings
+  exit 0  -> clippy-tip.txt
+
+cargo test -p zz --jobs 5 -- --test-threads=2   (the integration-test rule)
+  exit 0  -> zz-integration-tests-tip.txt   cli_binary: 125 passed; 0 failed, plus 634 unit tests and the smaller suites, all ok
+  one earlier attempt of this command failed once under three-lane load on
+  cli_binary daemon_autostart::control_mode::refresh_client_c_sizes_a_control_target_for_menu_gating
+  with left Some(1) right Some(0); the exact-solo re-run passed
+  (zz-integration-solo-rerun.txt) and the next full run passed.
+
+python3 compat/tui/tracker.py check
+  exit 0  -> tracker-check-tip.txt   compat/tui/campaign.json is valid and knowledge/tmux/tui-parity.md is current
+
+compat/tmux-gaps.json was not touched by this attempt, so compat/tmux-tracker.py
+was not run: nothing in the registry belongs to this lane this cycle.

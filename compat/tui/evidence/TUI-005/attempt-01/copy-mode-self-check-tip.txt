@@ -1,0 +1,38 @@
+self-check: one deliberate one-sided difference per asserted channel, plus two the fixture must not report
+      case one-sided-movement
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   6,22 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=2 selection=0 line=[$]
+      facts zz:   mode=copy-mode in=1 column=6 selection=0 line=[SEEDEND]
+      view tmux:  row=23 scroll=0
+      view zz:    row=22 scroll=0
+ok    self-check cursor: one extra cursor-up on the zz side
+ok    self-check facts: one extra cursor-up on the zz side
+ok    self-check view: one extra cursor-up on the zz side
+      case one-sided-page-up
+      first differing row 0 of 24
+        tmux: line-17 filler-17
+        zz:   line-39 filler-39
+      first differing glyph row 0 of 24
+        tmux text: line-17 filler-17
+        zz text:   line-39 filler-39
+      cursor tmux: 16,23 flag=1 pane=80x24
+      cursor zz:   2,23 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=16 selection=0 line=[line-40 filler-40]
+      facts zz:   mode=copy-mode in=1 column=2 selection=0 line=[$]
+      view tmux:  row=23 scroll=22
+      view zz:    row=23 scroll=0
+ok    self-check rows: a page-up typed on the pin side only
+ok    self-check text: a page-up typed on the pin side only
+      case one-sided-mode-style
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m$  ^[[39m^[[49m
+        zz:   ^[[7m$  ^[[0m
+ok    self-check rows alone: mode-style changed on the pin side only
+      case one-sided-buffer
+      buffer tmux: 0000000   t   m   u   x   -   c   o   p   i   e   d   -   b   y   t   e|0000020   s|0000021|
+      buffer zz:   0000000   z   z   -   c   o   p   i   e   d   -   b   y   t   e   s|0000017|
+ok    self-check buffer: a different byte string in the paste buffer
+ok    self-check equivalence: 5k and five k land on the same cell
+ok    self-check equivalence: prefix [ and the copy-mode command open the same mode
+self-check complete: every sabotage was caught in its own channel and every equivalence passed

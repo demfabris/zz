@@ -1,0 +1,13 @@
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-copy/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.49s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-f1b509bdb43a8219)
+
+running 1 test
+test daemon_autostart::control_mode::refresh_client_c_sizes_a_control_target_for_menu_gating ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out; finished in 1.45s
+

@@ -1,11 +1,11 @@
-The measured cells behind the recorded divergences, taken from ZZ_COPY_CAPTURE_DIR on the
-run that produced them. cat -v rendering, one row per divergence.
+The decoded cells behind each recorded divergence, taken from ZZ_COPY_CAPTURE_DIR on the
+first tip run (copy-mode-tip-1.txt). cat -v rendering.
 
-== selection, two lines selected, mode-style pinned bg=#cdcd00,fg=#101010 ==
-tmux: line-56 filler-56
-zz:   line-56 filler-56
+== selection, two lines, mode-style pinned bg=#cdcd00,fg=#101010 on both ==
+tmux rows 22-23: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-60 filler-60 | SEEDEND^[[39m^[[49m
+zz   rows 22-23: ^[[7mline-60 filler-60 | SEEDEND ^[[0m
 
-== the bytes that selection copies out, identical on both ==
+== the bytes that selection copies out, compared by cmp(1) and identical ==
 buffer zz:
 0000000   l   i   n   e   -   6   0       f   i   l   l   e   r   -   6
 0000020   0  \n   S   E   E   D   E   N   D
@@ -16,9 +16,19 @@ buffer tmux:
 0000031
 
 == copy-mode-position-format at its default, status row on ==
-tmux: line-40 filler-40                                                         ^[[38;2;16;16;16m^[[48;2;205;205;0m[0/40]
-zz:   line-40 filler-40
+tmux row 1: line-40 filler-40                                                         ^[[38;2;16;16;16m^[[48;2;205;205;0m[0/40]
+zz   row 1: line-40 filler-40
 
-== the search prompt row ==
-tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) needlex^[[39m^[[49m
-zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down) needlex
+== the search prompt row, glyphs identical and palette recorded ==
+tmux row 24: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) needlex^[[39m^[[49m
+zz   row 24: ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down) needlex
+
+== the view after a whole page up, from cursor row 21 on line-60 ==
+cursor zz:   17,0 flag=1 pane=80x24
+cursor tmux: 17,21 flag=1 pane=80x24
+view zz:    row=0 scroll=3
+view tmux:  row=21 scroll=22
+
+== the copy cursor is the terminal cursor: entry checkpoint ==
+cursor zz:   2,23 flag=1 pane=80x24
+cursor tmux: 2,23 flag=1 pane=80x24

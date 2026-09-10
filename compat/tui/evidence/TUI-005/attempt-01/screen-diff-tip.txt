@@ -395,7 +395,7 @@ ok    120x24-sidebar sidebar-before
         tmux: $ printf 'MARK-%s\n' sidebar-before
         zz:   ^[[38;2;16;19;24m^[[48;2;77;163;235mzz at alienware             ^[[38;2;216;222;233m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$ printf 'MARK-%s\n' sidebar-before
       cursor tmux: 2,2 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   119,23 flag=0 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   119,22 flag=0 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
 ok    120x24-sidebar sidebar-shown differs from the pin, which is what a drawn sidebar means
 ok    120x24-sidebar sidebar-withdrawn
 all 111 asserted checkpoints identical, 42 recorded not asserted

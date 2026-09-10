@@ -1,37 +1,58 @@
 TUI-005 attempt-01, proofs
 
-Every command below ran at c8e8c0ab47c35237d916019755d0e42a33a4ca59, which is this branch with all of its code, its
-fixture in place. The commit that follows adds the text files these commands
-wrote and one correction to the record's evidence_note so its numbers quote this
-run; no code and no fixture changed after them, and tracker.py check was re-run
-at the final tip.
+REVIEW PASS. The first review of this branch rejected on one blocker: the
+fixture typed the rectangle toggle on and straight back OFF before it copied,
+so the paste-buffer channel never looked at a rectangle, and a rectangle copy
+whose right edge runs past the end of the last selected line does NOT agree.
+Commit 1a42acb8 copies two rectangles per table with the rectangle still on,
+records the vi divergence with its bytes, splits whole-page movement out of the
+view-placement claim, and adds a sixth self-check sabotage that drives a real
+rectangle copy one-sided.
 
-PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/tui-copy-mode.sh
-  run 1 exit 0  -> copy-mode-tip-1.txt   all 73 cases agree on every channel they assert, 31 recorded a difference elsewhere
-  run 2 exit 0  -> copy-mode-tip-2.txt   all 73 cases agree on every channel they assert, 31 recorded a difference elsewhere
-  run 3 exit 0  -> copy-mode-tip-3.txt   all 73 cases agree on every channel they assert, 31 recorded a difference elsewhere
+Every command below ran at 1a42acb8c15aac80c5860217e73bb243e0a1aa85, which is
+this branch with all of its code, its fixture and its ledger record in place.
+The commit that follows adds only the text files these commands wrote; no code,
+no fixture and no record changed after them. The corpus runs, --self-check and
+tracker.py check were then re-run at the final tip and are reported with their
+exit codes in the lane's report.
+
+ZZ_BIN=<this worktree>/target/debug/zz ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/tui-copy-mode.sh
+  run 1 exit 0  -> copy-mode-tip-1.txt   all 83 cases agree on every channel they assert, 36 recorded a difference elsewhere
+  run 2 exit 0  -> copy-mode-tip-2.txt   all 83 cases agree on every channel they assert, 36 recorded a difference elsewhere
+  run 3 exit 0  -> copy-mode-tip-3.txt   all 83 cases agree on every channel they assert, 36 recorded a difference elsewhere
+  each run also prints: 79 of those cases assert at least one channel; 4 assert
+  none and are recorded in full (whole-page movement in both tables)
 
 compat/tui-copy-mode.sh --self-check
   exit 0  -> copy-mode-self-check-tip.txt   self-check complete: every sabotage was caught in its own channel and every equivalence passed
+  six sabotages now: cursor/facts/view, rows and text, rows alone, a paste-buffer
+  byte string, and one extra cursor-down inside a real rectangle copy
+
+the same one-sided cursor-down driven against the CORPUS case instead of the
+self-check, on a throwaway copy of the fixture
+  exit 1  -> rectangle-sabotage.txt   1 of 26 cases differ in a channel they assert (emacs-rectangle-past-end-of-line-copy, buffer)
 
 compat/tui-screen-diff.sh
   exit 0  -> screen-diff-tip.txt   all 111 asserted checkpoints identical, 42 recorded not asserted
 
 compat/tui-stock-keys.sh
-  exit 0  -> stock-keys-tip.txt   all 50 cases agree on every channel they assert, 22 recorded a difference elsewhere
+  exit 0  -> stock-keys-tip.txt   all 50 cases agree on every channel they assert, 23 recorded a difference elsewhere
+  (23 against the 22 this attempt first recorded: the #{pane_current_command}
+  settle that fixture's own COMMAND_SETTLE_REASON names, every asserted channel
+  still green; the review pass saw 23 as well)
 
 cargo test -p zz-tui --jobs 5 -- --test-threads=2
-  exit 0  -> unit-tests-tip.txt   test result: ok. 172 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+  exit 0  -> unit-tests-tip.txt   test result: ok. 172 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 cargo clippy -p zz-tui --all-targets --all-features --jobs 5 -- -D warnings
   exit 0  -> clippy-tip.txt
 
 cargo test -p zz --jobs 5 -- --test-threads=2   (the integration-test rule)
   exit 0  -> zz-integration-tests-tip.txt   cli_binary: 125 passed; 0 failed, plus 634 unit tests and the smaller suites, all ok
-  one earlier attempt of this command failed once under three-lane load on
+  no flake this pass. The first attempt saw one loaded failure on
   cli_binary daemon_autostart::control_mode::refresh_client_c_sizes_a_control_target_for_menu_gating
-  with left Some(1) right Some(0); the exact-solo re-run passed
-  (zz-integration-solo-rerun.txt) and the next full run passed.
+  with left Some(1) right Some(0); its exact-solo re-run passed
+  (zz-integration-solo-rerun.txt) and every full run since has passed.
 
 python3 compat/tui/tracker.py check
   exit 0  -> tracker-check-tip.txt   compat/tui/campaign.json is valid and knowledge/tmux/tui-parity.md is current

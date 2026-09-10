@@ -1,0 +1,52 @@
+TUI-005 attempt-01, the rectangle-copy sabotage
+
+THE QUESTION the review asked: the corpus now copies a rectangle, but can that
+case FAIL? This run answers it against the corpus case itself, not against the
+shipped --self-check (which carries its own rectangle sabotage).
+
+THE MODIFICATION, on a throwaway copy of the fixture in a scratch directory,
+never on the committed one:
+  - the corpus was trimmed to `run_movement emacs` alone
+  - one line was inserted between the rectangle case and its copy:
+        record_native_formats "$table-rectangle-past-end-of-line"
+      + type_side zz "$KEY_DOWN"
+        type_both "$KEY_COPY"
+    so the zz side copies THREE lines out of the rectangle and the pin two.
+
+THE RESULT: exit 1, one DIFF, in the buffer channel, with both byte strings.
+The pin also shows the emacs half of the trailing-newline rule here: its
+rectangle stops at 43 bytes with no terminator, which is why the emacs
+past-the-end case ASSERTS the buffer channel and only the vi one records it.
+
+A FIRST SABOTAGE THAT DID NOT REPORT, and why that is correct: one extra
+cursor-right (not cursor-down) on the zz side changed nothing, because the
+rectangle already reaches past the end of both lines and both engines trim
+the trailing blanks. The keys under test have to move a copied GLYPH for the
+buffer channel to see them; one more empty column is not one.
+
+--- the run ---
+
+--- the run ---
+
+ok    emacs-rectangle-inside-line-copy
+      case emacs-rectangle-past-end-of-line
+      first differing row 19 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-58 filler-58    ^[[39m^[[49m
+        zz:   ^[[7mline-58 filler-58    ^[[0m
+note  emacs-rectangle-past-end-of-line asserted text,cursor,facts,view,buffer, the rest recorded: the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+note  emacs-rectangle-past-end-of-line zz formats: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+note  emacs-rectangle-past-end-of-line tmux formats: selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+      case emacs-rectangle-past-end-of-line-copy
+      buffer tmux: 0000000   l   i   n   e   -   5   8       f   i   l   l   e   r   -   5|0000020   8  \n   l   i   n   e   -   5   9       f   i   l   l   e   r|0000040   -   5   9|0000043|
+      buffer zz:   0000000   l   i   n   e   -   5   8       f   i   l   l   e   r   -   5|0000020   8  \n   l   i   n   e   -   5   9       f   i   l   l   e   r|0000040   -   5   9  \n   l   i   n   e   -   6   0       f   i   l   l|0000060   e   r   -   6   0|
+DIFF  emacs-rectangle-past-end-of-line-copy
+ok    emacs-reenter
+ok    emacs-cancel
+ok    emacs-terminal-input-returns
+      case emacs-prefix-takes-precedence
+      cursor tmux: 9,22 flag=1 pane=80x24
+      cursor zz:   8,22 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=9 selection=0 line=[BACKALIVE]
+      facts zz:   mode=copy-mode in=1 column=8 selection=0 line=[BACKALIVE]
+note  emacs-prefix-takes-precedence asserted buffer, the rest recorded: the pin gives the prefix precedence over a copy-table binding of the same key; zz runs the copy binding
+1 of 26 cases differ in a channel they assert, 10 recorded elsewhere

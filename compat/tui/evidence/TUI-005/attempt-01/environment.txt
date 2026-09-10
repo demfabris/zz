@@ -1,0 +1,19 @@
+TUI-005 attempt-01 environment
+recorded: 2026-09-10T10:21:15-03:00
+box: alienware
+os: NAME="CachyOS Linux" PRETTY_NAME="CachyOS" 
+kernel: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+shell: GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+TERM: xterm-ghostty
+locale LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8 LC_ALL=unset
+outer size under test: 80x24 (the fixture sets it; the recording terminal is not the outer terminal)
+worktree: /home/demfabris/dev/zz-tui-copy
+branch: campaign/tui-copy-mode
+base: 46c606d9011f8dcec0a41e8336c1da74426922eb, which was origin/main when this attempt started
+origin/main moved to 8e2433d014ab1ab1848611f7765a317abbd22c0b (release: zz 0.7.0) mid-attempt; the base is an ancestor of it, so the branch still merges forward
+zz binary: /home/demfabris/dev/zz-tui-copy/target/debug/zz
+zz sha256: d0d54797aeb57c936d9606762b083d982dd4a3a14660f73426404ba994992f7d
+pin binary: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+pin revision: d77c9dc6aa021e4bc61f0da128c591af695e6466
+a debug build of zz is not bit-reproducible on this box: the sha256 identifies this artifact, the revision below attests it

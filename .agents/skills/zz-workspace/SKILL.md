@@ -43,7 +43,8 @@ zz list-panes -F '#{pane_id} #{pane_kind} #{agent_state} #{@agent_state}'
 ### `zz agent-send [-t %N] [--submit | --wait [--timeout SECS] [--on-block wait|fail]] [--context PATH[:START[-END]]] [TEXT]`
 
 Draft into another Agent pane's composer for its user to review. An omitted or
-non-agent target routes to that window's most recently focused Agent pane.
+non-agent target routes to that window's most recently focused Agent pane,
+except for Claude Code terminal peers described below.
 Read stdin when TEXT is omitted: `git diff | zz agent-send`.
 `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
 
@@ -53,6 +54,11 @@ stderr). Failure, cancellation, hand-back, or timeout exits non-zero. The timeou
 defaults to 600 seconds; `0` waits forever. A timeout leaves the turn running.
 `--on-block wait` waits for permission; `fail` prints the pending permission JSON
 and exits 3 while the turn continues.
+
+A terminal pane running Claude Code with cross-session messaging is a valid
+target. Plain sends and `--submit` deliver through Claude Code's inbox between
+its tool calls, attributed to your pane, or start a turn when it is idle.
+`--wait` is not supported for these targets.
 
 ### `zz show-agent-permission [-t %N]`
 
@@ -172,6 +178,12 @@ on the control connection and read `%subscription-changed`:
 ```text
 refresh-client -B 'agent:%5:#{agent_state}'
 ```
+
+### Peers
+
+Agent panes register as Claude Code peers under their `@name` user option
+(default `zz-%N`). `ListAgents` in any Claude Code session lists them, and
+`SendMessage` queues a prompt into the pane while its adapter runs.
 
 ## Foreign agents in terminal panes
 

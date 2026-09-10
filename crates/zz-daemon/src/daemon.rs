@@ -1318,6 +1318,10 @@ impl Daemon {
         T::Listener: Send + 'static,
     {
         let (mut socket_guard, identity_guard) = socket_guards;
+        #[cfg(all(feature = "agent", unix))]
+        if let Err(error) = crate::agent::claude_peers::sweep_stale_records() {
+            log::warn!(target: "zz::agent", "could not sweep Claude peers: {error}");
+        }
         let color_scheme = daemon_color_scheme();
         let load = AppearanceLoad::defaults_for(color_scheme);
         log_appearance_load("startup", &load);
@@ -2984,6 +2988,10 @@ struct Shared {
     agent_effects: Mutex<()>,
     #[cfg(feature = "agent")]
     agent_stopped: AtomicBool,
+    #[cfg(all(feature = "agent", unix))]
+    agent_peers: Mutex<BTreeMap<PaneId, crate::agent::claude_peers::PeerInbox>>,
+    #[cfg(all(feature = "agent", unix))]
+    agent_peer_owner: Mutex<Weak<Self>>,
     kitty_image_frames: Mutex<BTreeMap<KittyImageKey, Arc<[Vec<u8>]>>>,
     pasted_images: Mutex<BTreeMap<PaneId, PanePastedImages>>,
     status: Mutex<StatusRenderer>,
@@ -4059,6 +4067,10 @@ impl Shared {
             agent_effects: Mutex::new(()),
             #[cfg(feature = "agent")]
             agent_stopped: AtomicBool::new(false),
+            #[cfg(all(feature = "agent", unix))]
+            agent_peers: Mutex::new(BTreeMap::new()),
+            #[cfg(all(feature = "agent", unix))]
+            agent_peer_owner: Mutex::new(Weak::new()),
             kitty_image_frames: Mutex::new(BTreeMap::new()),
             pasted_images: Mutex::new(BTreeMap::new()),
             status: Mutex::new(StatusRenderer::default()),
@@ -12541,6 +12553,62 @@ impl Shared {
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_agent_send_args(args)?;
         let payload = parsed.payload()?;
+        #[cfg(all(feature = "agent", unix))]
+        {
+            use crate::agent::claude_peers;
+
+            let target = {
+                let inner = self.inner.lock();
+                let pane = inner.engine.resolve_pane(
+                    parsed.target.as_deref(),
+                    context.window,
+                    context.pane,
+                )?;
+                matches!(
+                    inner.engine.state.pane(pane).map(|pane| &pane.kind),
+                    Some(PaneKind::Terminal)
+                )
+                .then_some(pane)
+            };
+            if let Some(pane) = target {
+                let records = claude_peers::read_records().unwrap_or_else(|error| {
+                    log::warn!(target: "zz::agent", "could not read Claude peers: {error}");
+                    Vec::new()
+                });
+                if let Some(record) = claude_peers::record_for_pane(&records, &pane.to_string()) {
+                    if parsed.wait {
+                        return Err(ServerError::InvalidCommand(
+                            "agent-send --wait is not supported for Claude Code terminal peers"
+                                .to_owned(),
+                        )
+                        .into());
+                    }
+                    let (name, socket) = {
+                        let peers = self.agent_peers.lock();
+                        match context.pane.and_then(|pane| peers.get(&pane)) {
+                            Some(peer) => {
+                                (peer.name().to_owned(), Some(peer.socket_path().to_owned()))
+                            }
+                            None => (
+                                context
+                                    .pane
+                                    .map_or_else(|| "zz".to_owned(), |pane| format!("zz {pane}")),
+                                None,
+                            ),
+                        }
+                    };
+                    claude_peers::post_message(record, &payload, &name, socket.as_deref())?;
+                    return Ok(Execution {
+                        output: if parsed.submit && kind != ClientKind::Interactive {
+                            pane.to_string().into()
+                        } else {
+                            RawText::default()
+                        },
+                        effects: Vec::new(),
+                    });
+                }
+            }
+        }
         let pane = self.resolve_agent_pane(context, parsed.target.as_deref())?;
         if parsed.wait {
             if !matches!(kind, ClientKind::Command | ClientKind::Control) {
@@ -25137,6 +25205,10 @@ impl Shared {
         if let Some(runtime) = slot.as_ref() {
             return Some(Arc::clone(runtime));
         }
+        #[cfg(unix)]
+        {
+            *self.agent_peer_owner.lock() = Arc::downgrade(self);
+        }
         let publisher: Arc<dyn AgentPublisher> = Arc::<Self>::clone(self);
         let runtime = Arc::new(AgentRuntime::new(&publisher, config, journal));
         runtime.prewarm();
@@ -25204,6 +25276,8 @@ impl Shared {
             return;
         };
         runtime.reconfigure(self.agent_spawn_config());
+        #[cfg(unix)]
+        self.agent_peers.lock().remove(&pane);
         if !runtime.restart(pane, spec) {
             log::warn!(target: "zz::agent", "could not restart the agent runtime for {pane}");
         }
@@ -25237,6 +25311,85 @@ impl Shared {
         })
     }
 
+    #[cfg(unix)]
+    fn update_agent_peer(&self, pane: PaneId, phase: &zz_protocol::AgentConnectionPhase) {
+        use crate::agent::claude_peers::{PeerInbox, PeerMetadata, peer_name};
+        use zz_protocol::AgentConnectionPhase;
+
+        let mut peers = self.agent_peers.lock();
+        if self.agent_stopped.load(Ordering::Acquire) {
+            return;
+        }
+        if matches!(phase, AgentConnectionPhase::Starting) {
+            peers.remove(&pane);
+            return;
+        }
+        let busy = matches!(
+            phase,
+            AgentConnectionPhase::Running | AgentConnectionPhase::AwaitingPermission
+        );
+        let registered = peers.contains_key(&pane);
+        if !registered && !matches!(phase, AgentConnectionPhase::Ready) {
+            return;
+        }
+        let metadata = {
+            let inner = self.inner.lock();
+            let Some(model) = inner.engine.state.pane(pane) else {
+                return;
+            };
+            let PaneKind::Agent(agent) = &model.kind else {
+                return;
+            };
+            let Some(window) = inner.engine.state.window_for_pane(pane) else {
+                return;
+            };
+            let session = inner.engine.state.windows[&window].session;
+            let facts = inner.engine.format_facts();
+            PeerMetadata {
+                pane: pane.to_string(),
+                name: peer_name(
+                    &pane.to_string(),
+                    facts.user_option(
+                        &pane.to_string(),
+                        &window.to_string(),
+                        &session.to_string(),
+                        "@name",
+                    ),
+                ),
+                cwd: agent
+                    .cwd
+                    .clone()
+                    .or_else(|| std::env::current_dir().ok())
+                    .unwrap_or_else(|| PathBuf::from("/")),
+                tmux: format!(
+                    "{}:{window}.{pane}",
+                    inner.engine.state.sessions[&session].name
+                ),
+            }
+        };
+        if let Some(peer) = peers.get_mut(&pane) {
+            if let Err(error) = peer.update(busy, &metadata.name) {
+                log::warn!(target: "zz::agent", "could not update Claude peer {pane}: {error}");
+            }
+            return;
+        }
+        let owner = self.agent_peer_owner.lock().clone();
+        match PeerInbox::register(metadata, move |text| {
+            if let Some(shared) = owner.upgrade()
+                && !shared.submit_agent_prompt(pane, text)
+            {
+                log::warn!(target: "zz::agent", "could not submit Claude peer prompt to {pane}");
+            }
+        }) {
+            Ok(peer) => {
+                peers.insert(pane, peer);
+            }
+            Err(error) => {
+                log::warn!(target: "zz::agent", "could not register Claude peer {pane}: {error}");
+            }
+        }
+    }
+
     fn close_agent_panes(&self, panes: &[PaneId]) {
         let _effects = self.agent_effects.lock();
         let Some(runtime) = self.open_agent_runtime() else {
@@ -25244,6 +25397,13 @@ impl Shared {
         };
         for pane in panes {
             runtime.close(*pane);
+        }
+        #[cfg(unix)]
+        {
+            let mut peers = self.agent_peers.lock();
+            for pane in panes {
+                peers.remove(pane);
+            }
         }
         let mut inner = self.inner.lock();
         let states = Arc::make_mut(&mut inner.agent_states);
@@ -25256,6 +25416,8 @@ impl Shared {
         let runtime = {
             let _effects = self.agent_effects.lock();
             self.agent_stopped.store(true, Ordering::Release);
+            #[cfg(unix)]
+            self.agent_peers.lock().clear();
             self.agent.lock().take()
         };
         let Some(runtime) = runtime else {
@@ -25697,6 +25859,10 @@ impl AgentPublisher for Shared {
                     || previous.pending_permission != state.pending_permission
             })
         };
+        #[cfg(unix)]
+        if changed {
+            self.update_agent_peer(pane, &state.phase);
+        }
         if changed {
             self.signal_wait_channel(&format!("agent_state@{pane}"));
         }
@@ -37498,7 +37664,8 @@ zz list-panes -F '#{pane_id} #{pane_kind} #{agent_state} #{@agent_state}'
 ### `zz agent-send [-t %N] [--submit | --wait [--timeout SECS] [--on-block wait|fail]] [--context PATH[:START[-END]]] [TEXT]`
 
 Draft into another Agent pane's composer for its user to review. An omitted or
-non-agent target routes to that window's most recently focused Agent pane.
+non-agent target routes to that window's most recently focused Agent pane,
+except for Claude Code terminal peers described below.
 Read stdin when TEXT is omitted: `git diff | zz agent-send`.
 `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
 
@@ -37508,6 +37675,11 @@ stderr). Failure, cancellation, hand-back, or timeout exits non-zero. The timeou
 defaults to 600 seconds; `0` waits forever. A timeout leaves the turn running.
 `--on-block wait` waits for permission; `fail` prints the pending permission JSON
 and exits 3 while the turn continues.
+
+A terminal pane running Claude Code with cross-session messaging is a valid
+target. Plain sends and `--submit` deliver through Claude Code's inbox between
+its tool calls, attributed to your pane, or start a turn when it is idle.
+`--wait` is not supported for these targets.
 
 ### `zz show-agent-permission [-t %N]`
 
@@ -37627,6 +37799,12 @@ on the control connection and read `%subscription-changed`:
 ```text
 refresh-client -B 'agent:%5:#{agent_state}'
 ```
+
+### Peers
+
+Agent panes register as Claude Code peers under their `@name` user option
+(default `zz-%N`). `ListAgents` in any Claude Code session lists them, and
+`SendMessage` queues a prompt into the pane while its adapter runs.
 
 ## Foreign agents in terminal panes
 
@@ -68499,6 +68677,148 @@ set-option -g @alias-mixed-next yes
                 )
             }));
         }
+    }
+
+    #[cfg(all(feature = "agent", unix))]
+    #[test]
+    fn agent_send_delivers_to_claude_terminal_peer() {
+        use std::io::{BufRead, BufReader};
+        use std::os::unix::net::UnixListener;
+
+        const CHILD: &str = "ZZ_TEST_CLAUDE_TERMINAL_PEER";
+        if std::env::var_os(CHILD).is_none() {
+            let directory = tempfile::tempdir().expect("peer registry directory");
+            let mut child =
+                std::process::Command::new(std::env::current_exe().expect("test binary"))
+                    .args([
+                        "--exact",
+                        "daemon::tests::agent_send_delivers_to_claude_terminal_peer",
+                        "--nocapture",
+                        "--test-threads=1",
+                    ])
+                    .env(CHILD, "1")
+                    .env("CLAUDE_CONFIG_DIR", directory.path())
+                    .spawn()
+                    .expect("isolated peer regression");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                if let Some(status) = child.try_wait().expect("poll peer regression") {
+                    assert!(status.success());
+                    return;
+                }
+                if Instant::now() >= deadline {
+                    child.kill().expect("stop stalled peer regression");
+                    child.wait().expect("reap stalled peer regression");
+                    panic!("isolated peer regression stalled");
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        let directory = PathBuf::from(std::env::var_os("CLAUDE_CONFIG_DIR").expect("peer config"));
+        let sockets = tempfile::Builder::new()
+            .prefix("zz-peer-")
+            .tempdir_in("/tmp")
+            .expect("short socket directory");
+        let socket = sockets.path().join("peer.sock");
+        let listener = UnixListener::bind(&socket).expect("peer listener");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "claude-peer"]),
+            )
+            .expect("terminal session");
+        let pane = context.pane.expect("terminal pane");
+        let pid = std::process::id();
+        let start = std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "lstart="])
+            .env("TZ", "UTC")
+            .output()
+            .expect("process start");
+        assert!(start.status.success());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_millis() as u64;
+        let record = serde_json::json!({
+            "pid": pid, "sessionId": "peer-test", "cwd": directory,
+            "startedAt": now, "procStart": String::from_utf8_lossy(&start.stdout).trim(),
+            "version": "2.1.267", "peerProtocol": 1, "peerFeatures": [],
+            "kind": "interactive", "entrypoint": "cli",
+            "pidDomain": if cfg!(target_os = "macos") { "darwin" } else { "linux" },
+            "tmux": format!("claude-peer:@0.{pane}"), "messagingSocketPath": socket,
+            "name": "terminal-peer", "status": "idle", "updatedAt": now,
+            "statusUpdatedAt": now
+        });
+        fs::create_dir_all(directory.join("sessions")).expect("registry");
+        fs::write(
+            directory.join("sessions").join(format!("{pid}.json")),
+            serde_json::to_vec(&record).expect("record JSON"),
+        )
+        .expect("peer record");
+        for submit in [false, true] {
+            let mut args = vec!["-t".to_owned(), pane.to_string()];
+            if submit {
+                args.push("--submit".to_owned());
+            }
+            args.push("hello".to_owned());
+            let result = shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context.clone(),
+                    &CommandInvocation::new("agent-send", args),
+                )
+                .expect("send to Claude terminal peer");
+            assert_eq!(
+                result.output,
+                if submit {
+                    pane.to_string()
+                } else {
+                    String::new()
+                }
+            );
+            let (stream, _) = listener.accept().expect("outbound connection");
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let mut line = String::new();
+            BufReader::new(stream)
+                .read_line(&mut line)
+                .expect("peer wire line");
+            let value: serde_json::Value = serde_json::from_str(&line).expect("wire JSON");
+            assert_eq!(value["msgV"], 1);
+            assert_eq!(value["type"], "user");
+            assert_eq!(value["priority"], "next");
+            assert!(value.get("from").is_none());
+            assert_eq!(value["message"]["role"], "user");
+            assert_eq!(
+                value["message"]["content"],
+                format!(
+                    "<cross-session-message from-name=\"zz {pane}\" from-mode=\"prompting\">\nhello\n</cross-session-message>"
+                )
+            );
+        }
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("agent-send", ["-t", &pane.to_string(), "--wait", "hello"]),
+            )
+            .expect_err("peer wait unsupported");
+        assert!(
+            matches!(error, DaemonError::Server(ServerError::InvalidCommand(message))
+            if message.contains("--wait is not supported"))
+        );
+        assert!(matches!(listener.accept(), Err(error) if error.kind() == ErrorKind::WouldBlock));
     }
 
     #[test]

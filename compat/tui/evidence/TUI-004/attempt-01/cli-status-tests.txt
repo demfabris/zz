@@ -1,0 +1,7 @@
+test daemon_autostart::status_position_top_puts_the_status_block_at_row_zero ... ok
+test daemon_autostart::attached_tui_renders_daemon_authored_styled_status_labels ... ok
+test daemon_autostart::stock_eighty_column_attach_draws_the_whole_status_row ... ok
+test daemon_autostart::styled_multi_row_status_renders_two_rows_without_literal_markers ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 121 filtered out; finished in 3.67s
+command: cargo test -p zz --jobs 5 --test cli_binary -- --test-threads=2 <the four status tests>
+exit: 0

@@ -1,0 +1,18 @@
+STATUS-LEFT TRIM PROBE, both binaries, throwaway servers, -f /dev/null, scrubbed HOME and XDG_CONFIG_HOME
+recorded: 2026-09-09T22:52:53-03:00
+
+status-left-length is 10 by default, status-right-length 40 (options-table.c)
+
+display-message -p "#{T;=/#{status-left-length}:status-left}" with status-left = #[fg=red,bold]LEFT
+  tmux: #[fg=red,bold]LEFT
+  zz:   #[fg=red,b
+
+display-message -p "#{T;=/#{status-right-length}:status-right}" with 43 digits behind #[bg=blue]
+  tmux: #[bg=blue]0123456789012345678901234567890123456789
+  zz:   #[bg=blue]012345678901234567890123456789
+
+same probe with status-left-length raised past the marker
+  tmux: #[fg=red,bold]LEFT
+  zz:   #[fg=red,bold]LEFT
+
+the pin copies a #[...] section through format_trim_left without counting it; crates/zz-mux/src/formats.rs truncate_value counts every printable byte, so the marker is cut in half and the whole band leaves the row. The fix is in the format engine trim, which this lane does not own.

@@ -1,0 +1,322 @@
+whole-screen differential (pin tmux)
+note  80x24 fresh recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x24 fresh
+note  80x24 status-off recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x24 status-off
+note  80x24 status-on recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x24 status-on
+note  80x24 split recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x24 split
+note  80x24 zoom recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x24 zoom
+note  80x24 unzoom recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x24 unzoom
+note  100x24-from-80x24 resized recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24-from-80x24 resized
+note  80x24 restored recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x24 restored
+note  80x24 status-two-rows recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x24 status-two-rows
+note  80x24 status-top recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x24 status-top
+note  80x24 wide-glyphs recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x24 wide-glyphs
+note  80x24 default-fg recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint default-fg at 80x24
+      first differing row 23 of 24
+        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+      asserted cursor tmux: 2,2 flag=1 pane=80x24
+      asserted cursor zz:   2,2 flag=1 pane=80x24
+note  80x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+note  80x24 colour-classes recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint colour-classes at 80x24
+      first differing row 2 of 24
+        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+      asserted cursor tmux: 2,5 flag=1 pane=80x24
+      asserted cursor zz:   2,5 flag=1 pane=80x24
+note  80x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+note  100x24 fresh recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24 fresh
+note  100x24 status-off recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24 status-off
+note  100x24 status-on recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24 status-on
+note  100x24 split recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24 split
+note  100x24 zoom recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24 zoom
+note  100x24 unzoom recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24 unzoom
+note  80x24-from-100x24 resized recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x24-from-100x24 resized
+note  100x24 restored recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24 restored
+note  100x24 status-two-rows recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24 status-two-rows
+note  100x24 status-top recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24 status-top
+note  100x24 wide-glyphs recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24 wide-glyphs
+note  100x24 default-fg recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint default-fg at 100x24
+      first differing row 23 of 24
+        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+      asserted cursor tmux: 2,2 flag=1 pane=100x24
+      asserted cursor zz:   2,2 flag=1 pane=100x24
+note  100x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+note  100x24 colour-classes recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint colour-classes at 100x24
+      first differing row 1 of 24
+        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+      asserted cursor tmux: 2,4 flag=1 pane=100x24
+      asserted cursor zz:   2,4 flag=1 pane=100x24
+note  100x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+note  80x10 fresh recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x10 fresh
+note  80x10 status-off recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x10 status-off
+note  80x10 status-on recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x10 status-on
+note  80x10 split recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x10 split
+note  80x10 zoom recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x10 zoom
+note  80x10 unzoom recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x10 unzoom
+note  100x10-from-80x10 resized recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x10-from-80x10 resized
+note  80x10 restored recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x10 restored
+note  80x10 status-two-rows recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x10 status-two-rows
+note  80x10 status-top recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x10 status-top
+note  80x10 wide-glyphs recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    80x10 wide-glyphs
+note  80x10 default-fg recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint default-fg at 80x10
+      first differing row 9 of 10
+        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+      asserted cursor tmux: 2,2 flag=1 pane=80x10
+      asserted cursor zz:   2,2 flag=1 pane=80x10
+note  80x10 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+note  80x10 colour-classes recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint colour-classes at 80x10
+      first differing row 2 of 10
+        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+      asserted cursor tmux: 2,5 flag=1 pane=80x10
+      asserted cursor zz:   2,5 flag=1 pane=80x10
+note  80x10 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+note  109x24 fresh recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    109x24 fresh
+note  109x24 status-off recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    109x24 status-off
+note  109x24 status-on recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    109x24 status-on
+note  109x24 split recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    109x24 split
+note  109x24 zoom recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    109x24 zoom
+note  109x24 unzoom recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    109x24 unzoom
+note  120x24-from-109x24 resized recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    120x24-from-109x24 resized
+note  109x24 restored recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    109x24 restored
+note  109x24 status-two-rows recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    109x24 status-two-rows
+note  109x24 status-top recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    109x24 status-top
+note  109x24 wide-glyphs recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    109x24 wide-glyphs
+note  109x24 default-fg recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint default-fg at 109x24
+      first differing row 23 of 24
+        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+      asserted cursor tmux: 2,2 flag=1 pane=109x24
+      asserted cursor zz:   2,2 flag=1 pane=109x24
+note  109x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+note  109x24 colour-classes recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint colour-classes at 109x24
+      first differing row 1 of 24
+        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+      asserted cursor tmux: 2,4 flag=1 pane=109x24
+      asserted cursor zz:   2,4 flag=1 pane=109x24
+note  109x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+note  120x24 fresh recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    120x24 fresh
+note  120x24 status-off recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    120x24 status-off
+note  120x24 status-on recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    120x24 status-on
+note  120x24 split recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    120x24 split
+note  120x24 zoom recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    120x24 zoom
+note  120x24 unzoom recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    120x24 unzoom
+note  100x24-from-120x24 resized recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    100x24-from-120x24 resized
+note  120x24 restored recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    120x24 restored
+note  120x24 status-two-rows recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    120x24 status-two-rows
+note  120x24 status-top recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    120x24 status-top
+note  120x24 wide-glyphs recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+ok    120x24 wide-glyphs
+note  120x24 default-fg recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint default-fg at 120x24
+      first differing row 23 of 24
+        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+      asserted cursor tmux: 2,2 flag=1 pane=120x24
+      asserted cursor zz:   2,2 flag=1 pane=120x24
+note  120x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+note  120x24 colour-classes recorded cursor attributes differ (no registry owner yet)
+        tmux: shape=default blinking=0 very_visible=0 colour=none
+        zz:   shape=block blinking=1 very_visible=0 colour=#e5c07b
+      checkpoint colour-classes at 120x24
+      first differing row 1 of 24
+        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+      asserted cursor tmux: 2,4 flag=1 pane=120x24
+      asserted cursor zz:   2,4 flag=1 pane=120x24
+note  120x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+all 33 asserted checkpoints identical, 32 recorded not asserted, 65 recorded cursor differences

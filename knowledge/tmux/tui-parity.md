@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **2/12 verified**. Added scope: **0/1 verified**.
 
-Status counts: unmeasured: 6, different: 5, active: 0, review: 0, blocked: 0, verified: 2.
+Status counts: unmeasured: 6, different: 4, active: 1, review: 0, blocked: 0, verified: 2.
 
 Dependency-ready obligations, by priority: TUI-003, TUI-004, TUI-010, TUI-013.
 
@@ -30,7 +30,7 @@ Dependency-ready obligations, by priority: TUI-003, TUI-004, TUI-010, TUI-013.
 | TUI-001: Reliable attached-client baseline | verified | 1 | none |
 | TUI-002: Complete screen and interaction comparison | verified | 2 | TUI-001 |
 | TUI-003: Stock launcher, command and key behavior | different | 3 | TUI-002 |
-| TUI-004: Default canvas, status and pane borders | different | 4 | TUI-002 |
+| TUI-004: Default canvas, status and pane borders | active | 4 | TUI-002 |
 | TUI-013: Recorded macOS geometry-report timeout | unmeasured | 13 | none |
 
 ## interactive: Interactive surfaces
@@ -160,7 +160,7 @@ Next action: Capture unmodified tmux and zz launch/key behavior, then separate s
 
 ### TUI-004: Default canvas, status and pane borders
 
-Status: different.
+Status: active.
 
 Acceptance:
 
@@ -180,9 +180,9 @@ Sources:
 
 Tmux gap references: `tui.status-row`, `tui.sidebar-auto-hide`, `presentation.native-status`, `options.theme-palette`.
 
-On 2026-09-09 the existing debug binary passed all 11 status-row assertions; three theme cases differed and were record-only. Sidebar visibility still starts at 109 columns. This exploratory pass had no freshly built candidate and covers selected rows only.
+CYCLE 3, THE SIDEBAR DECISION, LANDED AND PROVED. PRODUCT DECISION: terminal width never invokes the sidebar; it is client-local chrome that appears only through focus-sidebar or a user binding, so at every width a terminal client's canvas is the one pinned tmux draws. decided 2026-09-09 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible. OLD BEHAVIOUR: crates/zz-tui/src/sidebar.rs AUTO_HIDE_COLUMNS = 80 + 28 + 1 = 109 with a three-state Visibility enum whose Auto arm showed the sidebar from 109 columns. MEASURED PIN BEHAVIOUR: the pin adds no column of chrome at any width, which is why tui-pane-geometry.sh recorded its 120-column columns and tui-screen-diff.sh recorded its 109 and 120 sizes instead of asserting them. NEW STANCE: State carries one `shown` flag defaulting to false and visible() is `shown && columns >= MIN_MANUAL_COLUMNS`, so 50 columns is only the floor below which the command declines. The TUI portion of tui.sidebar-auto-hide is updated with the same decision and the GUI scope retained. MEASURED AT THE FIX: tui-pane-geometry.sh asserts columns at 80, 100 and 120 and exits 0 (120 both 120, rows 23 both sides); its record mode is deleted because no size needs it. tui-screen-diff.sh promotes 109 and 120 from record to same, moves its resize cases across the retired threshold in both directions, and reports 58 asserted checkpoints identical with 15 recorded. THE COMMAND AND ITS WITHDRAWAL: a new 120x24-sidebar case binds F8 to focus-sidebar on the zz side only, requires the zz screen to DIFFER from the pin's while the sidebar is up, then sends q on the sidebar key table and requires the two screens to be identical again; the same first half is a --self-check sabotage. A one-shot `zz focus-sidebar` cannot drive it, the daemon answers 'focus-sidebar requires an interactive client'. FOUND WHILE PROVING THIS, RECORDED NOT FIXED: with the sidebar gone the status ROW is the only place status-left can land, and a STYLED status-left longer than status-left-length leaves the row entirely on zz. display-message -p '#{T;=/#{status-left-length}:status-left}' with status-left '#[fg=red,bold]LEFT' answers '#[fg=red,bold]LEFT' on the pin and '#[fg=red,b' on zz, and a styled status-right loses ten characters the same way; format.c format_trim_left copies a #[...] section through without counting it while crates/zz-mux/src/formats.rs truncate_value counts every printable byte and cuts the marker in half, so the unterminated marker takes the whole band off the row. tui-screen-diff.sh records it at every size as styled-left-trim, and crates/zz/tests/cli_binary.rs attached_tui_renders_daemon_authored_styled_status_labels now raises status-left-length past the marker so it asserts what it means to assert; it used to pass only because the sidebar drew the styled label. The fix is in the format engine's trim, crates/zz-mux, which this lane does not own.
 
-Next action: Extend the measured default canvas through the sidebar threshold and carry the existing tui.status-row gap into full-screen acceptance.
+Next action: Extend tui-screen-diff.sh through the rest of clause 2's matrix (pane-border-status, colour classes on status-style and formats, terminal light/dark reports) and settle the recorded cursor-attribute channel.
 
 ### TUI-005: Pane copy mode and search
 

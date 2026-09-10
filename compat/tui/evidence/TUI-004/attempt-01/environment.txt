@@ -1,0 +1,27 @@
+TUI-004 attempt-01 environment
+recorded: 2026-09-09T22:52:17-03:00
+box: alienware
+os: NAME="CachyOS Linux" PRETTY_NAME="CachyOS" 
+kernel: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+shell: GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+TERM: xterm-ghostty
+locale LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8 LC_ALL=unset
+worktree: /home/demfabris/dev/zz-tui-canvas
+revision: bfd05821c00eac75cf6a8418394681295caf7aab
+base: origin/main bfd05821c00eac75cf6a8418394681295caf7aab
+worktree dirty files at this recording:
+ M compat/tui-pane-geometry.sh
+ M compat/tui-screen-diff.sh
+ M crates/zz-tui/src/render.rs
+ M crates/zz-tui/src/sidebar.rs
+ M crates/zz-tui/src/state.rs
+ M crates/zz/tests/cli_binary.rs
+?? compat/tui/evidence/TUI-004/
+zz binary: 65833d5391cea30eeaf2b100d2884082eadb9d35672dd7594a27279194f2f90f  target/debug/zz
+zz build: cargo build -p zz --jobs 5 (debug)
+NOTE: a cargo debug build of zz is not bit-reproducible on this box; the hash identifies this artifact, it does not attest it. Attestation is the revision plus a clean worktree; provenance is reproduction.
+pin: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+pin -V: tmux next-3.8
+pin commit: d77c9dc6aa021e4bc61f0da128c591af695e6466 (next-3.8)
+outer sizes driven by tui-screen-diff.sh: 80x24 100x24 80x10 109x24 120x24, plus 120x24 for the sidebar case; alternates 120 80 100 120 100
+outer sizes driven by tui-pane-geometry.sh: 80x24 100x24 120x24

@@ -60,11 +60,21 @@
 # not enough. No wait in this file is a sleep.
 #
 # SIZES AND MODES. `same` asserts; `record` prints the same report and keeps
-# going. zz's sidebar appears from 109 columns (crates/zz-tui/src/sidebar.rs
-# AUTO_HIDE_COLUMNS = 80 + 28 + 1), which is a standing decision that TUI-004
-# owns, so 109 and 120 are recorded rather than waived by omission, and every
-# `same` size keeps its resize case strictly below 109 so an asserted size can
-# never invoke the sidebar by accident.
+# going. Every size asserts. zz's sidebar used to appear on its own from 109
+# columns (crates/zz-tui/src/sidebar.rs AUTO_HIDE_COLUMNS = 80 + 28 + 1), so
+# 109 and 120 were recorded rather than waived by omission; width no longer
+# invokes it, the sidebar is client-local chrome that only focus-sidebar or a
+# user binding shows, and those two widths are asserted like the rest. The
+# resize cases deliberately cross the retired threshold in both directions:
+# 80 goes out to 120 and back, 109 to 120, 120 down to 100.
+#
+# THE SIDEBAR CASE runs once, at 120x24, after the size loop. It is the one
+# place the two sides are driven differently on purpose: focus-sidebar is a zz
+# command with no counterpart in the pin, so the case requires the zz screen to
+# DIFFER while the sidebar is up and to be identical to the pin again once it
+# is withdrawn. The difference half is what makes the identity half worth
+# anything - a sidebar that never drew would pass a test that only asserted
+# equality.
 #
 # --self-check runs the same driver against a deliberate one-sided difference in
 # each channel and requires the comparison to catch it in that channel, plus three
@@ -110,10 +120,10 @@ ZZ_BIN="$(resolve_binary "$ZZ_INPUT")" || { printf 'error: zz binary not found: 
 TMUX_BIN="$(resolve_binary "$TMUX_INPUT")" || { printf 'error: tmux binary not found: %s\n' "$TMUX_INPUT" >&2; exit 2; }
 
 # SIZE|MODE|ALTERNATE. ALTERNATE is the width the resize case moves to and back
-# from. For every `same` size it stays below the 109 column sidebar threshold,
-# so an asserted size can never invoke the sidebar mid-case. The 120x24 record
-# deliberately crosses it, to measure what hiding the sidebar leaves behind.
-SIZES=(80x24\|same\|100 100x24\|same\|80 80x10\|same\|100 109x24\|record\|120 120x24\|record\|100)
+# from. 80 and 109 cross the retired 109 column threshold upwards and 120
+# crosses it downwards, so a width that once changed the canvas is asserted on
+# both sides of the move and on the way back.
+SIZES=(80x24\|same\|120 100x24\|same\|80 80x10\|same\|100 109x24\|same\|120 120x24\|same\|100)
 PANE_TITLE="screentitle"
 WINDOW_NAME="win"
 SCRATCH_DIR="$(mktemp -d /tmp/zzsd.XXXXXX)"
@@ -418,10 +428,10 @@ attach_both_at() {
   run_on_both select-pane -t "=$INNER_SESSION:0.0" -T "$PANE_TITLE"
 }
 
-# A substring, not a whole line: zz draws its sidebar to the LEFT of the pane
-# from 109 columns, so at those widths the marker shares its row with sidebar
-# cells and a border. The typed command carries MARK-%s, never MARK-<name>, so
-# only the shell's own output can satisfy this.
+# A substring, not a whole line: the sidebar case below draws zz's sidebar to
+# the LEFT of the pane, so there the marker shares its row with sidebar cells
+# and a border. The typed command carries MARK-%s, never MARK-<name>, so only
+# the shell's own output can satisfy this.
 screen_has_marker() {
   capture_plain "$1" | grep -Fq "$2"
 }
@@ -522,14 +532,12 @@ compare_screens() {
 }
 
 # The named settled checkpoint: mark, wait for the mark on both sides, compare.
-# A recorded case says WHY it is recorded. The default is the sidebar, which is
-# what the 109 and 120 column sizes record; a case that records something else
-# passes its own reason.
-SIDEBAR_REASON='zz shows its sidebar from 109 columns'
+# A recorded case says WHY it is recorded, in its own words: no size records any
+# more, so there is no default reason left to inherit.
 checkpoint() {
   local name="$1"
   local mode="$2"
-  local reason="${3:-$SIDEBAR_REASON}"
+  local reason="${3:-}"
   send_both "printf 'MARK-%s\\n' $name"
   settle_both "MARK-$name" "$name"
   if [ "$mode" = same ]; then
@@ -545,6 +553,7 @@ checkpoint() {
     FAILURES=$((FAILURES + 1))
     printf 'DIFF  %s %s\n' "$SIZE_LABEL" "$name"
   else
+    [ -n "$reason" ] || die "recorded checkpoint $name says nothing about why"
     printf 'note  %s %s recorded, not asserted: %s\n' "$SIZE_LABEL" "$name" "$reason"
   fi
   return 0
@@ -630,6 +639,88 @@ run_size() {
   send_both "printf '\\033[31mNAMED\\033[0m \\033[38;5;196mINDEXED\\033[0m \\033[38;2;1;2;3mRGB\\033[0m\\n'"
   checkpoint colour-classes record \
     'zz resolves a named and an indexed colour to RGB before writing to the terminal'
+
+  # A STYLED status-left longer than status-left-length. The pin's status-left
+  # is L everywhere else in this file, one character, which no length limit ever
+  # reaches; this case is the one that does. format.c format_trim_left copies a
+  # #[...] section through without counting it against the limit, so the pin's
+  # row draws LEFT; crates/zz-mux/src/formats.rs truncate_value counts every
+  # printable byte, so #{T;=/10:status-left} answers `#[fg=red,b` on zz and the
+  # unterminated marker takes the whole band off the row. Probed on both
+  # binaries 2026-09-09: display-message -p '#{T;=/#{status-left-length}:status-left}'
+  # answers '#[fg=red,bold]LEFT' on the pin and '#[fg=red,b' on zz, and the same
+  # arithmetic loses ten characters of a styled status-right. Recorded, not
+  # asserted: the fix is in the format engine's trim, which this lane does not own.
+  clear_both
+  set_on_both status-left '#[fg=red,bold]LEFT'
+  checkpoint styled-left-trim record \
+    'zz counts a #[...] section against status-left-length where the pin does not'
+  set_on_both status-left L
+}
+
+# --- the sidebar, driven on one side on purpose -----------------------------
+#
+# focus-sidebar is a zz command the pin has no counterpart for, and no width
+# invokes it. The case therefore asserts BOTH directions: while the sidebar is
+# up the zz screen has to DIFFER from the pin's, and once it is withdrawn the
+# two screens have to be identical again. Asserting only the second half would
+# pass on a sidebar that never drew at all.
+#
+# Nothing is typed into either shell between the two comparisons, so the only
+# thing that moves is the sidebar: the pin's screen is left settled from the
+# first checkpoint and is never touched again.
+SIDEBAR_MARKER='zz at '
+sidebar_on_screen() {
+  capture_plain zz | grep -Fq "$SIDEBAR_MARKER"
+}
+sidebar_off_screen() {
+  ! capture_plain zz | grep -Fq "$SIDEBAR_MARKER"
+}
+# focus-sidebar reaches the sidebar through a USER BINDING, which is the path
+# the contract names and the only one the daemon accepts: a one-shot `zz
+# focus-sidebar` is not an interactive client and crates/zz-daemon/src/daemon.rs
+# answers it 'focus-sidebar requires an interactive client', the way the pin
+# refuses a client command with no client. F8 keeps the case clear of every
+# default key table, so a lane that changes what prefix-s means cannot change
+# what this case measures. The key goes to the zz CLIENT through the outer pane;
+# the pin's side is neither bound nor sent anything.
+show_sidebar_on_zz() {
+  zz_command bind-key -n F8 focus-sidebar || die 'zz refused bind-key -n F8'
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" F8
+  wait_for 'the sidebar on the zz screen' sidebar_on_screen
+}
+
+run_sidebar_case() {
+  SIZE_LABEL='120x24-sidebar'
+  attach_both_at 120 24
+  checkpoint sidebar-before same
+
+  show_sidebar_on_zz
+  wait_settled zz "$SIDEBAR_MARKER" 'the sidebar settled on the zz screen'
+  CHECKS=$((CHECKS + 1))
+  compare_screens sidebar-shown || true
+  if [ "$LAST_ROWS_DIFFERED" -eq 1 ]; then
+    printf 'ok    %s sidebar-shown differs from the pin, which is what a drawn sidebar means\n' \
+      "$SIZE_LABEL"
+  else
+    FAILURES=$((FAILURES + 1))
+    printf 'DIFF  %s sidebar-shown: focus-sidebar left the screen identical to the pin\n' \
+      "$SIZE_LABEL"
+  fi
+
+  # q on the SIDEBAR key table is ChromeAction::ToggleSidebar, which withdraws
+  # it (crates/zz-client/src/chrome.rs TUI_SIDEBAR_DEFAULTS). It goes to the zz
+  # CLIENT through the outer pane, not to the inner pane, so no shell sees it.
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" q
+  wait_for 'the sidebar off the zz screen' sidebar_off_screen
+  wait_settled zz "MARK-sidebar-before" 'the withdrawn canvas settled on the zz screen'
+  CHECKS=$((CHECKS + 1))
+  if compare_screens sidebar-withdrawn; then
+    printf 'ok    %s sidebar-withdrawn\n' "$SIZE_LABEL"
+  else
+    FAILURES=$((FAILURES + 1))
+    printf 'DIFF  %s sidebar-withdrawn\n' "$SIZE_LABEL"
+  fi
 }
 
 # --- self-check ------------------------------------------------------------
@@ -721,6 +812,20 @@ run_self_check() {
   self_check_settle_on CURSORMARK cursor
   self_check_case 'cursor, a different-length unterminated line' cursor
 
+  # The sidebar case's two halves are each other's sabotage: it requires a
+  # difference while the sidebar is up and none once it is withdrawn. This is
+  # the first half, driven on its own, so the inventory shows the channel being
+  # caught rather than only the whole case passing. 120 columns, the width that
+  # used to invoke the sidebar by itself.
+  SIZE_LABEL='120x24-sidebar-shown'
+  attach_both_at 120 24
+  send_both "printf 'MARK-%s\\n' sidebar-fresh"
+  settle_both 'MARK-sidebar-fresh' sidebar-fresh
+  show_sidebar_on_zz
+  wait_settled zz "$SIDEBAR_MARKER" 'the sidebar settled on the zz screen'
+  compare_screens sidebar-shown || true
+  self_check_case 'sidebar, focus-sidebar shown on one side' rows
+
   SIZE_LABEL='80x24-geometry'
   attach_both_at 80 24
   side_command zz split-window -v -t "$(active_pane zz)" "$INNER_SHELL" ||
@@ -793,6 +898,7 @@ for entry in "${SIZES[@]}"; do
   IFS='|' read -r size mode alternate <<<"$entry"
   run_size "$size" "$mode" "$alternate"
 done
+run_sidebar_case
 
 if [ "$FAILURES" -ne 0 ]; then
   printf '%s of %s asserted checkpoints differ, %s recorded, %s recorded cursor differences\n' \

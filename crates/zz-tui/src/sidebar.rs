@@ -10,51 +10,24 @@ use crate::layout::Rect;
 
 pub(crate) const WIDTH: u16 = 28;
 pub(crate) const BORDER_WIDTH: u16 = 1;
-/// The pane width a terminal is expected to hand a multiplexer. `ssh -t host
-/// zz attach` on the stock 80x24 terminal has to leave the pane as wide as
-/// pinned tmux leaves it, which is the terminal's own width.
-pub(crate) const MIN_PANE_COLUMNS: u16 = 80;
-/// The sidebar appears on its own only once it can sit beside a pane still
-/// [`MIN_PANE_COLUMNS`] wide, so no terminal loses pane width to chrome it did
-/// not ask for. Below this, `C-a s` still shows it on demand.
-pub(crate) const AUTO_HIDE_COLUMNS: u16 = MIN_PANE_COLUMNS + WIDTH + BORDER_WIDTH;
+/// Terminal width never invokes the sidebar: it is client-local chrome that
+/// only `focus-sidebar` or a user binding shows, so at every width a terminal
+/// client's canvas is the one pinned tmux draws. It still needs room to sit
+/// beside a pane, and below this the command leaves the canvas alone.
 pub(crate) const MIN_MANUAL_COLUMNS: u16 = 50;
 pub(crate) const STATUS_ROWS: u16 = 3;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Visibility {
-    Auto,
-    Shown,
-    Hidden,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct State {
     pub focused: bool,
     pub selected: usize,
     pub scroll: usize,
-    visibility: Visibility,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            focused: false,
-            selected: 0,
-            scroll: 0,
-            visibility: Visibility::Auto,
-        }
-    }
+    shown: bool,
 }
 
 impl State {
     pub const fn visible(&self, columns: u16) -> bool {
-        columns >= MIN_MANUAL_COLUMNS
-            && match self.visibility {
-                Visibility::Auto => columns >= AUTO_HIDE_COLUMNS,
-                Visibility::Shown => true,
-                Visibility::Hidden => false,
-            }
+        self.shown && columns >= MIN_MANUAL_COLUMNS
     }
 
     pub fn focus(&mut self, columns: u16) {
@@ -62,9 +35,7 @@ impl State {
             self.focused = false;
             return;
         }
-        if !self.visible(columns) {
-            self.visibility = Visibility::Shown;
-        }
+        self.shown = true;
         self.focused = true;
     }
 
@@ -78,7 +49,7 @@ impl State {
 
     pub fn hide(&mut self) {
         self.focused = false;
-        self.visibility = Visibility::Hidden;
+        self.shown = false;
     }
 
     pub fn reconcile_width(&mut self, columns: u16) {
@@ -566,30 +537,36 @@ mod tests {
     }
 
     #[test]
-    fn visibility_thresholds_and_canvas_arithmetic_match_the_chrome_contract() {
+    fn width_never_invokes_the_sidebar_and_only_the_command_does() {
         let mut state = State::default();
-        assert_eq!(AUTO_HIDE_COLUMNS, 109);
+        for columns in [80, 100, 109, 120, 200, u16::MAX] {
+            assert!(
+                !state.visible(columns),
+                "{columns} columns keeps every column for the pane, as pinned tmux does"
+            );
+            assert_eq!(
+                canvas_rect(columns, 24, state.visible(columns), 1, false).width,
+                columns
+            );
+        }
+
+        state.focus(120);
+        assert!(state.visible(120), "focus-sidebar shows it");
+        assert_eq!(canvas_rect(120, 24, true, 0, false).width, 91);
+        state.hide();
         assert!(
-            !state.visible(80),
-            "an 80-column terminal keeps the whole 80 columns for the pane, as pinned tmux does"
+            !state.visible(120),
+            "and withdrawing it restores the pinned canvas"
         );
-        assert!(!state.visible(100), "so does a 100-column terminal");
-        assert!(
-            state.visible(AUTO_HIDE_COLUMNS),
-            "the sidebar arrives once the pane beside it is still 80 columns"
-        );
-        assert_eq!(
-            canvas_rect(AUTO_HIDE_COLUMNS, 24, true, 0, false).width,
-            MIN_PANE_COLUMNS
-        );
-        assert!(state.visible(120));
+
         state.focus(60);
+        assert!(state.visible(60), "the command works at any usable width");
+        state.focus(40);
         assert!(
-            state.visible(60),
-            "C-a s still shows it below the threshold"
+            !state.visible(40),
+            "a 40-column terminal has no room to spare"
         );
         state.hide();
-        assert!(!state.visible(120));
 
         assert_eq!(
             canvas_rect(100, 30, true, 0, false),

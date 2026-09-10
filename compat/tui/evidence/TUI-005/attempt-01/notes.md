@@ -6,11 +6,34 @@ Pane copy mode and search, typed into both attached clients.
 
 - Wrote `compat/tui-copy-mode.sh`, a new differential fixture that types the stock
   copy-table chords into both binaries' attached clients inside one outer pinned tmux
-  and compares five channels per case.
+  and compares six channels per case.
 - Fixed one defect in the raw client: the copy cursor is now the terminal cursor
   instead of a reverse-video cell (`crates/zz-tui/src/render.rs`).
-- Measured four divergences it did not fix, each outside this obligation's zones, and
+- Measured five divergences it did not fix, each outside this obligation's zones, and
   reproduced the `terminal search is unsupported here` message TUI-005 opened on.
+
+## What the review pass changed
+
+The first review rejected on one blocker and one must-fix, both about claims the
+fixture could not back:
+
+- THE BLOCKER: the selection group typed the rectangle toggle on and straight back
+  OFF before it copied, so the buffer channel only ever compared an ordinary
+  selection's bytes. Two rectangle copies per table now run with the rectangle still
+  ON, one with the right edge inside every selected line and one past the end of the
+  last. The vi past-the-end case is the fifth recorded divergence: the pin keeps the
+  trailing newline there and zz strips it, 44 bytes against 43. The emacs case and
+  both narrow ones ASSERT the bytes. The fixture drops every paste buffer straight
+  after the recorded case, because the buffer is the one channel a later case cannot
+  resynchronise by moving.
+- THE MUST-FIX: whole-page movement was folded into the view-placement record, which
+  said both engines put the same logical line under the cursor. Half-page movement
+  does; a whole page does not, because the pin steps `screen_size_y - 2` = 22 and zz
+  steps `screen_size_y` = 24. The page cases carry their own reason string with that
+  measurement, assert NOTHING, and print both sides' position on every run through
+  `record_position`; the summary counts them apart from the cases that assert.
+- The nit went the same way: those two cases used to assert the paste buffer alone,
+  which no movement key could have moved.
 
 ## Files
 
@@ -24,9 +47,14 @@ Pane copy mode and search, typed into both attached clients.
 - `copy-mode-tip-1.txt`, `copy-mode-tip-2.txt`, `copy-mode-tip-3.txt` — three runs of
   `compat/tui-copy-mode.sh`, the whole corpus, exit code recorded in
   `proofs-at-tip.txt`.
-- `copy-mode-self-check-tip.txt` — `--self-check`: five one-sided sabotages, one per
+- `copy-mode-self-check-tip.txt` — `--self-check`: six one-sided sabotages, one per
   asserted channel plus a style-only difference that must land in the rows channel
-  alone, and two equivalences the fixture must not report.
+  alone and one extra cursor-down inside a real rectangle copy, and two equivalences
+  the fixture must not report.
+- `rectangle-sabotage.txt` — the same one-sided cursor-down driven against the CORPUS
+  case rather than the self-check, on a throwaway copy of the fixture: exit 1, one
+  DIFF, in the buffer channel, both byte strings printed. It also records a first
+  sabotage that correctly did NOT report.
 - `measured-cells.txt` — the decoded cells behind each recorded divergence, taken from
   `ZZ_COPY_CAPTURE_DIR` on the first tip run: the selection style, the paste-buffer
   bytes that agree through it, the position indicator at its default, and the search
@@ -73,7 +101,9 @@ Pane copy mode and search, typed into both attached clients.
 
 Every case names the channels it asserts; a channel it leaves out is printed with the
 measurement behind it, so nothing is waived by omission. The recorded ones are the
-view placement after a scroll, page or search; the prefix taking precedence over a
-copy-table binding of the same key; the selection and position presentation; and the
-search prompt's palette. `compat/tui/campaign.json` carries each measurement with its
+view placement after a half page, a scroll or a search; the whole-page step size,
+which is a different and larger divergence and is recorded on its own; the paste
+buffer of a vi rectangle whose right edge runs past the end of the last selected
+line; the prefix taking precedence over a copy-table binding of the same key; the
+selection and position presentation; and the search prompt's palette. `compat/tui/campaign.json` carries each measurement with its
 numbers.

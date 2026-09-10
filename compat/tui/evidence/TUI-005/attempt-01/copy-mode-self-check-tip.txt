@@ -33,6 +33,10 @@ ok    self-check rows alone: mode-style changed on the pin side only
       buffer tmux: 0000000   t   m   u   x   -   c   o   p   i   e   d   -   b   y   t   e|0000020   s|0000021|
       buffer zz:   0000000   z   z   -   c   o   p   i   e   d   -   b   y   t   e   s|0000017|
 ok    self-check buffer: a different byte string in the paste buffer
+      case one-sided-rectangle-copy
+      buffer tmux: 0000000   l   i   n   e   -  \n   l   i   n   e   -|0000013|
+      buffer zz:   0000000   l   i   n   e   -  \n   l   i   n   e   -  \n   l   i   n   e|0000020   -|0000021|
+ok    self-check buffer: one extra line inside a rectangle copy on the zz side
 ok    self-check equivalence: 5k and five k land on the same cell
 ok    self-check equivalence: prefix [ and the copy-mode command open the same mode
 self-check complete: every sabotage was caught in its own channel and every equivalence passed

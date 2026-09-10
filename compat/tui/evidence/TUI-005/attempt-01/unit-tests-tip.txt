@@ -3,25 +3,29 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
+   Compiling zz-terminal v0.6.1 (/home/demfabris/dev/zz-tui-copy/crates/zz-terminal)
+   Compiling zz-protocol v0.6.1 (/home/demfabris/dev/zz-tui-copy/crates/zz-protocol)
+   Compiling zz-daemon v0.6.1 (/home/demfabris/dev/zz-tui-copy/crates/zz-daemon)
+   Compiling zz-client v0.6.1 (/home/demfabris/dev/zz-tui-copy/crates/zz-client)
    Compiling zz-tui v0.6.1 (/home/demfabris/dev/zz-tui-copy/crates/zz-tui)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.55s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.98s
      Running unittests src/lib.rs (target/debug/deps/zz_tui-3d9b78692235e89c)
 
 running 172 tests
 test app::tests::command_output_begin_search_starts_the_matching_local_prompt ... ok
 test app::tests::app_requested_mouse_lights_the_outer_modes_while_the_option_is_off ... ok
-test app::tests::command_output_resize_matches_rendered_content_and_tracks_geometry ... ok
 test app::tests::escape_timeout_honors_the_pinned_default_and_live_values ... ok
 test app::tests::failed_connect_first_host_switch_keeps_the_current_endpoint ... ok
+test app::tests::command_output_resize_matches_rendered_content_and_tracks_geometry ... ok
 test app::tests::file_probe_selects_file_only_on_ok_and_honors_the_override ... ok
 test app::tests::frame_inbox_removes_a_retired_synthetic_pane_before_delivery ... ok
-test app::tests::kitty_probe_disables_when_device_attributes_arrive_first ... ok
 test app::tests::frame_inbox_keeps_only_the_latest_viewport_per_pane ... ok
+test app::tests::kitty_probe_disables_when_device_attributes_arrive_first ... ok
 test app::tests::kitty_probe_enables_on_a_matching_ok_response ... ok
 test app::tests::mouse_gate_follows_the_effective_option_value ... ok
 test app::tests::mouse_off_forwards_only_to_a_tracking_pane_and_skips_chrome ... ok
-test app::tests::popup_descriptor_owns_outer_mouse_tracking_even_before_its_frame ... ok
 test app::tests::provider_navigation_publishes_the_full_tab_descriptor_once_changed ... ok
+test app::tests::popup_descriptor_owns_outer_mouse_tracking_even_before_its_frame ... ok
 test app::tests::tui_exit_notices_and_codes_match_tmux ... ok
 test app::tests::same_output_frames_dedupe_but_an_identical_replacement_resizes ... ok
 test app::tests::unrelated_request_zero_error_preserves_pending_attach_recovery ... ok
@@ -30,8 +34,8 @@ test browser::tests::damage_installs_each_paint_while_unknown_damage_dedupes_by_
 test browser::tests::file_transport_enforces_the_eight_millisecond_floor ... ok
 test browser::tests::inline_debt_uses_the_budget_and_caps_the_install_delay ... ok
 test browser::tests::provider_routes_commands_and_pointer_only_for_open_surfaces ... ok
-test browser::tests::frames_coalesce_until_the_file_floor_and_keep_generation_in_lockstep ... ok
 test browser::tests::receive_timeout_exists_only_while_a_provider_surface_is_active ... ok
+test browser::tests::frames_coalesce_until_the_file_floor_and_keep_generation_in_lockstep ... ok
 test browser::tests::reconnect_teardown_closes_every_surface_and_clears_pending_work ... ok
 test browser::tests::resize_discards_a_throttled_frame_from_the_old_pixel_viewport ... ok
 test browser::tests::scale_rounding_overshoot_past_the_budget_still_validates ... ok
@@ -70,22 +74,22 @@ test input::tests::popup_close_and_replacement_swallow_the_triggering_key_lifecy
 test input::tests::popup_close_preserves_every_held_key_until_its_release ... ok
 test input::tests::popup_paste_uses_terminal_view_and_inactive_paste_does_not ... ok
 test clipboard::tests::encoded_payload_is_capped_at_one_mibibyte ... ok
-test input::tests::popup_press_repeat_and_kitty_release_use_the_popup_key_lane ... ok
 test input::tests::popup_pointer_and_scroll_are_content_relative_and_tracking_gated ... ok
+test input::tests::popup_press_repeat_and_kitty_release_use_the_popup_key_lane ... ok
 test input::tests::rename_commands_use_stable_session_and_window_targets ... ok
 test input::tests::scalar_index_clamps_and_tracks_multibyte_text ... ok
 test input::tests::sidebar_keys_come_from_the_chrome_table ... ok
 test input::tests::xterm_shift_sequences_reach_the_shared_key_contract ... ok
 test kitty::tests::a_fully_clipped_placement_is_omitted ... ok
 test kitty::tests::clipping_a_negative_row_advances_the_source_rectangle ... ok
-test kitty::tests::an_image_arriving_after_its_viewport_places_once ... ok
 test kitty::tests::clipping_at_the_right_edge_reduces_cells_and_source_width ... ok
 test kitty::tests::clipping_tightens_an_existing_source_rectangle_on_every_edge ... ok
+test kitty::tests::an_image_arriving_after_its_viewport_places_once ... ok
 test kitty::tests::daemon_image_ids_are_namespaced_across_panes ... ok
 test kitty::tests::image_assembly_replaces_an_incomplete_generation ... ok
 test kitty::tests::inline_transmit_compresses_rgba_and_sends_each_generation_once ... ok
-test kitty::tests::file_transmit_rotates_eight_slots_and_cleanup_removes_them ... ok
 test kitty::tests::kitty_layers_map_to_the_settled_z_indices ... ok
+test kitty::tests::file_transmit_rotates_eight_slots_and_cleanup_removes_them ... ok
 test kitty::tests::premultiplied_bgra_converts_to_straight_rgba ... ok
 test kitty::tests::leaving_the_layout_deletes_the_panes_placements ... ok
 test layout::tests::borderless_floating_content_uses_the_full_frame ... ok
@@ -115,14 +119,14 @@ test render::tests::copy_mode_hides_only_its_position_when_the_daemon_asks ... o
 test render::tests::floating_border_tables_cover_every_published_line_style ... ok
 test render::tests::confirm_prompt_replaces_the_status_row_and_other_local_overlays ... ok
 test render::tests::forgetting_a_popup_purges_terminal_damage_and_image_caches ... ok
-test render::tests::higher_menu_paints_after_popup_and_suppresses_its_cursor ... ok
 test render::tests::menu_hides_the_workspace_cursor ... ok
+test render::tests::higher_menu_paints_after_popup_and_suppresses_its_cursor ... ok
 test render::tests::plain_text_clipping_uses_terminal_display_cells ... ok
 test render::tests::menu_paints_title_rows_shortcuts_selection_and_disabled_style ... ok
 test render::tests::popup_damage_survives_workspace_retention_and_repaints_only_changed_rows ... ok
 test render::tests::popup_images_are_placed_replaced_and_cleaned_up_on_close ... ok
-test render::tests::sgr_changes_once_per_style_run ... ok
 test render::tests::popup_paints_bounded_title_styles_border_content_and_cursor ... ok
+test render::tests::sgr_changes_once_per_style_run ... ok
 test render::tests::status_block_paints_daemon_rows_and_blank_rows_carry_base_style ... ok
 test render::tests::status_position_top_paints_the_block_at_row_zero ... ok
 test render::tests::style_only_changes_invalidate_cached_lines ... ok
@@ -137,25 +141,25 @@ test sidebar::tests::editor_operations_track_multibyte_scalar_positions_and_scro
 test sidebar::tests::hosts_section_marks_the_current_endpoint_and_ends_with_add_host ... ok
 test sidebar::tests::multiple_sessions_include_every_session_node ... ok
 test sidebar::tests::single_session_flattens_windows_directly_under_host_with_markers ... ok
-test sidebar::tests::width_never_invokes_the_sidebar_and_only_the_command_does ... ok
 test render::tests::the_detach_hint_is_sidebar_chrome_and_never_covers_the_status_row ... ok
+test sidebar::tests::width_never_invokes_the_sidebar_and_only_the_command_does ... ok
 test state::tests::a_timed_message_expires_on_its_duration_and_clears_only_by_identity ... ok
 test state::tests::client_focus_adopts_the_focused_attach_default_and_reports_only_a_loss ... ok
 test state::tests::client_focus_changed_while_attach_is_pending_replays_the_latest_state ... ok
 test state::tests::client_focus_replays_once_per_reattach_without_pane_focus ... ok
-test state::tests::command_output_actor_identity_owns_local_overlay_state ... ok
 test state::tests::command_output_search_survives_frames_and_clears_with_the_view ... ok
+test state::tests::command_output_actor_identity_owns_local_overlay_state ... ok
 test state::tests::command_output_search_uses_the_reserved_bottom_row_without_status ... ok
-test state::tests::confirm_state_seeds_and_resets_with_the_connection ... ok
 test state::tests::confirm_uses_the_message_row_with_status_on_or_off ... ok
+test state::tests::confirm_state_seeds_and_resets_with_the_connection ... ok
 test state::tests::failed_attach_recovers_latest_focus_without_same_value_churn ... ok
 test state::tests::menu_state_seeds_updates_closes_and_resets_with_the_connection ... ok
 test state::tests::message_row_follows_message_line_and_becomes_virtual_when_off ... ok
-test state::tests::popup_state_seeds_updates_closes_replaces_and_resets_with_the_connection ... ok
 test state::tests::reconnect_clears_command_output_state_and_resize_cache ... ok
+test state::tests::popup_state_seeds_updates_closes_replaces_and_resets_with_the_connection ... ok
 test state::tests::reconnect_discards_the_old_epoch_and_replays_without_pane_focus ... ok
-test state::tests::status_rows_change_geometry_and_report_a_layout_event ... ok
 test state::tests::status_hit_targets_map_columns_to_window_ranges ... ok
+test state::tests::status_rows_change_geometry_and_report_a_layout_event ... ok
 test state::tests::the_block_is_suppressed_when_no_pane_content_row_would_remain ... ok
 test state::tests::the_status_block_spans_only_the_main_columns_beside_the_sidebar ... ok
 test state::tests::unrelated_failure_while_ready_does_not_change_focus_delivery ... ok

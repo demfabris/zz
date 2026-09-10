@@ -93,9 +93,14 @@
 # 109-column sidebar threshold, so no asserted case can invoke zz's own chrome.
 #
 # SETTLE. A case names a bounded OBSERVABLE (a server format, or a substring on
-# the screen) and waits for it per side, then waits for that side's screen to
-# stop changing between two polls. A side that never reaches its observable is
-# a comparison RESULT, not a crash. No wait here is a sleep.
+# the screen) and waits for it per side, then waits for that side's screen AND
+# its outer cursor tuple to stop changing between two polls. The cursor is part
+# of the settle because a repaint that rewrites identical cells (the prefix
+# armed inside copy mode does exactly that) can be read by the outer tmux in two
+# chunks: at 63acab72 one loaded run caught zz's cursor at the end of the last
+# row it had written (2,23) before the frame's final cursor placement (9,22).
+# A side that never reaches its observable is a comparison RESULT, not a crash.
+# No wait here is a sleep.
 #
 # --self-check drives one deliberate one-sided difference per asserted channel
 # and requires the comparison to catch it in that channel, plus two
@@ -533,7 +538,8 @@ wait_settled() {
   local previous=""
   local current attempt
   for ((attempt = 0; attempt < 200; attempt++)); do
-    current="$(capture_plain "$side" 2>/dev/null || true)"
+    current="$(capture_plain "$side" 2>/dev/null || true)
+$(cursor_tuple "$side" 2>/dev/null || true)"
     if [ -n "$previous" ] && [ "$current" = "$previous" ]; then
       return 0
     fi

@@ -1,0 +1,12 @@
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-copy/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+    Checking parking_lot_core v0.9.12
+    Checking bitflags v2.13.1
+    Checking chrono v0.4.45
+    Checking nix v0.29.0
+    Checking parking_lot v0.12.5
+    Checking zz-mux v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-mux)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.27s

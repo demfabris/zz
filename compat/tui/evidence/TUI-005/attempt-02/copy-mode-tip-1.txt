@@ -1,0 +1,219 @@
+copy mode and search through the client stdin at 80x24 (pin tmux)
+ok    emacs-enter
+ok    emacs-cursor-up
+ok    emacs-cursor-down
+ok    emacs-count-five-up
+ok    emacs-end-of-line
+ok    emacs-start-of-line
+ok    emacs-scroll-start
+ok    emacs-halfpage-up
+ok    emacs-halfpage-down
+ok    emacs-page-start
+ok    emacs-page-up
+ok    emacs-page-down
+ok    emacs-selection-start
+      case emacs-begin-selection
+      first differing row 21 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0ml^[[39m^[[49mine-60 filler-60
+        zz:   ^[[7ml^[[0mine-60 filler-60
+note  emacs-begin-selection asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+      case emacs-selection-extends
+      first differing row 21 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-60 filler-60
+        zz:   ^[[7mline-60 filler-60
+note  emacs-selection-extends asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+ok    emacs-selection-extends-formats selection_active=[1] rectangle_toggle=[0] pane_search_string=[]
+      case emacs-rectangle-on
+      first differing row 21 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-60 ^[[39m^[[49mfiller-60
+        zz:   ^[[7mline-60 ^[[0mfiller-60
+note  emacs-rectangle-on asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+ok    emacs-rectangle-on-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+      case emacs-rectangle-off
+      first differing row 21 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-60 filler-60
+        zz:   ^[[7mline-60 filler-60
+note  emacs-rectangle-off asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+ok    emacs-copy-and-cancel
+      case emacs-rectangle-inside-line
+      first differing row 19 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-5^[[39m^[[49m8 filler-58
+        zz:   ^[[7mline-5^[[0m8 filler-58
+note  emacs-rectangle-inside-line asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+ok    emacs-rectangle-inside-line-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    emacs-rectangle-inside-line-copy
+      case emacs-rectangle-past-end-of-line
+      first differing row 19 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-58 filler-58    ^[[39m^[[49m
+        zz:   ^[[7mline-58 filler-58    ^[[0m
+note  emacs-rectangle-past-end-of-line asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+ok    emacs-rectangle-past-end-of-line-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    emacs-rectangle-past-end-of-line-copy
+ok    emacs-reenter
+ok    emacs-cancel
+ok    emacs-terminal-input-returns
+ok    emacs-prefix-takes-precedence
+ok    emacs-prefix-returns-to-the-copy-table
+ok    vi-enter
+ok    vi-cursor-up
+ok    vi-cursor-down
+ok    vi-count-five-up
+ok    vi-end-of-line
+ok    vi-start-of-line
+ok    vi-scroll-start
+ok    vi-halfpage-up
+ok    vi-halfpage-down
+ok    vi-page-start
+ok    vi-page-up
+ok    vi-page-down
+ok    vi-selection-start
+      case vi-begin-selection
+      first differing row 21 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0ml^[[39m^[[49mine-60 filler-60
+        zz:   ^[[7ml^[[0mine-60 filler-60
+note  vi-begin-selection asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+      case vi-selection-extends
+      first differing row 21 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-60 filler-60
+        zz:   ^[[7mline-60 filler-60
+note  vi-selection-extends asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+ok    vi-selection-extends-formats selection_active=[1] rectangle_toggle=[0] pane_search_string=[]
+      case vi-rectangle-on
+      first differing row 21 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-60^[[39m^[[49m filler-60
+        zz:   ^[[7mline-60^[[0m filler-60
+note  vi-rectangle-on asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+ok    vi-rectangle-on-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+      case vi-rectangle-off
+      first differing row 21 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-60 filler-60
+        zz:   ^[[7mline-60 filler-60
+note  vi-rectangle-off asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+ok    vi-copy-and-cancel
+      case vi-rectangle-inside-line
+      first differing row 19 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-5^[[39m^[[49m8 filler-58
+        zz:   ^[[7mline-5^[[0m8 filler-58
+note  vi-rectangle-inside-line asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+ok    vi-rectangle-inside-line-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    vi-rectangle-inside-line-copy
+      case vi-rectangle-past-end-of-line
+      first differing row 19 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0mline-58 filler-58    ^[[39m^[[49m
+        zz:   ^[[7mline-58 filler-58    ^[[0m
+note  vi-rectangle-past-end-of-line asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further
+ok    vi-rectangle-past-end-of-line-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    vi-rectangle-past-end-of-line-copy
+ok    vi-reenter
+ok    vi-cancel
+ok    vi-terminal-input-returns
+ok    vi-prefix-takes-precedence
+ok    vi-prefix-returns-to-the-copy-table
+ok    emacs-ordinary-pane-enter
+      case emacs-ordinary-pane-search-prompt
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) ^[[39m^[[49m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down)
+note  emacs-ordinary-pane-search-prompt asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes zz paints the command prompt from its own palette and ignores message-style
+      case emacs-ordinary-pane-search-typed
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) needlex^[[39m^[[49m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down) needlex
+note  emacs-ordinary-pane-search-typed asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes zz paints the command prompt from its own palette and ignores message-style
+      case emacs-ordinary-pane-search-backspace
+      first differing row 12 of 24
+        tmux: line-12 ^[[38;2;16;16;16m^[[48;2;205;0;205mneedle^[[39m^[[49m-12
+        zz:   line-12 ^[[7mneedle^[[0m-12
+note  emacs-ordinary-pane-search-backspace asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes zz paints the command prompt from its own palette and ignores message-style, and the incremental search already paints the current match: the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+      case emacs-ordinary-pane-search-submit
+      first differing row 12 of 24
+        tmux: line-12 ^[[38;2;16;16;16m^[[48;2;205;0;205mneedle^[[39m^[[49m-12
+        zz:   line-12 ^[[7mneedle^[[0m-12
+note  emacs-ordinary-pane-search-submit asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+ok    emacs-ordinary-pane-search-submit-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+      case emacs-ordinary-pane-search-again
+      first differing row 18 of 24
+        tmux: line-48 ^[[38;2;16;16;16m^[[48;2;205;0;205mneedle^[[39m^[[49m-48
+        zz:   line-48 ^[[7mneedle^[[0m-48
+note  emacs-ordinary-pane-search-again asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+      case emacs-ordinary-pane-search-reverse
+      first differing row 18 of 24
+        tmux: line-48 ^[[38;2;16;16;16m^[[48;2;205;0;205mneedle^[[39m^[[49m-48
+        zz:   line-48 ^[[7mneedle^[[0m-48
+note  emacs-ordinary-pane-search-reverse asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+      case emacs-ordinary-pane-search-backward
+      first differing row 18 of 24
+        tmux: line-30 ^[[38;2;16;16;16m^[[48;2;205;0;205mfiller-30^[[39m^[[49m
+        zz:   line-30 ^[[7mfiller-30^[[0m
+note  emacs-ordinary-pane-search-backward asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+ok    emacs-ordinary-pane-search-backward-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[filler-30]
+ok    emacs-ordinary-pane-search-cancel
+note  emacs-ordinary-pane-search-cancel zz pane_search_string outside the mode: []
+note  emacs-ordinary-pane-search-cancel tmux pane_search_string outside the mode: [filler-30]
+ok    vi-ordinary-pane-enter
+      case vi-ordinary-pane-search-prompt
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) ^[[39m^[[49m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down)
+note  vi-ordinary-pane-search-prompt asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes zz paints the command prompt from its own palette and ignores message-style
+      case vi-ordinary-pane-search-typed
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) needlex^[[39m^[[49m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down) needlex
+note  vi-ordinary-pane-search-typed asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes zz paints the command prompt from its own palette and ignores message-style
+      case vi-ordinary-pane-search-backspace
+      first differing row 23 of 24
+        tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) needle^[[39m^[[49m
+        zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down) needle
+note  vi-ordinary-pane-search-backspace asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes zz paints the command prompt from its own palette and ignores message-style
+      case vi-ordinary-pane-search-submit
+      first differing row 12 of 24
+        tmux: line-12 ^[[38;2;16;16;16m^[[48;2;205;0;205mneedle^[[39m^[[49m-12
+        zz:   line-12 ^[[7mneedle^[[0m-12
+note  vi-ordinary-pane-search-submit asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+ok    vi-ordinary-pane-search-submit-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+      case vi-ordinary-pane-search-again
+      first differing row 18 of 24
+        tmux: line-48 ^[[38;2;16;16;16m^[[48;2;205;0;205mneedle^[[39m^[[49m-48
+        zz:   line-48 ^[[7mneedle^[[0m-48
+note  vi-ordinary-pane-search-again asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+      case vi-ordinary-pane-search-reverse
+      first differing row 12 of 24
+        tmux: line-12 ^[[38;2;16;16;16m^[[48;2;205;0;205mneedle^[[39m^[[49m-12
+        zz:   line-12 ^[[7mneedle^[[0m-12
+note  vi-ordinary-pane-search-reverse asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+      case vi-ordinary-pane-search-backward
+      first differing row 18 of 24
+        tmux: line-30 ^[[38;2;16;16;16m^[[48;2;205;0;205mfiller-30^[[39m^[[49m
+        zz:   line-30 ^[[7mfiller-30^[[0m
+note  vi-ordinary-pane-search-backward asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+ok    vi-ordinary-pane-search-backward-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[filler-30]
+ok    vi-ordinary-pane-search-cancel
+note  vi-ordinary-pane-search-cancel zz pane_search_string outside the mode: []
+note  vi-ordinary-pane-search-cancel tmux pane_search_string outside the mode: [filler-30]
+note  native-search-command zz exit 0: <no output>
+note  native-search-command tmux exit 1: unknown command: copy-mode-search-prompt
+note  native-search-command zz last row: terminal search is unsupported here
+note  native-search-command tmux last row: L0:win*
+ok    live-mode-keys-emacs-entry
+ok    live-mode-keys-emacs-ignores-j
+ok    live-mode-keys-emacs-cancel
+ok    live-mode-keys-vi-entry
+ok    live-mode-keys-vi-moves-on-j
+ok    live-mode-keys-vi-cancel
+ok    live-binding-before-the-bind
+ok    live-binding-unbound-key-does-nothing
+ok    live-binding-runs-without-a-re-entry
+ok    live-binding-cancel
+ok    presentation-live-status-row
+      case presentation-copy-mode-position
+      first differing row 0 of 24
+        tmux: line-40 filler-40                                                         ^[[38;2;16;16;16m^[[48;2;205;205;0m[0/40]
+        zz:   line-40 filler-40
+      first differing glyph row 0 of 24
+        tmux text: line-40 filler-40                                                         [0/40]
+        zz text:   line-40 filler-40
+note  presentation-copy-mode-position asserted cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin draws copy-mode-position-format into the pane top row and zz paints a COPY badge on the status row
+ok    presentation-cancel
+all 97 cases agree on every channel they assert, 27 recorded a difference elsewhere
+97 of those cases assert at least one channel; 0 assert none and are recorded in full

@@ -1,0 +1,31 @@
+captured: 2026-09-10T16:59:45-03:00
+zz revision: 66b23b5f68502a81797909be33c268af4fde8dd0 on branch HEAD, base origin/main 3319cebab5d53d854199ae5e6c00d64b99c91e97
+worktree clean: yes
+zz binary: /home/demfabris/dev/zz-tui-copy/target/debug/zz
+zz sha256: fd9314c7e68723bd5e6b4c513f69909efee71f5765e7bc9f55d992c3e2bd6baf (debug build, not bit-reproducible on this box; attestation is the revision plus the clean tree)
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+pin version: tmux next-3.8
+pin commit (campaign.json tmux_commit): d77c9dc6aa021e4bc61f0da128c591af695e6466
+os: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+TERM: xterm-ghostty
+SHELL: /bin/bash
+bash: GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+outer size: 80x24 (the fixture's own outer pinned tmux)
+locale:
+LANG=en_US.UTF-8
+LC_CTYPE="en_US.UTF-8"
+LC_NUMERIC=pt_BR.UTF-8
+LC_TIME=pt_BR.UTF-8
+LC_COLLATE="en_US.UTF-8"
+LC_MONETARY=pt_BR.UTF-8
+LC_MESSAGES="en_US.UTF-8"
+LC_PAPER=pt_BR.UTF-8
+LC_NAME=pt_BR.UTF-8
+LC_ADDRESS=pt_BR.UTF-8
+LC_TELEPHONE=pt_BR.UTF-8
+LC_MEASUREMENT=pt_BR.UTF-8
+LC_IDENTIFICATION=pt_BR.UTF-8
+LC_ALL=

@@ -65,8 +65,8 @@ impl Default for KeyTables {
             ("-", "delete-buffer"),
             ("M-n", "next-window -a"),
             ("M-p", "previous-window -a"),
-            ("%", "split-picker -h"),
-            ("\"", "split-picker -v"),
+            ("%", "split-window -h"),
+            ("\"", "split-window"),
             ("!", "break-pane"),
             ("n", "next-window"),
             ("p", "previous-window"),
@@ -88,8 +88,8 @@ impl Default for KeyTables {
             ("?", "list-keys -N"),
             ("=", "choose-buffer -Z"),
             ("e", "send-last-output"),
-            ("s", "focus-sidebar"),
-            ("w", "focus-sidebar"),
+            ("s", "choose-tree -Zs"),
+            ("w", "choose-tree -Zw"),
             ("q", "display-panes"),
             ("r", "reload-config"),
             ("z", "resize-pane -Z"),
@@ -1292,7 +1292,7 @@ impl Deref for KeyName {
 }
 
 fn shifted_character(input: &KeyInput, character: char) -> char {
-    if input.modifiers.control() || input.modifiers.alt() {
+    if input.modifiers.control() {
         return character;
     }
     if input.modifiers.shift() && character.is_ascii_lowercase() {
@@ -1585,6 +1585,32 @@ mod tests {
             );
             assert_eq!(input_key_name(&input).as_str(), upper.to_string());
         }
+    }
+
+    /// A terminal writes `\033s` for M-s and `\033S` for M-S, two byte
+    /// sequences the pin binds separately, so Alt keeps the shift a client
+    /// reported. Control does not: a control byte carries no case, and 0x13 is
+    /// C-s whichever way it was typed.
+    #[test]
+    fn alt_keeps_the_shift_and_control_folds_it_away() {
+        let alt_shift = press(
+            KeyCode::Character('s'),
+            Modifiers::new(true, false, true, false),
+            Some("S"),
+        );
+        assert_eq!(input_key_name(&alt_shift).as_str(), "M-S");
+        let alt = press(
+            KeyCode::Character('s'),
+            Modifiers::new(false, false, true, false),
+            Some("s"),
+        );
+        assert_eq!(input_key_name(&alt).as_str(), "M-s");
+        let control_shift = press(
+            KeyCode::Character('s'),
+            Modifiers::new(true, true, false, false),
+            None,
+        );
+        assert_eq!(input_key_name(&control_shift).as_str(), "C-s");
     }
 
     #[test]
@@ -1987,11 +2013,11 @@ mod tests {
         );
         assert_eq!(
             tables.get("prefix", "%").unwrap().commands,
-            vec![CommandInvocation::new("split-picker", ["-h"])]
+            vec![CommandInvocation::new("split-window", ["-h"])]
         );
         assert_eq!(
             tables.get("prefix", "\"").unwrap().commands,
-            vec![CommandInvocation::new("split-picker", ["-v"])]
+            vec![CommandInvocation::new("split-window", [] as [&str; 0])]
         );
         assert_eq!(
             tables.get("prefix", "?").unwrap().commands,
@@ -2003,11 +2029,11 @@ mod tests {
         );
         assert_eq!(
             tables.get("prefix", "s").unwrap().commands,
-            vec![CommandInvocation::new("focus-sidebar", [] as [&str; 0])]
+            vec![CommandInvocation::new("choose-tree", ["-Zs"])]
         );
         assert_eq!(
             tables.get("prefix", "w").unwrap().commands,
-            vec![CommandInvocation::new("focus-sidebar", [] as [&str; 0])]
+            vec![CommandInvocation::new("choose-tree", ["-Zw"])]
         );
         assert_eq!(
             tables.get("prefix", "q").unwrap().commands,

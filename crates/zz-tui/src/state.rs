@@ -574,16 +574,6 @@ impl Model {
         changed
     }
 
-    pub fn toggle_sidebar_focus(&mut self) -> bool {
-        let was_visible = self.sidebar_visible();
-        self.sidebar.toggle_focus(self.size.columns);
-        let changed = was_visible != self.sidebar_visible();
-        if changed {
-            self.recompute_layout();
-        }
-        changed
-    }
-
     pub fn hide_sidebar(&mut self) -> bool {
         let was_visible = self.sidebar_visible();
         self.sidebar.hide();

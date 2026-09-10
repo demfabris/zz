@@ -172,16 +172,18 @@ count is consumed by the first `send` or `send-keys` command whose option prefix
 That command keeps its own `-N`; otherwise the engine inserts separate `-N <count>` arguments before
 the argument containing `-X`. Other commands and later actions stay unchanged. A binding of
 `split-window` (or `splitw`), whether imported from a
-tmux config or typed at `prefix :`, creates a plain terminal split like tmux. zz's *default* `%`/`"`
-bindings name the zz-native `split-picker` verb instead, which opens the pane-kind picker.
+tmux config or typed at `prefix :`, creates a plain terminal split like tmux, and since 2026-09-09
+so do zz's *default* `%`/`"` bindings: the zz-native `split-picker` verb stays a command anyone can
+bind, it is no longer what a stock key runs.
 
 # Default bindings (seeded in `KeyTables::default`)
 
 The pinned 303 defaults and zz's 311 defaults contain 226 shared keys. The live manifest owns 77
-missing keys, 85 zz-native keys, and 41 shared command-or-repeat divergences. The zz-native count
+missing keys, 85 zz-native keys, and 37 shared command-or-repeat divergences. The zz-native count
 grew by 22 on 2026-09-04 when the `choose-tree` and `choose-buffer` tables took the rest of
-`mode_tree_key`'s and `window_buffer_key`'s vocabulary. The remaining 185
-shared entries match structurally: 61 in `copy-mode`, 72 in `copy-mode-vi`, and 52 in `prefix`.
+`mode_tree_key`'s and `window_buffer_key`'s vocabulary. The divergent count fell by four on
+2026-09-09 when `%`, `"`, `s` and `w` adopted the pinned commands. The remaining 189
+shared entries match structurally: 61 in `copy-mode`, 72 in `copy-mode-vi`, and 56 in `prefix`.
 That structural equality does not claim complete command or action behavior; the existing consumer
 groups retain those runtime contracts.
 
@@ -189,15 +191,15 @@ Prefix table (partial, the canonical zz set):
 
 | Key | Command | Key | Command |
 | --- | --- | --- | --- |
-| `c` | `new-window` | `%` | `split-picker -h` |
-| `"` | `split-picker -v` | `!` | `break-pane` |
+| `c` | `new-window` | `%` | `split-window -h` |
+| `"` | `split-window` | `!` | `break-pane` |
 | `x` | `confirm-before … kill-pane` | `&` | `confirm-before … kill-window` |
 | `<prefix>` | `send-prefix` | | |
 | `n` / `p` | next / previous window | `o` | `select-pane -t:.+` |
 | `C-o` / `M-o` | `rotate-window` / `rotate-window -D` | `Space` | `next-layout` |
 | `E` | `select-layout -E` | `M-1`…`M-7` | select the seven named layouts |
 | `[` | `copy-mode` | `?` | `list-keys -N` |
-| `=` | `choose-buffer -Z` | `s` / `w` | `focus-sidebar` |
+| `=` | `choose-buffer -Z` | `s` / `w` | `choose-tree -Zs` / `-Zw` |
 | `q` | `display-panes` | `r` | `reload-config` |
 | `e` | `send-last-output` *(zz-native)* | | |
 | `z` | `resize-pane -Z` | `;` | `last-pane` |

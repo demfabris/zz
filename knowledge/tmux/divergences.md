@@ -640,8 +640,9 @@ remains for an implemented command.
 The catalog count does not include syntax zz accepts or parses before diverging:
 
 - The default prefix table has 60 bindings against the pin's 92, with 59 overlapping keys. zz
-  adds `e -> send-last-output`, omits 33 stock keys, and deliberately maps `%`/`"` to
-  `split-picker` plus `s`/`w` to `focus-sidebar`. Explicit imported commands retain tmux meaning;
+  adds `e -> send-last-output` and omits 33 stock keys. `%`/`"` and `s`/`w` ran the native
+  `split-picker` and `focus-sidebar` until 2026-09-09 and now run the pinned `split-window` and
+  `choose-tree`; both native verbs remain bindable. Explicit imported commands retain tmux meaning;
   the exact default delta lives in [key tables](/tmux/key-tables.md).
 - `refresh-client` bare and `-S` refresh the selected client's cached status jobs. The pan
   family `-c -D -L -R -U -l -r` and optional adjustment positional remain refused.

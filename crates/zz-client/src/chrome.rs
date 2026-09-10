@@ -316,11 +316,10 @@ impl ChromeProfile {
 
 type ChromeDefault = (&'static str, &'static str, ChromeAction);
 
-/// The raw-terminal client's chrome, whose chords all survive a PTY.
+/// The raw-terminal client's chrome, whose chords all survive a PTY and reach
+/// only the browser surface that owns them. Every other key belongs to the
+/// daemon's key tables, which is where the pin resolves it too.
 const TUI_DEFAULTS: &[ChromeDefault] = &[
-    (UI_TABLE, "C-\\", ChromeAction::Detach),
-    (UI_TABLE, "M-s", ChromeAction::ToggleSidebar),
-    (UI_TABLE, "M-S", ChromeAction::ToggleSidebar),
     (BROWSER_TABLE, "C-=", ChromeAction::BrowserZoomIn),
     (BROWSER_TABLE, "C-+", ChromeAction::BrowserZoomIn),
     (BROWSER_TABLE, "C--", ChromeAction::BrowserZoomOut),
@@ -662,14 +661,14 @@ mod tests {
     #[test]
     fn defaults_resolve_the_stock_chrome_chords() {
         let keymap = ChromeKeymap::new();
-        assert_eq!(
-            keymap.resolve("ui", &chord(KeyCode::Character('\\'), true, false, None)),
-            Some(ChromeAction::Detach)
-        );
-        assert_eq!(
-            keymap.resolve("ui", &chord(KeyCode::Character('s'), false, true, None)),
-            Some(ChromeAction::ToggleSidebar)
-        );
+        for key in ['\\', 's', 'S'] {
+            let control = key == '\\';
+            assert_eq!(
+                keymap.resolve("ui", &chord(KeyCode::Character(key), control, !control, None)),
+                None,
+                "the raw TUI must leave {key} to the daemon's key tables"
+            );
+        }
         assert_eq!(
             keymap.resolve(
                 "browser",
@@ -694,9 +693,9 @@ mod tests {
             keymap.resolve("ui", &chord(KeyCode::Character('d'), true, false, None)),
             Some(ChromeAction::Detach)
         );
-        assert!(keymap.unbind("ui", "C-\\"));
+        assert!(keymap.unbind("ui", "C-d"));
         assert_eq!(
-            keymap.resolve("ui", &chord(KeyCode::Character('\\'), true, false, None)),
+            keymap.resolve("ui", &chord(KeyCode::Character('d'), true, false, None)),
             None
         );
         assert_eq!(
@@ -708,7 +707,12 @@ mod tests {
     #[test]
     fn bindings_flatten_for_help_surfaces() {
         let bindings = ChromeKeymap::new().bindings();
-        assert!(bindings.contains(&("ui".to_owned(), "C-\\".to_owned(), ChromeAction::Detach)));
+        assert!(bindings.contains(&(
+            SIDEBAR_TABLE.to_owned(),
+            "q".to_owned(),
+            ChromeAction::ToggleSidebar
+        )));
+        assert!(!bindings.iter().any(|(table, _, _)| table == UI_TABLE));
         assert_eq!(
             bindings.len(),
             TUI_DEFAULTS.len() + TUI_SIDEBAR_DEFAULTS.len()

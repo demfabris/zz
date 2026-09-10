@@ -3283,6 +3283,8 @@ mod tests {
         }
 
         let mut sidebar_model = block_model(120, 10);
+        assert!(!sidebar_model.sidebar_visible(), "no width invokes it");
+        sidebar_model.focus_sidebar();
         assert!(sidebar_model.sidebar_visible());
         sidebar_model.set_status(block_status(vec!["ROW"], false));
         let mut renderer = Renderer::new();
@@ -3343,6 +3345,8 @@ mod tests {
         assert!(!output.contains("hidden message"));
 
         let mut sidebar_model = block_model(120, 10);
+        assert!(!sidebar_model.sidebar_visible(), "no width invokes it");
+        sidebar_model.focus_sidebar();
         assert!(sidebar_model.sidebar_visible());
         sidebar_model.confirm = model.confirm;
         assert!(status_overlay(&sidebar_model, 120).is_none());
@@ -3454,6 +3458,7 @@ mod tests {
         );
 
         let mut sidebar_model = block_model(120, 8);
+        sidebar_model.focus_sidebar();
         assert!(sidebar_model.sidebar_visible());
         sidebar_model.command_output_search = Some(SearchQuery::literal("visible"));
         assert!(matches!(
@@ -3477,6 +3482,7 @@ mod tests {
             total: 40,
         };
         model.command_output = Some((PaneId(9), viewport));
+        model.focus_sidebar();
         assert!(model.sidebar_visible());
         assert!(status_indicators(&model).starts_with("VIEW 3/40"));
         let Some(StatusOverlay::Right(overlay)) = status_overlay(&model, 120) else {

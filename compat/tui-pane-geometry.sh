@@ -45,14 +45,13 @@ resolve_binary() {
 ZZ_BIN="$(resolve_binary "$ZZ_INPUT")" || { printf 'error: zz binary not found: %s\n' "$ZZ_INPUT" >&2; exit 2; }
 TMUX_BIN="$(resolve_binary "$TMUX_INPUT")" || { printf 'error: tmux binary not found: %s\n' "$TMUX_INPUT" >&2; exit 2; }
 
-# Each entry is SIZE|MODE, and MODE governs the COLUMNS only: `same` asserts
-# both binaries hand the pane the same columns; `record` prints them without
-# asserting, for a width where zz's sidebar is chrome the pin has no
-# counterpart for. The sidebar's auto-hide threshold is 109 columns — 80 for
-# the pane plus 28 for the sidebar and 1 for its border — so 80 and 100 must
-# match and 120 is where zz's own chrome starts. Rows are asserted at all
-# three: the sidebar is a column of chrome, never a row of it.
-SIZES=(80x24\|same 100x24\|same 120x24\|record)
+# Columns and rows are asserted at every size. 120 used to be recorded instead:
+# the raw TUI showed its sidebar on its own from 109 columns — 80 for the pane
+# plus 28 for the sidebar and 1 for its border — and took those 29 columns off
+# a wide terminal's pane. Width no longer invokes the sidebar, so a 120-column
+# terminal hands the pane all 120 the way the pin does, and the width that used
+# to be the fixture's blind spot is now its assertion.
+SIZES=(80x24 100x24 120x24)
 SCRATCH_DIR="$(mktemp -d /tmp/zzgeo.XXXXXX)"
 TOKEN="${SCRATCH_DIR##*.}"
 OUTER_SOCKET_NAME="zzgeoo-$TOKEN"
@@ -245,9 +244,7 @@ ZZ_PID=$!
 wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
 
 printf 'pane geometry differential (pin %s)\n' "$(basename -- "$TMUX_BIN")"
-for entry in "${SIZES[@]}"; do
-  size="${entry%%|*}"
-  mode="${entry##*|}"
+for size in "${SIZES[@]}"; do
   columns="${size%x*}"
   rows="${size#*x}"
   SIZE_UNDER_TEST="$size"
@@ -279,17 +276,12 @@ for entry in "${SIZES[@]}"; do
   tmux_columns="${tmux_geometry%% *}"
   tmux_rows="${tmux_geometry##* }"
 
-  if [ "$mode" = same ]; then
-    CHECKS=$((CHECKS + 1))
-    if [ "$zz_columns" = "$tmux_columns" ]; then
-      printf 'ok    %s columns: both %s\n' "$size" "$zz_columns"
-    else
-      FAILURES=$((FAILURES + 1))
-      printf 'DIFF  %s columns: tmux %s, zz %s\n' "$size" "$tmux_columns" "$zz_columns"
-    fi
+  CHECKS=$((CHECKS + 1))
+  if [ "$zz_columns" = "$tmux_columns" ]; then
+    printf 'ok    %s columns: both %s\n' "$size" "$zz_columns"
   else
-    printf 'note  %s columns recorded, not asserted: tmux %s, zz %s (zz shows its sidebar here)\n' \
-      "$size" "$tmux_columns" "$zz_columns"
+    FAILURES=$((FAILURES + 1))
+    printf 'DIFF  %s columns: tmux %s, zz %s\n' "$size" "$tmux_columns" "$zz_columns"
   fi
   CHECKS=$((CHECKS + 1))
   if [ "$zz_rows" = "$tmux_rows" ]; then

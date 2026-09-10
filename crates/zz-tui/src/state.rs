@@ -1464,9 +1464,16 @@ mod tests {
 
     #[test]
     fn the_status_block_spans_only_the_main_columns_beside_the_sidebar() {
-        let model = make_model(130, 30);
-        assert!(model.sidebar_visible());
+        let mut model = make_model(130, 30);
+        assert!(
+            !model.sidebar_visible(),
+            "no width invokes the sidebar, so the status block owns every column"
+        );
+        assert_eq!(model.status_area(), (0, 130));
+        model.focus_sidebar();
         assert_eq!(model.status_area(), (29, 101));
+        model.hide_sidebar();
+        assert_eq!(model.status_area(), (0, 130));
 
         let narrow = make_model(79, 24);
         assert!(!narrow.sidebar_visible());

@@ -263,14 +263,12 @@ mod daemon_autostart {
         }
     }
 
-    /// Wide enough for the raw TUI's sidebar, which auto-hides below
-    /// `sidebar::AUTO_HIDE_COLUMNS` so that a narrower terminal keeps every
-    /// column for its pane. A status assertion that reads the block's own
-    /// geometry, its column origin or its row count, has to attach here,
-    /// because the sidebar moves the block right and owns the columns left of
-    /// it. `status-left` itself is drawn at every width; see
-    /// `stock_eighty_column_attach_draws_the_whole_status_row`.
-    const SIDEBAR_COLUMNS: u16 = 120;
+    /// Wider than the 109 columns the raw TUI used to take as its cue to show
+    /// the sidebar. Width never invokes it now, so a status assertion that
+    /// reads the block's own geometry attaches here to prove the block still
+    /// starts at column 1 and spans the whole terminal, the way `status.c`
+    /// draws it. Only `focus-sidebar` or a user binding moves it right.
+    const WIDE_COLUMNS: u16 = 120;
 
     /// What `ssh -t host zz attach` gets from a stock terminal, and the width
     /// `compat/tui-pane-geometry.sh` measures pinned tmux at.
@@ -2032,6 +2030,7 @@ mod daemon_autostart {
         }
         for arguments in [
             ["new-session", "-d", "-s", "styled", "-n", "main"].as_slice(),
+            ["set", "-t", "styled", "status-left-length", "40"].as_slice(),
             ["set", "-t", "styled", "status-left", "#[fg=red,bold]LEFT"].as_slice(),
             ["set", "-t", "styled", "status-right", "#[bg=blue]RIGHT"].as_slice(),
             [
@@ -2052,7 +2051,7 @@ mod daemon_autostart {
             );
         }
 
-        let Ok((mut master, slave)) = open_pty_sized(SIDEBAR_COLUMNS) else {
+        let Ok((mut master, slave)) = open_pty_sized(WIDE_COLUMNS) else {
             return;
         };
         rustix::io::ioctl_fionbio(&master, true).expect("set pty master nonblocking");
@@ -2221,14 +2220,14 @@ mod daemon_autostart {
         capture_command_until(command, needles, 80)
     }
 
-    fn capture_tui_until_beside_the_sidebar(
+    fn capture_tui_until_wide(
         fixture: &Fixture,
         attach: &[&str],
         needles: &[&[u8]],
     ) -> (bool, Vec<u8>, Option<std::process::ExitStatus>) {
         let mut command = fixture.command();
         command.args(attach);
-        capture_command_until(command, needles, SIDEBAR_COLUMNS)
+        capture_command_until(command, needles, WIDE_COLUMNS)
     }
 
     fn capture_command_until(
@@ -2348,7 +2347,7 @@ mod daemon_autostart {
             );
         }
 
-        let (rendered, captured, early_status) = capture_tui_until_beside_the_sidebar(
+        let (rendered, captured, early_status) = capture_tui_until_wide(
             &fixture,
             &["attach-session", "-t", "multirow"],
             &[b"[multirow]", b"ROWTWO"],
@@ -2359,7 +2358,7 @@ mod daemon_autostart {
             String::from_utf8_lossy(&captured),
         );
         assert!(!captured.windows(2).any(|window| window == b"#["));
-        for row in [b"\x1b[23;30H".as_slice(), b"\x1b[24;30H".as_slice()] {
+        for row in [b"\x1b[23;1H".as_slice(), b"\x1b[24;1H".as_slice()] {
             assert!(
                 captured.windows(row.len()).any(|window| window == row),
                 "both status rows paint above the last line: {}",
@@ -2367,7 +2366,7 @@ mod daemon_autostart {
             );
         }
         assert!(
-            visible_text_after(&captured, b"\x1b[24;30H")
+            visible_text_after(&captured, b"\x1b[24;1H")
                 .iter()
                 .any(|text| text.starts_with("ROWTWO")),
             "row 1 carries the second status-format row: {}",
@@ -2395,7 +2394,7 @@ mod daemon_autostart {
             );
         }
 
-        let (rendered, captured, early_status) = capture_tui_until_beside_the_sidebar(
+        let (rendered, captured, early_status) = capture_tui_until_wide(
             &fixture,
             &["attach-session", "-t", "toppos"],
             &[b"TOPMARK"],
@@ -2407,7 +2406,7 @@ mod daemon_autostart {
         );
         assert!(!captured.windows(2).any(|window| window == b"#["));
         assert!(
-            visible_text_after(&captured, b"\x1b[1;30H")
+            visible_text_after(&captured, b"\x1b[1;1H")
                 .iter()
                 .any(|text| text.starts_with("TOPMARK")),
             "the status block owns row zero of the main columns: {}",

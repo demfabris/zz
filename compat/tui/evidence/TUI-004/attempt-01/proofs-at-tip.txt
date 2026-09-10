@@ -29,3 +29,7 @@ NO PROOF HERE RAN AGAINST A BINARY BUILT ANYWHERE BUT THIS WORKTREE, and the bin
 the tip before the first of them. A cargo debug build of zz is not bit-reproducible on this box, so
 the hash identifies the artifact rather than attesting it; the attestation is the revision above
 plus a clean worktree, and provenance is reproduction.
+
+Recorded at 5e963474; the commit that carries this file, cdfd97be, adds evidence text only
+and changes no fixture, code or ledger byte (git diff --name-only 5e963474 cdfd97be lists
+only compat/tui/evidence/TUI-004/attempt-01/). Re-verified at the gate 2026-09-10.

@@ -42787,7 +42787,7 @@ mod tests {
         assert!(rows.contains(&"send-last-output [-t target-pane]"));
         assert!(rows.contains(&"capture-browser [-t target-pane] [-o output-path]"));
         assert!(rows.contains(&"debug-marker [note ...]"));
-        assert!(rows.contains(&"tools [argument ...]"));
+        assert!(rows.contains(&"tools [--skill]"));
         assert!(rows.contains(
             &"capture-pane (capturep) [-aeJMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
         ));

@@ -25,9 +25,9 @@
 #
 # THE CURSOR is read with `display-message -p` against the OUTER pane of each
 # side, so it is the cursor the inner client left in the outer terminal:
-# position, visibility, shape, blink and very-visible. The pin exposes all five
-# to a format (format.c format_cb_cursor_shape and its neighbours), so cursor
-# shape is a covered channel here rather than a declared hole.
+# position, visibility, shape, blink, very-visible and colour. The pin exposes
+# all six to a format (format.c format_cb_cursor_shape and its neighbours), so
+# every one of them is asserted here rather than declared a hole.
 #
 # CONTROLLED DYNAMIC VALUES, set on both sides before the first checkpoint and
 # never left to chance:
@@ -148,7 +148,6 @@ ZZ_PID=""
 FAILURES=0
 CHECKS=0
 RECORDS=0
-CURSOR_RECORDS=0
 LAST_ROWS_DIFFERED=0
 LAST_CURSOR_DIFFERED=0
 mkdir -p "$ZZ_HOME" "$TMUX_HOME" "$OUTER_HOME" "$ZZ_LOG_DIR"
@@ -275,19 +274,21 @@ wait_for() {
   die "$label did not happen within 10 seconds"
 }
 
-# The cursor is read in two halves. The first is asserted. The second is
-# RECORDED, printed on every checkpoint with both sides' values and never
-# waived by omission: measured 2026-09-09, zz's raw TUI writes DECSCUSR and an
-# OSC 12 cursor colour on every cursor placement
-# (crates/zz-tui/src/render.rs:1770-1799 turns the pane cursor's style and
-# blink into `\x1b[<n> q` and `\x1b]12;#rrggbb\x07`), where pinned tmux emits
-# neither and leaves the outer terminal's own cursor alone. The outer tmux
-# therefore reports shape=block blinking=1 for zz and shape=default blinking=0
-# for the pin at every size. That divergence has no registry owner yet, so this
-# fixture measures and prints it rather than asserting it or hiding it.
-CURSOR_ASSERTED_FORMAT='#{cursor_x},#{cursor_y} flag=#{cursor_flag} pane=#{pane_width}x#{pane_height}'
-CURSOR_RECORDED_FORMAT='shape=#{cursor_shape} blinking=#{cursor_blinking} very_visible=#{cursor_very_visible} colour=#{cursor_colour}'
-CURSOR_FORMAT="$CURSOR_ASSERTED_FORMAT $CURSOR_RECORDED_FORMAT"
+# The cursor is read WHOLE and asserted whole: position, visibility, shape,
+# blink, very-visible and colour. The last four used to be recorded instead,
+# because the raw TUI wrote DECSCUSR and an OSC 12 cursor colour on every
+# cursor placement where pinned tmux writes neither, so the outer tmux reported
+# shape=block blinking=1 colour=#e5c07b for zz against shape=default blinking=0
+# colour=none for the pin at every size and every checkpoint.
+#
+# tty.c tty_update_cursor is the pin's rule and it was read rather than
+# guessed: with the pane's screen at SCREEN_CURSOR_DEFAULT the pin emits Se
+# only if it had previously changed the style, and tty_force_cursor_colour with
+# ccolour -1 emits nothing at all, so a pane whose application never asked
+# leaves the outer terminal's own cursor exactly as it found it. The raw TUI
+# now does the same, and the whole tuple is one assertion.
+CURSOR_ASSERTED_FORMAT='#{cursor_x},#{cursor_y} flag=#{cursor_flag} pane=#{pane_width}x#{pane_height} shape=#{cursor_shape} blinking=#{cursor_blinking} very_visible=#{cursor_very_visible} colour=#{cursor_colour}'
+CURSOR_FORMAT="$CURSOR_ASSERTED_FORMAT"
 
 outer_pane_is() {
   [ "$(tmux_outer_command display-message -p -t "$1" '#{pane_width}x#{pane_height}' 2>/dev/null)" = "$2" ]
@@ -312,9 +313,6 @@ capture_plain() {
 }
 cursor_tuple() {
   tmux_outer_command display-message -p -t "=$OUTER_SESSION:$1" "$CURSOR_ASSERTED_FORMAT"
-}
-recorded_cursor_tuple() {
-  tmux_outer_command display-message -p -t "=$OUTER_SESSION:$1" "$CURSOR_RECORDED_FORMAT"
 }
 
 write_attach() {
@@ -481,26 +479,12 @@ compare_screens() {
   mapfile -t tmux_rows < <(capture_screen tmux)
   zz_cursor="$(cursor_tuple zz)"
   tmux_cursor="$(cursor_tuple tmux)"
-  local zz_recorded tmux_recorded
-  zz_recorded="$(recorded_cursor_tuple zz)"
-  tmux_recorded="$(recorded_cursor_tuple tmux)"
-  if [ "$zz_recorded" = "$tmux_recorded" ]; then
-    printf 'note  %s %s recorded cursor attributes identical, the record can close: %s\n' \
-      "$SIZE_LABEL" "$name" "$zz_recorded"
-  else
-    CURSOR_RECORDS=$((CURSOR_RECORDS + 1))
-    printf 'note  %s %s recorded cursor attributes differ (no registry owner yet)\n' "$SIZE_LABEL" "$name"
-    printf '        tmux: %s\n' "$tmux_recorded"
-    printf '        zz:   %s\n' "$zz_recorded"
-  fi
   if [ -n "$CAPTURE_DIR" ]; then
     printf '%s\n' "${zz_rows[@]-}" >"$CAPTURE_DIR/$SIZE_LABEL.$name.zz.screen.txt"
     printf '%s\n' "${tmux_rows[@]-}" >"$CAPTURE_DIR/$SIZE_LABEL.$name.tmux.screen.txt"
     {
-      printf 'asserted zz:   %s\n' "$zz_cursor"
-      printf 'asserted tmux: %s\n' "$tmux_cursor"
-      printf 'recorded zz:   %s\n' "$zz_recorded"
-      printf 'recorded tmux: %s\n' "$tmux_recorded"
+      printf 'zz:   %s\n' "$zz_cursor"
+      printf 'tmux: %s\n' "$tmux_cursor"
     } >"$CAPTURE_DIR/$SIZE_LABEL.$name.cursor.txt"
   fi
   total="$ROWS_UNDER_TEST"
@@ -526,8 +510,8 @@ compare_screens() {
   else
     printf '      all %s rows identical\n' "$total"
   fi
-  printf '      asserted cursor tmux: %s\n' "$tmux_cursor"
-  printf '      asserted cursor zz:   %s\n' "$zz_cursor"
+  printf '      cursor tmux: %s\n' "$tmux_cursor"
+  printf '      cursor zz:   %s\n' "$zz_cursor"
   return 1
 }
 
@@ -656,6 +640,21 @@ run_size() {
   checkpoint styled-left-trim record \
     'zz counts a #[...] section against status-left-length where the pin does not'
   set_on_both status-left L
+
+  # THE RESIDUE OF THE CURSOR FIX, driven identically on both sides and left
+  # LAST because it changes the outer terminal's cursor for the rest of the
+  # size. The raw TUI no longer writes DECSCUSR or OSC 12 at all, which is the
+  # pin's behaviour for a pane whose application never asked; it is not the
+  # pin's behaviour for a pane that DOES ask. The pin tracks s->cstyle per
+  # screen and forwards the request; zz's wire has nowhere to carry it, because
+  # libghostty's render state reports a concrete cursor style and never `the
+  # application has not asked` (RenderStateCursorVisualStyle is BAR, BLOCK,
+  # UNDERLINE or BLOCK_HOLLOW), and zz_terminal::Cursor packs those same four
+  # into two bits. Recorded here so the cost of the fix is visible on every run.
+  clear_both
+  send_both "printf '\\033[5 q'"
+  checkpoint cursor-style-request record \
+    'the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request'
 }
 
 # --- the sidebar, driven on one side on purpose -----------------------------
@@ -826,6 +825,17 @@ run_self_check() {
   compare_screens sidebar-shown || true
   self_check_case 'sidebar, focus-sidebar shown on one side' rows
 
+  # The cursor tuple's shape half, now that it is asserted rather than recorded.
+  # Both sides type the same command and each reads its own file; only one file
+  # carries the DECSCUSR, so the difference is in the cursor and nowhere else.
+  SIZE_LABEL='80x24-cursor-shape'
+  attach_both_at 80 24
+  plant zz cstyle 'CSMARK'
+  plant tmux cstyle '\033[5 qCSMARK'
+  send_both 'printf "%b" "$(cat $HOME/cstyle)"'
+  self_check_settle_on CSMARK cursor-shape
+  self_check_case 'cursor shape, DECSCUSR on one side' cursor
+
   SIZE_LABEL='80x24-geometry'
   attach_both_at 80 24
   side_command zz split-window -v -t "$(active_pane zz)" "$INNER_SHELL" ||
@@ -901,9 +911,9 @@ done
 run_sidebar_case
 
 if [ "$FAILURES" -ne 0 ]; then
-  printf '%s of %s asserted checkpoints differ, %s recorded, %s recorded cursor differences\n' \
-    "$FAILURES" "$CHECKS" "$RECORDS" "$CURSOR_RECORDS"
+  printf '%s of %s asserted checkpoints differ, %s recorded\n' \
+    "$FAILURES" "$CHECKS" "$RECORDS"
   exit 1
 fi
-printf 'all %s asserted checkpoints identical, %s recorded not asserted, %s recorded cursor differences\n' \
-  "$CHECKS" "$RECORDS" "$CURSOR_RECORDS"
+printf 'all %s asserted checkpoints identical, %s recorded not asserted\n' \
+  "$CHECKS" "$RECORDS"

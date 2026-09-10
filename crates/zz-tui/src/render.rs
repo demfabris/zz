@@ -11,7 +11,7 @@ use zz_protocol::{
     parse_styled_segments,
 };
 use zz_terminal::{
-    CellWidth, Color, CursorStyle, Glyph, KittyPlacement, PackedCell, PackedStyle, SearchDirection,
+    CellWidth, Color, Glyph, KittyPlacement, PackedCell, PackedStyle, SearchDirection,
     SearchQuery, TerminalAppearance, TerminalMode, TerminalViewport, UnderlineStyle,
 };
 
@@ -1664,7 +1664,7 @@ impl Renderer {
                 start.saturating_add(column.min(width.saturating_sub(1))),
                 row,
             );
-            self.output.extend_from_slice(b"\x1b[6 q\x1b[?25h");
+            self.output.extend_from_slice(b"\x1b[?25h");
             return;
         }
         let Some(pane) = model.active_pane() else {
@@ -1715,7 +1715,7 @@ impl Renderer {
         };
         let (_, column) = command_output_search_display(query, model.size.columns);
         write_cursor_position(&mut self.output, column, row);
-        self.output.extend_from_slice(b"\x1b[6 q\x1b[?25h");
+        self.output.extend_from_slice(b"\x1b[?25h");
     }
 
     fn place_sidebar_edit_cursor(&mut self, model: &Model) {
@@ -1741,7 +1741,7 @@ impl Renderer {
             column,
             u16::try_from(visible_row).unwrap_or(u16::MAX),
         );
-        self.output.extend_from_slice(b"\x1b[6 q\x1b[?25h");
+        self.output.extend_from_slice(b"\x1b[?25h");
     }
 
     fn place_viewport_cursor(
@@ -1767,36 +1767,7 @@ impl Renderer {
             rect.x.saturating_add(column),
             rect.y.saturating_add(cursor.row()),
         );
-        let shape = match cursor.style() {
-            CursorStyle::Block | CursorStyle::BlockHollow => {
-                if cursor.blinking() {
-                    1
-                } else {
-                    2
-                }
-            }
-            CursorStyle::Underline => {
-                if cursor.blinking() {
-                    3
-                } else {
-                    4
-                }
-            }
-            CursorStyle::Bar => {
-                if cursor.blinking() {
-                    5
-                } else {
-                    6
-                }
-            }
-        };
-        let color = cursor.color();
-        write!(
-            self.output,
-            "\x1b[{shape} q\x1b]12;#{:02x}{:02x}{:02x}\x07\x1b[?25h",
-            color.r, color.g, color.b
-        )
-        .expect("writing to Vec cannot fail");
+        self.output.extend_from_slice(b"\x1b[?25h");
     }
 
     fn hide_cursor(&mut self) {
@@ -2691,7 +2662,7 @@ mod tests {
     use super::*;
     use crate::state::ClientMessage;
     use zz_protocol::MenuState;
-    use zz_terminal::{CellWidth, Cursor, SessionStatus, TerminalDictionary};
+    use zz_terminal::{CellWidth, Cursor, CursorStyle, SessionStatus, TerminalDictionary};
 
     fn styled_viewport() -> TerminalViewport {
         let mut viewport = TerminalViewport::blank(3, 1, SessionStatus::Running);
@@ -2980,7 +2951,8 @@ mod tests {
         assert!(output.contains("\x1b[31m"), "{output:?}");
         assert!(output.contains("\x1b[44m"), "{output:?}");
         assert!(output.contains("\x1b[4;8H"), "{output:?}");
-        assert!(output.contains("\x1b[6 q\x1b]12;"));
+        assert!(!output.contains(" q"), "{output:?}");
+        assert!(!output.contains("\x1b]12;"), "{output:?}");
     }
 
     #[test]

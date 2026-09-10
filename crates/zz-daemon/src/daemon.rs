@@ -12999,29 +12999,37 @@ impl Shared {
         args: &[RawText],
     ) -> Result<(PaneId, LastCommandCapture), DaemonError> {
         let target = parse_target_only_args(verb, args)?;
-        let (pane, terminal) = {
+        let (pane, terminal, is_agent) = {
             let inner = self.inner.lock();
             let pane =
                 inner
                     .engine
                     .resolve_pane(target.as_deref(), context.window, context.pane)?;
-            if !matches!(
-                inner.engine.state.pane(pane).map(|pane| &pane.kind),
-                Some(PaneKind::Terminal | PaneKind::Agent(_))
-            ) {
-                return Err(
-                    ServerError::InvalidTarget(format!("{pane} is not a terminal pane")).into(),
-                );
-            }
+            let is_agent = match inner.engine.state.pane(pane).map(|pane| &pane.kind) {
+                Some(PaneKind::Terminal) => false,
+                Some(PaneKind::Agent(_)) => true,
+                _ => {
+                    return Err(ServerError::InvalidTarget(format!(
+                        "{pane} is not a terminal pane"
+                    ))
+                    .into());
+                }
+            };
             let terminal = inner
                 .terminals
                 .get(&pane)
                 .cloned()
                 .ok_or(ServerError::PaneExited(pane))?;
-            (pane, terminal)
+            (pane, terminal, is_agent)
         };
         let capture = match terminal.capture_last_command() {
             Ok(capture) => capture,
+            Err(TerminalCaptureError::NoSemanticMarks) if is_agent => {
+                return Err(ServerError::InvalidCommand(format!(
+                    "{pane} has not completed a turn yet"
+                ))
+                .into());
+            }
             Err(TerminalCaptureError::NoSemanticMarks) => {
                 return Err(ServerError::InvalidCommand(format!(
                     "{pane} has no shell-integration marks; {verb} needs a shell that emits \
@@ -13039,8 +13047,9 @@ impl Shared {
             Err(error) => return Err(ServerError::Internal(error.to_string()).into()),
         };
         if capture.command.trim().is_empty() {
+            let unit = if is_agent { "turn" } else { "command" };
             return Err(ServerError::InvalidCommand(format!(
-                "{pane} has not completed a command yet"
+                "{pane} has not completed a {unit} yet"
             ))
             .into());
         }
@@ -37923,7 +37932,9 @@ target. Plain sends and `--submit` deliver through Claude Code's inbox between
 its tool calls, attributed to your pane, or start a turn when it is idle.
 `--wait` prints the session's reply and exits non-zero if Claude Code refuses,
 expires, or drops the message, the session exits, or the timeout passes. Held
-and delivered status updates keep the wait open.
+and delivered status updates keep the wait open. A plain send carries no reply
+address unless you are a registered peer: a caller that needs the answer uses
+`--wait`, and a pane that should be reachable sets `@name`.
 
 ### `zz show-agent-permission [-t %N]`
 
@@ -38054,8 +38065,10 @@ Code refuses idle subscriptions to these peers; wait with
 
 A terminal pane becomes a peer when you set its pane `@name` option:
 `zz set-option -p -t %3 @name codex-1`. Messages to it are pasted into the pane
-and submitted, so do not name a bare shell pane. Claude Code terminal sessions
-keep their own registration.
+and submitted, so do not name a bare shell pane. This is how Codex, Gemini, and
+every other terminal agent join the bus; the daemon hosts no vendor's server
+and reads their state only from the bell and the window title. Claude Code
+terminal sessions keep their own registration.
 
 ## Foreign agents in terminal panes
 

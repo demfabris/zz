@@ -90,6 +90,13 @@ Messages submit input to the terminal, so do not name a bare shell pane. Changin
 `name` and `nameSince` in place. Unsetting the option or closing the pane removes its peer record
 and socket.
 
+This typed path is the whole story for Codex, Gemini, and any other terminal agent, by decision on
+2026-09-10. A version of zz hosted Codex's app-server per pane behind a `split-codex` verb, which
+gave steering, typed state, and approvals from the CLI; it was withdrawn the same day because it
+embedded one vendor's loop and its own verb into zz. The archive tag `archive/codex-host` keeps
+that work. What remains vendor-neutral: name the pane, deliver by verified paste, read state from
+the bell and the title, and let the human answer approvals in the pane.
+
 ## Waiting for a reply
 
 For a Claude Code terminal target, `agent-send --wait` requires a command or control client. The
@@ -98,7 +105,9 @@ Concurrent waits share that inbox; the last caller to finish removes its record 
 
 The daemon registers the message id and target socket before posting. The payload retains the
 sender pane's peer name, or the `zz %N` / `zz` fallback, but its `from` address points to the daemon
-inbox. Claude Code can therefore validate the reply address through the registry.
+inbox. Claude Code can therefore validate the reply address through the registry. A plain send
+from a caller without a peer stays fire-and-forget by decision: a caller that needs the answer uses
+`--wait`, and a pane that should be reachable sets `@name`; there is no daemon inbox for strays.
 
 Replies have no reply-to id. A `type: user` line resolves the oldest unresolved wait whose target
 socket equals the line's `from` address (`uds:<target socket>`). Other targets keep waiting. The

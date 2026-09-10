@@ -60,7 +60,9 @@ target. Plain sends and `--submit` deliver through Claude Code's inbox between
 its tool calls, attributed to your pane, or start a turn when it is idle.
 `--wait` prints the session's reply and exits non-zero if Claude Code refuses,
 expires, or drops the message, the session exits, or the timeout passes. Held
-and delivered status updates keep the wait open.
+and delivered status updates keep the wait open. A plain send carries no reply
+address unless you are a registered peer: a caller that needs the answer uses
+`--wait`, and a pane that should be reachable sets `@name`.
 
 ### `zz show-agent-permission [-t %N]`
 
@@ -191,8 +193,10 @@ Code refuses idle subscriptions to these peers; wait with
 
 A terminal pane becomes a peer when you set its pane `@name` option:
 `zz set-option -p -t %3 @name codex-1`. Messages to it are pasted into the pane
-and submitted, so do not name a bare shell pane. Claude Code terminal sessions
-keep their own registration.
+and submitted, so do not name a bare shell pane. This is how Codex, Gemini, and
+every other terminal agent join the bus; the daemon hosts no vendor's server
+and reads their state only from the bell and the window title. Claude Code
+terminal sessions keep their own registration.
 
 ## Foreign agents in terminal panes
 

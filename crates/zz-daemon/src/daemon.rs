@@ -19788,7 +19788,7 @@ impl Shared {
                     .key_engines
                     .entry(client)
                     .or_default()
-                    .switch_table(None);
+                    .cancel_prefix();
             }
         }
         self.sync_prefix_armed(client);

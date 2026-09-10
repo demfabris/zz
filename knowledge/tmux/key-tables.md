@@ -286,8 +286,8 @@ were the last divergent shared shapes now store the pin's exact commands. Fourte
 takes the flag as a presentation hint its own client surface honours, so the stored command matches
 and only the drawing differs. The remaining two, vi `#` and `*`, carry
 `send-keys -FX search-backward -- "#{copy_cursor_word}"` and its forward twin. `#{pane_search_string}`
-in the emacs `-I` value still expands empty in zz, so `C-s` and `C-r` open with an empty input rather
-than the last search.
+in the emacs `-I` value expands to the copy session's last search, so `C-s` and `C-r` pre-fill it
+inside one copy-mode entry; a fresh entry starts empty because the string dies with the session.
 See [copy mode](/tmux/copy-mode.md).
 
 # Shifted key spellings

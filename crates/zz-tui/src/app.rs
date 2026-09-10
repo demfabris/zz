@@ -1467,8 +1467,14 @@ fn handle_core_event(
             Ok(ProtocolOutcome::Repaint)
         }
         CoreEvent::CommandPromptChanged => {
-            model.command_prompt = lock_core(core).command_prompt().cloned();
-            Ok(ProtocolOutcome::Repaint)
+            let prompt = lock_core(core).command_prompt().cloned();
+            let closed = model.command_prompt.is_some() && prompt.is_none();
+            model.command_prompt = prompt;
+            Ok(if closed {
+                ProtocolOutcome::RepaintAll
+            } else {
+                ProtocolOutcome::Repaint
+            })
         }
         CoreEvent::CommandOutputChanged => {
             let (output_id, output) = {

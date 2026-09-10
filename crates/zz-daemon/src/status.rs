@@ -131,17 +131,19 @@ pub(crate) const LIST_CLIENTS_CONTEXT_FORMATS: [&str; 1] = ["line"];
 /// The `window_copy_formats` names zz answers. tmux adds them to the format
 /// tree from the pane's mode entry; zz reads them off the client view that
 /// holds the copy session, because copy mode is per client here.
-pub(crate) const COPY_MODE_CONTEXT_FORMATS: [&str; 15] = [
+pub(crate) const COPY_MODE_CONTEXT_FORMATS: [&str; 17] = [
     "copy_cursor_line",
     "copy_cursor_word",
     "copy_cursor_x",
     "copy_cursor_y",
+    "rectangle_toggle",
     "scroll_position",
     "search_count",
     "search_count_partial",
     "search_match",
     "search_present",
     "search_timed_out",
+    "selection_active",
     "selection_end_x",
     "selection_end_y",
     "selection_present",
@@ -1259,12 +1261,14 @@ impl DaemonFormatHooks<'_> {
             cursor_word,
             cursor_x,
             cursor_y,
+            rectangle_toggle,
             scroll_position,
             search_count,
             search_count_partial,
             search_match,
             search_present,
             search_timed_out,
+            selection_active,
             selection_end_x,
             selection_end_y,
             selection_present,
@@ -1284,6 +1288,8 @@ impl DaemonFormatHooks<'_> {
             );
         }
         match name {
+            _ if name == rectangle_toggle => Some(u8::from(view.rectangle_toggle).to_string()),
+            _ if name == selection_active => Some(u8::from(view.selection_active).to_string()),
             _ if name == search_present => Some(u8::from(view.search_present).to_string()),
             _ if name == search_timed_out => Some(u8::from(view.search_timed_out).to_string()),
             _ if name == search_match => Some(view.search_match.clone()),
@@ -1493,6 +1499,11 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     "0"
                 }
                 .to_owned(),
+            ),
+            "pane_search_string" => Some(
+                self.copy_mode_view(context)
+                    .map(|view| view.search_string.clone())
+                    .unwrap_or_default(),
             ),
             "pane_mode" => Some(
                 if self.copy_mode_view(context)?.view_mode {
@@ -2205,7 +2216,7 @@ mod tests {
     #[test]
     fn daemon_delegated_format_consumers_match_mux_inventory() {
         let delegated = zz_mux::delegated_format_variable_names().collect::<Vec<_>>();
-        assert_eq!(delegated.len(), 48);
+        assert_eq!(delegated.len(), 49);
 
         let session = SessionId(1);
         let pane = PaneId(1);
@@ -2255,6 +2266,47 @@ mod tests {
                 "daemon format hook does not consume {name}"
             );
         }
+    }
+
+    #[test]
+    fn copy_mode_toggle_selection_and_search_formats_answer_from_the_copy_view() {
+        let pane = PaneId(1);
+        let context = StatusContext {
+            pane_id: pane.to_string(),
+            ..StatusContext::default()
+        };
+        let answer = |facts: &FormatHookFacts| {
+            zz_mux::expand_format_values(
+                "#{selection_active}:#{rectangle_toggle}:[#{pane_search_string}]",
+                &context,
+                &mut DaemonFormatHooks::command(facts),
+            )
+        };
+        let in_mode = FormatHookFacts {
+            copy_modes: Arc::new(BTreeMap::from([(
+                pane,
+                vec![(
+                    String::new(),
+                    Arc::new(CopyModeFacts {
+                        rectangle_toggle: true,
+                        selection_active: true,
+                        search_string: "needle".to_owned(),
+                        ..CopyModeFacts::default()
+                    }),
+                )],
+            )])),
+            ..FormatHookFacts::default()
+        };
+        assert_eq!(answer(&in_mode), "1:1:[needle]");
+        let entered = FormatHookFacts {
+            copy_modes: Arc::new(BTreeMap::from([(
+                pane,
+                vec![(String::new(), Arc::new(CopyModeFacts::default()))],
+            )])),
+            ..FormatHookFacts::default()
+        };
+        assert_eq!(answer(&entered), "0:0:[]");
+        assert_eq!(answer(&FormatHookFacts::default()), "::[]");
     }
 
     #[test]

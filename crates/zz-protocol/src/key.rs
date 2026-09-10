@@ -799,6 +799,7 @@ pub struct KeyEngine {
     repeat_deadline: Option<Instant>,
     prefix_deadline: Option<Instant>,
     last_repeat_key: Option<String>,
+    mode_table_after_prefix: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -979,7 +980,11 @@ impl KeyEngine {
             ));
             return (KeyDecision::Ignore, false);
         }
-        if !self.mode_table && self.table.as_deref() != Some("prefix") && tables.is_prefix(&key) {
+        if self.table.as_deref() != Some("prefix") && tables.is_prefix(&key) {
+            if self.mode_table {
+                self.mode_table_after_prefix = self.table.take();
+                self.mode_table = false;
+            }
             self.table = Some("prefix".to_owned());
             self.repeat_deadline = None;
             self.prefix_deadline = (!prefix_timeout.is_zero()).then_some(now + prefix_timeout);
@@ -1133,8 +1138,8 @@ impl KeyEngine {
     }
 
     fn clear_explicit_table(&mut self) {
-        self.table = None;
-        self.mode_table = false;
+        self.table = self.mode_table_after_prefix.take();
+        self.mode_table = self.table.is_some();
         self.repeat_deadline = None;
         self.prefix_deadline = None;
         self.last_repeat_key = None;
@@ -1145,8 +1150,15 @@ impl KeyEngine {
         self.mode_table = false;
     }
 
+    pub fn cancel_prefix(&mut self) {
+        if self.table.as_deref() == Some("prefix") {
+            self.clear_explicit_table();
+        }
+    }
+
     pub fn switch_table(&mut self, table: Option<String>) {
         self.mode_table = matches!(table.as_deref(), Some("copy-mode" | "copy-mode-vi"));
+        self.mode_table_after_prefix = None;
         self.table = table;
         self.pending = None;
         self.repeat_count = None;
@@ -1560,6 +1572,31 @@ mod tests {
             KeyDecision::Commands(_)
         ));
         assert_eq!(engine.active_table(), None);
+    }
+
+    #[test]
+    fn prefix_takes_precedence_over_a_copy_table_binding_and_returns_to_the_mode() {
+        let tables = KeyTables::default();
+        for (table, copy_key) in [("copy-mode-vi", "k"), ("copy-mode", "C-p")] {
+            let mut engine = KeyEngine::default();
+            engine.switch_table(Some(table.to_owned()));
+            assert!(tables.get(table, "C-b").is_some(), "{table} binds C-b");
+            assert_eq!(engine.handle(&tables, "C-b"), KeyDecision::Prefix);
+            assert_eq!(engine.active_table(), Some("prefix"));
+            assert!(matches!(
+                engine.handle(&tables, "["),
+                KeyDecision::Commands(_)
+            ));
+            assert_eq!(engine.active_table(), Some(table));
+            assert!(matches!(
+                engine.handle(&tables, copy_key),
+                KeyDecision::Commands(_)
+            ));
+            assert_eq!(engine.active_table(), Some(table));
+            assert_eq!(engine.handle(&tables, "C-b"), KeyDecision::Prefix);
+            engine.cancel_prefix();
+            assert_eq!(engine.active_table(), Some(table));
+        }
     }
 
     #[test]

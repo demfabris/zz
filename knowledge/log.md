@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-09-09
+* **Update**: Integrated TUI parity cycle 1 on the alienware Linux box (`38c22b9e`): the whole-screen fixture `compat/tui-screen-diff.sh` (65 checkpoints, sabotage self-checks, the 109/120 sidebar recordings TUI-004 opens on), timeout-diagnostic retention in the geometry fixture, and banked proof for TUI-001 and TUI-002. Nothing verified yet: the recorded macOS geometry timeout stays unexplained after the adversarial review refuted the stale-binary story from the registry's own resolution text, so cycle 2 (`compat/tui/run-2.js`) is one attested macOS fixture run plus the records that flip both obligations to verified.
 * **Creation**: Added the TUI parity contract, the twelve-package proof ledger with its validator and generated report, the cycle-1 runner, and the campaign playbook. Runtime parity work has not started.
 * **Fix**: Removed the Agent footer background that stacked pane opacity and produced a dark bar beneath the composer. The footer now inherits the pane fill; the raised composer card keeps its own opacity.
 * **Update**: Added `chrome-contrast` with a 1.0 default and a 0.5–2.0 range. Desktop, browser, and showcase expose a 50–200% control with reset. The scalar scales elevation, hover, active, fill, glow, wash, and derived borders; muted text moves closer to foreground as contrast rises. Native macOS keeps the default strengths.

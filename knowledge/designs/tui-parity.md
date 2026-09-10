@@ -2,7 +2,7 @@
 type: Design Plan
 title: TUI parity campaign
 description: "The terminal-client parity contract: tmux observable behavior by default, zz additions through superset commands, and proof tied to the tested revision."
-status: Contract agreed 2026-09-09; cycle 1 (fixture baseline) written, not launched; runtime parity work has not started
+status: Contract agreed 2026-09-09; cycle 1 (fixture baseline) integrated 2026-09-09 at 38c22b9e with proof banked and 0/12 verified pending the macOS clause of TUI-001; runtime parity work has not started
 resource: compat/tui/campaign.json
 tags:
 - tui

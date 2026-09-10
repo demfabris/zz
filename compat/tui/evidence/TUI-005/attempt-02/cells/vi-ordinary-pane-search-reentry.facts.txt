@@ -1,0 +1,10 @@
+cursor zz:   2,23 flag=1 pane=80x24
+cursor tmux: 2,23 flag=1 pane=80x24
+facts zz:   mode=copy-mode in=1 column=2 selection=0 line=[$]
+facts tmux: mode=copy-mode in=1 column=2 selection=0 line=[$]
+view zz:    row=23 scroll=0
+view tmux:  row=23 scroll=0
+buffer zz:
+0000000
+buffer tmux:
+0000000

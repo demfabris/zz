@@ -148,8 +148,23 @@ note  emacs-ordinary-pane-search-reverse asserted text,cursor,facts,view,buffer,
 note  emacs-ordinary-pane-search-backward asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
 ok    emacs-ordinary-pane-search-backward-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[filler-30]
 ok    emacs-ordinary-pane-search-cancel
-note  emacs-ordinary-pane-search-cancel zz pane_search_string outside the mode: []
-note  emacs-ordinary-pane-search-cancel tmux pane_search_string outside the mode: [filler-30]
+ok    emacs-ordinary-pane-search-cancel-formats selection_active=[] rectangle_toggle=[] pane_search_string=[filler-30]
+ok    emacs-ordinary-pane-search-reentry
+ok    emacs-ordinary-pane-search-reentry-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[filler-30]
+      case emacs-ordinary-pane-search-reentry-again
+      first differing row 18 of 24
+        tmux: line-30 ^[[38;2;16;16;16m^[[48;2;205;0;205mfiller-30^[[39m^[[49m
+        zz:   line-30 ^[[7mfiller-30^[[0m
+note  emacs-ordinary-pane-search-reentry-again asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+ok    emacs-forward-search-reentry
+ok    emacs-forward-search-reentry-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+      case emacs-forward-search-reentry-searches-up
+      first differing row 9 of 24
+        tmux: line-48 ^[[38;2;16;16;16m^[[48;2;205;0;205mneedle^[[39m^[[49m-48
+        zz:   line-48 ^[[7mneedle^[[0m-48
+note  emacs-forward-search-reentry-searches-up asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+ok    emacs-forward-search-cancel
+ok    emacs-forward-search-cancel-formats selection_active=[] rectangle_toggle=[] pane_search_string=[needle]
 ok    vi-ordinary-pane-enter
       case vi-ordinary-pane-search-prompt
       first differing row 23 of 24
@@ -189,8 +204,23 @@ note  vi-ordinary-pane-search-reverse asserted text,cursor,facts,view,buffer, th
 note  vi-ordinary-pane-search-backward asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
 ok    vi-ordinary-pane-search-backward-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[filler-30]
 ok    vi-ordinary-pane-search-cancel
-note  vi-ordinary-pane-search-cancel zz pane_search_string outside the mode: []
-note  vi-ordinary-pane-search-cancel tmux pane_search_string outside the mode: [filler-30]
+ok    vi-ordinary-pane-search-cancel-formats selection_active=[] rectangle_toggle=[] pane_search_string=[filler-30]
+ok    vi-ordinary-pane-search-reentry
+ok    vi-ordinary-pane-search-reentry-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[filler-30]
+      case vi-ordinary-pane-search-reentry-again
+      first differing row 18 of 24
+        tmux: line-30 ^[[38;2;16;16;16m^[[48;2;205;0;205mfiller-30^[[39m^[[49m
+        zz:   line-30 ^[[7mfiller-30^[[0m
+note  vi-ordinary-pane-search-reentry-again asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+ok    vi-forward-search-reentry
+ok    vi-forward-search-reentry-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+      case vi-forward-search-reentry-searches-up
+      first differing row 9 of 24
+        tmux: line-48 ^[[38;2;16;16;16m^[[48;2;205;0;205mneedle^[[39m^[[49m-48
+        zz:   line-48 ^[[7mneedle^[[0m-48
+note  vi-forward-search-reentry-searches-up asserted text,cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video
+ok    vi-forward-search-cancel
+ok    vi-forward-search-cancel-formats selection_active=[] rectangle_toggle=[] pane_search_string=[needle]
 note  native-search-command zz exit 0: <no output>
 note  native-search-command tmux exit 1: unknown command: copy-mode-search-prompt
 note  native-search-command zz last row: terminal search is unsupported here
@@ -215,5 +245,5 @@ ok    presentation-live-status-row
         zz text:   line-40 filler-40
 note  presentation-copy-mode-position asserted cursor,facts,view,buffer, the rest recorded: SIBLING:modes the pin draws copy-mode-position-format into the pane top row and zz paints a COPY badge on the status row
 ok    presentation-cancel
-all 97 cases agree on every channel they assert, 27 recorded a difference elsewhere
-97 of those cases assert at least one channel; 0 assert none and are recorded in full
+all 115 cases agree on every channel they assert, 31 recorded a difference elsewhere
+115 of those cases assert at least one channel; 0 assert none and are recorded in full

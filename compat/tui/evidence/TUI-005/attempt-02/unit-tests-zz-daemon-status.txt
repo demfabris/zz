@@ -3,8 +3,7 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-   Compiling zz-daemon v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-daemon)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.22s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.52s
      Running unittests src/lib.rs (target/debug/deps/zz_daemon-a9db643d43e262df)
 
 running 44 tests
@@ -21,12 +20,12 @@ test status::tests::browser_url_status_uses_active_tab_and_is_empty_for_terminal
 test status::tests::buffer_samples_preserve_utf8_and_escape_control_and_invalid_bytes ... ok
 test status::tests::attached_status_jobs_start_in_each_clients_working_directory ... ok
 test status::tests::content_search_reads_visible_terminal_rows ... ok
-test status::tests::copy_mode_toggle_selection_and_search_formats_answer_from_the_copy_view ... ok
+test status::tests::copy_mode_toggle_and_selection_formats_answer_from_the_copy_view ... ok
 test status::tests::daemon_delegated_format_consumers_match_mux_inventory ... ok
 test status::tests::message_line_clamps_against_the_published_row_count ... ok
 test status::tests::only_changed_clients_are_published ... ok
-test status::tests::commands_run_once_and_then_come_from_the_cache ... ok
 test status::tests::oversized_row_title_and_base_style_stay_inside_the_wire_limit ... ok
+test status::tests::commands_run_once_and_then_come_from_the_cache ... ok
 test status::tests::per_window_status_overrides_style_the_rendered_row ... ok
 test status::tests::personalized_rows_expand_per_session_and_dedupe ... ok
 test status::tests::sparse_session_status_formats_keep_blank_rows_without_compaction ... ok
@@ -53,5 +52,5 @@ test status::tests::window_cell_metrics_default_to_the_pin_size_and_follow_a_rep
 test status::tests::window_status_separator_uses_each_item_scope_and_skips_the_trailing_item ... ok
 test status::tests::the_status_line_publishes_the_theme_the_way_the_pin_resolves_it_per_client ... ok
 
-test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 818 filtered out; finished in 1.39s
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 819 filtered out; finished in 1.85s
 

@@ -3,26 +3,25 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-   Compiling zz-protocol v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-protocol)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.79s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.60s
      Running unittests src/lib.rs (target/debug/deps/zz_protocol-9d0bcad2588412c3)
 
 running 222 tests
 test agent_stream::tests::image_bytes_ride_as_base64_rather_than_a_number_array ... ok
 test agent_stream::tests::the_seq_and_the_variant_tag_sit_side_by_side_in_the_object ... ok
 test catalog::tests::attach_session_working_directory_is_supported_and_advertised ... ok
+test catalog::tests::attaching_commands_accept_client_flags ... ok
 test agent_stream::tests::every_payload_shape_round_trips_through_json ... ok
 test catalog::tests::bind_key_args_parse_accepts_every_positional_as_command_or_string ... ok
-test catalog::tests::attaching_commands_accept_client_flags ... ok
 test catalog::tests::catalog_covers_every_executable_command_arm ... ok
 test catalog::tests::chooser_args_parse_accepts_a_command_or_string_template ... ok
 test catalog::tests::command_prompt_args_parse_accepts_only_the_template_as_a_block ... ok
 test catalog::tests::catalog_names_aliases_and_options_are_unique ... ok
 test catalog::tests::confirm_before_args_parse_accepts_only_the_command_as_a_block ... ok
 test catalog::tests::default_args_parse_requires_string_positionals_and_option_values ... ok
-test catalog::tests::command_resolution_follows_the_pin_contract ... ok
 test catalog::tests::display_menu_args_parse_tracks_names_keys_actions_and_separators ... ok
 test catalog::tests::display_panes_args_parse_accepts_a_command_or_string_template ... ok
+test catalog::tests::command_resolution_follows_the_pin_contract ... ok
 test catalog::tests::external_command_name_lists_are_unique_and_disjoint ... ok
 test catalog::tests::if_shell_args_parse_distinguishes_conditions_branches_and_option_values ... ok
 test catalog::tests::every_usage_string_matches_its_accepted_options ... ok
@@ -30,8 +29,8 @@ test catalog::tests::run_shell_args_parse_switches_every_positional_with_leading
 test catalog::tests::send_keys_outer_options_match_the_tmux_pin ... ok
 test catalog::tests::native_names_do_not_change_the_affected_tmux_prefixes ... ok
 test catalog::tests::set_hook_args_parse_switches_positionals_for_format_monitors ... ok
-test catalog::tests::set_option_args_parse_accepts_only_the_value_as_a_command_block ... ok
 test catalog::tests::split_window_spawn_style_and_title_options_are_supported_values ... ok
+test catalog::tests::set_option_args_parse_accepts_only_the_value_as_a_command_block ... ok
 test catalog::tests::tmux_option_diagnostics_use_the_canonical_command ... ok
 test catalog::tests::tmux_option_scanning_stops_at_the_first_positional_or_boundary ... ok
 test catalog::tests::tmux_optional_values_follow_the_pinned_lookahead ... ok
@@ -110,13 +109,13 @@ test message::tests::agent_runtime_variants_hold_the_wire_tails_they_were_append
 test message::tests::chooser_row_keys_are_bounded_at_sixty_four_bytes ... ok
 test message::tests::client_exit_actions_append_after_the_detach_reason ... ok
 test message::tests::client_focus_input_holds_wire_tag_eighteen ... ok
-test key::tests::unbound_copy_keys_preserve_armed_and_capturing_prefixes ... ok
 test message::tests::client_terminal_size_input_holds_wire_tag_seventeen ... ok
-test message::tests::command_invocation_new_has_no_typed_blocks ... ok
 test message::tests::command_invocation_command_blocks_round_trip_and_append ... ok
+test message::tests::command_invocation_new_has_no_typed_blocks ... ok
 test message::tests::command_invocation_split_omits_typed_command_names ... ok
 test message::tests::command_invocation_split_preserves_typed_positions_across_chains ... ok
 test message::tests::command_parse_error_holds_wire_tag_twelve ... ok
+test key::tests::unbound_copy_keys_preserve_armed_and_capturing_prefixes ... ok
 test message::tests::command_prompt_appends_type_mode_and_no_freeze ... ok
 test message::tests::command_request_carries_the_v74_prepared_bit ... ok
 test message::tests::command_success_appends_stderr_after_exit_code ... ok
@@ -146,8 +145,8 @@ test snapshot::tests::editor_descriptor_rejects_relative_oversized_and_control_p
 test snapshot::tests::editor_kind_round_trips_on_the_control_encoding ... ok
 test snapshot::tests::focused_window_resolves_stamped_valid_and_default_fallbacks ... ok
 test snapshot::tests::layout_deserialization_accepts_the_depth_boundary ... ok
-test message::tests::status_line_validation_enforces_rows_style_and_message_line_rules ... ok
 test snapshot::tests::layout_deserialization_rejects_excessive_depth ... ok
+test message::tests::status_line_validation_enforces_rows_style_and_message_line_rules ... ok
 test snapshot::tests::normalizes_browser_profile_names_and_legacy_default_alias ... ok
 test snapshot::tests::rejects_invalid_browser_profile_names ... ok
 test snapshot::tests::window_status_label_deserialization_is_bounded ... ok
@@ -231,16 +230,16 @@ test terminal_codec::tests::terminal_ui_commands_use_the_reliable_control_lane .
 test terminal_codec::tests::truncated_server_hello_palette_is_rejected ... ok
 test terminal_codec::tests::client_hello_environment_enforces_count_item_aggregate_and_syntax_bounds ... ok
 
-test result: ok. 222 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+test result: ok. 222 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.75s
 
      Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-89d700e01dd1742f)
 
 running 7 tests
 test an_empty_key_never_annotates ... ok
 test a_disabled_row_never_annotates_its_key ... ok
+test annotates_a_key_that_fits_a_quarter_of_the_room ... ok
 test annotates_a_wider_key_only_while_the_whole_name_still_fits_beside_it ... ok
 test drops_the_annotation_when_the_key_alone_fills_the_room ... ok
-test annotates_a_key_that_fits_a_quarter_of_the_room ... ok
 test measuring_and_trimming_skip_style_runs_and_count_wide_cells ... ok
 test trims_an_overlong_name_from_the_left_and_marks_it ... ok
 
@@ -251,16 +250,16 @@ test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 running 16 tests
 test browser_descriptor_is_tabs_not_a_single_url ... ok
 test chooser_states_append_the_v72_filter_fallback_flag ... ok
+test client_hello_carries_a_non_utf8_working_directory_verbatim ... ok
 test command_error_round_trips_output_after_the_error ... ok
 test command_output_keeps_event_tag_eleven_and_carries_its_output_id ... ok
-test client_hello_carries_a_non_utf8_working_directory_verbatim ... ok
-test command_success_round_trips_output_and_exit_code ... ok
 test control_client_kind_keeps_frozen_wire_tag_two ... ok
+test command_success_round_trips_output_and_exit_code ... ok
 test dark_interactive_hello_encodes_version_instance_and_process_id_as_varints ... ok
 test control_events_and_window_layout_fields_keep_the_frozen_wire_tail ... ok
 test mux_option_key_has_eighteen_daemon_owned_keys ... ok
-test pane_snapshot_carries_bell ... ok
 test pane_snapshot_border_colours_round_trip_and_reject_invalid_rgb ... ok
+test pane_snapshot_carries_bell ... ok
 test paste_upload_begin_carries_purpose ... ok
 test postcard_tags_put_input_before_event_before_gui_response ... ok
 test protocol_version_on_this_commit_is_one_hundred ... ok

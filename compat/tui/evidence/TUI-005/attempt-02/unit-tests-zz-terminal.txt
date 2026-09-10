@@ -3,11 +3,10 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-   Compiling zz-terminal v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-terminal)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.15s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.35s
      Running unittests src/terminal_core.rs (target/debug/deps/zz_terminal-9696a009549f740f)
 
-running 254 tests
+running 255 tests
 test appearance::tests::appearance_override_beats_the_ghostty_value ... ok
 test appearance::tests::adaptive_theme_uses_the_requested_system_scheme ... ok
 test appearance::tests::defaults_are_wire_safe_and_hash_deterministically ... ok
@@ -21,12 +20,12 @@ test appearance::tests::invalid_font_feature_lines_do_not_partially_mutate_prior
 test appearance::tests::invalid_synthetic_style_and_thickening_strength_preserve_defaults ... ok
 test appearance::tests::invalid_wire_values_are_rejected ... ok
 test appearance::tests::matches_ghostty_quotes_features_x11_colors_and_asymmetric_padding ... ok
-test appearance::tests::configuration_diagnostics_are_counted_but_memory_bounded ... ok
+test appearance::tests::missing_or_invalid_theme_is_fatal_but_bounded ... ok
 test appearance::tests::named_theme_is_loaded_before_explicit_user_overrides ... ok
+test appearance::tests::configuration_diagnostics_are_counted_but_memory_bounded ... ok
 test appearance::tests::non_regular_configuration_roots_are_rejected_without_opening_them ... ok
 test appearance::tests::override_theme_loads_before_other_override_keys_regardless_of_file_order ... ok
 test appearance::tests::oversized_configuration_stops_before_unbounded_parsing ... ok
-test appearance::tests::missing_or_invalid_theme_is_fatal_but_bounded ... ok
 test appearance::tests::parses_every_renderer_color_and_behavior_setting ... ok
 test appearance::tests::parses_every_ghostty_cursor_style_and_rejects_invalid_values ... ok
 test appearance::tests::parses_supported_values_including_named_and_alpha_colors ... ok
@@ -51,8 +50,8 @@ test model::tests::row_patch_appends_style_and_grapheme_dictionaries ... ok
 test model::tests::row_patch_detects_scroll_and_rebuilds_the_viewport ... ok
 test paste::tests::literal_paste_only_replaces_newline_separators ... ok
 test paste::tests::safe_paste_preserves_utf8_and_vis_encodes_unsafe_bytes ... ok
-test session::terminal_command_preserves_tmux_argv_shapes ... ok
 test paste::tests::paste_expansion_and_separator_are_bounded_before_allocation ... ok
+test session::terminal_command_preserves_tmux_argv_shapes ... ok
 test session::tests::a_rearmed_scroll_exit_latch_drives_the_plain_downward_actions ... ok
 test session::tests::a_grid_without_history_reports_nothing_to_scroll_into ... ok
 test session::tests::absolute_scroll_clamps_and_restores_follow_bottom ... ok
@@ -140,8 +139,8 @@ test session::tests::live_command_applies_spawn_environment_additions_and_remova
 test session::tests::live_dictionary_compaction_rebuilds_the_visible_working_set ... ok
 test session::tests::live_session_decodes_and_places_a_png_transmission ... ok
 test session::tests::dropping_a_terminating_session_never_waits_forever ... ok
-test session::tests::live_session_publishes_kitty_placements ... ok
 test session::tests::live_shell_round_trip_reaches_render_snapshot ... ok
+test session::tests::live_session_publishes_kitty_placements ... ok
 test session::tests::live_styled_capture_keeps_sgr_and_uses_lf_between_rows ... ok
 test session::tests::native_copy_mode_percent_matches_nested_brackets ... ok
 test session::tests::native_copy_mode_word_motion_honors_separator_runs_and_empty_values ... ok
@@ -235,6 +234,7 @@ test session::tests::terminal_type_seeds_term_and_spawn_environment_can_override
 test session::tests::terminate_escalates_while_session_is_retained ... ok
 test session::tests::the_and_cancel_actions_exit_without_the_scroll_exit_latch ... ok
 test session::tests::the_matching_bracket_pair_scans_in_opposite_directions ... ok
+test session::tests::the_pane_keeps_its_last_search_and_a_fresh_entry_searches_up_for_it ... ok
 test session::tests::tmux_passthrough_drops_a_single_dcs_escape_byte ... ok
 test session::tests::tmux_passthrough_off_consumes_the_complete_wrapper ... ok
 test session::tests::tmux_passthrough_un_doubles_payload_escapes ... ok
@@ -263,7 +263,7 @@ test word::tests::default_matches_tmux_and_keeps_a_compact_cold_layout ... ok
 test word::tests::empty_option_keeps_only_terminal_whitespace_boundaries ... ok
 test session::tests::shell_integration_updates_title_and_working_directory ... ok
 
-test result: ok. 253 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.32s
+test result: ok. 254 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.54s
 
    Doc-tests zz_terminal
 

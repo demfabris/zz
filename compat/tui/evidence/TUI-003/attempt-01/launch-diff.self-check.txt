@@ -1,0 +1,20 @@
+self-check: one deliberate one-sided difference per channel, plus one the fixture must not report
+      case sabotage-cli, channel cli
+        tmux: exit=1|stdout=|stderr=no sessions
+        zz:   exit=1|stdout=|stderr=open terminal failed: not a terminal
+note  sabotage-cli cli recorded, not asserted: deliberate
+ok    self-check cli: a session that exists on one side only
+      case sabotage-facts, channel facts
+        tmux: no server running on /tmp/tmux-1000/zzldi-oOFOwk
+        zz:   only-zz windows=1 attached=0
+note  sabotage-facts facts recorded, not asserted: deliberate
+ok    self-check facts: an extra session on one side
+      case sabotage-screen, channel screen
+        tmux: row 0: #
+        zz:   row 0: $
+note  sabotage-screen screen recorded, not asserted: deliberate
+ok    sabotage-screen cursor
+ok    self-check screen: a different prompt on one side, the cursor unmoved
+ok    alias-spelling answer
+ok    self-check equivalence: list-panes and its lsp alias
+self-check complete: every sabotage was caught in its own channel and the equivalence passed

@@ -1,0 +1,33 @@
+prefix bindings this batch changed, both binaries, throwaway servers, -f /dev/null
+
+BEFORE (origin/main zz):
+  zz  %   bind-key  -T prefix \% split-picker -h
+  pin %   bind-key  -T prefix \% split-window -h
+  zz  "   bind-key  -T prefix \" split-picker -v
+  pin "   bind-key  -T prefix \" split-window
+  zz  s   bind-key  -T prefix s focus-sidebar
+  pin s   bind-key  -T prefix s choose-tree -Zs
+  zz  w   bind-key  -T prefix w focus-sidebar
+  pin w   bind-key  -T prefix w choose-tree -Zw
+
+AFTER (this branch):
+zz  %   bind-key  -T prefix \% split-window -h
+pin %   bind-key  -T prefix \% split-window -h
+zz  "   bind-key  -T prefix \" split-window
+pin "   bind-key  -T prefix \" split-window
+zz  s   bind-key  -T prefix s choose-tree -Zs
+pin s   bind-key  -T prefix s choose-tree -Zs
+zz  w   bind-key  -T prefix w choose-tree -Zw
+pin w   bind-key  -T prefix w choose-tree -Zw
+zz  o   bind-key  -T prefix o select-pane -t :.+
+pin o   bind-key  -T prefix o select-pane -t :.+
+zz  z   bind-key  -T prefix z resize-pane -Z
+pin z   bind-key  -T prefix z resize-pane -Z
+zz  d   bind-key  -T prefix d detach-client
+pin d   bind-key  -T prefix d detach-client
+zz  ,   bind-key  -T prefix , command-prompt -I "#W" "rename-window -- '%%'"
+pin ,   bind-key  -T prefix , command-prompt -I "#W" { rename-window "%%" }
+zz  $   bind-key  -T prefix \$ command-prompt -I "#S" "rename-session -- '%%'"
+pin $   bind-key  -T prefix \$ command-prompt -I "#S" { rename-session "%%" }
+zz  Up  bind-key -r -T prefix Up select-pane -U
+pin Up  bind-key -r -T prefix Up select-pane -U

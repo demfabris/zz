@@ -1,0 +1,40 @@
+Proofs re-run at the tip in revision.txt (84b9fd49). Exit status first, then the
+headline the run printed. Every log named here is in this directory.
+
+0  compat/tui-stock-keys.sh
+   all 48 cases agree on every channel they assert, 22 recorded a difference elsewhere
+   -> stock-keys.run.txt
+0  compat/tui-stock-keys.sh --self-check
+   every sabotage was caught in its own channel and every equivalence passed
+   -> stock-keys.self-check.txt
+0  compat/tui-launch-diff.sh
+   all 29 comparisons agree where they assert, 5 recorded not asserted
+   -> launch-diff.run.txt
+0  compat/tui-launch-diff.sh --self-check
+   every sabotage was caught in its own channel and the equivalence passed
+   -> launch-diff.self-check.txt
+0  compat/tui-screen-diff.sh   (regression)
+   all 33 asserted checkpoints identical, 32 recorded not asserted, 65 recorded cursor differences
+   -> screen-diff.run.txt
+0  compat/tui-pane-geometry.sh (regression)
+   all 5 asserted measurements identical
+   -> pane-geometry.run.txt
+0  cargo test -p zz-protocol -p zz-tui -p zz-client --jobs 5 -- --test-threads=2
+   221 + 7 + 16 + 170 passed, 0 failed
+   -> cargo-tests.txt
+0  cargo test -p zz --jobs 5 -- --test-threads=2   (the cli_binary integration rule)
+   789 tests, 0 failed; cli_binary 125 passed in 119.69s
+   -> cargo-tests.txt
+0  cargo clippy -p zz-protocol -p zz-client -p zz-tui --all-targets --all-features -- -D warnings
+0  cargo clippy -p zz-mux --all-targets --all-features -- -D warnings
+0  cargo clippy -p zz --all-targets --all-features -- -D warnings
+   -> clippy.txt
+0  python3 compat/tui/tracker.py check
+   compat/tui/campaign.json is valid and knowledge/tmux/tui-parity.md is current
+0  python3 compat/tmux-tracker.py check
+   compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+
+The fixtures were run with PATH=/opt/homebrew/bin:$PATH,
+ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux and
+ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins, exactly as the
+campaign runs them.

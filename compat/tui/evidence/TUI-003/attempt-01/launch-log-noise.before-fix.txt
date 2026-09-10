@@ -1,0 +1,24 @@
+2026-09-10T02:20:22.034793Z elapsed_us=82 level=INFO role=tui pid=843856 thread=
+"main" thread_id=ThreadId(1) target=zz::diagnostics::lifecycle process_start rol
+e=tui package_version=0.6.1 os=linux arch=x86_64 pointer_width=64 cpus=Ok(16) ex
+ecutable=Ok("/home/demfabris/dev/zz-tui-keys/target/debug/zz") cwd=Ok("/home/dem
+fabris/dev/zz-tui-keys") args=["/home/demfabris/dev/zz-tui-keys/target/debug/zz"
+, "--socket", "/tmp/zzld-jSrBlf.sock", "new-session", "-s", "fresh", "-n", "win"
+, "-x", "80", "-y", "24"] log_path=Some("/tmp/zzld.jSrBlf/zz-logs/zz.tui.log")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

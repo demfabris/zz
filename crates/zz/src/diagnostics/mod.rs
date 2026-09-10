@@ -92,7 +92,10 @@ fn init_production(role: &str) {
         let _ = Builder::from_env(Env::default().default_filter_or(NORMAL_FILTER)).try_init();
         return;
     }
-    let writer = match RingLogWriter::open(&platform_log_dir().join(format!("zz.{role}.log"))) {
+    let writer = match RingLogWriter::open(
+        &platform_log_dir().join(format!("zz.{role}.log")),
+        role != "tui",
+    ) {
         Ok(writer) => writer,
         Err(error) => {
             eprintln!("zz: could not open log file: {error}");
@@ -147,7 +150,10 @@ struct RingLogWriter {
 }
 
 impl RingLogWriter {
-    fn open(path: &Path) -> io::Result<Self> {
+    /// `mirror_to_terminal` is what a developer running the app from a shell
+    /// wants and what the raw-terminal client cannot have: that terminal is
+    /// the client's screen, and pinned tmux writes nothing on it.
+    fn open(path: &Path, mirror_to_terminal: bool) -> io::Result<Self> {
         let (path, file) = open_log_file(Some(path))?;
         let written = file.metadata().map_or(0, |metadata| metadata.len());
         Ok(Self {
@@ -155,7 +161,7 @@ impl RingLogWriter {
             file,
             written,
             limit: RING_LOG_GENERATION_BYTES,
-            mirror: io::stderr().is_terminal().then(io::stderr),
+            mirror: (mirror_to_terminal && io::stderr().is_terminal()).then(io::stderr),
         })
     }
 
@@ -692,9 +698,7 @@ fn process_role(arguments: &[OsString]) -> String {
     if app_arguments.as_slice() == [OsStr::new("app")] {
         return "app".to_owned();
     }
-    if application_arguments(arguments).any(|argument| argument == OsStr::new("attach"))
-        && std::io::IsTerminal::is_terminal(&std::io::stdout())
-    {
+    if raw_terminal_command(arguments) && std::io::IsTerminal::is_terminal(&std::io::stdout()) {
         return "tui".to_owned();
     }
     let executable = arguments
@@ -724,6 +728,18 @@ fn process_type(arguments: &[OsString]) -> Option<String> {
         }
     }
     None
+}
+
+/// Whether these arguments hand the process to the raw-terminal client. Every
+/// spelling counts, because the log target follows the process and not the way
+/// its command was typed: `attach`, `attach-session` and `new-session` all end
+/// in the same client, and a client that logs to stderr writes on the screen
+/// the pin leaves untouched.
+fn raw_terminal_command(arguments: &[OsString]) -> bool {
+    application_arguments(arguments)
+        .filter_map(|argument| argument.to_str())
+        .map(zz_protocol::canonical_command)
+        .any(|command| matches!(command, "attach-session" | "new-session"))
 }
 
 fn application_arguments(arguments: &[OsString]) -> impl Iterator<Item = &OsString> {
@@ -1042,6 +1058,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn every_spelling_of_the_raw_terminal_client_owns_the_ring_log() {
+        for command in [
+            vec!["zz", "attach"],
+            vec!["zz", "attach-session", "-t", "=work"],
+            vec!["zz", "--socket", "/tmp/zz.sock", "attach-session"],
+            vec!["zz", "new-session"],
+            vec!["zz", "new", "-A", "-s", "work"],
+            vec!["zz", "-f", "/dev/null", "attach-session"],
+        ] {
+            assert!(
+                raw_terminal_command(&arguments(&command)),
+                "{command:?} runs the raw-terminal client"
+            );
+        }
+        for command in [
+            vec!["zz", "daemon"],
+            vec!["zz", "app"],
+            vec!["zz", "list-sessions"],
+            vec!["zz", "kill-server"],
+        ] {
+            assert!(
+                !raw_terminal_command(&arguments(&command)),
+                "{command:?} does not run the raw-terminal client"
+            );
+        }
+    }
+
     /// `--bootstrap-client-cwd` hands a daemon zz spawns the working directory
     /// the invoking client was in. Before protocol v98 the argument list was
     /// `Vec<String>` and `into_string` dropped a directory that only exists as
@@ -1090,11 +1134,25 @@ mod tests {
     }
 
     #[test]
+    fn the_raw_terminal_client_never_mirrors_its_log_to_the_screen() {
+        let dir = std::env::temp_dir().join(format!("zz-ring-mirror-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("zz.tui.log");
+        assert!(
+            RingLogWriter::open(&path, false)
+                .expect("ring log opens")
+                .mirror
+                .is_none()
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn ring_log_rotates_one_old_generation() {
         let dir = std::env::temp_dir().join(format!("zz-ring-log-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let path = dir.join("zz.app.log");
-        let mut writer = RingLogWriter::open(&path).expect("ring log opens");
+        let mut writer = RingLogWriter::open(&path, false).expect("ring log opens");
         writer.limit = 32;
 
         for _ in 0..3 {

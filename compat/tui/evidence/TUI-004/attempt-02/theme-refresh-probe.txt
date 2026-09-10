@@ -1,0 +1,12 @@
+### BEFORE ATTACH: set -s dark-theme-green colour124
+row: ^[[38;2;13;13;13m^[[48;5;124mL^[[4m0:bash*^[[0m^[[38;2;13;13;13m^[[48;5;124m
+client_colours: [16777216]
+E:dark-theme-green now: [colour124]
+### AFTER ATTACH: set -s dark-theme-black colour231
+row: ^[[38;5;231m^[[48;5;124mL^[[4m0:bash*^[[0m^[[38;5;231m^[[48;5;124m
+### refresh-client -S
+(refresh-client -S refused)
+row: ^[[38;5;231m^[[48;5;124mL^[[4m0:bash*^[[0m^[[38;5;231m^[[48;5;124m
+### theme light
+row: ^[[38;2;26;26;26m^[[48;2;46;139;87mL^[[4m0:bash*^[[0m^[[38;2;26;26;26m^[[48;2;46;139;87m
+DONE

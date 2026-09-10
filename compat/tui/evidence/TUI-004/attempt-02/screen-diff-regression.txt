@@ -45,13 +45,7 @@ note  80x24 default-fg recorded, not asserted: zz writes an explicit RGB foregro
       cursor tmux: 2,5 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
       cursor zz:   2,5 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
 note  80x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
-      checkpoint theme-light at 80x24
-      first differing row 23 of 24
-        tmux: ^[[38;2;26;26;26m^[[48;2;46;139;87mL^[[4m0:win*^[[0m^[[38;2;26;26;26m^[[48;2;46;139;87m
-        zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
-      cursor tmux: 2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
-note  80x24 theme-light recorded, not asserted: the pin resolves the theme colours per client from the server theme option and zz does not read it
+ok    80x24 theme-light
       checkpoint styled-left-trim at 80x24
       first differing row 23 of 24
         tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
@@ -110,13 +104,7 @@ note  100x24 default-fg recorded, not asserted: zz writes an explicit RGB foregr
       cursor tmux: 2,4 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
       cursor zz:   2,4 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
 note  100x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
-      checkpoint theme-light at 100x24
-      first differing row 23 of 24
-        tmux: ^[[38;2;26;26;26m^[[48;2;46;139;87mL^[[4m0:win*^[[0m^[[38;2;26;26;26m^[[48;2;46;139;87m
-        zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
-      cursor tmux: 2,2 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,2 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
-note  100x24 theme-light recorded, not asserted: the pin resolves the theme colours per client from the server theme option and zz does not read it
+ok    100x24 theme-light
       checkpoint styled-left-trim at 100x24
       first differing row 23 of 24
         tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
@@ -175,13 +163,7 @@ note  80x10 default-fg recorded, not asserted: zz writes an explicit RGB foregro
       cursor tmux: 2,5 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
       cursor zz:   2,5 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
 note  80x10 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
-      checkpoint theme-light at 80x10
-      first differing row 9 of 10
-        tmux: ^[[38;2;26;26;26m^[[48;2;46;139;87mL^[[4m0:win*^[[0m^[[38;2;26;26;26m^[[48;2;46;139;87m
-        zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
-      cursor tmux: 2,2 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,2 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
-note  80x10 theme-light recorded, not asserted: the pin resolves the theme colours per client from the server theme option and zz does not read it
+ok    80x10 theme-light
       checkpoint styled-left-trim at 80x10
       first differing row 9 of 10
         tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
@@ -240,13 +222,7 @@ note  80x6 default-fg recorded, not asserted: zz writes an explicit RGB foregrou
       cursor tmux: 2,4 flag=1 pane=80x6 shape=default blinking=0 very_visible=0 colour=none
       cursor zz:   2,4 flag=1 pane=80x6 shape=default blinking=0 very_visible=0 colour=none
 note  80x6 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
-      checkpoint theme-light at 80x6
-      first differing row 5 of 6
-        tmux: ^[[38;2;26;26;26m^[[48;2;46;139;87mL^[[4m0:win*^[[0m^[[38;2;26;26;26m^[[48;2;46;139;87m
-        zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
-      cursor tmux: 2,2 flag=1 pane=80x6 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,2 flag=1 pane=80x6 shape=default blinking=0 very_visible=0 colour=none
-note  80x6 theme-light recorded, not asserted: the pin resolves the theme colours per client from the server theme option and zz does not read it
+ok    80x6 theme-light
       checkpoint styled-left-trim at 80x6
       first differing row 5 of 6
         tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
@@ -305,13 +281,7 @@ note  109x24 default-fg recorded, not asserted: zz writes an explicit RGB foregr
       cursor tmux: 2,4 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
       cursor zz:   2,4 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
 note  109x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
-      checkpoint theme-light at 109x24
-      first differing row 23 of 24
-        tmux: ^[[38;2;26;26;26m^[[48;2;46;139;87mL^[[4m0:win*^[[0m^[[38;2;26;26;26m^[[48;2;46;139;87m
-        zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
-      cursor tmux: 2,2 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,2 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
-note  109x24 theme-light recorded, not asserted: the pin resolves the theme colours per client from the server theme option and zz does not read it
+ok    109x24 theme-light
       checkpoint styled-left-trim at 109x24
       first differing row 23 of 24
         tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
@@ -370,13 +340,7 @@ note  120x24 default-fg recorded, not asserted: zz writes an explicit RGB foregr
       cursor tmux: 2,4 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
       cursor zz:   2,4 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
 note  120x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
-      checkpoint theme-light at 120x24
-      first differing row 23 of 24
-        tmux: ^[[38;2;26;26;26m^[[48;2;46;139;87mL^[[4m0:win*^[[0m^[[38;2;26;26;26m^[[48;2;46;139;87m
-        zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
-      cursor tmux: 2,2 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,2 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
-note  120x24 theme-light recorded, not asserted: the pin resolves the theme colours per client from the server theme option and zz does not read it
+ok    120x24 theme-light
       checkpoint styled-left-trim at 120x24
       first differing row 23 of 24
         tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m

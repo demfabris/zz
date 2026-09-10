@@ -1742,6 +1742,8 @@ mod tests {
             window: zz_protocol::WindowId(2),
             duration_ms: 1000,
             indicators: Vec::new(),
+            colour: None,
+            active_colour: None,
         });
         core.popup = Some(PopupState {
             pane,

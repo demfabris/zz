@@ -47,6 +47,9 @@ RGB) stays part of the cell, as `tui.status-row` in `compat/tmux-gaps.json` esta
   channels per case including the paste-buffer bytes (TUI-005).
 - `compat/tui-caps.sh`: what an attached client asks of its outer terminal, decoded as pane state
   by the outer pinned tmux (TUI-009).
+- `compat/tui-overlays.sh`: the command prompt, confirm-before, display-menu, display-popup and
+  display-panes, whole screen plus the cursor tuple, including resizes, a message over an open
+  surface and keys that must not reach a covered pane (TUI-007).
 
 ## State
 

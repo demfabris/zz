@@ -221,6 +221,7 @@ pub(crate) struct Renderer {
     kitty: KittyBridge,
     writer: TerminalWriter,
     control_replay: Vec<u8>,
+    terminal_defaults: TmuxStyle,
 }
 
 impl Renderer {
@@ -250,6 +251,7 @@ impl Renderer {
             kitty: KittyBridge::default(),
             writer: TerminalWriter::spawn(sink),
             control_replay: Vec::new(),
+            terminal_defaults: TmuxStyle::default(),
         }
     }
 
@@ -391,7 +393,7 @@ impl Renderer {
         if model.menu.is_some() {
             self.kitty.suspend(&mut self.output);
             self.paint_menu(model);
-            self.hide_cursor();
+            self.place_menu_cursor(model);
         } else if model.confirm.is_some() {
             self.kitty.suspend(&mut self.output);
             if model.sidebar_visible() {
@@ -399,7 +401,7 @@ impl Renderer {
             } else {
                 self.paint_status_block(model, true);
             }
-            self.hide_cursor();
+            self.place_confirm_cursor(model);
         }
 
         self.output.extend_from_slice(b"\x1b[?2026l");
@@ -440,7 +442,13 @@ impl Renderer {
         } else {
             self.emit_queued_control();
             self.kitty.suspend(&mut self.output);
-            self.hide_cursor();
+            if model.menu.is_some() {
+                self.place_menu_cursor(model);
+            } else if model.confirm.is_some() {
+                self.place_confirm_cursor(model);
+            } else {
+                self.hide_cursor();
+            }
         }
         self.output.extend_from_slice(b"\x1b[?2026l");
         self.flush_output()
@@ -657,40 +665,21 @@ impl Renderer {
         if let Some(display) = &model.display_panes {
             for indicator in &display.indicators {
                 if let Some(entry) = model.pane_rect(indicator.pane) {
-                    let key = indicator
-                        .selection_key()
-                        .map_or_else(|| indicator.index.to_string(), |key| key.to_string());
-                    write_colored_text(
-                        &mut self.output,
-                        entry.rect.x.saturating_add(1),
-                        entry.rect.y,
-                        &format!(" {key} "),
-                        model.appearance.background,
-                        model.appearance.link_color,
-                    );
-                    if indicator.label.is_empty() {
-                        continue;
+                    for write in
+                        crate::overlay::display_panes_writes(display, indicator, entry.content())
+                    {
+                        let mut line = StyledLine::from_segments(vec![write.segment]);
+                        line.resolve_theme(&model.status.theme);
+                        write_styled_text(
+                            &mut self.output,
+                            write.column,
+                            write.row,
+                            &line,
+                            model.appearance.foreground,
+                            model.appearance.background,
+                            &model.appearance,
+                        );
                     }
-                    let start = entry.rect.x.saturating_add(4);
-                    let width = entry
-                        .rect
-                        .x
-                        .saturating_add(entry.rect.width)
-                        .saturating_sub(start);
-                    if width == 0 {
-                        continue;
-                    }
-                    let composed = zz_client::compose_status_row(&indicator.label, width, "");
-                    let line = StyledLine::from_segments(composed.segments);
-                    write_styled_text(
-                        &mut self.output,
-                        start,
-                        entry.rect.y,
-                        &line,
-                        model.appearance.foreground,
-                        model.appearance.background,
-                        &model.appearance,
-                    );
                 }
             }
         }
@@ -865,6 +854,7 @@ impl Renderer {
                             reverse,
                             viewport.foreground,
                             viewport.background,
+                            &self.terminal_defaults,
                         );
                         if selected && let Some(selection) = &selection_style {
                             write_selection_sgr(&mut self.output, selection);
@@ -890,6 +880,7 @@ impl Renderer {
                     reverse,
                     viewport.foreground,
                     viewport.background,
+                    &self.terminal_defaults,
                 );
                 if selected && let Some(selection) = &selection_style {
                     write_selection_sgr(&mut self.output, selection);
@@ -1248,7 +1239,9 @@ impl Renderer {
         }
         if let Some(viewport) = model.viewports.get(&state.pane) {
             let damage = self.damage.remove(&state.pane);
+            self.terminal_defaults = parse_style(&state.style).unwrap_or_default();
             self.paint_terminal(state.pane, viewport, layout.content, force, damage.as_ref());
+            self.terminal_defaults = TmuxStyle::default();
         } else {
             self.painted.remove(&state.pane);
             self.damage.remove(&state.pane);
@@ -1304,13 +1297,18 @@ impl Renderer {
 
         let content_width = rect.width.saturating_sub(4);
         if !state.title.is_empty() && content_width > 0 {
-            let title =
-                zz_client::compose_status_row(&state.title, content_width, &state.border_style);
+            let title = crate::overlay::compose_over(
+                &state.title,
+                content_width,
+                &state.border_style,
+                border.horizontal,
+                &border_style,
+            );
             write_styled_text(
                 &mut self.output,
                 rect.x.saturating_add(2),
                 rect.y,
-                &StyledLine::from_segments(title.segments),
+                &StyledLine::from_segments(title),
                 model.appearance.foreground,
                 model.appearance.background,
                 &model.appearance,
@@ -1357,13 +1355,23 @@ impl Renderer {
                             || item.name.clone(),
                             |key| format!("{}#[default] #[align=right]({key})", item.name),
                         );
-                    let content =
-                        zz_client::compose_status_row(&content, content_width, &base_style);
-                    let padding_style = parse_style(&base_style).unwrap_or_default();
+                    let padding_style = parse_style(if selected {
+                        &state.selected_style
+                    } else {
+                        &state.style
+                    })
+                    .unwrap_or_default();
+                    let content = crate::overlay::compose_over(
+                        &content,
+                        content_width,
+                        &base_style,
+                        " ",
+                        &padding_style,
+                    );
                     let mut line = StyledLine::default();
                     line.push_segment(border.vertical, border_style.clone());
                     line.push_segment(" ", padding_style.clone());
-                    line.append(&StyledLine::from_segments(content.segments));
+                    line.append(&StyledLine::from_segments(content));
                     line.push_segment(" ", padding_style);
                     line.push_segment(border.vertical, border_style.clone());
                     write_styled_text(
@@ -1758,13 +1766,18 @@ impl Renderer {
             self.hide_cursor();
             return;
         }
+        if model.display_panes.is_some() {
+            write_cursor_position(&mut self.output, 0, 0);
+            self.hide_cursor();
+            return;
+        }
         if let Some(prompt) = &model.command_prompt {
             let column = prompt
                 .prompt
                 .chars()
                 .count()
                 .saturating_add(usize::try_from(prompt.cursor).unwrap_or(usize::MAX));
-            let column = u16::try_from(column).unwrap_or(u16::MAX);
+            let mut column = u16::try_from(column).unwrap_or(u16::MAX);
             let (start, width, row) = if model.sidebar_visible() {
                 (0, sidebar::WIDTH, model.size.rows.saturating_sub(1))
             } else {
@@ -1773,6 +1786,13 @@ impl Renderer {
                     return;
                 };
                 let (x, width) = model.status_area();
+                column = crate::overlay::prompt_view(
+                    &prompt.prompt,
+                    &prompt.input,
+                    prompt.cursor,
+                    width,
+                )
+                .cursor;
                 (x, width, row)
             };
             write_cursor_position(
@@ -1827,6 +1847,68 @@ impl Renderer {
             return;
         };
         self.place_viewport_cursor(popup.pane, viewport, layout.content, model);
+        if client_message_hides_the_cursor(model) {
+            self.hide_cursor();
+        }
+    }
+
+    fn place_menu_cursor(&mut self, model: &Model) {
+        if let Some(state) = model.menu.as_ref()
+            && let Some(layout) = resolve_floating(
+                FloatingSpec {
+                    left: state.left,
+                    top: state.top,
+                    width: state.width,
+                    height: state.height,
+                    client_columns: state.client_columns,
+                    client_rows: state.client_rows,
+                    border_lines: state.border_lines,
+                },
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: model.size.columns,
+                    height: model.size.rows,
+                },
+            )
+        {
+            let row = model.menu_selection.map_or(layout.frame.y, |choice| {
+                layout
+                    .frame
+                    .y
+                    .saturating_add(1)
+                    .saturating_add(u16::try_from(choice).unwrap_or(u16::MAX))
+            });
+            write_cursor_position(&mut self.output, layout.frame.x.saturating_add(2), row);
+        }
+        self.hide_cursor();
+    }
+
+    fn place_confirm_cursor(&mut self, model: &Model) {
+        let Some(confirm) = model.confirm.as_ref() else {
+            self.hide_cursor();
+            return;
+        };
+        if model.sidebar_visible() && model.command_output.is_none() {
+            self.hide_cursor();
+            return;
+        }
+        let Some(row) = model.message_row_y() else {
+            self.hide_cursor();
+            return;
+        };
+        let (x, width) = if model.command_output.is_some() {
+            (0, model.size.columns)
+        } else {
+            model.status_area()
+        };
+        let column = crate::overlay::prompt_view(&confirm.prompt, "", 0, width).cursor;
+        write_cursor_position(
+            &mut self.output,
+            x.saturating_add(column.min(width.saturating_sub(1))),
+            row,
+        );
+        self.output.extend_from_slice(b"\x1b[?25h");
     }
 
     fn place_command_output_cursor(
@@ -2171,7 +2253,8 @@ fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
         return None;
     }
     if let Some(prompt) = &model.command_prompt {
-        return Some(message(&format!("{}{}", prompt.prompt, prompt.input)));
+        let view = crate::overlay::prompt_view(&prompt.prompt, &prompt.input, prompt.cursor, width);
+        return Some(message(&view.text));
     }
     model
         .client_message
@@ -2332,12 +2415,18 @@ fn paint_floating_border(
     }
     let title_width = rect.width.saturating_sub(4);
     if !title.is_empty() && title_width > 0 {
-        let title = zz_client::compose_status_row(title, title_width, border_style);
+        let title = crate::overlay::compose_over(
+            title,
+            title_width,
+            border_style,
+            border.horizontal,
+            &parse_style(border_style).unwrap_or_default(),
+        );
         write_styled_text(
             output,
             rect.x.saturating_add(2),
             rect.y,
-            &StyledLine::from_segments(title.segments),
+            &StyledLine::from_segments(title),
             model.appearance.foreground,
             model.appearance.background,
             &model.appearance,
@@ -2832,6 +2921,7 @@ fn write_sgr(
     reverse: bool,
     default_foreground: Color,
     default_background: Color,
+    defaults: &TmuxStyle,
 ) {
     output.extend_from_slice(b"\x1b[0m");
     if style.bold() {
@@ -2869,7 +2959,9 @@ fn write_sgr(
         output.extend_from_slice(b"\x1b[53m");
     }
     let foreground = style.foreground();
-    if foreground == default_foreground {
+    if foreground == default_foreground && defaults.fg.is_some() {
+        write_ground(output, defaults.fg, default_foreground, Ground::Foreground);
+    } else if foreground == default_foreground {
         output.extend_from_slice(b"\x1b[39m");
     } else {
         write!(
@@ -2880,7 +2972,9 @@ fn write_sgr(
         .expect("writing to Vec cannot fail");
     }
     let background = style.background();
-    if background == default_background {
+    if background == default_background && defaults.bg.is_some() {
+        write_ground(output, defaults.bg, default_background, Ground::Background);
+    } else if background == default_background {
         output.extend_from_slice(b"\x1b[49m");
     } else {
         write!(

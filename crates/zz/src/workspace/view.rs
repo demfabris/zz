@@ -3890,6 +3890,8 @@ mod tests {
                 flags: zz_protocol::PaneIndicator::ACTIVE,
                 label: "0".to_owned(),
             }],
+            colour: None,
+            active_colour: None,
         }
     }
 

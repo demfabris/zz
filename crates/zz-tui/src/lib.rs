@@ -7,6 +7,7 @@ mod input;
 mod kitty;
 mod layout;
 mod mode_view;
+mod overlay;
 mod picker;
 mod render;
 mod sidebar;

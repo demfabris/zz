@@ -27,7 +27,8 @@ CEF initialization with a browser configuration error. The TUI uses the environm
 
 Open a browser pane to initialize CEF and start listening. The GUI reads the file value before
 that first initialization. After CEF starts, restart the client to change or disable the port.
-There is no Settings UI control for this key.
+The Settings route's Browser page carries an **Agents** switch that writes `9222` or removes the
+key; any other port is set in the file.
 
 CDP is off by default. Chromium listens on loopback (`127.0.0.1`); zz adds only the
 `remote-debugging-port` switch and no `remote-debugging-address` switch. Any local process that

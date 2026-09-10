@@ -123,7 +123,7 @@ The client-local schema includes these scalar settings and chrome colors.
 | `editor-soft-wrap` | `true` | `true` or `false` | Wrap long lines at the pane edge instead of scrolling horizontally |
 | `editor-vim-mode` | `true` | `true` or `false` | Modal vim editing in editor panes: normal, insert, visual and visual-line modes |
 | `browser-element-selector-hotkey` | `cmd-shift-c` on macOS; `ctrl-shift-c` elsewhere | One GPUI keystroke containing Control, Alt, Command/Super, or Function; Shift is optional | Toggle the element selector while a Browser pane owns the Browser key context |
-| `browser-remote-debugging-port` | `0` (off) | Bare integer: `0` or `1024..=65535` | Loopback CDP endpoint; `ZZ_BROWSER_REMOTE_DEBUGGING_PORT` overrides this value at CEF startup. Restart the client after changing an initialized runtime; no Settings control |
+| `browser-remote-debugging-port` | `0` (off) | Bare integer: `0` or `1024..=65535` | Loopback CDP endpoint; `ZZ_BROWSER_REMOTE_DEBUGGING_PORT` overrides this value at CEF startup. Restart the client after changing an initialized runtime. The Browser page's **Agents** switch writes `9222` or removes the key; other ports are file-only |
 | `browser-search-provider` | `google` | `google`, `duckduckgo`, `brave` | Where a Browser pane's address bar sends an entry that is not an address |
 | `browser-egress` | `true` | `true` or `false` | Whether a Browser pane opened while attached to a remote ssh host routes its traffic through that host; panes already open keep the route they were created with |
 | `ui-font-family` | System default | Installed font family, or `.SystemUIFont` | Interface text across desktop windows; applies live and stays separate from terminal and editor fonts |
@@ -550,7 +550,7 @@ always-live inactive-opacity factor.
 | --- | --- |
 | Interface | **Theme** (`theme-mode` as three drawn window previews, `UI font`, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the five `chrome-*` pickers, `chrome-contrast`) · **Tweaks** (`animations`, `widget-corner-radius`, `shadow-strength`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
 | Status bar | Title-bar items shown when the sidebar is retracted (`status-show-session`, `status-badges`, `status-align`, `status-agents`, `status-host`, `status-update`, `status-clock`) |
-| Browser | **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
+| Browser | **Network** (`browser-egress`) · **Agents** (`browser-remote-debugging-port` as an on/off switch that writes `9222`) · **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
 | Panes | **Layout** (`pane-gaps`) · **Appearance** (`pane-background-opacity`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |

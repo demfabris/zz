@@ -741,6 +741,44 @@ impl SettingsView {
             )
     }
 
+    fn remote_debugging_setting(
+        setting: ConfigValue<Option<u16>>,
+        cx: &Context<Self>,
+    ) -> SettingEntry {
+        let key = ConfigKey::BrowserRemoteDebuggingPort;
+        SettingEntry::new(
+            "Remote debugging for agents",
+            "Serve the Chrome DevTools Protocol on 127.0.0.1:9222 so browser agents such as \
+             agent-browser or Playwright can read and drive browser panes. Takes effect when \
+             the browser runtime next starts; relaunch zz if a browser pane is already open. \
+             Set browser-remote-debugging-port in the config file for another port.",
+        )
+        .title_actions(key_annotations(key, setting.provenance))
+        .control(
+            Switch::new(format!("settings-{}", key.as_str()))
+                .checked(setting.value.is_some())
+                .on_click(move |enabled, _, cx| {
+                    let result = if *enabled {
+                        set_config_key(key, "9222")
+                    } else {
+                        remove_config_key(key)
+                    };
+                    if let Err(error) = result {
+                        report_write_error("set", key.as_str(), &error, cx);
+                    }
+                }),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_size(zz_ui::rems_from_px(11.0))
+                .text_color(cx.theme().warning)
+                .child(
+                    "Any local process that reaches the port can drive the logged-in browser.",
+                ),
+        )
+    }
+
     fn numeric_setting(
         key: ConfigKey,
         title: &'static str,
@@ -1129,6 +1167,7 @@ impl SettingsView {
     ) -> AnyElement {
         let setting = browser.0.element_selector_hotkey;
         let search = browser.0.search_provider;
+        let remote_debugging_port = browser.0.remote_debugging_port;
         Self::scroll_column("settings-browser")
             .child(settings_page_description(SettingsSection::Browser, cx))
             .child(
@@ -1141,6 +1180,10 @@ impl SettingsView {
                     resolved.browser_egress,
                     cx,
                 )),
+            )
+            .child(
+                SettingsStack::titled("Agents")
+                    .child(Self::remote_debugging_setting(remote_debugging_port, cx)),
             )
             .child(
                 SettingsStack::titled("Search").child(

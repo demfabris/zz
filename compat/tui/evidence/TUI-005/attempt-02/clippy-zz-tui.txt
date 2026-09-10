@@ -3,9 +3,4 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-    Checking zz-terminal v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-terminal)
-    Checking zz-protocol v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-protocol)
-    Checking zz-client v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-client)
-    Checking zz-daemon v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-daemon)
-    Checking zz-tui v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-tui)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 14.28s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42s

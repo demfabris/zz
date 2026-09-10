@@ -3,10 +3,4 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-    Checking parking_lot_core v0.9.12
-    Checking bitflags v2.13.1
-    Checking chrono v0.4.45
-    Checking nix v0.29.0
-    Checking parking_lot v0.12.5
-    Checking zz-mux v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-mux)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.27s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s

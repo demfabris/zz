@@ -3,16 +3,4 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-    Checking serde v1.0.229
-   Compiling phf_macros v0.13.1
-    Checking thiserror v2.0.20
-    Checking cobs v0.3.0
-    Checking serde_json v1.0.151
-    Checking smallvec v1.15.2
-    Checking heapless v0.7.17
-    Checking postcard v1.1.3
-    Checking phf v0.13.1
-    Checking csscolorparser v0.8.3
-    Checking zz-terminal v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-terminal)
-    Checking zz-protocol v0.7.0 (/home/demfabris/dev/zz-tui-copy/crates/zz-protocol)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.87s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.37s

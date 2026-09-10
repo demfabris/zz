@@ -21,7 +21,13 @@ Explicit values in `agent-command` config take precedence over these defaults.
 
 ## Targets
 
-Use stable IDs: `%N` for a pane, `@N` for a window, `$N` for a session.
+Use stable IDs: `%N` for a pane, `@N` for a window, `$N` for a session. Pass the
+bare ID: `-t %3` works everywhere, while `-t work:%3` and other session-prefixed
+guesses fail with `can't find window`. Discover verbs with `zz list-commands` (add
+a verb name for its usage line); the `--help` flag prints only the tmux usage
+banner. Never run the binary without a verb (`zz` alone, or with only global flags
+such as `-T`): that launches the desktop app. Pane options need `-p`:
+`zz set-option -p -t %3 @name reviewer`.
 
 ```sh
 zz list-sessions
@@ -93,7 +99,30 @@ path reports that readback is unavailable.
 
 ### `zz set-browser-url -t %N URL`
 
-Navigate a browser pane.
+Navigate a browser pane. `#{browser_url}` reports the active tab's URL.
+
+### Browser pages through CDP
+
+Read and act on a browser pane's page with your own CDP tool. The user enables
+the loopback endpoint with `browser-remote-debugging-port = 9222` in `zz/config`
+(or `ZZ_BROWSER_REMOTE_DEBUGGING_PORT` on the window process); it is off by
+default and listens on `127.0.0.1` only.
+
+```sh
+zz split-browser -h -P https://example.com
+zz list-panes -F '#{pane_id} #{pane_kind} #{browser_url}'
+curl -s http://127.0.0.1:9222/json/list
+agent-browser --cdp 9222 snapshot -i
+agent-browser --cdp 9222 click @e2
+agent-browser --cdp 9222 wait --load load
+```
+
+Match the pane to its CDP target by comparing `#{browser_url}` with the target
+list, then attach to that target. Never create pages (`Target.createTarget`,
+Playwright `newPage`, a tool that opens a fresh tab on connect): CEF hosts those
+as native Chromium windows outside zz. Install agent-browser instead of running it
+through `npx` per call; the binary answers in about 50 ms, `npx` adds 330 ms.
+Prefer `wait --load load` or `wait --text` over `networkidle`.
 
 ### `zz debug-marker [NOTE]`
 

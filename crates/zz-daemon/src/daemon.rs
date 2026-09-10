@@ -71102,7 +71102,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn default_percent_binding_creates_a_picker_via_split_picker() {
+    fn default_percent_binding_splits_like_the_pin_and_split_picker_stays_bindable() {
         let shared = Arc::new(Shared::new(1));
         let (client, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
@@ -71120,7 +71120,7 @@ bind - split-window -v -c "#{pane_current_path}"
         {
             let inner = shared.inner.lock();
             let binding = inner.engine.keys.get("prefix", "%").unwrap();
-            assert_eq!(binding.commands[0].name, "split-picker");
+            assert_eq!(binding.commands[0].name, "split-window");
             assert_eq!(binding.commands[0].args, ["-h"]);
         }
 
@@ -71152,20 +71152,62 @@ bind - split-window -v -c "#{pane_current_path}"
                 },
             )
             .expect("default horizontal split binding");
+        let split = context.pane.expect("split pane id");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.terminals.contains_key(&source));
+            assert!(inner.terminals.contains_key(&split));
+            assert!(matches!(
+                inner.engine.state.windows[&window].layout.project(),
+                LayoutNode::Split {
+                    axis: zz_protocol::Axis::Horizontal,
+                    ..
+                }
+            ));
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("bind-key", ["-T", "prefix", "%", "split-picker", "-h"]),
+            )
+            .expect("rebind the stock chord");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane: split,
+                    input: test_key(
+                        KeyCode::Character('b'),
+                        Modifiers::new(false, true, false, false),
+                        None,
+                    ),
+                    text_follows: false,
+                },
+            )
+            .expect("default prefix");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane: split,
+                    input: test_key(KeyCode::Character('%'), Modifiers::default(), Some("%")),
+                    text_follows: true,
+                },
+            )
+            .expect("rebound horizontal split binding");
         let picker = context.pane.expect("picker id");
         let inner = shared.inner.lock();
-        assert!(inner.terminals.contains_key(&source));
         assert!(!inner.terminals.contains_key(&picker));
         assert!(matches!(
             inner.engine.state.pane(picker).map(|pane| &pane.kind),
             Some(PaneKind::Picker { .. })
-        ));
-        assert!(matches!(
-            inner.engine.state.windows[&window].layout.project(),
-            LayoutNode::Split {
-                axis: zz_protocol::Axis::Horizontal,
-                ..
-            }
         ));
     }
 

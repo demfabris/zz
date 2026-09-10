@@ -1,0 +1,12 @@
+TUI-006 attempt-01 environment, recorded 2026-09-10
+zz revision: 3319cebab5d53d854199ae5e6c00d64b99c91e97 (origin/main 3319ceba, worktree clean apart from the new fixture compat/tui-choosers.sh)
+zz binary sha256: 3f568786308e70c3f44dd4e8642732b8b9ab5863a75c952fba232735d7496890 (cargo debug build, not bit-reproducible on this box: attestation is the revision plus a clean worktree)
+tmux pin: d77c9dc6 (next-3.8), binary /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+OS: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+TERM of the invoking shell: xterm-ghostty; the inner clients run under the outer pinned tmux's TERM
+shell: /bin/bash; inner shell: ENV= PS1='$ ' exec /bin/sh
+bash: GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+outer size: 80x24 for the main run, 100x40 for tall_case
+locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8 (status-right is emptied, so no strftime reaches a compared cell)

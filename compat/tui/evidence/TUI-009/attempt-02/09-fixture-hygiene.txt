@@ -1,0 +1,20 @@
+FIXTURE HYGIENE PROOF at 21c914e1, 2026-09-10T17:55:59-03:00
+A process belongs to a run when its environment names that run's scratch directory (/tmp/zzcaps.XXXXXX); the sweep reads /proc/<pid>/environ of every zz or tmux process.
+
+before: /tmp/zz-user present? no; processes naming any /tmp/zzcaps.: none
+
+1. normal run: exit=0, last line: all 111 asserted rows identical
+   cleanup reap lines: 0
+   scratch directories left by the run: none
+   processes naming any /tmp/zzcaps.: none
+   /tmp/zz-user present? no
+   pgrep -fa 'zz-user|zzprobe': 
+
+2. interrupted run: scratch /tmp/zzcaps.26MrJA; attached clients and daemons at the moment of the signal: 1958280:/home/demfabris/dev/zz-tui-caps/target/debug/zz --socket /tmp/zzcaps-26MrJA.sock -f /dev/null daemon 1958353:/home/demfabris/dev/zz-tui-caps/target/debug/zz --bootstrap-tray /tmp/zzcaps-26MrJA.sock 17890738024 1958436:/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux -L zzcapsi-26MrJA -f /dev/null new-session -d -s  1958509:/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux -L zzcapso-26MrJA -f /dev/null new-session -d -s  1961637:/home/demfabris/dev/zz-tui-caps/target/debug/zz --socket /tmp/zzcaps-26MrJA.sock attach-session -t = 1961639:/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux -L zzcapsi-26MrJA attach-session -t =caps 
+   SIGINT sent to the script pid alone after the keys/on case; exit=130; last line: ok    keys/on @extkey: both C-Enter
+   cleanup reap lines: 0
+   scratch directory still present? no
+   processes naming /tmp/zzcaps.26MrJA: none
+   sockets: none
+   /tmp/zz-user present? no
+   pgrep -fa 'zz-user|zzprobe': 

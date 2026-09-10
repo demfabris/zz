@@ -1,0 +1,31 @@
+TUI-009 attempt-01 environment
+captured: 2026-09-10T09:52:45-03:00
+box: alienware, Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+os: NAME="CachyOS Linux" PRETTY_NAME="CachyOS" 
+cores: 16  memory: 16153084 kB
+shell: GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+python: Python 3.14.6
+locale: LANG=en_US.UTF-8 LC_ALL=unset LC_TIME=pt_BR.UTF-8 charmap=UTF-8
+TERM at capture: xterm-ghostty
+TERM inside every case: named per case by the fixture (xterm, xterm-256color); LANG=C LC_ALL=C on both sides
+outer pinned tmux size under test: 80x24, status off, extended-keys on (decoder only)
+worktree: /home/demfabris/dev/zz-tui-caps
+base revision: 46c606d9011f8dcec0a41e8336c1da74426922eb, the origin/main tip the
+  worktree was cut from. origin/main advanced to 8e2433d0 (release: zz 0.7.0)
+  during this cycle; this branch is NOT rebased onto it, because every
+  measurement here was taken against the 46c606d9 build and a version bump
+  would invalidate the recorded binary without changing anything measured.
+branch: campaign/tui-caps
+worktree at capture: no tracked file is modified; the branch adds
+  compat/tui-caps.sh, this evidence directory and TUI-009's ledger record
+zz under test: 8f2734ea4c3ff12e53e7d81a55f09731bad8c5e4991d5e5841dc1aa637e368a8  target/debug/zz
+pin: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+pin version: tmux next-3.8
+pin commit: d77c9dc6aa021e4bc61f0da128c591af695e6466
+
+note: a cargo debug build of zz is not bit-reproducible on this box, so a
+recorded hash identifies an artifact and cannot attest it. The attestation is
+the revision plus the branch diff; the provenance is reproduction.
+
+this attempt changes no Rust source. Every finding needs a change outside
+TUI-009's zones, and each one names the field it would need.

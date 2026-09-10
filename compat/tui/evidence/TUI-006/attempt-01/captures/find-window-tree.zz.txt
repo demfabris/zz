@@ -1,0 +1,25 @@
+^[[38;2;13;13;13m^[[48;2;184;134;11m(0) - cho: 2 windows (attached)^[[39m
+^[[38;2;179;179;179m^[[49m(1) M-bM-^TM-^TM-bM-^TM-^@> ^[[38;2;205;92;92m-^[[38;2;179;179;179m ^[[39m1^[[38;2;179;179;179m: ^[[39mtwo
+^[[38;2;179;179;179m(2)     M-bM-^TM-^\M-bM-^TM-^@> ^[[39m0^[[38;2;179;179;179m: ^[[39msh^[[38;2;179;179;179m*: "ptitle"^[[39m
+^[[38;2;179;179;179m(3)     M-bM-^TM-^TM-bM-^TM-^@> ^[[39m1^[[38;2;179;179;179m: ^[[39msh^[[38;2;179;179;179m: "ptitle"^[[39m
+
+
+
+
+
+
+
+^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L cho (sort: index) (view: preview) (filter: active) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+M-bM-^TM-^B^[[39m^[[49m MARK-buffers                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ printf 'SCENE-%s\n' %1               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' find            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49mSCENE-%1                               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+M-bM-^TM-^B^[[39m^[[49m MARK-find                            ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m$ ^[[7m ^[[0m                                    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                  ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+M-bM-^TM-^B^[[39m^[[49m               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+M-bM-^TM-^B^[[39m^[[49m               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;205;92;92m0:win^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m ^[[38;2;108;166;205m1:two^[[39m ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+M-bM-^TM-^B^[[39m^[[49m               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+M-bM-^TM-^B^[[39m^[[49m                                      ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+M-bM-^TM-^B^[[39m^[[49m                                      ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+M-bM-^TM-^B^[[39m^[[49m                                      ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+cursor 0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none

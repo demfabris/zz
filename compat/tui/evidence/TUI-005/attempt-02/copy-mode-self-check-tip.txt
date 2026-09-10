@@ -84,10 +84,10 @@ ok    self-check facts: C-b as page-up on the zz side, as the prefix on the pin 
       case one-sided-mode-formats
       first differing row 0 of 24
         tmux: line-39 filler-39
-        zz:   $ cat /tmp/zzcm.5YOrrG/lines.txt
+        zz:   $ cat /tmp/zzcm.0Vecno/lines.txt
       first differing glyph row 0 of 24
         tmux text: line-39 filler-39
-        zz text:   $ cat /tmp/zzcm.5YOrrG/lines.txt
+        zz text:   $ cat /tmp/zzcm.0Vecno/lines.txt
       cursor tmux: 2,23 flag=1 pane=80x24
       cursor zz:   8,12 flag=1 pane=80x24
       facts tmux: mode=copy-mode in=1 column=2 selection=0 line=[$]
@@ -108,4 +108,38 @@ ok    self-check formats: selection_active, rectangle_toggle and pane_search_str
       cursor tmux: 2,23 flag=1 pane=80x24
       cursor zz:   14,23 flag=1 pane=80x24
 ok    self-check text: a search prompt open on the zz side only
+DIFF  one-sided-search-after-cancel-formats
+      formats tmux: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+      formats zz:   selection_active=[] rectangle_toggle=[] pane_search_string=[needle]
+ok    self-check formats: pane_search_string after cancel, searched on the zz side only
+DIFF  one-sided-search-on-reentry-formats
+      formats tmux: selection_active=[0] rectangle_toggle=[0] pane_search_string=[]
+      formats zz:   selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+ok    self-check formats: pane_search_string on a fresh entry, searched on the zz side only
+      case one-sided-reentry-search-again
+      first differing row 9 of 24
+        tmux: line-48 ^[[38;2;16;16;16m^[[48;2;205;0;205mneedle^[[39m^[[49m-48
+        zz:   line-48 needle-48
+      cursor tmux: 8,9 flag=1 pane=80x24
+      cursor zz:   2,23 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=8 selection=0 line=[line-48 needle-48]
+      facts zz:   mode=copy-mode in=1 column=2 selection=0 line=[$]
+      view tmux:  row=9 scroll=0
+      view zz:    row=23 scroll=0
+ok    self-check cursor: n on a fresh entry on the pin side only
+ok    self-check facts: n on a fresh entry on the pin side only
+      case reentry-direction
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   $ cat /tmp/zzcm.0Vecno/lines.txt
+      first differing glyph row 0 of 24
+        tmux text: line-39 filler-39
+        zz text:   $ cat /tmp/zzcm.0Vecno/lines.txt
+      cursor tmux: 8,9 flag=1 pane=80x24
+      cursor zz:   8,12 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=8 selection=0 line=[line-48 needle-48]
+      facts zz:   mode=copy-mode in=1 column=8 selection=0 line=[line-12 needle-12]
+      view tmux:  row=9 scroll=0
+      view zz:    row=12 scroll=39
+ok    self-check facts: n (up) on the pin side, N (down) on the zz side on a fresh entry
 self-check complete: every sabotage was caught in its own channel and every equivalence passed

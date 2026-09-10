@@ -3,4 +3,11 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.43s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running unittests src/lib.rs (target/debug/deps/zz_daemon-a9db643d43e262df)
+
+running 1 test
+test daemon::tests::client_focus_closes_display_panes_and_preserves_chooser_modes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 862 filtered out; finished in 0.41s
+

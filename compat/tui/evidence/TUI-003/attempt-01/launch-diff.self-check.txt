@@ -5,7 +5,7 @@ self-check: one deliberate one-sided difference per channel, plus one the fixtur
 note  sabotage-cli cli recorded, not asserted: deliberate
 ok    self-check cli: a session that exists on one side only
       case sabotage-facts, channel facts
-        tmux: no server running on /tmp/tmux-1000/zzldi-oOFOwk
+        tmux: no server running on /tmp/tmux-1000/zzldi-EllbNj
         zz:   only-zz windows=1 attached=0
 note  sabotage-facts facts recorded, not asserted: deliberate
 ok    self-check facts: an extra session on one side

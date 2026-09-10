@@ -48,6 +48,7 @@ report.
 | `facts.100x24.split-horizontal.txt` | The 100x24 split: both servers report pane 0 at 50 columns and pane 1 at 49, and the drawn border still sits one column apart. That is the `layout.rs` floored ratio, not a geometry difference. |
 | `launch-log-noise.before-fix.txt` | The zz screen of `new-session -s fresh` BEFORE the diagnostics fix: seven rows of `level=INFO role=tui … process_start` where the pin shows a prompt. |
 | `launch-scrollback.after-fix.txt` | The same region after the fix, both sides, with no log record on either. |
+| `replacement-bindings.txt` | zz accepts `bind -n M-s focus-sidebar` and `bind -n C-\ detach-client` and lists both in the root table; the pin answers `unknown command: focus-sidebar`, which is why the sidebar half is measured here and the detach half is a differential case (`root-binding-detaches`). |
 | `border-column-sweep.txt` | The drawn vertical border column against the daemon's own `#{pane_left}`/`#{pane_right}` at ten client widths, which is how the `layout.rs` rounding was pinned down. |
 
 ## What changed in the product

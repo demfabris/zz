@@ -20,7 +20,7 @@ ok    new-session-attached cursor
 ok    new-session-attached facts
       case bare-empty, channel screen
         tmux: row 0: $
-        zz:   row 0: ck fallback retained)
+        zz:   row 0: ack fallback retained)
 note  bare-empty screen recorded, not asserted: zz with no arguments starts the native desktop client, the pin paints a session in the terminal it was run from
       case bare-empty, channel cursor
         tmux: 2,0 flag=1 pane=80x24

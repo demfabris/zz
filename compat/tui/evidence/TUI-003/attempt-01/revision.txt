@@ -1,20 +1,22 @@
 Where the proofs in proofs.txt ran
 ==================================
 
-tree      84b9fd498b2fa583b6395eb91fda4ee8b3ce7d6e
-worktree  clean apart from this directory's untracked text files
-branch    campaign/tui-stock-keys, three commits on origin/main bfd05821:
+tree      1c1e4ee2b93668f1e4d3497216b22d4114f8556b
+worktree  clean apart from this directory's proof logs
+branch    campaign/tui-stock-keys, four commits on origin/main bfd05821:
             c5bac766 Make the stock chords produce the pinned result
             9ca0a040 Keep the raw client's log off the screen it paints
-            84b9fd49 Record what TUI-003 measured and move it to review
+            599c3552 Record what TUI-003 measured and move it to review
+            1c1e4ee2 Prove the binding that replaces the chord the client kept
 
 The last commit was then amended to carry the logs the proofs wrote, which
-changed its sha. That amendment adds only files under this directory:
-nothing under crates/, compat/ outside compat/tui/evidence/TUI-003/, or
-knowledge/ differs between the tree that ran the proofs and the branch tip.
+changed its sha. That amendment adds and rewrites only files under this
+directory: nothing under crates/, nothing under compat/ outside
+compat/tui/evidence/TUI-003/, and nothing under knowledge/ differs between
+the tree that ran the proofs and the branch tip.
 
 zz binary sha256 that ran them:
-  2326fc634d10e7030a4aa2c5d02453a5e86f5772e66511fca5b3c4be11be824d
+  a817fc3f8393181d7f6a06d4e0282e1b10ecb1a3c24be621b1b2a6fdf3b12b1f  target/debug/zz
 A cargo debug build of zz is not bit-reproducible on this box, so that hash
 names the artifact and does not attest it: the attestation is the tree above
-plus a clean worktree.
+plus a clean worktree, and the provenance is reproduction.

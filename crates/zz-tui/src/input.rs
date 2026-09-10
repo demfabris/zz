@@ -486,10 +486,10 @@ fn handle_key(
     browser: &mut BrowserState,
     event: KeyEvent,
 ) -> Result<InputOutcome, String> {
-    if model.sidebar_edit.is_some() && model.command_output.is_none() {
+    if model.sidebar_edit.is_some() && model.command_output_focus().is_none() {
         return handle_sidebar_edit_key(model, client, event);
     }
-    if model.sidebar.focused && model.command_output.is_none() {
+    if model.sidebar.focused && model.command_output_focus().is_none() {
         return handle_sidebar_key(model, client, event);
     }
 
@@ -526,7 +526,7 @@ fn handle_key(
         }
         return Ok(InputOutcome::None);
     }
-    if let Some(pane) = model.command_output.as_ref().map(|(pane, _)| *pane) {
+    if let Some(pane) = model.command_output_focus() {
         match command_output_key_route(
             &mut model.command_output_search,
             &mut model.command_output_swallowed_key,
@@ -1030,13 +1030,16 @@ fn handle_paste(
     client: &InteractiveClient,
     text: String,
 ) -> Result<InputOutcome, String> {
-    if let Some(action) = command_output_search_paste(&mut model.command_output_search, &text) {
+    let command_output_focused = model.command_output_focus().is_some();
+    if command_output_focused
+        && let Some(action) = command_output_search_paste(&mut model.command_output_search, &text)
+    {
         client
             .send_input(InputMessage::CommandOutputView { action })
             .map_err(|error| error.to_string())?;
         return Ok(InputOutcome::Repaint);
     }
-    if model.command_output.is_some() {
+    if command_output_focused {
         return Ok(InputOutcome::None);
     }
     if let Some(edit) = model.sidebar_edit.as_mut() {
@@ -1094,14 +1097,14 @@ fn handle_mouse(
     event: MouseEvent,
     pixel_mouse: bool,
 ) -> Result<InputOutcome, String> {
-    if model.command_output.is_some() {
+    if model.command_output_focus().is_some() {
         return Ok(InputOutcome::None);
     }
     let (global_column, global_row, global_x, global_y) =
         global_mouse_position(model, event, pixel_mouse);
     pointer_focus_follows_mouse(model, client, event, global_column, global_row)?;
     match mouse_route_owner(
-        model.command_output.is_some(),
+        model.command_output_focus().is_some(),
         model.mouse_option,
         model.sidebar_edit.is_some() || model.sidebar_visible() && global_column <= sidebar::WIDTH,
     ) {

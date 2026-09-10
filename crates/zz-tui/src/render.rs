@@ -1784,6 +1784,7 @@ impl Renderer {
             return;
         }
         if model.command_output_search.is_some()
+            && model.command_output_focus().is_some()
             && let Some((pane, viewport)) = &model.command_output
         {
             let rect = model.command_output_content_rect();
@@ -2158,7 +2159,9 @@ fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
         )),
         fill: message_style.fill,
     };
-    if let Some(query) = &model.command_output_search {
+    if model.command_output_focus().is_some()
+        && let Some(query) = &model.command_output_search
+    {
         return Some(message(&truncate(
             &command_output_search_prompt(query),
             width.saturating_sub(1),
@@ -2432,9 +2435,8 @@ fn mode_indicator(mode: TerminalMode) -> String {
 fn mode_indicators(model: &Model) -> String {
     let mut indicators = String::new();
     let viewport = model
-        .command_output
-        .as_ref()
-        .map(|(_, viewport)| viewport)
+        .command_output_focus()
+        .and_then(|pane| model.pane_viewport(pane))
         .or_else(|| model.active_viewport());
     if let Some(viewport) = viewport {
         match viewport.mode {
@@ -3684,6 +3686,11 @@ mod tests {
     #[test]
     fn command_output_search_prompt_tracks_direction_and_status_overlay() {
         let mut model = block_model(12, 8);
+        attach_one_pane(&mut model, PaneId(1));
+        model.command_output = Some((
+            PaneId(1),
+            TerminalViewport::blank(12, 6, SessionStatus::Running),
+        ));
         model.command_output_search = Some(SearchQuery {
             text: "needle".to_owned(),
             direction: SearchDirection::Backward,
@@ -3712,6 +3719,11 @@ mod tests {
         );
 
         let mut sidebar_model = block_model(120, 8);
+        attach_one_pane(&mut sidebar_model, PaneId(1));
+        sidebar_model.command_output = Some((
+            PaneId(1),
+            TerminalViewport::blank(120, 6, SessionStatus::Running),
+        ));
         sidebar_model.focus_sidebar();
         assert!(sidebar_model.sidebar_visible());
         sidebar_model.command_output_search = Some(SearchQuery::literal("visible"));
@@ -3845,8 +3857,62 @@ mod tests {
         assert!(status_overlay(&model, 120).is_none());
         model.focus_sidebar();
         assert!(model.sidebar_visible());
+        assert!(!status_indicators(&model).starts_with("VIEW"));
+        attach_one_pane(&mut model, PaneId(9));
         assert!(status_indicators(&model).starts_with("VIEW 3/40"));
         assert!(status_overlay(&model, 120).is_none());
+    }
+
+    fn attach_one_pane(model: &mut Model, pane: PaneId) {
+        let session = zz_protocol::SessionId(1);
+        let window = zz_protocol::WindowId(1);
+        model.attached_session = Some(session);
+        model.update_snapshot(std::sync::Arc::new(zz_protocol::MuxSnapshot {
+            generation: 1,
+            sessions: vec![zz_protocol::SessionSnapshot {
+                id: session,
+                name: "s".to_owned(),
+                active_window: window,
+                windows: vec![zz_protocol::WindowSnapshot {
+                    id: window,
+                    index: 0,
+                    name: "w".to_owned(),
+                    automatic_rename: true,
+                    active_pane: pane,
+                    zoomed_pane: None,
+                    layout: zz_protocol::LayoutNode::Pane(pane),
+                    panes: std::collections::BTreeMap::new(),
+                    layout_dump: String::new(),
+                    visible_layout_dump: String::new(),
+                    status_label: String::new(),
+                    activity: false,
+                    pane_border_status: zz_protocol::PaneBorderStatus::Off,
+                    pane_border_lines: zz_protocol::PaneBorderLines::Single,
+                    pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
+                    pane_order: Vec::new(),
+                    pane_z_order: Vec::new(),
+                }],
+                viewers: Vec::new(),
+            }],
+            focused_window: Some(window),
+        }));
+    }
+
+    #[test]
+    fn a_command_output_on_another_pane_owns_neither_the_prompt_nor_the_cursor() {
+        let mut model = block_model(40, 8);
+        attach_one_pane(&mut model, PaneId(1));
+        let viewport = TerminalViewport::blank(40, 6, SessionStatus::Running);
+        model.command_output = Some((PaneId(2), viewport.clone()));
+        model.command_output_search = Some(SearchQuery::literal("elsewhere"));
+        assert_eq!(model.command_output_focus(), None);
+        assert!(status_overlay(&model, 40).is_none());
+        model.command_output = Some((PaneId(1), viewport));
+        assert_eq!(model.command_output_focus(), Some(PaneId(1)));
+        assert!(matches!(
+            status_overlay(&model, 40),
+            Some(StatusOverlay::Message { .. })
+        ));
     }
 
     #[test]

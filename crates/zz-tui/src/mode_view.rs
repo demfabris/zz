@@ -129,7 +129,8 @@ fn cells_of(segments: &[StyledSegment], width: usize, cells: &mut [(String, Tmux
         for character in segment.text.chars() {
             let advance = character.width().unwrap_or(0);
             if advance == 0 {
-                if let Some((text, _)) = column.checked_sub(1).and_then(|last| cells.get_mut(last)) {
+                if let Some((text, _)) = column.checked_sub(1).and_then(|last| cells.get_mut(last))
+                {
                     text.push(character);
                 }
                 continue;
@@ -262,12 +263,16 @@ mod tests {
     }
 
     fn plain(segments: &[StyledSegment]) -> String {
-        segments.iter().map(|segment| segment.text.as_str()).collect()
+        segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect()
     }
 
     #[test]
     fn a_filled_message_clears_the_row_to_the_fill_with_the_default_foreground() {
-        let style = grounded(parse_style("bg=themeyellow,fg=themeblack,fill=themeyellow").expect("style"));
+        let style =
+            grounded(parse_style("bg=themeyellow,fg=themeblack,fill=themeyellow").expect("style"));
         let front = message_front("hello", 8, &style);
         let under = vec![StyledSegment {
             text: "STATUSROW".to_owned(),

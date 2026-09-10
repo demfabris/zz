@@ -17521,7 +17521,7 @@ impl Shared {
                     .copy_sessions
                     .get(&client)
                     .is_some_and(|copy| copy.pane == pane && !copy.exiting)
-                    || inner.command_outputs.contains_key(&client);
+                    || command_output_owns_pane(&inner, client, pane);
                 if copy_mode_active {
                     key_engine
                         .active_table()
@@ -17688,7 +17688,11 @@ impl Shared {
         if account_activity {
             self.note_terminal_input(client, pane);
         }
-        let command_output_active = self.inner.lock().command_outputs.contains_key(&client);
+        let command_output_active = {
+            let mut inner = self.inner.lock();
+            follow_command_output_focus(&mut inner, client, pane);
+            command_output_owns_pane(&inner, client, pane)
+        };
         let mut sinks = None;
         let mut pass_start = None;
         for (offset, character) in text.char_indices() {
@@ -17698,7 +17702,7 @@ impl Shared {
             match decision {
                 KeyDecision::Pass => {
                     if command_output_active
-                        || self.inner.lock().command_outputs.contains_key(&client)
+                        || command_output_owns_pane(&self.inner.lock(), client, pane)
                     {
                         if let Some(start) = pass_start.take() {
                             self.dispatch_input_text(
@@ -17767,7 +17771,7 @@ impl Shared {
             inner.choose_trees.contains_key(&client)
                 || inner.choose_buffers.contains_key(&client)
                 || inner.display_panes.contains_key(&client)
-                || inner.command_outputs.contains_key(&client)
+                || command_output_owns_pane(&inner, client, pane)
         };
         if blocked || self.input_command_prompt_text(client, kind, context, text) {
             return Ok(());
@@ -17912,6 +17916,7 @@ impl Shared {
         } else {
             self.note_terminal_input(client, pane);
         }
+        follow_command_output_focus(&mut self.inner.lock(), client, pane);
         let key = input_key_name(&input);
         let (decision, repeat_binding) = self.key_decision_with_repeat(
             client,
@@ -17929,7 +17934,7 @@ impl Shared {
         }
         let result = match decision {
             KeyDecision::Pass => {
-                if read_only || self.inner.lock().command_outputs.contains_key(&client) {
+                if read_only || command_output_owns_pane(&self.inner.lock(), client, pane) {
                     if !read_only {
                         self.suppress_committed_character(
                             client,
@@ -18000,7 +18005,7 @@ impl Shared {
         ) {
             return Ok(());
         }
-        if self.inner.lock().command_outputs.contains_key(&client) {
+        if command_output_owns_pane(&self.inner.lock(), client, pane) {
             self.suppress_committed_character(
                 client,
                 pane,
@@ -20897,6 +20902,7 @@ impl Shared {
                     pane,
                     terminal: Arc::clone(&terminal),
                     previous_key_table,
+                    parked: false,
                 },
             );
             let replaced = replaced.map(|output| {
@@ -21429,11 +21435,13 @@ impl Shared {
                 .command_outputs
                 .remove(&client)
                 .expect("command output was checked above");
-            inner
-                .key_engines
-                .entry(client)
-                .or_default()
-                .switch_table(output.previous_key_table);
+            if !output.parked {
+                inner
+                    .key_engines
+                    .entry(client)
+                    .or_default()
+                    .switch_table(output.previous_key_table);
+            }
             (
                 output.output_id,
                 output.pane,
@@ -29568,6 +29576,7 @@ struct CommandOutputSession {
     pane: PaneId,
     terminal: Arc<TerminalSession>,
     previous_key_table: Option<String>,
+    parked: bool,
 }
 
 struct PopupWaiter {
@@ -29819,11 +29828,13 @@ fn dismiss_overlays(
 
 fn take_command_output(inner: &mut ServerState, client: ClientId) -> Option<RetiredCommandOutput> {
     let output = inner.command_outputs.remove(&client)?;
-    inner
-        .key_engines
-        .entry(client)
-        .or_default()
-        .switch_table(output.previous_key_table.clone());
+    if !output.parked {
+        inner
+            .key_engines
+            .entry(client)
+            .or_default()
+            .switch_table(output.previous_key_table.clone());
+    }
     let subscriber = inner.subscribers.get(&client).cloned();
     Some((output, subscriber))
 }
@@ -30691,6 +30702,53 @@ fn enter_copy_session(
 /// terminal view, so the pane carries a mode command exactly while some client
 /// is still in copy mode on it, or while the caller is reading a command
 /// output overlay.
+fn command_output_owns_pane(inner: &ServerState, client: ClientId, pane: PaneId) -> bool {
+    inner
+        .command_outputs
+        .get(&client)
+        .is_some_and(|output| output.pane == pane)
+}
+
+fn follow_command_output_focus(inner: &mut ServerState, client: ClientId, pane: PaneId) {
+    let Some(output) = inner.command_outputs.get(&client) else {
+        return;
+    };
+    let focused = output.pane == pane;
+    if focused != output.parked {
+        return;
+    }
+    let output_pane = output.pane;
+    let previous = output.previous_key_table.clone();
+    let current = inner
+        .key_engines
+        .get(&client)
+        .and_then(|engine| engine.active_table())
+        .map(str::to_owned);
+    if focused {
+        if current != previous {
+            return;
+        }
+        let Ok(table) = inner.engine.copy_mode_table_for_pane(output_pane) else {
+            return;
+        };
+        let table = table.to_owned();
+        inner
+            .key_engines
+            .entry(client)
+            .or_default()
+            .switch_table(Some(table));
+    } else if matches!(current.as_deref(), Some("copy-mode" | "copy-mode-vi")) {
+        inner
+            .key_engines
+            .entry(client)
+            .or_default()
+            .switch_table(previous);
+    }
+    if let Some(output) = inner.command_outputs.get_mut(&client) {
+        output.parked = !focused;
+    }
+}
+
 fn pane_carries_a_mode_command(inner: &ServerState, client: ClientId, pane: PaneId) -> bool {
     inner.command_outputs.contains_key(&client)
         || inner
@@ -30915,7 +30973,11 @@ fn retarget_copy_mode_tables(inner: &mut ServerState, changed_window: Option<Win
         .copy_sessions
         .iter()
         .filter(|(client, session)| {
-            !session.exiting && !inner.command_outputs.contains_key(*client)
+            !session.exiting
+                && inner
+                    .command_outputs
+                    .get(*client)
+                    .is_none_or(|output| output.parked)
         })
         .filter_map(|(client, session)| {
             let window = inner.engine.state.window_for_pane(session.pane)?;
@@ -30924,6 +30986,9 @@ fn retarget_copy_mode_tables(inner: &mut ServerState, changed_window: Option<Win
                 .then_some((*client, session.pane))
         })
         .chain(inner.command_outputs.iter().filter_map(|(client, output)| {
+            if output.parked {
+                return None;
+            }
             let window = inner.engine.state.window_for_pane(output.pane)?;
             changed_window
                 .is_none_or(|changed| changed == window)
@@ -72648,6 +72713,46 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn command_output_hands_the_key_table_back_while_keys_target_another_pane() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (session, active, _) = output_view_session_fixture(&shared, "output-focus", "active");
+        let (_, hidden, _) = output_view_session_fixture(&shared, "output-hidden", "hidden");
+        shared
+            .attach(client, session)
+            .expect("attach output client");
+        take_reliable_messages(&mailbox);
+        shared
+            .open_command_output(client, Some(hidden), "fixture".to_owned(), "one\ntwo")
+            .expect("open command output");
+        take_command_output_message(&mailbox);
+
+        let mut inner = shared.inner.lock();
+        let table = inner.key_engines[&client].active_table().map(str::to_owned);
+        assert!(matches!(
+            table.as_deref(),
+            Some("copy-mode" | "copy-mode-vi")
+        ));
+        assert!(command_output_owns_pane(&inner, client, hidden));
+        assert!(!command_output_owns_pane(&inner, client, active));
+
+        follow_command_output_focus(&mut inner, client, active);
+        assert_eq!(inner.key_engines[&client].active_table(), None);
+        assert!(inner.command_outputs[&client].parked);
+        follow_command_output_focus(&mut inner, client, active);
+        assert_eq!(inner.key_engines[&client].active_table(), None);
+
+        follow_command_output_focus(&mut inner, client, hidden);
+        assert_eq!(
+            inner.key_engines[&client].active_table().map(str::to_owned),
+            table
+        );
+        assert!(!inner.command_outputs[&client].parked);
+    }
+
+    #[test]
     fn mode_keys_retarget_active_command_output_and_restore_the_previous_table() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
@@ -75714,6 +75819,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 pane,
                 terminal: Arc::clone(&terminal),
                 previous_key_table: None,
+                parked: false,
             },
         );
         let viewport = terminal.latest_viewport();

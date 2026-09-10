@@ -1,0 +1,19 @@
+zz only: the sidebar the raw TUI reached with M-s is still reachable as a binding.
+The pin has no focus-sidebar command, so this is a zz measurement, not a comparison.
+
+$ zz bind-key -n M-s focus-sidebar
+exit=0
+$ zz list-keys -T root M-s
+bind-key  -T root M-s focus-sidebar
+exit=0
+$ zz bind-key -n 'C-\' detach-client
+exit=0
+$ zz list-keys -T root 'C-\'
+bind-key  -T root C-\\ detach-client
+exit=0
+
+The pin refuses the zz-native verb, which is why focus-sidebar is measured here
+and not in the differential:
+$ tmux bind-key -n M-s focus-sidebar
+unknown command: focus-sidebar
+exit=1

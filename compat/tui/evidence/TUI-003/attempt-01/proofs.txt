@@ -1,8 +1,8 @@
-Proofs re-run at the tip in revision.txt (84b9fd49). Exit status first, then the
-headline the run printed. Every log named here is in this directory.
+Proofs re-run at the tip in revision.txt. Exit status first, then the headline
+the run printed. Every log named here is in this directory.
 
 0  compat/tui-stock-keys.sh
-   all 48 cases agree on every channel they assert, 22 recorded a difference elsewhere
+   all 50 cases agree on every channel they assert, 22 recorded a difference elsewhere
    -> stock-keys.run.txt
 0  compat/tui-stock-keys.sh --self-check
    every sabotage was caught in its own channel and every equivalence passed
@@ -23,7 +23,7 @@ headline the run printed. Every log named here is in this directory.
    221 + 7 + 16 + 170 passed, 0 failed
    -> cargo-tests.txt
 0  cargo test -p zz --jobs 5 -- --test-threads=2   (the cli_binary integration rule)
-   789 tests, 0 failed; cli_binary 125 passed in 119.69s
+   789 tests, 0 failed; cli_binary 125 passed in 127.36s
    -> cargo-tests.txt
 0  cargo clippy -p zz-protocol -p zz-client -p zz-tui --all-targets --all-features -- -D warnings
 0  cargo clippy -p zz-mux --all-targets --all-features -- -D warnings

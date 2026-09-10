@@ -1,35 +1,18 @@
-clippy at the tip in revision.txt, one call per touched crate
+clippy at the tip in revision.txt, -D warnings, one call per touched crate.
 
-cargo clippy -p zz-protocol --all-targets --all-features --jobs 5 -- -D warnings
-cargo clippy -p zz-client --all-targets --all-features --jobs 5 -- -D warnings
-cargo clippy -p zz-tui --all-targets --all-features --jobs 5 -- -D warnings
-warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-keys/third_party/rust/proc-macro-error2)` was not used in the crate graph
-help: Check that the patched package version and available features are compatible
-      with the dependency requirements. If the patch has a different version from
-      what is locked in the Cargo.lock file, run `cargo update` to use the new
+cargo clippy -p zz-protocol -p zz-client -p zz-tui --all-targets --all-features --jobs 5 -- -D warnings
       version. This may also occur with an optional dependency that is not enabled.
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.37s
-clippy(3) exit=0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s
+exit=0
 
 cargo clippy -p zz-mux --all-targets --all-features --jobs 5 -- -D warnings
-warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-keys/third_party/rust/proc-macro-error2)` was not used in the crate graph
-help: Check that the patched package version and available features are compatible
-      with the dependency requirements. If the patch has a different version from
-      what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
-zz-mux clippy exit=0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+exit=0
 
 cargo clippy -p zz --all-targets --all-features --jobs 5 -- -D warnings
-warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-keys/third_party/rust/proc-macro-error2)` was not used in the crate graph
-help: Check that the patched package version and available features are compatible
-      with the dependency requirements. If the patch has a different version from
-      what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-   Compiling cef-dll-sys v151.2.0+151.3.14
-    Checking cef v151.2.0+151.3.14
-    Checking zz-browser v0.6.1 (/home/demfabris/dev/zz-tui-keys/crates/zz-browser)
-    Checking zz-chrome-import v0.6.1 (/home/demfabris/dev/zz-tui-keys/crates/zz-chrome-import)
-    Checking zz v0.6.1 (/home/demfabris/dev/zz-tui-keys/crates/zz)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.73s
-zz clippy exit=0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.53s
+exit=0
+
+No warning line appears in any of the three logs; each finished the profile.

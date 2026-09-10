@@ -11,10 +11,10 @@ running 2 tests
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
      Running tests/simulator.rs (target/debug/deps/simulator-86693f41db4ebb88)
 running 2 tests
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.56s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.05s
      Running unittests src/lib.rs (target/debug/deps/zz_protocol-c251f5f3224fcb60)
 running 221 tests
-test result: ok. 221 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+test result: ok. 221 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
      Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-93319dd917fec2ea)
 running 7 tests
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
@@ -27,21 +27,19 @@ test result: ok. 170 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fi
      Running unittests src/main.rs (target/debug/deps/zz_tui-290b568adbfc02b4)
 running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-   Doc-tests zz_client
 running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-   Doc-tests zz_protocol
 running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-   Doc-tests zz_tui
 running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
 cargo test -p zz --jobs 5 -- --test-threads=2   (the cli_binary integration rule)
      Running unittests src/lib.rs (target/debug/deps/zz-4b0ff741ba7ebab3)
 running 632 tests
 running 1 test
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 631 filtered out; finished in 0.00s
-test result: ok. 632 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.79s
+test result: ok. 632 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.92s
      Running unittests src/main.rs (target/debug/deps/zz-ff2dc9156cce990e)
 running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
@@ -59,13 +57,12 @@ running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
      Running tests/buffer_client_file_load.rs (target/debug/deps/buffer_client_file_load-8ce982cff4145ed8)
 running 6 tests
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.51s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.43s
      Running tests/buffer_client_file_save.rs (target/debug/deps/buffer_client_file_save-2cfb531ef6498cf5)
 running 5 tests
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.42s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.46s
      Running tests/cli_binary.rs (target/debug/deps/cli_binary-f1b509bdb43a8219)
 running 125 tests
-test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 119.69s
-   Doc-tests zz
+test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 127.36s
 running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

@@ -67,6 +67,7 @@ ok    80x24 detach
 ok    80x24 root-binding-backslash
 ok    80x24 root-binding-alt-s
 ok    80x24 root-binding-alt-shift-s
+ok    80x24 root-binding-detaches
 ok    80x24 application-reader
 ok    80x24 application-backslash
 ok    80x24 application-alt-s
@@ -151,8 +152,9 @@ ok    100x24 detach
 ok    100x24 root-binding-backslash
 ok    100x24 root-binding-alt-s
 ok    100x24 root-binding-alt-shift-s
+ok    100x24 root-binding-detaches
 ok    100x24 application-reader
 ok    100x24 application-backslash
 ok    100x24 application-alt-s
 ok    100x24 application-alt-shift-s
-all 48 cases agree on every channel they assert, 22 recorded a difference elsewhere
+all 50 cases agree on every channel they assert, 22 recorded a difference elsewhere

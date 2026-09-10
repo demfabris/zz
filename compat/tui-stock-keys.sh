@@ -682,6 +682,15 @@ run_key_ownership() {
   type_both M-S
   key_case root-binding-alt-shift-s format '#{window_name}=boundaltshifts'
 
+  # The chord the raw client used to own, restored the way the pin restores
+  # anything: as a binding. `bind -n C-\ detach-client` is what a user who wants
+  # the old behaviour writes, and both sides answer it the same way.
+  attach_both_at "$columns" "$rows"
+  side_command zz bind-key -n 'C-\' detach-client || die 'zz refused bind-key -n C-\'
+  side_command tmux bind-key -n 'C-\' detach-client || die 'tmux refused bind-key -n C-\'
+  type_both 'C-\'
+  key_case root-binding-detaches gone ''
+
   # Application keys. With the root bindings gone and the program's signal keys
   # turned off, C-\, M-s and M-S are ordinary bytes the program must receive.
   # `cat -v` renders them, so the screen is the receipt.

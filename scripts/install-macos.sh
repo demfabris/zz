@@ -20,7 +20,7 @@ binary="$target/Contents/MacOS/zz"
 gui_pids() {
     pgrep -f "^$binary" 2>/dev/null | while read -r pid; do
         case "$(ps -o command= -p "$pid" 2>/dev/null)" in
-            "$binary" | "$binary app" | "$binary --verbose" | "$binary app --verbose") echo "$pid" ;;
+            "$binary" | "$binary app" | "$binary --verbose app" | "$binary app --verbose") echo "$pid" ;;
         esac
     done
 }

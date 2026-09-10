@@ -61,9 +61,9 @@ if [[ "$PLATFORM" == "linux" ]]; then
     # ZZ_CARGO_FEATURES opts a dev run into compiled-out features (CLI
     # --features merges into it); the macOS path reads it inside xtask.
     if [[ "$VERBOSE" == "--verbose" ]]; then
-        exec cargo run -p zz ${ZZ_CARGO_FEATURES:+--features "$ZZ_CARGO_FEATURES"} -- --verbose
+        exec cargo run -p zz ${ZZ_CARGO_FEATURES:+--features "$ZZ_CARGO_FEATURES"} -- --verbose app
     fi
-    exec cargo run -p zz ${ZZ_CARGO_FEATURES:+--features "$ZZ_CARGO_FEATURES"}
+    exec cargo run -p zz ${ZZ_CARGO_FEATURES:+--features "$ZZ_CARGO_FEATURES"} -- app
 fi
 
 zig_version="${ZZ_ZIG_VERSION:?the just recipe supplies this; export it to run the script directly}"
@@ -78,8 +78,8 @@ mkdir -p logs
 export ZZ_LOG_DIR="${ZZ_LOG_DIR:-$PWD/logs}"
 
 if [[ "$VERBOSE" == "--verbose" ]]; then
-    ./dist/zz-dev/zz.app/Contents/MacOS/zz --verbose >/dev/null 2>&1 &
+    ./dist/zz-dev/zz.app/Contents/MacOS/zz --verbose app >/dev/null 2>&1 &
 else
-    ./dist/zz-dev/zz.app/Contents/MacOS/zz >/dev/null 2>&1 &
+    ./dist/zz-dev/zz.app/Contents/MacOS/zz app >/dev/null 2>&1 &
 fi
 disown

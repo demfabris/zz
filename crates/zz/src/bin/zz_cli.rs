@@ -90,6 +90,7 @@ fn launch_application(launcher: &Path, _executable: &Path) -> ExitCode {
     }
     match command
         .arg(bundle)
+        .args(["--args", "app"])
         .env_remove("TMUX")
         .env_remove("TMUX_PANE")
         .status()

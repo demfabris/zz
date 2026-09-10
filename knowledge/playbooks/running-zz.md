@@ -42,9 +42,10 @@ The installed macOS and Linux `zz` command is the tmux-compatible launcher. Bare
 `new-session -A` and enters the raw-terminal client: an empty daemon creates numeric session `0`,
 while a live daemon attaches its current session. Explicit `zz attach` and `zz attach-session`
 remain tmux-compatible and return `no sessions` on an empty daemon. Use `zz new -s NAME` when the
-first session needs a name and `zz app` for a new GUI process. Direct bundle launches and
-`cargo run -p zz` keep the no-argument GUI behavior used by development tools and platform
-launchers.
+first session needs a name and `zz app` for a new GUI process. A direct bundle launch or
+`cargo run -p zz` with no command word is the same tmux client, not the GUI; development tools
+and platform launchers pass `app` (`scripts/run.sh`, the AppImage `AppRun`, the Linux `.desktop`
+entry). Only a LaunchServices launch on macOS and the Windows bundle open the GUI bare.
 
 `zz app` starts the first session in the directory where you ran the command. A Dock or Finder
 launch starts it in your home directory. The GUI includes that path when it creates a session, so
@@ -133,7 +134,8 @@ survive the swap; it serves the previous build until restarted. Local signing ke
 which would run bundle-less) into the first existing, writable candidate already on `PATH`, checking
 `/opt/homebrew/bin` then `/usr/local/bin`. It leaves any foreign `zz` untouched and prints a manual
 link command if neither candidate qualifies. Run `zz app` through that launcher to open the GUI;
-bare `zz` runs `new-session -A` through the raw-terminal client.
+bare `zz` runs `new-session -A` through the raw-terminal client, and so does the bundled
+executable itself when a shell runs it without a command word.
 
 The recipe writes `dist/zz-dev/zz.app`. Its debug CEF runtime uses Chromium's mock keychain so
 local rebuilds do not repeatedly prompt for Chromium Safe Storage; release bundles continue using

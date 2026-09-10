@@ -37,8 +37,13 @@ opt-in `quit-daemon-on-exit` key makes app quit send `kill-server` regardless. S
 every one of them, so an attached client still never has the daemon die under it. See
 [session persistence](/concepts/session-persistence.md).
 
-A GUI process auto-starts a daemon if none is running, then attaches as a client. The installed
-launcher reserves `zz app` for this path; bare `zz` uses the raw-terminal `new-session -A` path.
+A GUI process auto-starts a daemon if none is running, then attaches as a client. `zz app` is the
+one command that opens it; a command line with no command word is a tmux client and runs
+`default-client-command` (`new-session -A` by default) through the raw-terminal path, whether it
+reaches the executable through the installed launcher or directly. Two launches open the GUI
+without the verb because they cannot pass one: LaunchServices on macOS (Finder, the Dock, `open`),
+which the executable recognizes by its launchd parent, and the Windows bundle, which ships no CLI
+launcher. The launcher's own `zz app` passes `--args app` through `open -n` as well.
 On Unix the spawned daemon gets its own session, so Ctrl+C or a closing tty in the launching
 terminal never signals the daemon and its sessions. The daemon initially has no session unless
 config created one; the GUI's actual empty-target Interactive attach lazily creates numeric session

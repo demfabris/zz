@@ -63,7 +63,7 @@ capture_clients() {
         if [[ -n "$pid" ]]; then
             OLD_CLIENT_PIDS+=("$pid")
         fi
-    done < <(pgrep -fx "$client_path" || true)
+    done < <(pgrep -f "^${client_path}( --verbose)? app$" || true)
 }
 
 stop_old_clients() {

@@ -10,4 +10,7 @@ if [ -z "${APPDIR:-}" ]; then
 fi
 
 export LD_LIBRARY_PATH="$APPDIR/usr/lib/zz${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+if [ "$#" -eq 0 ]; then
+    set -- app
+fi
 exec "$APPDIR/usr/bin/zz" "$@"

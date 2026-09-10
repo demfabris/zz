@@ -821,7 +821,10 @@ fn run_command_mode(
         ));
     }
     let mut command_chain = split_command_chain(arguments);
-    if command_chain.is_empty() && origin == CommandLineOrigin::Launcher && host.is_none() {
+    if command_chain.is_empty()
+        && host.is_none()
+        && !bare_command_line_opens_application(origin, launched_by_launch_services())
+    {
         command_chain =
             default_client_command_chain(socket_path, mux_config_files, no_start_server);
     }
@@ -2291,6 +2294,24 @@ fn default_client_command_chain(
 }
 
 #[cfg(not(target_os = "ios"))]
+#[cfg(not(target_os = "ios"))]
+fn bare_command_line_opens_application(
+    origin: CommandLineOrigin,
+    launched_by_launch_services: bool,
+) -> bool {
+    origin == CommandLineOrigin::Application && (cfg!(windows) || launched_by_launch_services)
+}
+
+#[cfg(target_os = "macos")]
+fn launched_by_launch_services() -> bool {
+    std::os::unix::process::parent_id() == 1
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+fn launched_by_launch_services() -> bool {
+    false
+}
+
 fn is_launcher_default_client_command(commands: &[CommandInvocation]) -> bool {
     matches!(commands, [command] if command.name == "new-session" && command.args.is_empty())
 }
@@ -2977,6 +2998,19 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn a_bare_command_line_is_a_client_unless_launch_services_or_windows_opened_it() {
+        use super::{CommandLineOrigin, bare_command_line_opens_application};
+
+        assert!(!bare_command_line_opens_application(CommandLineOrigin::Launcher, true));
+        assert!(!bare_command_line_opens_application(CommandLineOrigin::Launcher, false));
+        assert_eq!(
+            bare_command_line_opens_application(CommandLineOrigin::Application, false),
+            cfg!(windows)
+        );
+        assert!(bare_command_line_opens_application(CommandLineOrigin::Application, true));
     }
 
     #[test]

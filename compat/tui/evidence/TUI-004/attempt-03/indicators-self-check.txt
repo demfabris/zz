@@ -48,6 +48,27 @@ ok    self-check message, one side paints the message in another style
       cursor tmux: 1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
       cursor zz:   1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
 ok    self-check prompt, one side paints the prompt in another style
+      case self-check-selection-keys
+      first differing row 1 of 24
+        tmux: MARK^[[39m^[[49m-selsab
+        zz:   MARK-^[[39m^[[49mselsab
+      cursor tmux: 4,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   4,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check selection, one side selects with the vi table
+      case self-check-view-owner
+      first differing row 2 of 24
+        tmux: $ printf 'TYPED-%s\n' HIDDEN
+        zz:   $
+      cursor tmux: 2,4 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check view, one side opens it on the active pane and swallows the keys
+      case self-check-view-owner-split (divider row 11 by glyph)
+      first differing row 0 of 24
+        tmux: NONACTIVEOUT                                                               ^[[38;2;13;13;13m^[[48;2;184;134;11m[0/0]
+        zz:   $ printf 'MARK-%s\n' splitsab
+      cursor tmux: 2,14 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,12 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check view in a split, one side opens it on the active pane
 ok    self-check equivalence: the same armed prefix on both sides
 self-check complete: every sabotage was caught and the equivalence passed
 exit=0

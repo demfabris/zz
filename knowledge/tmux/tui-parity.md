@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **4/12 verified**. Added scope: **0/1 verified**.
 
-Status counts: unmeasured: 5, different: 1, active: 0, review: 3, blocked: 0, verified: 4.
+Status counts: unmeasured: 4, different: 1, active: 0, review: 4, blocked: 0, verified: 4.
 
 Dependency-ready obligations, by priority: TUI-004, TUI-005, TUI-009, TUI-013.
 
@@ -39,7 +39,7 @@ Dependency-ready obligations, by priority: TUI-004, TUI-005, TUI-009, TUI-013.
 | --- | --- | ---: | --- |
 | TUI-005: Pane copy mode and search | review | 5 | TUI-002, TUI-003 |
 | TUI-006: Chooser and command-output presentation | different | 6 | TUI-002, TUI-003, TUI-004 |
-| TUI-007: Prompts, menus, popups and pane labels | unmeasured | 7 | TUI-002, TUI-003, TUI-004 |
+| TUI-007: Prompts, menus, popups and pane labels | review | 7 | TUI-002, TUI-003, TUI-004 |
 | TUI-008: Mouse, paste, focus and key ownership | unmeasured | 8 | TUI-003, TUI-005, TUI-007 |
 
 ## breadth: Broader parity and command composition
@@ -278,7 +278,7 @@ Next action: Capture default choose-tree and long command output on both clients
 
 ### TUI-007: Prompts, menus, popups and pane labels
 
-Status: unmeasured.
+Status: review.
 
 Acceptance:
 
@@ -288,16 +288,21 @@ Acceptance:
 
 Sources:
 
+- `crates/zz-tui/src/overlay.rs`
 - `crates/zz-tui/src/render.rs`
 - `crates/zz-tui/src/input.rs`
+- `crates/zz-tui/src/app.rs`
 - `crates/zz-tui/src/state.rs`
+- `crates/zz-daemon/src/daemon.rs`
+- `crates/zz-protocol/src/message.rs`
+- `compat/tui-overlays.sh`
 - `compat/attached-client.sh`
 
 Tmux gap references: `clients.tui-confirm-before-overlay`, `clients.tui-display-menu-overlay`, `clients.tui-display-popup-overlay`, `options.native-overlay-styles`.
 
-Existing attached fixtures cover several overlay behaviors but do not claim whole-screen equality. Prompt placement currently depends on sidebar visibility.
+CYCLE 5, ATTEMPT-01: MEASURED AND CLOSED IN ONE PASS. New fixture compat/tui-overlays.sh, 80x24, the outer-pinned-tmux driver of tui-indicators.sh, whole screen plus the cursor tuple at named settled checkpoints. At 36fb9f7c it reports all 33 asserted comparisons identical and 13 recorded, three runs out of three, and --self-check catches a menu item only one side has, a keystroke only one side's covered pane receives, a popup border only one side draws rounded and a prompt cursor only one side moves, and passes one equivalence. Evidence compat/tui/evidence/TUI-007/attempt-01/. WHAT ASSERTS. Command prompt: opened, typed, a long input scrolled the way prompt.c prompt_draw scrolls it, the cursor moved back into it, 60x20 and back, status-position top, cancelled. Confirm-before: opened, resized, refused. Display-menu (-x 4 -y 12, -T, shortcut annotations, a separator and a disabled row): opened, Down, Down past the separator, an unanswered z, a message over it, 100x30, Escape, the s shortcut, and a -M menu chosen by a button-1 click. Display-popup (-w 34 -h 9 -T -E over a job): opened, a line typed into the job, a message over it, 100x30, closed. Display-panes over a horizontal split: the split, the labels, a resize clearing them, digit 1 selecting pane 1, Z closing them and reaching the pane. Nothing typed into a covered pane reaches it: the restoration comparisons after the menu's z, the popup's line and the labels' Z cover the pane each surface sat on. THE 13 RECORDED CASES are text mode: every glyph, every column and the cursor asserted, only the prompt or message row's STYLE recorded with a reason starting SIBLING:modes, because message-style and message-command-style are TUI-004's this cycle; checked against run 1, no other row carries a style difference. OLD BEHAVIOUR AND FIX, each measured 2026-09-10 against the pin and fixed in crates/zz-tui/src/overlay.rs with hooks in render.rs, input.rs and app.rs: (1) prompt input never scrolled; zz cut it at the right edge where prompt_draw keeps the cursor on the last column. (2) confirm-before hid its cursor at 79,23 where status_prompt_cursor shows it after the prompt at 18,23, and a frame-only repaint after a resize hid it again. (3) menu and popup titles were padded with spaces where screen_write_box leaves the border line. (4) a disabled menu row's padding was dim where screen_write_menu dims only the name. (5) the hidden menu cursor sat at 23,11 where menu_mode_cb puts it two columns into the selected row. (6) popup content took the terminal's default colours where popup_draw_cb gives the job's default cells popup-style. (7) the popup cursor stayed visible under a message. (8) display-panes drew a small tag at each pane's top left where cmd_display_panes_draw_pane draws window_clock_table digits centred in the pane on a ground of display-panes-colour or display-panes-active-colour, display-panes-format on the pane's top row, and parks the hidden cursor at 0,0. (9) a key a client-local overlay answered never reached the daemon, so a message stayed up and froze pane output, where server_client_handle_key clears the message before any overlay sees the key. (10) a size change left display-panes up where server-client.c:2465 clears an overlay with no resize callback; closing it with DisplayPanesAction::Close would have typed an Escape into the pane, so the TUI sends a new Dismiss. WIRE: PROTOCOL_VERSION 100 to 101 for three pure appends, InputMessage::DismissClientMessage, DisplayPanesAction::Dismiss and DisplayPanesState colour and active_colour, consumer halves in the same push. GAPS: option:display-panes-colour and option:display-panes-active-colour closed as options.display-panes-colours, TMUX_OPTION_CONSUMERS 139 to 141; options.native-overlay-styles keeps its GUI decision and its presentation items with the dated measurement appended. The three clients.tui-*-overlay gaps were already closed; compat/attached-client.sh keeps their behavioural cases and passes at 36fb9f7c, and compat/tui-screen-diff.sh stays green, 111 asserted and 42 recorded. DECLARED IN THE FIXTURE HEADER: in the display-panes cases only, the SGR around the divider glyph is stripped on both sides, because the divider's colour is the border record tui-screen-diff.sh keeps under BORDER_STYLE_REASON. FINDINGS OUTSIDE THIS OBLIGATION, reported and not fixed: an 80-column -h split grown to 100 columns splits 50|49 on the pin and 49|50 on zz, and shrinking back leaves zz's left pane showing scrollback lines the pin's does not; the display-panes resize therefore changes the height only. RESIDUE NOT DRIVEN: under display-message -N the daemon ignores the dismissal as the pin does, but the TUI still hands the key to its menu where the pin swallows it; the TUI has no field that says a message ignores keys.
 
-Next action: Inventory existing overlay cases and add whole-screen checkpoints to a small prompt and popup case before broadening.
+Next action: Gate: fold the three appends into the cycle's single protocol 101 with its version-history entry. After the modes lane lands message-style and message-command-style, flip the 13 SIBLING:modes text cases in compat/tui-overlays.sh to same and keep the flip only if the fixture and its --self-check stay green. TUI-007 verifies in the records commit that verifies TUI-004.
 
 ### TUI-008: Mouse, paste, focus and key ownership
 

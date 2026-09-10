@@ -1157,17 +1157,47 @@ fn startup_config_owner_capability(
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ClientTerminalFlags {
+    pub utf8: bool,
+    pub features: Vec<String>,
+}
+
+static CLIENT_TERMINAL_FLAGS: std::sync::OnceLock<ClientTerminalFlags> = std::sync::OnceLock::new();
+
+pub fn set_client_terminal_flags(flags: ClientTerminalFlags) {
+    let _ = CLIENT_TERMINAL_FLAGS.set(flags);
+}
+
+fn client_terminal_flags() -> &'static ClientTerminalFlags {
+    CLIENT_TERMINAL_FLAGS.get_or_init(ClientTerminalFlags::default)
+}
+
 fn client_utf8_capability(capabilities: &mut Vec<String>) {
-    if client_takes_utf8(|name| std::env::var_os(name)) {
+    if client_terminal_flags().utf8 || client_takes_utf8(|name| std::env::var_os(name)) {
         capabilities.push(ClientHello::CLIENT_UTF8_CAPABILITY.to_owned());
     }
 }
 
+const MAX_CLIENT_FEATURE_SPECS: usize = 16;
+const MAX_CLIENT_FEATURE_SPEC_BYTES: usize = 200;
+
+fn client_features_capabilities(features: &[String], capabilities: &mut Vec<String>) {
+    capabilities.extend(
+        features
+            .iter()
+            .filter(|spec| spec.len() <= MAX_CLIENT_FEATURE_SPEC_BYTES)
+            .take(MAX_CLIENT_FEATURE_SPECS)
+            .map(|spec| format!("{}{spec}", ClientHello::CLIENT_FEATURES_CAPABILITY_PREFIX)),
+    );
+}
+
 /// tmux.c decides this in the client process, before it ever dials the server:
-/// `$TMUX` being set at all means the terminal is tmux's own and takes UTF-8,
-/// and otherwise the first of `LC_ALL`, `LC_CTYPE` and `LANG` that is set and
-/// non-empty decides it, by holding `UTF-8` or `UTF8` in any case. zz has no
-/// `-u` of its own, so that third input has no spelling here.
+/// `-u` raises it outright, `$TMUX` being set at all means the terminal is
+/// tmux's own and takes UTF-8, and otherwise the first of `LC_ALL`, `LC_CTYPE`
+/// and `LANG` that is set and non-empty decides it, by holding `UTF-8` or
+/// `UTF8` in any case. This reads the last two; `-u` arrives through
+/// `set_client_terminal_flags`.
 fn client_takes_utf8(lookup: impl Fn(&str) -> Option<OsString>) -> bool {
     if lookup("TMUX").is_some() {
         return true;
@@ -1373,6 +1403,7 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
     };
     startup_config_owner_capability(kind, startup_config_owner, &mut capabilities);
     client_utf8_capability(&mut capabilities);
+    client_features_capabilities(&client_terminal_flags().features, &mut capabilities);
     if kind == ClientKind::Interactive && client_has_terminal {
         capabilities.push(ClientHello::CLIENT_TERMINAL_CAPABILITY.to_owned());
     }
@@ -1485,9 +1516,10 @@ mod tests {
     };
 
     use super::{
-        CallerTtyScope, EndpointFactsScope, attach_session_command, client_environment_with,
-        client_takes_utf8, client_working_directory, startup_config_owner_capability,
-        terminal_facts_capabilities, terminal_facts_capabilities_with,
+        CallerTtyScope, EndpointFactsScope, MAX_CLIENT_FEATURE_SPECS, attach_session_command,
+        client_environment_with, client_features_capabilities, client_takes_utf8,
+        client_working_directory, startup_config_owner_capability, terminal_facts_capabilities,
+        terminal_facts_capabilities_with,
     };
 
     #[test]
@@ -1586,6 +1618,18 @@ mod tests {
         assert!(!takes(&[("LC_CTYPE", "C"), ("LANG", "en_US.UTF-8")]));
         assert!(takes(&[("LC_CTYPE", ""), ("LANG", "en_US.UTF-8")]));
         assert!(!takes(&[("LC_ALL", "C"), ("LANG", "en_US.UTF-8")]));
+    }
+
+    #[test]
+    fn global_feature_flags_travel_as_one_bounded_token_per_flag() {
+        let mut capabilities = Vec::new();
+        let mut features = vec!["256".to_owned(), "sixel:RGB".to_owned(), "x".repeat(201)];
+        features.extend((0..20).map(|index| format!("title{index}")));
+        client_features_capabilities(&features, &mut capabilities);
+        assert_eq!(capabilities.len(), MAX_CLIENT_FEATURE_SPECS);
+        assert_eq!(capabilities[0], "client-features-v1:256");
+        assert_eq!(capabilities[1], "client-features-v1:sixel:RGB");
+        assert_eq!(capabilities[2], "client-features-v1:title0");
     }
 
     #[test]

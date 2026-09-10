@@ -5629,6 +5629,7 @@ impl Shared {
             inner.client_kinds.remove(&client);
             inner.client_terminals.remove(&client);
             inner.utf8_clients.remove(&client);
+            inner.client_features.remove(&client);
             inner.nested_clients.remove(&client);
             inner.client_ttys.remove(&client);
             inner.client_sizes.remove(&client);
@@ -27740,6 +27741,7 @@ struct ServerState {
     /// The clients that raised tmux's `CLIENT_UTF8`. A client not in here is
     /// one `server_client_print` sanitizes its output for.
     utf8_clients: BTreeSet<ClientId>,
+    client_features: BTreeMap<ClientId, u32>,
     nested_clients: BTreeSet<ClientId>,
     client_ttys: BTreeMap<ClientId, String>,
     client_sizes: BTreeMap<ClientId, (u16, u16)>,
@@ -31475,6 +31477,62 @@ fn client_utf8_fact(capabilities: &[String]) -> bool {
         .any(|capability| capability == ClientHello::CLIENT_UTF8_CAPABILITY)
 }
 
+const TERMINAL_FEATURES: [&str; 21] = [
+    "256",
+    "bpaste",
+    "ccolour",
+    "clipboard",
+    "hyperlinks",
+    "cstyle",
+    "extkeys",
+    "focus",
+    "ignorefkeys",
+    "margins",
+    "mouse",
+    "osc7",
+    "overline",
+    "progressbar",
+    "rectfill",
+    "RGB",
+    "sixel",
+    "strikethrough",
+    "sync",
+    "title",
+    "usstyle",
+];
+
+fn terminal_feature_bit(name: &str) -> Option<u32> {
+    TERMINAL_FEATURES
+        .iter()
+        .position(|feature| feature.eq_ignore_ascii_case(name))
+        .map(|index| 1 << index)
+}
+
+fn client_features_fact(capabilities: &[String]) -> u32 {
+    let mut features = 0;
+    for spec in capabilities.iter().filter_map(|capability| {
+        capability.strip_prefix(ClientHello::CLIENT_FEATURES_CAPABILITY_PREFIX)
+    }) {
+        for name in spec.split([':', ',']) {
+            let Some(bit) = terminal_feature_bit(name) else {
+                break;
+            };
+            features |= bit;
+        }
+    }
+    features
+}
+
+fn terminal_features_list(features: u32) -> String {
+    TERMINAL_FEATURES
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| features & (1 << index) != 0)
+        .map(|(_, name)| *name)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn client_size_fact(capabilities: &[String]) -> Option<(u16, u16)> {
     capabilities.iter().find_map(|capability| {
         let value = capability.strip_prefix(ClientHello::CLIENT_SIZE_CAPABILITY_PREFIX)?;
@@ -31831,6 +31889,9 @@ fn client_environment_value<'a>(
 }
 
 fn client_uses_utf8(inner: &ServerState, client: ClientId) -> bool {
+    if inner.utf8_clients.contains(&client) {
+        return true;
+    }
     if client_environment_value(inner, client, "TMUX").is_some_and(|value| !value.is_empty()) {
         return true;
     }
@@ -31855,11 +31916,14 @@ fn client_colour_count(inner: &ServerState, client: ClientId) -> Option<u32> {
     let colour_term = client_environment_value(inner, client, "COLORTERM")
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if matches!(colour_term.as_str(), "truecolor" | "24bit")
+    let requested = inner.client_features.get(&client).copied().unwrap_or(0);
+    let has = |name| terminal_feature_bit(name).is_some_and(|bit| requested & bit != 0);
+    if has("RGB")
+        || matches!(colour_term.as_str(), "truecolor" | "24bit")
         || term.to_ascii_lowercase().contains("truecolor")
     {
         Some(16_777_216)
-    } else if term.to_ascii_lowercase().contains("256color") {
+    } else if has("256") || term.to_ascii_lowercase().contains("256color") {
         Some(256)
     } else if term == "dumb" {
         Some(2)
@@ -31872,11 +31936,8 @@ fn client_term_features(inner: &ServerState, client: ClientId) -> String {
     let Some(colours) = client_colour_count(inner, client) else {
         return String::new();
     };
-    let mut features = Vec::new();
-    if colours >= 256 {
-        features.push("256");
-    }
-    features.extend([
+    let mut features = inner.client_features.get(&client).copied().unwrap_or(0);
+    for name in [
         "bpaste",
         "ccolour",
         "clipboard",
@@ -31887,12 +31948,20 @@ fn client_term_features(inner: &ServerState, client: ClientId) -> String {
         "mouse",
         "osc7",
         "overline",
-    ]);
-    if colours == 16_777_216 {
-        features.push("RGB");
+        "strikethrough",
+        "sync",
+        "title",
+        "usstyle",
+    ] {
+        features |= terminal_feature_bit(name).unwrap_or(0);
     }
-    features.extend(["strikethrough", "sync", "title", "usstyle"]);
-    features.join(",")
+    if colours >= 256 {
+        features |= terminal_feature_bit("256").unwrap_or(0);
+    }
+    if colours == 16_777_216 {
+        features |= terminal_feature_bit("RGB").unwrap_or(0);
+    }
+    terminal_features_list(features)
 }
 
 fn client_format_geometry(
@@ -38899,6 +38968,10 @@ fn handle_connection<S: TransportStream>(
         }
         if client_utf8_fact(&hello.capabilities) {
             inner.utf8_clients.insert(client);
+        }
+        let features = client_features_fact(&hello.capabilities);
+        if features != 0 {
+            inner.client_features.insert(client, features);
         }
         if let Some(tty) = client_tty_fact(&hello.capabilities) {
             inner.client_ttys.insert(client, tty);
@@ -64365,6 +64438,23 @@ set-option -g @alias-mixed-next yes
         assert_eq!(client_size_fact(&["client-size-v1:0x40".to_owned()]), None);
         assert_eq!(client_size_fact(&["client-size-v1:120".to_owned()]), None);
         assert_eq!(client_size_fact(&["client-terminal-v1".to_owned()]), None);
+        let features = |tokens: &[&str]| {
+            terminal_features_list(client_features_fact(
+                &tokens
+                    .iter()
+                    .map(|token| format!("client-features-v1:{token}"))
+                    .collect::<Vec<_>>(),
+            ))
+        };
+        assert_eq!(features(&["256"]), "256");
+        assert_eq!(features(&["sixel:rgb", "256"]), "256,RGB,sixel");
+        assert_eq!(features(&["title,bogus,sixel"]), "title");
+        assert_eq!(features(&["", "sixel"]), "sixel");
+        assert_eq!(client_features_fact(&["client-terminal-v1".to_owned()]), 0);
+        assert_eq!(
+            terminal_features_list(u32::MAX),
+            TERMINAL_FEATURES.join(",")
+        );
         assert_eq!(
             client_working_directory_fact(
                 ClientPath::from_path(Path::new("/tmp/client cwd")).as_ref()

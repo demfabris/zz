@@ -10,6 +10,7 @@ use zz_protocol::{
     PopupBorderLines, StyledSegment, ThemeColours, TmuxAttributeState, TmuxColour, TmuxStyle,
     apply_style, parse_style, parse_styled_segments,
 };
+use zz_terminal::ColourClass;
 use zz_terminal::{
     CellWidth, Color, Glyph, KittyPlacement, OverlayKind, OverlaySpan, PackedCell, PackedStyle,
     SearchDirection, SearchQuery, TerminalAppearance, TerminalMode, TerminalViewport,
@@ -2802,34 +2803,55 @@ enum Ground {
 /// `terminal` reset the ground, the way `tty_colours` sends `39` and `49`.
 fn write_ground(output: &mut Vec<u8>, colour: Option<TmuxColour>, fallback: Color, ground: Ground) {
     let Some(colour) = colour else {
-        write_rgb_ground(output, fallback, ground);
+        write_default_ground(output, ground);
         return;
     };
     match colour {
         TmuxColour::Basic(index) | TmuxColour::Indexed(index) => {
-            let (low, bright, extended) = match ground {
-                Ground::Foreground => (30, 90, 38),
-                Ground::Background => (40, 100, 48),
-            };
-            if index < 8 {
-                write!(output, "\x1b[{}m", low + u16::from(index))
-            } else if index < 16 {
-                write!(output, "\x1b[{}m", bright + u16::from(index) - 8)
-            } else {
-                write!(output, "\x1b[{extended};5;{index}m")
-            }
-            .expect("writing to Vec cannot fail");
+            write_palette_ground(output, index, ground);
         }
         TmuxColour::Rgb(value) => write_rgb_ground(output, Color::from_packed(value), ground),
         TmuxColour::Theme(index) => {
             write_rgb_ground(output, theme_colour(index).unwrap_or(fallback), ground);
         }
-        TmuxColour::Default | TmuxColour::Terminal => {
-            output.extend_from_slice(match ground {
-                Ground::Foreground => b"\x1b[39m",
-                Ground::Background => b"\x1b[49m",
-            });
-        }
+        TmuxColour::Default | TmuxColour::Terminal => write_default_ground(output, ground),
+    }
+}
+
+fn write_palette_ground(output: &mut Vec<u8>, index: u8, ground: Ground) {
+    let (low, bright, extended) = match ground {
+        Ground::Foreground => (30, 90, 38),
+        Ground::Background => (40, 100, 48),
+    };
+    if index < 8 {
+        write!(output, "\x1b[{}m", low + u16::from(index))
+    } else if index < 16 {
+        write!(output, "\x1b[{}m", bright + u16::from(index) - 8)
+    } else {
+        write!(output, "\x1b[{extended};5;{index}m")
+    }
+    .expect("writing to Vec cannot fail");
+}
+
+fn write_default_ground(output: &mut Vec<u8>, ground: Ground) {
+    output.extend_from_slice(match ground {
+        Ground::Foreground => b"\x1b[39m",
+        Ground::Background => b"\x1b[49m",
+    });
+}
+
+fn write_cell_ground(
+    output: &mut Vec<u8>,
+    class: ColourClass,
+    colour: Color,
+    default: Color,
+    ground: Ground,
+) {
+    match class {
+        ColourClass::Default => write_default_ground(output, ground),
+        ColourClass::Palette(index) => write_palette_ground(output, index, ground),
+        ColourClass::Resolved if colour == default => write_default_ground(output, ground),
+        ColourClass::Rgb | ColourClass::Resolved => write_rgb_ground(output, colour, ground),
     }
 }
 
@@ -2996,28 +3018,20 @@ fn write_sgr(
     if style.overline() {
         output.extend_from_slice(b"\x1b[53m");
     }
-    let foreground = style.foreground();
-    if foreground == default_foreground {
-        output.extend_from_slice(b"\x1b[39m");
-    } else {
-        write!(
-            output,
-            "\x1b[38;2;{};{};{}m",
-            foreground.r, foreground.g, foreground.b
-        )
-        .expect("writing to Vec cannot fail");
-    }
-    let background = style.background();
-    if background == default_background {
-        output.extend_from_slice(b"\x1b[49m");
-    } else {
-        write!(
-            output,
-            "\x1b[48;2;{};{};{}m",
-            background.r, background.g, background.b
-        )
-        .expect("writing to Vec cannot fail");
-    }
+    write_cell_ground(
+        output,
+        style.foreground_class(),
+        style.foreground(),
+        default_foreground,
+        Ground::Foreground,
+    );
+    write_cell_ground(
+        output,
+        style.background_class(),
+        style.background(),
+        default_background,
+        Ground::Background,
+    );
     if reverse {
         output.extend_from_slice(b"\x1b[7m");
     }
@@ -3083,6 +3097,50 @@ mod tests {
     }
 
     #[test]
+    fn pane_cells_reach_the_terminal_in_the_class_the_program_wrote() {
+        let default_foreground = Color::rgb(216, 222, 233);
+        let default_background = Color::rgb(16, 19, 24);
+        let sgr = |foreground: ColourClass, background: ColourClass, colour: Color| {
+            let style = PackedStyle::new(colour, colour, None, 0, UnderlineStyle::None)
+                .with_classes(foreground, background);
+            let mut output = Vec::new();
+            write_sgr(
+                &mut output,
+                style,
+                false,
+                default_foreground,
+                default_background,
+            );
+            String::from_utf8(output).unwrap()
+        };
+        let red = Color::rgb(205, 0, 0);
+        assert_eq!(
+            sgr(ColourClass::Palette(1), ColourClass::Palette(9), red),
+            "\x1b[0m\x1b[31m\x1b[101m"
+        );
+        assert_eq!(
+            sgr(ColourClass::Palette(42), ColourClass::Palette(200), red),
+            "\x1b[0m\x1b[38;5;42m\x1b[48;5;200m"
+        );
+        assert_eq!(
+            sgr(ColourClass::Rgb, ColourClass::Default, default_foreground),
+            "\x1b[0m\x1b[38;2;216;222;233m\x1b[49m"
+        );
+        assert_eq!(
+            sgr(ColourClass::Default, ColourClass::Rgb, red),
+            "\x1b[0m\x1b[39m\x1b[48;2;205;0;0m"
+        );
+        assert_eq!(
+            sgr(
+                ColourClass::Resolved,
+                ColourClass::Resolved,
+                default_foreground
+            ),
+            "\x1b[0m\x1b[39m\x1b[48;2;216;222;233m"
+        );
+    }
+
+    #[test]
     fn the_copy_cursor_is_the_terminal_cursor_and_not_a_reversed_cell() {
         let mut viewport = styled_viewport();
         viewport.overlays = Arc::from([OverlaySpan::new(0, 1, 2, OverlayKind::Selection)]);
@@ -3095,7 +3153,11 @@ mod tests {
 
         let mut renderer = Renderer::new();
         renderer.blit_row(&viewport, 0, rect);
-        assert!(String::from_utf8(renderer.output).unwrap().contains("\x1b[7m"));
+        assert!(
+            String::from_utf8(renderer.output)
+                .unwrap()
+                .contains("\x1b[7m")
+        );
 
         viewport.overlays = Arc::from([OverlaySpan::new(0, 1, 2, OverlayKind::CopyCursor)]);
         let mut renderer = Renderer::new();

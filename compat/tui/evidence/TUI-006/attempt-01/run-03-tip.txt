@@ -1,0 +1,376 @@
+chooser and command-output differential at 80x24 (pin tmux)
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    find-window-prompt: every glyph, column and the cursor identical
+      case find-window-prompt
+      1 of 24 rows differ, first differing row 23
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(find-window)^[[39m
+        23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(find-window)
+      cursor tmux: 14,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   14,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  find-window-prompt: styles recorded, not asserted: SIBLING:overlays the pin paints the (find-window) prompt in message-command-style and the raw TUI in its own overlay appearance; the overlays lane (TUI-007) owns the prompt row style
+ok    find-window-typed: every glyph, column and the cursor identical
+      case find-window-typed
+      1 of 24 rows differ, first differing row 23
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(find-window) two^[[39m
+        23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(find-window) two
+      cursor tmux: 17,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   17,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  find-window-typed: styles recorded, not asserted: SIBLING:overlays the pin paints the (find-window) prompt in message-command-style and the raw TUI in its own overlay appearance; the overlays lane (TUI-007) owns the prompt row style
+ok    find-window-tree
+ok    find-window-closed
+note  the run-shell output on the zz screen: the zz screen changed and then held still for 2 seconds without it
+      case output-shown
+      24 of 24 rows differ, first differing row 0
+         0 tmux: 1                                                                      ^[[38;2;13;13;13m^[[48;2;184;134;11m[177/177]
+         0 zz:   ^[[38;2;77;163;235m^[[48;2;16;19;24m command output M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+         1 tmux: ^[[39m^[[49m2
+         1 zz:   ^[[39m^[[49m1
+         2 tmux: 3
+         2 zz:   2
+         3 tmux: 4
+         3 zz:   3
+         4 tmux: 5
+         4 zz:   4
+         5 tmux: 6
+         5 zz:   5
+         6 tmux: 7
+         6 zz:   6
+         7 tmux: 8
+         7 zz:   7
+         8 tmux: 9
+         8 zz:   8
+         9 tmux: 10
+         9 zz:   9
+        10 tmux: 11
+        10 zz:   10
+        11 tmux: 12
+        11 zz:   11
+        12 tmux: 13
+        12 zz:   12
+        13 tmux: 14
+        13 zz:   13
+        14 tmux: 15
+        14 zz:   14
+        15 tmux: 16
+        15 zz:   15
+        16 tmux: 17
+        16 zz:   16
+        17 tmux: 18
+        17 zz:   17
+        18 tmux: 19
+        18 zz:   18
+        19 tmux: 20
+        19 zz:   19
+        20 tmux: 21
+        20 zz:   20
+        21 tmux: 22
+        21 zz:   21
+        22 tmux: 23
+        22 zz:   ^[[48;2;16;19;24m
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two                                                       ^[[38;2;16;19;24m^[[48;2;216;222;233m VIEW 1/200
+      cursor tmux: 0,0 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  output-shown recorded, not asserted: SIBLING:modes run-shell output is a view-mode pane grid on the pin and the command-output surface on zz; the modes lane lands the view surface this cycle
+      case output-search-prompt
+      24 of 24 rows differ, first differing row 0
+         0 tmux: 1                                                                      ^[[38;2;13;13;13m^[[48;2;184;134;11m[177/177]
+         0 zz:   ^[[38;2;77;163;235m^[[48;2;16;19;24m command output M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+         1 tmux: ^[[39m^[[49m2
+         1 zz:   ^[[39m^[[49m1
+         2 tmux: 3
+         2 zz:   2
+         3 tmux: 4
+         3 zz:   3
+         4 tmux: 5
+         4 zz:   4
+         5 tmux: 6
+         5 zz:   5
+         6 tmux: 7
+         6 zz:   6
+         7 tmux: 8
+         7 zz:   7
+         8 tmux: 9
+         8 zz:   8
+         9 tmux: 10
+         9 zz:   9
+        10 tmux: 11
+        10 zz:   10
+        11 tmux: 12
+        11 zz:   11
+        12 tmux: 13
+        12 zz:   12
+        13 tmux: 14
+        13 zz:   13
+        14 tmux: 15
+        14 zz:   14
+        15 tmux: 16
+        15 zz:   15
+        16 tmux: 17
+        16 zz:   16
+        17 tmux: 18
+        17 zz:   17
+        18 tmux: 19
+        18 zz:   18
+        19 tmux: 20
+        19 zz:   19
+        20 tmux: 21
+        20 zz:   20
+        21 tmux: 22
+        21 zz:   21
+        22 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(search down) ^[[39m^[[49m
+        22 zz:   ^[[48;2;16;19;24m
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down)
+      cursor tmux: 14,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  output-search-prompt recorded, not asserted: SIBLING:modes run-shell output is a view-mode pane grid on the pin and the command-output surface on zz; the modes lane lands the view surface this cycle
+      case output-search-typed
+      24 of 24 rows differ, first differing row 0
+         0 tmux: 59                                                                     ^[[38;2;13;13;13m^[[48;2;184;134;11m[119/177]
+         0 zz:   ^[[38;2;77;163;235m^[[48;2;16;19;24m command output M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+         1 tmux: ^[[39m^[[49m60
+         1 zz:   ^[[39m^[[49m57
+         2 tmux: 61
+         2 zz:   58
+         3 tmux: 62
+         3 zz:   59
+         4 tmux: 63
+         4 zz:   60
+         5 tmux: 64
+         5 zz:   61
+         6 tmux: 65
+         6 zz:   62
+         7 tmux: 66
+         7 zz:   63
+         8 tmux: 67
+         8 zz:   64
+         9 tmux: 68
+         9 zz:   65
+        10 tmux: 69
+        10 zz:   66
+        11 tmux: 70
+        11 zz:   67
+        12 tmux: 71
+        12 zz:   68
+        13 tmux: 72
+        13 zz:   69
+        14 tmux: 73
+        14 zz:   70
+        15 tmux: 74
+        15 zz:   71
+        16 tmux: 75
+        16 zz:   72
+        17 tmux: 76
+        17 zz:   73
+        18 tmux: ^[[38;2;13;13;13m^[[48;2;147;112;219m77^[[39m^[[49m
+        18 zz:   74
+        19 tmux: 78
+        19 zz:   75
+        20 tmux: 79
+        20 zz:   76
+        21 tmux: 80
+        21 zz:   ^[[7m77^[[0m
+        22 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(search down) 77^[[39m^[[49m
+        22 zz:   ^[[48;2;16;19;24m
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233m(search down) 77
+      cursor tmux: 16,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,21 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  output-search-typed recorded, not asserted: SIBLING:modes run-shell output is a view-mode pane grid on the pin and the command-output surface on zz; the modes lane lands the view surface this cycle
+      case output-searched
+      24 of 24 rows differ, first differing row 0
+         0 tmux: 59                                                                     ^[[38;2;13;13;13m^[[48;2;184;134;11m[119/177]
+         0 zz:   ^[[38;2;77;163;235m^[[48;2;16;19;24m command output M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+         1 tmux: ^[[39m^[[49m60
+         1 zz:   ^[[39m^[[49m57
+         2 tmux: 61
+         2 zz:   58
+         3 tmux: 62
+         3 zz:   59
+         4 tmux: 63
+         4 zz:   60
+         5 tmux: 64
+         5 zz:   61
+         6 tmux: 65
+         6 zz:   62
+         7 tmux: 66
+         7 zz:   63
+         8 tmux: 67
+         8 zz:   64
+         9 tmux: 68
+         9 zz:   65
+        10 tmux: 69
+        10 zz:   66
+        11 tmux: 70
+        11 zz:   67
+        12 tmux: 71
+        12 zz:   68
+        13 tmux: 72
+        13 zz:   69
+        14 tmux: 73
+        14 zz:   70
+        15 tmux: 74
+        15 zz:   71
+        16 tmux: 75
+        16 zz:   72
+        17 tmux: 76
+        17 zz:   73
+        18 tmux: ^[[38;2;13;13;13m^[[48;2;147;112;219m77^[[39m^[[49m
+        18 zz:   74
+        19 tmux: 78
+        19 zz:   75
+        20 tmux: 79
+        20 zz:   76
+        21 tmux: 80
+        21 zz:   ^[[7m77^[[0m
+        22 tmux: 81
+        22 zz:   ^[[48;2;16;19;24m
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two                                          ^[[38;2;16;19;24m^[[48;2;216;222;233m VIEW 77/200  search 1/2
+      cursor tmux: 2,18 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,21 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  output-searched recorded, not asserted: SIBLING:modes run-shell output is a view-mode pane grid on the pin and the command-output surface on zz; the modes lane lands the view surface this cycle
+      case output-selected
+      24 of 24 rows differ, first differing row 0
+         0 tmux: 59                                                                     ^[[38;2;13;13;13m^[[48;2;184;134;11m[119/177]
+         0 zz:   ^[[38;2;77;163;235m^[[48;2;16;19;24m command output M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+         1 tmux: ^[[39m^[[49m60
+         1 zz:   ^[[39m^[[49m58
+         2 tmux: 61
+         2 zz:   59
+         3 tmux: 62
+         3 zz:   60
+         4 tmux: 63
+         4 zz:   61
+         5 tmux: 64
+         5 zz:   62
+         6 tmux: 65
+         6 zz:   63
+         7 tmux: 66
+         7 zz:   64
+         8 tmux: 67
+         8 zz:   65
+         9 tmux: 68
+         9 zz:   66
+        10 tmux: 69
+        10 zz:   67
+        11 tmux: 70
+        11 zz:   68
+        12 tmux: 71
+        12 zz:   69
+        13 tmux: 72
+        13 zz:   70
+        14 tmux: 73
+        14 zz:   71
+        15 tmux: 74
+        15 zz:   72
+        16 tmux: 75
+        16 zz:   73
+        17 tmux: 76
+        17 zz:   74
+        18 tmux: 77^[[38;2;13;13;13m^[[48;2;184;134;11m
+        18 zz:   75
+        19 tmux: 7^[[39m^[[49m8
+        19 zz:   76
+        20 tmux: 79
+        20 zz:   ^[[7m77
+        21 tmux: 80
+        21 zz:   78^[[0m
+        22 tmux: 81
+        22 zz:   ^[[48;2;16;19;24m
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two                                          ^[[38;2;16;19;24m^[[48;2;216;222;233m VIEW 78/200  search 1/2
+      cursor tmux: 1,19 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   1,21 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  output-selected recorded, not asserted: SIBLING:modes run-shell output is a view-mode pane grid on the pin and the command-output surface on zz; the modes lane lands the view surface this cycle
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+note  the client tree on the zz screen: the zz screen changed and then held still for 2 seconds without it
+      case client-tree-open
+      23 of 24 rows differ, first differing row 0
+         0 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) /dev/pts/41: 18:34: session cho^[[39m
+         0 zz:   $ printf 'SCENE-%s\n' %0
+         1 tmux: 
+         1 zz:   SCENE-%0
+         2 tmux: 
+         2 zz:   $ printf 'MARK-%s\n' baseline
+         3 tmux: 
+         3 zz:   MARK-baseline
+         4 tmux: 
+         4 zz:   $ printf 'MARK-%s\n' sessions
+         5 tmux: 
+         5 zz:   MARK-sessions
+         6 tmux: 
+         6 zz:   $ printf 'MARK-%s\n' windows
+         7 tmux: 
+         7 zz:   MARK-windows
+         8 tmux: 
+         8 zz:   $ printf 'MARK-%s\n' filter
+         9 tmux: 
+         9 zz:   MARK-filter
+        10 tmux: 
+        10 zz:   $ printf 'MARK-%s\n' scroll
+        11 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/pts/41 (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        11 zz:   MARK-scroll
+        12 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' output                                                  ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        12 zz:   $ printf 'MARK-%s\n' buffers
+        13 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-output                                                                  ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        13 zz:   MARK-buffers
+        14 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' clients                                                 ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        14 zz:   $ printf 'MARK-%s\n' find
+        15 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-clients                                                                 ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 zz:   MARK-find
+        16 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                                                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 zz:   $ printf 'MARK-%s\n' output
+        17 tmux: M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 zz:   MARK-output
+        18 tmux: M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 zz:   $ printf 'MARK-%s\n' clients
+        19 tmux: M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 zz:   MARK-clients
+        20 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 zz:   $
+        21 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two                                                               ^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 zz:   
+        22 tmux: M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        22 zz:   
+      cursor tmux: 0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,20 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  client-tree-open recorded, not asserted: commands.native-client-tools, accepted and outside this lane: zz does not implement choose-client, and the pin lists each client by its tty
+ok    tall-window-tree-open
+ok    tall-window-tree-help
+ok    tall-window-tree-help-closed
+ok    tall-buffer-tree-open
+ok    tall-buffer-tree-help
+ok    tall-buffer-tree-help-closed
+ok    tall-closed
+all 39 asserted comparisons identical, 8 recorded not asserted (7 for a sibling lane)
+--- stderr (0 bytes)
+exit=0

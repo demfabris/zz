@@ -1,0 +1,12 @@
+TUI-006 attempt-01 environment at the code tip, recorded 2026-09-10T21:32:28Z
+zz revision: 9cf839a343716dbe0e027add7fc6e0811cf8a0c0 (Draw the pin's mode tree for the choosers in the raw TUI); git status --short: 0 entries
+zz binary sha256: e0e63928ef442148d2455153ff7735a92ea13d3c43712b73b47abba203e02f30 (cargo debug build at that revision in this worktree; not bit-reproducible on this box, so attestation is the revision plus the clean worktree)
+tmux pin: d77c9dc6 (next-3.8), /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+OS: Linux alienware 7.2.2-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Fri, 28 Aug 2026 13:26:51 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+TERM of the invoking shell: xterm-ghostty; the inner clients run under the outer pinned tmux's default-terminal
+shell: /bin/bash; inner shell: ENV= PS1='$ ' exec /bin/sh
+bash: GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+outer sizes: 80x24 for the main run and the self-check, 100x40 for tall_case
+locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8 (status-right is emptied, so no strftime reaches a compared cell; buffer rows print HH:MM, locale-independent)

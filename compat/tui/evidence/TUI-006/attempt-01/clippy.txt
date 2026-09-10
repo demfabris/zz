@@ -1,0 +1,32 @@
+=== cargo clippy -p zz-protocol --all-targets --all-features --jobs 3 -- -D warnings
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-choosers/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.69s
+exit=0
+=== cargo clippy -p zz-client --all-targets --all-features --jobs 3 -- -D warnings
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-choosers/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.43s
+exit=0
+=== cargo clippy -p zz-daemon --all-targets --all-features --jobs 3 -- -D warnings
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-choosers/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s
+exit=0
+=== cargo clippy -p zz-tui --all-targets --all-features --jobs 3 -- -D warnings
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-choosers/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s
+exit=0

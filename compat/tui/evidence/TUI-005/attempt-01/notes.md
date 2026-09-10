@@ -22,7 +22,7 @@ fixture could not back:
   selection's bytes. Two rectangle copies per table now run with the rectangle still
   ON, one with the right edge inside every selected line and one past the end of the
   last. The vi past-the-end case is the fifth recorded divergence: the pin keeps the
-  trailing newline there and zz strips it, 44 bytes against 43. The emacs case and
+  trailing newline there and zz strips it, 36 bytes against 35. The emacs case and
   both narrow ones ASSERT the bytes. The fixture drops every paste buffer straight
   after the recorded case, because the buffer is the one channel a later case cannot
   resynchronise by moving.

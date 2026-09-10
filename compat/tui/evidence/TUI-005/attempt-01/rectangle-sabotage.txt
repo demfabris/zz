@@ -15,16 +15,16 @@ never on the committed one:
 
 THE RESULT: exit 1, one DIFF, in the buffer channel, with both byte strings.
 The pin also shows the emacs half of the trailing-newline rule here: its
-rectangle stops at 43 bytes with no terminator, which is why the emacs
+rectangle stops at 35 bytes with no terminator, which is why the emacs
 past-the-end case ASSERTS the buffer channel and only the vi one records it.
+(The od -c dump below ends at offset |0000043|, which is OCTAL: 35 bytes.
+Corrected at the gate 2026-09-10, where the first record read it as decimal.)
 
 A FIRST SABOTAGE THAT DID NOT REPORT, and why that is correct: one extra
 cursor-right (not cursor-down) on the zz side changed nothing, because the
 rectangle already reaches past the end of both lines and both engines trim
 the trailing blanks. The keys under test have to move a copied GLYPH for the
 buffer channel to see them; one more empty column is not one.
-
---- the run ---
 
 --- the run ---
 

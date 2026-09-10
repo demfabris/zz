@@ -757,11 +757,15 @@ PAGE_REASON='the pin steps screen_size_y-2 = 22 lines and keeps the cursor row, 
 # two byte strings printed by the case itself on every run.
 # Measured 2026-09-10 on a two-line rectangle over line-58 and line-59 with the
 # right edge at column 20, past the 17 glyphs those lines carry: in the vi
-# table the pin copied `line-58 filler-58\nline-59 filler-59\n`, 44 bytes, and
-# zz copied the same 43 bytes without the terminator; in the emacs table the
+# table the pin copied `line-58 filler-58\nline-59 filler-59\n`, 36 bytes, and
+# zz copied the same 35 bytes without the terminator; in the emacs table the
 # same rectangle copied identically on both sides, and so did the narrower
 # rectangle whose right edge stays inside both lines. The bytes come out of
 # crates/zz-terminal, not this obligation's zones.
+# READING THE DUMP: the case prints the buffer through od -c, whose offsets are
+# OCTAL. The final offset of the pin's buffer reads |0000044| and that is 36
+# bytes, not 44; zz's |0000043| is 35. Corrected at the gate 2026-09-10 after
+# the first record quoted the octal offsets as byte counts.
 RECTANGLE_REASON='in the vi table the pin keeps the trailing newline of a rectangle whose right edge is past the end of the last selected line (window-copy.c:5737) and zz strips it'
 # SELECTION_REASON. The pin paints the selected cells with
 # copy-mode-selection-style, which defaults to #{E:mode-style}; the raw TUI

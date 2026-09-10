@@ -1,0 +1,55 @@
+THEME ARM PROBE, both binaries, throwaway servers, -f /dev/null, scrubbed HOME and XDG_CONFIG_HOME
+recorded: 2026-09-09T23:20:49-03:00
+NOTE: this is the state at the branch tip, with the theme arm NOT landed. The middle block was
+measured on a throwaway build that had the 21 names in TMUX_OPTION_CONSUMERS, and is reproduced
+here as the numbers it produced; the tree at this tip is back to 118 consumers.
+
+AT THIS TIP, rebuilt after the theme arm was reverted (zz sha256 97a60b05edfb82bd73a9de699cfb31cb8263f08054186054a52e7e4988c3e0cd):
+  #{theme}                 zz=[]  tmux=[detect]
+  #{dark-theme-black}      zz=[]  tmux=[#{?#{e|>=:#{client_colours},256},gray5,black}]
+  #{E:dark-theme-green}    zz=[]  tmux=[green]
+  #{E:light-theme-green}   zz=[]  tmux=[green]
+
+the options themselves are stored identically on both sides:
+  show-options -s dark-theme-black
+    zz:   dark-theme-black "#{?#{e|>=:#{client_colours},256},gray5,black}"
+    tmux: dark-theme-black "#{?#{e|>=:#{client_colours},256},gray5,black}"
+
+the pin keeps the class it was given, which is why the wire field has to be a TmuxColour:
+  after set -s dark-theme-green colour124, tmux #{E:dark-theme-green} = [colour124]
+
+ON THE THROWAWAY BUILD WITH THE 21 NAMES ADDED, zz answered exactly what the pin answers:
+  #{E:dark-theme-green} = [green]   #{E:dark-theme-black} = [black]
+  #{theme} = [detect]               #{E:light-theme-green} = [green]
+  after set -s dark-theme-green colour124: [colour124]
+  (green rather than yellowgreen because a one-shot client reports no client_colours, which is
+   what the pin answers too; #{?#{e|>=:#{client_colours},256},yellowgreen,green} is the default)
+
+WHY THE ARM DID NOT LAND, measured rather than argued:
+  1. The roster is 21 names, not the 11 the cycle-18 handoff recorded: theme plus TEN dark-theme-*
+     AND TEN light-theme-*, because server_client_update_theme_colours picks the dark or the light
+     set per client from the resolved theme. TMUX_OPTION_CONSUMERS goes 118 to 139, not to 129.
+  2. crates/zz-mux/src/compat_manifest_tests.rs enforces a PARTITION: the consumer roster and the
+     option:<name> items tracked in compat/tmux-gaps.json must be disjoint and must together equal
+     the 180 name catalog. All 21 names are items of the OPEN gap options.theme-palette. Adding
+     them as consumers therefore forces closing 21 items of a gap this lane does not own, moving
+     the tracked count 62 to 41 and the scope counts [15,44,41,18] to [36,44,41,18], and it would
+     assert that zz consumes options it would still not act on until the wire half lands.
+  3. The wire is postcard, which is not self-describing, so an appended StatusLine field is not
+     tolerated by an older decoder and PROTOCOL_VERSION 99 to 100 is mandatory rather than
+     optional. The version reaches clients/web, which is a SEPARATE cargo workspace with its own
+     lockfile, and clients/ios and clients/macos through crates/zz-client-ffi and
+     include/zz-client.h. None of those is built by this lane proof set, so a bump landed here
+     could not be shown not to break them.
+
+WHAT THE FIELD WOULD BE, for whoever takes it next:
+  StatusLine gains theme: [TmuxColour; 10] in colour_theme_table order, defaulting to the pin dark
+  set so a client that has not had its first publication keeps today behaviour. The daemon side
+  fits entirely in crates/zz-daemon/src/status.rs once the names are consumers: expand
+  #{E:<dark|light>-theme-<name>} in the client own format context, parse with the same colour
+  parser style.rs uses, keep colour 8 where it does not parse, and use the terminal column
+  [0,7,7,0,2,3,1,4,6,5] when theme is terminal. server-client.c:1173 is the exact shape: option 1
+  terminal, 2 light, 3 dark, 0 detect which follows the client own reported theme.
+  The client side is crates/zz-tui/src/render.rs write_ground and resolve_tmux_colour, which today
+  resolve TmuxColour::Theme through the hard-coded DARK_THEME_COLOURS X11 names and would instead
+  re-dispatch on the published TmuxColour, which is what makes colour124 leave as 48;5;124m.

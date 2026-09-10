@@ -28,6 +28,7 @@ pub use interaction::{
     SearchCase, SearchDirection, SearchMode, SearchQuery, TerminalMouseButton, TerminalMouseInput,
     TerminalMousePhase, TerminalViewAction, TerminalViewId,
 };
+pub use model::ColourClass;
 pub use model::{
     ATTR_BLINK, ATTR_BOLD, ATTR_EXPLICIT_RGB, ATTR_FAINT, ATTR_HYPERLINK, ATTR_INVISIBLE,
     ATTR_ITALIC, ATTR_OVERLINE, ATTR_STRIKETHROUGH, CellWidth, Color, Cursor, CursorStyle,

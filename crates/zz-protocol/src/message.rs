@@ -26,6 +26,7 @@ pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
 pub const CLIENT_TTY_CAPABILITY_PREFIX: &str = "client-tty-v1:";
 /// Value-token prefix naming the caller's terminal size, `client-size-v1:80x24`.
 pub const CLIENT_SIZE_CAPABILITY_PREFIX: &str = "client-size-v1:";
+pub const CLIENT_FEATURES_CAPABILITY_PREFIX: &str = "client-features-v1:";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
 pub const MAX_CHOOSE_TREE_QUERY_BYTES: usize = 4 * 1024;
@@ -1492,6 +1493,7 @@ impl ClientHello {
     pub const CLIENT_NESTED_CAPABILITY: &'static str = CLIENT_NESTED_CAPABILITY;
     pub const CLIENT_TTY_CAPABILITY_PREFIX: &'static str = CLIENT_TTY_CAPABILITY_PREFIX;
     pub const CLIENT_SIZE_CAPABILITY_PREFIX: &'static str = CLIENT_SIZE_CAPABILITY_PREFIX;
+    pub const CLIENT_FEATURES_CAPABILITY_PREFIX: &'static str = CLIENT_FEATURES_CAPABILITY_PREFIX;
     pub const STARTUP_CONFIG_OWNER_CAPABILITY: &'static str = "startup-config-owner-v1";
     /// The client's terminal takes UTF-8, so the server hands it bytes
     /// untouched. tmux.c raises `CLIENT_UTF8` from `-u`, from `$TMUX` being set

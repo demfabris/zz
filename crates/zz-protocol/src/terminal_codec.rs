@@ -793,6 +793,9 @@ fn encode_viewport_into(
     }
     push_u32(output, checked_count(viewport.kitty_placements.len())?);
     encode_kitty_placements(output, &viewport.kitty_placements);
+    for style in viewport.styles() {
+        push_u32(output, style.class_word());
+    }
     finish_enveloped_in_place(output)
 }
 
@@ -899,6 +902,9 @@ fn encode_patch_into(
     }
     push_u32(output, checked_count(patch.kitty_placements.len())?);
     encode_kitty_placements(output, &patch.kitty_placements);
+    for style in patch.dictionary.appended_styles() {
+        push_u32(output, style.class_word());
+    }
     finish_enveloped_in_place(output)
 }
 
@@ -980,7 +986,10 @@ fn decode_patch(payload: &[u8]) -> Result<(PaneId, u64, TerminalViewportPatch), 
     let kitty_placement_count = preflight.count(MAX_KITTY_PLACEMENTS, "kitty placement")?;
     expect_exact_remaining(
         &preflight,
-        checked_wire_section(kitty_placement_count, KITTY_PLACEMENT_WIRE_BYTES)?,
+        checked_wire_capacity(&[
+            checked_wire_section(kitty_placement_count, KITTY_PLACEMENT_WIRE_BYTES)?,
+            checked_wire_section(appended_style_count, U32_WIRE_BYTES)?,
+        ])?,
         "terminal patch has trailing bytes",
     )?;
 
@@ -1030,6 +1039,12 @@ fn decode_patch(payload: &[u8]) -> Result<(PaneId, u64, TerminalViewportPatch), 
     let overlays = decode_overlays(reader.bytes(overlay_bytes)?);
     let kitty_placement_count = reader.count(MAX_KITTY_PLACEMENTS, "kitty placement")?;
     let kitty_placements = decode_kitty_placements(&mut reader, kitty_placement_count)?;
+    for style in &mut appended_styles {
+        let Some(classed) = style.with_class_word(reader.u32()?) else {
+            return invalid("packed style colour classes are invalid");
+        };
+        *style = classed;
+    }
     if !reader.is_empty() {
         return invalid("terminal patch has trailing bytes");
     }
@@ -1153,7 +1168,10 @@ fn decode_viewport_kind(
     let kitty_placement_count = preflight.count(MAX_KITTY_PLACEMENTS, "kitty placement")?;
     expect_exact_remaining(
         &preflight,
-        checked_wire_section(kitty_placement_count, KITTY_PLACEMENT_WIRE_BYTES)?,
+        checked_wire_capacity(&[
+            checked_wire_section(kitty_placement_count, KITTY_PLACEMENT_WIRE_BYTES)?,
+            checked_wire_section(style_count, U32_WIRE_BYTES)?,
+        ])?,
         "terminal update has trailing bytes",
     )?;
 
@@ -1175,6 +1193,8 @@ fn decode_viewport_kind(
     let overlays = decode_overlays(reader.bytes(overlay_bytes)?);
     let kitty_placement_count = reader.count(MAX_KITTY_PLACEMENTS, "kitty placement")?;
     let kitty_placements = decode_kitty_placements(&mut reader, kitty_placement_count)?;
+    let class_bytes = checked_wire_section(style_count, U32_WIRE_BYTES)?;
+    let styles = decode_style_classes(&styles, reader.bytes(class_bytes)?)?;
     if !reader.is_empty() {
         return invalid("terminal update has trailing bytes");
     }
@@ -1580,6 +1600,7 @@ fn viewport_payload_capacity(
         checked_wire_section(viewport.overlays.len(), OVERLAY_WIRE_BYTES)?,
         U32_WIRE_BYTES,
         checked_wire_section(viewport.kitty_placements.len(), KITTY_PLACEMENT_WIRE_BYTES)?,
+        checked_wire_section(viewport.styles().len(), U32_WIRE_BYTES)?,
         title_len,
         working_directory_len,
         hovered_uri_len,
@@ -1609,6 +1630,7 @@ fn patch_payload_capacity(
         checked_wire_section(patch.overlays.len(), OVERLAY_WIRE_BYTES)?,
         U32_WIRE_BYTES,
         checked_wire_section(patch.kitty_placements.len(), KITTY_PLACEMENT_WIRE_BYTES)?,
+        checked_wire_section(patch.dictionary.appended_styles().len(), U32_WIRE_BYTES)?,
         title_len,
         working_directory_len,
         hovered_uri_len,
@@ -1785,6 +1807,21 @@ fn decode_styles(bytes: &[u8]) -> Result<Arc<[PackedStyle]>, ProtocolError> {
             )
         })
         .collect())
+}
+
+fn decode_style_classes(
+    styles: &[PackedStyle],
+    bytes: &[u8],
+) -> Result<Arc<[PackedStyle]>, ProtocolError> {
+    styles
+        .iter()
+        .zip(bytes.chunks_exact(U32_WIRE_BYTES))
+        .map(|(style, chunk)| {
+            style.with_class_word(wire_u32_at(chunk, 0)).ok_or_else(|| {
+                ProtocolError::InvalidTerminal("packed style colour classes are invalid".to_owned())
+            })
+        })
+        .collect()
 }
 
 fn decode_u32s(bytes: &[u8]) -> Arc<[u32]> {
@@ -4734,13 +4771,19 @@ mod tests {
         cells.copy_within(2..6, 0);
         cells[4..6].fill(PackedCell::new(u32::from('d'), 0, CellWidth::Narrow));
         let mut styles = current.styles().to_vec();
-        styles.push(PackedStyle::new(
-            Color::rgb(0x33, 0x88, 0xcc),
-            current.background,
-            None,
-            zz_terminal::ATTR_ITALIC,
-            UnderlineStyle::None,
-        ));
+        styles.push(
+            PackedStyle::new(
+                Color::rgb(0x33, 0x88, 0xcc),
+                current.background,
+                None,
+                zz_terminal::ATTR_ITALIC,
+                UnderlineStyle::None,
+            )
+            .with_classes(
+                zz_terminal::ColourClass::Palette(12),
+                zz_terminal::ColourClass::Default,
+            ),
+        );
         let grapheme = "e\u{301}";
         let dictionary = Arc::make_mut(&mut current.dictionary);
         dictionary.styles = styles.into();
@@ -4807,12 +4850,20 @@ mod tests {
                 viewport,
             },
         });
-        let mut capped = encode_protocol_message(&message).expect("encode empty placements");
+        let encoded = encode_protocol_message(&message).expect("encode empty placements");
+        let mut capped = encoded.clone();
         let count = u32::try_from(MAX_KITTY_PLACEMENTS + 1).expect("cap fits u32");
-        let count_offset = capped.len() - size_of::<u32>();
-        capped[count_offset..].copy_from_slice(&count.to_le_bytes());
+        let count_offset = capped.len() - 2 * size_of::<u32>();
+        capped[count_offset..count_offset + size_of::<u32>()].copy_from_slice(&count.to_le_bytes());
         assert!(matches!(
             decode_protocol_frame(&capped),
+            Err(ProtocolError::InvalidTerminal(_))
+        ));
+        let mut unclassed = encoded;
+        let class_offset = unclassed.len() - size_of::<u32>();
+        unclassed[class_offset..].copy_from_slice(&(1_u32 << 24).to_le_bytes());
+        assert!(matches!(
+            decode_protocol_frame(&unclassed),
             Err(ProtocolError::InvalidTerminal(_))
         ));
 
@@ -4840,7 +4891,7 @@ mod tests {
             },
         }))
         .expect("encode placement");
-        let record_offset = malformed.len() - KITTY_PLACEMENT_WIRE_BYTES;
+        let record_offset = malformed.len() - KITTY_PLACEMENT_WIRE_BYTES - size_of::<u32>();
         malformed[record_offset + 12] = 9;
         assert!(matches!(
             decode_protocol_frame(&malformed),

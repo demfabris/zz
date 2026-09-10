@@ -152,6 +152,42 @@ impl PackedCell {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ColourClass {
+    Resolved,
+    Default,
+    Palette(u8),
+    Rgb,
+}
+
+const CLASS_RESOLVED: u8 = 0;
+const CLASS_DEFAULT: u8 = 1;
+const CLASS_PALETTE: u8 = 2;
+const CLASS_RGB: u8 = 3;
+const RGB_MASK: u32 = 0x00ff_ffff;
+const CLASS_SHIFT: u16 = 12;
+const ATTRIBUTE_MASK: u16 = (1 << CLASS_SHIFT) - 1;
+
+impl ColourClass {
+    const fn code(self) -> (u8, u8) {
+        match self {
+            Self::Resolved => (CLASS_RESOLVED, 0),
+            Self::Default => (CLASS_DEFAULT, 0),
+            Self::Palette(index) => (CLASS_PALETTE, index),
+            Self::Rgb => (CLASS_RGB, 0),
+        }
+    }
+
+    const fn from_code(code: u8, index: u8) -> Self {
+        match code {
+            CLASS_DEFAULT => Self::Default,
+            CLASS_PALETTE => Self::Palette(index),
+            CLASS_RGB => Self::Rgb,
+            _ => Self::Resolved,
+        }
+    }
+}
+
 /// A resolved, interned terminal style referenced by [`PackedCell::style_id`].
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -161,7 +197,7 @@ pub struct PackedStyle {
     underline_color: u32,
     attributes: u16,
     underline_kind: u8,
-    reserved: u8,
+    background_index: u8,
 }
 
 impl PackedStyle {
@@ -180,9 +216,9 @@ impl PackedStyle {
                 Some(color) => color.packed(),
                 None => NO_COLOR,
             },
-            attributes,
+            attributes: attributes & ATTRIBUTE_MASK,
             underline_kind: underline as u8,
-            reserved: 0,
+            background_index: 0,
         }
     }
 
@@ -198,15 +234,63 @@ impl PackedStyle {
             foreground,
             background,
             underline_color,
-            attributes,
+            attributes: attributes & ATTRIBUTE_MASK,
             underline_kind,
-            reserved: 0,
+            background_index: 0,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_classes(self, foreground: ColourClass, background: ColourClass) -> Self {
+        let (foreground_code, foreground_index) = foreground.code();
+        let (background_code, background_index) = background.code();
+        let codes = (foreground_code | background_code << 2) as u16;
+        Self {
+            foreground: self.foreground & RGB_MASK | (foreground_index as u32) << 24,
+            attributes: self.attributes & ATTRIBUTE_MASK | codes << CLASS_SHIFT,
+            background_index,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub const fn foreground_class(self) -> ColourClass {
+        ColourClass::from_code(
+            (self.attributes >> CLASS_SHIFT) as u8 & 0b11,
+            (self.foreground >> 24) as u8,
+        )
+    }
+
+    #[must_use]
+    pub const fn background_class(self) -> ColourClass {
+        ColourClass::from_code(
+            (self.attributes >> (CLASS_SHIFT + 2)) as u8 & 0b11,
+            self.background_index,
+        )
+    }
+
+    #[must_use]
+    pub const fn class_word(self) -> u32 {
+        (self.attributes >> CLASS_SHIFT) as u32
+            | (self.foreground >> 24) << 8
+            | (self.background_index as u32) << 16
+    }
+
+    #[must_use]
+    pub const fn with_class_word(self, word: u32) -> Option<Self> {
+        let foreground = ColourClass::from_code((word & 0b11) as u8, (word >> 8) as u8);
+        let background = ColourClass::from_code((word >> 2 & 0b11) as u8, (word >> 16) as u8);
+        let style = self.with_classes(foreground, background);
+        if style.class_word() == word {
+            Some(style)
+        } else {
+            None
         }
     }
 
     #[must_use]
     pub const fn foreground_raw(self) -> u32 {
-        self.foreground
+        self.foreground & RGB_MASK
     }
 
     #[must_use]
@@ -245,7 +329,7 @@ impl PackedStyle {
 
     #[must_use]
     pub const fn attributes(self) -> u16 {
-        self.attributes
+        self.attributes & ATTRIBUTE_MASK
     }
 
     #[must_use]
@@ -1638,6 +1722,49 @@ mod tests {
         assert_eq!(overlay.kind(), OverlayKind::Selection);
         assert_eq!(overlay.flags(), OVERLAY_RECTANGLE);
         assert_eq!(size_of::<OverlaySpan>(), 8);
+    }
+
+    #[test]
+    fn colour_classes_ride_beside_the_resolved_colours() {
+        let attributes = ATTR_BOLD | ATTR_HYPERLINK;
+        let plain = PackedStyle::new(
+            Color::rgb(205, 0, 0),
+            Color::rgb(0, 215, 135),
+            None,
+            attributes,
+            UnderlineStyle::None,
+        );
+        assert_eq!(plain.foreground_class(), ColourClass::Resolved);
+        assert_eq!(plain.background_class(), ColourClass::Resolved);
+        assert_eq!(plain.class_word(), 0);
+
+        let classed = plain.with_classes(ColourClass::Palette(1), ColourClass::Palette(42));
+        assert_eq!(classed.foreground(), Color::rgb(205, 0, 0));
+        assert_eq!(classed.background(), Color::rgb(0, 215, 135));
+        assert_eq!(classed.foreground_raw(), 0x00cd_0000);
+        assert_eq!(classed.background_raw(), 0x0000_d787);
+        assert_eq!(classed.attributes(), attributes);
+        assert_eq!(classed.foreground_class(), ColourClass::Palette(1));
+        assert_eq!(classed.background_class(), ColourClass::Palette(42));
+        assert_ne!(classed, plain);
+        assert_eq!(plain.with_class_word(classed.class_word()), Some(classed));
+
+        for (foreground, background) in [
+            (ColourClass::Default, ColourClass::Rgb),
+            (ColourClass::Rgb, ColourClass::Default),
+            (ColourClass::Palette(255), ColourClass::Palette(0)),
+        ] {
+            let style = plain.with_classes(foreground, background);
+            assert_eq!(style.foreground_class(), foreground);
+            assert_eq!(style.background_class(), background);
+            assert_eq!(plain.with_class_word(style.class_word()), Some(style));
+        }
+        assert_eq!(plain.with_class_word(0b0001 | 7 << 8), None);
+        assert_eq!(plain.with_class_word(1 << 24), None);
+        assert_eq!(
+            PackedStyle::from_raw(0, 0, NO_COLOR, u16::MAX, 0).attributes(),
+            (1 << 12) - 1
+        );
     }
 
     #[test]

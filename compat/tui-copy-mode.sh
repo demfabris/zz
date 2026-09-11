@@ -782,9 +782,10 @@ copy_case() {
 # The same options.native-mode-styles family as the selection.
 # The cycle-5 gate flipped these cases after the modes landing and they stayed
 # red on the rows channel only (the current-match cells); text, cursor, facts,
-# view and buffer identical. The modes landing paints no match style, so the
-# owner is still to be named.
-MATCH_REASON='SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video (kept recorded at the cycle-5 gate: flipped after the modes landing, still red on rows, owner not named)'
+# view and buffer identical. The match painting lives in crates/zz-tui
+# render.rs and is the modes lane's this cycle (cycle 6), so these cases flip at
+# the copy gate once main carries that landing.
+MATCH_REASON='SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video (measured at the cycle-5 gate after the modes landing: red on rows only, text, cursor, facts, view and buffer identical)'
 
 table_keys() {
   case "$1" in

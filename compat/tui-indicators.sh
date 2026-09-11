@@ -49,14 +49,22 @@
 #   the divider row      ONLY in view-inactive-opened and view-inactive-typed,
 #                        the two cases that need a second visible pane. That
 #                        row's GLYPHS are asserted and its STYLES are not: it
-#                        is the pane border, whose colour is the clause-2 record
-#                        tui-screen-diff.sh keeps as BORDER_STYLE_REASON (the
-#                        pin draws the default border styles on a default
-#                        ground; the raw TUI draws its own theme over an
-#                        explicit ground, and promotes an explicit indexed
-#                        border colour to RGB - measured 2026-09-10 with
-#                        pane-border-style fg=colour2 on both sides: \e[32m\e[49m
-#                        against \e[38;2;0;205;0m\e[48;2;16;19;24m). Every other
+#                        is the pane border. In this driver a plain split's
+#                        default border colours differ with or without a view,
+#                        at origin/main 3319ceba and at 2911d88c alike
+#                        (measured 2026-09-10 by the modes review): the pin
+#                        draws \e[38;2;179;179;179m then \e[38;2;154;205;50m on
+#                        the default ground, the raw TUI draws
+#                        \e[38;2;216;222;233m\e[48;2;16;19;24m then
+#                        \e[38;2;77;163;235m. It is the mechanism
+#                        BORDER_STYLE_REASON in tui-screen-diff.sh describes
+#                        (the raw TUI's own theme over an explicit ground; with
+#                        pane-border-style fg=colour2 on both sides:
+#                        \e[32m\e[49m against \e[38;2;0;205;0m\e[48;2;16;19;24m),
+#                        but no existing record covers it: tui-screen-diff.sh's
+#                        plain split checkpoint asserts identical and does not
+#                        reproduce it. Why the two drivers disagree is not
+#                        explained yet and is raised for clause-2 triage. Every other
 #                        row of those two cases is asserted whole, and so is
 #                        the cursor. The row BELOW the divider is captured on
 #                        its own: capture-pane -e carries SGR state from one

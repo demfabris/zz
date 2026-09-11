@@ -1,0 +1,12 @@
+# Throwaway probes against the pin, 2026-09-11, 10:55:27. tmux -L zzprobe-ev504939 -f /dev/null, HOME and XDG_CONFIG_HOME scrubbed to /tmp/zzprobe-ev, server killed at the end.
+# pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux (tmux next-3.8)
+## 1. split-window with the target after the shell command (the old run_on_both_active spelling)
+$ tmux split-window -v "ENV= PS1='$ ' exec /bin/sh" -t %0
+panes after: 1
+## 2. the same with the target first (the fixed spelling)
+$ tmux split-window -v -t %0 "ENV= PS1='$ ' exec /bin/sh"
+panes after: 2
+## 3. #{top_line_time} and #{copy_position} at the default copy-mode-position-format
+copy-mode-position-format default: #[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}
+on entry: top_line_time=0 copy_position=0 expanded=[#[align=right][0/78]]
+after page-up: top_line_time=1789134928 copy_position=22 expanded=[#[align=right]10:55 [22/78]]

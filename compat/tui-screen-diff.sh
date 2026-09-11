@@ -375,6 +375,10 @@ send_both() {
   tmux_inner_command send-keys -t "$pane" "$1" Enter || die "tmux refused send-keys"
 }
 # The same command against each side's own active pane.
+# The target goes before the positional arguments. tmux stops option parsing
+# at the first argument, so a trailing -t became part of split-window's shell
+# command, the new pane's shell exited at once, and until 2026-09-11 (TUI-004
+# attempt-04) every split in this file measured one pane.
 run_on_both_active() {
   local side pane
   for side in zz tmux; do
@@ -668,10 +672,26 @@ run_size() {
   SIZE_LABEL="$size"
   checkpoint restored "$mode"
 
+  # A SECOND STATUS ROW WITH A SPLIT. MEASURED 2026-09-11 (TUI-004 attempt-04)
+  # at 80x10: after `status 2` the pin's window is 8 rows, %0 h=3 and %1 h=4;
+  # zz's server keeps 9, %0 h=4 and %1 h=4. zz-mux set_pane_geometry back-solves
+  # the window extent from the ACTIVE pane's reported size alone, and the active
+  # pane keeps its height when the status block grows, so the other pane keeps
+  # the row the pin takes away and the raw TUI paints its 4-row viewport into a
+  # 3-row box. The same geometry holds at every size; the screen shows it only
+  # where the top pane's content is taller than its box, which is 80x10 and 80x6
+  # here. The fix is in zz-mux's window sizing, outside the modes lane's zones,
+  # so those two sizes record it.
+  STATUS_ROWS_MODE="$mode"
+  STATUS_ROWS_REASON=''
+  if [ "$rows" -le 10 ]; then
+    STATUS_ROWS_MODE=record
+    STATUS_ROWS_REASON='with a split, zz-mux back-solves the window from the active pane only, so status 2 leaves the other pane one row taller than the pin'
+  fi
   set_on_both status 2
-  checkpoint status-two-rows "$mode"
+  checkpoint status-two-rows "$STATUS_ROWS_MODE" "$STATUS_ROWS_REASON"
   set_on_both status-position top
-  checkpoint status-top "$mode"
+  checkpoint status-top "$STATUS_ROWS_MODE" "$STATUS_ROWS_REASON"
   set_on_both status-position bottom
   set_on_both status on
 

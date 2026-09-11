@@ -22,7 +22,8 @@
 #           still asserts what the two screens SAY
 #   cursor  the outer cursor tuple, which in copy mode is the COPY cursor
 #   facts   the LOGICAL position each side's own server reports: pane_mode,
-#           pane_in_mode, copy_cursor_x, selection_present and copy_cursor_line
+#           pane_in_mode, copy_cursor_x, selection_present, pane_search_string
+#           and copy_cursor_line
 #   view    where each side left the viewport: copy_cursor_y and
 #           scroll_position, kept apart from the logical position because the
 #           two answers come apart
@@ -305,9 +306,11 @@ wait_for() {
 }
 
 CURSOR_FORMAT='#{cursor_x},#{cursor_y} flag=#{cursor_flag} pane=#{pane_width}x#{pane_height}'
-# THE LOGICAL POSITION, read from each side's own server. copy_cursor_line is
-# last because it is the only field that can carry a space.
-FACTS_FORMAT='mode=#{pane_mode} in=#{pane_in_mode} column=#{copy_cursor_x} selection=#{selection_present} line=[#{copy_cursor_line}]'
+# THE LOGICAL POSITION, read from each side's own server, with the pane's
+# last search beside it: the pin answers pane_search_string from the pane
+# (format.c:2418), so every checkpoint of every case asks it, inside the mode,
+# in its prompts and after it. Both bracketed fields can carry a space.
+FACTS_FORMAT='mode=#{pane_mode} in=#{pane_in_mode} column=#{copy_cursor_x} selection=#{selection_present} search=[#{pane_search_string}] line=[#{copy_cursor_line}]'
 # THE VIEW, kept apart from the logical position because the two answers can
 # come apart: an engine that moves the cursor row where the pin moves the view
 # lands on the same logical line with a different view. Its own channel, so
@@ -1126,6 +1129,22 @@ run_search() {
   type_both q
   copy_case "$table-forward-search-cancel" format '#{pane_in_mode}=0'
   assert_mode_formats "$table-forward-search-cancel"
+
+  # THE SEARCH PROMPT ON A FRESH ENTRY. The emacs C-r and C-s bindings pass
+  # -I '#{pane_search_string}' (key-bindings.c:569-570), and the format answers
+  # the pane's last search here, but an incremental prompt keeps the expanded
+  # value as its last search and opens with an empty buffer (prompt.c:162-164),
+  # so both sides open `(search up) ` empty; the vi / and ? bindings carry no
+  # -I and open empty too.
+  enter_copy_mode "$table search prompt on a fresh entry"
+  assert_mode_formats "$table-fresh-entry-before-the-prompt"
+  type_both "$KEY_SEARCHBACK"
+  copy_case "$table-fresh-entry-search-prompt" screen '(search up)'
+  type_both Escape
+  copy_case "$table-fresh-entry-search-prompt-escape" none ''
+  type_both q
+  copy_case "$table-fresh-entry-search-prompt-cancel" format '#{pane_in_mode}=0'
+  assert_mode_formats "$table-fresh-entry-search-prompt-cancel"
 }
 
 # THE DEFECT TUI-005 OPENED ON, measured rather than argued. zz carries a
@@ -1550,6 +1569,8 @@ run_self_check() {
   await_observable tmux format '#{pane_in_mode}=0' || true
   assert_mode_formats one-sided-search-after-cancel
   self_check_case 'formats: pane_search_string after cancel, searched on the zz side only' formats
+  self_check_compare one-sided-search-after-cancel-facts
+  self_check_case 'facts: pane_search_string after cancel, searched on the zz side only' facts
   type_prefix_both '['
   await_observable zz format '#{pane_in_mode}=1' || true
   await_observable tmux format '#{pane_in_mode}=1' || true

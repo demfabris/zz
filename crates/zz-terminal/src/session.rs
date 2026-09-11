@@ -3051,7 +3051,7 @@ struct ViewportDictionary {
     mode_viewport: Option<(u64, u32)>,
     default_style: Option<PackedStyle>,
     palette: Option<Box<[RgbColor; 256]>>,
-    palette_classes: Vec<(u8, ColourClass)>,
+    class_hints: ClassHints,
     styles: Vec<PackedStyle>,
     style_ids: InternHashMap<PackedStyle, u16>,
     grapheme_ids: InternHashMap<String, u32>,
@@ -4167,8 +4167,18 @@ fn apply_terminal_appearance(
     terminal: &mut Terminal<'_, '_>,
     appearance: &TerminalAppearance,
 ) -> Result<(), WorkerError> {
+    let follows_default = [
+        terminal.fg_color()? == terminal.default_fg_color()?,
+        terminal.bg_color()? == terminal.default_bg_color()?,
+    ];
     terminal.set_default_fg_color(Some(ghostty_color(appearance.foreground)))?;
     terminal.set_default_bg_color(Some(ghostty_color(appearance.background)))?;
+    if follows_default[0] && terminal.fg_color()? != terminal.default_fg_color()? {
+        terminal.vt_write(b"\x1b]110\x1b\\");
+    }
+    if follows_default[1] && terminal.bg_color()? != terminal.default_bg_color()? {
+        terminal.vt_write(b"\x1b]111\x1b\\");
+    }
     terminal.set_default_cursor_color(Some(ghostty_color(appearance.cursor_color)))?;
     terminal.set_default_cursor_style(Some(ghostty_cursor_style(appearance.cursor_style)))?;
     terminal.set_default_cursor_blink(Some(!matches!(
@@ -4314,9 +4324,7 @@ fn run_output_view(
     let bound_pasted_images = HashSet::new();
     let mut generations = ViewportGenerations::new()?;
     let mut dictionary = ViewportDictionary::default();
-    dictionary
-        .palette_classes
-        .clone_from(&appearance.palette_classes);
+    dictionary.class_hints = ClassHints::new(&appearance);
     let (mut search_worker, search_results) = SearchWorker::spawn(ActorWake::none())?;
 
     loop {
@@ -4471,7 +4479,7 @@ fn run_output_view(
                 Ok(Command::SetAppearance(next)) => {
                     reported_color_scheme.set(ghostty_color_scheme(next.color_scheme));
                     apply_terminal_appearance(&mut terminal, &next)?;
-                    dictionary.palette_classes.clone_from(&next.palette_classes);
+                    dictionary.class_hints = ClassHints::new(&next);
                     render_state = RenderState::new()?;
                     for view in active_views.values_mut().chain(inactive_views.values_mut()) {
                         refresh_frozen_view_appearance(&mut terminal, view)?;
@@ -5091,9 +5099,7 @@ fn run_terminal(
     let mut inactive_views = InactiveTerminalViews::new();
     let mut generations = ViewportGenerations::new()?;
     let mut dictionary = ViewportDictionary::default();
-    dictionary
-        .palette_classes
-        .clone_from(&appearance.palette_classes);
+    dictionary.class_hints = ClassHints::new(&appearance);
     let mut pasted_image_bindings = PastedImageBindings::default();
     let mut reader_eof = false;
     let mut exit_status = None;
@@ -5571,7 +5577,7 @@ fn run_terminal(
                 Command::SetAppearance(next) => {
                     reported_color_scheme.set(ghostty_color_scheme(next.color_scheme));
                     apply_terminal_appearance(&mut terminal, &next)?;
-                    dictionary.palette_classes.clone_from(&next.palette_classes);
+                    dictionary.class_hints = ClassHints::new(&next);
                     render_state = RenderState::new()?;
                     for view in active_views.values_mut().chain(inactive_views.values_mut()) {
                         refresh_frozen_view_appearance(&mut terminal, view)?;
@@ -5819,7 +5825,7 @@ fn run_terminal(
                         &terminal,
                         start,
                         count,
-                        &dictionary.palette_classes,
+                        &dictionary.class_hints,
                     ));
                 }
                 Command::KittyImage(request) => {
@@ -8124,7 +8130,7 @@ fn capture_history(
     terminal: &Terminal<'_, '_>,
     start: u32,
     count: u32,
-    palette_classes: &[(u8, ColourClass)],
+    hints: &ClassHints,
 ) -> Result<HistoryCapture, TerminalCaptureError> {
     let history_rows =
         u32::try_from(terminal.scrollback_rows().map_err(capture_failure)?).unwrap_or(u32::MAX);
@@ -8141,13 +8147,14 @@ fn capture_history(
         .unwrap_or_default();
     let palette = terminal.color_palette().map_err(capture_failure)?.0;
     let default_palette = terminal.default_color_palette().map_err(capture_failure)?.0;
-    let default_style = PackedStyle::new(
+    let classes = Classifier::new(hints, &palette, &default_palette, [foreground, background]);
+    let default_style = classes.default_style(PackedStyle::new(
         color(foreground),
         color(background),
         None,
         0,
         UnderlineStyle::None,
-    );
+    ));
     let mut dictionary = ViewportDictionary::default();
     dictionary.ensure_default(default_style, &palette);
     let mut rows = Vec::with_capacity(usize::try_from(end - start).unwrap_or(0));
@@ -8180,27 +8187,14 @@ fn capture_history(
                 (ColourClass::Resolved, ColourClass::Resolved)
             } else {
                 (
-                    ground_class(
-                        raw_style.fg_color,
-                        &palette,
-                        &default_palette,
-                        palette_classes,
-                    ),
+                    classes.ground(raw_style.fg_color, 0),
                     match raw_cell.content_tag().map_err(capture_failure)? {
-                        CellContentTag::BgColorPalette => palette_class(
-                            raw_cell.bg_color_palette().map_err(capture_failure)?.0,
-                            &palette,
-                            &default_palette,
-                            palette_classes,
-                        ),
+                        CellContentTag::BgColorPalette => {
+                            classes.entry(raw_cell.bg_color_palette().map_err(capture_failure)?.0)
+                        }
                         CellContentTag::BgColorRgb => ColourClass::Rgb,
                         CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
-                            ground_class(
-                                raw_style.bg_color,
-                                &palette,
-                                &default_palette,
-                                palette_classes,
-                            )
+                            classes.ground(raw_style.bg_color, 1)
                         }
                     },
                 )
@@ -12998,7 +12992,13 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     let full_dirty = dirty == Dirty::Full;
     let colors = snapshot.colors()?;
     let default_palette = terminal.default_color_palette()?.0;
-    let palette_classes = dictionary.palette_classes.clone();
+    let hints = dictionary.class_hints.clone();
+    let classes = Classifier::new(
+        &hints,
+        &colors.palette,
+        &default_palette,
+        [colors.foreground, colors.background],
+    );
     let columns = snapshot.cols()?;
     let row_count = snapshot.rows()?;
     let foreground = color(colors.foreground);
@@ -13026,7 +13026,13 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
         })
         .filter(|_| copy_mode.is_none());
 
-    let default_style = PackedStyle::new(foreground, background, None, 0, UnderlineStyle::None);
+    let default_style = classes.default_style(PackedStyle::new(
+        foreground,
+        background,
+        None,
+        0,
+        UnderlineStyle::None,
+    ));
     let cell_count = usize::from(columns).saturating_mul(usize::from(row_count));
     let previous_dictionary_generation = dictionary.generation;
     dictionary.ensure_default(default_style, &colors.palette);
@@ -13099,27 +13105,14 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                         (ColourClass::Resolved, ColourClass::Resolved)
                     } else {
                         (
-                            ground_class(
-                                raw_style.fg_color,
-                                &colors.palette,
-                                &default_palette,
-                                &palette_classes,
-                            ),
+                            classes.ground(raw_style.fg_color, 0),
                             match raw_cell.content_tag()? {
-                                CellContentTag::BgColorPalette => palette_class(
-                                    raw_cell.bg_color_palette()?.0,
-                                    &colors.palette,
-                                    &default_palette,
-                                    &palette_classes,
-                                ),
+                                CellContentTag::BgColorPalette => {
+                                    classes.entry(raw_cell.bg_color_palette()?.0)
+                                }
                                 CellContentTag::BgColorRgb => ColourClass::Rgb,
                                 CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
-                                    ground_class(
-                                        raw_style.bg_color,
-                                        &colors.palette,
-                                        &default_palette,
-                                        &palette_classes,
-                                    )
+                                    classes.ground(raw_style.bg_color, 1)
                                 }
                             },
                         )
@@ -13497,33 +13490,84 @@ fn resolve_style_color(value: StyleColor, palette: &[RgbColor; 256]) -> Option<C
     }
 }
 
-fn ground_class(
-    value: StyleColor,
-    palette: &[RgbColor; 256],
-    defaults: &[RgbColor; 256],
-    classes: &[(u8, ColourClass)],
-) -> ColourClass {
-    match value {
-        StyleColor::None => ColourClass::Default,
-        StyleColor::Palette(index) => palette_class(index.0, palette, defaults, classes),
-        StyleColor::Rgb(_) => ColourClass::Rgb,
+/// What a cell's colour class depends on beyond the cell: the class of each
+/// `pane-colours` entry, the class of the window-style ground a pane was given,
+/// and the configured default grounds, so an OSC 10 or OSC 11 over them shows.
+#[derive(Clone, Debug, Default)]
+struct ClassHints {
+    palette: Vec<(u8, ColourClass)>,
+    grounds: [Option<ColourClass>; 2],
+    configured: Option<[RgbColor; 2]>,
+}
+
+impl ClassHints {
+    fn new(appearance: &TerminalAppearance) -> Self {
+        Self {
+            palette: appearance.palette_classes.clone(),
+            grounds: appearance.default_classes,
+            configured: Some([
+                ghostty_color(appearance.foreground),
+                ghostty_color(appearance.background),
+            ]),
+        }
     }
 }
 
-fn palette_class(
-    index: u8,
-    palette: &[RgbColor; 256],
-    defaults: &[RgbColor; 256],
-    classes: &[(u8, ColourClass)],
-) -> ColourClass {
-    let slot = usize::from(index);
-    if palette[slot] != defaults[slot] {
-        return ColourClass::Rgb;
+struct Classifier<'a> {
+    palette: &'a [RgbColor; 256],
+    defaults: &'a [RgbColor; 256],
+    entries: &'a [(u8, ColourClass)],
+    grounds: [ColourClass; 2],
+}
+
+impl<'a> Classifier<'a> {
+    fn new(
+        hints: &'a ClassHints,
+        palette: &'a [RgbColor; 256],
+        defaults: &'a [RgbColor; 256],
+        current: [RgbColor; 2],
+    ) -> Self {
+        let grounds = [0, 1].map(|ground| {
+            if hints
+                .configured
+                .as_ref()
+                .is_some_and(|configured| configured[ground] != current[ground])
+            {
+                ColourClass::Rgb
+            } else {
+                hints.grounds[ground].unwrap_or(ColourClass::Default)
+            }
+        });
+        Self {
+            palette,
+            defaults,
+            entries: &hints.palette,
+            grounds,
+        }
     }
-    classes
-        .iter()
-        .find(|(entry, _)| *entry == index)
-        .map_or(ColourClass::Palette(index), |(_, class)| *class)
+
+    fn ground(&self, value: StyleColor, ground: usize) -> ColourClass {
+        match value {
+            StyleColor::None => self.grounds[ground],
+            StyleColor::Palette(index) => self.entry(index.0),
+            StyleColor::Rgb(_) => ColourClass::Rgb,
+        }
+    }
+
+    fn entry(&self, index: u8) -> ColourClass {
+        let slot = usize::from(index);
+        if self.palette[slot] != self.defaults[slot] {
+            return ColourClass::Rgb;
+        }
+        self.entries
+            .iter()
+            .find(|(entry, _)| *entry == index)
+            .map_or(ColourClass::Palette(index), |(_, class)| *class)
+    }
+
+    const fn default_style(&self, style: PackedStyle) -> PackedStyle {
+        style.with_classes(self.grounds[0], self.grounds[1])
+    }
 }
 
 #[cfg(test)]
@@ -15725,14 +15769,14 @@ mod tests {
         terminal.vt_write(b"\x1b[31mR\x1b[0m\x1b[38;5;42mI\x1b[0m\x1b[32mG\x1b[0m\x1b[41mB\x1b[0m");
         fn cell_classes(
             terminal: &Terminal<'_, '_>,
-            palette_classes: &[(u8, ColourClass)],
+            hints: &ClassHints,
         ) -> Vec<(ColourClass, ColourClass, Color)> {
             let mut render_state = RenderState::new().expect("render state");
             let mut rows = RowIterator::new().expect("rows");
             let mut cells = CellIterator::new().expect("cells");
             let mut generations = ViewportGenerations::default();
             let mut dictionary = ViewportDictionary {
-                palette_classes: palette_classes.to_vec(),
+                class_hints: hints.clone(),
                 ..ViewportDictionary::default()
             };
             let viewport = snapshot(
@@ -15760,8 +15804,8 @@ mod tests {
                 })
                 .collect()
         }
-        let classes =
-            |terminal: &Terminal<'_, '_>| cell_classes(terminal, &appearance.palette_classes);
+        let hints = ClassHints::new(&appearance);
+        let classes = |terminal: &Terminal<'_, '_>| cell_classes(terminal, &hints);
 
         let stock = classes(&terminal);
         assert_eq!(
@@ -15790,6 +15834,130 @@ mod tests {
 
         terminal.vt_write(b"\x1b]104\x1b\\");
         assert_eq!(classes(&terminal), stock);
+    }
+
+    #[test]
+    fn default_grounds_leave_in_the_class_of_the_window_style_or_osc_colour() {
+        let mut appearance = TerminalAppearance::default();
+        appearance.foreground = appearance.palette[2];
+        appearance.background = appearance.palette[4];
+        appearance.default_classes = [Some(ColourClass::Palette(2)), Some(ColourClass::Palette(4))];
+        let hints = ClassHints::new(&appearance);
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 4,
+            rows: 1,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        apply_terminal_appearance(&mut terminal, &appearance).expect("apply appearance");
+        let classes = |terminal: &Terminal<'_, '_>, text: &[u8]| {
+            let mut terminal_output = text.to_vec();
+            terminal_output.clear();
+            let mut render_state = RenderState::new().expect("render state");
+            let mut rows = RowIterator::new().expect("rows");
+            let mut cells = CellIterator::new().expect("cells");
+            let mut generations = ViewportGenerations::default();
+            let mut dictionary = ViewportDictionary {
+                class_hints: hints.clone(),
+                ..ViewportDictionary::default()
+            };
+            let viewport = snapshot(
+                terminal,
+                &mut render_state,
+                &mut rows,
+                &mut cells,
+                &mut generations,
+                SnapshotChange::Content,
+                &mut dictionary,
+                None,
+                SessionStatus::Running,
+            )
+            .expect("snapshot");
+            let row = viewport.row(0).expect("first row");
+            let cell = viewport.style(row[0]).expect("style");
+            let blank = viewport.styles()[0];
+            (
+                (
+                    cell.foreground_class(),
+                    cell.background_class(),
+                    cell.foreground(),
+                ),
+                (blank.foreground_class(), blank.background_class()),
+            )
+        };
+
+        terminal.vt_write(b"D");
+        let window = classes(&terminal, b"");
+        assert_eq!(
+            window,
+            (
+                (
+                    ColourClass::Palette(2),
+                    ColourClass::Palette(4),
+                    appearance.palette[2]
+                ),
+                (ColourClass::Palette(2), ColourClass::Palette(4)),
+            )
+        );
+
+        terminal.vt_write(b"\x1b]10;rgb:ff/00/00\x1b\\");
+        let osc = classes(&terminal, b"");
+        assert_eq!(
+            osc.0,
+            (
+                ColourClass::Rgb,
+                ColourClass::Palette(4),
+                Color::rgb(255, 0, 0)
+            )
+        );
+        assert_eq!(osc.1, (ColourClass::Rgb, ColourClass::Palette(4)));
+
+        terminal.vt_write(b"\x1b]110\x1b\\");
+        assert_eq!(classes(&terminal, b""), window);
+
+        terminal.vt_write(b"\x1b]11;rgb:00/00/80\x1b\\");
+        assert_eq!(
+            classes(&terminal, b"").1,
+            (ColourClass::Palette(2), ColourClass::Rgb)
+        );
+    }
+
+    #[test]
+    fn an_osc_reset_leaves_the_default_grounds_following_the_appearance() {
+        let theme = TerminalAppearance::default();
+        let mut styled = TerminalAppearance::default();
+        styled.foreground = styled.palette[2];
+        styled.background = styled.palette[4];
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 4,
+            rows: 1,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        apply_terminal_appearance(&mut terminal, &theme).expect("apply theme");
+        terminal.vt_write(
+            b"\x1b]10;rgb:ff/00/00\x1b\\\x1b]11;rgb:00/00/80\x1b\\\x1b]110\x1b\\\x1b]111\x1b\\",
+        );
+        apply_terminal_appearance(&mut terminal, &styled).expect("apply styled");
+        assert_eq!(
+            terminal.fg_color().expect("foreground"),
+            Some(ghostty_color(styled.foreground))
+        );
+        assert_eq!(
+            terminal.bg_color().expect("background"),
+            Some(ghostty_color(styled.background))
+        );
+
+        terminal.vt_write(b"\x1b]10;rgb:ff/00/00\x1b\\");
+        apply_terminal_appearance(&mut terminal, &theme).expect("apply theme again");
+        assert_eq!(
+            terminal.fg_color().expect("foreground"),
+            Some(ghostty_color(Color::rgb(255, 0, 0)))
+        );
+        assert_eq!(
+            terminal.bg_color().expect("background"),
+            Some(ghostty_color(theme.background))
+        );
     }
 
     #[test]
@@ -21916,19 +22084,40 @@ preexec_functions+=(__zz_fixture_preexec)
         let mode = copy_mode.as_mut().expect("mode");
         let bottom = mode.viewport_offset;
         assert_eq!(bottom, mode.revision.maximum_offset());
-        mode.cursor = PointCoordinate { x: 0, y: bottom + 4 };
+        mode.cursor = PointCoordinate {
+            x: 0,
+            y: bottom + 4,
+        };
         let separators = WordSeparators::default();
         move_copy_cursor(mode, &CopyModeAction::HalfPageUp, &separators, true);
         assert_eq!(mode.viewport_offset, bottom - 3);
-        assert_eq!(mode.cursor, PointCoordinate { x: 0, y: bottom - 3 + 4 });
+        assert_eq!(
+            mode.cursor,
+            PointCoordinate {
+                x: 0,
+                y: bottom - 3 + 4
+            }
+        );
         move_copy_cursor(mode, &CopyModeAction::PageUp, &separators, true);
         assert_eq!(mode.viewport_offset, bottom - 7);
-        assert_eq!(mode.cursor, PointCoordinate { x: 0, y: bottom - 7 + 4 });
+        assert_eq!(
+            mode.cursor,
+            PointCoordinate {
+                x: 0,
+                y: bottom - 7 + 4
+            }
+        );
         move_copy_cursor(mode, &CopyModeAction::PageDown, &separators, true);
         assert_eq!(mode.viewport_offset, bottom - 3);
         move_copy_cursor(mode, &CopyModeAction::HalfPageDown, &separators, true);
         assert_eq!(mode.viewport_offset, bottom);
-        assert_eq!(mode.cursor, PointCoordinate { x: 0, y: bottom + 4 });
+        assert_eq!(
+            mode.cursor,
+            PointCoordinate {
+                x: 0,
+                y: bottom + 4
+            }
+        );
     }
 
     #[test]
@@ -21949,7 +22138,13 @@ preexec_functions+=(__zz_fixture_preexec)
         };
         move_copy_cursor(mode, &CopyModeAction::PageDown, &separators, true);
         assert_eq!(mode.viewport_offset, bottom);
-        assert_eq!(mode.cursor, PointCoordinate { x: 0, y: bottom + 5 });
+        assert_eq!(
+            mode.cursor,
+            PointCoordinate {
+                x: 0,
+                y: bottom + 5
+            }
+        );
     }
 
     #[test]
@@ -22009,7 +22204,10 @@ preexec_functions+=(__zz_fixture_preexec)
         let mut copy_mode = copy_mode_over_thirty_lines();
         let mode = copy_mode.as_mut().expect("mode");
         let bottom = mode.viewport_offset;
-        mode.cursor = PointCoordinate { x: 0, y: bottom + 2 };
+        mode.cursor = PointCoordinate {
+            x: 0,
+            y: bottom + 2,
+        };
         scroll_copy_view_to_cursor(mode);
         assert_eq!(mode.viewport_offset, bottom);
         mode.cursor = PointCoordinate { x: 0, y: 2 };
@@ -22050,22 +22248,25 @@ preexec_functions+=(__zz_fixture_preexec)
             }
             contents.contains("ZZ_SEARCH_READY")
         });
-        let wait_for_facts = |expected: &str, predicate: &dyn Fn(Option<&CopyModeFacts>) -> bool| {
-            let deadline = std::time::Instant::now() + Duration::from_secs(30);
-            loop {
-                let facts = session.copy_mode_facts(view);
-                if predicate(facts.as_deref()) {
-                    return facts;
+        let wait_for_facts =
+            |expected: &str, predicate: &dyn Fn(Option<&CopyModeFacts>) -> bool| {
+                let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                loop {
+                    let facts = session.copy_mode_facts(view);
+                    if predicate(facts.as_deref()) {
+                        return facts;
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "timed out waiting for {expected}; last facts: {facts:?}"
+                    );
+                    thread::sleep(Duration::from_millis(10));
                 }
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "timed out waiting for {expected}; last facts: {facts:?}"
-                );
-                thread::sleep(Duration::from_millis(10));
-            }
-        };
+            };
         let on_line = |line: &'static str| {
-            move |facts: Option<&CopyModeFacts>| facts.is_some_and(|facts| facts.cursor_line == line)
+            move |facts: Option<&CopyModeFacts>| {
+                facts.is_some_and(|facts| facts.cursor_line == line)
+            }
         };
         assert_eq!(session.pane_search_string(), "");
 

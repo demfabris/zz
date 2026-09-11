@@ -487,6 +487,8 @@ pub struct TerminalAppearance {
     pub background_opacity: f32,
     #[serde(skip)]
     pub palette_classes: Vec<(u8, ColourClass)>,
+    #[serde(skip)]
+    pub default_classes: [Option<ColourClass>; 2],
 }
 
 struct BoundedFontFamily(String);
@@ -660,6 +662,7 @@ impl fmt::Debug for TerminalAppearance {
             .field("rounded_selection", &self.rounded_selection)
             .field("background_opacity", &self.background_opacity)
             .field("palette_classes", &self.palette_classes)
+            .field("default_classes", &self.default_classes)
             .finish()
     }
 }
@@ -703,6 +706,7 @@ impl Default for TerminalAppearance {
             rounded_selection: true,
             background_opacity: 1.0,
             palette_classes: Vec::new(),
+            default_classes: [None, None],
         }
     }
 }
@@ -803,6 +807,7 @@ impl TerminalAppearance {
         self.rounded_selection.hash(&mut hasher);
         self.background_opacity.to_bits().hash(&mut hasher);
         self.palette_classes.hash(&mut hasher);
+        self.default_classes.hash(&mut hasher);
         hasher.finish()
     }
 }

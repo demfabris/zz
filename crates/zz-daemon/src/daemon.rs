@@ -827,12 +827,16 @@ fn pane_terminal_appearance(
         .find_map(|(candidate, mapped)| (*candidate == cursor_style).then_some(*mapped))
         .flatten();
     let resolved_color = pane_cursor_color(base, cursor_colour);
-    let foreground = window_colours
-        .0
-        .and_then(|colour| appearance_tmux_colour(base, colour));
-    let background = window_colours
-        .1
-        .and_then(|colour| appearance_tmux_colour(base, colour));
+    let ground = |colour: Option<TmuxColour>| {
+        colour.and_then(|colour| {
+            Some((
+                appearance_tmux_colour(base, colour)?,
+                tmux_colour_class(colour)?,
+            ))
+        })
+    };
+    let foreground = ground(window_colours.0);
+    let background = ground(window_colours.1);
     let palette = pane_palette(base, pane_colours);
     if cursor_style.is_none()
         && resolved_color.is_none()
@@ -854,13 +858,23 @@ fn pane_terminal_appearance(
     if let Some(color) = resolved_color {
         appearance.cursor_color = color;
     }
-    if let Some(color) = foreground {
+    if let Some((color, class)) = foreground {
         appearance.foreground = color;
+        appearance.default_classes[0] = Some(class);
     }
-    if let Some(color) = background {
+    if let Some((color, class)) = background {
         appearance.background = color;
+        appearance.default_classes[1] = Some(class);
     }
     Arc::new(appearance)
+}
+
+fn tmux_colour_class(colour: TmuxColour) -> Option<ColourClass> {
+    match colour {
+        TmuxColour::Default | TmuxColour::Terminal => None,
+        TmuxColour::Basic(entry) | TmuxColour::Indexed(entry) => Some(ColourClass::Palette(entry)),
+        TmuxColour::Rgb(_) | TmuxColour::Theme(_) => Some(ColourClass::Rgb),
+    }
 }
 
 /// `colour_palette_from_option` copies the resolved `pane-colours` entries into
@@ -874,14 +888,10 @@ fn pane_palette(
     let mut classes = Vec::new();
     for (index, value) in pane_colours {
         let Some((color, class)) = parse_tmux_colour(value).and_then(|colour| {
-            let class = match colour {
-                TmuxColour::Default | TmuxColour::Terminal => return None,
-                TmuxColour::Basic(entry) | TmuxColour::Indexed(entry) => {
-                    ColourClass::Palette(entry)
-                }
-                TmuxColour::Rgb(_) | TmuxColour::Theme(_) => ColourClass::Rgb,
-            };
-            appearance_tmux_colour(base, colour).map(|color| (color, class))
+            Some((
+                appearance_tmux_colour(base, colour)?,
+                tmux_colour_class(colour)?,
+            ))
         }) else {
             continue;
         };
@@ -20372,11 +20382,7 @@ impl Shared {
                 .and_then(KeyEngine::active_table)
                 == Some("prefix")
             {
-                inner
-                    .key_engines
-                    .entry(client)
-                    .or_default()
-                    .cancel_prefix();
+                inner.key_engines.entry(client).or_default().cancel_prefix();
             }
         }
         self.sync_prefix_armed(client);
@@ -31922,11 +31928,7 @@ fn client_colour_count(inner: &ServerState, client: ClientId) -> Option<u32> {
     )
 }
 
-fn client_colour_count_with(
-    inner: &ServerState,
-    client: ClientId,
-    requested: u32,
-) -> Option<u32> {
+fn client_colour_count_with(inner: &ServerState, client: ClientId, requested: u32) -> Option<u32> {
     if inner.client_kinds.get(&client) != Some(&ClientKind::Interactive)
         || !inner.client_terminals.contains(&client)
     {

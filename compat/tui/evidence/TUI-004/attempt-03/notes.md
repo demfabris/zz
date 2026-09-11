@@ -135,11 +135,18 @@ New in the rework:
   client. Compared whole.
 - `view-inactive-opened`, `view-inactive-typed`: R10. A `-v` split, run-shell
   on the inactive pane, the same typing. Every row is compared whole except the
-  divider row, which is compared by glyph. That row's colour is the clause-2
-  record tui-screen-diff.sh keeps as `BORDER_STYLE_REASON`. Measured here:
-  even `pane-border-style fg=colour2` set on both sides gives `\e[32m\e[49m`
-  against `\e[38;2;0;205;0m\e[48;2;16;19;24m`, and the default styles give the
-  same kind of split. The row below the divider is captured on its own, because
+  divider row, which is compared by glyph. In this driver a plain split's
+  default border colours differ with or without a view, at origin/main
+  3319ceba and at 2911d88c alike (the modes review's probe6 and probe7): the
+  pin draws `\e[38;2;179;179;179m` then `\e[38;2;154;205;50m` on the default
+  ground, zz draws `\e[38;2;216;222;233m\e[48;2;16;19;24m` then
+  `\e[38;2;77;163;235m`. Even `pane-border-style fg=colour2` set on both sides
+  gives `\e[32m\e[49m` against `\e[38;2;0;205;0m\e[48;2;16;19;24m`. That is the
+  mechanism `BORDER_STYLE_REASON` in tui-screen-diff.sh describes, but no
+  existing record covers this case: tui-screen-diff.sh's plain `split`
+  checkpoint asserts identical and does not reproduce it. Why the two drivers
+  disagree is not explained yet; it is raised for clause-2 triage (corrected by
+  the cycle-5 gate). The row below the divider is captured on its own, because
   capture-pane -e carries the divider's SGR into that row's leading escapes.
   The header's CONTROLLED DYNAMIC VALUES declares both rules.
 

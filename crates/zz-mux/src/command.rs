@@ -1130,7 +1130,7 @@ pub enum MuxEffect {
         context: ExecutionContext,
     },
     ReloadConfig,
-    ImportTmuxConfig,
+    ImportTmuxConfig(Option<String>),
     KillServer,
     SuppressAfterHook,
     SnapshotChanged,
@@ -4504,14 +4504,15 @@ impl MuxEngine {
                 }
             }
             "import-tmux-config" => {
-                parse_command_options("import-tmux-config", &command.args)?;
-                if command.args.is_empty() {
-                    Execution::effect(MuxEffect::ImportTmuxConfig)
-                } else {
+                let (_, positional) = parse_command_options("import-tmux-config", &command.args)?;
+                if positional.len() > 1 {
                     return Err(ServerError::CommandParse(
-                        "import-tmux-config does not take arguments".to_owned(),
+                        "usage: import-tmux-config [path]".to_owned(),
                     ));
                 }
+                Execution::effect(MuxEffect::ImportTmuxConfig(
+                    positional.first().map(ToString::to_string),
+                ))
             }
             "start-server" => {
                 let (_, positional) = parse_command_options("start-server", &command.args)?;
@@ -24335,17 +24336,29 @@ mod tests {
     }
 
     #[test]
-    fn import_tmux_config_is_a_native_argument_free_effect() {
+    fn import_tmux_config_accepts_an_optional_path() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         let execution = engine
             .execute(&mut context, &command("import-tmux-config", &[]))
             .expect("import effect");
-        assert_eq!(execution.effects, [MuxEffect::ImportTmuxConfig]);
+        assert_eq!(execution.effects, [MuxEffect::ImportTmuxConfig(None)]);
+        let execution = engine
+            .execute(
+                &mut context,
+                &command("import-tmux-config", &["/tmp/my tmux.conf"]),
+            )
+            .expect("import with path");
+        assert_eq!(
+            execution.effects,
+            [MuxEffect::ImportTmuxConfig(Some(
+                "/tmp/my tmux.conf".to_owned()
+            ))]
+        );
         assert!(matches!(
             engine.execute(
                 &mut context,
-                &command("import-tmux-config", &["unexpected"])
+                &command("import-tmux-config", &["one", "two"])
             ),
             Err(ServerError::CommandParse(_))
         ));

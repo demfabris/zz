@@ -72,10 +72,9 @@ This slice deliberately selects one host at a time. It does not reproduce the de
 or aggregate sessions from several daemons. `ZZ_SOCKET` remains the simulator override and bypasses
 saved-host setup for the local development loop.
 
-The client offers no tmux config import. Since cycle 15 (2026-09-05) the daemon reads the host's
-tmux config files in place at startup, with `zz/mux.conf` as the final layer, so
-`import-tmux-config` only prints that explanation. The first-attach offer and the Prefix Keys import
-button that used to call it were removed together with the result messages they invented.
+The native iOS client offers no tmux config import UI. Since 2026-09-11 the daemon loads only
+`zz/mux.conf` or explicit `-f` files. `import-tmux-config [path]` copies a donor into `zz/mux.conf`
+and reloads. Desktop Settings and the CLI expose that verb.
 
 ## Pane overview
 

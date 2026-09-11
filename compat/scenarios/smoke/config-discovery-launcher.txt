@@ -1,24 +1,20 @@
 launcher:
 corpus: none
-# Discovery is opt-in: stage only scratch HOME/XDG files before either server
-# starts without -f. The harness refuses discovery when /etc/tmux.conf exists;
-# every ordinary scenario retains -f /dev/null on both sides.
 startup-config: discovery
 stage: fixtures/config-discovery-import.sh ~/config-discovery-import.sh
 stage: fixtures/config-discovery-home.conf ~/.tmux.conf
 stage: fixtures/config-discovery-xdg.conf $XDG_CONFIG_HOME/tmux/tmux.conf
 stage: fixtures/config-discovery-fallback.conf ~/.config/tmux/tmux.conf
 stage: fixtures/config-discovery-mux.conf $XDG_CONFIG_HOME/zz/mux.conf
-out: show-options -g @discovery-home
-out: show-options -g @discovery-xdg
-out: show-options -g @discovery-fallback
-out: show-options -g @discovery-home-xdg-order
-out: show-options -g @discovery-order
-out: list-keys -T prefix
-tmux-only: set-option -g @discovery-layer mux-last
 zz-only: run-shell 'sh ~/config-discovery-import.sh'
-zz-only: source-file -F '#{XDG_CONFIG_HOME}/zz/mux.conf'
+tmux-only: source-file -F '#{HOME}/.tmux.conf'
+tmux-only: set-option -g @discovery-layer mux-last
+tmux-only: set-option -g @import-proof passed
+out: show-options -g @import-proof
+out: show-options -g @discovery-home
+out: show-options -g @discovery-order
 out: show-options -g @discovery-layer
+out: list-keys -T prefix
 zz-only: reload-config
 out: list-keys -T prefix
 out: show-options -g @discovery-layer

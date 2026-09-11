@@ -161,15 +161,10 @@ fn tmux_config_candidates_for(home: Option<&Path>, xdg_config_home: Option<&Path
 }
 
 #[must_use]
-pub fn tmux_config_candidates() -> Vec<PathBuf> {
+pub fn discover_tmux_config() -> Option<PathBuf> {
     let home = nonempty_env("HOME");
     let xdg_config_home = nonempty_env("XDG_CONFIG_HOME");
     tmux_config_candidates_for(home.as_deref(), xdg_config_home.as_deref())
-}
-
-#[must_use]
-pub fn discover_tmux_config() -> Option<PathBuf> {
-    tmux_config_candidates()
         .into_iter()
         .find(|candidate| candidate.is_file())
 }

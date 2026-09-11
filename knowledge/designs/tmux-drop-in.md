@@ -2399,6 +2399,12 @@ alt screen, panes `0` and `1` on both) and byte-exact headless for every error r
 
 # The 100% ledger — consciously parked
 
+On 2026-09-11, config discovery moved to explicit import. The daemon now loads only
+`zz/mux.conf`, or explicit `-f` files that replace it. `import-tmux-config [path]` copies a
+chosen donor into an import block and reloads; the first-run offer returns once for existing
+installs. Earlier discovery decisions below remain historical.
+
+
 Everything below was seen, weighed, and deliberately not done during phase 4. This is the
 checklist for a future 100%-compat assessment: each row is either an accepted divergence to
 re-confirm, a deferred mechanic with an owner phase, or an open question. The operational

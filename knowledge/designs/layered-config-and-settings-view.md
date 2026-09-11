@@ -11,16 +11,16 @@ tags:
 - provenance
 - design-plan
 timestamp: 2026-09-09T00:00:00Z
-last_updated: 2026-09-06
+last_updated: 2026-09-11
 ---
 
 # Overview
 
-`zz/config` is zz's whole application configuration surface. Every knob zz honors has a spelling in
-that one flat file, whether the value is consumed by the GUI client or by the daemon. The native
+`zz/config` holds application settings and terminal appearance. `zz/mux.conf` holds tmux commands
+and the global options edited by Multiplexer Settings. The native
 settings view keeps structured controls for app-level and terminal-appearance choices; Multiplexer
-exposes split shortcut controls above the separate zz-owned `mux.conf` editor. Users import Ghostty
-appearance on request; the daemon reads tmux config files in place before zz overrides.
+exposes Options and split shortcut controls above the zz-owned `mux.conf` editor. Users import
+Ghostty appearance and tmux commands on request, from any path.
 
 This document records the shape and the reasoning. Current grammar and key tables live in
 [Application configuration](/configuration/app-config.md),
@@ -36,7 +36,7 @@ rows read the effective prefix table; its full-file editor covers the remaining 
 |--------|--------|------------------|
 | Client-local knobs | built-in default < `zz/config` | `Default`, `Override` |
 | Terminal appearance (`AppearanceConfigKey::ALL`) | built-in defaults < theme file named by a `theme` override < the rest of the `zz/config` override set | `Default`, `ThemeFile`, `Ghostty`, `Override` |
-| Mux options | defaults < tmux files (or explicit `-f` roots) < `zz/mux.conf` < `zz/config` override < runtime command | `Default`, `TmuxConfig`, `Override`, `RuntimeCommand` |
+| Mux options | defaults < `zz/mux.conf` OR explicit `-f` roots < `zz/config` override < runtime command | `Default`, `TmuxConfig`, `Override`, `RuntimeCommand` |
 
 Client-local provenance is `Override` whenever the key is *present*, even if its value is invalid, so
 Reset can delete a stale bad line instead of presenting it as absent.
@@ -55,14 +55,14 @@ place that already owns each grammar.
 
 | Group | Owner | Where the grammar lives |
 |-------|-------|-------------------------|
-| Window chrome, pane geometry, widget radius, theme mode, paired `chrome-preset`, five optional `chrome-*` roots | GUI client | `crates/zz/src/config/mod.rs` |
+| Window chrome, pane geometry, widget radius, theme mode, per-mode `chrome-preset-light` / `chrome-preset-dark`, three optional `chrome-*` roots | GUI client | `crates/zz/src/config/mod.rs` |
 | Browser-local element-selector hotkey | GUI client | `crates/zz/src/config/mod.rs` |
 | Repeatable `chrome-keybind` / `chrome-unbind` overrides for `ui`, `sidebar`, `browser`, and `terminal` actions | GUI client | `crates/zz/src/config/mod.rs` + `crates/zz-client/src/chrome.rs` |
 | Three ACP launch keys (`agent-command`, `agent-claude-code-command`, `agent-working-directory`) | GUI client | `crates/zz/src/config/mod.rs`; file-only, no settings row |
 | Terminal appearance, including face-specific `font-family*` stacks, `font-feature`, synthetic/thickening policy, colors, palette, padding, policy, `theme`, and the `zz-*` extension keys | daemon | `crates/zz-terminal/src/appearance.rs` |
 | `prefix`, `mode-keys`, `history-limit`, `word-separators`, `copy-command`, `set-clipboard`, `buffer-limit`, `synchronize-panes` | daemon | `crates/zz-mux/src/command.rs` |
 
-Daemon-owned pane key tables use tmux config files and zz-owned `zz/mux.conf` overrides. Settings
+Daemon-owned pane key tables use zz-owned `zz/mux.conf` or explicit `-f` files. Settings
 offers shortcut and pane-type controls for Split below and Split right, with custom commands left
 in the text editor. See [Application configuration](/configuration/app-config.md) for the current behavior.
 Client-owned chrome gained repeatable file-only overrides through `chrome-keybind` and
@@ -97,19 +97,14 @@ still arrive as overrides against whatever the remote daemon resolves.
 
 # Import, not adoption
 
-Appearance remains import-and-own: the Ghostty loader serializes concrete appearance values into
-`zz/config` with donor-wins replacement. The first-run prompt offers this appearance import when a
-Ghostty config exists.
+On 2026-09-11, zz adopted explicit imports for both donor formats. Ghostty imports serialize
+concrete appearance values into `zz/config`. The daemon's `import-tmux-config [path]` copies
+commands into a marked `zz/mux.conf` block, comments unsupported constructs, and reloads.
+The first-run prompt offers every discovered donor once, including once more after this upgrade.
+Neither import changes the donor. Both Settings pages accept user-chosen paths.
 
-The previous tmux stance said "tmux is copied verbatim to the zz-owned zz/mux.conf". Pinned tmux
-`Makefile.am` defines `/etc/tmux.conf:~/.tmux.conf:$XDG_CONFIG_HOME/tmux/tmux.conf:~/.config/tmux/tmux.conf`,
-and `cfg.c::start_cfg` loops over all expanded candidates. A first-existing-file copy loses those
-layers and drifts from files edited by plugin managers and `source-file` bindings.
-
-zz now reads those tmux files in place in the same order, followed by the selected `zz/mux.conf`.
-Explicit `-f` files replace the tmux candidate list while `zz/mux.conf` still loads last. The tmux
-copy helper is removed; import entry points explain the in-place behavior. This was decided
-2026-09-05 by fabrico for cycle 15; reversible. Neither import flow writes a donor file.
+The daemon loads only `zz/mux.conf` unless explicit `-f` files replace it. This supersedes
+the 2026-09-05 decision to read tmux candidates in place.
 
 # Settings view
 
@@ -130,20 +125,32 @@ Three rules hold the design together:
 - **The writer edits the last occurrence**, matching the parser's later-entry precedence. Cumulative
   appearance keys are replaced as whole reset-led groups during Ghostty import.
 - **Whole-file mux edits are explicit.** Multiplexer keeps its buffer local until Save, enforces the
-  1 MiB parser bound, and replaces the target atomically.
+  1 MiB editor bound, and replaces the target atomically.
 
-Terminal restores the structured five-group appearance surface: effective daemon values,
-per-key provenance, bounded inputs, palette swatches, and Reset controls all write through the
-comment-preserving `zz/config` writer. Multiplexer mounts the bounded `zz/mux.conf` editor with no
-line-number gutter and compact 12px text, below a list of the files the daemon loads. A clean mux
-editor reloads when entered; a `mux.conf` that still begins with a pre-2026-09-05 tmux copy gets a one-click trim.
+Terminal's Appearance rows edit the saved `zz/config`, including one font-family value, font
+size, theme, cursor style and blink, opacity, and padding. Multiplexer's Options rows edit global
+set-option lines in `zz/mux.conf`. Reset removes the last scalar override; font-family edits
+replace its whole stack. Both pages keep an Import group above their editor. Multiplexer
+controls require a local connection and a clean editor, wait for daemon confirmation, and
+allow retry after five seconds.
 
-Appearance and Terminal are long enough that mounting every off-screen control makes wheel-event
-layout proportional to the whole page. They therefore describe their content as individual rows
+Choosing a terminal theme replaces the background, foreground, cursor, selection, and palette
+overrides left by an import, so those colors no longer hide the chosen theme. Fonts, padding,
+opacity, and cursor behavior stay unchanged. Resetting the theme only removes its name.
+`crates/zz-config/src/file_options.rs` applies the theme and color edits in one atomic write.
+
+Terminal includes a live preview using the shared terminal painter with fixed sample content.
+Draft field and editor changes update its local appearance without applying them to other panes.
+The loader ignores invalid entries while applying valid ones, matching daemon resolution.
+`crates/zz/src/config/settings/terminal_preview.rs` owns its render cache and cancellable blink
+and source-resolution tasks; changing sections or closing settings releases the preview.
+
+Appearance is long enough that mounting every off-screen control makes wheel-event
+layout proportional to the whole page. It therefore describes its content as individual rows
 and render it through GPUI's variable-height `ListState`: only rows in the viewport plus a small
 overdraw are constructed, while a uniform height hint gives the scrollbar a useful extent before
 each row has been measured. The page-keyed list state retains scroll position independently for
-each section. Short pages keep the simpler ordinary scroll column. GPUI's list honours only the
+each section. Terminal and short pages keep the ordinary scroll column. GPUI's list honours only the
 vertical padding of its own style and places every row at its left edge, so a virtualized page
 carries the page gutter and the bounded, centered content column *per row*; otherwise its cards sit
 flush against the window edge while the scrolled pages stay inset.
@@ -162,7 +169,7 @@ shown, and then retained so edits and focus survive navigation.
 | Multi-client fights | Two attached clients with different `zz/config` files both push overrides | Last-writer-wins; per-client overrides become real under [scene-streaming remote attach](/designs/scene-streaming-remote.md) |
 | Comment-preserving writer | Repeated keys, inline comments, and `key=value` spacing variants make in-place editing fiddly | Edit the last occurrence, keep unknown lines byte-identical, cover with fixture tests |
 | Schema creep | A settings GUI invites unbounded knob growth | Every knob keeps the bounded contract: validated range, warn-and-keep, documented; no key ships without a consumer |
-| A preset must survive both palettes | The light and dark built-ins run their elevations in opposite directions, so one fixed preset cannot follow System correctly | Persist one preset family with paired variants; resolve base < active variant < explicit roots, and keep the last actual OS mode separate from any pin |
+| A preset must survive both palettes | The light and dark built-ins run their elevations in opposite directions, so one fixed preset cannot follow System correctly | Persist one preset per mode (paired families were tried first and produced invented light halves); resolve base < that mode's preset < explicit roots, and keep the last actual OS mode separate from any pin |
 
 # Non-goals
 

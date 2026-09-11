@@ -70,7 +70,6 @@ pub use lifecycle::{
 };
 pub use paths::{
     default_mux_config, discover_tmux_config, mux_config_candidates, mux_config_write_path,
-    tmux_config_candidates,
 };
 #[cfg(target_os = "ios")]
 pub use russh_client::ios_ssh_public_key;

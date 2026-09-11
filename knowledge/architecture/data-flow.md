@@ -133,12 +133,11 @@ stays client-side.
 
 The daemon resolves [appearance](/terminal/appearance.md) as built-in defaults plus the
 client-pushed `zz/config` overrides. With config loading enabled, it sources explicit `-f` files
-in order, or the discovered tmux config candidates when no explicit files were supplied, then
-loads `zz/mux.conf`. `reload-config`/`C-b r` replays that selection and pushes the resolved state
+in order, or only `zz/mux.conf` when no explicit files were supplied. `reload-config`/`C-b r` replays that selection and pushes the resolved state
 to GUI clients and live terminal actors without killing PTYs, scrollback, selections, searches,
 layouts, or browser panes. See `startup_mux_config_files` and `selected_mux_config_files` in
-`crates/zz-daemon/src/daemon.rs` for the selection and precedence rules. The client's import flow
-can also copy Ghostty and tmux settings into `zz/config` and `zz/mux.conf`.
+`crates/zz-daemon/src/daemon.rs` for the selection and precedence rules. The client imports Ghostty appearance into `zz/config`; the daemon's
+`import-tmux-config [path]` copies tmux commands into `zz/mux.conf`.
 
 # Related
 

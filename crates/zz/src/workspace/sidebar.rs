@@ -282,6 +282,9 @@ impl WorkspaceSidebar {
         if self.route == WorkspaceRoute::App {
             return;
         }
+        if let Some(settings) = &self.settings {
+            settings.update(cx, |settings, _| settings.release_terminal_preview());
+        }
         self.route = WorkspaceRoute::App;
         cx.emit(SidebarRouteChanged);
         cx.notify();
@@ -1604,8 +1607,17 @@ mod tests {
         );
 
         cx.update(|window, cx| {
+            first.update(cx, |settings, cx| {
+                settings.set_section(zz_ui::settings::SettingsSection::Terminal, window, cx);
+                let _ = settings.render(window, cx);
+                assert!(settings.has_terminal_preview());
+            });
+        });
+
+        cx.update(|window, cx| {
             sidebar.update(cx, |sidebar, cx| sidebar.close_settings(window, cx));
         });
+        assert!(!first.read_with(cx, |settings, _| settings.has_terminal_preview()));
         assert_eq!(
             sidebar.read_with(cx, |sidebar, _| sidebar.route()),
             WorkspaceRoute::App
@@ -1620,6 +1632,12 @@ mod tests {
             })
         });
         assert_eq!(first.entity_id(), reopened.entity_id());
+        cx.update(|window, cx| {
+            reopened.update(cx, |settings, cx| {
+                let _ = settings.render(window, cx);
+                assert!(settings.has_terminal_preview());
+            });
+        });
     }
 
     struct ShellProbe {

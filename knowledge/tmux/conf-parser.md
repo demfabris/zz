@@ -13,13 +13,11 @@ last_updated_by: Claude
 
 `parser.rs` implements `parse_config(source, input) -> ParsedConfig`, the lexer used for startup
 config, `source-file`, and each `command-prompt` submission. The daemon's `selected_mux_config_files`
-discovers tmux configuration roots, then appends the first existing zz-owned platform candidate for
-`zz/mux.conf`: XDG config, the home config directory, macOS Application Support, or Windows AppData
-in platform order. Top-level startup `-f` files replace the tmux roots while zz overrides still load
-last. `reload-config` replays the same discovery or explicit roots and the selected zz file;
-`replay_mux_config_files` records that ordered selection in `#{config_files}`. Later `source-file`
-calls do not append to the fact. Settings lists the existing files in that order above the `zz/mux.conf` editor. See
-[Application configuration](/configuration/app-config.md).
+selects explicit `-f` files in order, or the first existing zz-owned `zz/mux.conf`.
+`reload-config` repeats that selection. `replay_mux_config_files` records it in `#{config_files}`;
+later `source-file` calls do not append to the fact. tmux donors enter through
+`import-tmux-config [path]`, which copies a block into `zz/mux.conf`. Settings rows edit
+that same file above its editor. See [Application configuration](/configuration/app-config.md).
 
 The lexer is a single character-by-character state machine (modeled on tmux's `cmd-parse.y` /
 `arguments.c`) that splits input into words, groups words into commands, and records a
@@ -58,7 +56,7 @@ the option grammar and normal effects (`ModeKeysChanged`, `WordSeparatorsChanged
 and are skipped while later entries continue.
 
 Startup and reload precedence is
-`built-in default < tmux roots or explicit -f files < zz/mux.conf < zz/config override`.
+`built-in default < zz/mux.conf OR explicit -f files < zz/config override`.
 `load_config_file`
 labels successful option writes as `tmux-config` (the wire tier kept its name; it now means "from
 the sourced mux config file"); after the complete startup, `reload-config`, or

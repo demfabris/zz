@@ -1,7 +1,9 @@
 //! Native settings route backed by the application configuration.
 
+mod file_options;
 mod multiplexer;
 mod sources;
+mod terminal_preview;
 
 use std::{
     collections::BTreeMap,
@@ -41,8 +43,7 @@ use crate::{
         hosts::{HostId, HostState},
     },
     theme::{
-        CHROME_PRESETS, ChromeColor, ChromePreset, ChromePresetId, ThemeModeSetting,
-        inherited_chrome_colors,
+        ChromeColor, ChromePresetId, ThemeModeSetting, chrome_presets, inherited_chrome_colors,
     },
     window::toast,
     workspace::add_host,
@@ -52,7 +53,7 @@ use zz_client::{ChromeAction, UI_TABLE};
 use zz_protocol::ConfigOverrideEntry;
 use zz_terminal::{TerminalColorScheme, discover_ghostty_config};
 use zz_ui::feedback::import_configuration_file_alert;
-use zz_ui::settings::appearance::{picker_tile, ui_font_select};
+use zz_ui::settings::appearance::{PickerStrip, palette_preview, picker_tile, ui_font_select};
 use zz_ui::settings::{
     SettingEntry, SettingsScrollColumn, SettingsSection, SettingsSelectItem, SettingsStack,
     StackPosition, settings_control_fill, settings_list_group_header, settings_page_content,
@@ -61,6 +62,9 @@ use zz_ui::settings::{
 };
 
 gpui::actions!(zz, [OpenSettings]);
+
+pub(crate) struct PendingMuxImport(pub bool);
+impl gpui::Global for PendingMuxImport {}
 
 /// What the Settings hint prints when the chrome keymap names no chord for
 /// `open-settings`. The binding itself is data; see `zz_client::ChromeKeymap`.
@@ -98,7 +102,7 @@ fn key_bindings(chords: &[ChromeChord]) -> Vec<KeyBinding> {
         .collect()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum ConfigFileKind {
     Mux,
     Terminal,
@@ -151,9 +155,12 @@ pub(crate) struct SettingsView {
     chrome_pickers: BTreeMap<ChromeColor, Entity<ColorPickerState>>,
     mux_config_editor: Option<ConfigFileEditor>,
     mux_split_controls: Option<multiplexer::SplitControls>,
-    mux_sources: Option<sources::MuxSources>,
+    file_options: BTreeMap<ConfigFileKind, file_options::FileOptions>,
+    file_command_sequence: u64,
+    pending_file_command: Option<(u64, ConfigFileKind)>,
     observed_appearance_overrides: Vec<ConfigOverrideEntry>,
     terminal_config_editor: Option<ConfigFileEditor>,
+    terminal_preview: Option<Entity<terminal_preview::TerminalPreview>>,
     hosts_state: Option<HostsSectionState>,
     section: SettingsSection,
     focus_handle: FocusHandle,
@@ -329,9 +336,12 @@ impl SettingsView {
             chrome_pickers,
             mux_config_editor: None,
             mux_split_controls: None,
-            mux_sources: None,
+            file_options: BTreeMap::new(),
+            file_command_sequence: 0,
+            pending_file_command: None,
             observed_appearance_overrides,
             terminal_config_editor: None,
+            terminal_preview: None,
             hosts_state: None,
             section: SettingsSection::Appearance,
             focus_handle: cx.focus_handle(),
@@ -462,10 +472,41 @@ impl SettingsView {
             self.reload_config_editor_if_clean(section, window, cx);
         }
         self.section = section;
-        if section == SettingsSection::Multiplexer {
-            self.refresh_mux_sources();
+        if section != SettingsSection::Terminal {
+            self.release_terminal_preview();
         }
         cx.notify();
+    }
+
+    pub(crate) fn release_terminal_preview(&mut self) {
+        self.terminal_preview = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_terminal_preview(&self) -> bool {
+        self.terminal_preview.is_some()
+    }
+
+    fn synchronize_terminal_preview(&mut self, cx: &mut Context<Self>) {
+        if self.section != SettingsSection::Terminal {
+            return;
+        }
+        let source = self.terminal_preview_source(cx);
+        let path = self
+            .config_file_editor(ConfigFileKind::Terminal)
+            .path
+            .clone();
+        let scheme = import_color_scheme(cx);
+        let preview = self.terminal_preview.get_or_insert_with(|| {
+            let appearance = crate::theme::terminal_appearance(cx).map_or_else(
+                || zz_terminal::AppearanceLoad::defaults_for(scheme).appearance,
+                |appearance| appearance.as_ref().clone(),
+            );
+            cx.new(|cx| terminal_preview::TerminalPreview::new(appearance, cx))
+        });
+        preview.update(cx, |preview, cx| {
+            preview.set_source(source, scheme, path, cx);
+        });
     }
 
     fn synchronize_numeric_inputs(
@@ -728,17 +769,16 @@ impl SettingsView {
     ) -> SettingEntry {
         SettingEntry::new(title, description)
             .title_actions(key_annotations(key, setting.provenance))
-            .control(
-                Switch::new(format!("settings-{}", key.as_str()))
-                    .checked(setting.value)
-                    .on_click(move |enabled, _, cx| {
-                        if let Err(error) =
-                            set_config_key(key, if *enabled { "true" } else { "false" })
-                        {
-                            report_write_error("set", key.as_str(), &error, cx);
-                        }
-                    }),
-            )
+            .control(boolean_control(
+                key.as_str(),
+                setting.value,
+                move |enabled, _, cx| {
+                    if let Err(error) = set_config_key(key, if *enabled { "true" } else { "false" })
+                    {
+                        report_write_error("set", key.as_str(), &error, cx);
+                    }
+                },
+            ))
     }
 
     fn remote_debugging_setting(
@@ -773,9 +813,7 @@ impl SettingsView {
                 .flex_none()
                 .text_size(zz_ui::rems_from_px(11.0))
                 .text_color(cx.theme().warning)
-                .child(
-                    "Any local process that reaches the port can drive the logged-in browser.",
-                ),
+                .child("Any local process that reaches the port can drive the logged-in browser."),
         )
     }
 
@@ -789,13 +827,7 @@ impl SettingsView {
     ) -> SettingEntry {
         SettingEntry::new(title, description)
             .title_actions(key_annotations(key, setting.provenance))
-            .control(
-                div().w(px(CONTROL_WIDTH)).flex_none().child(
-                    NumberInput::new(input)
-                        .small()
-                        .bg(settings_control_fill(cx)),
-                ),
-            )
+            .control(numeric_control(input, cx))
     }
 }
 
@@ -806,7 +838,8 @@ impl SettingsView {
 
     fn appearance_section(&self, resolved: &AppConfig, cx: &Context<Self>) -> AnyElement {
         let items = appearance_page_items(crate::profile::profile(cx).has_window_blur);
-        let inherited = inherited_chrome_colors(resolved.chrome_preset.value, cx.theme().mode);
+        let mode = cx.theme().mode;
+        let inherited = inherited_chrome_colors(resolved.chrome_preset(mode.is_dark()).value, mode);
         let view = cx.entity();
         let resolved = *resolved;
         zz_ui::settings::appearance::appearance_page(items, move |item, position, _, cx| {
@@ -844,9 +877,13 @@ impl SettingsView {
             AppearancePageItem::UiFontFamily => self.ui_font_setting(cx),
             AppearancePageItem::UiZoom => self.ui_zoom_setting(cx),
             AppearancePageItem::AppIcon => Self::app_icon_setting(resolved, cx),
-            AppearancePageItem::Preset => Self::preset_setting(resolved, cx),
+            AppearancePageItem::Preset(mode) => Self::preset_setting(mode, resolved, cx),
             AppearancePageItem::ChromeColor(color) => {
-                self.chrome_color_setting(color, resolved, inherited)
+                let preset_active = resolved
+                    .chrome_preset(cx.theme().mode.is_dark())
+                    .value
+                    .is_some();
+                self.chrome_color_setting(color, resolved, inherited, preset_active)
             }
             AppearancePageItem::ChromeContrast => Self::numeric_setting(
                 ConfigKey::ChromeContrast,
@@ -946,7 +983,12 @@ impl SettingsView {
                     picker_tile(
                         format!("settings-theme-mode-{}", mode.as_str()).into(),
                         mode.title(),
-                        theme_preview(mode, resolved.chrome_preset.value, cx),
+                        theme_preview(
+                            mode,
+                            resolved.chrome_preset(false).value,
+                            resolved.chrome_preset(true).value,
+                            cx,
+                        ),
                         mode == setting.value,
                         cx,
                     )
@@ -985,42 +1027,43 @@ impl SettingsView {
             ))
     }
 
-    fn preset_setting(resolved: &AppConfig, cx: &Context<Self>) -> SettingEntry {
-        let setting = resolved.chrome_preset;
-        let label = setting
-            .value
-            .map_or("Color theme", |preset| preset.preset().name);
-        SettingEntry::new(
-            "Preset",
-            "Choose a color theme or manually define your own below.",
-        )
-        .title_actions(key_annotations(ConfigKey::ChromePreset, setting.provenance))
-        .control(
-            Button::new("settings-preset")
-                .small()
-                .label(label)
-                .dropdown_caret(true)
-                .bg(settings_control_fill(cx))
-                .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-                    CHROME_PRESETS
-                        .iter()
-                        .fold(menu.min_w(px(230.0)), |menu, preset| {
-                            menu.item(
-                                PopupMenuItem::element(move |_, cx| {
-                                    h_flex()
-                                        .w_full()
-                                        .items_center()
-                                        .justify_between()
-                                        .gap(px(12.0))
-                                        .py(px(2.0))
-                                        .child(preset.name)
-                                        .child(preset_swatches(preset, cx))
-                                })
-                                .on_click(move |_, _, cx| apply_preset(preset, cx)),
-                            )
-                        })
-                }),
-        )
+    fn preset_setting(mode: ThemeMode, resolved: &AppConfig, cx: &Context<Self>) -> SettingEntry {
+        let dark = mode.is_dark();
+        let setting = resolved.chrome_preset(dark);
+        let (title, description, strip) = if dark {
+            (
+                "Dark palette",
+                "Used while the interface is dark.",
+                "settings-presets-dark",
+            )
+        } else {
+            (
+                "Light palette",
+                "Used while the interface is light.",
+                "settings-presets-light",
+            )
+        };
+        let presets: Vec<Option<ChromePresetId>> = std::iter::once(None)
+            .chain(chrome_presets(dark).map(|preset| Some(preset.id)))
+            .collect();
+        let selected = presets
+            .iter()
+            .position(|preset| *preset == setting.value)
+            .unwrap_or(0);
+        let tiles = PickerStrip::new(strip, selected)
+            .tiles(presets.iter().map(|preset| {
+                (
+                    preset.map_or("Default", |id| id.preset().name),
+                    palette_preview(&inherited_chrome_colors(*preset, mode), cx),
+                )
+            }))
+            .on_select(move |index, _, cx| apply_preset(dark, presets[index], cx));
+        SettingEntry::new(title, description)
+            .title_actions(key_annotations(
+                ConfigKey::ChromePreset { dark },
+                setting.provenance,
+            ))
+            .child(tiles)
     }
 
     fn chrome_color_setting(
@@ -1028,12 +1071,11 @@ impl SettingsView {
         color: ChromeColor,
         resolved: &AppConfig,
         inherited: &ThemeColor,
+        preset_active: bool,
     ) -> SettingEntry {
         let setting = resolved.chrome(color);
         let key = ConfigKey::Chrome(color);
-        let badge = if setting.provenance == ConfigProvenance::Default
-            && resolved.chrome_preset.value.is_some()
-        {
+        let badge = if setting.provenance == ConfigProvenance::Default && preset_active {
             settings_provenance_badge("Preset")
         } else {
             provenance_badge(setting.provenance)
@@ -1067,12 +1109,7 @@ impl SettingsView {
     ) -> SettingEntry {
         SettingEntry::new(title, description)
             .title_actions(key_annotations(key, provenance))
-            .control(
-                div()
-                    .w(px(CONTROL_WIDTH))
-                    .flex_none()
-                    .child(Select::new(select).small().bg(settings_control_fill(cx))),
-            )
+            .control(select_control(select, cx))
     }
 
     fn ui_font_setting(&self, cx: &Context<Self>) -> SettingEntry {
@@ -1589,32 +1626,21 @@ impl SettingsView {
             let mux = self.mux.read(cx);
             mux.is_connected() && mux.attached_host() == HostId::LOCAL
         };
-        let donor = (kind == ConfigFileKind::Terminal)
-            .then(discover_ghostty_config)
-            .flatten();
-        let donor_tooltip = donor.as_ref().map_or_else(
-            || "No Ghostty configuration was found to import".to_owned(),
-            |path| format!("Import {}", path.display()),
-        );
-        let has_config_import = crate::profile::profile(cx).has_config_import;
 
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .min_h_0()
-            .overflow_hidden()
-            .p(px(14.0))
+        Self::scroll_column("settings-config-file")
             .child(
                 settings_page_content()
-                    .flex_1()
-                    .min_h_0()
                     .gap(px(10.0))
                     .child(settings_page_description(kind.section(), cx))
-                    .when(kind == ConfigFileKind::Mux, |page| {
-                        page.child(self.mux_sources_section())
-                            .child(self.mux_splits_section(cx))
+                    .when(kind == ConfigFileKind::Terminal, |page| {
+                        page.child(settings_list_group_header("Preview", None, cx))
+                            .children(self.terminal_preview.clone())
                     })
+                    .when(kind == ConfigFileKind::Mux, |page| {
+                        page.child(self.mux_splits_section(cx))
+                    })
+                    .child(self.file_options_section(kind, cx))
+                    .child(self.file_import_section(kind, cx))
                     .child(
                         div()
                             .flex()
@@ -1635,11 +1661,13 @@ impl SettingsView {
                                     Button::new("settings-reload-mux-config")
                                         .small()
                                         .label("Reload")
-                                        .disabled(dirty || !local)
+                                        .disabled(
+                                            dirty || !local || self.pending_file_command.is_some(),
+                                        )
                                         .tooltip(if dirty {
                                             "Save your edits first"
                                         } else if local {
-                                            "Read every configuration file again"
+                                            "Reload zz/mux.conf"
                                         } else {
                                             "Connect to a local session to reload"
                                         })
@@ -1648,26 +1676,11 @@ impl SettingsView {
                                         })),
                                 )
                             })
-                            .when(
-                                has_config_import && kind == ConfigFileKind::Terminal,
-                                |row| {
-                                    row.child(
-                                        Button::new("settings-import-ghostty")
-                                            .small()
-                                            .label("Import Ghostty…")
-                                            .tooltip(donor_tooltip)
-                                            .disabled(donor.is_none())
-                                            .on_click(cx.listener(move |this, _, window, cx| {
-                                                this.confirm_ghostty_import(window, cx);
-                                            })),
-                                    )
-                                },
-                            )
                             .child(
                                 Button::new(kind.save_button_id())
                                     .small()
                                     .label("Save")
-                                    .disabled(!dirty)
+                                    .disabled(!dirty || self.pending_file_command.is_some())
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.save_config_editor(kind, cx);
                                     })),
@@ -1682,14 +1695,11 @@ impl SettingsView {
                                 .child(error),
                         )
                     })
-                    .when(kind == ConfigFileKind::Mux, |page| {
-                        page.when_some(self.mux_copied_notice(cx), gpui::ParentElement::child)
-                    })
                     .child(
                         div()
                             .flex()
-                            .flex_1()
-                            .min_h_0()
+                            .flex_none()
+                            .h(px(320.0))
                             .overflow_hidden()
                             .p(px(CONFIG_EDITOR_PADDING))
                             .border_1()
@@ -1940,86 +1950,17 @@ Self::numeric_setting(
         );
         cx.notify();
     }
-
-    fn confirm_ghostty_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let kind = ConfigFileKind::Terminal;
-        let Some(donor) = discover_ghostty_config() else {
-            toast::push(
-                Notification::info("No Ghostty configuration was found to import"),
-                cx,
-            );
-            return;
-        };
-        let target = match config_file_path(kind) {
-            Ok(path) => path,
-            Err(error) => {
-                toast::push(
-                    Notification::error(format!("Could not locate {}: {error}", kind.file_name())),
-                    cx,
-                );
-                return;
-            }
-        };
-        let mut description = format!(
-            "This rewrites the appearance keys in {} from {}, replacing any you changed \
-             since the last import. The Ghostty file is not modified.",
-            target.display(),
-            donor.display(),
-        );
-        let file = self.config_file_editor(kind);
-        if file.editor.read(cx).value().as_ref() != file.saved {
-            description.push_str(" Unsaved changes in this editor will be discarded.");
-        }
-        let settings = cx.entity();
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let settings = settings.clone();
-            import_configuration_file_alert(alert, "Import from Ghostty?", description.clone())
-                .on_ok(move |_, window, cx| {
-                    settings.update(cx, |settings, cx| {
-                        settings.run_ghostty_import(window, cx);
-                    });
-                    true
-                })
-        });
-    }
-
-    fn run_ghostty_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let result = config::import::import_ghostty_config(import_color_scheme(cx))
-            .map(|report| report.config_path);
-        match result {
-            Ok(Some(path)) => {
-                log::info!(
-                    target: "zz::config",
-                    "imported Ghostty configuration into {}",
-                    path.display(),
-                );
-                self.reload_config_editor(ConfigFileKind::Terminal, window, cx);
-                config::request_daemon_reload(cx);
-                toast::push(
-                    Notification::success(format!(
-                        "Imported Ghostty configuration into {}",
-                        path.display()
-                    )),
-                    cx,
-                );
-            }
-            Ok(None) => toast::push(
-                Notification::info("No Ghostty configuration was found to import"),
-                cx,
-            ),
-            Err(error) => {
-                log::warn!(target: "zz::config", "could not import Ghostty configuration error={error}");
-                toast::push(
-                    Notification::error(format!("Could not import Ghostty configuration: {error}")),
-                    cx,
-                );
-            }
-        }
-    }
 }
 
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if cx
+            .try_global::<PendingMuxImport>()
+            .is_some_and(|pending| pending.0)
+        {
+            cx.set_global(PendingMuxImport(false));
+            self.set_section(SettingsSection::Multiplexer, window, cx);
+        }
         let _ = self.ensure_section_state(self.section, window, cx);
         let resolved = self.synchronize_numeric_inputs(window, cx);
         let browser = self.synchronize_browser_input(window, cx);
@@ -2027,6 +1968,8 @@ impl Render for SettingsView {
         self.synchronize_ui_font(window, cx);
         self.synchronize_terminal_editor(window, cx);
         self.synchronize_mux_splits(window, cx);
+        self.synchronize_file_options(window, cx);
+        self.synchronize_terminal_preview(cx);
 
         let content = match self.section {
             SettingsSection::Appearance => self.appearance_section(&resolved, cx),
@@ -2057,6 +2000,31 @@ impl Focusable for SettingsView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus()
     }
+}
+
+fn boolean_control(
+    id: &str,
+    checked: bool,
+    commit: impl Fn(&bool, &mut Window, &mut App) + 'static,
+) -> Switch {
+    Switch::new(format!("settings-{id}"))
+        .checked(checked)
+        .on_click(commit)
+}
+
+fn numeric_control(input: &Entity<InputState>, cx: &App) -> gpui::Div {
+    div().w(px(CONTROL_WIDTH)).flex_none().child(
+        NumberInput::new(input)
+            .small()
+            .bg(settings_control_fill(cx)),
+    )
+}
+
+fn select_control(select: &Entity<SelectState<Vec<SettingsSelectItem>>>, cx: &App) -> gpui::Div {
+    div()
+        .w(px(CONTROL_WIDTH))
+        .flex_none()
+        .child(Select::new(select).small().bg(settings_control_fill(cx)))
 }
 
 fn settings_select_state(
@@ -2472,7 +2440,7 @@ fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
         | ConfigKey::ThemeMode
         | ConfigKey::UiFontFamily
         | ConfigKey::AppIcon
-        | ConfigKey::ChromePreset
+        | ConfigKey::ChromePreset { .. }
         | ConfigKey::Chrome(_) => {
             unreachable!("only numeric settings use numeric inputs")
         }
@@ -2526,37 +2494,26 @@ fn write_chrome_color(color: ChromeColor, value: Option<gpui::Hsla>, cx: &mut Ap
     }
 }
 
-fn apply_preset(preset: &'static ChromePreset, cx: &mut App) {
-    if let Err(error) = set_chrome_preset(preset.id) {
-        report_write_error("set", ConfigKey::ChromePreset.as_str(), &error, cx);
+fn apply_preset(dark: bool, preset: Option<ChromePresetId>, cx: &mut App) {
+    if let Err(error) = set_chrome_preset(dark, preset) {
+        report_write_error("set", ConfigKey::ChromePreset { dark }.as_str(), &error, cx);
     }
 }
 
-fn preset_swatches(preset: &'static ChromePreset, cx: &App) -> gpui::Div {
-    div().flex().flex_col().flex_none().gap(px(2.0)).children(
-        [ThemeMode::Light, ThemeMode::Dark].map(|mode| {
-            div()
-                .flex()
-                .gap(px(2.0))
-                .children(preset.colors(mode.is_dark()).iter().map(|hex| {
-                    div()
-                        .size(px(6.0))
-                        .rounded_full()
-                        .bg(zz_ui::parse_hex(hex).unwrap_or(cx.theme().border()))
-                }))
-        }),
-    )
-}
-
-fn theme_preview(mode: ThemeModeSetting, preset: Option<ChromePresetId>, cx: &App) -> gpui::Div {
+fn theme_preview(
+    mode: ThemeModeSetting,
+    light: Option<ChromePresetId>,
+    dark: Option<ChromePresetId>,
+    cx: &App,
+) -> gpui::Div {
     zz_ui::settings::appearance::theme_preview(
         match mode {
             ThemeModeSetting::System => None,
             ThemeModeSetting::Light => Some(ThemeMode::Light),
             ThemeModeSetting::Dark => Some(ThemeMode::Dark),
         },
-        &inherited_chrome_colors(preset, ThemeMode::Light),
-        &inherited_chrome_colors(preset, ThemeMode::Dark),
+        &inherited_chrome_colors(light, ThemeMode::Light),
+        &inherited_chrome_colors(dark, ThemeMode::Dark),
         cx,
     )
 }

@@ -86,7 +86,7 @@ use crate::{
         chooser_prompt_edit, client_key_inputs, input_key_name, send_tokens,
     },
     lifecycle::DaemonIdentityGuard,
-    paths::{default_mux_config, home_directory, tmux_config_candidates},
+    paths::{default_mux_config, discover_tmux_config, home_directory, mux_config_write_path},
     shell_process,
     status::{
         BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
@@ -1204,15 +1204,202 @@ fn partition_config_overrides(
 fn startup_mux_config_files(
     load_user_config: bool,
     explicit: Option<&[PathBuf]>,
-    candidates: impl FnOnce() -> Vec<PathBuf>,
     default: impl FnOnce() -> Option<PathBuf>,
 ) -> Vec<PathBuf> {
     if !load_user_config {
         return Vec::new();
     }
-    let mut files = explicit.map_or_else(candidates, <[PathBuf]>::to_vec);
-    files.extend(default());
-    files
+    explicit.map_or_else(|| default().into_iter().collect(), <[PathBuf]>::to_vec)
+}
+
+const MUX_IMPORT_MAX_BYTES: usize = 1024 * 1024;
+const MUX_IMPORT_START: &str = "# zz-import-tmux-begin: ";
+const MUX_IMPORT_END: &str = "# zz-import-tmux-end: ";
+
+fn resolve_tmux_import_path(
+    donor: Option<&str>,
+    context: &ExecutionContext,
+) -> Result<PathBuf, DaemonError> {
+    let source = match donor {
+        Some(donor) => {
+            let path = if donor == "~" || donor.starts_with("~/") {
+                home_directory()
+                    .ok_or_else(|| {
+                        ServerError::InvalidCommand(format!(
+                            "cannot resolve {donor}: home directory unavailable"
+                        ))
+                    })?
+                    .join(donor.strip_prefix("~/").unwrap_or(""))
+            } else {
+                PathBuf::from(donor)
+            };
+            if path.is_absolute() {
+                path
+            } else {
+                context
+                    .client_working_directory()
+                    .map(Path::to_owned)
+                    .map_or_else(std::env::current_dir, Ok)?
+                    .join(path)
+            }
+        }
+        None => discover_tmux_config()
+            .ok_or_else(|| ServerError::InvalidCommand("no tmux configuration found".to_owned()))?,
+    };
+    Ok(source)
+}
+
+fn read_mux_import_source(path: &Path) -> Result<String, DaemonError> {
+    let read = || -> std::io::Result<String> {
+        let mut source = String::new();
+        fs::File::open(path)?
+            .take((MUX_IMPORT_MAX_BYTES + 1) as u64)
+            .read_to_string(&mut source)?;
+        if source.len() > MUX_IMPORT_MAX_BYTES {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidData,
+                "configuration exceeds the 1 MiB limit",
+            ));
+        }
+        Ok(source)
+    };
+    read().map_err(|error| {
+        std::io::Error::new(error.kind(), format!("{}: {error}", path.display())).into()
+    })
+}
+
+fn prepare_tmux_import(
+    engine: &MuxEngine,
+    path: &Path,
+    source: &str,
+) -> (String, usize, Vec<String>) {
+    let parsed = engine.parse_config(path.display().to_string(), source);
+    let mut output = String::new();
+    let mut pending = String::new();
+    let mut first_line = 1;
+    let mut copied = 0;
+    let mut unsupported = Vec::new();
+    let lines = source.split_inclusive('\n').collect::<Vec<_>>();
+    for (index, line) in lines.iter().enumerate() {
+        pending.push_str(line);
+        if line
+            .trim_end_matches(['\r', '\n'])
+            .chars()
+            .rev()
+            .take_while(|character| *character == '\\')
+            .count()
+            % 2
+            == 1
+            && index + 1 != lines.len()
+        {
+            continue;
+        }
+        let unit = MuxEngine::parse_config_without_variable_expansion("import", &pending);
+        if !unit.diagnostics.is_empty() && index + 1 != lines.len() {
+            continue;
+        }
+        let commands = if parsed.diagnostics.is_empty() {
+            parsed
+                .commands
+                .iter()
+                .filter(|command| {
+                    command.source.as_ref().is_some_and(|span| {
+                        usize::try_from(span.line)
+                            .is_ok_and(|line| line >= first_line && line <= index + 1)
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else {
+            unit.commands.iter().collect::<Vec<_>>()
+        };
+        let mut rejected = commands
+            .iter()
+            .filter_map(|command| match prepare_config_command(engine, command) {
+                Ok((command, _))
+                    if !zz_protocol::CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS
+                        .contains(&canonical_command(&command.name)) =>
+                {
+                    None
+                }
+                Ok((command, _)) => Some(command.name),
+                Err(_) => Some(command.name.clone()),
+            })
+            .collect::<Vec<_>>();
+        if !unit.diagnostics.is_empty() {
+            rejected.push("invalid configuration construct".to_owned());
+        }
+        if rejected.is_empty() {
+            copied += commands.len();
+            output.push_str(&pending);
+        } else {
+            unsupported.extend(rejected);
+            for line in pending.split_inclusive('\n') {
+                output.push_str("# zz-unsupported: ");
+                output.push_str(line);
+            }
+        }
+        pending.clear();
+        first_line = index + 2;
+    }
+    (output, copied, unsupported)
+}
+
+fn replace_tmux_import(existing: &str, source: &Path, copied: &str) -> Result<String, DaemonError> {
+    let source_label = source.display().to_string().replace(['\r', '\n'], " ");
+    let mut label = source_label.clone();
+    let mut discriminator = 0;
+    while copied
+        .lines()
+        .any(|line| line == format!("{MUX_IMPORT_END}{label}"))
+    {
+        discriminator += 1;
+        label = format!("{source_label} [{discriminator}]");
+    }
+    let block = format!(
+        "{MUX_IMPORT_START}{label}\n{copied}{}{MUX_IMPORT_END}{label}\n",
+        if copied.is_empty() || copied.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        }
+    );
+    let mut offset = 0;
+    let mut start = None;
+    let mut range = None;
+    let mut closing = None;
+    for line in existing.split_inclusive('\n') {
+        if let Some(label) = line.strip_prefix(MUX_IMPORT_START)
+            && start.is_none()
+        {
+            start = Some(offset);
+            closing = Some(format!(
+                "{MUX_IMPORT_END}{}",
+                label.trim_end_matches(['\r', '\n'])
+            ));
+        }
+        offset += line.len();
+        if closing.as_deref() == Some(line.trim_end_matches(['\r', '\n']))
+            && let Some(start) = start
+        {
+            range = Some(start..offset);
+            break;
+        }
+    }
+    if start.is_some() && range.is_none() {
+        return Err(ServerError::InvalidCommand(
+            "zz/mux.conf has an unfinished import block".to_owned(),
+        )
+        .into());
+    }
+    let mut edited = existing.to_owned();
+    edited.replace_range(range.unwrap_or(0..0), &block);
+    if edited.len() > MUX_IMPORT_MAX_BYTES {
+        return Err(ServerError::InvalidCommand(
+            "imported configuration exceeds the 1 MiB limit".to_owned(),
+        )
+        .into());
+    }
+    Ok(edited)
 }
 
 fn format_config_files(files: &[PathBuf]) -> String {
@@ -7313,7 +7500,7 @@ impl Shared {
         let mut monitor_silence_changed = false;
         let mut attach = None;
         let mut detach = None;
-        let mut import_tmux_config = false;
+        let mut import_tmux_config = None;
         let mut reload_config = false;
         let mut snapshot_changed = false;
         let mut mux_options_changed = false;
@@ -8986,8 +9173,8 @@ impl Shared {
                     MuxEffect::ReloadConfig => {
                         reload_config = true;
                     }
-                    MuxEffect::ImportTmuxConfig => {
-                        import_tmux_config = true;
+                    MuxEffect::ImportTmuxConfig(path) => {
+                        import_tmux_config = Some(path.clone());
                     }
                     MuxEffect::KillServer => force_shutdown_requested = true,
                     MuxEffect::SnapshotChanged => snapshot_changed = true,
@@ -9095,11 +9282,10 @@ impl Shared {
             (execution, mux_options_changed, recheck_shutdown_requested)
         };
 
-        if import_tmux_config {
-            append_inserted_output(
-                &mut execution.output,
-                "zz reads tmux configuration files in place at daemon startup; no import is needed. Put zz-specific overrides in zz/mux.conf.",
-            );
+        if let Some(path) = import_tmux_config {
+            let output = self.import_tmux_configuration(path.as_deref(), context)?;
+            append_inserted_output(&mut execution.output, &output);
+            reload_config = true;
         }
 
         if force_shutdown_requested {
@@ -24193,19 +24379,56 @@ impl Shared {
         });
     }
 
+    fn import_tmux_configuration(
+        &self,
+        donor: Option<&str>,
+        context: &ExecutionContext,
+    ) -> Result<String, DaemonError> {
+        let source = resolve_tmux_import_path(donor, context)?;
+        let target = self
+            .zz_mux_config_path
+            .lock()
+            .clone()
+            .or_else(mux_config_write_path)
+            .ok_or_else(|| {
+                ServerError::InvalidCommand("no zz/mux.conf path available".to_owned())
+            })?;
+        let donor_text = read_mux_import_source(&source).map_err(|error| {
+            ServerError::InvalidCommand(match error {
+                DaemonError::Io(error) => format!("{}: {}", source.display(), error.kind()),
+                error => error.to_string(),
+            })
+        })?;
+        let (copied, commands, unsupported) =
+            prepare_tmux_import(&self.inner.lock().engine, &source, &donor_text);
+        let existing = match read_mux_import_source(&target) {
+            Ok(source) => source,
+            Err(DaemonError::Io(error)) if error.kind() == ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(error),
+        };
+        let edited = replace_tmux_import(&existing, &source, &copied)?;
+        crate::fleet_hosts::atomic_write(&target, edited.as_bytes())?;
+        let names = if unsupported.is_empty() || unsupported.len() > 5 {
+            String::new()
+        } else {
+            format!(" ({})", unsupported.join(", "))
+        };
+        Ok(format!(
+            "Imported {} into {}: {commands} commands copied, {} commented out as unsupported{names}",
+            source.display(),
+            target.display(),
+            unsupported.len()
+        ))
+    }
+
     fn selected_mux_config_files(&self) -> Vec<PathBuf> {
         let selection = self.mux_config_selection.lock();
-        startup_mux_config_files(
-            selection.0,
-            selection.1.as_deref(),
-            tmux_config_candidates,
-            || {
-                self.zz_mux_config_path
-                    .lock()
-                    .clone()
-                    .or_else(default_mux_config)
-            },
-        )
+        startup_mux_config_files(selection.0, selection.1.as_deref(), || {
+            self.zz_mux_config_path
+                .lock()
+                .clone()
+                .or_else(default_mux_config)
+        })
     }
 
     fn replay_mux_config_files(
@@ -40622,7 +40845,7 @@ mod tests {
             .output;
         assert_eq!(output, "C-x");
 
-        let expected = format_config_files(&[configs[0].clone(), configs[1].clone(), mux]);
+        let expected = format_config_files(&configs);
         let config_files = shared
             .execute(
                 ClientId(7),
@@ -42005,42 +42228,142 @@ mod tests {
     }
 
     #[test]
-    fn startup_config_layers_mux_after_pinned_candidates_or_explicit_files() {
-        let tmux = vec![
-            PathBuf::from("/etc/tmux.conf"),
-            PathBuf::from("/home/u/.tmux.conf"),
-        ];
+    fn tmux_import_prepends_and_reloads_a_binding() {
+        let directory = tempfile::tempdir().unwrap();
+        let donor = directory.path().join("donor.conf");
+        let target = directory.path().join("mux.conf");
+        fs::write(
+            &donor,
+            "bind-key -T prefix F11 display-message IMPORTED\nset -g @import-priority donor\n",
+        )
+        .unwrap();
+        let tail = "# user tail\nset -g @import-priority user\n";
+        fs::write(&target, tail).unwrap();
+        let shared = Arc::new(Shared::new(1));
+        *shared.zz_mux_config_path.lock() = Some(target.clone());
+        shared.initialize(true).unwrap();
+        let mut context = ExecutionContext::default();
+        let output = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("import-tmux-config", [donor.display().to_string()]),
+            )
+            .unwrap()
+            .output;
+        let saved = fs::read_to_string(&target).unwrap();
+        assert!(saved.starts_with(MUX_IMPORT_START));
+        assert!(saved.ends_with(tail));
+        assert!(output.contains("2 commands copied, 0 commented"));
+        let binding = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("list-keys", ["-T", "prefix", "F11"]),
+            )
+            .unwrap()
+            .output;
+        assert!(binding.contains("IMPORTED"));
+        assert_eq!(read_global_option(&shared, "@import-priority"), "user");
+    }
+
+    #[test]
+    fn tmux_reimport_replaces_block_and_preserves_surrounding_text() {
+        let first = replace_tmux_import(
+            "# tail\r\nset -g mouse off",
+            Path::new("/old"),
+            "set -g prefix C-a\n",
+        )
+        .unwrap();
+        let existing = format!("# before\r\n{first}");
+        let next =
+            replace_tmux_import(&existing, Path::new("/new"), "set -g prefix C-x\n").unwrap();
+        assert!(next.starts_with("# before\r\n# zz-import-tmux-begin: /new\n"));
+        assert!(next.ends_with("# tail\r\nset -g mouse off"));
+        assert!(!next.contains("/old"));
+        assert_eq!(next.matches(MUX_IMPORT_START).count(), 1);
+        assert!(!next.contains("prefix C-a"));
+    }
+
+    #[test]
+    fn tmux_reimport_ignores_marker_comments_inside_the_donor() {
+        let donor = "# zz-import-tmux-end: /old\nset -g prefix C-a\n";
+        let first = replace_tmux_import("# tail\n", Path::new("/old"), donor).unwrap();
+        let next = replace_tmux_import(&first, Path::new("/new"), "set -g prefix C-x\n").unwrap();
+        assert!(!next.contains("prefix C-a"));
+        assert!(next.ends_with("# tail\n"));
+    }
+
+    #[test]
+    fn tmux_import_comments_unsupported_constructs_without_running_commands() {
+        let engine = MuxEngine::default();
+        let source =
+            "clock-mode\nserver-access \\\n -a user\nrun-shell 'exit 1'\nset -g prefix C-a\n";
+        let (text, copied, unsupported) = prepare_tmux_import(&engine, Path::new("/donor"), source);
+        assert!(text.starts_with("# zz-unsupported: clock-mode\n"));
+        assert!(text.contains("# zz-unsupported:  -a user\n"));
+        assert!(text.contains("run-shell 'exit 1'\n"));
+        assert_eq!(copied, 2);
+        assert_eq!(unsupported.len(), 2);
+    }
+
+    #[test]
+    fn tmux_import_missing_path_reports_the_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing.conf");
+        let shared = Arc::new(Shared::new(1));
+        let error = shared
+            .import_tmux_configuration(
+                Some(missing.to_str().unwrap()),
+                &ExecutionContext::default(),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains(missing.to_str().unwrap()));
+    }
+
+    #[test]
+    fn tmux_import_without_path_uses_discover_tmux_config() {
+        let actual = resolve_tmux_import_path(None, &ExecutionContext::default());
+        match discover_tmux_config() {
+            Some(expected) => assert_eq!(actual.unwrap(), expected),
+            None => assert!(
+                actual
+                    .unwrap_err()
+                    .to_string()
+                    .contains("no tmux configuration found")
+            ),
+        }
+    }
+
+    #[test]
+    fn startup_config_selects_only_explicit_files_or_mux() {
         let mux = PathBuf::from("/home/u/.config/zz/mux.conf");
-        let explicit = vec![PathBuf::from("/tmp/explicit.conf")];
+        let explicit = vec![
+            PathBuf::from("/tmp/first.conf"),
+            PathBuf::from("/tmp/second.conf"),
+        ];
         assert_eq!(
-            startup_mux_config_files(true, None, || tmux.clone(), || Some(mux.clone())),
-            [tmux[0].clone(), tmux[1].clone(), mux.clone()]
+            startup_mux_config_files(true, None, || Some(mux.clone())),
+            [mux]
         );
         assert_eq!(
-            startup_mux_config_files(
-                true,
-                Some(&explicit),
-                || panic!("discovery with -f"),
-                || Some(mux.clone())
-            ),
-            [explicit[0].clone(), mux]
+            startup_mux_config_files(true, Some(&explicit), || panic!("default with -f")),
+            explicit
         );
         assert!(
-            startup_mux_config_files(
-                false,
-                Some(&explicit),
-                || panic!("disabled discovery"),
-                || panic!("disabled mux config")
-            )
-            .is_empty()
+            startup_mux_config_files(false, Some(&explicit), || panic!("disabled config"))
+                .is_empty()
         );
+        assert!(startup_mux_config_files(true, None, || None).is_empty());
     }
 
     #[test]
     fn config_files_is_empty_when_loading_is_disabled_and_retains_the_default_selection() {
         let default = PathBuf::from("/tmp/default.conf");
         assert_eq!(
-            startup_mux_config_files(true, None, Vec::new, || Some(default.clone())),
+            startup_mux_config_files(true, None, || Some(default.clone())),
             [default]
         );
         let shared = Arc::new(Shared::new(1));
@@ -42058,101 +42381,46 @@ mod tests {
     }
 
     #[test]
-    fn reload_config_preserves_discovered_and_explicit_root_bindings() {
-        const CHILD: &str = "ZZ_TEST_CONFIG_RELOAD_ROOTS";
-        if std::env::var_os(CHILD).is_none() {
-            let directory = tempfile::tempdir().expect("scratch home");
-            let home = directory.path();
-            fs::create_dir_all(home.join(".config/zz")).expect("native config directory");
-            fs::write(
-                home.join(".tmux.conf"),
-                "bind-key -T prefix F11 display-message HOME_BINDING\n",
+    fn reload_config_preserves_explicit_root_bindings() {
+        let directory = tempfile::tempdir().expect("scratch config");
+        let root = directory.path().join("explicit.conf");
+        let mux = directory.path().join("mux.conf");
+        fs::write(
+            &root,
+            "bind-key -T prefix F11 display-message EXPLICIT_BINDING\n",
+        )
+        .unwrap();
+        fs::write(&mux, "bind-key -T prefix F12 display-message MUX_IGNORED\n").unwrap();
+        let shared = Arc::new(Shared::new(1));
+        *shared.zz_mux_config_path.lock() = Some(mux);
+        shared
+            .initialize_with_mux_config_files(true, Some(std::slice::from_ref(&root)), None)
+            .unwrap();
+        fs::write(
+            &root,
+            "bind-key -T prefix F11 display-message RELOADED_BINDING\n",
+        )
+        .unwrap();
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("reload-config", [] as [&str; 0]),
             )
-            .expect("home binding");
-            fs::write(
-                home.join("explicit.conf"),
-                "bind-key -T prefix F11 display-message EXPLICIT_BINDING\n",
+            .unwrap();
+        let output = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("list-keys", ["-T", "prefix", "F11"]),
             )
-            .expect("explicit binding");
-            let mut child = std::process::Command::new(
-                std::env::current_exe().expect("test binary"),
-            )
-            .args([
-                "--exact",
-                "daemon::tests::reload_config_preserves_discovered_and_explicit_root_bindings",
-                "--nocapture",
-                "--test-threads=1",
-            ])
-            .env(CHILD, "1")
-            .env("HOME", home)
-            .env("XDG_CONFIG_HOME", home.join(".config"))
-            .spawn()
-            .expect("isolated reload regression");
-            let deadline = Instant::now() + Duration::from_secs(30);
-            let status = loop {
-                if let Some(status) = child.try_wait().expect("poll reload regression") {
-                    break status;
-                }
-                if Instant::now() >= deadline {
-                    child.kill().expect("stop stalled regression");
-                    child.wait().expect("reap stalled regression");
-                    panic!("isolated reload regression stalled");
-                }
-                std::thread::yield_now();
-            };
-            assert!(status.success());
-            return;
-        }
-        let home = PathBuf::from(std::env::var_os("HOME").expect("scratch HOME"));
-        let mux = home.join(".config/zz/mux.conf");
-        for explicit in [false, true] {
-            let roots = explicit.then(|| vec![home.join("explicit.conf")]);
-            let shared = Arc::new(Shared::new(1));
-            shared
-                .initialize_with_mux_config_files(true, roots.as_deref(), None)
-                .expect("startup roots");
-            let mut context = ExecutionContext::default();
-            let expected = if explicit {
-                "EXPLICIT_BINDING"
-            } else {
-                "HOME_BINDING"
-            };
-            for reloading in [false, true] {
-                if reloading {
-                    fs::write(&mux, "bind-key -T prefix F12 display-message MUX_SAVED\n")
-                        .expect("save mux config after startup");
-                    shared
-                        .execute(
-                            ClientId(7),
-                            ClientKind::Command,
-                            &mut context,
-                            &CommandInvocation::new("reload-config", [] as [&str; 0]),
-                        )
-                        .expect("Settings reload command");
-                }
-                let binding = shared
-                    .execute(
-                        ClientId(7),
-                        ClientKind::Command,
-                        &mut context,
-                        &CommandInvocation::new("list-keys", ["-T", "prefix", "F11"]),
-                    )
-                    .expect("root F11 survives reload")
-                    .output;
-                assert!(binding.contains(expected), "{binding}");
-            }
-            let binding = shared
-                .execute(
-                    ClientId(7),
-                    ClientKind::Command,
-                    &mut context,
-                    &CommandInvocation::new("list-keys", ["-T", "prefix", "F12"]),
-                )
-                .expect("saved mux binding")
-                .output;
-            assert!(binding.contains("MUX_SAVED"), "{binding}");
-            fs::remove_file(&mux).expect("reset native layer");
-        }
+            .unwrap()
+            .output;
+        assert!(output.contains("RELOADED_BINDING"));
+        assert_eq!(shared.selected_mux_config_files(), [root]);
     }
 
     #[test]

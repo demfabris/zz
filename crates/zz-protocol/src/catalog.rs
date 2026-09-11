@@ -2459,7 +2459,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "reload-config",
         aliases: &[],
-        description: "Reload tmux and Ghostty configuration",
+        description: "Reload zz configuration",
         usage: "",
         options: &[],
         positionals: &[],
@@ -2469,9 +2469,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "import-tmux-config",
         aliases: &[],
         description: "Copy the host tmux configuration into zz/mux.conf and reload",
-        usage: "",
+        usage: "[path]",
         options: &[],
-        positionals: &[],
+        positionals: &[FreeForm],
         variadic: None,
     },
     CommandSpec {

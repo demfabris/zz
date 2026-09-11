@@ -1,6 +1,6 @@
 use std::{
     io::{self, ErrorKind},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use zz_terminal::{
@@ -25,34 +25,43 @@ impl ImportReport {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
-pub fn donors_present() -> bool {
-    discover_ghostty_config().is_some()
-}
-
 /// Import only the Ghostty appearance into `zz/config`, leaving `zz/mux.conf`
 /// alone. Re-running overwrites the keys a previous import wrote.
 pub fn import_ghostty_config(scheme: TerminalColorScheme) -> io::Result<ImportReport> {
-    let mut report = ImportReport::default();
-    import_ghostty_config_into(scheme, &mut report)?;
-    Ok(report)
+    discover_ghostty_config().map_or_else(
+        || Ok(ImportReport::default()),
+        |path| import_ghostty_config_from(&path, scheme),
+    )
 }
 
-fn import_ghostty_config_into(
+pub fn import_ghostty_config_from(
+    path: &Path,
     scheme: TerminalColorScheme,
-    report: &mut ImportReport,
-) -> io::Result<()> {
-    if let Some(ghostty) = discover_ghostty_config() {
-        let load = load_ghostty_appearance_from_for(&ghostty, scheme);
-        let values = ghostty_import_values(&load)?;
-        if !values.is_empty() {
-            let target = config::import_target_path()?;
-            config::import_appearance_values_at(&target, &values)?;
-            report.ghostty_keys = values.len();
-            report.config_path = Some(target);
-        }
+) -> io::Result<ImportReport> {
+    std::fs::File::open(path)
+        .map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", path.display())))?;
+    if !path.is_file() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("{}: expected a configuration file", path.display()),
+        ));
     }
-    Ok(())
+    let load = load_ghostty_appearance_from_for(path, scheme);
+    if load.fatal {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            format!("could not load {}: {:?}", path.display(), load.diagnostics),
+        ));
+    }
+    let values = ghostty_import_values(&load)?;
+    let mut report = ImportReport::default();
+    if !values.is_empty() {
+        let target = config::import_target_path()?;
+        config::import_appearance_values_at(&target, &values)?;
+        report.ghostty_keys = values.len();
+        report.config_path = Some(target);
+    }
+    Ok(report)
 }
 
 /// The `zz/config` lines a loaded Ghostty appearance imports as: every key the
@@ -76,4 +85,18 @@ pub fn ghostty_import_values(
         values.push((key, group));
     }
     Ok(values)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ghostty_import_missing_donor_names_the_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing-ghostty");
+        let error = import_ghostty_config_from(&missing, TerminalColorScheme::Dark).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::NotFound);
+        assert!(error.to_string().contains(missing.to_str().unwrap()));
+    }
 }

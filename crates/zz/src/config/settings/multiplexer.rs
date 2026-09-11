@@ -130,6 +130,9 @@ impl SettingsView {
         if !mux.is_connected() || mux.attached_host() != HostId::LOCAL {
             return Some("Connect to a local session to edit split shortcuts.");
         }
+        if self.pending_file_command.is_some() {
+            return Some("Applying multiplexer configuration…");
+        }
         if self
             .mux_split_controls
             .as_ref()

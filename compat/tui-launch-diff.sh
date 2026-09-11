@@ -220,15 +220,20 @@ reset_pair() {
   plant_controlled_config tmux
 }
 
-# The controlled values live in each side's own ~/.tmux.conf, which both
-# binaries read in place. They cannot be `set-option`d instead: the pin's server
-# exits with its last session and comes back with its defaults, and a launcher
-# case creates its session itself, so a value set from outside would never reach
-# the pane the launcher spawns.
+# The controlled values live in the file each side reads on its own: the pin's
+# ~/.tmux.conf and zz's zz/mux.conf under its XDG config root. They cannot be
+# `set-option`d instead: the pin's server exits with its last session and comes
+# back with its defaults, and a launcher case creates its session itself, so a
+# value set from outside would never reach the pane the launcher spawns.
 plant_controlled_config() {
   local side="$1"
   local entry
-  local file="$(side_home "$side")/.tmux.conf"
+  local file
+  if [ "$side" = zz ]; then
+    file="$(side_home "$side")/config/zz/mux.conf"
+  else
+    file="$(side_home "$side")/.tmux.conf"
+  fi
   mkdir -p "$(dirname -- "$file")"
   {
     printf 'set -g status-right ""\n'
@@ -563,30 +568,37 @@ config_value() {
 run_config_cases() {
   local side
 
-  # ~/.tmux.conf, the first candidate both binaries read in place.
+  # zz reads only its own zz/mux.conf; tmux reads ~/.tmux.conf. The same
+  # option planted in each side's own file must reach the launched server.
+  for side in zz tmux; do
+    clear_roots "$side"
+    kill_every_session "$side"
+  done
+  plant zz config/zz/mux.conf 'set -g status-left OWNCONF'
+  plant tmux .tmux.conf 'set -g status-left OWNCONF'
+  reset_servers
+  local zz_value tmux_value
+  zz_value="$(config_value zz new-session -d -s c1)"
+  tmux_value="$(config_value tmux new-session -d -s c1)"
+  report config-own-file same option "$zz_value" "$tmux_value" ''
+
+  # A tmux file zz never imported must not reach zz; tmux still reads its
+  # own. Both sides then agree only after zz imports it.
   for side in zz tmux; do
     clear_roots "$side"
     kill_every_session "$side"
     plant "$side" .tmux.conf 'set -g status-left HOMECONF'
   done
   reset_servers
-  local zz_value tmux_value
-  zz_value="$(config_value zz new-session -d -s c1)"
-  tmux_value="$(config_value tmux new-session -d -s c1)"
-  report config-home-tmux-conf same option "$zz_value" "$tmux_value" ''
-
-  # $XDG_CONFIG_HOME/tmux/tmux.conf, read when the home candidate is gone.
-  for side in zz tmux; do
-    clear_roots "$side"
-    kill_every_session "$side"
-    plant "$side" config/tmux/tmux.conf 'set -g status-left XDGCONF'
-  done
-  reset_servers
   zz_value="$(config_value zz new-session -d -s c2)"
   tmux_value="$(config_value tmux new-session -d -s c2)"
-  report config-xdg-tmux-conf same option "$zz_value" "$tmux_value" ''
+  report config-unimported-tmux-conf record option "$zz_value" "$tmux_value" \
+    'zz does not read ~/.tmux.conf until it is imported'
+  side_command zz import-tmux-config >/dev/null 2>&1 || true
+  zz_value="$(config_value zz display-message -p imported)"
+  report config-imported-tmux-conf same option "$zz_value" "$tmux_value" ''
 
-  # An explicit -f replaces the candidates on both sides.
+  # An explicit -f replaces the default file on both sides.
   for side in zz tmux; do
     clear_roots "$side"
     kill_every_session "$side"

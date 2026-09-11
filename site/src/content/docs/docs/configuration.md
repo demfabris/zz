@@ -14,12 +14,13 @@ Both are picked up without a restart.
 
 ## One-shot import
 
-On first launch zz offers to import Ghostty appearance keys into `config`.
+On first launch zz offers to import any Ghostty or tmux configuration it finds. You can
+choose another source path in Settings. Ghostty appearance becomes a snapshot in `zz/config`;
+tmux commands become an import block in `zz/mux.conf`.
 
-The daemon reads tmux configuration in place at startup: `/etc/tmux.conf`,
-`~/.tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf`, then `~/.config/tmux/tmux.conf`.
-Your `zz/mux.conf` loads last. `zz -f <file>` replaces the tmux candidate list
-while keeping that final zz layer. See [tmux compatibility](./tmux/) for details.
+The daemon loads only `zz/mux.conf`. Explicit `zz -f <file>` arguments replace that file,
+in argument order. Reload uses the same selection. Terminal's Appearance rows edit `zz/config`;
+Multiplexer's Options rows edit `zz/mux.conf`, matching the editor on each page.
 
 ## Ghostty compatibility
 

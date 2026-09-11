@@ -47,15 +47,10 @@ dispatches mux values through the existing global `set-option` grammar. Appearan
 after `reload-config` and system color-scheme changes; mux overrides replay after every
 `zz/mux.conf` load so a reload cannot revert a GUI choice.
 
-The first-run import copies Ghostty appearance into `zz/config`. The daemon reads tmux
-configuration in place at startup: `/etc/tmux.conf`, `~/.tmux.conf`,
-`$XDG_CONFIG_HOME/tmux/tmux.conf`, then `~/.config/tmux/tmux.conf`, skipping missing files and
-repeated paths. The selected zz-owned `zz/mux.conf` loads last. Explicit `-f` files replace the
-tmux candidate list, in argument order, while `zz/mux.conf` remains the final layer. The CLI tmux
-import command explains discovery without copying files. Settings lists the existing files in that
-order above the `zz/mux.conf` editor, with Reload beside Save. Settings saves
-request `reload-config`, which replays the same discovery or explicit roots and the current
-zz mux layer, preserving bindings from tmux files.
+The daemon loads only `zz/mux.conf`, or explicit `-f` files that replace it in argument order.
+Reload repeats that selection. It never reads tmux donors implicitly. The first-run offer imports
+Ghostty appearance into `zz/config` and tmux commands into a marked `zz/mux.conf` block.
+Settings accepts any donor path and keeps structured rows above the editor for the same file.
 
 # Discovery and loading
 
@@ -130,12 +125,14 @@ The client-local schema includes these scalar settings and chrome colors.
 | `theme-mode` | `system` | `system`, `light`, `dark` | Follow the OS appearance, or pin one mode |
 | `app-icon` | `automatic` | `automatic`, `light`, `dark` | Which render of `assets/zz.icon` the macOS Dock tile wears; `automatic` defers to the bundle's compiled icon when packaged (so tinted/clear dock styles work) and follows the OS appearance in bare builds, independently of `theme-mode` |
 | `chrome-contrast` | `1.0` | `0.5`–`2.0` | Scales the chrome derivations; out-of-range or invalid values are reported and fall back to `1.0`. Settings shows it as 50–200% in steps of 5. |
-| `chrome-preset` | unset | `tokyo-night`, `catppuccin`, `gruvbox`, `nord`, `breeze`, `adwaita`, `ubuntu`, `rose-pine`, `ayu`, `solarized`, `macos-classic` | Select a paired light/dark chrome family; the active variant follows the effective `theme-mode` |
+| `chrome-preset-light` | unset | a light preset id from the catalog below | The chrome palette used while the effective mode is light |
+| `chrome-preset-dark` | unset | a dark preset id from the catalog below | The chrome palette used while the effective mode is dark |
 | `chrome-background` | unset | `#rgb`, `#rrggbb`, `#rrggbbaa` | zz-ui's `ThemeColor::background` . the window's base plane |
 | `chrome-foreground` | unset | same | `ThemeColor::foreground` . default text, and the source of muted text, rings, links |
-| `chrome-success` | unset | same | `ThemeColor::success` |
-| `chrome-warning` | unset | same | `ThemeColor::warning` |
-| `chrome-danger` | unset | same | `ThemeColor::danger` |
+| `chrome-accent` | unset | same | `ThemeColor::accent` . the one chromatic emphasis: the checked switch track, the selected tile ring, the active pane border and glow, the Agent send button |
+
+`chrome-success`, `chrome-warning`, and `chrome-danger` are retired: a line with one of them is
+reported and skipped, and the status roots follow the selected preset or the built-in palette.
 
 The status settings project directly into `zz_client::StatusBarSettings` and apply through the
 normal watched-config refresh. The clock never shows seconds. `AppShell` aligns its first wake to
@@ -191,23 +188,43 @@ preference, so macOS, Linux, and Windows follow this key directly.
 
 ## Chrome theming
 
-The five chrome color keys overwrite zz-ui's **palette roots** (`ThemeColor`, five configurable
-roots plus scrim). Other colors the UI paints (elevations, hover and pressed fills, muted text, focus rings, status washes)
+The three chrome color keys overwrite three of zz-ui's **palette roots** (`ThemeColor`: background,
+foreground, accent, success, warning, danger, plus scrim). Other colors the UI paints (elevations, hover and pressed fills, muted text, focus rings, status washes)
 is derived from those roots by `Colorize` at paint time, so setting a root recolors everything built
-on it with no further plumbing. That is also why there are five knobs and not a table: `scrim` is
-omitted because it is black in both modes and only its alpha is meaningful, and a larger table could
-disagree with itself.
+on it with no further plumbing. That is also why there are three knobs and not a table: the status
+roots come from the preset so they stay legible against it, `scrim` is black in both modes with
+only its alpha meaningful, and a larger table could disagree with itself. The accent is deliberately
+narrow: the checked switch track, the selected tile ring, the active pane border and its glow, and
+the Agent send button (`ButtonVariant::Accent`); every other control stays neutral.
 
-Resolution is `zz-ui base for the effective mode < chrome-preset variant < explicit chrome-*`.
-An unset root is therefore **inherited** from the active preset variant or, with no preset, the
+Resolution is `zz-ui base for the effective mode < the preset selected for that mode < explicit
+chrome-*`. An unset root is therefore **inherited** from the selected preset or, with no preset, the
 zz-ui base. `AppConfig` stores `Option<Hsla>` per root rather than a default color, and Settings
 labels a preset-inherited root accordingly.
 
-The built-ins in `zz::theme::CHROME_PRESETS` pair light and dark variants under one stable family
-ID. Applying one atomically removes the five explicit roots and writes `chrome-preset`; it does not
-change `theme-mode`. Switching System/Light/Dark, or an OS appearance change while on System, picks
-the matching variant. A subsequent per-root edit is an override on both modes, and Reset returns
-that root to the active preset variant. At the default contrast, `border()` derives an opaque Oklab
+Every built-in in `zz::theme::CHROME_PRESETS` is a single-mode palette: six roots and a `dark`
+flag. `chrome-preset-light` and `chrome-preset-dark` each name one preset of the matching mode (a
+dark id under the light key is a diagnostic, and so is the retired paired `chrome-preset` key).
+Applying or clearing a preset for a mode atomically removes the three explicit roots and writes that
+mode's key; it does not change `theme-mode`. Switching System/Light/Dark, or an OS appearance change
+while on System, picks the other key's preset. A subsequent per-root edit is an override on both
+modes, and Reset returns that root to the selected preset.
+
+The catalog takes every root from the upstream palette, then moves a root in Oklab toward the
+contrast pole where the upstream value fails the floor zz's chrome needs: foreground at least 7:1 on
+the background (muted text derives from it), and the accent and each status root at least 3:1 on
+the background and on a two-step raised panel. Each accent is the theme's own signature color
+(Tokyo Night blue, Catppuccin mauve, Gruvbox orange, Nord frost, Dracula purple, Rosé Pine rose,
+the KDE, GNOME, Ubuntu, and macOS system blues and orange), picked apart from its status colors. Dark presets: `tokyo-night`, `tokyo-night-storm`, `catppuccin-mocha`,
+`catppuccin-macchiato`, `catppuccin-frappe`, `gruvbox-dark`, `nord`, `dracula`, `one-dark`,
+`github-dark`, `everforest-dark`, `rose-pine`, `rose-pine-moon`, `solarized-dark`, `ayu-dark`,
+`breeze-dark`, `adwaita-dark`, `ubuntu-dark`, `ubuntu-terminal` (the aubergine GNOME Terminal
+profile with its Tango palette), `macos-classic-dark`. Light presets:
+`tokyo-night-day`, `catppuccin-latte`, `gruvbox-light`, `alucard`, `one-light`, `github-light`,
+`everforest-light`, `rose-pine-dawn`, `solarized-light`, `ayu-light`, `breeze-light`,
+`adwaita-light`, `ubuntu-light`, `macos-classic-light`. Nord and Dracula have no invented light
+half; Dracula's official light theme is Alucard. A test in `crates/zz-ui/src/chrome_palette.rs`
+holds every entry to the floors. At the default contrast, `border()` derives an opaque Oklab
 mix of 86% background and 14% foreground. The removed
 `chrome-border` key remains visible as an unrecognized key in the config editor.
 
@@ -287,11 +304,11 @@ pane frame paints borders, shadows, and focus effects above the continuous app b
 Terminal, Agent, Editor, picker, and waiting surfaces use this factor. Browser panes apply
 it only to the toolbar; page, blank, loading, and error backgrounds stay opaque.
 
-The Agent main surface and raised composer card each use the chosen opacity.
+The Agent main surface uses the chosen opacity; the raised composer card stays opaque.
 The footer inherits the main pane background and adds no fill of its own.
 Shadow strength remains independent.
-The pane and composer card are separate overlapping layers; text
-keeps its own opacity. The composer can reveal timeline content underneath while scrolling.
+The input card overlaps the transcript by 12 px, hiding content as it scrolls behind the top edge.
+The transcript clips before the footer. Prefix cards disable the overlap. Text keeps its own opacity.
 
 A terminal first blends its Ghostty background color with the theme base using
 `background-opacity`, then applies the shared pane factor to that result. Ghostty's
@@ -489,8 +506,7 @@ shows per-key provenance for the rest of its structured appearance controls.
 Mux option state is also daemon-resolved. `ServerHello.mux_options` and `MuxOptionsChanged` carry a
 complete ordered map of the ten effective display strings. Each value has the last-writer tier
 `default`, `tmux-config`, `override`, or `runtime-command`. The `tmux-config` wire tier kept its name
-for compatibility and means "set by sourced tmux or zz mux configuration". Settings no longer mirrors that
-map into option controls; Multiplexer edits `zz/mux.conf` directly.
+for compatibility and means "set by sourced tmux or zz mux configuration". Multiplexer reads the saved `zz/mux.conf` for its option controls.
 
 # Comment-preserving writer
 
@@ -512,8 +528,8 @@ mistaken for the line's preserved trailing comment.
 
 # Import
 
-`crates/zz/src/config/import.rs` owns the one-shot import. `import_ghostty_config(scheme)`
-discovers Ghostty through `discover_ghostty_config`, parses that config client-side with the zz-terminal loader, and serializes every key the donor set, directly
+`crates/zz/src/config/import.rs` owns the one-shot import. `import_ghostty_config_from(path, scheme)`
+reads a chosen donor (`import_ghostty_config` delegates with the discovered default), parses it client-side with the zz-terminal loader, and serializes every key the donor set, directly
 (`Ghostty` provenance) or through its `theme` directive (`ThemeFile`), into concrete
 `zz/config` values. Theme-derived values are flattened for the current color scheme; an import is a
 snapshot.
@@ -525,10 +541,11 @@ remove every prior occurrence and re-append the group at end of file, led by an 
 the result is donor-independent. Palette writes only indices that differ from the built-in palette.
 Both the input and result honor the 64 KiB bound, and the write is the normal atomic writer.
 
-The daemon reads tmux files in place through its tmux-grammar loader. `zz/mux.conf` supplies the
-last file layer; `zz/config` mux overrides still layer above sourced values. The old tmux copy
-helper is removed. After a Ghostty import the client asks the daemon to `reload-config`; when no
-daemon is connected the client sends the appearance overrides on its next connection.
+The daemon owns `import-tmux-config [path]`. Without a path it uses `discover_tmux_config`.
+It copies the donor into a marked import block, comments unsupported source constructs with
+`# zz-unsupported:`, and reloads its selected files. The first import prepends the block;
+re-import replaces it in place while preserving everything outside it. User-written `source-file`
+lines remain intact. `zz/config` mux overrides still apply above the loaded mux values.
 
 # Settings view
 
@@ -548,15 +565,15 @@ always-live inactive-opacity factor.
 
 | Page | Groups |
 | --- | --- |
-| Interface | **Theme** (`theme-mode` as three drawn window previews, `UI font`, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the five `chrome-*` pickers, `chrome-contrast`) · **Tweaks** (`animations`, `widget-corner-radius`, `shadow-strength`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
+| Interface | **Theme** (`theme-mode` as three drawn window previews, `UI font`, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (`chrome-preset-light` and `chrome-preset-dark` as two sideways-scrolling tile strips, the three `chrome-*` pickers, `chrome-contrast`) · **Tweaks** (`animations`, `widget-corner-radius`, `shadow-strength`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
 | Status bar | Title-bar items shown when the sidebar is retracted (`status-show-session`, `status-badges`, `status-align`, `status-agents`, `status-host`, `status-update`, `status-clock`) |
 | Browser | **Network** (`browser-egress`) · **Agents** (`browser-remote-debugging-port` as an on/off switch that writes `9222`) · **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
 | Panes | **Layout** (`pane-gaps`) · **Appearance** (`pane-background-opacity`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |
 | System | **Tray** (`tray`, only where the profile has one) · **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`, each row present only with its cargo feature). `auto-restart-stale-daemon` is a file key with no Settings row |
-| Multiplexer | **Configuration files** (the existing tmux files, then `zz/mux.conf`, in load order) · **Split panes** (shortcut and Pane picker / Terminal / Browser for Split below and Split right) · `zz/mux.conf` editor with Reload and Save, plus a one-click trim when the file still begins with an old tmux copy |
-| Terminal | Full-file Ghostty-compatible configuration editor, with Save and **Import Ghostty…** |
+| Multiplexer | **Split panes**, **Options** (Prefix, Mode keys, Mouse, History limit, Clipboard, Escape time), **Import** (path, Choose, Import), and `zz/mux.conf` editor with Reload and Save |
+| Terminal | **Appearance** (Font family, Font size, Theme, Cursor style, Cursor blink, Background opacity, Padding X/Y), **Import** (path, Choose, Import), and the `zz/config` appearance editor |
 | About | Centered mark (the Dock render at 88pt), name, tagline and version badge · **Updates** (`check-for-updates`, plus a Latest-release row that reads the update state: Check now, or Update / What's new once a newer release is known; desktop only) · **Build** (`CARGO_PKG_VERSION`, OS · arch, the short `ZZ_GPUI_SOURCE` revision, with a copy button on Version that puts all three on one line) · **Project** (repository, releases, new issue, license) |
 
 Structured `zz/config` rows show their effective client-local or daemon-resolved appearance provenance and
@@ -566,7 +583,7 @@ semantic values.
 
 The Theme group is two picker cards rather than rows of buttons, because both choices are about
 appearance: `theme-mode` offers three tiles carrying a drawn 84×56 window mockup . sidebar strip,
-title-bar lights, two lines of body text . painted from the selected preset's matching variant (or
+title-bar lights, two lines of body text . painted from the preset selected for that mode (or
 `ThemeColor::for_mode` with no preset), with System showing one window in both palettes (the dark
 copy is drawn full width and clipped to the right half).
 `app-icon` offers three tiles of the real artwork through `crate::app_icon::icon_preview` . macOS's
@@ -592,13 +609,18 @@ The Chroma Colors group's color rows use `zz_ui::color_picker::ColorPicker`: a s
 popover with a `#rrggbb` field and a swatch grid. It is *not* a port of upstream's picker (no
 saturation/lightness area, no hue slider), because chrome colors are pasted from a published palette
 or nudged, not explored. Clearing the field writes a key removal, which is how a root returns to
-the selected preset or built-in palette. The preset menu shows both variants as stacked swatch rows;
-its atomic writer stores the family and clears explicit roots without changing `theme-mode`.
+the selected preset or built-in palette. Above the pickers sit two palette rows, Light and Dark: each
+is a `PickerStrip` (a sideways-scrolling row of the same 84×56 window tiles the Theme card uses,
+`palette_preview`) that bleeds to the row's edges with no scrollbar, a Default tile first, every
+catalog preset of that mode after it. Each strip keeps its own scroll offset and focus handle,
+keyed on its id in window state; clicking a tile focuses the strip, and the left and right arrows
+move the selection for users without horizontal scrolling. A tile's atomic writer stores that
+mode's key and clears explicit roots without changing `theme-mode`.
 `synchronize_geometry_inputs` echoes the resulting file back into the pickers through the silent
 `set_color` setter, so a preset (or a hand-edit of `zz/config`) updates the swatches without
 re-entering the writer.
 
-Terminal mirrors daemon-resolved appearance into its controls and writes edits back through the
+Terminal reads saved appearance entries into its controls and writes edits back through the
 bounded, comment-preserving `zz/config` writer. Multiplexer mounts the native rope-backed
 `CodeEditor` for `zz/mux.conf` with line numbers disabled, 12px monospace text, tmux-grammar
 highlighting (`tree-sitter-tmux`, upstream's own `highlights.scm`), and a deliberately square 2px-
@@ -607,7 +629,7 @@ inset frame . a file surface, not a control. Save uses the
 successful mux save asks the daemon to `reload-config`.
 
 The **Split panes** rows in `crates/zz/src/config/settings/multiplexer.rs` read
-`MuxClient::prefix_bindings`, the daemon's effective table after tmux files, zz overrides, and runtime
+`MuxClient::prefix_bindings`, the daemon's effective table after its selected mux files, zz overrides, and runtime
 commands. Each direction selects one shortcut, preferring `-` / `|`, then `"` / `%`, then another
 binding that splits in that direction. A renamed shortcut stays selected while Settings remains open.
 Additional shortcuts stay in the text editor. Choosing a pane type or pressing Enter in the shortcut
@@ -626,27 +648,21 @@ If the daemon does not confirm within five seconds, Settings refreshes the rows 
 bindings, permits another edit, and offers a reload retry. Saving a manual editor change or requesting
 a reload cancels the earlier pending shortcut expectation.
 
-Multiplexer's **Configuration files** group lists the files the daemon loads, in order: every existing
-tmux candidate from `zz_daemon::tmux_config_candidates`, then the selected `zz/mux.conf`. The list is
-computed in the client from the same path functions the daemon uses, so it does not cover a daemon
-started with explicit `-f` roots; the CLI's `display-message -p "#{config_files}"` remains the full
-answer, and it matches tmux by naming missing implicit candidates too. The list is refreshed when the
-page is entered, after Save, and after **Reload**, which sits beside Save and sends `reload-config`
-to the local daemon. Reload is disabled while the editor has unsaved text or while the active
-connection is remote or disconnected.
+Multiplexer's Options rows read the last saved global `set-option` line for each option, or
+show its built-in default. Writes replace that line or append one; Reset removes it. The daemon
+owns value grammar. Controls require a clean editor and local connection, and wait for daemon
+confirmation with a five-second retry fallback. The Reload button uses the daemon's retained
+file selection, including explicit `-f` files.
 
-Imports before 2026-09-05 copied the whole tmux file into `zz/mux.conf`, and the daemon now reads
-that original first, so such a copy shadows later edits to the tmux file. When the saved `mux.conf`
-begins with the exact contents of a listed tmux file, a notice above the editor names that file and
-**Remove copied lines** replaces the editor buffer with whatever followed the copy. Nothing is written
-until Save, and the notice disappears as soon as the buffer no longer starts with the copy.
+Terminal's Appearance rows read the saved parsed `zz/config` entries. Scalars replace the last
+line; Font family replaces its whole stack with one line. The existing watcher applies these
+edits. Both pages offer a donor path prefilled from discovery, Choose, and a confirmed Import.
+Import requires a clean editor; tmux import also requires a local connection.
 
-Terminal's confirmed
-**Import Ghostty…** action re-reads the Ghostty donor into `zz/config`, rewriting each appearance
-key that donor sets and requesting a daemon reload. Theme imports store concrete colors for the
-active scheme. The button is disabled when no donor exists and its row names the path to read.
-The first-run prompt (`crates/zz/src/config/import_prompt.rs`, marker
-`<data-dir>/zz/import-prompted`) now offers only Ghostty appearance import.
+The first-run prompt (`crates/zz/src/config/import_prompt.rs`) uses marker
+`<data-dir>/zz/import-prompted-v2`. It names every discovered donor and explains that zz does not
+read those files on its own. Accepting imports the found donors; Cancel imports nothing. Settings
+accepts other paths. Existing installs receive this offer once more after the ownership change.
 
 Shadow strength appears in Interface's Tweaks group beside Widget corner radius. The numeric control
 shows 0–100%, steps by five percentage points, and stores a 0–1 factor. Valid edits save as they are

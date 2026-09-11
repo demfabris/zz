@@ -2,8 +2,8 @@
 
 use gpui::{AnyElement, Context, ParentElement as _, prelude::*};
 use zz_ui::feedback::{
-    add_host_prompt_dialog, browser_clear_site_data_alert, import_configuration_alert,
-    import_configuration_file_alert, ssh_confirm_prompt_dialog, ssh_secret_prompt_dialog,
+    add_host_prompt_dialog, browser_clear_site_data_alert, import_configuration_file_alert,
+    ssh_confirm_prompt_dialog, ssh_secret_prompt_dialog,
 };
 use zz_ui::{
     IconName, WindowExt as _,
@@ -40,22 +40,6 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
                                         );
                                         true
                                     })
-                                });
-                            }),
-                        cx,
-                    ))
-                    .child(specimen(
-                        "warning · import configuration",
-                        Button::new("fb-import-config")
-                            .warning()
-                            .icon(IconName::File)
-                            .label("Import configuration…")
-                            .on_click(|_, window, cx| {
-                                window.open_alert_dialog(cx, |alert, _, _| {
-                                    import_configuration_alert(
-                                        alert,
-                                        "This copies your Ghostty appearance into ~/.config/zz/config, overwriting previously imported keys, and replaces ~/.config/zz/mux.conf with a copy of your tmux configuration. Your Ghostty and tmux files are not modified.",
-                                    )
                                 });
                             }),
                         cx,

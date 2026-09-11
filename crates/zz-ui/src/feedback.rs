@@ -34,15 +34,6 @@ pub fn browser_clear_site_data_alert(alert: AlertDialog, cx: &App) -> AlertDialo
         )
 }
 
-/// Confirmation for importing Ghostty and tmux configuration into zz-owned
-/// files. The caller supplies the path-bearing description.
-pub fn import_configuration_alert(
-    alert: AlertDialog,
-    description: impl Into<SharedString>,
-) -> AlertDialog {
-    import_configuration_file_alert(alert, "Import from Ghostty and tmux?", description)
-}
-
 /// Confirmation for importing one donor into one zz-owned configuration file.
 pub fn import_configuration_file_alert(
     alert: AlertDialog,

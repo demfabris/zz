@@ -13,18 +13,18 @@ half-implemented, so you find out at config load, not mid-session.
 
 ## Your config
 
-At daemon startup zz reads each existing file in this order: `/etc/tmux.conf`,
-`~/.tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf`, and `~/.config/tmux/tmux.conf`.
-It then reads your `zz/mux.conf` (normally `~/.config/zz/mux.conf`) so you can
-keep zz-specific overrides there. Duplicate paths load once.
+The daemon loads `zz/mux.conf` (normally `~/.config/zz/mux.conf`). It does not read tmux
+configuration on its own. `zz -f <file>` replaces the default file; multiple `-f` arguments
+load in their given order. `reload-config` repeats that selection.
 
-`zz -f <file>` replaces the tmux candidate list with that file; `zz/mux.conf`
-still loads last. Multiple `-f` arguments load in their given order. Saving in
-Settings reloads the same tmux files and applies your current `zz/mux.conf` last. The
-`import-tmux-config` command now explains this behavior without copying files.
-Your tmux config stays in place, so plugin managers and `source-file ~/.tmux.conf`
-use the same file. `set -g prefix`, key bindings, `history-limit`, `mode-keys`,
-and the rest of the supported subset apply as-is.
+Run `zz import-tmux-config [path]` to copy a tmux file into `zz/mux.conf` and reload. Without
+a path, zz uses the first discovered tmux file. Settings › Multiplexer also accepts any path.
+The first import prepends a marked block so your existing lines keep their precedence.
+Re-import replaces that block and preserves everything outside it. Unsupported commands become
+comments prefixed with `# zz-unsupported:`. Your own `source-file` lines stay as written.
+
+The Options rows and text editor both edit `zz/mux.conf`. Saving or changing a row reloads
+the daemon's selected configuration. When you started with `-f`, reload still uses those files.
 
 ## Copy mode
 

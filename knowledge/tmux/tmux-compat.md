@@ -558,17 +558,16 @@ This is a presentation divergence, not permission to reinterpret a tmux command.
 
 # Config ownership
 
-By default the daemon reads tmux configuration in place, in this order: `/etc/tmux.conf`,
-`~/.tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf`, and `~/.config/tmux/tmux.conf`, without
-duplicating the home config path when it matches the XDG path. Top-level startup `-f` files
-replace those tmux roots. The daemon then appends the first existing zz-owned platform candidate
-for `zz/mux.conf`: XDG config, the home config directory, macOS Application Support, or Windows
-AppData in platform order. `reload-config` uses the same discovery or retained explicit roots,
-followed by the selected zz file; `#{config_files}` records that ordered selection.
-`import-tmux-config` prints an explanation of in-place loading and performs no copy. See
-`crates/zz-daemon/src/paths.rs` (`tmux_config_candidates`, `default_mux_config`) and
-`crates/zz-daemon/src/daemon.rs` (`startup_mux_config_files`, `selected_mux_config_files`,
-`replay_mux_config_files`, `reload_user_config_with_source_base`).
+The daemon loads only the first existing zz-owned `zz/mux.conf`, or the explicit startup
+`-f` files in argument order. Explicit files replace the default. `reload-config` repeats that
+selection, and `#{config_files}` records it.
+
+`import-tmux-config [path]` copies a chosen file into a marked block in `zz/mux.conf` and
+reloads. With no path, `discover_tmux_config` selects the first discoverable donor. The first
+import prepends the block; re-import replaces it without changing surrounding user text.
+Unsupported commands become `# zz-unsupported:` comments. See `crates/zz-daemon/src/paths.rs`
+(`discover_tmux_config`, `default_mux_config`) and `crates/zz-daemon/src/daemon.rs`
+(`startup_mux_config_files`, `selected_mux_config_files`, `import_tmux_configuration`).
 
 The config parser implements tmux grammar and reports unsupported commands. Its whole-file lexer
 and parser path latches the first diagnostic, clears the commands built from that file, and stops

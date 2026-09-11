@@ -112,11 +112,10 @@ The socket lives at `$XDG_RUNTIME_DIR/zz/default.sock`, falling back to
 `\\.\pipe\zz-<user>-default`. Set `ZZ_SOCKET` or pass `--socket <path>` to run a
 second, isolated daemon.
 
-If you have a `~/.tmux.conf` or a Ghostty config, zz offers once to bring them
-over. Accepting copies your tmux file verbatim into `zz/mux.conf` and writes the
-Ghostty appearance keys into `zz/config` as concrete values. Neither original is
-touched, and the offer never returns. You can run either import again later from
-Settings.
+When zz finds a tmux or Ghostty config, it offers to import it. Accepting copies tmux commands
+into a marked block in `zz/mux.conf` and Ghostty appearance into `zz/config` as concrete values.
+Unsupported tmux commands stay visible as comments. zz leaves both donor files untouched and
+does not read them on its own. Settings lets you choose another source path or re-import.
 
 The first GUI attach lazily creates session `0`, so you land in a terminal immediately. The empty
 workspace with its key hints appears only after the connected GUI loses its last session; press
@@ -349,8 +348,9 @@ mkdir -p ~/.config/zz && cp examples/config ~/.config/zz/config
 | Key | Default | Does |
 | --- | --- | --- |
 | `theme-mode` | `system` | `system`, `light`, or `dark` |
-| `chrome-preset` | unset | One of eleven paired palettes: `tokyo-night`, `catppuccin`, `gruvbox`, `nord`, `breeze`, `adwaita`, `ubuntu`, `rose-pine`, `ayu`, `solarized`, `macos-classic` |
-| `chrome-background` … `chrome-danger` | unset | Six palette roots. Everything else derives from them |
+| `chrome-preset-dark` | unset | The palette for dark mode: `tokyo-night`, `tokyo-night-storm`, `catppuccin-mocha`, `catppuccin-macchiato`, `catppuccin-frappe`, `gruvbox-dark`, `nord`, `dracula`, `one-dark`, `github-dark`, `everforest-dark`, `rose-pine`, `rose-pine-moon`, `solarized-dark`, `ayu-dark`, `breeze-dark`, `adwaita-dark`, `ubuntu-dark`, `ubuntu-terminal`, `macos-classic-dark` |
+| `chrome-preset-light` | unset | The palette for light mode: `tokyo-night-day`, `catppuccin-latte`, `gruvbox-light`, `alucard`, `one-light`, `github-light`, `everforest-light`, `rose-pine-dawn`, `solarized-light`, `ayu-light`, `breeze-light`, `adwaita-light`, `ubuntu-light`, `macos-classic-light` |
+| `chrome-background`, `chrome-foreground`, `chrome-accent` | unset | The three palette roots you can set. Everything else derives from them; status colors follow the palette |
 | `pane-gaps` | `false` | The card treatment. Off pins the next three to zero |
 | `pane-margin` | `6` | Gap between panes and at the window edge, 0–32 |
 | `pane-corner-radius` | `13.5` | 0–32 |
@@ -403,10 +403,10 @@ are compiled in and stay where they are.
 ### Settings
 
 <kbd>cmd-,</kbd> or <kbd>ctrl-,</kbd> opens Settings as a route inside the
-window. Nine pages, grouped as Appearance, Tools, and Advanced. Two of them
-(Terminal and Multiplexer) are full text editors over `zz/config` and
-`zz/mux.conf`, with syntax highlighting and an Import button. Every structured
-row shows where its value came from and offers a Reset that deletes the line.
+window. Ten pages, grouped as Appearance, Tools, and Advanced. Terminal has Appearance
+rows above its `zz/config` editor; Multiplexer has Options and split shortcut rows above
+`zz/mux.conf`. Both pages offer a donor path, Choose, and Import. Structured file rows
+show saved overrides or defaults and offer Reset.
 
 ## How it works
 

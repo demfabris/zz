@@ -36,7 +36,7 @@ mod workspace;
 #[cfg(not(target_os = "ios"))]
 use std::{
     borrow::Cow,
-    io::{self, ErrorKind, Write as _},
+    io::{self, ErrorKind, IsTerminal as _, Write as _},
     path::PathBuf,
     process::{Command, ExitCode, Stdio},
     sync::atomic::{AtomicU64, Ordering},
@@ -2125,6 +2125,19 @@ fn next_spawn_server_id() -> u64 {
 }
 
 #[cfg(not(target_os = "ios"))]
+fn tmux_import_hint(interactive: bool, mux_exists: bool, donor: Option<&Path>) -> Option<String> {
+    if !interactive || mux_exists {
+        return None;
+    }
+    donor.map(|path| {
+        format!(
+            "zz does not read {}; run `zz import-tmux-config` to import it.",
+            path.display()
+        )
+    })
+}
+
+#[cfg(not(target_os = "ios"))]
 fn spawn_daemon(
     path: &Path,
     color_scheme: Option<TerminalColorScheme>,
@@ -2161,6 +2174,13 @@ fn spawn_daemon(
         command
             .arg(DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT)
             .arg(client_working_directory);
+    }
+    if let Some(hint) = tmux_import_hint(
+        std::io::stderr().is_terminal(),
+        zz_daemon::mux_config_write_path().is_some_and(|path| path.exists()),
+        zz_daemon::discover_tmux_config().as_deref(),
+    ) {
+        eprintln!("{hint}");
     }
     command.spawn()?;
     log::debug!(
@@ -2855,6 +2875,19 @@ mod tests {
     use zz_protocol::{CommandInvocation, PreparedCommand, PreparedCommandResult, ServerError};
 
     #[test]
+    fn tmux_import_hint_only_when_cli_spawns_without_mux_config() {
+        let donor = Path::new("/home/u/.tmux.conf");
+        assert!(
+            super::tmux_import_hint(true, false, Some(donor))
+                .unwrap()
+                .contains("zz import-tmux-config")
+        );
+        assert!(super::tmux_import_hint(false, false, Some(donor)).is_none());
+        assert!(super::tmux_import_hint(true, true, Some(donor)).is_none());
+        assert!(super::tmux_import_hint(true, false, None).is_none());
+    }
+
+    #[test]
     fn daemon_bootstrap_arguments_accept_only_the_ordered_private_grammar() {
         let path = std::env::temp_dir().join("client cwd [literal]*? with spaces");
         let path_string = path.to_str().expect("UTF-8 temporary path").to_owned();
@@ -3004,13 +3037,22 @@ mod tests {
     fn a_bare_command_line_is_a_client_unless_launch_services_or_windows_opened_it() {
         use super::{CommandLineOrigin, bare_command_line_opens_application};
 
-        assert!(!bare_command_line_opens_application(CommandLineOrigin::Launcher, true));
-        assert!(!bare_command_line_opens_application(CommandLineOrigin::Launcher, false));
+        assert!(!bare_command_line_opens_application(
+            CommandLineOrigin::Launcher,
+            true
+        ));
+        assert!(!bare_command_line_opens_application(
+            CommandLineOrigin::Launcher,
+            false
+        ));
         assert_eq!(
             bare_command_line_opens_application(CommandLineOrigin::Application, false),
             cfg!(windows)
         );
-        assert!(bare_command_line_opens_application(CommandLineOrigin::Application, true));
+        assert!(bare_command_line_opens_application(
+            CommandLineOrigin::Application,
+            true
+        ));
     }
 
     #[test]

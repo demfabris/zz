@@ -284,6 +284,7 @@ TMUX_PANE_ID=""
 # 1 while a case attaches both clients to a silent terminal (see
 # write_silent_terminal); 0 for the outer pinned tmux itself.
 SILENT_TERMINAL=0
+WIDTH_RUN=0
 PYTHON="$(command -v python3)"
 mkdir -p "$ZZ_HOME/config" "$TMUX_HOME/config" "$OUTER_HOME/config" "$ZZ_LOG_DIR" "$RUNTIME_DIR"
 chmod 700 "$RUNTIME_DIR"
@@ -975,26 +976,30 @@ pane_colours_set() {
 # width lands the cursor somewhere else. Both clients attach under a UTF-8
 # locale, because a non-UTF-8 client changes what the pin puts on the wire for
 # these bytes and that is the -u channel's subject, not this one. The typed
-# command carries W%s so only the shell's own output can satisfy the settle.
+# command carries W%s so only the shell's own output can satisfy the settle,
+# and each run prints its own number: the inner pane keeps the previous case's
+# output, so a marker shared between cases would settle before the command ran.
 WIDTH_SUFFIX=" \344\270\226\347\225\214 | e\314\201 | \360\237\230\200 |"
 case_widths() {
   local zz_suffix="${1:-$WIDTH_SUFFIX}" pin_suffix="${2:-$WIDTH_SUFFIX}"
   local label="${3:-widths}" zz_flags="${4:-}" pin_flags="${5:-}"
   open_case "$label" xterm-256color "$zz_flags" "$pin_flags"
+  WIDTH_RUN=$((WIDTH_RUN + 1))
+  local marker="W$WIDTH_RUN"
   side_command zz send-keys -t "$(side_pane zz)" \
-    "clear; printf 'W%s$zz_suffix' 1" Enter
+    "clear; printf 'W%s$zz_suffix' $WIDTH_RUN" Enter
   side_command tmux send-keys -t "$(side_pane tmux)" \
-    "clear; printf 'W%s$pin_suffix' 1" Enter
+    "clear; printf 'W%s$pin_suffix' $WIDTH_RUN" Enter
   local side
   for side in zz tmux; do
-    wait_settled "$side" 'W1'
+    wait_settled "$side" "$marker"
   done
   assert_row "$label/cursor" \
     "$(tmux_outer_command display-message -p -t "$(outer_window zz)" '#{cursor_x},#{cursor_y}')" \
     "$(tmux_outer_command display-message -p -t "$(outer_window tmux)" '#{cursor_x},#{cursor_y}')"
   compare_row "${6:-}" line "$label/line" \
-    "$(outer_screen zz | grep -a 'W1' | head -n 1 | cat -v)" \
-    "$(outer_screen tmux | grep -a 'W1' | head -n 1 | cat -v)"
+    "$(outer_screen zz | grep -a "$marker" | head -n 1 | sed "s/$marker/W/" | cat -v)" \
+    "$(outer_screen tmux | grep -a "$marker" | head -n 1 | sed "s/$marker/W/" | cat -v)"
 }
 
 # The flag diagnostics need no terminal at all: they are what each binary

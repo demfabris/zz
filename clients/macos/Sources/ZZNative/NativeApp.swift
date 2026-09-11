@@ -210,19 +210,18 @@ struct NativeWorkspace: View {
     private var theme: ZZTheme {
         let settings = client.settings
         var theme = dark ? ZZTheme.macOSClassicDark : ZZTheme.macOSClassicLight
-        if let preset = settings.snapshot?.presets.first(where: { $0.id == settings.text("chrome-preset") }) {
-            let colors = dark ? preset.dark : preset.light
-            theme.background = ZZColor(hex: colors[0]) ?? theme.background
-            theme.foreground = ZZColor(hex: colors[1]) ?? theme.foreground
-            theme.success = ZZColor(hex: colors[2]) ?? theme.success
-            theme.warning = ZZColor(hex: colors[3]) ?? theme.warning
-            theme.danger = ZZColor(hex: colors[4]) ?? theme.danger
+        let presetKey = dark ? "chrome-preset-dark" : "chrome-preset-light"
+        if let preset = settings.snapshot?.presets.first(where: { $0.id == settings.text(presetKey) }) {
+            theme.background = ZZColor(hex: preset.background) ?? theme.background
+            theme.foreground = ZZColor(hex: preset.foreground) ?? theme.foreground
+            theme.accent = ZZColor(hex: preset.accent) ?? theme.accent
+            theme.success = ZZColor(hex: preset.success) ?? theme.success
+            theme.warning = ZZColor(hex: preset.warning) ?? theme.warning
+            theme.danger = ZZColor(hex: preset.danger) ?? theme.danger
         }
         theme.background = ZZColor(hex: settings.text("chrome-background")) ?? theme.background
         theme.foreground = ZZColor(hex: settings.text("chrome-foreground")) ?? theme.foreground
-        theme.success = ZZColor(hex: settings.text("chrome-success")) ?? theme.success
-        theme.warning = ZZColor(hex: settings.text("chrome-warning")) ?? theme.warning
-        theme.danger = ZZColor(hex: settings.text("chrome-danger")) ?? theme.danger
+        theme.accent = ZZColor(hex: settings.text("chrome-accent")) ?? theme.accent
         theme.radius = settings.number("widget-corner-radius", fallback: 6)
         theme.fontFamily = settings.text("ui-font-family")
         theme.shadowStrength = settings.number("shadow-strength", fallback: 1)

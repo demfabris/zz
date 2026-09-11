@@ -59,19 +59,27 @@ theme-mode = system
 # light or dark pins one.
 app-icon = automatic
 
-# Recolor the whole chrome with a built-in paired palette. Each preset ships a
-# light and a dark variant, so unlike the explicit chrome-* roots below it
-# composes with theme-mode = system. Unset means zz's own palette.
-# One of: tokyo-night, catppuccin, gruvbox, nord, breeze, adwaita, ubuntu,
-# rose-pine, ayu, solarized, macos-classic.
+# Recolor the whole chrome with a built-in palette. A preset belongs to one
+# mode, so naming both keys composes with theme-mode = system: 14 light
+# palettes and 20 dark ones ship in the catalog. Unset means zz's own palette.
+# Pick them in Settings -> Interface, which shows every tile, or write the ids
+# here: tokyo-night, tokyo-night-storm, catppuccin-mocha, catppuccin-macchiato,
+# catppuccin-frappe, gruvbox-dark, nord, dracula, one-dark, github-dark,
+# everforest-dark, rose-pine, rose-pine-moon, solarized-dark, ayu-dark,
+# breeze-dark, adwaita-dark, ubuntu-dark, ubuntu-terminal, macos-classic-dark;
+# tokyo-night-day, catppuccin-latte, gruvbox-light, alucard, one-light,
+# github-light, everforest-light, rose-pine-dawn, solarized-light, ayu-light,
+# breeze-light, adwaita-light, ubuntu-light, macos-classic-light.
 #
-# chrome-preset = tokyo-night
+# chrome-preset-light = catppuccin-latte
+# chrome-preset-dark = tokyo-night
 
-# Recolor the application chrome. These six are the palette *roots*: every panel,
-# hover state, muted label, focus ring and status wash is derived from them, so
-# setting a root reaches everything built on it. Accepts #rgb, #rrggbb or
-# #rrggbbaa. Leave a key out to inherit that root from the active preset (if
-# any) or the built-in palette for the active mode.
+# Recolor the application chrome. These three are the palette *roots* you can
+# set: every panel, hover state, muted label and focus ring is derived from
+# them, so setting a root reaches everything built on it. Status colors follow
+# the preset. Accepts #rgb, #rrggbb or #rrggbbaa. Leave a key out to inherit
+# that root from the active preset (if any) or the built-in palette for the
+# active mode.
 #
 # An explicit color is one value and cannot suit both built-in palettes, so pin
 # theme-mode above to whichever mode you tuned these for. Commented out here
@@ -79,10 +87,7 @@ app-icon = automatic
 #
 # chrome-background = #1a1b26   # the window's base plane
 # chrome-foreground = #c0caf5   # default text, muted text, rings, links
-# chrome-border     = #292e42   # every edge
-# chrome-success    = #9ece6a
-# chrome-warning    = #e0af68
-# chrome-danger     = #f7768e
+# chrome-accent     = #7aa2f7   # checked switches, the selected tile, the active pane border
 
 # Corner radius of the window frame zz draws with client-side decorations on
 # Linux, in logical pixels (0..=32). Desktops agree on no radius and expose no

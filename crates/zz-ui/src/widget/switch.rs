@@ -169,7 +169,7 @@ impl RenderOnce for Switch {
         let toggle_state = window.use_keyed_state(self.id.clone(), cx, |_, _| checked);
 
         let base_track: Background = if checked {
-            cx.theme().foreground.into()
+            cx.theme().accent.into()
         } else {
             cx.theme().background.raised(3).into()
         };

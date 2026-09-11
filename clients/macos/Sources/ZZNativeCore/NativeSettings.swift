@@ -65,7 +65,6 @@ public struct NativeSettingsSnapshot: Decodable {
     public let hosts: [Host]
     public let diagnostics: [Diagnostic]
     public let ghostty_path: String?
-    public let tmux_sources: [String]
     public let mux_sources: [String]
     public let prefix_bindings: [Binding]
     public let horizontal: SplitBinding
@@ -89,8 +88,13 @@ public struct NativeSettingsSnapshot: Decodable {
     public struct Preset: Decodable, Identifiable {
         public let id: String
         public let name: String
-        public let light: [String]
-        public let dark: [String]
+        public let dark: Bool
+        public let background: String
+        public let foreground: String
+        public let accent: String
+        public let success: String
+        public let warning: String
+        public let danger: String
     }
 }
 

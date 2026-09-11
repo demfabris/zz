@@ -34,6 +34,11 @@ pub(super) fn buttons(cx: &mut Context<Showcase>) -> AnyElement {
                         cx,
                     ))
                     .child(specimen(
+                        "accent",
+                        Button::new("v-accent").accent().label("Button"),
+                        cx,
+                    ))
+                    .child(specimen(
                         "secondary",
                         Button::new("v-secondary").secondary().label("Button"),
                         cx,

@@ -64,7 +64,7 @@ struct NativeSettingsView: View {
                             ZZSettingsStack {
                                 ForEach(
                                     model.snapshot?.settings.filter {
-                                        $0.section == model.section && $0.key != "chrome-preset" && $0.key != "chrome-contrast"
+                                        $0.section == model.section && !$0.key.hasPrefix("chrome-preset-") && $0.key != "chrome-contrast"
                                     } ?? []
                                 ) { setting in
                                     NativeSettingRow(setting: setting, model: model)
@@ -95,30 +95,35 @@ struct NativeSettingsView: View {
     }
 
     private var palettes: some View {
-        ZZSettingsStack("Palette") {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 125))], spacing: 10) {
-                ForEach(model.snapshot?.presets ?? []) { preset in
-                    Button {
-                        model.action("preset", ["value": preset.id])
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 0) {
-                                ForEach(
-                                    Array(((colorScheme == .dark) ? preset.dark : preset.light).enumerated()),
-                                    id: \.offset
-                                ) { _, color in
-                                    ZZColor(hex: color)!.color.frame(height: 22)
-                                }
-                            }.clipShape(RoundedRectangle(cornerRadius: 4))
-                            HStack {
-                                Text(preset.name).font(theme.font(size: 11))
-                                if model.text("chrome-preset") == preset.id { Image(systemName: "checkmark") }
-                            }
-                        }.padding(8)
-                    }.buttonStyle(.plain)
+        ForEach([false, true], id: \.self) { dark in
+            let key = dark ? "chrome-preset-dark" : "chrome-preset-light"
+            ZZSettingsStack(
+                dark ? "Dark palette" : "Light palette",
+                description: dark ? "Used while the interface is dark." : "Used while the interface is light."
+            ) {
+                ZZPickerStrip {
+                    ZZPaletteTile(
+                        "Default", palette: dark ? .dark : .light, selected: model.text(key).isEmpty
+                    ) { model.action("reset", ["key": key]) }
+                    ForEach(model.snapshot?.presets.filter { $0.dark == dark } ?? []) { preset in
+                        ZZPaletteTile(
+                            preset.name, palette: palette(preset, dark: dark), selected: model.text(key) == preset.id
+                        ) { model.action("preset", ["value": preset.id]) }
+                    }
                 }
-            }.padding(8)
+            }
         }
+    }
+
+    private func palette(_ preset: NativeSettingsSnapshot.Preset, dark: Bool) -> ZZTheme {
+        var palette: ZZTheme = dark ? .dark : .light
+        palette.background = ZZColor(hex: preset.background) ?? palette.background
+        palette.foreground = ZZColor(hex: preset.foreground) ?? palette.foreground
+        palette.accent = ZZColor(hex: preset.accent) ?? palette.accent
+        palette.success = ZZColor(hex: preset.success) ?? palette.success
+        palette.warning = ZZColor(hex: preset.warning) ?? palette.warning
+        palette.danger = ZZColor(hex: preset.danger) ?? palette.danger
+        return palette
     }
 
     private var hosts: some View {
@@ -212,7 +217,7 @@ struct NativeSettingsView: View {
                 )
                 .font(theme.font(size: 11)).foregroundStyle(.secondary)
                 DisclosureGroup("Configuration search paths") {
-                    ForEach((model.snapshot?.tmux_sources ?? []) + (model.snapshot?.mux_sources ?? []), id: \.self) {
+                    ForEach((model.snapshot?.mux_sources ?? []), id: \.self) {
                         Text($0).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
                     }
                 }

@@ -42,7 +42,7 @@ pub fn composer_action_button(
         ComposerAction::Stop => (IconName::Xmark, "Stop the current turn"),
     };
     Button::compact_icon(id, icon)
-        .when(action == ComposerAction::Send, ButtonVariants::primary)
+        .when(action == ComposerAction::Send, ButtonVariants::accent)
         .when(action == ComposerAction::Queue, ButtonVariants::secondary)
         .rounded_full()
         .tooltip(tooltip)

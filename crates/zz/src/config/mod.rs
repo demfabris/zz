@@ -424,9 +424,8 @@ pub(crate) fn app_icon_setting(cx: &App) -> AppIconSetting {
     resolved_config(cx).app_icon.value
 }
 
-/// The selected paired chrome family, if any.
-pub(crate) fn chrome_preset(cx: &App) -> Option<ChromePresetId> {
-    resolved_config(cx).chrome_preset.value
+pub(crate) fn chrome_preset(dark: bool, cx: &App) -> Option<ChromePresetId> {
+    resolved_config(cx).chrome_preset(dark).value
 }
 
 /// Every chrome override, in [`ChromeColor::ALL`] order.
@@ -676,6 +675,26 @@ fn send_current_config_overrides(cx: &App) {
     if let Err(error) = client.set_config_overrides(entries) {
         log::warn!(target: "zz::config", "failed to send configuration overrides: {error}");
     }
+}
+
+#[cfg(not(target_os = "ios"))]
+pub(crate) fn local_command_client() -> Result<zz_daemon::CommandClient, String> {
+    let arguments = crate::application_arguments(
+        crate::diagnostics::application_args(),
+        zz_daemon::default_socket_path(),
+    )
+    .map_err(|_| "could not resolve the local daemon socket".to_owned())?;
+    zz_daemon::CommandClient::connect(&arguments.socket_path).map_err(|error| error.to_string())
+}
+
+#[cfg(not(target_os = "ios"))]
+pub(crate) fn import_tmux_config(path: &Path) -> Result<String, String> {
+    local_command_client()?
+        .execute(CommandInvocation::new(
+            "import-tmux-config",
+            [path.display().to_string()],
+        ))
+        .map_err(|error| error.to_string())
 }
 
 /// Ask the daemon to re-source `zz/mux.conf` after an import. A no-op with no
@@ -945,7 +964,7 @@ mod tests {
                       host-blue = ssh blue\n\
                       background = #282C34\n\
                       unknown-key = kept\n\
-                      chrome-preset = graphite\n";
+                      chrome-preset-dark = nord\n";
         let view = appearance_editor_view(source);
         assert_eq!(
             view,
@@ -967,7 +986,7 @@ mod tests {
              prefix = C-a\n\
              agent-command = codex\n\
              host-blue = ssh blue\n\
-             chrome-preset = graphite\n\
+             chrome-preset-dark = nord\n\
              # header comment\n\
              font-family = \"Berkeley Mono\"\n\
              \n\
@@ -1191,12 +1210,10 @@ mod tests {
         let parsed = parse_config(
             "theme-mode = dark\n\
              app-icon = light\n\
-             chrome-preset = tokyo-night\n\
+             chrome-preset-dark = tokyo-night\n\
              chrome-background = #1a1b26\n\
              chrome-foreground = #c0caf5\n\
-             chrome-success = #9ece6a # trailing comments still work\n\
-             chrome-warning = #e0af68\n\
-             chrome-danger = #f7768e\n",
+             chrome-accent = #7aa2f7 # trailing comments still work\n",
         );
 
         assert!(parsed.diagnostics.is_empty());
@@ -1211,11 +1228,11 @@ mod tests {
             ConfigProvenance::Override
         );
         assert_eq!(
-            parsed.config.chrome_preset.value,
-            Some(ChromePresetId::TokyoNight)
+            parsed.config.chrome_preset(true).value,
+            Some(ChromePresetId::parse("tokyo-night").expect("Tokyo Night exists"))
         );
         assert_eq!(
-            parsed.config.chrome_preset.provenance,
+            parsed.config.chrome_preset(true).provenance,
             ConfigProvenance::Override
         );
         for color in ChromeColor::ALL {
@@ -1238,9 +1255,9 @@ mod tests {
         let parsed = parse_config("pane-gaps = true\n");
         assert_eq!(parsed.config.theme_mode.value, ThemeModeSetting::System);
         assert_eq!(parsed.config.app_icon.value, AppIconSetting::Automatic);
-        assert_eq!(parsed.config.chrome_preset.value, None);
+        assert_eq!(parsed.config.chrome_preset(true).value, None);
         assert_eq!(
-            parsed.config.chrome_preset.provenance,
+            parsed.config.chrome_preset(true).provenance,
             ConfigProvenance::Default
         );
         for color in ChromeColor::ALL {
@@ -1258,42 +1275,35 @@ mod tests {
         let parsed = parse_config(
             "theme-mode = midnight\n\
              app-icon = rainbow\n\
-             chrome-preset = vaporwave\n\
+             chrome-preset-dark = vaporwave\n\
              chrome-background = not-a-color\n",
         );
 
         assert_eq!(parsed.diagnostics.len(), 4);
         assert_eq!(parsed.config.theme_mode.value, ThemeModeSetting::System);
         assert_eq!(parsed.config.app_icon.value, AppIconSetting::Automatic);
-        assert_eq!(parsed.config.chrome_preset.value, None);
+        assert_eq!(parsed.config.chrome_preset(true).value, None);
         assert_eq!(parsed.config.chrome(ChromeColor::Background).value, None);
     }
 
     #[test]
-    fn every_preset_variant_parses_and_covers_each_root() {
-        for preset in &crate::theme::CHROME_PRESETS {
+    fn every_preset_parses_and_covers_each_root() {
+        for preset in &zz_ui::chrome_palette::CHROME_PRESETS {
             assert_eq!(preset.id.preset().name, preset.name);
-            for (mode, colors) in [
-                (zz_ui::ThemeMode::Light, preset.colors(false)),
-                (zz_ui::ThemeMode::Dark, preset.colors(true)),
+            for hex in [
+                preset.background,
+                preset.foreground,
+                preset.accent,
+                preset.success,
+                preset.warning,
+                preset.danger,
             ] {
-                assert_eq!(colors.len(), ChromeColor::ALL.len(), "{}", preset.name);
-                for hex in colors {
-                    assert!(
-                        zz_ui::parse_hex(hex).is_ok(),
-                        "{} {mode:?}: {hex} does not parse",
-                        preset.name
-                    );
-                }
+                assert!(
+                    zz_ui::parse_hex(hex).is_ok(),
+                    "{}: {hex} does not parse",
+                    preset.id.as_str(),
+                );
             }
-            let light_background =
-                zz_ui::parse_hex(preset.light[0]).expect("light background parses");
-            let dark_background = zz_ui::parse_hex(preset.dark[0]).expect("dark background parses");
-            assert!(
-                light_background.l > dark_background.l,
-                "{} variants are reversed",
-                preset.name
-            );
         }
     }
 
@@ -2086,25 +2096,25 @@ mod tests {
         .expect("write explicit background");
         write_config_edit_at(
             &path,
-            ConfigKey::Chrome(ChromeColor::Danger).as_str(),
+            ConfigKey::Chrome(ChromeColor::Accent).as_str(),
             Some("#abcdef"),
         )
-        .expect("write explicit danger");
-        let preset = ChromePresetId::TokyoNight;
-        write_chrome_preset_at(&path, preset).expect("write paired chrome preset");
+        .expect("write explicit accent");
+        let preset = ChromePresetId::parse("tokyo-night").expect("Tokyo Night exists");
+        write_chrome_preset_at(&path, true, Some(preset)).expect("write dark chrome preset");
 
         let source = fs::read_to_string(&path).expect("read theme settings");
         let parsed = parse_config(&source);
         assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
         assert_eq!(parsed.config.theme_mode.value, ThemeModeSetting::System);
-        assert_eq!(parsed.config.chrome_preset.value, Some(preset));
+        assert_eq!(parsed.config.chrome_preset(true).value, Some(preset));
         for color in ChromeColor::ALL {
             assert_eq!(parsed.config.chrome(color).value, None, "{color:?}");
         }
         assert!(source.contains("theme-mode = system"));
-        assert!(source.contains("chrome-preset = tokyo-night"));
+        assert!(source.contains("chrome-preset-dark = tokyo-night"));
         assert!(!source.contains("chrome-background"));
-        assert!(!source.contains("chrome-danger"));
+        assert!(!source.contains("chrome-accent"));
     }
 
     #[test]
@@ -3041,9 +3051,10 @@ mod tests {
             "theme-mode",
             "ui-font-family",
             "app-icon",
-            "chrome-preset",
+            "chrome-preset-light",
+            "chrome-preset-dark",
         ];
-        assert_eq!(ChromeColor::ALL.len(), 5);
+        assert_eq!(ChromeColor::ALL.len(), 3);
         for key in named {
             assert_eq!(ConfigKey::parse(key).map(ConfigKey::as_str), Some(key));
         }

@@ -150,8 +150,8 @@ fn packed_tmux_colour(colour: u32) -> Hsla {
 }
 
 pub use zz_ui::chrome_palette::{
-    CHROME_PRESETS, ChromeColor, ChromePreset, ChromePresetId, ThemeModeSetting,
-    inherited_chrome_colors, resolved_chrome_colors,
+    ChromeColor, ChromePresetId, ThemeModeSetting, chrome_presets, inherited_chrome_colors,
+    resolved_chrome_colors,
 };
 
 #[derive(Clone, Copy)]
@@ -253,7 +253,7 @@ fn apply_zz_overrides(cx: &mut App) {
     let chrome_contrast = config::chrome_contrast(cx);
     let shadow_strength = config::shadow_strength(cx);
     let pane_background_opacity = config::pane_background_opacity(cx);
-    let chrome_preset = config::chrome_preset(cx);
+    let chrome_preset = config::chrome_preset(Theme::global(cx).mode.is_dark(), cx);
     let chrome = config::chrome_colors(cx);
     let theme = Theme::global_mut(cx);
 
@@ -272,7 +272,7 @@ fn apply_zz_overrides(cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zz_ui::ThemeColor;
+    use zz_ui::{ThemeColor, chrome_palette::CHROME_PRESETS};
 
     #[test]
     fn each_root_reads_back_exactly_what_it_wrote() {
@@ -302,14 +302,20 @@ mod tests {
     }
 
     #[test]
-    fn paired_presets_land_on_the_roots_in_order() {
-        let preset = &CHROME_PRESETS[0];
-        for mode in [ThemeMode::Light, ThemeMode::Dark] {
-            let expected = preset.colors(mode.is_dark());
+    fn presets_land_on_the_named_roots() {
+        for preset in &CHROME_PRESETS {
+            let mode = if preset.dark {
+                ThemeMode::Dark
+            } else {
+                ThemeMode::Light
+            };
             let colors = inherited_chrome_colors(Some(preset.id), mode);
-            assert_eq!(zz_ui::to_hex(colors.background), expected[0]);
-            assert_eq!(zz_ui::to_hex(colors.foreground), expected[1]);
-            assert_eq!(zz_ui::to_hex(colors.danger), expected[4]);
+            assert_eq!(zz_ui::to_hex(colors.background), preset.background);
+            assert_eq!(zz_ui::to_hex(colors.foreground), preset.foreground);
+            assert_eq!(zz_ui::to_hex(colors.accent), preset.accent);
+            assert_eq!(zz_ui::to_hex(colors.success), preset.success);
+            assert_eq!(zz_ui::to_hex(colors.warning), preset.warning);
+            assert_eq!(zz_ui::to_hex(colors.danger), preset.danger);
         }
     }
 
@@ -320,48 +326,43 @@ mod tests {
     #[test]
     fn separators_stay_legible_without_reading_as_rules() {
         for preset in &CHROME_PRESETS {
-            for mode in [ThemeMode::Light, ThemeMode::Dark] {
-                let floor = if mode.is_dark() {
-                    SEPARATOR_DELTA_FLOOR_DARK
-                } else {
-                    SEPARATOR_DELTA_FLOOR_LIGHT
-                };
-                let colors = preset.colors(mode.is_dark());
-                let plane = zz_ui::parse_hex(colors[0]).expect("preset background parses");
-                let hairline = inherited_chrome_colors(Some(preset.id), mode).border();
-                let delta =
-                    (zz_ui::oklab_lightness(hairline) - zz_ui::oklab_lightness(plane)).abs();
+            let mode = if preset.dark {
+                ThemeMode::Dark
+            } else {
+                ThemeMode::Light
+            };
+            let floor = if mode.is_dark() {
+                SEPARATOR_DELTA_FLOOR_DARK
+            } else {
+                SEPARATOR_DELTA_FLOOR_LIGHT
+            };
+            let plane = zz_ui::parse_hex(preset.background).expect("preset background parses");
+            let hairline = inherited_chrome_colors(Some(preset.id), mode).border();
+            let delta = (zz_ui::oklab_lightness(hairline) - zz_ui::oklab_lightness(plane)).abs();
 
-                assert!(
-                    (floor..=SEPARATOR_DELTA_CEILING).contains(&delta),
-                    "{} {mode:?}: border {} is {:.1}% from background {}, outside {:.1}%..={:.1}%",
-                    preset.name,
-                    zz_ui::to_hex(hairline),
-                    delta * 100.0,
-                    colors[0],
-                    floor * 100.0,
-                    SEPARATOR_DELTA_CEILING * 100.0,
-                );
-            }
+            assert!(
+                (floor..=SEPARATOR_DELTA_CEILING).contains(&delta),
+                "{} {mode:?}: border {} is {:.1}% from background {}, outside {:.1}%..={:.1}%",
+                preset.name,
+                zz_ui::to_hex(hairline),
+                delta * 100.0,
+                preset.background,
+                floor * 100.0,
+                SEPARATOR_DELTA_CEILING * 100.0,
+            );
         }
     }
 
     #[test]
-    fn explicit_chrome_color_wins_over_the_active_preset_variant() {
+    fn explicit_chrome_color_wins_over_the_active_preset() {
         let marker = zz_ui::parse_hex("#808080").expect("test marker parses");
         let mut overrides = [None; ChromeColor::ALL.len()];
         overrides[0] = Some(marker);
-        let colors = resolved_chrome_colors(
-            Some(ChromePresetId::TokyoNight),
-            ThemeMode::Light,
-            overrides,
-        );
+        let preset = ChromePresetId::parse("tokyo-night-day").expect("Tokyo Night Day exists");
+        let colors = resolved_chrome_colors(Some(preset), ThemeMode::Light, overrides);
 
         assert_eq!(colors.background, marker);
-        assert_eq!(
-            zz_ui::to_hex(colors.foreground),
-            ChromePresetId::TokyoNight.preset().light[1]
-        );
+        assert_eq!(zz_ui::to_hex(colors.foreground), preset.preset().foreground);
     }
 
     #[test]

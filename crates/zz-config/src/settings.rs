@@ -2,7 +2,7 @@ use super::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{io, path::PathBuf};
-use zz_client::chrome_palette::{CHROME_PRESETS, ChromeColor, ChromePresetId};
+use zz_client::chrome_palette::{CHROME_PRESETS, ChromeColor, ChromePresetId, chrome_presets};
 use zz_protocol::KeyBindingSnapshot;
 
 pub const MAX_MUX_CONFIG_BYTES: usize = 1024 * 1024;
@@ -190,8 +190,8 @@ fn value(parsed: &ParsedConfig, key: ConfigKey) -> (Value, ConfigProvenance) {
             let setting = &parsed.config.app_icon;
             (json!(setting.value.as_str()), setting.provenance)
         }
-        ConfigKey::ChromePreset => {
-            let setting = &parsed.config.chrome_preset;
+        ConfigKey::ChromePreset { dark } => {
+            let setting = parsed.config.chrome_preset(dark);
             (
                 json!(setting.value.map(ChromePresetId::as_str)),
                 setting.provenance,
@@ -236,8 +236,7 @@ fn choices(key: ConfigKey) -> Vec<Choice> {
             .into_iter()
             .map(|provider| (provider.as_str(), provider.title()))
             .collect(),
-        ConfigKey::ChromePreset => CHROME_PRESETS
-            .iter()
+        ConfigKey::ChromePreset { dark } => chrome_presets(dark)
             .map(|preset| (preset.id.as_str(), preset.name))
             .collect(),
         _ => Vec::new(),
@@ -347,7 +346,8 @@ pub fn settings(parsed: &ParsedConfig) -> Vec<Setting> {
         ConfigKey::ThemeMode,
         ConfigKey::UiFontFamily,
         ConfigKey::AppIcon,
-        ConfigKey::ChromePreset,
+        ConfigKey::ChromePreset { dark: false },
+        ConfigKey::ChromePreset { dark: true },
     ]
     .into_iter()
     .chain(ChromeColor::ALL.map(ConfigKey::Chrome))
@@ -546,11 +546,13 @@ impl SettingsModel {
             "terminal_source":terminal_source.as_ref().ok().and_then(|value|value.as_ref()),"mux_source":mux_source.as_ref().ok().and_then(|value|value.as_ref()),
             "editor_error":terminal_source.err().or_else(||mux_source.err()).map(|error|error.to_string()),
             "hosts":hosts,"diagnostics":self.parsed.diagnostics.iter().map(|error|json!({"line":error.line,"message":error.message})).collect::<Vec<_>>(),
-            "ghostty_path":zz_terminal::discover_ghostty_config(),"tmux_sources":zz_daemon::tmux_config_candidates(),
+            "ghostty_path":zz_terminal::discover_ghostty_config(),
             "mux_sources":zz_daemon::mux_config_candidates(),"error":self.error,"chrome_overrides":overrides,
             "horizontal":split(mux_bindings::SplitDirection::Horizontal),"vertical":split(mux_bindings::SplitDirection::Vertical),
             "prefix_bindings":bindings.iter().map(|binding|json!({"key":binding.key,"command":binding.commands.iter().map(zz_mux::format_command).collect::<Vec<_>>().join(" ; ")})).collect::<Vec<_>>(),
-            "presets":CHROME_PRESETS.iter().map(|preset|json!({"id":preset.id.as_str(),"name":preset.name,"light":preset.light,"dark":preset.dark})).collect::<Vec<_>>(),
+            "presets":CHROME_PRESETS.iter().map(|preset|json!({"id":preset.id.as_str(),"name":preset.name,"dark":preset.dark,
+                "background":preset.background,"foreground":preset.foreground,"accent":preset.accent,
+                "success":preset.success,"warning":preset.warning,"danger":preset.danger})).collect::<Vec<_>>(),
             "version":env!("CARGO_PKG_VERSION"),"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH})
     }
     pub fn action(
@@ -580,22 +582,34 @@ impl SettingsModel {
                     if let Some(error) = parsed.diagnostics.first() {
                         return Err(invalid(&error.message));
                     }
-                    let text = if key == ConfigKey::BrowserElementSelectorHotkey {
-                        normalize_browser_hotkey(&text).map_err(|error| invalid(&error))?
+                    if let ConfigKey::ChromePreset { dark } = key {
+                        write_chrome_preset_at(
+                            &self.config_path()?,
+                            dark,
+                            parsed.config.chrome_preset(dark).value,
+                        )?;
                     } else {
-                        text
-                    };
-                    write_config_edit_at(&self.config_path()?, key.as_str(), Some(&text))?;
+                        let text = if key == ConfigKey::BrowserElementSelectorHotkey {
+                            normalize_browser_hotkey(&text).map_err(|error| invalid(&error))?
+                        } else {
+                            text
+                        };
+                        write_config_edit_at(&self.config_path()?, key.as_str(), Some(&text))?;
+                    }
                 }
             }
             SettingsAction::Reset { key } => {
                 let key = ConfigKey::parse(&key).ok_or_else(|| invalid("Unknown setting."))?;
-                write_config_edit_at(&self.config_path()?, key.as_str(), None)?;
+                if let ConfigKey::ChromePreset { dark } = key {
+                    write_chrome_preset_at(&self.config_path()?, dark, None)?;
+                } else {
+                    write_config_edit_at(&self.config_path()?, key.as_str(), None)?;
+                }
             }
             SettingsAction::Preset { value } => {
                 let preset =
                     ChromePresetId::parse(&value).ok_or_else(|| invalid("Unknown palette."))?;
-                write_chrome_preset_at(&self.config_path()?, preset)?;
+                write_chrome_preset_at(&self.config_path()?, preset.dark(), Some(preset))?;
             }
             SettingsAction::SaveTerminal { source } => {
                 save_appearance_editor(&self.config_path()?, &source)?;
@@ -817,8 +831,8 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
-            model.parsed.config.chrome_preset.value,
-            Some(ChromePresetId::Nord)
+            model.parsed.config.chrome_preset(true).value,
+            ChromePresetId::parse("nord")
         );
         std::fs::remove_file(&config).unwrap();
         assert!(model.poll());

@@ -29,8 +29,8 @@ page backgrounds, simulated window blur, and the font/renderer differences that 
 # Rules
 
 1. Every application-chrome color comes from a `cx.theme()` root or a `Colorize` derivation of one.
-   The palette has five roots (`background`, `foreground`, `success`, `warning`, `danger`)
-   plus the fixed per-mode `scrim` in `crates/zz-ui/src/widget/foundation/theme_color.rs`; panels, hover fills, muted text, and
+   The palette has six roots (`background`, `foreground`, `accent`, `success`, `warning`,
+   `danger`) plus the fixed per-mode `scrim` in `crates/zz-ui/src/widget/foundation/theme_color.rs`; panels, hover fills, muted text, and
    focus rings are derived at paint time by `Colorize` in
    `crates/zz-ui/src/widget/foundation/color.rs`. Choose the nearest derivation, such as
    `background.raised(1)`, `background.hover()`, or `foreground.muted()`; do not color-match an old
@@ -149,7 +149,8 @@ chrome (borders, labels, hover states, badges, and reset controls) still reads i
 # Chrome chroma is independent of the terminal
 
 **Application colors come from zz-ui's own `ThemeColor::light()` / `ThemeColor::dark()` palettes,
-an optional paired `chrome-preset`, and the `chrome-*` overrides in `zz/config`, never from the
+an optional preset per mode (`chrome-preset-light`, `chrome-preset-dark`), and the `chrome-*`
+overrides in `zz/config`, never from the
 terminal.** The mode follows the OS appearance unless `theme-mode` pins one. There is no knob that
 derives chrome from terminal colors, and a Ghostty palette cannot repaint the window.
 
@@ -158,8 +159,8 @@ the desktop and browser clients. `crates/zz/src/theme.rs` applies desktop config
 `TerminalAppearance` and `AppearanceProvenance` as GPUI globals (used by settings badges and the
 detach action, not to color anything). `apply_zz_overrides` layers these values over the zz-ui base:
 
-- the active light or dark variant of `chrome-preset`, when selected;
-- the five optional `chrome-*` palette roots from `zz/config`, written over the preset so every
+- the preset selected for the effective mode, when one is;
+- the three optional `chrome-*` palette roots from `zz/config`, written over the preset so every
   elevation, hover, and focus ring derived from them at paint time follows the user's roots;
 - `font_family` from `ui-font-family`, with the system UI font as the default;
 - `mono_font_family` from the terminal's resolved primary family, so Agent Markdown and code blocks
@@ -210,14 +211,20 @@ Light/Dark pin and cannot be reused as the System preference.
 card is the System / Light / Dark picker, three drawn window previews
 (`config/settings.rs`, `theme_preview`). A pinned mode wins in both `refresh_current_theme` and
 `sync_system_appearance`, so the pin survives an OS light/dark switch; returning to System restores
-the last recorded OS mode. The previews and selected `chrome-preset` use the same paired variants.
+the last recorded OS mode. The previews paint each half from the preset selected for that mode.
 
 Settings maps each `AppearanceSource` tier to one badge: `Default` → “Default,” `ThemeFile` → “From
 theme,” `Ghostty` → “From Ghostty,” `Override` → “Overridden.” Those badges describe *terminal*
 appearance provenance; chrome colors carry the client-local `Default`/`Overridden` provenance
 instead, with “Preset” shown when an otherwise-unset root inherits from the selected family.
 
-`ThemeColor` holds five palette roots plus the per-mode scrim. `border()` is an opaque Oklab mix
+`ThemeColor` holds six palette roots plus the per-mode scrim. The accent is reserved for four
+places: the checked `Switch` track, the selected tile ring in `settings::appearance`, the active
+pane border and its inset glow (`pane_border_color`, `pane_focus_glow`), and the Agent composer's
+send button (`ButtonVariant::Accent`); new controls do not reach for it. Only the blurred pane glow
+paints it translucent: a saturated color at partial alpha over a plane blends to brown in gamma
+space, so the tile's selection and focus rings are two opaque 1px strokes with a 1px gap rather
+than a border plus a spread glow. `border()` is an opaque Oklab mix
 of 86% background and 14% foreground at the default contrast. Other colors derive through `Colorize` at paint time, so
 overriding a root needs no parallel token table kept in step. Views read
 `cx.theme()` and never receive a copied palette or local color literals.
@@ -228,7 +235,8 @@ border instead of exposing the shadow at the join, without stacking translucent 
 titlebar, Settings, margins, split gaps, and rounded pane corners inherit that fill. The slideover
 sidebar paints its own overlay surface. App-owned pane roots use `theme::app_pane_background`
 with `Theme::pane_background_opacity`, controlled by Panes settings and defaulting to 50%.
-The Agent composer card uses the same factor. The footer inherits the pane background, and
+The Agent composer card stays opaque and overlaps the transcript by 12 px at its top edge.
+Prefix cards disable this overlap. The transcript clips before the footer, which inherits the pane background, and
 the shared pane frame adds no background fill. The terminal blends its Ghostty tint with the
 theme base before applying the factor. Browser pages remain opaque.
 

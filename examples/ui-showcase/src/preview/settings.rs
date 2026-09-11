@@ -9,16 +9,16 @@ use gpui::{
     img, prelude::*, px,
 };
 use zz_ui::{
-    ActiveTheme as _, IndexPath, Sizable as _, Theme, ThemeColor, ThemeMode,
-    button::Button,
+    ActiveTheme as _, IndexPath, Sizable as _, Theme, ThemeMode,
+    chrome_palette::{ChromePresetId, chrome_presets, inherited_chrome_colors},
     color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState},
     input::{InputEvent, InputState, NumberInput},
     select::{Select, SelectEvent, SelectState},
     settings::{
         SettingEntry, SettingsSection, SettingsSelectItem,
         appearance::{
-            AppearancePageItem, appearance_page, appearance_page_items, picker_tile, theme_preview,
-            ui_font_select,
+            AppearancePageItem, PickerStrip, appearance_page, appearance_page_items,
+            palette_preview, picker_tile, theme_preview, ui_font_select,
         },
         settings_control_fill, settings_provenance_badge, settings_reset_button,
     },
@@ -46,7 +46,7 @@ fn app_icon(dark: bool) -> Arc<Image> {
     ICONS[usize::from(dark)].clone()
 }
 
-const COLORS: [(&str, &str); 5] = [
+const COLORS: [(&str, &str); 3] = [
     (
         "Background",
         "The window's base plane. Every panel, popover and hover state is this color, raised.",
@@ -55,9 +55,11 @@ const COLORS: [(&str, &str); 5] = [
         "Foreground",
         "Default text, and the source of muted text, focus rings, links, selection and every edge.",
     ),
-    ("Success", "Something completed or is healthy."),
-    ("Warning", "Something needs attention but still works."),
-    ("Danger", "Something failed or is destructive."),
+    (
+        "Accent",
+        "The one chromatic emphasis: a checked switch, the selected tile ring, the active pane \
+         border, the send button.",
+    ),
 ];
 
 pub(super) struct SettingsFixture {
@@ -429,8 +431,14 @@ self.number("border", "Pane border width", "Border width for gapped panes, in lo
                                     title,
                                     theme_preview(
                                         mode,
-                                        &ThemeColor::light(),
-                                        &ThemeColor::dark(),
+                                        &inherited_chrome_colors(
+                                            self.options.preset(ThemeMode::Light),
+                                            ThemeMode::Light,
+                                        ),
+                                        &inherited_chrome_colors(
+                                            self.options.preset(ThemeMode::Dark),
+                                            ThemeMode::Dark,
+                                        ),
                                         cx,
                                     ),
                                     self.settings_state.theme_mode == i,
@@ -495,25 +503,55 @@ self.number("border", "Pane border width", "Border width for gapped panes, in lo
                             }),
                     ),
                 ),
-            AppearancePageItem::Preset => SettingEntry::new(
-                "Preset",
-                "Choose a color theme or manually define your own below.",
-            )
-            .title_actions(Self::annotations("preset"))
-            .control(
-                Button::new("preview-preset")
-                    .small()
-                    .label("Color theme")
-                    .dropdown_caret(true)
-                    .bg(settings_control_fill(cx)),
-            ),
+            AppearancePageItem::Preset(mode) => {
+                let dark = mode.is_dark();
+                let selected = self.options.preset(mode);
+                let (title, description, strip) = if dark {
+                    (
+                        "Dark palette",
+                        "Used while the interface is dark.",
+                        "preview-presets-dark",
+                    )
+                } else {
+                    (
+                        "Light palette",
+                        "Used while the interface is light.",
+                        "preview-presets-light",
+                    )
+                };
+                let presets: Vec<Option<ChromePresetId>> = std::iter::once(None)
+                    .chain(chrome_presets(dark).map(|preset| Some(preset.id)))
+                    .collect();
+                let selected = presets
+                    .iter()
+                    .position(|preset| *preset == selected)
+                    .unwrap_or(0);
+                let view = cx.entity().downgrade();
+                let tiles = PickerStrip::new(strip, selected)
+                    .tiles(presets.iter().map(|preset| {
+                        (
+                            preset.map_or("Default", |id| id.preset().name),
+                            palette_preview(&inherited_chrome_colors(*preset, mode), cx),
+                        )
+                    }))
+                    .on_select(move |index, _, cx| {
+                        view.update(cx, |this, cx| {
+                            this.options.presets[usize::from(dark)] =
+                                presets[index].map(|id| id.as_str().to_owned());
+                            this.remember(cx);
+                            cx.notify();
+                        })
+                        .ok();
+                    });
+                SettingEntry::new(title, description)
+                    .title_actions(Self::annotations("preset"))
+                    .child(tiles)
+            }
             AppearancePageItem::ChromeColor(i) => {
                 let color = [
                     cx.theme().background,
                     cx.theme().foreground,
-                    cx.theme().success,
-                    cx.theme().warning,
-                    cx.theme().danger,
+                    cx.theme().accent,
                 ][i];
                 SettingEntry::new(COLORS[i].0, COLORS[i].1)
                     .title_actions(Self::annotations(COLORS[i].0))

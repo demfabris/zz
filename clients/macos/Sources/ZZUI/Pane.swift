@@ -81,7 +81,7 @@ public struct ZZPane<Content: View, Overlay: View>: View {
         .overlay {
             ZZPaneShape(corners ?? ZZPaneCorners(gap > 0 ? radius : 0))
                 .strokeBorder(
-                    (active ? theme.foreground.wash() : theme.foreground.opacity(0.1)).color,
+                    (active ? theme.accent : theme.foreground.opacity(0.1)).color,
                     lineWidth: borderWidth ?? 0.5
                 )
                 .allowsHitTesting(false)

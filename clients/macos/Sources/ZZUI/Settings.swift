@@ -193,33 +193,93 @@ public struct ZZThemeTile: View {
     }
 
     public var body: some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
-                ZStack {
-                    preview(mode == .dark ? .dark : .light)
-                    if mode == .system {
-                        preview(.dark).mask {
-                            HStack(spacing: 0) {
-                                Color.clear
-                                Rectangle()
-                            }
+        ZZPickerTile(mode.rawValue, selected: selected, action: action) {
+            ZStack {
+                ZZPalettePreview(mode == .dark ? .dark : .light)
+                if mode == .system {
+                    ZZPalettePreview(.dark).mask {
+                        HStack(spacing: 0) {
+                            Color.clear
+                            Rectangle()
                         }
                     }
                 }
-                .frame(width: 84, height: 56).clipShape(ZZRoundedRectangle(radius: theme.radius))
-                .overlay {
-                    ZZRoundedRectangle(radius: theme.radius).stroke(
-                        theme.foreground.opacity(selected ? 1 : 0.1).color, lineWidth: selected ? 2 : 0.5)
-                }
+            }
+        }
+    }
+}
+
+/// One chroma palette as a tile, drawn from its own colors rather than the current theme.
+public struct ZZPaletteTile: View {
+    private let name: String
+    private let palette: ZZTheme
+    private let selected: Bool
+    private let action: () -> Void
+
+    public init(_ name: String, palette: ZZTheme, selected: Bool = false, action: @escaping () -> Void) {
+        self.name = name
+        self.palette = palette
+        self.selected = selected
+        self.action = action
+    }
+
+    public var body: some View {
+        ZZPickerTile(name, selected: selected, action: action) { ZZPalettePreview(palette) }
+    }
+}
+
+/// A row of picker tiles that scrolls sideways once it outgrows its container.
+public struct ZZPickerStrip<Content: View>: View {
+    private let content: Content
+
+    public init(@ViewBuilder content: () -> Content) { self.content = content() }
+
+    public var body: some View {
+        ScrollView(.horizontal) { HStack(alignment: .top, spacing: 10) { content }.padding(12) }
+            .scrollIndicators(.hidden)
+    }
+}
+
+struct ZZPickerTile<Preview: View>: View {
+    @Environment(\.zzTheme) private var theme
+    private let label: String
+    private let selected: Bool
+    private let action: () -> Void
+    private let preview: Preview
+
+    init(_ label: String, selected: Bool, action: @escaping () -> Void, @ViewBuilder preview: () -> Preview) {
+        self.label = label
+        self.selected = selected
+        self.action = action
+        self.preview = preview()
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                preview
+                    .frame(width: 84, height: 56).clipShape(ZZRoundedRectangle(radius: theme.radius))
+                    .overlay {
+                        ZZRoundedRectangle(radius: theme.radius).stroke(
+                            (selected ? theme.accent : theme.foreground.opacity(0.1)).color,
+                            lineWidth: selected ? 2 : 0.5)
+                    }
                 HStack(spacing: 4) {
-                    Text(mode.rawValue).font(theme.font(size: 11))
+                    Text(label).font(theme.font(size: 11))
                     if selected { Image(systemName: "checkmark.circle.fill").font(.system(size: 11)) }
                 }
             }
         }.buttonStyle(.plain).accessibilityAddTraits(selected ? [.isSelected] : [])
     }
+}
 
-    private func preview(_ palette: ZZTheme) -> some View {
+/// The window mockup the theme and palette tiles share, painted from `palette`.
+public struct ZZPalettePreview: View {
+    private let palette: ZZTheme
+
+    public init(_ palette: ZZTheme) { self.palette = palette }
+
+    public var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 RoundedRectangle(cornerRadius: 1).fill(palette.foreground.wash().color).frame(height: 3)
@@ -228,9 +288,9 @@ public struct ZZThemeTile: View {
             }.padding(4).frame(width: 20).background(palette.background.raised(2).color)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 2) {
-                    Circle().fill(palette.foreground.wash().color).frame(width: 3, height: 3)
-                    Circle().fill(palette.foreground.wash().color).frame(width: 3, height: 3)
-                    Circle().fill(palette.foreground.wash().color).frame(width: 3, height: 3)
+                    Circle().fill(palette.danger.color).frame(width: 3, height: 3)
+                    Circle().fill(palette.warning.color).frame(width: 3, height: 3)
+                    Circle().fill(palette.success.color).frame(width: 3, height: 3)
                 }
                 RoundedRectangle(cornerRadius: 2).fill(palette.background.raised(1).color)
                     .overlay(alignment: .topLeading) {
@@ -238,6 +298,7 @@ public struct ZZThemeTile: View {
                             palette.foreground.wash().color.frame(width: 25, height: 2)
                             palette.foreground.fill().color.frame(width: 35, height: 2)
                             palette.foreground.fill().color.frame(width: 18, height: 2)
+                            Capsule().fill(palette.accent.color).frame(width: 10, height: 4)
                         }.padding(5)
                     }
             }.padding(4).background(palette.background.color)

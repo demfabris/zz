@@ -203,7 +203,7 @@ Browser, Terminal, Hosts, System, About:
 
 | Section | Contents |
 |---------|----------|
-| Interface | Theme (`theme-mode`, system UI font picker, transient UI zoom, and macOS app-icon pickers), Chroma Colors (presets and `chrome-*` colors), Tweaks (`animations`, `widget-corner-radius`, window blur, and Linux `use-system-titlebar`) |
+| Interface | Theme (`theme-mode`, system UI font picker, transient UI zoom, and macOS app-icon pickers), Chroma Colors (a light and a dark palette strip, `chrome-*` colors, contrast), Tweaks (`animations`, `widget-corner-radius`, window blur, and Linux `use-system-titlebar`) |
 | Status bar | Session chip, window badges and alignment, Agent count, remote host, update, and clock; visible in the title bar when the sidebar is retracted |
 | Editor | Editor-pane typography and display controls, when compiled in |
 | Panes | Layout (`pane-gaps`), Focus (`pane-inactive-opacity`), Frame (`pane-margin`, `pane-corner-radius`, `pane-border-width`); gapped panes carry subtle inset surface rings |
@@ -276,10 +276,10 @@ effect without a restart.
 
 `apply_zz_overrides` writes, in this order:
 
-- the five `chrome-*` palette roots (`ChromeColor::ALL`) that are set. Only the roots are written;
+- the three `chrome-*` palette roots (`ChromeColor::ALL`) that are set. Only the roots are written;
   every elevation, hover state, muted text, and focus ring derives from them at paint time, so
-  recoloring reaches the whole UI with no per-component plumbing. `CHROME_PRESETS` ships eleven
-  paired light/dark palettes;
+  recoloring reaches the whole UI with no per-component plumbing. `CHROME_PRESETS` ships single-mode
+  palettes, one selected per mode by `chrome-preset-light` and `chrome-preset-dark`;
 - `mono_font_family` from the terminal's resolved primary family, so Agent Markdown, tool previews,
   and code blocks match the terminal typeface;
 - `radius` from `widget-corner-radius`, which reaches every widget through the theme;

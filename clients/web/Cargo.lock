@@ -8725,7 +8725,7 @@ dependencies = [
 
 [[package]]
 name = "zz-client"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "agent-client-protocol-schema",
  "base64 0.22.1",
@@ -8740,7 +8740,7 @@ dependencies = [
 
 [[package]]
 name = "zz-protocol"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "base64 0.22.1",
  "postcard",
@@ -8754,7 +8754,7 @@ dependencies = [
 
 [[package]]
 name = "zz-terminal"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "csscolorparser",
  "serde",
@@ -8764,7 +8764,7 @@ dependencies = [
 
 [[package]]
 name = "zz-ui"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-channel",

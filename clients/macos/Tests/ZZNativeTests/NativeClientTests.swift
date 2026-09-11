@@ -308,7 +308,7 @@ private func eventually(line: Int = #line, _ condition: () -> Bool) async throws
     let config = directory.appendingPathComponent("config")
     let model = NativeSettings(config: config.path, mux: directory.appendingPathComponent("mux").path)
     #expect(model.error == nil)
-    #expect(model.snapshot?.presets.count == 11)
+    #expect(model.snapshot?.presets.count == 34)
     #expect(model.snapshot?.settings.contains { $0.key == "browser-search-provider" } == true)
     model.set("theme-mode", .string("light"))
     #expect(model.text("theme-mode") == "light")

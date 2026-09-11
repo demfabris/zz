@@ -498,7 +498,7 @@ private struct ZZSwitchStyle: ToggleStyle {
         let width: CGFloat = compact ? 28 : 36
         let height: CGFloat = compact ? 16 : 20
         let thumb: CGFloat = compact ? 12 : 16
-        let track = configuration.isOn ? theme.foreground.opacity(isEnabled ? 1 : 0.5) : theme.background.raised(3)
+        let track = configuration.isOn ? theme.accent.opacity(isEnabled ? 1 : 0.5) : theme.background.raised(3)
         Button {
             configuration.isOn.toggle()
         } label: {

@@ -80,8 +80,8 @@ menus use the provider's current options. Composer actions, context usage, and G
 the desktop presentation. Reclaimed drafts and PNG, JPEG, and WebP attachments are supported.
 The working-directory picker lists known Agent directories and accepts an absolute path on the
 daemon host; recursive filesystem discovery remains desktop-only. Appearance preferences for the
-browser live in local storage: system/light/dark mode, all eleven desktop chrome presets, six
-editable palette roots, zoom, and corner radius. Numeric fields, color pickers, theme previews, and
+browser live in local storage: system/light/dark mode, a desktop chrome preset per mode, the
+three editable palette roots, zoom, and corner radius. Numeric fields, color pickers, theme previews, and
 pane-picker rows use the desktop components. Panes settings use the shared Layout, Focus, and
 Frame groups for gaps, inactive opacity, margins, pane radius, and border width. These settings are
 saved independently from widget radius. Sidebar rows share desktop labels, markers, layout and

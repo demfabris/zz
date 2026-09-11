@@ -7,7 +7,7 @@ use zz_ui::{
     UiZoom,
     button::Button,
     chrome_palette::{
-        CHROME_PRESETS, ChromeColor, ChromePresetId, ThemeModeSetting, inherited_chrome_colors,
+        ChromeColor, ChromePresetId, ThemeModeSetting, chrome_presets, inherited_chrome_colors,
         resolved_chrome_colors,
     },
     color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState},
@@ -15,7 +15,7 @@ use zz_ui::{
     select::{Select, SelectState},
     settings::{
         SettingEntry, SettingsSection, SettingsSelectItem, SettingsStack,
-        appearance::{picker_tile, theme_preview},
+        appearance::{PickerStrip, palette_preview, picker_tile, theme_preview},
         settings_control_fill, settings_page_description, settings_reset_button,
         settings_scroll_column,
     },
@@ -31,7 +31,8 @@ pub(super) struct Preferences {
     pub gaps: bool,
     pub dark: bool,
     pub mode: Option<String>,
-    pub preset: Option<String>,
+    pub preset_light: Option<String>,
+    pub preset_dark: Option<String>,
     pub colors: [Option<String>; ChromeColor::ALL.len()],
     pub zoom: f32,
     pub radius: f32,
@@ -50,7 +51,8 @@ impl Default for Preferences {
             gaps: false,
             dark: true,
             mode: None,
-            preset: None,
+            preset_light: None,
+            preset_dark: None,
             colors: Default::default(),
             zoom: 1.0,
             radius: 6.0,
@@ -108,7 +110,7 @@ impl Preferences {
         }
         let mode = cx.theme().mode;
         Theme::global_mut(cx).colors = resolved_chrome_colors(
-            self.preset.as_deref().and_then(ChromePresetId::parse),
+            self.preset(mode),
             mode,
             self.colors
                 .clone()
@@ -120,6 +122,16 @@ impl Preferences {
         cx.set_global(UiZoom(self.zoom));
         window.set_zoom(self.zoom);
         cx.refresh_windows();
+    }
+
+    fn preset(&self, mode: ThemeMode) -> Option<ChromePresetId> {
+        if mode.is_dark() {
+            &self.preset_dark
+        } else {
+            &self.preset_light
+        }
+        .as_deref()
+        .and_then(ChromePresetId::parse)
     }
 
     fn theme_mode(&self) -> ThemeModeSetting {
@@ -184,7 +196,11 @@ impl Controls {
                 .max(200.0)
         });
         let mut subscriptions = Vec::new();
-        for (input, key) in [(&zoom, "zoom"), (&radius, "radius"), (&contrast, "contrast")] {
+        for (input, key) in [
+            (&zoom, "zoom"),
+            (&radius, "radius"),
+            (&contrast, "contrast"),
+        ] {
             subscriptions.push(cx.subscribe_in(
                 input,
                 window,
@@ -326,11 +342,17 @@ impl WebClient {
     }
     fn select_preset(
         &mut self,
+        mode: ThemeMode,
         preset: Option<ChromePresetId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.preferences.preset = preset.map(|id| id.as_str().to_owned());
+        let value = preset.map(|id| id.as_str().to_owned());
+        if mode.is_dark() {
+            self.preferences.preset_dark = value;
+        } else {
+            self.preferences.preset_light = value;
+        }
         self.preferences.colors = Default::default();
         for color in &self.settings_controls.colors {
             color.update(cx, |color, cx| color.set_color(None, window, cx));
@@ -348,13 +370,14 @@ impl WebClient {
         let mut rows = Vec::new();
         match section {
             SettingsSection::Appearance => {
-                let preset = self
-                    .preferences
-                    .preset
-                    .as_deref()
-                    .and_then(ChromePresetId::parse);
-                let light = inherited_chrome_colors(preset, ThemeMode::Light);
-                let dark = inherited_chrome_colors(preset, ThemeMode::Dark);
+                let light = inherited_chrome_colors(
+                    self.preferences.preset(ThemeMode::Light),
+                    ThemeMode::Light,
+                );
+                let dark = inherited_chrome_colors(
+                    self.preferences.preset(ThemeMode::Dark),
+                    ThemeMode::Dark,
+                );
                 let theme = div()
                     .flex()
                     .gap(px(8.0))
@@ -409,53 +432,47 @@ impl WebClient {
                             ),
                         ),
                 );
-                let presets = div()
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(8.0))
-                    .child(
-                        picker_tile(
-                            "web-preset-default".into(),
-                            "Default",
-                            theme_preview(
-                                Some(cx.theme().mode),
-                                &inherited_chrome_colors(None, ThemeMode::Light),
-                                &inherited_chrome_colors(None, ThemeMode::Dark),
-                                cx,
-                            ),
-                            preset.is_none(),
-                            cx,
+                for mode in [ThemeMode::Light, ThemeMode::Dark] {
+                    let dark = mode.is_dark();
+                    let selected = self.preferences.preset(mode);
+                    let (title, description, strip) = if dark {
+                        (
+                            "Dark palette",
+                            "Used while the interface is dark.",
+                            "web-presets-dark",
                         )
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.select_preset(None, window, cx)),
-                        ),
-                    )
-                    .children(CHROME_PRESETS.iter().map(|entry| {
-                        let id = entry.id;
-                        picker_tile(
-                            format!("web-preset-{}", id.as_str()).into(),
-                            entry.name,
-                            theme_preview(
-                                Some(cx.theme().mode),
-                                &inherited_chrome_colors(Some(id), ThemeMode::Light),
-                                &inherited_chrome_colors(Some(id), ThemeMode::Dark),
-                                cx,
-                            ),
-                            preset == Some(id),
-                            cx,
+                    } else {
+                        (
+                            "Light palette",
+                            "Used while the interface is light.",
+                            "web-presets-light",
                         )
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| this.select_preset(Some(id), window, cx),
-                        ))
-                    }));
-                rows.push(
-                    SettingEntry::new(
-                        "Chroma Colors",
-                        "Choose a palette for the application chrome.",
-                    )
-                    .child(presets),
-                );
-                let inherited = inherited_chrome_colors(preset, cx.theme().mode);
+                    };
+                    let presets: Vec<Option<ChromePresetId>> = std::iter::once(None)
+                        .chain(chrome_presets(dark).map(|preset| Some(preset.id)))
+                        .collect();
+                    let selected = presets
+                        .iter()
+                        .position(|preset| *preset == selected)
+                        .unwrap_or(0);
+                    let view = cx.entity().downgrade();
+                    let tiles = PickerStrip::new(strip, selected)
+                        .tiles(presets.iter().map(|preset| {
+                            (
+                                preset.map_or("Default", |id| id.preset().name),
+                                palette_preview(&inherited_chrome_colors(*preset, mode), cx),
+                            )
+                        }))
+                        .on_select(move |index, window, cx| {
+                            view.update(cx, |this, cx| {
+                                this.select_preset(mode, presets[index], window, cx);
+                            })
+                            .ok();
+                        });
+                    rows.push(SettingEntry::new(title, description).child(tiles));
+                }
+                let mode = cx.theme().mode;
+                let inherited = inherited_chrome_colors(self.preferences.preset(mode), mode);
                 for (index, color) in ChromeColor::ALL.into_iter().enumerate() {
                     rows.push(
                         SettingEntry::new(color.title(), color.description()).control(
@@ -469,24 +486,32 @@ impl WebClient {
                     );
                 }
                 rows.push(
-                    SettingEntry::new("Contrast", "Adjust surface, text, and edge contrast from 50% to 200%.")
-                        .title_actions(settings_reset_button(
+                    SettingEntry::new(
+                        "Contrast",
+                        "Adjust surface, text, and edge contrast from 50% to 200%.",
+                    )
+                    .title_actions(
+                        settings_reset_button(
                             "web-contrast-reset",
                             "Reset contrast to 100%",
                             self.preferences.contrast != 1.0,
-                        ).on_click(cx.listener(|this, _, window, cx| {
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
                             this.preferences.contrast = 1.0;
                             this.settings_controls.contrast.update(cx, |input, cx| {
                                 input.set_value("100", window, cx);
                             });
                             this.preferences.save();
                             this.preferences.apply(window, cx);
-                        })))
-                        .control(div().w(px(120.0)).flex_none().child(
+                        })),
+                    )
+                    .control(
+                        div().w(px(120.0)).flex_none().child(
                             NumberInput::new(&self.settings_controls.contrast)
                                 .small()
                                 .bg(settings_control_fill(cx)),
-                        )),
+                        ),
+                    ),
                 );
                 rows.push(
                     SettingEntry::new(
@@ -877,10 +902,19 @@ mod tests {
         let defaults = serde_json::from_str::<Preferences>("{}").unwrap();
         assert_eq!(defaults.contrast, 1.0);
         for (value, expected) in [(0.1, 0.5), (3.0, 2.0), (1.5, 1.5), (f32::NAN, 1.0)] {
-            let preferences = Preferences { contrast: value, ..Preferences::default() }.sanitized();
+            let preferences = Preferences {
+                contrast: value,
+                ..Preferences::default()
+            }
+            .sanitized();
             assert_eq!(preferences.contrast, expected);
             let saved = serde_json::to_string(&preferences).unwrap();
-            assert_eq!(serde_json::from_str::<Preferences>(&saved).unwrap().contrast, expected);
+            assert_eq!(
+                serde_json::from_str::<Preferences>(&saved)
+                    .unwrap()
+                    .contrast,
+                expected
+            );
         }
     }
 

@@ -13,7 +13,7 @@ use zz_ui::{
     StyledExt as _, UiZoom,
     agent::{
         AgentEntry, AgentTimeline, AgentTimelineStore, TimelineRow, agent_pane_header,
-        composer::{AgentComposer, composer_tail_clearance},
+        composer::{AgentComposer, COMPOSER_OUTER_PADDING},
         fold_timeline_rows,
     },
     browser::{
@@ -59,6 +59,7 @@ pub(crate) struct PreviewOptions {
     pub inactive_opacity: f32,
     pub settings_section: String,
     pub chrome_colors: [Option<String>; zz_ui::chrome_palette::ChromeColor::ALL.len()],
+    pub presets: [Option<String>; 2],
     pub ui_font: String,
     pub mono_font: String,
 }
@@ -85,6 +86,7 @@ impl Default for PreviewOptions {
             inactive_opacity: 0.7,
             settings_section: "appearance".into(),
             chrome_colors: Default::default(),
+            presets: Default::default(),
             ui_font: String::new(),
             mono_font: String::new(),
         }
@@ -140,34 +142,25 @@ impl PreviewOptions {
         }
     }
 
+    pub(super) fn preset(
+        &self,
+        mode: zz_ui::ThemeMode,
+    ) -> Option<zz_ui::chrome_palette::ChromePresetId> {
+        self.presets[usize::from(mode.is_dark())]
+            .as_deref()
+            .and_then(zz_ui::chrome_palette::ChromePresetId::parse)
+    }
+
     fn apply_colors(&self, cx: &mut App) {
         zz_ui::Theme::global_mut(cx).set_contrast(self.contrast);
         zz_ui::Theme::global_mut(cx).pane_background_opacity = self.pane_background_opacity;
         let mode = zz_ui::Theme::global(cx).mode;
-        let base = zz_ui::ThemeColor::for_mode(mode);
-        let defaults = [
-            base.background,
-            base.foreground,
-            base.success,
-            base.warning,
-            base.danger,
-        ];
-        let colors = &mut zz_ui::Theme::global_mut(cx).colors;
-        for (index, color) in [
-            &mut colors.background,
-            &mut colors.foreground,
-            &mut colors.success,
-            &mut colors.warning,
-            &mut colors.danger,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            *color = self.chrome_colors[index]
-                .as_deref()
-                .and_then(|color| zz_ui::parse_hex(color).ok())
-                .unwrap_or(defaults[index]);
-        }
+        let overrides = self
+            .chrome_colors
+            .clone()
+            .map(|color| color.and_then(|value| zz_ui::parse_hex(&value).ok()));
+        zz_ui::Theme::global_mut(cx).colors =
+            zz_ui::chrome_palette::resolved_chrome_colors(self.preset(mode), mode, overrides);
     }
 
     pub(super) fn remember(&self) {
@@ -857,7 +850,7 @@ impl Preview {
                             self.scroll.clone(),
                             self.timeline.clone(),
                         )
-                        .bottom_padding(composer_tail_clearance()),
+                        .bottom_padding(COMPOSER_OUTER_PADDING),
                     ),
             )
             .child(composer)

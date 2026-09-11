@@ -138,6 +138,7 @@ public struct ZZTheme: Sendable, Equatable {
     public var background: ZZColor
     public var foreground: ZZColor
     public var border: ZZColor { background.mix(foreground, weight: 0.86).opaque() }
+    public var accent: ZZColor
     public var success: ZZColor
     public var warning: ZZColor
     public var danger: ZZColor
@@ -149,13 +150,14 @@ public struct ZZTheme: Sendable, Equatable {
     public var shadowStrength: Double = 1
 
     public init(
-        background: ZZColor, foreground: ZZColor,
+        background: ZZColor, foreground: ZZColor, accent: ZZColor,
         success: ZZColor, warning: ZZColor, danger: ZZColor, scrim: ZZColor, radius: CGFloat = 6,
         fontFamily: String? = nil, monospacedFontFamily: String? = nil,
         shadows: Bool = true, shadowStrength: Double = 1
     ) {
         self.background = background
         self.foreground = foreground
+        self.accent = accent
         self.success = success
         self.warning = warning
         self.danger = danger
@@ -187,6 +189,7 @@ public struct ZZTheme: Sendable, Equatable {
     public static let light = Self(
         background: ZZColor(hue: 0, saturation: 0, lightness: 100),
         foreground: ZZColor(hue: 0, saturation: 0, lightness: 3.9),
+        accent: ZZColor(hue: 221.2, saturation: 83.2, lightness: 53.3),
         success: ZZColor(hue: 142.1, saturation: 70.6, lightness: 45.3),
         warning: ZZColor(hue: 45.4, saturation: 93.4, lightness: 47.5),
         danger: ZZColor(hue: 0, saturation: 84.2, lightness: 60.2),
@@ -196,6 +199,7 @@ public struct ZZTheme: Sendable, Equatable {
     public static let dark = Self(
         background: ZZColor(hue: 0, saturation: 0, lightness: 3.9),
         foreground: ZZColor(hue: 0, saturation: 0, lightness: 98),
+        accent: ZZColor(hue: 213.1, saturation: 93.9, lightness: 67.8),
         success: ZZColor(hue: 141.9, saturation: 69.2, lightness: 58),
         warning: ZZColor(hue: 47.9, saturation: 95.8, lightness: 53.1),
         danger: ZZColor(hue: 0, saturation: 90.6, lightness: 70.8),
@@ -204,14 +208,14 @@ public struct ZZTheme: Sendable, Equatable {
 
     public static let macOSClassicLight = Self(
         background: ZZColor(hex: "#ffffff")!, foreground: ZZColor(hex: "#1a1a1a")!,
-        success: ZZColor(hex: "#036a07")!,
+        accent: ZZColor(hex: "#007aff")!, success: ZZColor(hex: "#036a07")!,
         warning: ZZColor(hex: "#9e7008")!, danger: ZZColor(hex: "#c5060b")!,
         scrim: light.scrim
     )
 
     public static let macOSClassicDark = Self(
         background: ZZColor(hex: "#131313")!, foreground: ZZColor(hex: "#caccca")!,
-        success: ZZColor(hex: "#62ba46")!,
+        accent: ZZColor(hex: "#0a84ff")!, success: ZZColor(hex: "#62ba46")!,
         warning: ZZColor(hex: "#b0a878")!, danger: ZZColor(hex: "#d2602d")!,
         scrim: dark.scrim
     )

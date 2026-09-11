@@ -1,17 +1,18 @@
 import SwiftUI
 
 public enum ZZButtonVariant: Sendable, Equatable {
-    case `default`, primary, secondary, danger, success, warning, ghost, link, text
+    case `default`, primary, accent, secondary, danger, success, warning, ghost, link, text
     case custom(ZZColor)
 
     public static let standard: [Self] = [
-        .default, .primary, .secondary, .danger, .success, .warning, .ghost, .link, .text,
+        .default, .primary, .accent, .secondary, .danger, .success, .warning, .ghost, .link, .text,
     ]
 
     public var title: String {
         switch self {
         case .default: "Default"
         case .primary: "Primary"
+        case .accent: "Accent"
         case .secondary: "Secondary"
         case .danger: "Danger"
         case .success: "Success"
@@ -26,8 +27,11 @@ public enum ZZButtonVariant: Sendable, Equatable {
     var isUnpadded: Bool { self == .link || self == .text }
     var isNeutral: Bool { self == .default || self == .secondary || self == .ghost }
 
+    var isSolid: Bool { self == .primary || self == .accent }
+
     func color(in theme: ZZTheme) -> ZZColor {
         switch self {
+        case .accent: theme.accent
         case .danger: theme.danger
         case .success: theme.success
         case .warning: theme.warning
@@ -182,7 +186,8 @@ private struct ZZButtonBody: View {
 
     private var foreground: ZZColor {
         if !isEnabled { return theme.foreground.muted().opacity(0.5) }
-        let base = style.variant == .primary && !style.outline ? theme.foreground.on() : style.variant.color(in: theme)
+        let root = style.variant.color(in: theme)
+        let base = style.variant.isSolid && !style.outline ? root.on() : root
         if isEnabled && style.variant == .text && active { return base.opacity(0.7) }
         return base
     }
@@ -197,7 +202,7 @@ private struct ZZButtonBody: View {
         }
         if !isEnabled {
             switch variant {
-            case .primary, .custom: return root.opacity(0.15)
+            case .primary, .accent, .custom: return root.opacity(0.15)
             case .danger, .success, .warning: return root.fill().opacity(0.15)
             case .secondary: return theme.background.raised(2)
             case .default: return theme.background.raised(1).opacity(0.5)
@@ -207,7 +212,7 @@ private struct ZZButtonBody: View {
         let base: ZZColor
         switch variant {
         case .default: base = theme.background.raised(1)
-        case .primary: base = theme.foreground
+        case .primary, .accent: base = root
         case .secondary: base = theme.background.raised(2)
         case .ghost, .link, .text: base = .clear
         case .custom: base = root.opacity(active ? 0.4 : highlighted ? 0.3 : 0.2)

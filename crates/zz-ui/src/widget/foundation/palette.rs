@@ -43,6 +43,8 @@ fn palette(mode: ThemeMode) -> ThemeColor {
     let green_500 = hsl(142.1, 70.6, 45.3);
     let yellow_400 = hsl(47.9, 95.8, 53.1);
     let yellow_500 = hsl(45.4, 93.4, 47.5);
+    let blue_400 = hsl(213.1, 93.9, 67.8);
+    let blue_600 = hsl(221.2, 83.2, 53.3);
 
     let is_dark = mode.is_dark();
 
@@ -55,6 +57,7 @@ fn palette(mode: ThemeMode) -> ThemeColor {
     ThemeColor {
         background: per_mode!(white, neutral_950),
         foreground: per_mode!(neutral_950, neutral_50),
+        accent: per_mode!(blue_600, blue_400),
         success: per_mode!(green_500, green_400),
         warning: per_mode!(yellow_500, yellow_400),
         danger: per_mode!(red_500, red_400),

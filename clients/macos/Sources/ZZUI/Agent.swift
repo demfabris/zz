@@ -442,7 +442,7 @@ public struct ZZAgentComposer<Settings: View, Attachments: View, Footer: View>: 
                     Spacer(minLength: 0)
                     ZZButton(
                         actionTitle, icon: stops ? "xmark" : (running ? "plus" : "arrow.up"),
-                        variant: running ? .default : .primary,
+                        variant: running ? .default : .accent,
                         size: .xSmall, iconOnly: true, action: stops ? stop : send
                     )
                     .compactChromeIcon()

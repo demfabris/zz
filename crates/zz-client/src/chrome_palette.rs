@@ -2,27 +2,17 @@
 pub enum ChromeColor {
     Background,
     Foreground,
-    Success,
-    Warning,
-    Danger,
+    Accent,
 }
 
 impl ChromeColor {
-    pub const ALL: [Self; 5] = [
-        Self::Background,
-        Self::Foreground,
-        Self::Success,
-        Self::Warning,
-        Self::Danger,
-    ];
+    pub const ALL: [Self; 3] = [Self::Background, Self::Foreground, Self::Accent];
 
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Background => "chrome-background",
             Self::Foreground => "chrome-foreground",
-            Self::Success => "chrome-success",
-            Self::Warning => "chrome-warning",
-            Self::Danger => "chrome-danger",
+            Self::Accent => "chrome-accent",
         }
     }
 
@@ -34,9 +24,7 @@ impl ChromeColor {
         match self {
             Self::Background => "Background",
             Self::Foreground => "Foreground",
-            Self::Success => "Success",
-            Self::Warning => "Warning",
-            Self::Danger => "Danger",
+            Self::Accent => "Accent",
         }
     }
 
@@ -49,9 +37,9 @@ impl ChromeColor {
             Self::Foreground => {
                 "Default text, and the source of muted text, focus rings, links, selection and every edge."
             }
-            Self::Success => "Something completed or is healthy.",
-            Self::Warning => "Something needs attention but still works.",
-            Self::Danger => "Something failed or is destructive.",
+            Self::Accent => {
+                "The one chromatic emphasis: a checked switch, the selected tile ring, the active pane border, the send button."
+            }
         }
     }
 }
@@ -99,55 +87,18 @@ impl ThemeModeSetting {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ChromePresetId {
-    TokyoNight,
-    Catppuccin,
-    Gruvbox,
-    Nord,
-    Breeze,
-    Adwaita,
-    Ubuntu,
-    RosePine,
-    Ayu,
-    Solarized,
-    MacosClassic,
-}
+pub struct ChromePresetId(&'static str);
 
 impl ChromePresetId {
-    pub const ALL: [Self; 11] = [
-        Self::TokyoNight,
-        Self::Catppuccin,
-        Self::Gruvbox,
-        Self::Nord,
-        Self::Breeze,
-        Self::Adwaita,
-        Self::Ubuntu,
-        Self::RosePine,
-        Self::Ayu,
-        Self::Solarized,
-        Self::MacosClassic,
-    ];
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::TokyoNight => "tokyo-night",
-            Self::Catppuccin => "catppuccin",
-            Self::Gruvbox => "gruvbox",
-            Self::Nord => "nord",
-            Self::Breeze => "breeze",
-            Self::Adwaita => "adwaita",
-            Self::Ubuntu => "ubuntu",
-            Self::RosePine => "rose-pine",
-            Self::Ayu => "ayu",
-            Self::Solarized => "solarized",
-            Self::MacosClassic => "macos-classic",
-        }
+    pub fn parse(value: &str) -> Option<Self> {
+        CHROME_PRESETS
+            .iter()
+            .find(|preset| preset.id.as_str() == value.trim())
+            .map(|preset| preset.id)
     }
 
-    pub fn parse(value: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|preset| preset.as_str() == value.trim())
+    pub const fn as_str(self) -> &'static str {
+        self.0
     }
 
     pub fn preset(self) -> &'static ChromePreset {
@@ -156,87 +107,404 @@ impl ChromePresetId {
             .find(|preset| preset.id == self)
             .expect("every ChromePresetId has a built-in preset")
     }
+
+    pub fn dark(self) -> bool {
+        self.preset().dark
+    }
 }
 
 pub struct ChromePreset {
     pub id: ChromePresetId,
     pub name: &'static str,
-    pub light: [&'static str; ChromeColor::ALL.len()],
-    pub dark: [&'static str; ChromeColor::ALL.len()],
+    pub dark: bool,
+    pub background: &'static str,
+    pub foreground: &'static str,
+    pub accent: &'static str,
+    pub success: &'static str,
+    pub warning: &'static str,
+    pub danger: &'static str,
 }
 
-impl ChromePreset {
-    pub fn colors(&self, dark: bool) -> &[&'static str; ChromeColor::ALL.len()] {
-        if dark { &self.dark } else { &self.light }
-    }
+pub fn chrome_presets(dark: bool) -> impl Iterator<Item = &'static ChromePreset> {
+    CHROME_PRESETS
+        .iter()
+        .filter(move |preset| preset.dark == dark)
 }
 
-pub const CHROME_PRESETS: [ChromePreset; 11] = [
+pub static CHROME_PRESETS: [ChromePreset; 34] = [
     ChromePreset {
-        id: ChromePresetId::TokyoNight,
+        id: ChromePresetId("tokyo-night"),
         name: "Tokyo Night",
-        light: ["#e1e2e7", "#3760bf", "#587539", "#8c6c3e", "#f52a65"],
-        dark: ["#1a1b26", "#c0caf5", "#9ece6a", "#e0af68", "#f7768e"],
+        dark: true,
+        background: "#1a1b26",
+        foreground: "#c0caf5",
+        accent: "#7aa2f7",
+        success: "#9ece6a",
+        warning: "#e0af68",
+        danger: "#f7768e",
     },
     ChromePreset {
-        id: ChromePresetId::Catppuccin,
-        name: "Catppuccin",
-        light: ["#eff1f5", "#4c4f69", "#40a02b", "#df8e1d", "#d20f39"],
-        dark: ["#1e1e2e", "#cdd6f4", "#a6e3a1", "#f9e2af", "#f38ba8"],
+        id: ChromePresetId("tokyo-night-storm"),
+        name: "Tokyo Night Storm",
+        dark: true,
+        background: "#24283b",
+        foreground: "#c0caf5",
+        accent: "#7aa2f7",
+        success: "#9ece6a",
+        warning: "#e0af68",
+        danger: "#f7768e",
     },
     ChromePreset {
-        id: ChromePresetId::Gruvbox,
+        id: ChromePresetId("catppuccin-mocha"),
+        name: "Catppuccin Mocha",
+        dark: true,
+        background: "#1e1e2e",
+        foreground: "#cdd6f4",
+        accent: "#cba6f7",
+        success: "#a6e3a1",
+        warning: "#f9e2af",
+        danger: "#f38ba8",
+    },
+    ChromePreset {
+        id: ChromePresetId("catppuccin-macchiato"),
+        name: "Catppuccin Macchiato",
+        dark: true,
+        background: "#24273a",
+        foreground: "#cad3f5",
+        accent: "#c6a0f6",
+        success: "#a6da95",
+        warning: "#eed49f",
+        danger: "#ed8796",
+    },
+    ChromePreset {
+        id: ChromePresetId("catppuccin-frappe"),
+        name: "Catppuccin Frappé",
+        dark: true,
+        background: "#303446",
+        foreground: "#c6d0f5",
+        accent: "#ca9ee6",
+        success: "#a6d189",
+        warning: "#e5c890",
+        danger: "#e78284",
+    },
+    ChromePreset {
+        id: ChromePresetId("gruvbox-dark"),
         name: "Gruvbox",
-        light: ["#fbf1c7", "#3c3836", "#79740e", "#b57614", "#9d0006"],
-        dark: ["#282828", "#ebdbb2", "#b8bb26", "#fabd2f", "#fb4934"],
+        dark: true,
+        background: "#282828",
+        foreground: "#ebdbb2",
+        accent: "#fe8019",
+        success: "#b8bb26",
+        warning: "#fabd2f",
+        danger: "#fb4934",
     },
     ChromePreset {
-        id: ChromePresetId::Nord,
+        id: ChromePresetId("nord"),
         name: "Nord",
-        light: ["#eceff4", "#2e3440", "#a3be8c", "#ebcb8b", "#bf616a"],
-        dark: ["#2e3440", "#eceff4", "#a3be8c", "#ebcb8b", "#bf616a"],
+        dark: true,
+        background: "#2e3440",
+        foreground: "#eceff4",
+        accent: "#88c0d0",
+        success: "#a3be8c",
+        warning: "#ebcb8b",
+        danger: "#c9767c",
     },
     ChromePreset {
-        id: ChromePresetId::Breeze,
-        name: "Breeze",
-        light: ["#eff0f1", "#232629", "#27ae60", "#f67400", "#da4453"],
-        dark: ["#202326", "#fcfcfc", "#27ae60", "#f67400", "#da4453"],
+        id: ChromePresetId("dracula"),
+        name: "Dracula",
+        dark: true,
+        background: "#282a36",
+        foreground: "#f8f8f2",
+        accent: "#bd93f9",
+        success: "#50fa7b",
+        warning: "#f1fa8c",
+        danger: "#ff5555",
     },
     ChromePreset {
-        id: ChromePresetId::Adwaita,
-        name: "Adwaita",
-        light: ["#fafafb", "#323237", "#007c3d", "#905400", "#c30000"],
-        dark: ["#222226", "#ffffff", "#78e9ab", "#ffc252", "#ff938c"],
+        id: ChromePresetId("one-dark"),
+        name: "One Dark",
+        dark: true,
+        background: "#282c34",
+        foreground: "#b2b9c5",
+        accent: "#61afef",
+        success: "#98c379",
+        warning: "#e5c07b",
+        danger: "#e06c75",
     },
     ChromePreset {
-        id: ChromePresetId::Ubuntu,
-        name: "Ubuntu",
-        light: ["#fafafa", "#3d3d3d", "#109b26", "#f99b11", "#c7162b"],
-        dark: ["#2c2c2c", "#f7f7f7", "#50c856", "#f99b11", "#ff5c5d"],
+        id: ChromePresetId("github-dark"),
+        name: "GitHub Dark",
+        dark: true,
+        background: "#0d1117",
+        foreground: "#f0f6fc",
+        accent: "#58a6ff",
+        success: "#3fb950",
+        warning: "#d29922",
+        danger: "#f85149",
     },
     ChromePreset {
-        id: ChromePresetId::RosePine,
+        id: ChromePresetId("everforest-dark"),
+        name: "Everforest",
+        dark: true,
+        background: "#2d353b",
+        foreground: "#d3c6aa",
+        accent: "#7fbbb3",
+        success: "#a7c080",
+        warning: "#dbbc7f",
+        danger: "#e67e80",
+    },
+    ChromePreset {
+        id: ChromePresetId("rose-pine"),
         name: "Rosé Pine",
-        light: ["#faf4ed", "#464261", "#286983", "#ea9d34", "#b4637a"],
-        dark: ["#191724", "#e0def4", "#31748f", "#f6c177", "#eb6f92"],
+        dark: true,
+        background: "#191724",
+        foreground: "#e0def4",
+        accent: "#ebbcba",
+        success: "#9ccfd8",
+        warning: "#f6c177",
+        danger: "#eb6f92",
     },
     ChromePreset {
-        id: ChromePresetId::Ayu,
-        name: "Ayu",
-        light: ["#f8f9fa", "#5c6166", "#6cbf43", "#f29718", "#e65050"],
-        dark: ["#0d1017", "#bfbdb6", "#70bf56", "#e6b450", "#d95757"],
+        id: ChromePresetId("rose-pine-moon"),
+        name: "Rosé Pine Moon",
+        dark: true,
+        background: "#232136",
+        foreground: "#e0def4",
+        accent: "#ea9a97",
+        success: "#9ccfd8",
+        warning: "#f6c177",
+        danger: "#eb6f92",
     },
     ChromePreset {
-        id: ChromePresetId::Solarized,
+        id: ChromePresetId("solarized-dark"),
         name: "Solarized",
-        light: ["#fdf6e3", "#586e75", "#859900", "#b58900", "#dc322f"],
-        dark: ["#002b36", "#93a1a1", "#859900", "#b58900", "#dc322f"],
+        dark: true,
+        background: "#002b36",
+        foreground: "#a9b4b4",
+        accent: "#268bd2",
+        success: "#859900",
+        warning: "#b58900",
+        danger: "#e14941",
     },
     ChromePreset {
-        id: ChromePresetId::MacosClassic,
+        id: ChromePresetId("ayu-dark"),
+        name: "Ayu Dark",
+        dark: true,
+        background: "#0b0e14",
+        foreground: "#bfbdb6",
+        accent: "#59c2ff",
+        success: "#7fd962",
+        warning: "#e6b450",
+        danger: "#d95757",
+    },
+    ChromePreset {
+        id: ChromePresetId("breeze-dark"),
+        name: "Breeze Dark",
+        dark: true,
+        background: "#202326",
+        foreground: "#fcfcfc",
+        accent: "#3daee9",
+        success: "#27ae60",
+        warning: "#f67400",
+        danger: "#da4453",
+    },
+    ChromePreset {
+        id: ChromePresetId("adwaita-dark"),
+        name: "Adwaita Dark",
+        dark: true,
+        background: "#222226",
+        foreground: "#ffffff",
+        accent: "#78aeed",
+        success: "#78e9ab",
+        warning: "#ffc252",
+        danger: "#ff938c",
+    },
+    ChromePreset {
+        id: ChromePresetId("ubuntu-dark"),
+        name: "Ubuntu Dark",
+        dark: true,
+        background: "#2c2c2c",
+        foreground: "#f7f7f7",
+        accent: "#e95420",
+        success: "#50c856",
+        warning: "#f99b11",
+        danger: "#ff5c5d",
+    },
+    ChromePreset {
+        id: ChromePresetId("ubuntu-terminal"),
+        name: "Ubuntu Terminal",
+        dark: true,
+        background: "#300a24",
+        foreground: "#eeeeec",
+        accent: "#e95420",
+        success: "#4e9a06",
+        warning: "#c4a000",
+        danger: "#ef2929",
+    },
+    ChromePreset {
+        id: ChromePresetId("macos-classic-dark"),
         name: "macOS Classic",
-        light: ["#ffffff", "#1a1a1a", "#036a07", "#9e7008", "#c5060b"],
-        dark: ["#131313", "#caccca", "#62ba46", "#b0a878", "#d2602d"],
+        dark: true,
+        background: "#131313",
+        foreground: "#caccca",
+        accent: "#0a84ff",
+        success: "#62ba46",
+        warning: "#b0a878",
+        danger: "#d2602d",
+    },
+    ChromePreset {
+        id: ChromePresetId("tokyo-night-day"),
+        name: "Tokyo Night Day",
+        dark: false,
+        background: "#e1e2e7",
+        foreground: "#25448b",
+        accent: "#276ece",
+        success: "#587539",
+        warning: "#8a6a3d",
+        danger: "#d52357",
+    },
+    ChromePreset {
+        id: ChromePresetId("catppuccin-latte"),
+        name: "Catppuccin Latte",
+        dark: false,
+        background: "#eff1f5",
+        foreground: "#4c4f69",
+        accent: "#8839ef",
+        success: "#358823",
+        warning: "#a86a13",
+        danger: "#d20f39",
+    },
+    ChromePreset {
+        id: ChromePresetId("gruvbox-light"),
+        name: "Gruvbox",
+        dark: false,
+        background: "#fbf1c7",
+        foreground: "#3c3836",
+        accent: "#af3a03",
+        success: "#79740e",
+        warning: "#a66c11",
+        danger: "#9d0006",
+    },
+    ChromePreset {
+        id: ChromePresetId("alucard"),
+        name: "Alucard",
+        dark: false,
+        background: "#fffbeb",
+        foreground: "#1f1f1f",
+        accent: "#644ac9",
+        success: "#14710a",
+        warning: "#846e15",
+        danger: "#cb3a2a",
+    },
+    ChromePreset {
+        id: ChromePresetId("one-light"),
+        name: "One Light",
+        dark: false,
+        background: "#fafafa",
+        foreground: "#383a42",
+        accent: "#4078f2",
+        success: "#468e45",
+        warning: "#aa7401",
+        danger: "#d85145",
+    },
+    ChromePreset {
+        id: ChromePresetId("github-light"),
+        name: "GitHub Light",
+        dark: false,
+        background: "#ffffff",
+        foreground: "#1f2328",
+        accent: "#0969da",
+        success: "#1a7f37",
+        warning: "#9a6700",
+        danger: "#d1242f",
+    },
+    ChromePreset {
+        id: ChromePresetId("everforest-light"),
+        name: "Everforest",
+        dark: false,
+        background: "#fdf6e3",
+        foreground: "#4a555c",
+        accent: "#3384b0",
+        success: "#728301",
+        warning: "#a37400",
+        danger: "#d84946",
+    },
+    ChromePreset {
+        id: ChromePresetId("rose-pine-dawn"),
+        name: "Rosé Pine Dawn",
+        dark: false,
+        background: "#faf4ed",
+        foreground: "#464261",
+        accent: "#ad6864",
+        success: "#4c848e",
+        warning: "#a86f22",
+        danger: "#b4637a",
+    },
+    ChromePreset {
+        id: ChromePresetId("solarized-light"),
+        name: "Solarized",
+        dark: false,
+        background: "#fdf6e3",
+        foreground: "#44565b",
+        accent: "#2381c4",
+        success: "#738400",
+        warning: "#9d7600",
+        danger: "#dc322f",
+    },
+    ChromePreset {
+        id: ChromePresetId("ayu-light"),
+        name: "Ayu Light",
+        dark: false,
+        background: "#f8f9fa",
+        foreground: "#505559",
+        accent: "#2e83bf",
+        success: "#4e8d2f",
+        warning: "#ab701f",
+        danger: "#da4b4b",
+    },
+    ChromePreset {
+        id: ChromePresetId("breeze-light"),
+        name: "Breeze",
+        dark: false,
+        background: "#eff0f1",
+        foreground: "#232629",
+        accent: "#2a7eaa",
+        success: "#1d894a",
+        warning: "#c05900",
+        danger: "#d44251",
+    },
+    ChromePreset {
+        id: ChromePresetId("adwaita-light"),
+        name: "Adwaita",
+        dark: false,
+        background: "#fafafb",
+        foreground: "#323237",
+        accent: "#327fdb",
+        success: "#007c3d",
+        warning: "#905400",
+        danger: "#c30000",
+    },
+    ChromePreset {
+        id: ChromePresetId("ubuntu-light"),
+        name: "Ubuntu",
+        dark: false,
+        background: "#fafafa",
+        foreground: "#3d3d3d",
+        accent: "#dd4f1e",
+        success: "#0f9323",
+        warning: "#b36e09",
+        danger: "#c7162b",
+    },
+    ChromePreset {
+        id: ChromePresetId("macos-classic-light"),
+        name: "macOS Classic",
+        dark: false,
+        background: "#ffffff",
+        foreground: "#1a1a1a",
+        accent: "#007aff",
+        success: "#036a07",
+        warning: "#9e7008",
+        danger: "#c5060b",
     },
 ];
 

@@ -9,6 +9,7 @@ use gpui::{
 };
 
 const PANE_DRAG_SOURCE_FADE: f32 = 0.3;
+const PANE_FOCUS_GLOW_ALPHA: f32 = 0.06;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PaneChrome {
@@ -54,7 +55,7 @@ impl PaneChrome {
 #[must_use]
 pub fn pane_border_color(active: bool, cx: &App) -> Hsla {
     if active {
-        cx.theme().foreground.wash()
+        cx.theme().accent
     } else {
         cx.theme().foreground.opacity(0.1)
     }
@@ -111,7 +112,7 @@ fn pane_focus_glow(radii: Corners<Pixels>, cx: &App) -> gpui::Div {
         .rounded_bl(radii.bottom_left)
         .rounded_br(radii.bottom_right)
         .shadow(vec![BoxShadow {
-            color: cx.theme().foreground.opacity(0.032),
+            color: cx.theme().accent.opacity(PANE_FOCUS_GLOW_ALPHA),
             offset: point(px(16.0), px(24.0)),
             blur_radius: px(96.0),
             spread_radius: px(-8.0),

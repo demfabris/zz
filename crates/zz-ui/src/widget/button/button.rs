@@ -50,6 +50,11 @@ pub trait ButtonVariants: Sized {
         self.with_variant(ButtonVariant::Primary)
     }
 
+    /// Solid, on the accent root: the one call to action a surface owns.
+    fn accent(self) -> Self {
+        self.with_variant(ButtonVariant::Accent)
+    }
+
     fn secondary(self) -> Self {
         self.with_variant(ButtonVariant::Secondary)
     }
@@ -115,6 +120,7 @@ pub enum ButtonVariant {
     #[default]
     Default,
     Primary,
+    Accent,
     Secondary,
     Danger,
     Success,
@@ -678,6 +684,13 @@ enum ButtonStyleState {
 }
 
 impl ButtonVariant {
+    fn solid(&self, cx: &App) -> Hsla {
+        match self {
+            Self::Accent => cx.theme().accent,
+            _ => cx.theme().foreground,
+        }
+    }
+
     fn outline_background(&self, state: ButtonStyleState, cx: &mut App) -> Hsla {
         match (self, state) {
             (Self::Default, ButtonStyleState::Normal) => cx.theme().background.raised(1).into(),
@@ -691,12 +704,12 @@ impl ButtonVariant {
                 .border()
                 .mix_oklab(cx.theme().transparent, 0.7)
                 .into(),
-            (Self::Primary, ButtonStyleState::Normal) => cx.theme().foreground.opacity(0.1),
-            (Self::Primary, ButtonStyleState::Hovered) => {
-                cx.theme().foreground.hover().opacity(0.2)
+            (Self::Primary | Self::Accent, ButtonStyleState::Normal) => self.solid(cx).opacity(0.1),
+            (Self::Primary | Self::Accent, ButtonStyleState::Hovered) => {
+                self.solid(cx).hover().opacity(0.2)
             }
-            (Self::Primary, ButtonStyleState::Active) => {
-                cx.theme().foreground.active().opacity(0.4)
+            (Self::Primary | Self::Accent, ButtonStyleState::Active) => {
+                self.solid(cx).active().opacity(0.4)
             }
             (Self::Secondary, ButtonStyleState::Normal) => {
                 cx.theme().background.raised(2).opacity(0.1)
@@ -728,7 +741,7 @@ impl ButtonVariant {
 
         match self {
             Self::Default => cx.theme().background.raised(1).into(),
-            Self::Primary => cx.theme().foreground.into(),
+            Self::Primary | Self::Accent => self.solid(cx).into(),
             Self::Secondary => cx.theme().background.raised(2).into(),
             Self::Danger => cx.theme().danger.fill().into(),
             Self::Warning => cx.theme().warning.fill().into(),
@@ -741,11 +754,11 @@ impl ButtonVariant {
     fn text_color(&self, outline: bool, cx: &mut App) -> Hsla {
         match self {
             Self::Default => cx.theme().foreground,
-            Self::Primary => {
+            Self::Primary | Self::Accent => {
                 if outline {
-                    cx.theme().foreground
+                    self.solid(cx)
                 } else {
-                    cx.theme().foreground.on()
+                    self.solid(cx).on()
                 }
             }
             Self::Secondary => {
@@ -787,7 +800,7 @@ impl ButtonVariant {
         match self {
             Self::Default => cx.theme().border(),
             Self::Secondary => cx.theme().border(),
-            Self::Primary => cx.theme().foreground,
+            Self::Primary | Self::Accent => self.solid(cx),
             Self::Danger => {
                 if outline {
                     cx.theme().danger.mix_oklab(transparent_white(), 0.4)
@@ -830,7 +843,7 @@ impl ButtonVariant {
     fn shadow(&self, outline: bool, _: &App) -> bool {
         match self {
             Self::Default => true,
-            Self::Primary | Self::Secondary | Self::Danger => outline,
+            Self::Primary | Self::Accent | Self::Secondary | Self::Danger => outline,
             Self::Custom(c) => c.shadow,
             _ => false,
         }
@@ -855,11 +868,11 @@ impl ButtonVariant {
     fn hovered(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
         let bg: Hsla = match self {
             Self::Default | Self::Secondary | Self::Ghost => cx.theme().background.washed(2),
-            Self::Primary => {
+            Self::Primary | Self::Accent => {
                 if outline {
                     self.outline_background(ButtonStyleState::Hovered, cx)
                 } else {
-                    cx.theme().foreground.hover().into()
+                    self.solid(cx).hover().into()
                 }
             }
             Self::Danger => {
@@ -914,11 +927,11 @@ impl ButtonVariant {
     fn active(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
         let bg = match self {
             Self::Default | Self::Secondary | Self::Ghost => cx.theme().background.washed(2),
-            Self::Primary => {
+            Self::Primary | Self::Accent => {
                 if outline {
                     self.outline_background(ButtonStyleState::Active, cx)
                 } else {
-                    cx.theme().foreground.active().into()
+                    self.solid(cx).active().into()
                 }
             }
             Self::Danger => {
@@ -976,7 +989,7 @@ impl ButtonVariant {
 
         let bg = match self {
             Self::Default | Self::Secondary | Self::Ghost => cx.theme().background.washed(2),
-            Self::Primary => cx.theme().foreground.active().into(),
+            Self::Primary | Self::Accent => self.solid(cx).active().into(),
             Self::Danger => cx.theme().danger.fill().active().into(),
             Self::Warning => cx.theme().warning.fill().active().into(),
             Self::Success => cx.theme().success.fill().active().into(),
@@ -1006,7 +1019,7 @@ impl ButtonVariant {
     fn disabled(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
         let bg = match self {
             Self::Default | Self::Link | Self::Ghost | Self::Text => cx.theme().transparent.into(),
-            Self::Primary => cx.theme().foreground.opacity(0.15),
+            Self::Primary | Self::Accent => self.solid(cx).opacity(0.15),
             Self::Danger => cx.theme().danger.fill().opacity(0.15),
             Self::Warning => cx.theme().warning.fill().opacity(0.15),
             Self::Success => cx.theme().success.fill().opacity(0.15),
@@ -1027,7 +1040,7 @@ impl ButtonVariant {
             )
         } else {
             let border = match self {
-                Self::Primary => cx.theme().foreground.opacity(0.15),
+                Self::Primary | Self::Accent => self.solid(cx).opacity(0.15),
                 Self::Secondary => cx.theme().background.raised(2).opacity(1.5),
                 Self::Danger => cx.theme().danger.fill().opacity(0.15),
                 Self::Warning => cx.theme().warning.fill().opacity(0.15),

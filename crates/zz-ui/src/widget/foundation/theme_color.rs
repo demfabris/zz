@@ -4,7 +4,7 @@ use gpui::Hsla;
 
 use super::{Colorize as _, color::edge_weight};
 
-/// The five palette roots and scrim the widget layer names. Read them off `cx.theme()`; derive
+/// The six palette roots and scrim the widget layer names. Read them off `cx.theme()`; derive
 /// everything else with [`Colorize`].
 ///
 /// [`Colorize`]: super::Colorize
@@ -15,6 +15,9 @@ pub struct ThemeColor {
     /// Default text, and the source of muted text, focus rings, links and
     /// selection and every edge.
     pub foreground: Hsla,
+    /// The one chromatic emphasis: a checked switch, the selected tile ring,
+    /// the active pane border and glow, the send button.
+    pub accent: Hsla,
     /// Something completed or is healthy.
     pub success: Hsla,
     /// Something needs attention but still works.

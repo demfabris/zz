@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
     PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
     PopupBorderLines, StyledSegment, ThemeColours, TmuxAttributeState, TmuxColour, TmuxStyle,
-    parse_style, parse_styled_segments,
+    apply_style, parse_style, parse_styled_segments,
 };
 use zz_terminal::{
     CellWidth, Color, Glyph, KittyPlacement, OverlayKind, OverlaySpan, PackedCell, PackedStyle,
@@ -2683,17 +2683,12 @@ fn write_styled_text(
 }
 
 fn grounded(style: &TmuxStyle, base: Option<&TmuxStyle>) -> TmuxStyle {
-    TmuxStyle {
-        fg: style
-            .fg
-            .or_else(|| base.and_then(|base| base.fg))
-            .or(Some(TmuxColour::Default)),
-        bg: style
-            .bg
-            .or_else(|| base.and_then(|base| base.bg))
-            .or(Some(TmuxColour::Default)),
-        ..style.clone()
-    }
+    let base = base.cloned().unwrap_or_default();
+    let mut grounded = base.clone();
+    apply_style(&mut grounded, style, &base);
+    grounded.fg = grounded.fg.or(Some(TmuxColour::Default));
+    grounded.bg = grounded.bg.or(Some(TmuxColour::Default));
+    grounded
 }
 
 fn write_border_text(

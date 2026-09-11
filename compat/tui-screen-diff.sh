@@ -401,6 +401,7 @@ OWNED_OPTIONS=(
   status-left-length status-right-length
   window-status-format window-status-current-format default-command
   automatic-rename pane-border-status pane-border-format pane-border-lines
+  pane-border-style pane-active-border-style
 )
 reset_owned_options() {
   local side="$1"
@@ -713,6 +714,28 @@ run_size() {
   checkpoint pane-border-top "$mode"
   set_on_both pane-border-status bottom
   checkpoint pane-border-bottom "$mode"
+
+  # BORDER STYLE ATTRIBUTES. MEASURED 2026-09-11 (cycle 6 modes gate): format_draw
+  # starts the pane status line from the border style, so its attributes stay on
+  # the border glyphs around the text and #[default] returns to them. The raw TUI
+  # kept only the style's colours on that row and dropped bold. The pin's divider
+  # row 11 at 80x24 with the lower pane active reads
+  # \e[1m\e[31m\e[44m══\e[7m1\e[0;1m\e[31m\e[44m "ptitle"══. The second checkpoint
+  # moves the status line to the bottom with the upper pane active, so the
+  # divider row carries the upper pane's status line in the active style.
+  set_on_both pane-active-border-style 'fg=colour1,bg=colour4,bold'
+  set_on_both pane-border-style 'fg=#ff8800'
+  set_on_both pane-border-lines double
+  set_on_both pane-border-status top
+  checkpoint pane-border-attributes-top "$mode"
+  set_on_both pane-border-lines heavy
+  set_on_both pane-border-status bottom
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  checkpoint pane-border-attributes-bottom "$mode"
+  run_on_both select-pane -t "=$INNER_SESSION:0.1"
+  run_on_both set-option -gu pane-active-border-style
+  run_on_both set-option -gu pane-border-style
+  run_on_both set-option -gu pane-border-lines
   set_on_both pane-border-status off
   checkpoint pane-border-off "$mode"
 
@@ -973,6 +996,17 @@ run_self_check() {
   side_command zz set-option -g pane-border-style fg=red || die 'zz refused pane-border-style'
   self_check_checkpoint border-style
   self_check_case 'border style, pane-border-style fg=red on one side' rows
+
+  SIZE_LABEL='80x24-border-attributes'
+  attach_both_at 80 24
+  run_on_both_active split-window -v "$INNER_SHELL"
+  pin_pane_titles
+  set_on_both pane-border-status top
+  set_on_both pane-active-border-style 'fg=colour1,bg=colour4'
+  side_command zz set-option -g pane-active-border-style 'fg=colour1,bg=colour4,bold' ||
+    die 'zz refused pane-active-border-style'
+  self_check_checkpoint border-attributes
+  self_check_case 'border attributes, bold only in pane-active-border-style on one side' rows
 
   SIZE_LABEL='80x24-cursor'
   attach_both_at 80 24

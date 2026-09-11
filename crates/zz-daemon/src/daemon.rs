@@ -7485,6 +7485,7 @@ impl Shared {
         let mut retired_popups = Vec::new();
         let mut deferred_terminal_commands = Vec::new();
         let mut injected_client_keys = Vec::new();
+        let mut mode_table_keys = Vec::new();
         let mut refresh_armed = false;
         let mut unfocused_copy_mode_exits = Vec::new();
         let mut pipes_to_close = Vec::new();
@@ -8278,6 +8279,11 @@ impl Shared {
                         }
                     }
                     MuxEffect::SendKeys { pane, keys, repeat } => {
+                        let owners = copy_mode_key_owners(&inner, client, *pane);
+                        if !owners.is_empty() {
+                            mode_table_keys.push((owners, *pane, keys.clone(), *repeat));
+                            continue;
+                        }
                         let sinks = resolve_input_sinks(&inner, *pane)?;
                         let mut terminals = Vec::new();
                         for sink in sinks {
@@ -9372,6 +9378,9 @@ impl Shared {
         }
         for (target, keys, repeat) in injected_client_keys {
             self.inject_client_keys(target, &keys, repeat);
+        }
+        for (owners, pane, keys, repeat) in mode_table_keys {
+            self.inject_mode_table_keys(&owners, pane, &keys, repeat);
         }
         if refresh_armed {
             self.arm_copy_mode_refresh();
@@ -19196,6 +19205,76 @@ impl Shared {
                         target: "zz_daemon::diagnostics::input",
                         "send-keys -K injection failed client={target} error={error}"
                     );
+                }
+            }
+        }
+        CLIENT_KEY_INJECTION_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+
+    fn inject_mode_table_keys(
+        self: &Arc<Self>,
+        owners: &[ClientId],
+        pane: PaneId,
+        keys: &[zz_protocol::KeyToken],
+        repeat: u32,
+    ) {
+        let inputs = keys.iter().flat_map(client_key_inputs).collect::<Vec<_>>();
+        if inputs.is_empty() {
+            return;
+        }
+        let entered = CLIENT_KEY_INJECTION_DEPTH.with(|depth| {
+            let entered = depth.get();
+            if entered < MAX_CLIENT_KEY_INJECTION_DEPTH {
+                depth.set(entered + 1);
+            }
+            entered
+        });
+        if entered >= MAX_CLIENT_KEY_INJECTION_DEPTH {
+            log::warn!(
+                target: "zz_daemon::diagnostics::input",
+                "send-keys into copy mode stopped at injection depth {entered} for pane={pane}"
+            );
+            return;
+        }
+        for owner in owners {
+            for _ in 0..repeat {
+                for input in &inputs {
+                    let key = prompt_key_spelling(input);
+                    let Some((kind, commands, mut context)) = ({
+                        let inner = self.inner.lock();
+                        inner
+                            .copy_sessions
+                            .get(owner)
+                            .filter(|session| session.pane == pane && !session.exiting)
+                            .and_then(|_| inner.engine.copy_mode_table_for_pane(pane).ok())
+                            .and_then(|table| inner.engine.keys.get(table, &key))
+                            .map(|binding| binding.commands.clone())
+                            .zip(ExecutionContext::for_pane(&inner.engine.state, pane))
+                            .map(|(commands, mut context)| {
+                                if let Some(environment) =
+                                    inner.client_environments.get(owner).cloned()
+                                {
+                                    context.set_client_environment(Some(environment));
+                                }
+                                let kind = inner
+                                    .client_kinds
+                                    .get(owner)
+                                    .copied()
+                                    .unwrap_or(ClientKind::Interactive);
+                                (kind, commands, context)
+                            })
+                    }) else {
+                        continue;
+                    };
+                    context.set_invoking_key(Some(key));
+                    if let Err(error) =
+                        self.execute_key_commands(*owner, kind, &mut context, pane, &commands, false)
+                    {
+                        log::warn!(
+                            target: "zz_daemon::diagnostics::input",
+                            "send-keys into copy mode failed client={owner} pane={pane} error={error}"
+                        );
+                    }
                 }
             }
         }
@@ -30970,6 +31049,19 @@ fn follow_command_output_focus(inner: &mut ServerState, client: ClientId, pane: 
     if let Some(output) = inner.command_outputs.get_mut(&client) {
         output.parked = !focused;
     }
+}
+
+fn copy_mode_key_owners(inner: &ServerState, client: ClientId, pane: PaneId) -> Vec<ClientId> {
+    let live = |session: &CopySession| session.pane == pane && !session.exiting;
+    if inner.copy_sessions.get(&client).is_some_and(live) {
+        return vec![client];
+    }
+    inner
+        .copy_sessions
+        .iter()
+        .filter(|(_, session)| live(session))
+        .map(|(owner, _)| *owner)
+        .collect()
 }
 
 fn pane_carries_a_mode_command(inner: &ServerState, client: ClientId, pane: PaneId) -> bool {
@@ -75015,6 +75107,73 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[cfg(unix)]
     #[test]
+    fn send_keys_and_send_prefix_into_copy_mode_run_the_copy_table() {
+        let (shared, client, mut context, pane, terminal, _mailbox) =
+            copy_mode_fixture("copy-send-keys", "printf 'one\\r\\ntwo\\r\\nthree\\r\\n'");
+        let target = pane.to_string();
+        let run = |context: &mut ExecutionContext, name: &str, arguments: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    &CommandInvocation::new(name, arguments.to_vec()),
+                )
+                .expect(name)
+                .output
+        };
+        let wait_for_answer = |context: &mut ExecutionContext, format: &str, expected: &str| {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                let got = run(context, "display-message", &["-p", "-t", &target, format]);
+                if got.trim_end() == expected {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "{format} stayed {got:?}, expected {expected:?}"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+        run(&mut context, "set-option", &["-g", "mode-keys", "vi"]);
+        enter_observed_copy_mode(&shared, client, &mut context, pane, &terminal);
+        let start = run(
+            &mut context,
+            "display-message",
+            &["-p", "-t", &target, "#{copy_cursor_y}"],
+        )
+        .trim_end()
+        .parse::<u32>()
+        .expect("copy cursor row");
+        assert!(start >= 2, "copy cursor row {start}");
+
+        run(&mut context, "send-keys", &["-t", &target, "Z", "k"]);
+        wait_for_answer(&mut context, "#{copy_cursor_y}", &(start - 1).to_string());
+
+        run(&mut context, "set-option", &["-g", "prefix", "k"]);
+        run(&mut context, "send-prefix", &["-t", &target]);
+        wait_for_answer(&mut context, "#{copy_cursor_y}", &(start - 2).to_string());
+
+        run(&mut context, "send-keys", &["-t", &target, "-X", "cancel"]);
+        wait_for_answer(&mut context, "#{pane_in_mode}", "0");
+        run(&mut context, "send-keys", &["-t", &target, "LIVE", "Enter"]);
+        wait_for_viewport(
+            &terminal,
+            TerminalViewId(client.0),
+            "keys sent after the cancel never reached the pane",
+            |viewport| viewport_text(viewport).contains("LIVE"),
+        );
+        let text = viewport_text(
+            &terminal
+                .latest_viewport_for(TerminalViewId(client.0))
+                .expect("viewport"),
+        );
+        assert!(!text.contains('Z'), "a key sent into copy mode reached the pane: {text:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn exiting_copy_session_stays_claimed_until_live_mode_is_published() {
         let (shared, client, _context, pane, _terminal, _mailbox) =
             copy_mode_fixture("copy-exit-order", ":");
@@ -97283,9 +97442,12 @@ bind - split-window -v -c "#{pane_current_path}"
             ))
             .unwrap();
         commands
+            .execute(CommandInvocation::new("set-buffer", ["MODE_LIVE_ONLY\n"]))
+            .unwrap();
+        commands
             .execute(CommandInvocation::new(
-                "send-keys",
-                ["-t", &pane_target, "MODE_LIVE_ONLY", "Enter"],
+                "paste-buffer",
+                ["-d", "-t", &pane_target],
             ))
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(30);

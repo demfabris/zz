@@ -229,6 +229,10 @@ This default-key policy does not reinterpret imported bindings: explicit `split-
 
 The prefix key itself is bound to **`send-prefix`** in the prefix table, matching tmux's stock
 `bind C-b send-prefix`, so `<prefix> <prefix>` delivers one literal prefix keystroke to the pane.
+A pane in copy mode gets that key through the mode's own table instead, as the pin's
+`cmd_send_keys_inject_key` does for `send-prefix` and for `send-keys` without `-X`: a bound key
+runs its binding with the pane as target, an unbound one is dropped, so `C-b C-b` pages up in
+`copy-mode-vi` and moves left in `copy-mode`.
 `set-option prefix` carries that binding to the new key unless the user has rebound it.
 `prefix2` carries no stock binding and `set_prefix2` never touches the tables, matching the pin's
 default bindings; `send-prefix -2` sends the second prefix, and is a silent success while

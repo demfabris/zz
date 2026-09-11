@@ -794,6 +794,7 @@ table_keys() {
     KEY_RIGHT=C-f
     KEY_BEGINSEL=C-Space KEY_RECT=R KEY_COPY=M-w KEY_CANCEL=q
     KEY_SEARCHFWD=C-s KEY_SEARCHBACK=C-r KEY_COUNT=M-5
+    SEND_PREFIX_OBSERVABLE='#{copy_cursor_x}=2'
     SEARCH_OPEN_MODE=text,cursor,facts,view,buffer
     SEARCH_OPEN_REASON="$MATCH_REASON; the incremental search already paints the current match"
     ;;
@@ -803,6 +804,7 @@ table_keys() {
     KEY_RIGHT=l
     KEY_BEGINSEL=Space KEY_RECT=v KEY_COPY=Enter KEY_CANCEL=q
     KEY_SEARCHFWD=/ KEY_SEARCHBACK='?' KEY_COUNT=5
+    SEND_PREFIX_OBSERVABLE='#{scroll_position}=22'
     SEARCH_OPEN_MODE=rows,text,cursor,facts,view,buffer
     SEARCH_OPEN_REASON=''
     ;;
@@ -977,6 +979,35 @@ run_movement() {
   type_both '['
   type_both "$KEY_UP"
   copy_case "$table-prefix-returns-to-the-copy-table" none ''
+
+  # SEND-PREFIX INTO THE COPY TABLE. The second C-b of C-b C-b runs
+  # send-prefix, and cmd_send_keys_inject_key (cmd-send-keys.c:94-100) hands a
+  # key sent to a pane in a mode to that mode's table instead of the pane:
+  # cursor-left in copy-mode, page-up in copy-mode-vi. zz used to write the key
+  # to the pane, so nothing moved (measured by the cycle-5 review's probe2).
+  reenter_copy_mode "$table send-prefix"
+  type_both "$KEY_UP"
+  type_both "$KEY_UP"
+  type_both "$KEY_SOL"
+  type_both "$KEY_RIGHT"
+  type_both "$KEY_RIGHT"
+  type_both "$KEY_RIGHT"
+  copy_case "$table-send-prefix-start" format '#{copy_cursor_x}=3'
+  type_prefix_both C-b
+  copy_case "$table-send-prefix-runs-the-copy-binding" format "$SEND_PREFIX_OBSERVABLE"
+
+  # SEND-KEYS INTO A PANE IN COPY MODE, from the command line. The same
+  # lookup: Z is bound in neither stock table, so the pin drops it, and -N 2
+  # repeats the pair, so the cursor goes up twice. The cancel checkpoint's
+  # text channel shows whether any of it reached the shell.
+  reenter_copy_mode "$table send-keys"
+  side_command zz send-keys -t "=$SESSION_NAME:0.0" -N 2 Z "$KEY_UP" ||
+    die 'zz refused send-keys into copy mode'
+  side_command tmux send-keys -t "=$SESSION_NAME:0.0" -N 2 Z "$KEY_UP" ||
+    die 'tmux refused send-keys into copy mode'
+  copy_case "$table-send-keys-runs-the-copy-table" format '#{copy_cursor_y}=21'
+  type_both "$KEY_CANCEL"
+  copy_case "$table-send-keys-cancel" format '#{pane_in_mode}=0'
 }
 
 # THE PAGE CLAMP. window_copy_pageup1 and window_copy_pagedown1
@@ -1586,6 +1617,41 @@ run_self_check() {
   self_check_compare page-clamp
   self_check_case 'cursor: the page landing on column 0 on the zz side only' cursor
   self_check_case 'facts: the page landing on column 0 on the zz side only' facts
+
+  # facts and view: C-b C-b on the pin side only, which is what zz's
+  # send-prefix used to amount to inside copy-mode-vi: nothing at all.
+  attach_both_at
+  set_on_both mode-keys vi
+  seed_pane
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_both k
+  type_both k
+  type_side tmux C-b C-b
+  await_observable tmux format '#{scroll_position}=22' || true
+  self_check_compare send-prefix-one-sided
+  self_check_case 'facts: C-b C-b on the pin side only' facts
+  self_check_case 'view: C-b C-b on the pin side only' view
+
+  # text: send-keys to the pane while it is in copy mode on the pin side, and
+  # to the same pane after a cancel on the zz side, so the keys reach zz's
+  # shell the way zz's send-keys used to deliver them in copy mode.
+  attach_both_at
+  set_on_both mode-keys vi
+  seed_pane
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  side_command tmux send-keys -t "=$SESSION_NAME:0.0" -N 2 Z k || die 'tmux refused send-keys'
+  side_command tmux send-keys -t "=$SESSION_NAME:0.0" -X cancel || die 'tmux refused cancel'
+  side_command zz send-keys -t "=$SESSION_NAME:0.0" -X cancel || die 'zz refused cancel'
+  await_observable zz format '#{pane_in_mode}=0' || true
+  await_observable tmux format '#{pane_in_mode}=0' || true
+  side_command zz send-keys -t "=$SESSION_NAME:0.0" -N 2 Z k || die 'zz refused send-keys'
+  await_observable zz screen 'ZkZk' || true
+  self_check_compare send-keys-reach-the-shell
+  self_check_case 'text: keys sent into copy mode reach the shell on the zz side only' text
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"

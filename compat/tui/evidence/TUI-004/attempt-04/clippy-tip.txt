@@ -1,0 +1,14 @@
+$ cargo clippy -p zz-protocol -p zz-daemon -p zz-tui --all-targets --all-features --jobs 4 -- -D warnings (through the slot-and-cap wrapper, 5G)
+# revision a25c5b39, 2026-09-11 11:20
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-modes/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+    Checking zz-protocol v0.7.0 (/home/demfabris/dev/zz-tui-modes/crates/zz-protocol)
+    Checking zz-mux v0.7.0 (/home/demfabris/dev/zz-tui-modes/crates/zz-mux)
+    Checking zz-client v0.7.0 (/home/demfabris/dev/zz-tui-modes/crates/zz-client)
+    Checking zz-daemon v0.7.0 (/home/demfabris/dev/zz-tui-modes/crates/zz-daemon)
+    Checking zz-tui v0.7.0 (/home/demfabris/dev/zz-tui-modes/crates/zz-tui)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.84s
+exit 0

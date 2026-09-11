@@ -1,0 +1,22 @@
+Proofs at the tip, revision a25c5b392b5da4a9669d50a4781004027a17d3ed, clean tree, 2026-09-11.
+ZZ_BIN=/home/demfabris/dev/zz-tui-modes/target/debug/zz (sha256 in environment.txt), pin /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux.
+
+PATH=/opt/homebrew/bin:$PATH ZZ_BIN=<zz> TMUX_BIN=<pin> ZZ_COMPAT_TMUX=<pin> ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/attached-client.sh -> exit 0, attached-client compatibility: PASS (attached-client-tip.txt)
+compat/tui-indicators.sh -> exit 0, 23 asserted identical, 0 recorded (indicators-run-1.txt)
+compat/tui-indicators.sh -> exit 0, same (indicators-run-2.txt)
+compat/tui-indicators.sh -> exit 0, same (indicators-run-3.txt)
+compat/tui-indicators.sh --self-check -> exit 0, every sabotage caught, equivalence passed (indicators-self-check.txt)
+compat/tui-screen-diff.sh -> exit 0, all 113 asserted checkpoints identical, 28 recorded (screen-diff-tip.txt)
+compat/tui-screen-diff.sh --self-check -> exit 0, every sabotage caught in its own channel (screen-diff-self-check.txt)
+compat/tui-pane-geometry.sh -> exit 0, all 6 asserted measurements identical (pane-geometry-tip.txt)
+LC_ALL=C LC_TIME=C compat/status-row.sh <zz> <pin> -> exit 0, all 14 comparisons identical, none recorded (status-row-tip.txt)
+compat/tui-stock-keys.sh -> exit 0, all 50 cases agree, 12 recorded a difference elsewhere (stock-keys-tip.txt)
+THROWAWAY FLIP of compat/tui-copy-mode.sh with the 13 MATCH_REASON cases asserting rows -> exit 0, all 115 cases agree (copy-mode-match-flip-tip.txt)
+<zz_daemon test binary> --exact daemon::tests::client_focus_closes_display_panes_and_preserves_chooser_modes x20 -> 20 of 20 passed (daemon-focus-flake-tip.txt)
+cargo test -p zz-protocol -p zz-tui --jobs 4 -- --test-threads=3 -> exit 0 (unit-tests-protocol-tui.txt)
+cargo test -p zz-daemon --lib --jobs 4 -- --test-threads=3 -> exit 0, 864 passed (zz-daemon-unit-tests.txt)
+cargo test -p zz-daemon --test '*' --jobs 4 -- --test-threads=3 -> exit 0 (zz-daemon-integration-tests.txt)
+cargo test -p zz --jobs 4 -- --test-threads=3 -> exit 0 (zz-integration-tests.txt)
+cargo clippy -p zz-protocol -p zz-daemon -p zz-tui --all-targets --all-features --jobs 4 -- -D warnings -> exit 0 (clippy-tip.txt)
+python3 compat/tui/tracker.py check -> exit 0; python3 compat/tmux-tracker.py check -> exit 0 (trackers-tip.txt)
+Every cargo command ran through: systemd-run --user --scope -q -p MemoryMax=5G -p MemorySwapMax=2G flock -w 540 /tmp/zz-cargo-slot-N.lock

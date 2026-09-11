@@ -1,0 +1,6 @@
+$ python3 compat/tui/tracker.py check
+compat/tui/campaign.json is valid and knowledge/tmux/tui-parity.md is current
+exit 0
+$ python3 compat/tmux-tracker.py check
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+exit 0

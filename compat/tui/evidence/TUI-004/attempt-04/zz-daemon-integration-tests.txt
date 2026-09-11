@@ -1,0 +1,99 @@
+$ cargo test -p zz-daemon --tests --jobs 4 -- --test-threads=3 (integration binaries; --lib ran separately; through the slot-and-cap wrapper, 5G)
+# revision a25c5b39, 2026-09-11 11:13
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-modes/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+   Compiling zz-daemon v0.7.0 (/home/demfabris/dev/zz-tui-modes/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.32s
+     Running tests/agent_soak.rs (target/debug/deps/agent_soak-37d80b9bd4a949ec)
+
+running 3 tests
+test agent_stream_soak ... ignored, streaming soak: minutes of adapter output, run it explicitly
+test agent_send_wait_round_trip ... ok
+test agent_stream_soak_slow_client ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.07s
+
+     Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-b4328572046a72f5)
+
+running 3 tests
+test menu_rows_fit_the_clients_cells_and_keep_their_action_keys ... ok
+test the_title_seeds_the_menu_width_and_an_overwide_title_refuses_the_menu ... ok
+test a_long_row_still_opens_a_menu_a_narrow_client_can_show ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.95s
+
+     Running tests/display_menu_resize_lifecycle.rs (target/debug/deps/display_menu_resize_lifecycle-2e61eb0cf6d5c7ca)
+
+running 1 test
+test a_resize_moves_the_menu_and_keeps_everything_else ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s
+
+     Running tests/display_menu_shortcut_grammar.rs (target/debug/deps/display_menu_shortcut_grammar-8c648bdfb1fcb543)
+
+running 2 tests
+test a_disabled_row_carries_no_shortcut ... ok
+test display_menu_keeps_only_shortcuts_an_attached_client_can_press ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.83s
+
+     Running tests/display_popup_resize_lifecycle.rs (target/debug/deps/display_popup_resize_lifecycle-32b06014ee41315c)
+
+running 2 tests
+test a_borderless_popup_resizes_to_the_whole_viewport ... ok
+test a_resize_rebuilds_the_popup_from_what_it_asked_for ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+
+     Running tests/format_client_loop_context.rs (target/debug/deps/format_client_loop_context-977536147af98c8e)
+
+running 5 tests
+test an_empty_roster_produces_no_positions_at_all ... ok
+test one_client_is_index_zero_and_the_last_row ... ok
+test a_nested_loop_owns_the_position_only_while_its_rows_run ... ok
+test the_position_formats_stay_empty_outside_every_loop ... ok
+test two_clients_count_from_zero_and_only_the_final_row_carries_the_flag ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.81s
+
+     Running tests/format_environment_loop_context.rs (target/debug/deps/format_environment_loop_context-bc667b6d7cc7a5f7)
+
+running 5 tests
+test hidden_and_removed_entries_report_their_own_flags ... ok
+test each_row_reports_its_own_entry_and_its_position ... ok
+test a_nested_loop_owns_the_row_formats_only_while_its_rows_run ... ok
+test none_of_the_six_formats_answer_outside_a_loop ... ok
+test the_global_and_client_stores_carry_the_same_six_formats ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s
+
+     Running tests/format_modifier_client_loop.rs (target/debug/deps/format_modifier_client_loop-21dc2a4d5159fc2e)
+
+running 6 tests
+test a_server_with_no_attached_client_expands_the_loop_to_nothing ... ok
+test every_attached_client_owns_one_row_and_the_command_client_owns_none ... ok
+test attaching_and_detaching_change_the_roster_the_loop_walks ... ok
+test a_row_answers_the_client_formats_for_its_own_client ... ok
+test nested_and_malformed_client_loops_keep_the_pinned_fallback ... ok
+test the_order_flags_and_reversal_follow_the_pinned_comparator ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.49s
+
+     Running tests/format_modifier_environment_loop.rs (target/debug/deps/format_modifier_environment_loop-397bdf63ef80bf7a)
+
+running 8 tests
+test an_emptied_session_store_produces_no_rows_while_the_global_one_keeps_its_own ... ok
+test an_unspelled_flag_word_leaves_no_store_and_no_rows ... ok
+test hidden_and_removed_entries_keep_their_rows ... ok
+test each_flag_word_reads_its_own_store_when_the_names_collide ... ok
+test nested_and_malformed_environment_loops_keep_the_pinned_fallback ... ok
+test the_default_and_the_session_flag_walk_the_sessions_own_store ... ok
+test the_client_store_is_the_invoking_clients_own_environment ... ok
+test the_row_formats_stay_empty_outside_a_loop ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.85s
+
+exit 0

@@ -1,0 +1,18 @@
+TUI-004 attempt-04 environment, captured 2026-09-11 10:57:18 -0300
+host: alienware
+os: Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+cores: 16
+worktree: /home/demfabris/dev/zz-tui-modes
+revision: a25c5b392b5da4a9669d50a4781004027a17d3ed (Record the second status row under a split, where zz-mux sizes the window from the active pane)
+tree state: clean (untracked build.log/check.log/*.log are ignored scratch)
+base: 5d9bf198 (origin/campaign/tui-cycle5-gated)
+zz binary: /home/demfabris/dev/zz-tui-modes/target/debug/zz, built with: systemd-run --user --scope -q -p MemoryMax=5G -p MemorySwapMax=2G flock -w 540 /tmp/zz-cargo-slot-N.lock cargo build -p zz --jobs 4
+zz sha256: 36cf549f93e10ca5ab0b3709de33dcddbc2280e4c4947c5c1d0a67f65716d45a (a debug build is not bit-reproducible here; the revision plus the clean tree attests it)
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux, tmux next-3.8, sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5, source commit d77c9dc6aa021e4bc61f0da128c591af695e6466
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+TERM=xterm-ghostty
+SHELL=/bin/bash, bash 5.3.15(1)-release
+locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8 LC_ALL=
+HOME and XDG_CONFIG_HOME were scrubbed by every fixture and probe; the box's ~/.tmux.conf and ~/.config/zz/mux.conf were never read.

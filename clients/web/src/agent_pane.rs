@@ -25,7 +25,7 @@ use zz_ui::{
         AgentToolKind, AgentToolPayload, AgentToolStatus, COMPOSER_ATTACHMENT, MarkdownSlot,
         TimelineRow, TimelineStick, agent_attachment_thumbnail, agent_jump_to_bottom_button,
         agent_pane_header,
-        composer::{AgentComposer, composer_tail_clearance},
+        composer::{AgentComposer, COMPOSER_OUTER_PADDING},
         controls::{
             AgentControlChoice, ComposerAction, agent_chrome_button, agent_config_picker,
             composer_action, composer_action_button, context_usage_meter, git_summary_footer,
@@ -1716,7 +1716,7 @@ impl Render for AgentPane {
             self.permission_selected = 0;
             self.permission_answered = false;
         }
-        self.stick.set_bottom_padding(composer_tail_clearance());
+        self.stick.set_bottom_padding(COMPOSER_OUTER_PADDING);
         self.drive_stick(window, cx);
         let show_jump = !self.rows.is_empty() && self.stick.shows_jump_button();
         let mut prefix = Vec::new();
@@ -1980,7 +1980,7 @@ impl Render for AgentPane {
                                 self.timeline.clone(),
                             )
                             .active_turn(running)
-                            .bottom_padding(composer_tail_clearance()),
+                            .bottom_padding(COMPOSER_OUTER_PADDING),
                         )
                         .child(
                             div()
@@ -1988,31 +1988,36 @@ impl Render for AgentPane {
                                 .top_0()
                                 .left_0()
                                 .right_0()
-                                .bottom(px(composer_tail_clearance()))
+                                .bottom(px(COMPOSER_OUTER_PADDING))
                                 .child(Scrollbar::vertical(&self.scroll)),
+                        )
+                    })
+                    .when(show_jump, |area| {
+                        area.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom(px(2.0 * COMPOSER_OUTER_PADDING))
+                                .flex()
+                                .justify_center()
+                                .child(
+                                    agent_jump_to_bottom_button(
+                                        ("web-agent-jump-to-end", self.pane.0),
+                                        cx,
+                                    )
+                                    .on_click(cx.listener(
+                                        |this, _, _, cx| {
+                                            this.stick.engage(&this.scroll, cx.reduce_motion());
+                                            cx.notify();
+                                            cx.stop_propagation();
+                                        },
+                                    )),
+                                ),
                         )
                     }),
             )
             .child(composer)
-            .when(show_jump, |pane| {
-                pane.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .right_0()
-                        .bottom(px(composer_tail_clearance()))
-                        .flex()
-                        .justify_center()
-                        .child(
-                            agent_jump_to_bottom_button(("web-agent-jump-to-end", self.pane.0), cx)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.stick.engage(&this.scroll, cx.reduce_motion());
-                                    cx.notify();
-                                    cx.stop_propagation();
-                                })),
-                        ),
-                )
-            })
             .when(self.history_open, |pane| {
                 pane.child(self.history(ready && !running, cx))
             })

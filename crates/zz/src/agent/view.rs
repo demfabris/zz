@@ -3,9 +3,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use zz_ui::agent::composer::composer_tail_clearance;
-#[cfg(test)]
-use zz_ui::agent::composer::{COMPOSER_OUTER_PADDING, composer_total_height};
+use zz_ui::agent::composer::COMPOSER_OUTER_PADDING;
 use zz_ui::agent::controls::{
     AgentControlChoice, ComposerAction, agent_chrome_button, agent_config_picker, composer_action,
     composer_action_button, context_usage_meter, git_summary_footer,
@@ -1579,7 +1577,7 @@ impl AgentView {
             .absolute()
             .left_0()
             .right_0()
-            .bottom(px(composer_tail_clearance()))
+            .bottom(px(2.0 * COMPOSER_OUTER_PADDING))
             .flex()
             .justify_center()
             .child(
@@ -2275,8 +2273,7 @@ impl Render for AgentView {
         let rows = self.timeline.rows.clone();
         let has_timeline = !rows.is_empty();
         let show_jump = has_timeline && self.stick.shows_jump_button();
-        let timeline_clearance = composer_tail_clearance();
-        self.stick.set_bottom_padding(timeline_clearance);
+        self.stick.set_bottom_padding(COMPOSER_OUTER_PADDING);
         self.drive_stick(window, cx);
         let view = cx.entity();
         let local_host = self.mux.read(cx).attached_host() == HostId::LOCAL;
@@ -2306,6 +2303,7 @@ impl Render for AgentView {
             .child(
                 div()
                     .id(("agent-thread-scroll", self.pane.0))
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
@@ -2328,7 +2326,7 @@ impl Render for AgentView {
                                 self.timeline_store.clone(),
                             )
                             .active_turn(state.connection.has_active_turn())
-                            .bottom_padding(timeline_clearance),
+                            .bottom_padding(COMPOSER_OUTER_PADDING),
                         )
                         .child(
                             div()
@@ -2336,15 +2334,15 @@ impl Render for AgentView {
                                 .top_0()
                                 .left_0()
                                 .right_0()
-                                .bottom(px(timeline_clearance))
+                                .bottom(px(COMPOSER_OUTER_PADDING))
                                 .child(Scrollbar::vertical(&self.timeline_scroll)),
                         )
+                    })
+                    .when(show_jump, |this| {
+                        this.child(self.render_jump_to_end(&view, cx))
                     }),
             )
             .child(self.render_composer(&state, &view, local_host, cx))
-            .when(show_jump, |this| {
-                this.child(self.render_jump_to_end(&view, cx))
-            })
             .when(self.history_open, |this| {
                 this.child(self.render_history_overlay(&state, &view, cx))
             })
@@ -3138,16 +3136,6 @@ mod completion_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn composer_geometry_tracks_the_rendered_stack() {
-        assert_eq!(composer_total_height(), 146.0);
-        assert_eq!(composer_tail_clearance(), 158.0);
-        assert_eq!(
-            composer_tail_clearance() - composer_total_height(),
-            COMPOSER_OUTER_PADDING
-        );
-    }
 
     #[test]
     fn context_usage_is_bounded_and_handles_an_unknown_window() {

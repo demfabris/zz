@@ -13,17 +13,6 @@ pub const COMPOSER_INPUT_PADDING_TOP: f32 = 12.0;
 pub const COMPOSER_INPUT_PADDING_X: f32 = 14.0;
 pub const COMPOSER_MAX_WIDTH: f32 = AGENT_CONTENT_MAX_WIDTH + 2.0;
 
-pub const fn composer_total_height() -> f32 {
-    COMPOSER_MIN_HEIGHT
-        + 2.0 * COMPOSER_OUTER_PADDING
-        + COMPOSER_SECTION_GAP
-        + COMPOSER_FOOTER_HEIGHT
-}
-
-pub const fn composer_tail_clearance() -> f32 {
-    composer_total_height() + COMPOSER_OUTER_PADDING
-}
-
 #[derive(IntoElement)]
 pub struct AgentComposer {
     pub input: Entity<InputState>,
@@ -39,17 +28,16 @@ pub struct AgentComposer {
 
 impl RenderOnce for AgentComposer {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let has_prefix = !self.prefix.is_empty();
         v_flex()
-            .absolute()
-            .left(px(0.0))
-            .right(px(0.0))
-            .bottom(px(0.0))
+            .flex_none()
             .w_full()
+            .when(!has_prefix, |this| this.mt(px(-COMPOSER_OUTER_PADDING)))
             .child(
                 v_flex()
                     .w_full()
                     .px(px(COMPOSER_OUTER_PADDING))
-                    .pt(px(COMPOSER_OUTER_PADDING))
+                    .when(has_prefix, |this| this.pt(px(COMPOSER_OUTER_PADDING)))
                     .child(
                         v_flex()
                             .w_full()
@@ -64,11 +52,7 @@ impl RenderOnce for AgentComposer {
                                     .rounded(cx.theme().radius)
                                     .border_1()
                                     .border_color(cx.theme().border())
-                                    .bg(cx
-                                        .theme()
-                                        .background
-                                        .raised(1)
-                                        .opacity(cx.theme().pane_background_opacity))
+                                    .bg(cx.theme().background.raised(1).opaque())
                                     .when(cx.theme().shadow, gpui::Styled::shadow_xs)
                                     .children(self.attachments)
                                     .child(

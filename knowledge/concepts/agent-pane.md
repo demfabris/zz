@@ -499,12 +499,14 @@ Markdown state.
 
 The transcript is a variable-height GPUI `ListState`, so only visible rows plus 1200 px of overdraw
 are measured and rendered. Every row uses a centered 680 px content column with responsive side
-padding; the composer extends one pixel beyond that column on each side. The composer floats over the
-bottom of the full-height transcript without a section divider or a full-width underlay. Its card is
-the only opaque surface, so content remains visible while scrolling beneath the floating composer.
-The footer remains present because it holds the working-directory picker.
-`composer_tail_clearance` aligns the settled transcript tail with the card's top edge rather than the
-composer's outer padding, and the scrollbar uses the same cutoff. Controller updates for other panes
+padding; the composer extends one pixel beyond that column on each side. The composer occupies its
+measured height below the transcript, including attachments, wrapped input, and permission cards.
+With no prefix cards, the input overlaps the transcript by 12 px with no top gap, so content scrolls
+behind its opaque edge. The transcript clips within that overlap, before reaching the footer.
+Permission, error, queue, and completion prefixes keep their top spacing without overlap.
+Only the input card paints an opaque background; its surroundings inherit the pane transparency.
+The footer remains present because it holds the working-directory picker. The transcript reserves
+12 px of bottom padding, and its scrollbar stops 12 px above the viewport bottom. Controller updates for other panes
 or unchanged pane metadata do not invalidate this view.
 
 The pane-owned timeline store keys body Markdown and materialized tool content separately by entry
@@ -652,8 +654,8 @@ invites a no-op. The Send, Queue, and Stop states share one 28 px icon-only butt
 `rounded_full()`,
 so it stays a true circle instead of inheriting the widget radius or squircle smoothing. The
 jump-to-latest control is its mirror: a 26 px `rounded_full()` disc carrying the arrow-down twin of
-Send's arrow-up, floated over the timeline at `composer_tail_clearance()` so it clears the composer
-card rather than sitting on it, and labelled by tooltip alone. A separate
+Send's arrow-up, floated 24 px above the bottom of the clipped timeline viewport and labelled by
+tooltip alone. A separate
 compact footer under the card carries the current Git branch and `N files +A -D` summary on the
 left; its right side holds the 16 px context-usage ring and working-directory picker. The ring fills
 clockwise, exposes exact token counts and percentage in its tooltip and accessibility value, and

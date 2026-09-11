@@ -1,0 +1,11 @@
+$ PATH=/opt/homebrew/bin:$PATH ZZ_BIN=<worktree>/target/debug/zz ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=... compat/tui-pane-geometry.sh
+# revision a25c5b39, clean tree, 2026-09-11 11:14:15
+pane geometry differential (pin tmux)
+ok    80x24 columns: both 80
+ok    80x24 rows: both 23
+ok    100x24 columns: both 100
+ok    100x24 rows: both 23
+ok    120x24 columns: both 120
+ok    120x24 rows: both 23
+all 6 asserted measurements identical
+exit 0

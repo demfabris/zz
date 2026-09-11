@@ -1,5 +1,5 @@
 --- compat/tui-copy-mode.sh	2026-09-11 09:44:40.948324817 -0300
-+++ <scratchpad>/tui-copy-mode-flip.sh	2026-09-11 10:22:40.709048889 -0300
++++ flip-throwaway.sh	2026-09-11 11:14:33.904325807 -0300
 @@ -118,7 +118,7 @@
    printf '       ZZ_BIN=path TMUX_BIN=path compat/tui-copy-mode.sh\n' >&2
  }

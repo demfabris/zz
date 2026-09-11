@@ -1,8 +1,8 @@
 export const meta = {
   name: 'tui-run-6',
-  description: 'TUI parity cycle 6: five Opus 5 continuation lanes at xhigh working the punch lists cycle 5 left (modes TUI-004, copy TUI-005, caps TUI-009, overlays TUI-007, choosers TUI-006), one adversarial reviewer per lane with one bounded fix pass, then one gate agent per branch in order, each pushing main when green',
+  description: 'TUI parity cycle 6: five Opus 5 continuation lanes at xhigh, at most two agents working at once, working the punch lists cycle 5 left (modes TUI-004, copy TUI-005, caps TUI-009, overlays TUI-007, choosers TUI-006), one adversarial reviewer per lane with one bounded fix pass, then one gate agent per branch in order, each pushing main when green',
   phases: [
-    { title: 'Work', detail: 'five worktrees, each starting where cycle 5 stopped' },
+    { title: 'Work', detail: 'five worktrees, each starting where cycle 5 stopped; two lanes at a time' },
     { title: 'Review', detail: 'one Opus 5 reviewer at xhigh per lane, adversarial, pipelined behind its worker; a rejected lane gets one fix pass and a re-review' },
     { title: 'Integrate', detail: 'one Opus 5 gate agent per branch, in the order modes, copy, caps, overlays, choosers; each rebases, tests, flips its sibling cases, writes its records, pushes main' },
   ],
@@ -14,17 +14,17 @@ const M = {
   dev: A.dev || '/home/demfabris/dev',
   holder: A.holder || 'alienware/orchestrator',
   machine: A.machine || '16-core, 15 GB (plus 15 GB zram) CachyOS Linux box (alienware)',
-  workerJobs: A.workerJobs || 3,
-  workerThreads: A.workerThreads || 2,
-  gateJobs: A.gateJobs || 8,
+  workerJobs: A.workerJobs || 4,
+  workerThreads: A.workerThreads || 3,
+  gateJobs: A.gateJobs || 6,
   gateThreads: A.gateThreads || 4,
   date: A.date || '2026-09-11',
   base: A.base || 'origin/campaign/tui-cycle5-gated',
   protected: A.protected || "nothing at launch: no zz daemon or tmux server of the user's was running on this box when cycle 6 started; if one appears mid-run it is the user's. Never touch a server on the default sockets (/run/user/1000/zz/default.sock, /tmp/tmux-1000/default) that you did not start",
-  boxNote: A.boxNote || "This box (alienware) is LINUX: CachyOS (Arch-based), 16 cores, 15 GB RAM plus 15 GB zram swap; /bin/bash is 5.x; the filesystem is btrfs; /opt/homebrew does not exist, so the PATH=/opt/homebrew/bin:$PATH prefix this prompt carries is harmless. Where a prompt says sw_vers, use uname -a plus head -2 /etc/os-release for the OS line. The zz daemon ring log lands under the scrubbed HOME at .local/state/zz/logs/. The compat caches are populated and cycles 1, 3, 4 and 5 ran here: every TUI fixture is known green at origin/main EXCEPT compat/status-row.sh under the box locale (LC_TIME=pt_BR.UTF-8 changes %b; the LC_ALL=C LC_TIME=C control exits 0), and four corpus rows are environmental here (micro-flags, show-options-hooks, lane2-store, smoke/plugin-runtime-resurrect-restore). Slow corpus rows that pass alone: command-item-format (up to 8 minutes), command-prompt-editing (about 4 minutes), copy-mode-stock-action-keys. A red row or fixture at your tip is yours only if it is green at origin/main on this box. Known fixture fragility: compat/tui-stock-keys.sh root-binding-detaches can flake on a wall-clock second boundary and its recorded count wobbles; tui-screen-diff.sh --self-check exited 2 once ('zz refused status-right') and passed solo. zz-daemon client_focus_closes_display_panes_and_preserves_chooser_modes fails about 1 run in 10 even exact-solo at BASE: the modes lane owns it this cycle, so elsewhere a single red there reruns and is named as this known flake, not chased. A single Bash call is capped at 600 seconds and a longer command is moved to the background and killed: pass timeout of at most 590000 and split long work. A cargo debug build of zz is NOT bit-reproducible here: a hash identifies an artifact, the revision plus a clean worktree attests it. The box has a real ~/.tmux.conf and ~/.config/zz/mux.conf: never read or edit them and never start a server that would load them (scrub HOME and XDG_CONFIG_HOME, both; probes use -f /dev/null). Never write 'rm -rf $HOME' or 'rm -rf ~'; put a scratch directory in a plain variable (D=/tmp/<name>; rm -rf \"$D\"; mkdir -p \"$D\"; export HOME=\"$D\"). NEVER run a bare tmux or zz command without -L <throwaway> (or --socket /tmp/<short>.sock for zz). HYGIENE, measured in cycle 5: agents left about 5 GB of zz binary copies under /tmp, which is a RAM-backed tmpfs, and filled the zram swap; a cargo test killed by a timeout leaves /tmp/zz-cli-*/ daemons running for hours; a scrubbed environment without XDG_RUNTIME_DIR autostarts a daemon on /tmp/zz-user/default.sock. So: copy a binary under /tmp only when a comparison needs a frozen copy, delete every copy before your final report, and at the end run pgrep -fa 'zz-cli-|zz-user|zzprobe' and reap only pids whose command line or environment names a socket or scratch HOME you created. After switching a shared CARGO_TARGET_DIR to another worktree, touch that worktree's crates/**/*.rs and Cargo.* first, and rebuild before spawning a binary. Every git commit is 'git -c commit.gpgsign=false commit'.",
+  boxNote: A.boxNote || "This box (alienware) is LINUX: CachyOS (Arch-based), 16 cores, 15 GB RAM plus 15 GB zram swap; /bin/bash is 5.x; the filesystem is btrfs; /opt/homebrew does not exist, so the PATH=/opt/homebrew/bin:$PATH prefix this prompt carries is harmless. Where a prompt says sw_vers, use uname -a plus head -2 /etc/os-release for the OS line. The zz daemon ring log lands under the scrubbed HOME at .local/state/zz/logs/. The compat caches are populated and cycles 1, 3, 4 and 5 ran here: every TUI fixture is known green at origin/main EXCEPT compat/status-row.sh under the box locale (LC_TIME=pt_BR.UTF-8 changes %b; the LC_ALL=C LC_TIME=C control exits 0), and four corpus rows are environmental here (micro-flags, show-options-hooks, lane2-store, smoke/plugin-runtime-resurrect-restore). Slow corpus rows that pass alone: command-item-format (up to 8 minutes), command-prompt-editing (about 4 minutes), copy-mode-stock-action-keys. A red row or fixture at your tip is yours only if it is green at origin/main on this box. Known fixture fragility: compat/tui-stock-keys.sh root-binding-detaches can flake on a wall-clock second boundary and its recorded count wobbles; tui-screen-diff.sh --self-check exited 2 once ('zz refused status-right') and passed solo. zz-daemon client_focus_closes_display_panes_and_preserves_chooser_modes fails about 1 run in 10 even exact-solo at BASE: the modes lane owns it this cycle, so elsewhere a single red there reruns and is named as this known flake, not chased. A single Bash call is capped at 600 seconds and a longer command is moved to the background and killed: pass timeout of at most 590000 and split long work. A cargo debug build of zz is NOT bit-reproducible here: a hash identifies an artifact, the revision plus a clean worktree attests it. The box has a real ~/.tmux.conf and ~/.config/zz/mux.conf: never read or edit them and never start a server that would load them (scrub HOME and XDG_CONFIG_HOME, both; probes use -f /dev/null). Never write 'rm -rf $HOME' or 'rm -rf ~'; put a scratch directory in a plain variable (D=/tmp/<name>; rm -rf \"$D\"; mkdir -p \"$D\"; export HOME=\"$D\"). NEVER run a bare tmux or zz command without -L <throwaway> (or --socket /tmp/<short>.sock for zz). HYGIENE, measured in cycle 5: agents left about 5 GB of zz binary copies under /tmp, which is a RAM-backed tmpfs, and filled the zram swap; a cargo test killed by a timeout leaves /tmp/zz-cli-*/ daemons running for hours; a scrubbed environment without XDG_RUNTIME_DIR autostarts a daemon on /tmp/zz-user/default.sock. So: copy a binary under /tmp only when a comparison needs a frozen copy, delete every copy before your final report, and at the end run pgrep -fa 'zz-cli-|zz-user|zzprobe' and reap only pids whose command line or environment names a socket or scratch HOME you created. After switching a shared CARGO_TARGET_DIR to another worktree, touch that worktree's crates/**/*.rs and Cargo.* first, and rebuild before spawning a binary. Every git commit is 'git -c commit.gpgsign=false commit'. MEMORY, measured 2026-09-11: the first run of this cycle drove the box out of memory about twenty minutes in, with five lanes compiling and testing at once (four rustc, a 1.5 GB zz-daemon test binary, three cargo), and the desktop stayed unusable for hours. So EVERY cargo command on this box goes through a shared two-slot lock and a per-command memory cap, exactly like this: S=$((RANDOM % 2)); systemd-run --user --scope -q -p MemoryMax=CAP -p MemorySwapMax=2G flock -w 540 /tmp/zz-cargo-slot-$S.lock cargo <args> (CAP is 5G for lanes and reviewers, 7G for a gate). fabrico's rule for this box since the OOM: at most two agents work at a time, and the runner enforces it; the two lock slots keep at most two cargo commands running even so. A command that waits more than 540 seconds for a slot exits 1 without running: run it again. A command that hits its cap is killed with exit 137 instead of taking the box down: run it again with fewer --jobs or --test-threads. Neither is a test result. Fixtures and probes need no wrapper, but run one at a time per lane.",
   gitNote: A.gitNote || 'NETWORK GIT: origin is HTTPS (https://github.com/demfabris/zz) through the gh credential helper; never change the remote URL. Set GIT_TERMINAL_PROMPT=0 on network commands.',
 }
-log(`TUI cycle 6 on ${M.machine}; five continuation lanes at --jobs ${M.workerJobs}; one gate agent per branch at --jobs ${M.gateJobs}`)
+log(`TUI cycle 6 on ${M.machine}; five continuation lanes, two agents at a time, --jobs ${M.workerJobs}; one gate agent per branch at --jobs ${M.gateJobs}`)
 
 const RUN_ENV = `PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=${M.root}/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=${M.root}/compat/.cache/plugins`
 const PIN = `${M.root}/compat/.cache/tmux-src/tmux`
@@ -87,7 +87,7 @@ const GATE_SCHEMA = {
   },
 }
 
-const COMMON = `You are an autonomous worker on the zz TUI parity campaign (repo demfabris/zz). FOUR OTHER LANES run beside you on this ${M.machine}, and the user may code here too, so stay inside your zones and your parallelism caps. Rules that are not negotiable:
+const COMMON = `You are an autonomous worker on the zz TUI parity campaign (repo demfabris/zz). ONE OTHER LANE or gate runs beside you on this ${M.machine} (the runner keeps at most two agents working at once, fabrico's limit for this box), and the user may code here too, so stay inside your zones and your parallelism caps. Rules that are not negotiable:
 
 WHAT THIS CYCLE IS FOR
 - Two cycles have ended with obligations one or two items short of verified. This cycle is a PUNCH LIST: your batch names exactly what cycle 5's reviewers and gate left open on your obligation, with the measurements and the fix directions. Do those items, in order, and nothing else first. An obligation counts only when every clause asserts; your lane is judged by whether its obligation can be set verified at its gate.
@@ -103,7 +103,7 @@ SETUP
 - The shared checkout is ${M.root}. Read it and add worktrees from it; NEVER edit, stash, reset or clean it. Its local main branch is stale: use origin/main. knowledge/tmux/tui-parity.md and knowledge/tmux/gaps.md are generated: regenerate with python3 compat/tui/tracker.py write-report and python3 compat/tmux-tracker.py write-report, never hand-merge them.
 - ${M.gitNote} Fetch with GIT_TERMINAL_PROMPT=0 git -C ${M.root} fetch origin +refs/heads/main:refs/remotes/origin/main '+refs/heads/campaign/*:refs/remotes/origin/campaign/*' and push with git push origin HEAD:refs/heads/campaign/BRANCHNAME (never force, never main).
 - BASE THIS CYCLE is ${M.base} (5d9bf198): cycle 5's modes and copy landings, gated green on tests, clippy, the delta corpus and every TUI fixture, but NOT yet on main, because compat/attached-client.sh fails at it in one step: its copy-mode wait still expects zz's old COPY status badge, which the modes landing replaced with the pin's in-pane position indicator. The modes lane fixes that first, and the modes gate lands BASE on main together with its own work. Until then origin/main (3319ceba) lacks BASE: build on BASE, never on origin/main, and diff your work against BASE.
-- Worktree: your WORKDIR under ${M.dev} was pre-positioned by the orchestrator at your batch's START commit, clean, with a warm target. Confirm with git log -1 and git status --short; if it is dirty, stop and use ${M.dev}/WORKDIR-2 at the same commit. If your START is not BASE, rebase onto BASE FIRST (git rebase ${M.base}; resolve conflicts by keeping both sides' intent, regenerate generated reports, rebuild, and run your obligation's fixture once before any new work). Build: cargo build -p zz --jobs ${M.workerJobs} > build.log 2>&1, check the exit code.
+- Worktree: your WORKDIR under ${M.dev} was pre-positioned by the orchestrator at your batch's START commit, clean, with a warm target. Confirm with git log -1 and git status --short; RESUMING AFTER THE OOM: the first run of this batch was killed about twenty minutes in, and its work is in your WORKDIR (commits after START plus uncommitted edits). Start with git status, git log --oneline START..HEAD and git diff: keep what serves your punch list, finish or redo what was cut off mid-edit (an unfinished rebase, a half-written hunk), and continue from there. Never discard it blindly and never switch to a second worktree. If your START is not BASE, rebase onto BASE FIRST (git rebase ${M.base}; resolve conflicts by keeping both sides' intent, regenerate generated reports, rebuild, and run your obligation's fixture once before any new work). Build through the wrapper (CAP 5G): S=$((RANDOM % 2)); systemd-run --user --scope -q -p MemoryMax=5G -p MemorySwapMax=2G flock -w 540 /tmp/zz-cargo-slot-$S.lock cargo build -p zz --jobs ${M.workerJobs} > build.log 2>&1, check the exit code.
 - compat/attached-client.sh at BASE stops at 'zz screen did not visibly become copy-mode'. That one red is known and the modes lane's to fix; every other lane runs it and reports anything past that step.
 - ${M.boxNote}
 
@@ -124,7 +124,7 @@ WIRE PROTOCOL RULE: PROTOCOL_VERSION is 101 on main and STAYS 101 this cycle: 10
 
 CODE BOUNDARIES: five lanes touch crates/zz-tui/src. Keep new surfaces in their modules (copy_view, overlay, chooser and so on), minimal hooks in render.rs, state.rs and input.rs, never reflow or reorder code you do not change, and name every render.rs hunk by function in notes. The GUI keeps compiling with no presentation change.
 
-MACHINE ETIQUETTE: cargo build/test --jobs ${M.workerJobs}, -- --test-threads=${M.workerThreads}; never workspace-scale; cargo test -p <pkg> and cargo clippy -p <pkg> --all-targets --all-features -- -D warnings per touched crate. If the diff touches crates/, cargo test -p zz (cli_binary) before the last commit, split by test filters across calls if one call cannot hold it. Never pipe cargo test through tail or grep. Load-flake rule: fails loaded + passes exact-solo = flake.
+MACHINE ETIQUETTE: every cargo command through the slot-and-cap wrapper in the box note (CAP 5G); cargo build/test --jobs ${M.workerJobs}, -- --test-threads=${M.workerThreads}; never workspace-scale; cargo test -p <pkg> and cargo clippy -p <pkg> --all-targets --all-features -- -D warnings per touched crate. If the diff touches crates/, cargo test -p zz (cli_binary) before the last commit, split by test filters across calls if one call cannot hold it. Never pipe cargo test through tail or grep. Load-flake rule: fails loaded + passes exact-solo = flake.
 
 DELIVERY: one commit per punch-list item where feasible, subject in repo style, git -c commit.gpgsign=false, NO attribution trailers, NO comments in code (a fixture's header block is documentation). Every case you flip or add has a --self-check sabotage that fails for the right reason. After your LAST commit re-run every proof you list. Push campaign/BRANCHNAME and report with the final tip sha. NO GitHub comments, NO issue 7, NO compat/board.py mutations.
 `
@@ -177,7 +177,7 @@ Proofs at tip: ${RUN_ENV} compat/tui-overlays.sh three times plus --self-check; 
 `
 
 const BATCH_CHOOSERS = COMMON + `
-YOUR BATCH: finish TUI-006. BRANCHNAME: tui-choosers-2. WORKDIR: zz-tui-choosers. START: origin/campaign/tui-choosers (069143ba, on the cycle-4 base). Rebase it onto BASE first: the cycle-5 gate mapped the conflicts and never applied them. Its dry-run-verified scripts are in /tmp/claude-1000/-home-demfabris-dev-zz/92f0e606-413d-4b37-9d72-867d86ccbf15/scratchpad (cho-resolve.py and choosers-fixes.py): read them as a guide, check each change against the code, do not run them blind. The map: hunt_claims.rs keeps the ..._one_hundred_and_one name; render.rs hunk 1 keeps choosers' paint_mode_tree match without the command-output branch modes deleted; render.rs hunk 2 keeps the menu/confirm cursor, else restore_mode_tree_cursor. HARD BUDGET 240 MINUTES.
+YOUR BATCH: finish TUI-006. BRANCHNAME: tui-choosers-2. WORKDIR: zz-tui-choosers. START: origin/campaign/tui-choosers (069143ba, on the cycle-4 base). The killed first run already rebased it onto BASE in your worktree (local branch tui-choosers-2) and was partway through its edits; the cycle-5 gate's helper scripts were lost with the reboot. The conflict map, for checking that rebase: hunt_claims.rs keeps the ..._one_hundred_and_one name; render.rs hunk 1 keeps choosers' paint_mode_tree match without the command-output branch modes deleted; render.rs hunk 2 keeps the menu/confirm cursor, else restore_mode_tree_cursor. HARD BUDGET 240 MINUTES.
 Zones: compat/tui/ (TUI-006 and evidence attempt-02), compat/tui-choosers.sh, crates/zz-tui/src/ (chooser module plus minimal hooks), crates/zz-client/src/ chooser reduction, crates/zz-daemon/src/ and crates/zz-protocol/src/ only for appends under the wire rule, crates/zz-mux/src/ consumer lists and compat_manifest_tests.rs, crates/zz/ only for GUI compile consequences, crates/zz/tests/, and in compat/tmux-gaps.json the items of choosers.native-presentation, clients.tui-command-output-navigation and clients.command-output-pane-prompt your landing makes match.
 PUNCH LIST:
 1. THE REVIEW'S THREE UNRECORDED DIVERGENCES in clause 1: choose-tree -Z zoom, choose-buffer f (filter), and choose-tree c. The cycle-5 review's bytes and fix direction are in its record (TUI-006's evidence_note after the gate's planned edits, or the review in the gate scratch notes). Add a fixture case for each, fix each, with sabotages.
@@ -187,10 +187,10 @@ PUNCH LIST:
 Proofs at tip: ${RUN_ENV} compat/tui-choosers.sh three times plus --self-check; compat/tui-stock-keys.sh and compat/tui-screen-diff.sh; cargo test and clippy per touched crate; cargo test -p zz; tracker checks.
 `
 
-const REVIEW_COMMON = `You are an adversarial code reviewer for the zz TUI parity campaign (repo demfabris/zz). A worker just pushed a campaign branch; your verdict decides what its gate trusts. NEVER push, commit, touch the board or GitHub issues, or edit ${M.root}. Other lanes run beside you; keep to the caps.
+const REVIEW_COMMON = `You are an adversarial code reviewer for the zz TUI parity campaign (repo demfabris/zz). A worker just pushed a campaign branch; your verdict decides what its gate trusts. NEVER push, commit, touch the board or GitHub issues, or edit ${M.root}. One other agent runs beside you; keep to the caps.
 HOW YOU REPORT: your final act is the structured report. FOREGROUND ONLY, timeout at most 590000, never a background task, never end your turn to wait.
 SETUP: GIT_TERMINAL_PROMPT=0 git -C ${M.root} fetch origin +refs/heads/main:refs/remotes/origin/main '+refs/heads/campaign/*:refs/remotes/origin/campaign/*'. REVIEWDIR exists and is clean: checkout --detach the branch tip there (if dirty, add ${M.dev}/REVIEWDIR-2). export CARGO_TARGET_DIR=WORKERTARGET (the worker's warm target; the worker is finished); touch crates/**/*.rs and Cargo.* first, never cargo clean, rebuild before spawning a binary. ${M.boxNote}
-ETIQUETTE: cargo test -p <pkg> --jobs ${M.workerJobs} -- --test-threads=${M.workerThreads}; throwaway pin servers -L zzprobe-$$ -f /dev/null only; never kill servers you did not start (${M.protected}); delete any binary copy you made under /tmp before reporting.
+ETIQUETTE: every cargo command through the slot-and-cap wrapper in the box note (CAP 5G); cargo test -p <pkg> --jobs ${M.workerJobs} -- --test-threads=${M.workerThreads}; throwaway pin servers -L zzprobe-$$ -f /dev/null only; never kill servers you did not start (${M.protected}); delete any binary copy you made under /tmp before reporting.
 METHOD:
 1. PUNCH LIST AUDIT: for each punch-list item in the batch below, is it done at the tip, with a fixture case that asserts the pin's behaviour and a sabotage that fails for the right reason? An item neither done nor honestly recorded as open is a blocker.
 2. CONTRACT AUDIT: for the obligation, take each acceptance clause and find the ASSERTED evidence at the tip. A recorded case inside a clause keeps it open, except a SIBLING:<lane> case pointing at an EARLIER lane in the gate order (${ORDER.join(', ')}). An accepted gap is never evidence. The worker may write only status, evidence_note, next_action and sources of its obligation. ${OWNERSHIP}
@@ -264,7 +264,7 @@ async function runLane(lane) {
 
 function gatePrompt(r, earlier) {
   const summary = { key: r.lane.key, review: r.review || null, first_review: r.firstReview || null, fixed_after_reject: !!r.fixed, ...r.worker }
-  return `You are the integration gate for ONE branch of the zz TUI parity campaign (repo demfabris/zz, board = GitHub issue 7): the ${r.lane.key} lane of cycle 6. Gates run one per branch in the order ${ORDER.join(', ')}; each pushes main before the next starts, so origin/main already carries every earlier lane that merged. Other lanes' workers or reviewers may still run beside you: use --jobs ${M.gateJobs}, never run two heavy things of your own at once (cycle 5's gate manufactured flakes by overlapping cargo tests with corpus chunks), and apply the load-flake rule. FOREGROUND ONLY: every command in the foreground with a timeout of at most 590000 (a call is capped at 600 seconds; split cargo test by package and the corpus by explicit scenario names); never a background task; never end your turn to wait. You are done when you have emitted the structured report.
+  return `You are the integration gate for ONE branch of the zz TUI parity campaign (repo demfabris/zz, board = GitHub issue 7): the ${r.lane.key} lane of cycle 6. Gates run one per branch in the order ${ORDER.join(', ')}; each pushes main before the next starts, so origin/main already carries every earlier lane that merged. One other lane's worker or reviewer may run beside you: use --jobs ${M.gateJobs}, never run two heavy things of your own at once (cycle 5's gate manufactured flakes by overlapping cargo tests with corpus chunks), and apply the load-flake rule. FOREGROUND ONLY: every command in the foreground with a timeout of at most 590000 (a call is capped at 600 seconds; split cargo test by package and the corpus by explicit scenario names); never a background task; never end your turn to wait. You are done when you have emitted the structured report.
 EARLIER GATES THIS CYCLE:
 ${JSON.stringify(earlier, null, 2)}
 THIS LANE, worker report + review verdict:
@@ -273,7 +273,7 @@ REVIEW VERDICTS BIND YOU: approve-with-fixes => apply every must-fix in its own 
 VERIFIED MEANS EVERY CLAUSE: read the obligation's acceptance list, its evidence_note at your tip and the reviewer's every_clause_asserted. Any clause open or partial, or holding a recorded case (a SIBLING case you did not flip green included), keeps the lane's honest status. An accepted gap is never evidence. A dependency not verified on main blocks verified (TUI-006 and TUI-007 need TUI-004).
 BOARD: ZZ_BOARD_HOLDER=${M.holder} python3 compat/board.py <cmd> from inside a repo checkout. claim MAIN --lease 3h before you rebase; renew MAIN --lease 2h before any long stage; after the push: note ${LOCK} --note "<lane> integrated at <sha>: verified <ids or none>; open <what and why>; review <verdict> and what you did"; then release MAIN --reason "cycle 6 <lane> pushed at <sha>". If MAIN is held by someone other than ${M.holder}, wait for it with bounded polls (at most 30 minutes), then report it as a problem and stop. BOARD FALLBACK: on a GitHub auth failure append the command to ${M.root}/compat/tui/board-replay-6.sh (uncommitted) and continue.
 ${M.gitNote} Fetch git fetch origin +refs/heads/main:refs/remotes/origin/main '+refs/heads/campaign/*:refs/remotes/origin/campaign/*'; push git push origin HEAD:main. Never use ${M.root}'s local main, never edit, stash or reset in it. Commits: git -c commit.gpgsign=false commit.
-THIS BOX: ${M.boxNote} Gate worktree: ${M.dev}/zz-gate-tui6 (create it if missing: git -C ${M.root} worktree add --detach ${M.dev}/zz-gate-tui6 origin/main; if it exists and is clean, reuse it; never remove it, the next gate reuses it). export CARGO_TARGET_DIR=${M.dev}/zz-gate-target in every shell that runs cargo, compat/check.sh included; touch crates/**/*.rs and Cargo.* after every checkout.
+THIS BOX: ${M.boxNote} Gate worktree: ${M.dev}/zz-gate-tui6 (create it if missing: git -C ${M.root} worktree add --detach ${M.dev}/zz-gate-tui6 origin/main; if it exists and is clean, reuse it; never remove it, the next gate reuses it). export CARGO_TARGET_DIR=${M.dev}/zz-gate-target in every shell that runs cargo, compat/check.sh included; touch crates/**/*.rs and Cargo.* after every checkout. Every cargo command goes through the slot-and-cap wrapper in the box note with CAP 7G; the one other working agent may hold the other slot.
 STAGES:
 1. Fetch; git merge-tree --write-tree origin/main <tip> to predict conflicts; check out the lane tip on a local branch gate-${r.lane.key} and rebase onto origin/main. BASE (${M.base}, cycle 5's gated modes and copy chain) reaches main through the first gate that pushes: if origin/main does not contain it yet, your branch carries it, and it lands only with stage 3 fully green, compat/attached-client.sh included. If attached-client.sh fails only at 'zz screen did not visibly become copy-mode' (the modes lane's punch item 0, not landed because that lane did not merge), give its zz side the pin's [n/m] pattern in wait_for_visible_mode as a gate commit and rerun it to the end. Conflicts: generated reports regenerate; campaign.json and tmux-gaps.json merge by record and by item; render.rs, state.rs and input.rs merge by union; TMUX_OPTION_CONSUMERS and compat_manifest_tests.rs counts by union recomputed; PROTOCOL_VERSION stays 101 and the v101 history entry keeps every line. A conflict union cannot settle inside files the lane does not own => push campaign/<branch>-gated, report, stop.
 2. cargo test -p <each touched package> and cargo test -p zz --jobs ${M.gateJobs} -- --test-threads=${M.gateThreads} > log 2>&1 (exit code, never piped); cargo clippy --workspace --all-targets --all-features --jobs ${M.gateJobs} -- -D warnings; ${RUN_ENV} compat/run.sh --strict-geometry --delta origin/main..HEAD --commands <touched_commands> plus every keys and status scenario and smoke/tui-client-input-backpressure, in sequential chunks. Red that is not a load flake and not a known environmental row: fix if minutes, else push campaign/<branch>-gated, report, stop.
@@ -285,19 +285,48 @@ STAGES:
 Report: branch, merged, pushed_sha, verified ids, sibling_flips, gate_summary, review_actions, flakes, fixtures (exit code and last line of each at the pushed tip), board_updates, problems.`
 }
 
-log(`TUI cycle 6: ${ORDER.join(', ')}; continuation lanes; per-branch gates in order`)
-const lanePromises = LANES.map(lane => runLane(lane))
-phase('Integrate')
+log(`TUI cycle 6: ${ORDER.join(', ')}; at most two agents at a time; each lane's gate follows its review, gates in order`)
+const SLOTS = 2
+const queue = LANES.slice()
+const lanes = {}
 const gates = []
-for (let i = 0; i < LANES.length; i++) {
-  const r = await lanePromises[i]
+const gateResolve = {}
+const gateDone = {}
+for (const l of LANES) gateDone[l.key] = new Promise(res => { gateResolve[l.key] = res })
+
+async function gateLane(r, i) {
+  if (i > 0) await gateDone[LANES[i - 1].key]
+  let g
   if (!r || !r.worker || !r.worker.branch) {
-    gates.push({ key: LANES[i].key, skipped: 'no branch pushed' })
-    continue
+    g = { key: LANES[i].key, skipped: (r && r.error) || 'no branch pushed' }
+  } else {
+    const out = await agent(gatePrompt(r, gates), { label: `gate:${r.lane.key}`, phase: 'Integrate', schema: GATE_SCHEMA, ...OPTS })
+    g = { key: r.lane.key, ...(out || { problems: 'gate agent returned nothing' }) }
+    log(`gate:${r.lane.key} -> merged=${out && out.merged} pushed=${out && out.pushed_sha} verified=${out && JSON.stringify(out.verified)}`)
   }
-  const g = await agent(gatePrompt(r, gates), { label: `gate:${r.lane.key}`, phase: 'Integrate', schema: GATE_SCHEMA, ...OPTS })
-  gates.push({ key: r.lane.key, ...(g || { problems: 'gate agent returned nothing' }) })
-  log(`gate:${r.lane.key} -> merged=${g && g.merged} pushed=${g && g.pushed_sha} verified=${g && JSON.stringify(g.verified)}`)
+  gates.push(g)
+  gateResolve[LANES[i].key](g)
 }
-const lanes = await Promise.all(lanePromises)
-return { lanes, gates }
+
+async function slot() {
+  while (queue.length) {
+    const lane = queue.shift()
+    const i = LANES.indexOf(lane)
+    let r
+    try {
+      r = await runLane(lane)
+    } catch (e) {
+      r = { lane, worker: null, error: String(e) }
+    }
+    lanes[lane.key] = r
+    try {
+      await gateLane(r, i)
+    } catch (e) {
+      gates.push({ key: lane.key, problems: `gate failed: ${String(e)}` })
+      gateResolve[lane.key]({ key: lane.key, problems: String(e) })
+    }
+  }
+}
+
+await Promise.all(Array.from({ length: SLOTS }, () => slot()))
+return { lanes: ORDER.map(k => lanes[k]), gates }

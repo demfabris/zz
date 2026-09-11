@@ -139,9 +139,9 @@ mask multiplication, and material opacity remains independent. GPU pixel compari
 opaque and translucent fills, borders, circular and smoothed corners, partial tiling, and fractional
 positions. The user confirmed the correction in a native GNOME window on 2026-09-09.
 
-The comment block above the `[patch]` section in `Cargo.toml` narrates the same list; treat the
-branch's `git log` as the tiebreaker (it currently carries more commits than this list numbers,
-because a few patches landed as follow-up fixes to an entry above).
+`Cargo.toml` no longer narrates the list; the branch's `git log` is the authority (it carries
+more commits than this list numbers, because a few patches landed as follow-up fixes to an entry
+above).
 
 # Examples
 

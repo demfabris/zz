@@ -9719,14 +9719,15 @@ fn page_copy_cursor(mode: &mut CopyModeState, up: bool, half: bool, vi: bool) {
         .viewport_offset
         .saturating_add(row)
         .min(mode.revision.total_rows().saturating_sub(1));
-    let mut x = mode.last_cx;
+    let x = mode.last_cx;
     if !(mode.selection.is_some() && mode.rectangle) {
         let end = revision_line_length(&mode.revision, y);
         if (x >= mode.last_sx && x != end) || x > end {
-            x = end;
+            place_copy_cursor(mode, PointCoordinate { x: end, y }, vi);
+            return;
         }
     }
-    place_copy_cursor(mode, PointCoordinate { x, y }, vi);
+    mode.cursor = PointCoordinate { x, y };
 }
 
 fn scroll_copy_view_to_cursor(mode: &mut CopyModeState) {
@@ -21716,6 +21717,58 @@ preexec_functions+=(__zz_fixture_preexec)
         move_copy_cursor(mode, &CopyModeAction::PageDown, &separators, true);
         assert_eq!(mode.viewport_offset, bottom);
         assert_eq!(mode.cursor, PointCoordinate { x: 0, y: bottom + 5 });
+    }
+
+    #[test]
+    fn page_movement_pinned_at_the_bottom_keeps_the_remembered_column_unclamped() {
+        let separators = WordSeparators::default();
+        for (vi, start, landed) in [(true, 1, 1), (false, 1, 1), (true, 2, 0), (false, 2, 1)] {
+            let mut terminal = Terminal::new(TerminalOptions {
+                cols: 10,
+                rows: 6,
+                max_scrollback: 64,
+            })
+            .expect("terminal");
+            let lines = (0..30)
+                .map(|index| {
+                    if index == 28 {
+                        "x".to_owned()
+                    } else {
+                        format!("l{index:02}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\r\n");
+            terminal.vt_write(lines.as_bytes());
+            let mut selection = None;
+            let mut copy_mode = None;
+            enter_copy_mode(
+                &mut terminal,
+                &mut selection,
+                &mut copy_mode,
+                false,
+                false,
+                None,
+                vi,
+            )
+            .expect("copy mode");
+            let mode = copy_mode.as_mut().expect("mode");
+            let bottom = mode.viewport_offset;
+            mode.cursor = PointCoordinate {
+                x: start,
+                y: bottom + 1,
+            };
+            move_copy_cursor(mode, &CopyModeAction::HalfPageDown, &separators, vi);
+            assert_eq!(mode.viewport_offset, bottom);
+            assert_eq!(
+                mode.cursor,
+                PointCoordinate {
+                    x: landed,
+                    y: bottom + 4
+                },
+                "vi={vi} from column {start}"
+            );
+        }
     }
 
     #[test]

@@ -174,6 +174,7 @@ ZZ_LOG_DIR="$SCRATCH_DIR/zz-logs"
 ZZ_CLIENT_STDERR="$SCRATCH_DIR/zz-client.err"
 TMUX_CLIENT_STDERR="$SCRATCH_DIR/tmux-client.err"
 LINES_FILE="$SCRATCH_DIR/lines.txt"
+CLAMP_LINES_FILE="$SCRATCH_DIR/clamp-lines.txt"
 CAPTURE_DIR="${ZZ_COPY_CAPTURE_DIR:-}"
 DIAGNOSTICS_DIR=""
 CASE_LABEL=""
@@ -459,6 +460,19 @@ generate_lines() {
   printf 'SEEDEND\n' >>"$LINES_FILE"
 }
 
+# The page-clamp seed, the cycle-5 review's probe2 content: 77 numbered lines,
+# then four short ones and the marker, so the rows above the prompt are
+# aaaaaaaaaaaa (18), bbbbbbbbbbbbbbbbbbbb (19), cc (20), empty (21) and
+# SEEDEND (22), with the shell prompt `$` on row 23.
+generate_clamp_lines() {
+  local index
+  : >"$CLAMP_LINES_FILE"
+  for ((index = 1; index <= 77; index++)); do
+    printf 'line-%02d filler-%02d\n' "$index" "$index" >>"$CLAMP_LINES_FILE"
+  done
+  printf 'aaaaaaaaaaaa\nbbbbbbbbbbbbbbbbbbbb\ncc\n\nSEEDEND\n' >>"$CLAMP_LINES_FILE"
+}
+
 send_pane_both() {
   local side
   for side in zz tmux; do
@@ -471,12 +485,13 @@ send_pane_both() {
 # geometry question (scroll_position, copy_cursor_y, what page-up reaches) has
 # one answer on both sides.
 seed_pane() {
+  local file="${1:-$LINES_FILE}"
   local side
   send_pane_both "printf '\\033[2J\\033[3J\\033[H'"
   for side in zz tmux; do
     wait_settled "$side" 'the cleared screen'
   done
-  send_pane_both "cat $LINES_FILE"
+  send_pane_both "cat $file"
   for side in zz tmux; do
     if ! await_observable "$side" screen SEEDEND; then
       die "$side never showed the seeded content"
@@ -962,6 +977,43 @@ run_movement() {
   type_both '['
   type_both "$KEY_UP"
   copy_case "$table-prefix-returns-to-the-copy-table" none ''
+}
+
+# THE PAGE CLAMP. window_copy_pageup1 and window_copy_pagedown1
+# (window-copy.c:877-990) put the cursor back on data->lastcx and call
+# window_copy_cursor_end_of_line only when (cx >= lastsx && cx != px) ||
+# cx > px, so a page move pinned at the bottom that lands on a line exactly
+# lastcx long keeps that column even in vi, where every other path stops one
+# short of the line length. From column 1 of aaaaaaaaaaaa the landing on the
+# one-glyph prompt row is column 1 on the pin; zz used to clamp it to 0.
+run_page_clamp() {
+  local table="$1"
+  table_keys "$table"
+
+  attach_both_at
+  set_on_both mode-keys "$table"
+  seed_pane "$CLAMP_LINES_FILE"
+
+  type_prefix_both '['
+  copy_case "$table-clamp-enter" format '#{pane_in_mode}=1'
+  type_both "$KEY_COUNT"
+  type_both "$KEY_UP"
+  copy_case "$table-clamp-count-five-up" format '#{copy_cursor_line}=aaaaaaaaaaaa'
+  type_both "$KEY_HALFUP"
+  type_both "$KEY_HALFUP"
+  copy_case "$table-clamp-halfpage-up-twice" format '#{scroll_position}=24'
+  type_both "$KEY_HALFDOWN"
+  type_both "$KEY_HALFDOWN"
+  copy_case "$table-clamp-halfpage-down-twice" format '#{scroll_position}=0'
+  type_both "$KEY_HALFDOWN"
+  copy_case "$table-clamp-halfpage-down-onto-the-prompt" format '#{copy_cursor_y}=23'
+
+  reenter_copy_mode "$table page clamp"
+  type_both "$KEY_COUNT"
+  type_both "$KEY_UP"
+  copy_case "$table-clamp-page-count-five-up" format '#{copy_cursor_line}=aaaaaaaaaaaa'
+  type_both "$KEY_PAGEDOWN"
+  copy_case "$table-clamp-page-down-onto-the-prompt" format '#{copy_cursor_y}=23'
 }
 
 run_search() {
@@ -1513,6 +1565,28 @@ run_self_check() {
   self_check_compare reentry-direction
   self_check_case 'facts: n (up) on the pin side, N (down) on the zz side on a fresh entry' facts
 
+  # cursor and facts: the page-down onto the prompt row on both sides, then a
+  # cursor-left on the zz side only, which leaves it on column 0 where the old
+  # vi clamp put it, against the pin's remembered column 1.
+  attach_both_at
+  set_on_both mode-keys vi
+  seed_pane "$CLAMP_LINES_FILE"
+  type_prefix_both '['
+  await_observable zz format '#{pane_in_mode}=1' || true
+  await_observable tmux format '#{pane_in_mode}=1' || true
+  type_both 5
+  type_both k
+  await_observable zz format '#{copy_cursor_line}=aaaaaaaaaaaa' || true
+  await_observable tmux format '#{copy_cursor_line}=aaaaaaaaaaaa' || true
+  type_both NPage
+  await_observable zz format '#{copy_cursor_y}=23' || true
+  await_observable tmux format '#{copy_cursor_y}=23' || true
+  type_side zz h
+  await_observable zz format '#{copy_cursor_x}=0' || true
+  self_check_compare page-clamp
+  self_check_case 'cursor: the page landing on column 0 on the zz side only' cursor
+  self_check_case 'facts: the page landing on column 0 on the zz side only' facts
+
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"
     return 1
@@ -1524,6 +1598,7 @@ run_self_check() {
 # --- run -------------------------------------------------------------------
 
 generate_lines
+generate_clamp_lines
 write_attach zz "$SCRATCH_DIR/attach-zz.sh"
 write_attach tmux "$SCRATCH_DIR/attach-tmux.sh"
 zz_command -f /dev/null daemon >"$SCRATCH_DIR/zz-daemon.out" 2>"$SCRATCH_DIR/zz-daemon.err" &
@@ -1539,6 +1614,8 @@ printf 'copy mode and search through the client stdin at %sx%s (pin %s)\n' \
   "$COLUMNS_UNDER_TEST" "$ROWS_UNDER_TEST" "$(basename -- "$TMUX_BIN")"
 run_movement emacs
 run_movement vi
+run_page_clamp emacs
+run_page_clamp vi
 run_search emacs
 run_search vi
 run_native_search_command

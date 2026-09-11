@@ -1,0 +1,13 @@
+TUI-005 attempt-03 (cycle 6, copy lane, branch campaign/tui-copy-2)
+date: 2026-09-11T10:08:17-03:00
+host: Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+base: 5d9bf198 (origin/campaign/tui-cycle5-gated)
+pin: tmux d77c9dc6 (next-3.8) at /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux: tmux next-3.8
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+bash: 5.3.15(1)-release
+locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8
+zz binary: target/debug/zz, cargo debug build of the revision named in each run file (a debug build is not bit-reproducible here; the revision plus a clean worktree attests it)
+cargo wrapper: systemd-run --user --scope -p MemoryMax=5G -p MemorySwapMax=2G flock -w 540 /tmp/zz-cargo-slot-N.lock cargo ... --jobs 4 -- --test-threads=3

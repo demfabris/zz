@@ -1,0 +1,4 @@
+revision: 4f4f0b0b (clean tracked worktree: 0 modified files)
+command: PATH=/opt/homebrew/bin:$PATH compat/attached-client.sh target/debug/zz /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+started: 2026-09-11T10:29:20-03:00
+exit: 1 after 19s

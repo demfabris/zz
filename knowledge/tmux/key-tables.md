@@ -287,7 +287,8 @@ takes the flag as a presentation hint its own client surface honours, so the sto
 and only the drawing differs. The remaining two, vi `#` and `*`, carry
 `send-keys -FX search-backward -- "#{copy_cursor_word}"` and its forward twin. `#{pane_search_string}`
 in the emacs `-I` value expands to the last search on the pane, which the pane keeps after copy mode
-ends, so `C-s` and `C-r` pre-fill it on a fresh entry too, and that entry's `n` searches up for it.
+ends, so a fresh entry's `n` searches up for it. The incremental `C-s` and `C-r` prompt still opens
+empty on a fresh entry, on the pin and on zz alike (measured 2026-09-10).
 See [copy mode](/tmux/copy-mode.md).
 
 # Shifted key spellings

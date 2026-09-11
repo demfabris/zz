@@ -67,8 +67,9 @@
 #   copy-mode-position-format ''
 #                        the pin draws `[#{copy_position}/#{copy_position_limit}]`
 #                        right-aligned into the pane's own top row
-#                        (window-copy.c:5228) and zz never reads the option
-#                        (options.native-mode-styles, accepted). Emptied for
+#                        (window-copy.c:5228); the raw TUI side of
+#                        options.native-mode-styles was decided 2026-09-10
+#                        and lands with the modes lane. Emptied for
 #                        the corpus and MEASURED at its default in the
 #                        presentation group.
 #   mode-keys            set explicitly per table on both sides, never
@@ -750,7 +751,8 @@ copy_case() {
 # bg=#cdcd00,fg=#101010: the pin opened the run with
 # \e[38;2;16;16;16m\e[48;2;205;205;0m and closed it with \e[39m\e[49m on the
 # last glyph of the last selected line, and zz opened \e[7m and closed \e[0m
-# one cell further along. That is options.native-mode-styles, accepted. The
+# one cell further along. The raw TUI side of options.native-mode-styles was
+# decided 2026-09-10 and lands with the modes lane (SIBLING:modes). The
 # BUFFER channel asserts straight through the divergence: the bytes the two
 # engines copy out of that selection are identical.
 SELECTION_REASON='SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further'
@@ -1127,10 +1129,9 @@ run_live_mode_keys() {
 }
 
 # The two surfaces the corpus pins away, measured at their defaults with the
-# status row back on. Both are RECORDED: the pane-cell position box is
-# options.native-mode-styles (accepted) and the status-row badge is
-# presentation.native-status (accepted). They are measured here rather than
-# waived by omission.
+# status row back on. The pane-cell position box is options.native-mode-styles
+# and the status-row badge presentation.native-status; the raw TUI side of both
+# was decided 2026-09-10 and lands with the modes lane (SIBLING:modes).
 POSITION_REASON='SIBLING:modes the pin draws copy-mode-position-format into the pane top row and zz paints a COPY badge on the status row'
 run_presentation() {
   attach_both_at

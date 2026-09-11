@@ -978,7 +978,6 @@ table below lists the remaining missing or deliberate format differences.
 | `pane_fg` | The terminal cell foreground at the cursor is not mirrored into mux facts. | **silent** |
 | `pane_key_mode` | Native copy/view mode is not projected as tmux's pane key mode. | **silent** |
 | `pane_mode` | Native pane mode is not projected as tmux's mode name. | **silent** |
-| `pane_search_string` | Answered from the last copy-mode search on the pane, kept by the pane terminal inside and outside the mode, as the pin keeps `wp->searchstr`. | **silent** |
 | `pane_tabs` | Terminal tab stops are not mirrored into mux facts. | **silent** |
 | `session_group` | Session groups are unsupported, so no group name exists. | **silent** |
 | `session_group_attached_list` | Session groups are unsupported, so no grouped attachment list exists. | **silent** |

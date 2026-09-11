@@ -62,6 +62,13 @@
 #                                  keeps its index where the pin's
 #                                  colour_palette_get substitutes the
 #                                  option's colour. Not driven.
+#   colour class, OSC 10/11 and    after OSC 10 rgb:ff/00/00 the pin      named
+#     window-style defaults        paints a default cell \e[38;2;255;0;0m
+#                                  and under window-style fg=colour2
+#                                  \e[32m; the raw TUI writes 39 for both
+#                                  (measured 2026-09-10 by the caps
+#                                  review, and so on origin/main too).
+#                                  Not driven.
 #   theme reply                    client_theme before any reply         driven
 #   focus reporting                the pin publishes no pane format for      named
 #                                  focus mode, so this decoder cannot see
@@ -103,27 +110,12 @@
 #                          two rows move together and are one divergence.
 #   keypad_flag            the pin sends smkx; zz sends neither.
 #   keypad_cursor_flag
-#   pane_key_mode          under `extended-keys on` the pin arms Eneks
-#     (extended case)      (`\e[>4;2m`, INPUT_CSI_MODSET) and the decoder
-#                          records Ext 2; zz arms NOTHING and the decoder
-#                          records VT10x. Under the TERM this case drives,
-#                          xterm-256color, tty.rs writes `\e[>3u` only when
-#                          guard.kitty_keyboard is set, and
-#                          supports_kitty_keyboard reads TERM/TERM_PROGRAM for
-#                          ghostty, kitty, wezterm, foot or zz - none of which
-#                          xterm-256color matches. Measured at the gate
-#                          2026-09-10 by capturing the attach stream: 0
-#                          occurrences of `\e[>3u` under xterm-256color, 1
-#                          under xterm-ghostty. So zz gets no extended keys
-#                          here because it never asks, not because the pin
-#                          ignored the request.
 #   client_termfeatures    the pin's list is negotiated from the terminal's
 #   client_colours         replies; zz derives its roster from TERM and
 #                          COLORTERM.
-#   client_utf8 under -u   the pin sets CLIENT_UTF8; zz's CLI accepts -u and
-#   client_flags under -u  drops it.
-#   client_termfeatures    the pin adds the named features; zz's CLI accepts
-#     under -2 and -T      both and drops them.
+#   widths/non-utf8 line   under LANG=C with no -u the pin draws each non-ASCII
+#                          cell as underscores (tty.c tty_check_codeset); the
+#                          raw TUI writes the UTF-8 glyph.
 #   client_theme           a zz client always carries a theme and the pin's is
 #                          empty until its terminal answers. That is the
 #                          recorded stance on

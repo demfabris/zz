@@ -1,0 +1,11 @@
+$ python3 compat/tui/tracker.py check   (at 95d3644e plus this attempt's ledger edit, before write-report)
+error: knowledge/tmux/tui-parity.md is stale; run write-report
+exit=1
+
+$ python3 compat/tui/tracker.py write-report
+Wrote knowledge/tmux/tui-parity.md
+exit=0
+
+$ python3 compat/tui/tracker.py check   (2026-09-11T16:12:18-03:00)
+compat/tui/campaign.json is valid and knowledge/tmux/tui-parity.md is current
+exit=0

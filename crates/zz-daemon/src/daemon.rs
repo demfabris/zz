@@ -31915,6 +31915,18 @@ fn client_uses_utf8(inner: &ServerState, client: ClientId) -> bool {
 }
 
 fn client_colour_count(inner: &ServerState, client: ClientId) -> Option<u32> {
+    client_colour_count_with(
+        inner,
+        client,
+        inner.client_features.get(&client).copied().unwrap_or(0),
+    )
+}
+
+fn client_colour_count_with(
+    inner: &ServerState,
+    client: ClientId,
+    requested: u32,
+) -> Option<u32> {
     if inner.client_kinds.get(&client) != Some(&ClientKind::Interactive)
         || !inner.client_terminals.contains(&client)
     {
@@ -31924,7 +31936,6 @@ fn client_colour_count(inner: &ServerState, client: ClientId) -> Option<u32> {
     let colour_term = client_environment_value(inner, client, "COLORTERM")
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let requested = inner.client_features.get(&client).copied().unwrap_or(0);
     let has = |name| terminal_feature_bit(name).is_some_and(|bit| requested & bit != 0);
     if has("RGB")
         || matches!(colour_term.as_str(), "truecolor" | "24bit")
@@ -31941,7 +31952,7 @@ fn client_colour_count(inner: &ServerState, client: ClientId) -> Option<u32> {
 }
 
 fn client_term_features(inner: &ServerState, client: ClientId) -> String {
-    let Some(colours) = client_colour_count(inner, client) else {
+    let Some(colours) = client_colour_count_with(inner, client, 0) else {
         return String::new();
     };
     let mut features = inner.client_features.get(&client).copied().unwrap_or(0);
@@ -84884,6 +84895,50 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .unwrap();
         assert_eq!(filtered.output, "list-clients:1:zeta:z:80x24:unknown");
+    }
+
+    #[test]
+    fn requested_colour_features_join_the_roster_alone() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, _, _) = switch_test_session(&shared, "requested-features");
+        let facts = |requested: &str| {
+            let (client, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                Some("tui".to_owned()),
+                None,
+                OutboundMailbox::new(),
+            );
+            shared.attach(client, session).expect("attach client");
+            let mut inner = shared.inner.lock();
+            inner.client_terminals.insert(client);
+            inner.client_environments.insert(
+                client,
+                Arc::new(BTreeMap::from([("TERM".into(), "xterm".into())])),
+            );
+            inner.client_features.insert(
+                client,
+                client_features_fact(&[format!("client-features-v1:{requested}")]),
+            );
+            (
+                client_colour_count(&inner, client),
+                client_term_features(&inner, client),
+            )
+        };
+        let has = |roster: &str, name: &str| roster.split(',').any(|item| item == name);
+
+        let (colours, roster) = facts("RGB");
+        assert_eq!(colours, Some(16_777_216));
+        assert!(has(&roster, "RGB"), "{roster}");
+        assert!(!has(&roster, "256"), "{roster}");
+
+        let (colours, roster) = facts("256");
+        assert_eq!(colours, Some(256));
+        assert!(has(&roster, "256"), "{roster}");
+        assert!(!has(&roster, "RGB"), "{roster}");
+
+        let (colours, roster) = facts("");
+        assert_eq!(colours, Some(16));
+        assert!(!has(&roster, "256") && !has(&roster, "RGB"), "{roster}");
     }
 
     #[test]

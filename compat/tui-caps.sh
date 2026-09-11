@@ -44,6 +44,13 @@
 #   global flag -2                 accepted, and its own-side delta      driven
 #   global flag -u                 accepted, and its own-side delta      driven
 #   global flag -T                 accepted, and its own-side delta      driven
+#   -T RGB and -2 on a silent      each flag's own-side roster delta     driven
+#     terminal                     where neither baseline carries 256
+#                                  or RGB (see write_silent_terminal)
+#   extended keys, silent          pane_key_mode with extended-keys on,  driven
+#     terminal                     recorded below
+#   the -2 screen effect, silent   the colour sample with and without    driven
+#     terminal                     -2 under TERM=xterm, recorded below
 #   flag diagnostics               missing argument, unknown option      driven
 #   colour class, stock palette    a named, an indexed and an RGB        driven
 #                                  cell and a named background
@@ -115,6 +122,25 @@
 #   widths/non-utf8 line   under LANG=C with no -u the pin draws each non-ASCII
 #                          cell as underscores (tty.c tty_check_codeset); the
 #                          raw TUI writes the UTF-8 glyph.
+#   pane_key_mode          on a silent terminal only (silent/extended): the pin
+#                          writes Eneks only when its terminal carries extkeys
+#                          (tty.c tty_update_features over tty-features.c
+#                          tty_feature_extkeys), which it learns from a reply,
+#                          -T or terminal-features, whose default gives xterm*
+#                          none; tty.rs arms \e[>4;2m whenever extended-keys is
+#                          not off. Under the outer tmux both arm and it asserts.
+#   colours/silent and     on a silent terminal only: tty.c tty_check_fg and
+#   colours/silent-2       tty_check_bg turn an RGB colour into its nearest 256
+#     cells and line       colour (colour_find_rgb) when the terminal has no
+#                          RGB and a 256 colour into 16 (colour_256to16) when
+#                          it has fewer than 256; render.rs never downgrades.
+#                          Without -2 the pin writes the indexed cell as 32 and
+#                          the RGB cell as 30, with -2 the RGB cell as
+#                          38;5;233. A downgrade from TERM alone would break
+#                          every terminal that answers, where the pin learns
+#                          RGB, so matching it needs the raw TUI to learn its
+#                          terminal's features from the replies as the pin does
+#                          (options.client-terminal-negotiation).
 #   client_theme           a zz client always carries a theme and the pin's is
 #                          empty until its terminal answers. That is the
 #                          recorded stance on
@@ -248,6 +274,10 @@ INNER_SHELL="ENV= PS1='\$ ' exec /bin/sh"
 CASE_LOCALE=C
 ZZ_PANE=""
 TMUX_PANE_ID=""
+# 1 while a case attaches both clients to a silent terminal (see
+# write_silent_terminal); 0 for the outer pinned tmux itself.
+SILENT_TERMINAL=0
+PYTHON="$(command -v python3)"
 mkdir -p "$ZZ_HOME/config" "$TMUX_HOME/config" "$OUTER_HOME/config" "$ZZ_LOG_DIR" "$RUNTIME_DIR"
 chmod 700 "$RUNTIME_DIR"
 
@@ -555,6 +585,46 @@ write_attach() {
   chmod +x "$destination"
 }
 
+# A SILENT TERMINAL. The outer pinned tmux answers every query a client sends
+# (DA, DA2, XTVERSION), and the pin learns its features from those replies
+# (tty-keys.c tty_keys_device_attributes2 and
+# tty_keys_extended_device_attributes, tty-features.c tty_default_features:
+# a "tmux" reply adds 256, RGB, extkeys and more). A terminal that answers
+# nothing, such as script(1) or a serial line, leaves the pin with the
+# features its TERM, COLORTERM and flags give it. This relay is that terminal:
+# the client runs on a pty of its own, everything it writes is copied to the
+# outer pane, where the pin decodes it as usual, and nothing the outer pane
+# answers or is sent ever reaches the client. The relay's own tty is raw so the
+# outer pane's replies are not echoed back onto the decoded screen, and the
+# client's pty is sized to the outer pane before the client starts.
+write_silent_terminal() {
+  cat >"$SCRATCH_DIR/silent-terminal.py" <<'PY'
+import fcntl
+import os
+import pty
+import sys
+import termios
+import tty
+
+size = fcntl.ioctl(1, termios.TIOCGWINSZ, b"\0" * 8)
+tty.setraw(0)
+pid, master = pty.fork()
+if pid == 0:
+    fcntl.ioctl(0, termios.TIOCSWINSZ, size)
+    os.execv(sys.argv[1], sys.argv[1:])
+while True:
+    try:
+        data = os.read(master, 65536)
+    except OSError:
+        break
+    if not data:
+        break
+    while data:
+        data = data[os.write(1, data):]
+os.waitpid(pid, 0)
+PY
+}
+
 # Both sides attach with the same TERM and the same extra flags unless a
 # sabotage names different ones. The two windows are made fresh for every case
 # so a mode a previous case armed cannot leak into the next reading.
@@ -571,7 +641,12 @@ open_case() {
   write_attach zz "$SCRATCH_DIR/attach-zz.sh" "$term" $zz_flags
   write_attach tmux "$SCRATCH_DIR/attach-tmux.sh" "$term" $tmux_flags
   for side in zz tmux; do
-    tmux_outer_command new-window -d -n "w-$side" "$SCRATCH_DIR/attach-$side.sh"
+    if [ "$SILENT_TERMINAL" = 1 ]; then
+      tmux_outer_command new-window -d -n "w-$side" \
+        "$PYTHON $SCRATCH_DIR/silent-terminal.py $SCRATCH_DIR/attach-$side.sh"
+    else
+      tmux_outer_command new-window -d -n "w-$side" "$SCRATCH_DIR/attach-$side.sh"
+    fi
   done
   for side in zz tmux; do
     wait_for "outer $side pane for $name" outer_pane_is "$(outer_window "$side")" 80x24
@@ -749,6 +824,7 @@ cell_class() {
 # clear keeps a one-sided command line off the compared screen.
 colour_stage() {
   local stage="$1" zz_escape="$2" pin_escape="$3" zz_sample="$4" pin_sample="$5"
+  local row="${6:-assert_row}"
   local zz_line pin_line glyph
   side_command zz send-keys -t "$(side_pane zz)" "printf '$zz_escape'; clear; $zz_sample" Enter
   side_command tmux send-keys -t "$(side_pane tmux)" "printf '$pin_escape'; clear; $pin_sample" Enter
@@ -757,11 +833,40 @@ colour_stage() {
   pin_line="$(colour_line tmux)"
   assert_row "colours/$stage glyphs" "$(strip_escapes "$zz_line")" "$(strip_escapes "$pin_line")"
   for glyph in R I X B; do
-    assert_row "colours/$stage cell $glyph" \
+    "$row" "colours/$stage cell $glyph" \
       "$(cell_class "$zz_line" "$glyph")" "$(cell_class "$pin_line" "$glyph")"
   done
-  assert_row "colours/$stage line" "$(printf '%s' "$zz_line" | cat -v)" \
+  "$row" "colours/$stage line" "$(printf '%s' "$zz_line" | cat -v)" \
     "$(printf '%s' "$pin_line" | cat -v)"
+}
+
+# THE SILENT-TERMINAL CASES. -T and -2 name features, and the flag-features and
+# delta rows of the outer tmux's cases cannot see what a flag adds beside them:
+# the pin's replied roster already carries 256 and RGB there. On a silent
+# terminal under TERM=xterm neither baseline carries them, so each flag's delta
+# is exactly what the flag added on its side: RGB alone for -T RGB (the pin's
+# tty_feature_rgb is one bit, whatever colours it implies) and 256 for -2.
+# pane_key_mode with extended-keys on and the colour line with and without -2
+# are measured here and recorded: the pin arms no extended keys and downgrades
+# 256 and RGB colours for a terminal it learned nothing about, and the raw TUI
+# does neither (see RECORDED DIVERGENCES).
+case_silent() {
+  SILENT_TERMINAL=1
+  case_facts 'silent/bare' xterm '' '' "$FACT_RECORDED" baseline
+  case_facts 'silent/-T' xterm '-T RGB' '-T RGB' "$FACT_RECORDED" '' RGB
+  case_facts 'silent/-2' xterm -2 -2 "$FACT_RECORDED" '' 256
+  side_command zz set-option -s extended-keys on >/dev/null
+  side_command tmux set-option -s extended-keys on >/dev/null
+  case_modes 'silent/extended' xterm-256color '' '' "$MODE_RECORDED pane_key_mode"
+  side_command zz set-option -s extended-keys off >/dev/null
+  side_command tmux set-option -s extended-keys off >/dev/null
+  open_case 'silent/colours' xterm '' ''
+  colour_stage silent '' '' "$COLOUR_SAMPLE" "$COLOUR_SAMPLE" record_row
+  open_case 'silent/colours-2' xterm -2 -2
+  colour_stage silent-2 '' '' "$COLOUR_SAMPLE" "$COLOUR_SAMPLE" record_row
+  SILENT_TERMINAL=0
+  BASELINE_ZZ=""
+  BASELINE_PIN=""
 }
 
 # THE STAGES CLAUSE 3 NAMES. stock: the pin keeps each class it was given.
@@ -884,6 +989,7 @@ case_cli() {
 
 # --- driver ----------------------------------------------------------------
 
+write_silent_terminal
 zz_command -f /dev/null daemon >"$SCRATCH_DIR/zz-daemon.out" 2>"$SCRATCH_DIR/zz-daemon.err" &
 ZZ_PID=$!
 wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
@@ -932,6 +1038,7 @@ if [ "$SELF_CHECK" -eq 0 ]; then
   case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/non-utf8 '' '' line
   case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/-u -u -u
   case_colours
+  case_silent
   case_cli '' ''
 
   printf '%s asserted rows, %s recorded rows\n' "$CHECKS" "$RECORDED"
@@ -990,6 +1097,17 @@ self_check_case 'a one-sided -T sixel on the pin only' catches \
 # flag flag-features has to report 256:no against the pin's 256:yes.
 self_check_case 'a one-sided -2 on the pin only' catches \
   case_facts 'sc/one-sided-2' xterm '' -2 "$FACT_RECORDED" '' 256
+
+# The silent terminal's control and the -T RGB delta. The sabotage is the
+# shape of the bug it guards: a side whose roster gains 256 beside the RGB it
+# was asked for. Handing the pin -T 256,RGB against zz's -T RGB has to show up
+# in delta-client_termfeatures, which the silent baseline leaves free of both.
+SILENT_TERMINAL=1
+self_check_case 'control, a silent terminal with no sabotage' quiet \
+  case_facts 'sc/silent-control' xterm '' '' "$FACT_RECORDED" baseline
+self_check_case 'a one-sided 256 beside -T RGB on the pin, silent terminal' catches \
+  case_facts 'sc/silent-T' xterm '-T RGB' '-T 256,RGB' "$FACT_RECORDED" '' RGB
+SILENT_TERMINAL=0
 
 # The colour class itself: the pin's side writes the named cell as the RGB
 # colour it resolves to, the same colour in another class, and the stock stage

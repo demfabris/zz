@@ -1,0 +1,71 @@
+probe scratch /tmp/zzcm.sFfqIb zz socket /tmp/zzcm-sFfqIb.sock
+=== g3_repeat
+ok    g3r-entry
+      zz   mode=copy-mode in=1 column=2 selection=0 line=[$] | row=23 scroll=0 | 2,23 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=2 selection=0 line=[$] | row=23 scroll=0 | 2,23 flag=1 pane=80x24
+ok    g3r-5k
+      zz   mode=copy-mode in=1 column=1 selection=0 line=[aaaaaaaaaaaa] | row=18 scroll=0 | 1,18 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=1 selection=0 line=[aaaaaaaaaaaa] | row=18 scroll=0 | 1,18 flag=1 pane=80x24
+ok    g3r-2cu
+      zz   mode=copy-mode in=1 column=1 selection=0 line=[line-54 filler-54] | row=18 scroll=24 | 1,18 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=1 selection=0 line=[line-54 filler-54] | row=18 scroll=24 | 1,18 flag=1 pane=80x24
+ok    g3r-cd1
+      zz   mode=copy-mode in=1 column=1 selection=0 line=[line-66 filler-66] | row=18 scroll=12 | 1,18 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=1 selection=0 line=[line-66 filler-66] | row=18 scroll=12 | 1,18 flag=1 pane=80x24
+ok    g3r-cd2
+      zz   mode=copy-mode in=1 column=1 selection=0 line=[aaaaaaaaaaaa] | row=18 scroll=0 | 1,18 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=1 selection=0 line=[aaaaaaaaaaaa] | row=18 scroll=0 | 1,18 flag=1 pane=80x24
+      case g3r-cd3-clamped
+      cursor tmux: 1,23 flag=1 pane=80x24
+      cursor zz:   0,23 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=1 selection=0 line=[$]
+      facts zz:   mode=copy-mode in=1 column=0 selection=0 line=[$]
+DIFF  g3r-cd3-clamped
+      zz   mode=copy-mode in=1 column=0 selection=0 line=[$] | row=23 scroll=0 | 0,23 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=1 selection=0 line=[$] | row=23 scroll=0 | 1,23 flag=1 pane=80x24
+=== g3_variants
+ok    g3j-seedend-eol
+      zz   mode=copy-mode in=1 column=6 selection=0 line=[SEEDEND] | row=22 scroll=0 | 6,22 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=6 selection=0 line=[SEEDEND] | row=22 scroll=0 | 6,22 flag=1 pane=80x24
+ok    g3j-j-onto-prompt
+      zz   mode=copy-mode in=1 column=0 selection=0 line=[$] | row=23 scroll=0 | 0,23 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=0 selection=0 line=[$] | row=23 scroll=0 | 0,23 flag=1 pane=80x24
+ok    g3c-col0-clamped
+      zz   mode=copy-mode in=1 column=0 selection=0 line=[$] | row=23 scroll=0 | 0,23 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=0 selection=0 line=[$] | row=23 scroll=0 | 0,23 flag=1 pane=80x24
+      case g3n-npage-clamped
+      cursor tmux: 1,23 flag=1 pane=80x24
+      cursor zz:   0,23 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=1 selection=0 line=[$]
+      facts zz:   mode=copy-mode in=1 column=0 selection=0 line=[$]
+DIFF  g3n-npage-clamped
+      zz   mode=copy-mode in=1 column=0 selection=0 line=[$] | row=23 scroll=0 | 0,23 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=1 selection=0 line=[$] | row=23 scroll=0 | 1,23 flag=1 pane=80x24
+ok    g3e-emacs-clamped
+      zz   mode=copy-mode in=1 column=1 selection=0 line=[$] | row=23 scroll=0 | 1,23 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=1 selection=0 line=[$] | row=23 scroll=0 | 1,23 flag=1 pane=80x24
+=== g9_send_prefix_leak
+ok    g9-start
+      case g9-send-prefix
+      first differing row 0 of 24
+        tmux: line-38 filler-38
+        zz:   line-60 filler-60
+      first differing glyph row 0 of 24
+        tmux text: line-38 filler-38
+        zz text:   line-60 filler-60
+      cursor tmux: 6,21 flag=1 pane=80x24
+      cursor zz:   0,21 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=6 selection=0 line=[line-59 filler-59]
+      facts zz:   mode=copy-mode in=1 column=0 selection=0 line=[]
+      view tmux:  row=21 scroll=22
+      view zz:    row=21 scroll=0
+DIFF  g9-send-prefix
+      zz   mode=copy-mode in=1 column=0 selection=0 line=[] | row=21 scroll=0 | 0,21 flag=1 pane=80x24
+      tmux mode=copy-mode in=1 column=6 selection=0 line=[line-59 filler-59] | row=21 scroll=22 | 6,21 flag=1 pane=80x24
+g9 zz pane: $ echo LEAKCHECK
+g9 zz pane: LEAKCHECK
+g9 zz pane: $
+g9 tmux pane: $ echo LEAKCHECK
+g9 tmux pane: LEAKCHECK
+g9 tmux pane: $
+probe: 3 of 13 cases differ in a channel they assert, 0 recorded

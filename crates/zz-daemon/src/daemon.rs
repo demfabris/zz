@@ -57,12 +57,12 @@ use zz_protocol::{
 };
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
-    CaptureBoundary, CaptureOptions, ClipboardTarget, Color, CursorBlinkPolicy, CursorStyle,
-    EngineKnobs, LastCommandCapture, PasteBufferAction, RawOutputTapError, TerminalAppearance,
-    TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalEvents,
-    TerminalMode, TerminalPalette, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId,
-    TerminalViewport, WordSeparators, apply_appearance_overrides, parse_x11_color,
-    prepare_paste_buffer,
+    CaptureBoundary, CaptureOptions, ClipboardTarget, Color, ColourClass, CursorBlinkPolicy,
+    CursorStyle, EngineKnobs, LastCommandCapture, PasteBufferAction, RawOutputTapError,
+    TerminalAppearance, TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch,
+    TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette, TerminalSession, TerminalSize,
+    TerminalSpawn, TerminalViewId, TerminalViewport, WordSeparators, apply_appearance_overrides,
+    parse_x11_color, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -843,8 +843,9 @@ fn pane_terminal_appearance(
         return Arc::clone(base);
     }
     let mut appearance = (**base).clone();
-    if let Some(palette) = palette {
+    if let Some((palette, classes)) = palette {
         appearance.palette = palette;
+        appearance.palette_classes = classes;
     }
     if let Some((style, blink)) = cursor_style {
         appearance.cursor_style = style;
@@ -868,20 +869,27 @@ fn pane_terminal_appearance(
 fn pane_palette(
     base: &TerminalAppearance,
     pane_colours: &[(u8, String)],
-) -> Option<TerminalPalette> {
+) -> Option<(TerminalPalette, Vec<(u8, ColourClass)>)> {
     let mut colors = base.palette.into_array();
-    let mut overlaid = false;
+    let mut classes = Vec::new();
     for (index, value) in pane_colours {
-        let Some(color) = parse_tmux_colour(value).and_then(|colour| match colour {
-            TmuxColour::Default | TmuxColour::Terminal => None,
-            colour => appearance_tmux_colour(base, colour),
+        let Some((color, class)) = parse_tmux_colour(value).and_then(|colour| {
+            let class = match colour {
+                TmuxColour::Default | TmuxColour::Terminal => return None,
+                TmuxColour::Basic(entry) | TmuxColour::Indexed(entry) => {
+                    ColourClass::Palette(entry)
+                }
+                TmuxColour::Rgb(_) | TmuxColour::Theme(_) => ColourClass::Rgb,
+            };
+            appearance_tmux_colour(base, colour).map(|color| (color, class))
         }) else {
             continue;
         };
         colors[usize::from(*index)] = color;
-        overlaid = true;
+        classes.retain(|(entry, _)| entry != index);
+        classes.push((*index, class));
     }
-    overlaid.then(|| TerminalPalette::new(colors))
+    (!classes.is_empty()).then(|| (TerminalPalette::new(colors), classes))
 }
 
 fn pane_cursor_color(appearance: &TerminalAppearance, value: &str) -> Option<Color> {

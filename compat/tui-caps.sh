@@ -56,12 +56,11 @@
 #                                  because libghostty-vt exposes the
 #                                  current and the default palette and no
 #                                  override mask. Not driven.
-#   colour class, pane-colours     zz applies pane-colours to the pane's  named
-#                                  default palette (crates/zz-daemon
-#                                  daemon.rs pane_palette), so a cell
-#                                  keeps its index where the pin's
-#                                  colour_palette_get substitutes the
-#                                  option's colour. Not driven.
+#   colour class, pane-colours     an RGB entry and an indexed entry on   driven
+#                                  the window, an OSC 4 over the option
+#                                  and OSC 104 back to it, an entry the
+#                                  option leaves untouched, and the
+#                                  array unset
 #   colour class, OSC 10/11 and    after OSC 10 rgb:ff/00/00 the pin      named
 #     window-style defaults        paints a default cell \e[38;2;255;0;0m
 #                                  and under window-style fg=colour2
@@ -163,14 +162,16 @@
 # again; zz does the same from the frame's per-style colour class (PROTOCOL
 # 101). Every cell of every colour stage asserts.
 #
-# --self-check drives EIGHT deliberate one-sided differences and requires the
-# comparison to report each in the channel that was sabotaged: a one-sided
-# client flag (-u on the pin only), a named cell spelled as the RGB colour it
-# resolves to on one side, a one-sided palette entry, an OSC 4 on an indexed
-# entry sent to one side, an OSC 104 sent to one side, the legacy-terminal case
-# driven with extended keys on one side, a one-sided unknown CLI option, and a
-# one-sided wide codepoint. A ninth case is a CONTROL that sabotages nothing
-# and must stay quiet. A fixture that only passes has proved nothing.
+# --self-check drives deliberate one-sided differences and requires the
+# comparison to report each in the channel that was sabotaged: one-sided client
+# flags (-u, -T sixel and -2 on the pin only), a named cell spelled as the RGB
+# colour it resolves to on one side, a one-sided palette entry, an OSC 4 on an
+# indexed entry sent to one side, an OSC 104 sent to one side, pane-colours set
+# on one side, a pane-colours entry the other stage leaves untouched named on
+# one side, the legacy-terminal case and an extended key driven with extended
+# keys on one side, a one-sided unknown CLI option, and a one-sided wide
+# codepoint. One more case is a CONTROL that sabotages nothing and must stay
+# quiet. A fixture that only passes has proved nothing.
 #
 # ZZ_CAPS_DIAGNOSTICS_DIR names the directory a bounded wait that runs out
 # copies its evidence into; without it a fresh /tmp directory is made and named
@@ -780,11 +781,43 @@ case_colours() {
   indexed-entry) pin_indexed='' ;;
   reset) pin_reset='' ;;
   esac
+  local pin_pane='1=#123456 42=colour200' pin_other='3=#654321'
+  case "$sabotage" in
+  pane-entry) pin_pane='' ;;
+  pane-untouched) pin_other='1=#123456 3=#654321' ;;
+  esac
   open_case colours xterm-256color '' ''
   colour_stage stock '' '' "$COLOUR_SAMPLE" "$pin_sample"
   colour_stage palette "$PALETTE_NAMED" "$pin_named" "$COLOUR_SAMPLE" "$pin_sample"
   colour_stage indexed "$PALETTE_INDEXED" "$pin_indexed" "$COLOUR_SAMPLE" "$pin_sample"
   colour_stage reset "$PALETTE_RESET" "$pin_reset" "$COLOUR_SAMPLE" "$pin_sample"
+  pane_colours_set zz 1=#123456 42=colour200
+  pane_colours_set tmux $pin_pane
+  colour_stage pane '' '' "$COLOUR_SAMPLE" "$pin_sample"
+  colour_stage pane-osc "$PALETTE_NAMED" "$PALETTE_NAMED" "$COLOUR_SAMPLE" "$pin_sample"
+  colour_stage pane-osc-reset "$PALETTE_RESET" "$PALETTE_RESET" "$COLOUR_SAMPLE" "$pin_sample"
+  pane_colours_set zz 3=#654321
+  pane_colours_set tmux $pin_other
+  colour_stage pane-untouched '' '' "$COLOUR_SAMPLE" "$pin_sample"
+  pane_colours_set zz
+  pane_colours_set tmux
+  colour_stage pane-unset '' '' "$COLOUR_SAMPLE" "$pin_sample"
+}
+
+# pane-colours is the pane's configured palette, the layer an OSC 4 entry sits
+# on (colour.c colour_palette_from_option and colour_palette_get). A cell whose
+# index the option names leaves the pin as the option's own colour in that
+# colour's own class: #123456 as 38;2;18;52;86 and colour200 as 38;5;200. An
+# index the option does not name keeps its class. Each call replaces the whole
+# window array on one side with the INDEX=COLOUR entries it is given.
+pane_colours_set() {
+  local side="$1" entry
+  shift
+  side_command "$side" set-option -wu -t "$(side_pane "$side")" pane-colours >/dev/null
+  for entry in "$@"; do
+    side_command "$side" set-option -w -t "$(side_pane "$side")" \
+      "pane-colours[${entry%%=*}]" "${entry#*=}" >/dev/null
+  done
 }
 
 # Unicode widths reach the outer terminal as the column the inner mux left its
@@ -976,6 +1009,17 @@ self_check_case 'an OSC 4 on an indexed entry sent to zz only' catches \
 # A reset on one side only: zz's named and indexed cells go back to their
 # index while the pin's stay RGB, and the reset stage catches it.
 self_check_case 'an OSC 104 sent to zz only' catches case_colours reset
+
+# pane-colours on zz alone: zz's named, indexed and background cells take the
+# option's colours while the pin's keep their index, and the pane stage
+# catches it.
+self_check_case 'pane-colours set on zz only' catches case_colours pane-entry
+
+# An entry the other stage leaves untouched, named on the pin alone: zz's named
+# cell has to keep 31 while the pin's goes RGB, and the untouched stage
+# catches it.
+self_check_case 'pane-colours naming the untouched entry on the pin only' catches \
+  case_colours pane-untouched
 
 # The legacy-terminal case driven with extended keys on one side. With
 # extended-keys off on both, pane_key_mode is VT10x on both and asserts; turning

@@ -3051,6 +3051,7 @@ struct ViewportDictionary {
     mode_viewport: Option<(u64, u32)>,
     default_style: Option<PackedStyle>,
     palette: Option<Box<[RgbColor; 256]>>,
+    palette_classes: Vec<(u8, ColourClass)>,
     styles: Vec<PackedStyle>,
     style_ids: InternHashMap<PackedStyle, u16>,
     grapheme_ids: InternHashMap<String, u32>,
@@ -4313,6 +4314,9 @@ fn run_output_view(
     let bound_pasted_images = HashSet::new();
     let mut generations = ViewportGenerations::new()?;
     let mut dictionary = ViewportDictionary::default();
+    dictionary
+        .palette_classes
+        .clone_from(&appearance.palette_classes);
     let (mut search_worker, search_results) = SearchWorker::spawn(ActorWake::none())?;
 
     loop {
@@ -4467,6 +4471,7 @@ fn run_output_view(
                 Ok(Command::SetAppearance(next)) => {
                     reported_color_scheme.set(ghostty_color_scheme(next.color_scheme));
                     apply_terminal_appearance(&mut terminal, &next)?;
+                    dictionary.palette_classes.clone_from(&next.palette_classes);
                     render_state = RenderState::new()?;
                     for view in active_views.values_mut().chain(inactive_views.values_mut()) {
                         refresh_frozen_view_appearance(&mut terminal, view)?;
@@ -5086,6 +5091,9 @@ fn run_terminal(
     let mut inactive_views = InactiveTerminalViews::new();
     let mut generations = ViewportGenerations::new()?;
     let mut dictionary = ViewportDictionary::default();
+    dictionary
+        .palette_classes
+        .clone_from(&appearance.palette_classes);
     let mut pasted_image_bindings = PastedImageBindings::default();
     let mut reader_eof = false;
     let mut exit_status = None;
@@ -5563,6 +5571,7 @@ fn run_terminal(
                 Command::SetAppearance(next) => {
                     reported_color_scheme.set(ghostty_color_scheme(next.color_scheme));
                     apply_terminal_appearance(&mut terminal, &next)?;
+                    dictionary.palette_classes.clone_from(&next.palette_classes);
                     render_state = RenderState::new()?;
                     for view in active_views.values_mut().chain(inactive_views.values_mut()) {
                         refresh_frozen_view_appearance(&mut terminal, view)?;
@@ -5806,7 +5815,12 @@ fn run_terminal(
                         count,
                         reply,
                     } = *request;
-                    let _ = reply.send(capture_history(&terminal, start, count));
+                    let _ = reply.send(capture_history(
+                        &terminal,
+                        start,
+                        count,
+                        &dictionary.palette_classes,
+                    ));
                 }
                 Command::KittyImage(request) => {
                     let image = generations
@@ -8110,6 +8124,7 @@ fn capture_history(
     terminal: &Terminal<'_, '_>,
     start: u32,
     count: u32,
+    palette_classes: &[(u8, ColourClass)],
 ) -> Result<HistoryCapture, TerminalCaptureError> {
     let history_rows =
         u32::try_from(terminal.scrollback_rows().map_err(capture_failure)?).unwrap_or(u32::MAX);
@@ -8165,16 +8180,27 @@ fn capture_history(
                 (ColourClass::Resolved, ColourClass::Resolved)
             } else {
                 (
-                    ground_class(raw_style.fg_color, &palette, &default_palette),
+                    ground_class(
+                        raw_style.fg_color,
+                        &palette,
+                        &default_palette,
+                        palette_classes,
+                    ),
                     match raw_cell.content_tag().map_err(capture_failure)? {
                         CellContentTag::BgColorPalette => palette_class(
                             raw_cell.bg_color_palette().map_err(capture_failure)?.0,
                             &palette,
                             &default_palette,
+                            palette_classes,
                         ),
                         CellContentTag::BgColorRgb => ColourClass::Rgb,
                         CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
-                            ground_class(raw_style.bg_color, &palette, &default_palette)
+                            ground_class(
+                                raw_style.bg_color,
+                                &palette,
+                                &default_palette,
+                                palette_classes,
+                            )
                         }
                     },
                 )
@@ -12972,6 +12998,7 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     let full_dirty = dirty == Dirty::Full;
     let colors = snapshot.colors()?;
     let default_palette = terminal.default_color_palette()?.0;
+    let palette_classes = dictionary.palette_classes.clone();
     let columns = snapshot.cols()?;
     let row_count = snapshot.rows()?;
     let foreground = color(colors.foreground);
@@ -13072,12 +13099,18 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                         (ColourClass::Resolved, ColourClass::Resolved)
                     } else {
                         (
-                            ground_class(raw_style.fg_color, &colors.palette, &default_palette),
+                            ground_class(
+                                raw_style.fg_color,
+                                &colors.palette,
+                                &default_palette,
+                                &palette_classes,
+                            ),
                             match raw_cell.content_tag()? {
                                 CellContentTag::BgColorPalette => palette_class(
                                     raw_cell.bg_color_palette()?.0,
                                     &colors.palette,
                                     &default_palette,
+                                    &palette_classes,
                                 ),
                                 CellContentTag::BgColorRgb => ColourClass::Rgb,
                                 CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
@@ -13085,6 +13118,7 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                                         raw_style.bg_color,
                                         &colors.palette,
                                         &default_palette,
+                                        &palette_classes,
                                     )
                                 }
                             },
@@ -13467,21 +13501,29 @@ fn ground_class(
     value: StyleColor,
     palette: &[RgbColor; 256],
     defaults: &[RgbColor; 256],
+    classes: &[(u8, ColourClass)],
 ) -> ColourClass {
     match value {
         StyleColor::None => ColourClass::Default,
-        StyleColor::Palette(index) => palette_class(index.0, palette, defaults),
+        StyleColor::Palette(index) => palette_class(index.0, palette, defaults, classes),
         StyleColor::Rgb(_) => ColourClass::Rgb,
     }
 }
 
-fn palette_class(index: u8, palette: &[RgbColor; 256], defaults: &[RgbColor; 256]) -> ColourClass {
+fn palette_class(
+    index: u8,
+    palette: &[RgbColor; 256],
+    defaults: &[RgbColor; 256],
+    classes: &[(u8, ColourClass)],
+) -> ColourClass {
     let slot = usize::from(index);
-    if palette[slot] == defaults[slot] {
-        ColourClass::Palette(index)
-    } else {
-        ColourClass::Rgb
+    if palette[slot] != defaults[slot] {
+        return ColourClass::Rgb;
     }
+    classes
+        .iter()
+        .find(|(entry, _)| *entry == index)
+        .map_or(ColourClass::Palette(index), |(_, class)| *class)
 }
 
 #[cfg(test)]
@@ -15665,6 +15707,89 @@ mod tests {
             viewport.style(row[1]).expect("style").foreground_class(),
             ColourClass::Palette(42)
         );
+    }
+
+    #[test]
+    fn pane_colours_entries_leave_in_the_class_of_the_option_colour() {
+        let mut appearance = TerminalAppearance::default();
+        appearance.palette[1] = Color::rgb(0x12, 0x34, 0x56);
+        appearance.palette[42] = appearance.palette[200];
+        appearance.palette_classes = vec![(1, ColourClass::Rgb), (42, ColourClass::Palette(200))];
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 4,
+            rows: 1,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        apply_terminal_appearance(&mut terminal, &appearance).expect("apply appearance");
+        terminal.vt_write(b"\x1b[31mR\x1b[0m\x1b[38;5;42mI\x1b[0m\x1b[32mG\x1b[0m\x1b[41mB\x1b[0m");
+        fn cell_classes(
+            terminal: &Terminal<'_, '_>,
+            palette_classes: &[(u8, ColourClass)],
+        ) -> Vec<(ColourClass, ColourClass, Color)> {
+            let mut render_state = RenderState::new().expect("render state");
+            let mut rows = RowIterator::new().expect("rows");
+            let mut cells = CellIterator::new().expect("cells");
+            let mut generations = ViewportGenerations::default();
+            let mut dictionary = ViewportDictionary {
+                palette_classes: palette_classes.to_vec(),
+                ..ViewportDictionary::default()
+            };
+            let viewport = snapshot(
+                terminal,
+                &mut render_state,
+                &mut rows,
+                &mut cells,
+                &mut generations,
+                SnapshotChange::Content,
+                &mut dictionary,
+                None,
+                SessionStatus::Running,
+            )
+            .expect("snapshot");
+            let row = viewport.row(0).expect("first row");
+            row.iter()
+                .take(4)
+                .map(|cell| {
+                    let style = viewport.style(*cell).expect("style");
+                    (
+                        style.foreground_class(),
+                        style.background_class(),
+                        style.foreground(),
+                    )
+                })
+                .collect()
+        }
+        let classes =
+            |terminal: &Terminal<'_, '_>| cell_classes(terminal, &appearance.palette_classes);
+
+        let stock = classes(&terminal);
+        assert_eq!(
+            stock[0],
+            (
+                ColourClass::Rgb,
+                ColourClass::Default,
+                Color::rgb(0x12, 0x34, 0x56)
+            )
+        );
+        assert_eq!(stock[1].0, ColourClass::Palette(200));
+        assert_eq!(stock[2].0, ColourClass::Palette(2));
+        assert_eq!(stock[3].1, ColourClass::Rgb);
+
+        terminal.vt_write(b"\x1b]4;1;rgb:00/ff/00\x1b\\");
+        let osc = classes(&terminal);
+        assert_eq!(
+            osc[0],
+            (
+                ColourClass::Rgb,
+                ColourClass::Default,
+                Color::rgb(0, 255, 0)
+            )
+        );
+        assert_eq!(osc[2].0, ColourClass::Palette(2));
+
+        terminal.vt_write(b"\x1b]104\x1b\\");
+        assert_eq!(classes(&terminal), stock);
     }
 
     #[test]

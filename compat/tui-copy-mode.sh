@@ -727,8 +727,9 @@ copy_case() {
 
 # THE MEASURED DIVERGENCES the corpus records rather than asserts, each
 # measured at this fixture's own checkpoints at 80x24 against tmux d77c9dc6.
-# Every one left is a mode-style, prompt or position surface the modes lane's
-# landing paints the pin's way, so each reason starts `SIBLING:modes `.
+# Every one left is the current-match style, which the modes landing did not
+# paint; its reason keeps `SIBLING:modes ` with the cycle-5 gate's measurement
+# appended until an owner lands the painting.
 #
 # CLOSED 2026-09-10 and asserted since: the half page and the search landing
 # (window_copy_pageup1 moves the view by screen_size_y/2 and keeps the cursor
@@ -742,9 +743,12 @@ copy_case() {
 # #{pane_search_string} empty where the pin answered the last search, and a
 # fresh entry's n did nothing where the pin searched up for it; the pane's
 # terminal now keeps it (crates/zz-terminal) and the daemon answers the format
-# from there (crates/zz-daemon status.rs).
+# from there (crates/zz-daemon status.rs). Closed at the cycle-5 gate after the
+# modes landing and asserted on every channel since: the selection style, the
+# search prompt's message-style row and the copy-mode position indicator (the
+# 18 cases that recorded SELECTION_REASON, PROMPT_REASON and POSITION_REASON).
 #
-# SELECTION_REASON. The pin paints the selected cells with
+# THE SELECTION, before the modes landing. The pin paints the selected cells with
 # copy-mode-selection-style, which defaults to #{E:mode-style}; the raw TUI
 # paints an OverlaySpan of kind Selection in reverse video and never reads the
 # option. Measured on a two-line selection with mode-style pinned to
@@ -755,20 +759,17 @@ copy_case() {
 # decided 2026-09-10 and lands with the modes lane (SIBLING:modes). The
 # BUFFER channel asserts straight through the divergence: the bytes the two
 # engines copy out of that selection are identical.
-SELECTION_REASON='SIBLING:modes the pin paints the selection with copy-mode-selection-style and stops on the last glyph; zz paints a reverse-video overlay one cell further'
 # MATCH_REASON. The pin paints the current search match with
 # copy-mode-current-match-style, pinned here to bg=#cd00cd,fg=#101010; the raw
 # TUI paints it in reverse video. Measured 2026-09-10 on line-12 after `needle`:
 # the pin wrote \e[38;2;16;16;16m\e[48;2;205;0;205mneedle\e[39m\e[49m and zz
 # \e[7mneedle\e[0m, every glyph, the cursor, the view and the buffer identical.
 # The same options.native-mode-styles family as the selection.
-MATCH_REASON='SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video'
-# PROMPT_REASON. The same measurement tui-stock-keys.sh carries: the pin draws
-# command-prompt in message-style across the whole row and terminates it with
-# \e[39m\e[49m; zz paints the prompt from its own palette and stops at the
-# text. The prompt GLYPHS are identical on both sides and this fixture asserts
-# them through the cursor and the search that follows.
-PROMPT_REASON='SIBLING:modes zz paints the command prompt from its own palette and ignores message-style'
+# The cycle-5 gate flipped these cases after the modes landing and they stayed
+# red on the rows channel only (the current-match cells); text, cursor, facts,
+# view and buffer identical. The modes landing paints no match style, so the
+# owner is still to be named.
+MATCH_REASON='SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video (kept recorded at the cycle-5 gate: flipped after the modes landing, still red on rows, owner not named)'
 
 table_keys() {
   case "$1" in
@@ -778,7 +779,8 @@ table_keys() {
     KEY_RIGHT=C-f
     KEY_BEGINSEL=C-Space KEY_RECT=R KEY_COPY=M-w KEY_CANCEL=q
     KEY_SEARCHFWD=C-s KEY_SEARCHBACK=C-r KEY_COUNT=M-5
-    SEARCH_OPEN_REASON="$PROMPT_REASON, and the incremental search already paints the current match: ${MATCH_REASON#SIBLING:modes }"
+    SEARCH_OPEN_MODE=text,cursor,facts,view,buffer
+    SEARCH_OPEN_REASON="$MATCH_REASON; the incremental search already paints the current match"
     ;;
   vi)
     KEY_DOWN=j KEY_UP=k KEY_HALFDOWN=C-d KEY_HALFUP=C-u
@@ -786,7 +788,8 @@ table_keys() {
     KEY_RIGHT=l
     KEY_BEGINSEL=Space KEY_RECT=v KEY_COPY=Enter KEY_CANCEL=q
     KEY_SEARCHFWD=/ KEY_SEARCHBACK='?' KEY_COUNT=5
-    SEARCH_OPEN_REASON="$PROMPT_REASON"
+    SEARCH_OPEN_MODE=rows,text,cursor,facts,view,buffer
+    SEARCH_OPEN_REASON=''
     ;;
   esac
 }
@@ -866,16 +869,16 @@ run_movement() {
   type_both "$KEY_SOL"
   copy_case "$table-selection-start" none ''
   type_both "$KEY_BEGINSEL"
-  copy_case "$table-begin-selection" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
+  copy_case "$table-begin-selection" none ''
   type_both "$KEY_DOWN"
   type_both "$KEY_EOL"
-  copy_case "$table-selection-extends" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
+  copy_case "$table-selection-extends" none ''
   assert_mode_formats "$table-selection-extends"
   type_both "$KEY_RECT"
-  copy_case "$table-rectangle-on" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
+  copy_case "$table-rectangle-on" none ''
   assert_mode_formats "$table-rectangle-on"
   type_both "$KEY_RECT"
-  copy_case "$table-rectangle-off" none '' text,cursor,facts,view,buffer "$SELECTION_REASON"
+  copy_case "$table-rectangle-off" none ''
 
   # The copy leaves the mode and fills the paste buffer on both sides.
   type_both "$KEY_COPY"
@@ -897,7 +900,7 @@ run_movement() {
   type_both "$KEY_DOWN"
   type_both "$KEY_COUNT"
   type_both "$KEY_RIGHT"
-  copy_case "$table-rectangle-inside-line" format '#{copy_cursor_x}=5' text,cursor,facts,view,buffer "$SELECTION_REASON"
+  copy_case "$table-rectangle-inside-line" format '#{copy_cursor_x}=5'
   assert_mode_formats "$table-rectangle-inside-line"
   type_both "$KEY_COPY"
   copy_case "$table-rectangle-inside-line-copy" format '#{pane_in_mode}=0'
@@ -920,7 +923,7 @@ run_movement() {
     type_both "$KEY_COUNT"
     type_both "$KEY_RIGHT"
   done
-  copy_case "$table-rectangle-past-end-of-line" format '#{copy_cursor_x}=20' text,cursor,facts,view,buffer "$SELECTION_REASON"
+  copy_case "$table-rectangle-past-end-of-line" format '#{copy_cursor_x}=20'
   assert_mode_formats "$table-rectangle-past-end-of-line"
   type_both "$KEY_COPY"
   copy_case "$table-rectangle-past-end-of-line-copy" format '#{pane_in_mode}=0'
@@ -980,13 +983,13 @@ run_search() {
   copy_case "$table-ordinary-pane-enter" format '#{pane_in_mode}=1'
 
   type_both "$KEY_SEARCHFWD"
-  copy_case "$table-ordinary-pane-search-prompt" none '' text,cursor,facts,view,buffer "$PROMPT_REASON"
+  copy_case "$table-ordinary-pane-search-prompt" none ''
 
   type_both -l 'needlex'
-  copy_case "$table-ordinary-pane-search-typed" none '' text,cursor,facts,view,buffer "$PROMPT_REASON"
+  copy_case "$table-ordinary-pane-search-typed" none ''
 
   type_both BSpace
-  copy_case "$table-ordinary-pane-search-backspace" none '' text,cursor,facts,view,buffer "$SEARCH_OPEN_REASON"
+  copy_case "$table-ordinary-pane-search-backspace" none '' "$SEARCH_OPEN_MODE" "$SEARCH_OPEN_REASON"
 
   type_both Enter
   copy_case "$table-ordinary-pane-search-submit" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
@@ -1129,10 +1132,10 @@ run_live_mode_keys() {
 }
 
 # The two surfaces the corpus pins away, measured at their defaults with the
-# status row back on. The pane-cell position box is options.native-mode-styles
-# and the status-row badge presentation.native-status; the raw TUI side of both
-# was decided 2026-09-10 and lands with the modes lane (SIBLING:modes).
-POSITION_REASON='SIBLING:modes the pin draws copy-mode-position-format into the pane top row and zz paints a COPY badge on the status row'
+# status row back on: the pane-cell position box (options.native-mode-styles)
+# and the status row without a COPY badge (presentation.native-status). The raw
+# TUI side of both was decided 2026-09-10; the modes landing draws the pin's
+# cells and the cycle-5 gate asserts the case on every channel.
 run_presentation() {
   attach_both_at
   set_on_both mode-keys emacs
@@ -1143,8 +1146,7 @@ run_presentation() {
 
   copy_case 'presentation-live-status-row' none ''
   type_prefix_both '['
-  copy_case 'presentation-copy-mode-position' format '#{pane_in_mode}=1' \
-    cursor,facts,view,buffer "$POSITION_REASON"
+  copy_case 'presentation-copy-mode-position' format '#{pane_in_mode}=1'
   type_both q
   copy_case 'presentation-cancel' format '#{pane_in_mode}=0'
 }
@@ -1232,25 +1234,27 @@ run_self_check() {
   self_check_case 'rows: a page-up typed on the pin side only' rows
   self_check_case 'text: a page-up typed on the pin side only' text
 
-  # rows again, this time a STYLE-only difference: mode-style set on the pin
-  # side with a live selection changes the class of the highlighted cells and
-  # nothing else. The corpus records the selection style rather than asserting
-  # it, and this is the demonstration that the record is a measurement and not
-  # a blind spot: the comparison does see the class change.
+  # rows again, this time a STYLE-only difference: copy-mode-selection-style
+  # set on the pin side with a live selection changes the class of the
+  # highlighted cells and nothing else. The corpus pins that option on both
+  # sides, so mode-style alone would no longer reach the selection; since the
+  # cycle-5 gate asserts the selection cases, this is the sabotage that shows
+  # the rows channel sees a selection style that differs. The pin paints a
+  # copy-mode line when the mode redraws, not on an option change, so the
+  # style goes in before the selection is drawn.
   attach_both_at
   set_on_both mode-keys vi
   seed_pane
   type_prefix_both '['
   await_observable zz format '#{pane_in_mode}=1' || true
   await_observable tmux format '#{pane_in_mode}=1' || true
+  side_command tmux set-option -g copy-mode-selection-style 'bg=#0000ff,fg=#ffffff' ||
+    die 'tmux refused a one-sided copy-mode-selection-style'
   type_both Space
   type_both j
   type_both '$'
-  side_command tmux set-option -g mode-style 'bg=#0000ff,fg=#ffffff' ||
-    die 'tmux refused a one-sided mode-style'
-  side_command tmux refresh-client >/dev/null 2>&1 || true
   self_check_compare one-sided-mode-style
-  self_check_case 'rows alone: mode-style changed on the pin side only' style-only
+  self_check_case 'rows alone: copy-mode-selection-style changed on the pin side only' style-only
 
   # buffer: the two sides copy different bytes.
   attach_both_at

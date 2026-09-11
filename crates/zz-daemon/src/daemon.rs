@@ -43873,6 +43873,19 @@ mod tests {
                 },
             )
             .expect("store modal client geometry");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .pane(pane)
+            .is_none_or(|pane| pane.title != "focus-modal fixture")
+        {
+            assert!(Instant::now() < deadline, "the fixture title did not sync");
+            thread::sleep(Duration::from_millis(5));
+        }
+        shared.refresh_status(false);
         let focus_state = || {
             let inner = shared.inner.lock();
             (

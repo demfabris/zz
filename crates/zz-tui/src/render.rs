@@ -926,7 +926,19 @@ impl Renderer {
                     rect.y.saturating_add(row),
                 );
             }
-            write!(self.output, "\x1b[0m\x1b[{}X", rect.width - start)
+            self.output.extend_from_slice(b"\x1b[0m");
+            match default_style.background_class() {
+                ColourClass::Default => {}
+                ColourClass::Resolved if default_style.background() == viewport.background => {}
+                class => write_cell_ground(
+                    &mut self.output,
+                    class,
+                    default_style.background(),
+                    viewport.background,
+                    Ground::Background,
+                ),
+            }
+            write!(self.output, "\x1b[{}X", rect.width - start)
                 .expect("writing to Vec cannot fail");
         }
         self.output.extend_from_slice(b"\x1b[0m");

@@ -68,13 +68,20 @@
 #                                  and OSC 104 back to it, an entry the
 #                                  option leaves untouched, and the
 #                                  array unset
-#   colour class, OSC 10/11 and    after OSC 10 rgb:ff/00/00 the pin      named
-#     window-style defaults        paints a default cell \e[38;2;255;0;0m
-#                                  and under window-style fg=colour2
-#                                  \e[32m; the raw TUI writes 39 for both
-#                                  (measured 2026-09-10 by the caps
-#                                  review, and so on origin/main too).
-#                                  Not driven.
+#   colour class, OSC 10/11 and    the sample after OSC 10, OSC 110,      driven
+#     window-style defaults        OSC 11 and OSC 111, and under
+#                                  window-style with indexed grounds, with
+#                                  RGB and indexed grounds, and unset: a
+#                                  cell that names no colour leaves as the
+#                                  pane's default ground in that ground's
+#                                  own class (tty.c tty_default_colours)
+#   colour class, OSC 10 under     the pin's window-style wins over the   named
+#     a window-style foreground    pane's OSC 10 colour (tty.c
+#                                  tty_window_default_style, then
+#                                  style_add); zz applies window-style as
+#                                  the terminal's configured default and
+#                                  OSC 10 overrides it, for the GUI as
+#                                  well. Not driven.
 #   theme reply                    client_theme before any reply         driven
 #   focus reporting                the pin publishes no pane format for      named
 #                                  focus mode, so this decoder cannot see
@@ -805,6 +812,10 @@ COLOUR_SAMPLE_RGB="printf 'CLR \\033[38;2;205;0;0mR\\033[0m \\033[38;5;42mI\\033
 PALETTE_NAMED='\033]4;1;rgb:00/ff/00\033\\'
 PALETTE_INDEXED='\033]4;42;rgb:ff/00/ff\033\\'
 PALETTE_RESET='\033]104\033\\'
+OSC_FOREGROUND='\033]10;rgb:ff/00/00\033\\'
+OSC_FOREGROUND_RESET='\033]110\033\\'
+OSC_BACKGROUND='\033]11;rgb:00/00/80\033\\'
+OSC_BACKGROUND_RESET='\033]111\033\\'
 colour_line() {
   outer_screen "$1" | grep -a 'CLR ' | grep -a 'END' | tail -n 1
 }
@@ -887,9 +898,12 @@ case_colours() {
   reset) pin_reset='' ;;
   esac
   local pin_pane='1=#123456 42=colour200' pin_other='3=#654321'
+  local pin_osc_foreground="$OSC_FOREGROUND" pin_window='fg=colour2,bg=colour4'
   case "$sabotage" in
   pane-entry) pin_pane='' ;;
   pane-untouched) pin_other='1=#123456 3=#654321' ;;
+  osc-foreground) pin_osc_foreground='' ;;
+  window-style) pin_window='' ;;
   esac
   open_case colours xterm-256color '' ''
   colour_stage stock '' '' "$COLOUR_SAMPLE" "$pin_sample"
@@ -907,6 +921,36 @@ case_colours() {
   pane_colours_set zz
   pane_colours_set tmux
   colour_stage pane-unset '' '' "$COLOUR_SAMPLE" "$pin_sample"
+  colour_stage osc-10 "$OSC_FOREGROUND" "$pin_osc_foreground" "$COLOUR_SAMPLE" "$pin_sample"
+  colour_stage osc-110 "$OSC_FOREGROUND_RESET" "$OSC_FOREGROUND_RESET" \
+    "$COLOUR_SAMPLE" "$pin_sample"
+  colour_stage osc-11 "$OSC_BACKGROUND" "$OSC_BACKGROUND" "$COLOUR_SAMPLE" "$pin_sample"
+  colour_stage osc-111 "$OSC_BACKGROUND_RESET" "$OSC_BACKGROUND_RESET" \
+    "$COLOUR_SAMPLE" "$pin_sample"
+  window_style_set zz 'fg=colour2,bg=colour4'
+  window_style_set tmux "$pin_window"
+  colour_stage window-style '' '' "$COLOUR_SAMPLE" "$pin_sample"
+  window_style_set zz 'fg=#102030,bg=colour200'
+  window_style_set tmux 'fg=#102030,bg=colour200'
+  colour_stage window-style-rgb '' '' "$COLOUR_SAMPLE" "$pin_sample"
+  window_style_set zz
+  window_style_set tmux
+  colour_stage window-style-unset '' '' "$COLOUR_SAMPLE" "$pin_sample"
+}
+
+# A pane's default grounds: OSC 10 and OSC 11 set them (input.c input_osc_10
+# and input_osc_11 into the pane palette's fg and bg), OSC 110 and OSC 111 put
+# them back, and window-style overrides them (tty.c tty_style_changed). The pin
+# paints every cell that names no colour, and clears, in that ground: an OSC
+# colour as RGB, colour2 as 32, colour200 as 48;5;200. An empty style unsets
+# the window option on that side.
+window_style_set() {
+  local side="$1" style="${2:-}"
+  if [ -n "$style" ]; then
+    side_command "$side" set-option -w -t "$(side_pane "$side")" window-style "$style" >/dev/null
+  else
+    side_command "$side" set-option -wu -t "$(side_pane "$side")" window-style >/dev/null
+  fi
 }
 
 # pane-colours is the pane's configured palette, the layer an OSC 4 entry sits
@@ -1097,6 +1141,13 @@ self_check_case 'a one-sided -T sixel on the pin only' catches \
 # flag flag-features has to report 256:no against the pin's 256:yes.
 self_check_case 'a one-sided -2 on the pin only' catches \
   case_facts 'sc/one-sided-2' xterm '' -2 "$FACT_RECORDED" '' 256
+
+# The default grounds on one side: an OSC 10 sent to zz alone has to turn zz's
+# uncoloured cells red while the pin's stay default, and window-style set on
+# zz alone has to do the same with 32 and 44. The osc-10 and window-style
+# stages catch them.
+self_check_case 'an OSC 10 sent to zz only' catches case_colours osc-foreground
+self_check_case 'window-style set on zz only' catches case_colours window-style
 
 # The silent terminal's control and the -T RGB delta. The sabotage is the
 # shape of the bug it guards: a side whose roster gains 256 beside the RGB it

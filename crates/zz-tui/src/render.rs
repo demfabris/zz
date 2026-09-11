@@ -822,14 +822,20 @@ impl Renderer {
                 UnderlineStyle::None,
             )
         });
-        let clear_from = trailing_clear(
-            viewport,
-            row,
-            rect.width,
-            default_style,
-            &self.overlay_mask,
-            &self.selection_mask,
-        );
+        let grounded_defaults =
+            self.terminal_defaults.fg.is_some() || self.terminal_defaults.bg.is_some();
+        let clear_from = if grounded_defaults {
+            None
+        } else {
+            trailing_clear(
+                viewport,
+                row,
+                rect.width,
+                default_style,
+                &self.overlay_mask,
+                &self.selection_mask,
+            )
+        };
         write_cursor_position(&mut self.output, rect.x, rect.y.saturating_add(row));
         let mut current_style = None;
         let mut terminal_column = 0_u16;
@@ -3328,6 +3334,17 @@ mod tests {
         assert!(output.contains("\x1b[4;8H"), "{output:?}");
         assert!(!output.contains(" q"), "{output:?}");
         assert!(!output.contains("\x1b]12;"), "{output:?}");
+    }
+
+    #[test]
+    fn popup_blank_rows_keep_the_popup_style_instead_of_an_erase() {
+        let model = popup_model(PopupBorderLines::Single, true);
+        let mut renderer = Renderer::new();
+        renderer.paint_popup(&model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+
+        assert!(!output.contains('X'), "{output:?}");
+        assert!(output.contains("\x1b[44m          \x1b[0m"), "{output:?}");
     }
 
     #[test]

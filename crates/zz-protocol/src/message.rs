@@ -522,6 +522,10 @@ pub struct ModePresentation {
     #[serde(deserialize_with = "deserialize_status_text")]
     pub selection_style: String,
     pub vi_keys: bool,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub match_style: String,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub current_match_style: String,
 }
 
 fn deserialize_mode_presentations<'de, D>(
@@ -631,11 +635,15 @@ impl StatusLine {
             if mode.position.len() > MAX_STATUS_TEXT_BYTES
                 || mode.position_style.len() > MAX_STATUS_TEXT_BYTES
                 || mode.selection_style.len() > MAX_STATUS_TEXT_BYTES
+                || mode.match_style.len() > MAX_STATUS_TEXT_BYTES
+                || mode.current_match_style.len() > MAX_STATUS_TEXT_BYTES
             {
                 return Err("status mode presentation exceeds the wire byte limit");
             }
             if !style_or_empty_parses(&mode.position_style)
                 || !style_or_empty_parses(&mode.selection_style)
+                || !style_or_empty_parses(&mode.match_style)
+                || !style_or_empty_parses(&mode.current_match_style)
             {
                 return Err("status mode style does not parse as a style");
             }

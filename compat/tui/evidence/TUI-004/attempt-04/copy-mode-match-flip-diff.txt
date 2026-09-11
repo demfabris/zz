@@ -1,0 +1,62 @@
+--- compat/tui-copy-mode.sh	2026-09-11 09:44:40.948324817 -0300
++++ <scratchpad>/tui-copy-mode-flip.sh	2026-09-11 10:22:40.709048889 -0300
+@@ -118,7 +118,7 @@
+   printf '       ZZ_BIN=path TMUX_BIN=path compat/tui-copy-mode.sh\n' >&2
+ }
+ 
+-COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
++COMPAT_DIR=/home/demfabris/dev/zz-tui-modes/compat
+ REPO_DIR="$(cd -- "$COMPAT_DIR/.." && pwd)"
+ SELF_CHECK=0
+ POSITIONAL=()
+@@ -779,7 +779,7 @@
+     KEY_RIGHT=C-f
+     KEY_BEGINSEL=C-Space KEY_RECT=R KEY_COPY=M-w KEY_CANCEL=q
+     KEY_SEARCHFWD=C-s KEY_SEARCHBACK=C-r KEY_COUNT=M-5
+-    SEARCH_OPEN_MODE=text,cursor,facts,view,buffer
++    SEARCH_OPEN_MODE=rows,text,cursor,facts,view,buffer
+     SEARCH_OPEN_REASON="$MATCH_REASON; the incremental search already paints the current match"
+     ;;
+   vi)
+@@ -992,19 +992,19 @@
+   copy_case "$table-ordinary-pane-search-backspace" none '' "$SEARCH_OPEN_MODE" "$SEARCH_OPEN_REASON"
+ 
+   type_both Enter
+-  copy_case "$table-ordinary-pane-search-submit" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
++  copy_case "$table-ordinary-pane-search-submit" none '' rows,text,cursor,facts,view,buffer "$MATCH_REASON"
+   assert_mode_formats "$table-ordinary-pane-search-submit"
+ 
+   type_both n
+-  copy_case "$table-ordinary-pane-search-again" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
++  copy_case "$table-ordinary-pane-search-again" none '' rows,text,cursor,facts,view,buffer "$MATCH_REASON"
+ 
+   type_both N
+-  copy_case "$table-ordinary-pane-search-reverse" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
++  copy_case "$table-ordinary-pane-search-reverse" none '' rows,text,cursor,facts,view,buffer "$MATCH_REASON"
+ 
+   type_both "$KEY_SEARCHBACK"
+   type_both -l 'filler-30'
+   type_both Enter
+-  copy_case "$table-ordinary-pane-search-backward" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
++  copy_case "$table-ordinary-pane-search-backward" none '' rows,text,cursor,facts,view,buffer "$MATCH_REASON"
+   assert_mode_formats "$table-ordinary-pane-search-backward"
+ 
+   type_both q
+@@ -1020,7 +1020,7 @@
+   assert_mode_formats "$table-ordinary-pane-search-reentry"
+   type_both n
+   copy_case "$table-ordinary-pane-search-reentry-again" format '#{copy_cursor_line}=line-30 filler-30' \
+-    text,cursor,facts,view,buffer "$MATCH_REASON"
++    rows,text,cursor,facts,view,buffer "$MATCH_REASON"
+ 
+   # The last search above ran backward, so that landing cannot tell the UP rule
+   # from a kept direction. A FORWARD search next, sent through the command path
+@@ -1038,7 +1038,7 @@
+   assert_mode_formats "$table-forward-search-reentry"
+   type_both n
+   copy_case "$table-forward-search-reentry-searches-up" format '#{copy_cursor_line}=line-48 needle-48' \
+-    text,cursor,facts,view,buffer "$MATCH_REASON"
++    rows,text,cursor,facts,view,buffer "$MATCH_REASON"
+   type_both q
+   copy_case "$table-forward-search-cancel" format '#{pane_in_mode}=0'
+   assert_mode_formats "$table-forward-search-cancel"

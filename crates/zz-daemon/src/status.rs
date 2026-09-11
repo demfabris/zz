@@ -244,6 +244,12 @@ fn mode_presentation(
         position_style: expand_style("#{E:copy-mode-position-style}", &mode.context, hooks),
         selection_style: expand_style("#{E:copy-mode-selection-style}", &mode.context, hooks),
         vi_keys: mode.vi_keys,
+        match_style: expand_style("#{E:copy-mode-match-style}", &mode.context, hooks),
+        current_match_style: expand_style(
+            "#{E:copy-mode-current-match-style}",
+            &mode.context,
+            hooks,
+        ),
     }
 }
 

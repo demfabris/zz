@@ -204,6 +204,8 @@ pub(crate) struct Renderer {
     output: Vec<u8>,
     queued_control: Vec<u8>,
     overlay_mask: Vec<bool>,
+    match_mask: Vec<u8>,
+    match_styles: [Option<TmuxStyle>; 2],
     selection_mask: Vec<bool>,
     selection_style: Option<TmuxStyle>,
     selection_trim: Option<(u16, u16)>,
@@ -239,6 +241,8 @@ impl Renderer {
             output: Vec::with_capacity(64 * 1024),
             queued_control: Vec::new(),
             overlay_mask: Vec::new(),
+            match_mask: Vec::new(),
+            match_styles: [None, None],
             selection_mask: Vec::new(),
             selection_style: None,
             selection_trim: None,
@@ -631,12 +635,18 @@ impl Renderer {
                         self.selection_trim = mode
                             .filter(|mode| !mode.vi_keys)
                             .and_then(|_| crate::mode_view::emacs_selection_trim(viewport));
+                        self.match_styles = mode.map_or([None, None], |mode| {
+                            [&mode.match_style, &mode.current_match_style].map(|style| {
+                                crate::mode_view::resolved_style(style, &model.status.theme)
+                            })
+                        });
                         self.paint_terminal(entry.pane, viewport, content, force, damage.as_ref());
                         if let Some(mode) = mode {
                             self.paint_mode_position(mode, viewport, content, model);
                         }
                         self.selection_style = None;
                         self.selection_trim = None;
+                        self.match_styles = [None, None];
                     } else if force {
                         self.paint_card(
                             content,
@@ -821,6 +831,22 @@ impl Renderer {
         );
     }
 
+    /// `window_copy_update_style`: a cell inside a search match takes the
+    /// match style's attributes and colours in place of its own, the current
+    /// match's cells `copy-mode-current-match-style` and every other match's
+    /// `copy-mode-match-style`.
+    fn write_match_sgr(&mut self, matched: u8) {
+        let Some(style) = matched
+            .checked_sub(1)
+            .and_then(|index| self.match_styles.get(usize::from(index)))
+            .and_then(Option::as_ref)
+        else {
+            return;
+        };
+        self.output.extend_from_slice(b"\x1b[0m");
+        write_selection_sgr(&mut self.output, style);
+    }
+
     fn blit_row(&mut self, viewport: &TerminalViewport, row: u16, rect: Rect) {
         if rect.width == 0 {
             return;
@@ -829,6 +855,8 @@ impl Renderer {
         self.overlay_mask.fill(false);
         self.selection_mask.resize(usize::from(rect.width), false);
         self.selection_mask.fill(false);
+        self.match_mask.resize(usize::from(rect.width), 0);
+        self.match_mask.fill(0);
         for overlay in viewport
             .overlays
             .iter()
@@ -836,6 +864,16 @@ impl Renderer {
         {
             let start = usize::from(overlay.start.min(rect.width));
             let end = usize::from(overlay.end.min(rect.width));
+            let matched = match overlay.kind() {
+                OverlayKind::SearchMatch => 1,
+                OverlayKind::SearchCurrent => 2,
+                _ => 0,
+            };
+            if matched != 0 && self.match_styles[usize::from(matched - 1)].is_some() {
+                for cell in &mut self.match_mask[start..end] {
+                    *cell = (*cell).max(matched);
+                }
+            }
             if overlay.kind() == OverlayKind::Selection && self.selection_style.is_some() {
                 let end = match self.selection_trim {
                     Some((trim_row, trim_end)) if trim_row == row => {
@@ -875,6 +913,7 @@ impl Renderer {
             let style = viewport.style(cell).unwrap_or(default_style);
             let reverse = self.overlay_mask[usize::from(column)];
             let selected = self.selection_mask[usize::from(column)];
+            let matched = self.match_mask[usize::from(column)];
             if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
                 if terminal_column <= column {
                     if terminal_column != column {
@@ -884,7 +923,7 @@ impl Renderer {
                             rect.y.saturating_add(row),
                         );
                     }
-                    if current_style != Some((style, reverse, selected)) {
+                    if current_style != Some((style, reverse, selected, matched)) {
                         write_sgr(
                             &mut self.output,
                             style,
@@ -892,10 +931,11 @@ impl Renderer {
                             viewport.foreground,
                             viewport.background,
                         );
+                        self.write_match_sgr(matched);
                         if selected && let Some(selection) = &selection_style {
                             write_selection_sgr(&mut self.output, selection);
                         }
-                        current_style = Some((style, reverse, selected));
+                        current_style = Some((style, reverse, selected, matched));
                     }
                     self.output.push(b' ');
                     terminal_column = column.saturating_add(1);
@@ -909,7 +949,7 @@ impl Renderer {
                     rect.y.saturating_add(row),
                 );
             }
-            if current_style != Some((style, reverse, selected)) {
+            if current_style != Some((style, reverse, selected, matched)) {
                 write_sgr(
                     &mut self.output,
                     style,
@@ -917,10 +957,11 @@ impl Renderer {
                     viewport.foreground,
                     viewport.background,
                 );
+                self.write_match_sgr(matched);
                 if selected && let Some(selection) = &selection_style {
                     write_selection_sgr(&mut self.output, selection);
                 }
-                current_style = Some((style, reverse, selected));
+                current_style = Some((style, reverse, selected, matched));
             }
             let advance = if cell.width() == CellWidth::Wide {
                 2

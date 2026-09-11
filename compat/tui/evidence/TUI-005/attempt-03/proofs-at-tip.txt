@@ -1,0 +1,18 @@
+Proofs for TUI-005 attempt-03 at 4f4f0b0b (branch campaign/tui-copy-2), clean tracked worktree.
+Each file named below carries its own revision line, command and exit code.
+
+PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/tui-copy-mode.sh
+  run 1: exit: 0 after 156s   147 cases agree, 13 recorded SIBLING:modes   copy-mode-tip-1.txt
+  run 2: exit: 0 after 156s   147 cases agree, 13 recorded SIBLING:modes   copy-mode-tip-2.txt
+  run 3: exit: 0 after 152s   147 cases agree, 13 recorded SIBLING:modes   copy-mode-tip-3.txt
+  --self-check: exit: 0 after 156s   27 of 27 expectations met   copy-mode-self-check-tip.txt
+compat/tui-screen-diff.sh: exit: 0 after 131s   111 asserted checkpoints identical, 42 recorded   screen-diff-tip.txt
+compat/tui-stock-keys.sh: exit: 0 after 102s   50 cases agree, 19 recorded (the count wobbles on this box)   stock-keys-tip.txt
+compat/attached-client.sh target/debug/zz <pin>: exit: 1 after 19s   the known BASE stop, 'zz screen did not visibly become copy-mode' (modes lane's)   attached-client-tip.txt
+cargo test -p zz-terminal --jobs 4 -- --test-threads=3: exit: 0   255 passed, 1 ignored   unit-tests-zz-terminal.txt
+cargo test -p zz-daemon --jobs 4 -- --test-threads=3: exit: 0   lib 865 passed, integration targets green   unit-tests-zz-daemon.txt
+cargo clippy -p zz-terminal --jobs 4 --all-targets --all-features -- -D warnings: exit: 0   clippy-zz-terminal.txt
+cargo clippy -p zz-daemon --jobs 4 --all-targets --all-features -- -D warnings: exit: 0   clippy-zz-daemon.txt
+cargo test -p zz --jobs 4 --lib --test buffer_client_file_load --test buffer_client_file_save --test cli_binary -- --test-threads=3: exit: 0 after 110s   lib 634, load 6, save 5, cli_binary 125   zz-integration-tests-tip.txt
+python3 compat/tui/tracker.py check / write-report and python3 compat/tmux-tracker.py check / write-report: exit 0 at 4f4f0b0b and at the ledger commit
+Every cargo command ran through: systemd-run --user --scope -q -p MemoryMax=5G -p MemorySwapMax=2G flock -w 540 /tmp/zz-cargo-slot-N.lock

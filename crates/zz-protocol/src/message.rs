@@ -505,6 +505,8 @@ pub struct StatusLine {
     pub message_command_style: String,
     #[serde(deserialize_with = "deserialize_mode_presentations")]
     pub modes: Vec<ModePresentation>,
+    #[serde(deserialize_with = "deserialize_pane_border_presentations")]
+    pub pane_borders: Vec<PaneBorderPresentation>,
 }
 
 pub const MAX_MODE_PRESENTATIONS: usize = 2;
@@ -536,6 +538,35 @@ where
         ));
     }
     Ok(modes)
+}
+
+pub const MAX_PANE_BORDER_PRESENTATIONS: usize = 256;
+
+/// `window_pane_get_border_style`: the style this client's borders take next
+/// to one pane of its current window, `pane-active-border-style` for the
+/// client's active pane and `pane-border-style` for every other, expanded in
+/// that pane's context.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneBorderPresentation {
+    pub pane: PaneId,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub style: String,
+}
+
+fn deserialize_pane_border_presentations<'de, D>(
+    deserializer: D,
+) -> Result<Vec<PaneBorderPresentation>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let borders = Vec::<PaneBorderPresentation>::deserialize(deserializer)?;
+    if borders.len() > MAX_PANE_BORDER_PRESENTATIONS {
+        return Err(serde::de::Error::invalid_length(
+            borders.len(),
+            &"at most 256 pane border presentations",
+        ));
+    }
+    Ok(borders)
 }
 
 fn style_or_empty_parses(value: &str) -> bool {
@@ -607,6 +638,17 @@ impl StatusLine {
                 || !style_or_empty_parses(&mode.selection_style)
             {
                 return Err("status mode style does not parse as a style");
+            }
+        }
+        if self.pane_borders.len() > MAX_PANE_BORDER_PRESENTATIONS {
+            return Err("status pane border presentations exceed the wire limit");
+        }
+        for border in &self.pane_borders {
+            if border.style.len() > MAX_STATUS_TEXT_BYTES {
+                return Err("status pane border style exceeds the wire byte limit");
+            }
+            if !style_or_empty_parses(&border.style) {
+                return Err("status pane border style does not parse as a style");
             }
         }
         Ok(())
@@ -4240,6 +4282,7 @@ mod tests {
         message_style: String,
         message_command_style: String,
         modes: Vec<super::ModePresentation>,
+        pane_borders: Vec<super::PaneBorderPresentation>,
     }
 
     fn unbounded_status(rows: Vec<String>, message_line: u8) -> Vec<u8> {
@@ -4256,6 +4299,7 @@ mod tests {
             message_style: String::new(),
             message_command_style: String::new(),
             modes: Vec::new(),
+            pane_borders: Vec::new(),
         })
         .expect("status line shape")
     }

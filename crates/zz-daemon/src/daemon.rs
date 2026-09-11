@@ -31879,6 +31879,9 @@ fn status_request(
         client_focused_window_for_attachment(inner, client),
     );
     context.config_files.clone_from(&inner.config_files);
+    let pane_borders = attached.map_or_else(Vec::new, |session| {
+        border_presentations(inner, client, session, &facts)
+    });
     StatusRequest {
         client,
         formats: inner.engine.status_formats_for_session(attached),
@@ -31896,7 +31899,46 @@ fn status_request(
         client_scheme: inner.client_color_schemes.get(&client).copied(),
         message_styles: inner.engine.message_styles_for_session(attached),
         modes: attached.map_or_else(Vec::new, |session| mode_requests(inner, client, session)),
+        pane_borders,
     }
+}
+
+fn border_presentations(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    facts: &FormatHookFacts,
+) -> Vec<zz_protocol::PaneBorderPresentation> {
+    let Some(session_state) = inner.engine.state.sessions.get(&session) else {
+        return Vec::new();
+    };
+    let window = client_focused_window(inner, client, session_state);
+    let Some(window_state) = inner.engine.state.windows.get(&window) else {
+        return Vec::new();
+    };
+    let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(&inner.engine);
+    window_state
+        .panes
+        .keys()
+        .take(zz_protocol::MAX_PANE_BORDER_PRESENTATIONS)
+        .map(|pane| {
+            let context = inner.engine.format_status_context_for_client(
+                Some(session),
+                Some(window),
+                Some(*pane),
+                session,
+            );
+            let format = if *pane == window_state.active_pane {
+                "#{E:pane-active-border-style}"
+            } else {
+                "#{E:pane-border-style}"
+            };
+            zz_protocol::PaneBorderPresentation {
+                pane: *pane,
+                style: crate::status::expand_style(format, &context, &mut hooks),
+            }
+        })
+        .collect()
 }
 
 fn mode_requests(

@@ -46,33 +46,6 @@
 #                        carries no clock.
 #   the inner shell      ENV= PS1='$ ' exec /bin/sh: no rc file, and a prompt
 #                        that carries no host, user, path or clock.
-#   the divider row      ONLY in view-inactive-opened and view-inactive-typed,
-#                        the two cases that need a second visible pane. That
-#                        row's GLYPHS are asserted and its STYLES are not: it
-#                        is the pane border. In this driver a plain split's
-#                        default border colours differ with or without a view,
-#                        at origin/main 3319ceba and at 2911d88c alike
-#                        (measured 2026-09-10 by the modes review): the pin
-#                        draws \e[38;2;179;179;179m then \e[38;2;154;205;50m on
-#                        the default ground, the raw TUI draws
-#                        \e[38;2;216;222;233m\e[48;2;16;19;24m then
-#                        \e[38;2;77;163;235m. It is the mechanism
-#                        BORDER_STYLE_REASON in tui-screen-diff.sh describes
-#                        (the raw TUI's own theme over an explicit ground; with
-#                        pane-border-style fg=colour2 on both sides:
-#                        \e[32m\e[49m against \e[38;2;0;205;0m\e[48;2;16;19;24m),
-#                        but no existing record covers it: tui-screen-diff.sh's
-#                        plain split checkpoint asserts identical and does not
-#                        reproduce it. Why the two drivers disagree is not
-#                        explained yet and is raised for clause-2 triage. Every other
-#                        row of those two cases is asserted whole, and so is
-#                        the cursor. The row BELOW the divider is captured on
-#                        its own: capture-pane -e carries SGR state from one
-#                        line to the next, so in a whole-screen capture that
-#                        row's leading escapes restate the divider's colours
-#                        (\e[39m against \e[39m\e[49m) rather than its own
-#                        cells. Captured alone, it starts from the default
-#                        state and every one of its cells is compared.
 # Nothing else is masked. Anything not in that list is compared.
 #
 # SETTLED CHECKPOINTS, AND WHY THIS FIXTURE MARKS BEFORE IT ACTS. tui-screen-
@@ -503,30 +476,23 @@ verdict() {
   return 0
 }
 
-# The two-pane comparison: every row styled except the divider row, which is
-# compared by glyph, plus the cursor. Counted as asserted; the header's
-# CONTROLLED DYNAMIC VALUES says why that one row's styles are left out.
+# The two-pane comparison: every row styled, the divider row included, plus the
+# cursor. MEASURED 2026-09-11 (TUI-004 attempt-04): redraw_draw_border_span
+# paints the divider in window_pane_get_border_style over the default ground,
+# fg=themelightgrey over the inactive pane's half and fg=themegreen over the
+# active pane's (redraw_mark_two_pane_colours), and the raw TUI paints the same
+# cells, so the divider is asserted whole like every other row.
 compare_split_rows() {
   local name="$1"
   local divider="$2"
-  local zz_rows tmux_rows zz_plain tmux_plain zz_cursor tmux_cursor index differing
+  local zz_rows tmux_rows zz_cursor tmux_cursor index differing
   mapfile -t zz_rows < <(capture_screen zz)
   mapfile -t tmux_rows < <(capture_screen tmux)
-  mapfile -t zz_plain < <(capture_plain zz)
-  mapfile -t tmux_plain < <(capture_plain tmux)
   zz_cursor="$(cursor_tuple zz)"
   tmux_cursor="$(cursor_tuple tmux)"
-  zz_rows[divider + 1]="$(tmux_outer_command capture-pane -p -e -S "$((divider + 1))" \
-    -E "$((divider + 1))" -t "=$OUTER_SESSION:zz")"
-  tmux_rows[divider + 1]="$(tmux_outer_command capture-pane -p -e -S "$((divider + 1))" \
-    -E "$((divider + 1))" -t "=$OUTER_SESSION:tmux")"
   differing=-1
   for ((index = 0; index < ROWS_UNDER_TEST; index++)); do
-    if [ "$index" -eq "$divider" ]; then
-      [ "${zz_plain[index]-}" = "${tmux_plain[index]-}" ] && continue
-    else
-      [ "${zz_rows[index]-}" = "${tmux_rows[index]-}" ] && continue
-    fi
+    [ "${zz_rows[index]-}" = "${tmux_rows[index]-}" ] && continue
     differing="$index"
     break
   done
@@ -537,7 +503,7 @@ compare_split_rows() {
   if [ "$LAST_ROWS_DIFFERED" -eq 0 ] && [ "$LAST_CURSOR_DIFFERED" -eq 0 ]; then
     return 0
   fi
-  printf '      case %s (divider row %s by glyph)\n' "$name" "$divider"
+  printf '      case %s (divider row %s asserted whole)\n' "$name" "$divider"
   if [ "$LAST_ROWS_DIFFERED" -eq 1 ]; then
     printf '      first differing row %s of %s\n' "$differing" "$ROWS_UNDER_TEST"
     printf '        tmux: %s\n' "$(printf '%s' "${tmux_rows[differing]-}" | cat -v)"
@@ -552,7 +518,7 @@ verdict_split() {
   local divider="$2"
   CHECKS=$((CHECKS + 1))
   if compare_split_rows "$name" "$divider"; then
-    printf 'ok    %s (divider row %s compared by glyph)\n' "$name" "$divider"
+    printf 'ok    %s (divider row %s asserted whole)\n' "$name" "$divider"
     return 0
   fi
   FAILURES=$((FAILURES + 1))
@@ -1195,7 +1161,7 @@ run_self_check() {
   self_check_case 'view, one side opens it on the active pane and swallows the keys' rows
 
   # The same owner, through the two-pane comparison. view-inactive-* compare
-  # every row but the divider's styles, so the sabotage is one side opening the
+  # every row, the divider's styles included, so the sabotage is one side opening the
   # view on the active pane of the split while the other opens it on the
   # inactive one: that side's typed keys go into the view.
   CASE_LABEL='self-check view owner in a split'
@@ -1206,6 +1172,18 @@ run_self_check() {
   type_command_on_both INACTIVE ''
   compare_split_rows self-check-view-owner-split "$(divider_row_below "$(inactive_pane tmux)")" || true
   self_check_case 'view in a split, one side opens it on the active pane' rows
+
+  # The divider's style. view-inactive-* assert the divider row whole, so the
+  # sabotage is one side drawing its inactive borders in red.
+  CASE_LABEL='self-check divider style'
+  attach_both_at 80 24
+  mark_both divsab
+  split_for_inactive MARK-divsab
+  side_command zz set-option -g pane-border-style fg=red || die 'zz refused pane-border-style'
+  mark_both divset
+  settle_both MARK-divset 'the one-sided divider style'
+  compare_split_rows self-check-divider-style "$(divider_row_below "$(inactive_pane tmux)")" || true
+  self_check_case 'divider, pane-border-style fg=red on one side' rows
 
   # The equivalence: the same prefix, armed and released on both sides with
   # nothing planted, must report nothing at all. Without it the three sabotages

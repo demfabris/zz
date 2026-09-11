@@ -617,7 +617,10 @@ now validate on both encode and decode. v100 appends `theme: ThemeColours` after
 ten theme slots resolved for this client, and validation rejects a slot carrying a theme colour.
 v101 appends `message_style`, `message_command_style` and `modes: Vec<ModePresentation>` after
 `theme`; the two style strings must be empty or parse as a style, and `modes` is capped at
-`MAX_MODE_PRESENTATIONS` (2) with a third rejected during deserialization.
+`MAX_MODE_PRESENTATIONS` (2) with a third rejected during deserialization. v101 also appends
+`pane_borders: Vec<PaneBorderPresentation>` after `modes`; each style must be empty or parse as a
+style, and the list is capped at `MAX_PANE_BORDER_PRESENTATIONS` (256) with one more rejected during
+deserialization.
 
 # Versioning & compatibility
 
@@ -633,8 +636,12 @@ v101 appends `message_style`, `message_command_style` and `modes: Vec<ModePresen
   `copy-mode-position-style` and `copy-mode-selection-style`) and `vi_keys` (the pane's mode keys,
   which decide whether the selection keeps its bottom-right cell). The raw TUI draws the position
   cells over the pane's first row, paints selected cells in the selection style, and paints the
-  message row and the prompt in the message style; GUI clients ignore all three fields. Pure
-  appends; the cycle's gate folds every lane's 101 appends into one entry.
+  message row and the prompt in the message style; GUI clients ignore all three fields. v101 also
+  appends `pane_borders`, one `PaneBorderPresentation { pane, style }` per pane of the client's
+  current window: `window_pane_get_border_style` resolved for this client, the expanded
+  `pane-active-border-style` for its active pane and `pane-border-style` for every other. The raw
+  TUI paints the dividers and the pane status rows in them over the default ground; GUI clients
+  ignore the field. Pure appends; the cycle's gate folds every lane's 101 appends into one entry.
 - v100 carries the resolved theme palette. `StatusLine` gains `theme: ThemeColours` appended after
   `customized`, where `ThemeColours` is a new `crates/zz-protocol/src/style.rs` type wrapping
   `[TmuxColour; COLOUR_THEME_COUNT]` (10) in the pin's own `colour_theme_table` order:

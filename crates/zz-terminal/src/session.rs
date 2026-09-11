@@ -4323,8 +4323,10 @@ fn run_output_view(
     let mut inactive_views = InactiveTerminalViews::new();
     let bound_pasted_images = HashSet::new();
     let mut generations = ViewportGenerations::new()?;
-    let mut dictionary = ViewportDictionary::default();
-    dictionary.class_hints = ClassHints::new(&appearance);
+    let mut dictionary = ViewportDictionary {
+        class_hints: ClassHints::new(appearance),
+        ..ViewportDictionary::default()
+    };
     let (mut search_worker, search_results) = SearchWorker::spawn(ActorWake::none())?;
 
     loop {
@@ -5098,8 +5100,10 @@ fn run_terminal(
     let mut active_views = ActiveTerminalViews::new();
     let mut inactive_views = InactiveTerminalViews::new();
     let mut generations = ViewportGenerations::new()?;
-    let mut dictionary = ViewportDictionary::default();
-    dictionary.class_hints = ClassHints::new(&appearance);
+    let mut dictionary = ViewportDictionary {
+        class_hints: ClassHints::new(appearance),
+        ..ViewportDictionary::default()
+    };
     let mut pasted_image_bindings = PastedImageBindings::default();
     let mut reader_eof = false;
     let mut exit_status = None;

@@ -168,3 +168,147 @@ clusters. Wide cells also carry spacer heads/tails that must not produce a
 second glyph. Use `TerminalViewport::glyph` or the C ABI's
 `zz_viewport_row_text`, preserve empty narrow cells as spaces for a row-shaped
 string, and truncate only between complete UTF-8 sequences.
+
+## 16. An in-process test daemon never drops its clients
+
+`kill-server` releases the socket *path*, but each client connection lives in
+a detached thread whose loop only exits on client EOF — a client wired
+straight to a test daemon can never observe a disconnect. Reconnect tests need
+a cuttable transport: a ~70-line unix-socket relay with `cut()`/`restore()`
+(see `Relay` in `crates/zz-gtk/tests/engine.rs`). Two corollaries: wait for
+the old socket file to vanish before rebinding (the dying listener removes the
+path on the way out, deleting a replacement's socket underneath it), and
+create the replacement fixture session explicitly before restoring the relay,
+so a reconnect cannot attach midway through fixture setup (see pitfall 12).
+
+## 17. The `MissingTarget` fallback is the normal reconnect path
+
+Session ids start at `$0` and a restarted daemon renumbers from scratch, so a
+remembered id may refer to a missing or different session after a restart.
+`attach("")` uses the daemon's default context, so fixtures should create two
+sessions and attach explicitly to the non-default one to detect lost targets.
+
+## 18. Replay geometry after a reconnect, don't just clear it
+
+Widgets only re-measure when the toolkit re-allocates them, and a reconnect
+does not cause a re-allocation — a cleared dedup cache alone means the new
+daemon never learns any pane's size. Drain the cache into a replay list at
+dial time and republish for every pane the re-attached session still has.
+
+## 19. Per-client overlays cannot be driven from a `CommandClient`
+
+`choose-tree`, `choose-buffer`, `command-prompt`, and `display-panes` reject
+non-interactive clients ("requires an interactive client") and publish only to
+the client that issued them — no test can open another client's chooser. Test
+overlay view-models directly, drive the real key path through your own engine,
+or hand verification to a human. The exception: `copy-mode -t %n` is
+pane-scoped and visible to every attached client, so mode indicators are
+headlessly checkable.
+
+## 20. Native status and command-prompt publications are typed
+
+Graphical clients derive native status from `zz_client::StatusBarModel` and
+`MuxSnapshot`, rather than rendering `StatusLine` fragments. The TUI retains
+the daemon's formatted status path. Track each `CommandPromptChanged`
+publication with a revision: a newly opened prompt can have identical content
+to the previous one, while unrelated overlay changes must preserve local edits.
+Honor `CommandPromptMode` before offering completions or letting a text widget
+consume keys.
+
+## 21. `force_selection` means "the user is overriding the program"
+
+Not "this pane isn't mouse-tracking". The daemon uses that bit to refuse
+`OpenUri` on click and to route wheel notches past alternate-scroll — a
+client that widens it (e.g. `shift || !mouse_tracking`) silently loses link
+activation and full-screen-app scrolling with no error anywhere. Set it only
+for Shift or a Ctrl/Cmd multi-click, exactly as the desktop does. Related:
+link hover requires the modifier held AND fresh motion — synthesize one
+`Mouse(Motion, button: None)` when the modifier is pressed over a stationary
+pointer, or hover never lights.
+
+## 22. A core-based client wants a backfill-only history ring
+
+The desktop feeds its scrollback ring from the pre-patch viewport at
+patch-apply time — that requires the second retention the desktop keeps
+outside `ClientCore`, and adding it to a core client violates the frame-path
+budget. Backfill on demand (`HistoryRequest`/`HistoryChunk`), and retire the
+ring on `viewport.generation` change — `scrollbar.total`/`offset` are NOT
+sufficient staleness witnesses, because a capped scrollback evicts a row per
+new line without moving either.
+
+## 23. The command-output pager has no keys of its own
+
+`InputMessage::CommandOutputView` carries only view actions; keys travel as
+ordinary `InputMessage::Key` on the anchor pane, because the daemon already
+swapped that client's key table into copy-mode. Don't hardcode `q`. Also:
+`mode-keys` defaults to emacs, so copy-mode search is `C-s` — a test that
+sends `/` waits forever.
+
+## 24. Command grammar corners that bite fixtures
+
+`new-pane` opens a *picker* pane, not a terminal — use `split-window -h/-v`
+for a terminal fixture. Both take a pane target (`%n`); window/session
+spellings are rejected there. `list-panes` has no `-a`. The daemon's own enums
+(`AppearanceConfigKey::ALL` ∪ `MuxOptionKey::ALL`) are the authoritative list
+of daemon-owned config keys — never restate that set in a client.
+
+## 25. NEVER inject synthetic input on a live desktop session
+
+XTEST/ydotool/wtype keystrokes go to whatever window the compositor has
+focused — during this project an agent's test strings landed in the user's
+terminal, and `_NET_ACTIVE_WINDOW` had "confirmed" the wrong window first.
+Verification alternatives, in order: engine-level tests against a real daemon
+(the send-text path proves typing end to end), unit tests on the translation
+layer, D-Bus action activation (`org.gtk.Actions`), and finally an explicit
+human-verification handoff list in your report.
+
+## 26. Multi-agent builds sharing one `CARGO_TARGET_DIR` race on the binary
+
+Two worktrees building the same crate name overwrite each other's executable
+— agents have screenshotted a sibling's build and debugged features that
+weren't theirs. Build and `cp` to a private path in ONE shell invocation, then
+verify the copy with a `strings` marker unique to your change before running
+it. Never `pkill -f <pattern>` where the pattern matches your own wrapper
+shell's command line (it kills your tool call; use `pkill -x`), and keep
+scratch files in a private subdirectory of the shared scratchpad.
+
+## 27. A freshly connected, unattached client has no snapshot
+
+The daemon publishes `MuxSnapshot` only on change, so a fleet host you connect
+to but do not attach stays empty forever. `request_resync()` immediately after
+connect is the sanctioned initial-tree request — the desktop does exactly
+this, and it does not contradict pitfall #1: having no snapshot at all is not
+a sequence gap.
+
+## 28. Multi-daemon state is per daemon — never key across hosts
+
+Pane ids collide across daemons (`%1` on host A and `%1` on host B are
+different terminals), so any pane→widget or pane→state map must be cleared on
+a host switch. An undrained `FrameInbox` latches its wake flag — clear it when
+its host leaves the screen or `FramesReady` never fires again. And once more
+than one daemon is connected, AIM your commands: an unaimed `kill-server` on
+quit stops whichever daemon is active — possibly a remote machine's.
+
+## 29. Retiring a live connection takes more than a flag
+
+A quiet connection blocks in `recv()` forever, so a reader thread never
+notices a closed flag on its own. Set the flag AND provoke a response the
+daemon will send (`detach()` triggers a snapshot publish). Related Rust trap
+that cost a 300-second test hang: a `MutexGuard` temporary inside a `for`
+iterator expression lives for the whole loop body — bind the collected `Vec`
+to a variable before iterating, or any re-entrant lock deadlocks.
+
+## 30. `unix://` is a first-class fleet endpoint
+
+A `host-<name> = unix:///tmp/…` config line pointing at a second local daemon
+is a complete fleet fixture — every layer above the transport (host rows,
+per-host reconnect, frozen frames, host removal) is testable without ssh.
+
+## 31. An "isolated" XDG_CONFIG_HOME is not isolated until you seed it
+
+`zz`'s config candidate resolution falls back to the real
+`~/.config/zz/config` when the isolated directory holds no config file — so a
+scratch `XDG_CONFIG_HOME` sandbox silently reads (and side-effect files like
+the first-run `import-prompted` marker land in) the user's real profile on
+first launch. Always write a config file into the scratch dir before the
+first run.

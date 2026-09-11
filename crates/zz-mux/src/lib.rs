@@ -13,6 +13,7 @@ mod layout;
 mod layout_pin_tests;
 mod model;
 mod parser;
+pub mod settings_bindings;
 mod sort;
 mod status;
 mod terminfo;

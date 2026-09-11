@@ -18,6 +18,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-chrome-import` — Chrome profile, cookie, and history import
 - `crates/zz-ui` — widget layer: a maintained full fork of gpui-component
 - `crates/zz-tui` — raw-terminal attach client
+- `crates/zz-gtk` — GTK4/libadwaita GNOME client, excluded from the workspace (needs system GTK); build it from its own directory
 - `crates/zz-web` - local HTTP/WebSocket gateway for browser clients
 - `clients/web` - full-page GPUI/WASM client using zz-ui and zz-client, with its own Cargo workspace
 - `clients/ios` — adaptive SwiftUI/UIKit iPhone and iPad app over `zz-client-ffi`
@@ -59,6 +60,7 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `just macos-gallery` / `macos-gallery-build [debug\|release]` / `macos-gallery-test` | Native macOS component gallery / app bundle / Swift and isolated daemon tests |
 | `just macos-native [--socket PATH] [--session NAME]` / `macos-native-build [debug\|release]` / `macos-native-test` | Native macOS client / CEF app bundle / Swift and isolated daemon tests |
 | `just forks` / `just fork-rebase <name>` | Carried-patch fork status / rebase |
+| `just gtk [args]` | Run the GTK4/libadwaita client (`crates/zz-gtk`, workspace-excluded) |
 | `just site` | Docs site dev server with live reload |
 | `just showcase` / `showcase-setup` / `showcase-build[-release]` | wasm UI showcase dev loop / toolchain / assets |
 | `just web` / `web-build[-release]` / `web-serve` | Browser client dev loop / assets / local gateway |

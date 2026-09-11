@@ -6,6 +6,7 @@
 * [zz-client-ffi crate](zz-client-ffi.md) - Native client C ABI for transport, terminal viewports, Agent transcripts, settings, chrome bindings, and optional CEF browsers.
 * [zz-client crate](zz-client.md) - Renderer-free client state, effects, chrome keymaps, and normalized pane geometry shared by native and terminal skins.
 * [zz-daemon crate](zz-daemon.md) - The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
+* [zz-gtk crate . GTK4/libadwaita GNOME client](zz-gtk.md) - Native GTK4/libadwaita client for terminal, daemon-owned Agent, and CEF Browser panes, with shared client state, fleet connections, and GNOME navigation.
 * [zz-mux crate . renderer-free mux state machine](zz-mux.md) - The pure, UI-agnostic multiplexer core that owns sessions/windows/panes/splits, resolves tmux-style targets, executes tmux-compatible commands, holds key tables, and parses .tmux.conf.
 * [zz-protocol crate](zz-protocol.md) - The stable, versioned wire vocabulary (IDs, framing, control messages, packed terminal lanes, and mux snapshots) shared by every zz client and the daemon.
 * [zz-terminal crate](zz-terminal.md) - The per-pane terminal engine that owns a PTY child and every libghostty-vt object on a worker thread and publishes immutable renderer-neutral frames.

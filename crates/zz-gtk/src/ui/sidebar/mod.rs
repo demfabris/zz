@@ -1,0 +1,1037 @@
+mod hosts;
+mod model;
+mod panel;
+
+use std::{
+    cell::{Cell, RefCell},
+    collections::BTreeSet,
+    rc::Rc,
+    sync::Arc,
+};
+
+use adw::prelude::*;
+use gtk::{gdk, gio, glib, graphene};
+use zz_client::{ChromeAction, ChromeKeymap, SIDEBAR_TABLE};
+use zz_protocol::{Axis, CommandInvocation};
+use zz_terminal::{KeyAction, KeyInput};
+
+use crate::{engine::Engine, ui::keys};
+
+pub use hosts::parse_add_host;
+pub use panel::NewSessionPanel;
+
+use model::{
+    Activation, HostId, PaneKind, Row, RowKind, Tree, TreeNode, TreeTarget, expand_path_to,
+    kill_target_command, new_pane_command, new_window_command,
+};
+
+/// A utility pane's width, the way GNOME sizes one: fixed, and the same at
+/// every window size. `AdwOverlaySplitView` lays its sidebar out as a fraction
+/// of the window and offers no handle; pinning both bounds is what makes the
+/// width a constant rather than something that drifts as the window moves.
+const SIDEBAR_WIDTH: f64 = 280.0;
+/// Under this scaled width, the sidebar stops taking room from the panes and
+/// overlays them instead.
+const COLLAPSE_WIDTH: f64 = 640.0;
+/// How far each level of the tree is inset, in pixels.
+const INDENT: i32 = 16;
+
+/// What the sidebar hands back up to the window: chrome it cannot answer on its
+/// own, and the request to give the keyboard back to the focused pane.
+pub struct Hooks {
+    pub chrome: Rc<dyn Fn(ChromeAction)>,
+    pub focus_pane: Rc<dyn Fn()>,
+}
+
+/// The session tree: every session, window and pane the local daemon holds,
+/// with the row the mux is on marked and a client-local cursor of its own.
+///
+/// Nothing here is state — every row is projected from the snapshot the daemon
+/// last published, and every interaction is a command back to it.
+pub struct Sidebar {
+    engine: Arc<Engine>,
+    host: String,
+    split: adw::OverlaySplitView,
+    root: adw::ToolbarView,
+    primary_menu: gtk::MenuButton,
+    scroller: gtk::ScrolledWindow,
+    list: gtk::ListBox,
+    menu: gtk::PopoverMenu,
+    tree: RefCell<Tree>,
+    rows: RefCell<Vec<Row>>,
+    expanded: RefCell<BTreeSet<TreeNode>>,
+    /// Hosts whose first sessions have already been revealed, so a host opens
+    /// itself once rather than every time its tree changes.
+    greeted: RefCell<BTreeSet<HostId>>,
+    selected: Cell<Option<TreeNode>>,
+    revealed: Cell<Option<TreeNode>>,
+    seeded: Cell<bool>,
+    focused: Cell<bool>,
+    syncing: Cell<bool>,
+    hooks: RefCell<Option<Hooks>>,
+}
+
+impl Sidebar {
+    pub fn build(engine: Arc<Engine>, primary_menu: &impl IsA<gio::MenuModel>) -> Rc<Self> {
+        let list = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::Single)
+            .build();
+        list.add_css_class("navigation-sidebar");
+
+        let scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&list)
+            .build();
+
+        let header = adw::HeaderBar::builder()
+            .show_end_title_buttons(false)
+            .build();
+        header.set_title_widget(Some(&adw::WindowTitle::new("Sessions", "")));
+        let primary_menu = gtk::MenuButton::builder()
+            .icon_name("open-menu-symbolic")
+            .tooltip_text("Main Menu")
+            .menu_model(primary_menu)
+            .primary(true)
+            .build();
+        header.pack_start(&primary_menu);
+        header.pack_end(
+            &gtk::Button::builder()
+                .icon_name("list-add-symbolic")
+                .tooltip_text("New Session")
+                .action_name("sidebar.new-session")
+                .has_frame(false)
+                .build(),
+        );
+
+        let root = adw::ToolbarView::new();
+        root.set_hexpand(true);
+        root.add_top_bar(&header);
+        root.set_content(Some(&scroller));
+
+        let split = adw::OverlaySplitView::builder()
+            .sidebar(&root)
+            .sidebar_width_unit(adw::LengthUnit::Px)
+            .min_sidebar_width(SIDEBAR_WIDTH)
+            .max_sidebar_width(SIDEBAR_WIDTH)
+            .build();
+
+        // The menu hangs off the scroller rather than the list: a popover
+        // parented to a `gtk::ListBox` is a child the list cannot remove, and
+        // `remove_all` spins on it forever.
+        let menu = gtk::PopoverMenu::builder().has_arrow(false).build();
+        menu.set_parent(&scroller);
+
+        let sidebar = Rc::new(Self {
+            engine,
+            host: host_name(),
+            split,
+            root,
+            primary_menu,
+            scroller,
+            list,
+            menu,
+            tree: RefCell::new(Tree::default()),
+            rows: RefCell::new(Vec::new()),
+            expanded: RefCell::new(BTreeSet::new()),
+            greeted: RefCell::new(BTreeSet::new()),
+            selected: Cell::new(None),
+            revealed: Cell::new(None),
+            seeded: Cell::new(false),
+            focused: Cell::new(false),
+            syncing: Cell::new(false),
+            hooks: RefCell::new(None),
+        });
+        sidebar.install_actions();
+        sidebar.connect_signals();
+        sidebar.sync();
+        sidebar
+    }
+
+    /// The split view, for the window to hang its workspace in.
+    pub fn widget(&self) -> &gtk::Widget {
+        self.split.upcast_ref()
+    }
+
+    /// Below `COLLAPSE_WIDTH` the tree becomes an overlay. Without this the
+    /// sidebar's width is part of the window's minimum, so dragging the frame
+    /// narrower hits a floor the compositor keeps fighting, and the tree jitters
+    /// against the panes at every size near it. The breakpoint restores both
+    /// properties on the way back out, so widening returns the pinned sidebar.
+    pub fn install_breakpoint(
+        &self,
+        window: &adw::ApplicationWindow,
+        content_menu: &gtk::MenuButton,
+    ) {
+        let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
+            adw::BreakpointConditionLengthType::MaxWidth,
+            COLLAPSE_WIDTH,
+            adw::LengthUnit::Sp,
+        ));
+        breakpoint.add_setter(&self.split, "collapsed", Some(&true.into()));
+        breakpoint.add_setter(&self.split, "show-sidebar", Some(&false.into()));
+        breakpoint.add_setter(&self.primary_menu, "visible", Some(&false.into()));
+        breakpoint.add_setter(content_menu, "visible", Some(&true.into()));
+        window.add_breakpoint(breakpoint);
+    }
+
+    pub fn set_content(&self, content: &impl IsA<gtk::Widget>) {
+        self.split.set_content(Some(content));
+    }
+
+    /// A header button that shows and hides the tree, bound to the split view
+    /// so it always reads the real state rather than a copy of it.
+    pub fn toggle_button(&self) -> gtk::ToggleButton {
+        let button = gtk::ToggleButton::builder()
+            .icon_name("sidebar-show-symbolic")
+            .tooltip_text("Toggle Sidebar")
+            .has_frame(false)
+            .build();
+        self.split
+            .bind_property("show-sidebar", &button, "active")
+            .bidirectional()
+            .sync_create()
+            .build();
+        button
+    }
+
+    pub fn connect(&self, hooks: Hooks) {
+        self.hooks.replace(Some(hooks));
+    }
+
+    /// True while the keyboard belongs to the tree. The window asks before it
+    /// hands focus back to a pane: sidebar focus and pane focus are exclusive,
+    /// and a snapshot arriving must never move the keyboard on its own.
+    pub fn has_focus(&self) -> bool {
+        self.focused.get()
+    }
+
+    /// Show the tree and put the keyboard in it — what the daemon's
+    /// `focus-sidebar` and the `-s`/`-w` choosers ask for.
+    pub fn focus(&self) {
+        self.split.set_show_sidebar(true);
+        let active = self.tree.borrow().active;
+        if let Some(active) = active {
+            expand_path_to(&mut self.expanded.borrow_mut(), &self.tree.borrow(), active);
+            self.rebuild_rows();
+        }
+        if self.selected.get().is_none() {
+            self.select(active.or_else(|| self.first_node()));
+        }
+        self.grab_selected_row();
+    }
+
+    pub fn toggle(&self) {
+        if !self.split.shows_sidebar() {
+            self.focus();
+            return;
+        }
+        if self.focused.get() {
+            self.split.set_show_sidebar(false);
+            self.blur();
+            return;
+        }
+        self.focus();
+    }
+
+    /// Rebuild the tree from the snapshot the core holds. Identical rows are
+    /// left alone, so a redraw costs nothing while the daemon's clock ticks.
+    pub fn sync(&self) {
+        let hosts = self.engine.hosts();
+        let tree = Tree::from_hosts(&hosts, |view| {
+            if view.id == HostId::LOCAL {
+                self.host.clone()
+            } else {
+                view.name.clone()
+            }
+        });
+
+        {
+            let mut expanded = self.expanded.borrow_mut();
+            if !self.seeded.replace(true) {
+                expanded.insert(TreeNode::Host(HostId::LOCAL));
+            }
+            // A host opens itself the first time it has anything to show; a
+            // machine that is still dialling has an empty root, and opening
+            // that would only teach the user to close it again.
+            let mut greeted = self.greeted.borrow_mut();
+            for host in &tree.hosts {
+                if host.id == HostId::LOCAL && !host.sessions.is_empty() && greeted.insert(host.id)
+                {
+                    expanded.insert(TreeNode::Host(host.id));
+                }
+            }
+            drop(greeted);
+            if let Some(active) = tree.active
+                && self.revealed.get() != Some(active)
+            {
+                expand_path_to(&mut expanded, &tree, active);
+                self.revealed.set(Some(active));
+            }
+            expanded.retain(|node| tree.is_live(*node));
+        }
+        self.tree.replace(tree);
+        self.rebuild_rows();
+
+        let live = self
+            .selected
+            .get()
+            .filter(|node| self.rows.borrow().iter().any(|row| row.node == *node));
+        self.select(live.or(self.tree.borrow().active));
+    }
+
+    pub fn shows_sidebar(&self) -> bool {
+        self.split.shows_sidebar() && !self.split.is_collapsed()
+    }
+
+    pub fn connect_visibility(&self, changed: impl Fn() + 'static) {
+        let changed = Rc::new(changed);
+        let showing = Rc::clone(&changed);
+        self.split.connect_show_sidebar_notify(move |_| showing());
+        self.split.connect_collapsed_notify(move |_| changed());
+    }
+
+    fn split_pane(&self, node: TreeNode, axis: Axis) {
+        let pane = self.rows.borrow().iter().find_map(|row| match row.kind {
+            RowKind::Window { active_pane } if row.node == node => Some(active_pane),
+            _ => None,
+        });
+        if let Some(pane) = pane {
+            self.engine
+                .execute_on(node.host(), new_pane_command(pane, axis));
+        }
+    }
+
+    fn install_actions(self: &Rc<Self>) {
+        let actions = gio::SimpleActionGroup::new();
+        for (name, run) in Self::verbs() {
+            let action = gio::SimpleAction::new(name, Some(glib::VariantTy::STRING));
+            let target = Rc::downgrade(self);
+            action.connect_activate(move |_, parameter| {
+                let Some(sidebar) = target.upgrade() else {
+                    return;
+                };
+                let Some(node) = parameter
+                    .and_then(glib::Variant::str)
+                    .and_then(TreeNode::parse)
+                else {
+                    return;
+                };
+                run(&sidebar, node);
+            });
+            actions.add_action(&action);
+        }
+
+        let action = gio::SimpleAction::new("new-session", None);
+        let target = Rc::downgrade(self);
+        action.connect_activate(move |_, _| {
+            if let Some(sidebar) = target.upgrade() {
+                sidebar.engine.new_session();
+            }
+        });
+        actions.add_action(&action);
+
+        let action = gio::SimpleAction::new("add-host", None);
+        let target = Rc::downgrade(self);
+        action.connect_activate(move |_, _| {
+            if let Some(sidebar) = target.upgrade() {
+                hosts::add(&sidebar.split, &sidebar.engine);
+            }
+        });
+        actions.add_action(&action);
+
+        self.split.insert_action_group("sidebar", Some(&actions));
+    }
+
+    fn verbs() -> [(&'static str, fn(&Rc<Self>, TreeNode)); 9] {
+        [
+            ("toggle", |sidebar, node| {
+                sidebar.select(Some(node));
+                sidebar.toggle_node(node);
+            }),
+            ("rename", |sidebar, node| sidebar.rename(node)),
+            ("kill", |sidebar, node| {
+                if let TreeNode::Target(host, target) = node {
+                    sidebar.engine.execute_on(host, kill_target_command(target));
+                }
+            }),
+            ("new-window", |sidebar, node| {
+                if let TreeNode::Target(host, TreeTarget::Session(session)) = node {
+                    sidebar.engine.execute_on(host, new_window_command(session));
+                }
+            }),
+            ("new-pane", |sidebar, node| {
+                sidebar.split_pane(node, Axis::Horizontal);
+            }),
+            ("split-bottom", |sidebar, node| {
+                sidebar.split_pane(node, Axis::Vertical);
+            }),
+            // A host's own verbs. New session lands on that machine rather than
+            // on whichever one the workspace happens to be showing.
+            ("host-new-session", |sidebar, node| {
+                sidebar.engine.new_session_on(node.host());
+            }),
+            ("reconnect-host", |sidebar, node| {
+                sidebar.engine.reconnect_host(node.host());
+            }),
+            ("close-host", |sidebar, node| {
+                let host = node.host();
+                sidebar.close_host(host);
+            }),
+        ]
+    }
+
+    /// Closing a host is a config edit, exactly as the desktop makes it: the
+    /// line goes, the poll notices, and the fleet layer drops the connection.
+    /// The row is dropped here as well so the tree answers immediately rather
+    /// than half a second later.
+    fn close_host(&self, host: HostId) {
+        let Some(name) = self.engine.host_name(host) else {
+            return;
+        };
+        if let Err(error) = crate::config::write_host(&name, None) {
+            self.engine
+                .notify(format!("Could not remove host-{name}: {error}"));
+            return;
+        }
+        self.engine.close_host(host);
+        self.sync();
+    }
+
+    fn connect_signals(self: &Rc<Self>) {
+        let target = Rc::downgrade(self);
+        self.list.connect_row_activated(move |_, row| {
+            let Some(sidebar) = target.upgrade() else {
+                return;
+            };
+            if let Some(node) = sidebar.node_at(row.index()) {
+                sidebar.activate(node, false);
+            }
+        });
+
+        let target = Rc::downgrade(self);
+        self.list.connect_row_selected(move |_, row| {
+            let Some(sidebar) = target.upgrade() else {
+                return;
+            };
+            if sidebar.syncing.get() {
+                return;
+            }
+            if let Some(node) = row.and_then(|row| sidebar.node_at(row.index())) {
+                sidebar.selected.set(Some(node));
+            }
+        });
+
+        let keyboard = gtk::EventControllerKey::new();
+        keyboard.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let target = Rc::downgrade(self);
+        keyboard.connect_key_pressed(move |_, keyval, _, modifiers| {
+            let Some(sidebar) = target.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            if keys::is_modifier(keyval) {
+                return glib::Propagation::Proceed;
+            }
+            let input = keys::key_input(KeyAction::Press, keyval, modifiers, None);
+            let Some(action) = resolve_chrome(&sidebar.engine.chrome(), &input) else {
+                return glib::Propagation::Proceed;
+            };
+            sidebar.perform(action);
+            glib::Propagation::Stop
+        });
+        self.root.add_controller(keyboard);
+
+        let focus = gtk::EventControllerFocus::new();
+        let target = Rc::downgrade(self);
+        focus.connect_enter(move |_| {
+            if let Some(sidebar) = target.upgrade() {
+                sidebar.focused.set(true);
+                sidebar.select(sidebar.selected.get());
+            }
+        });
+        let target = Rc::downgrade(self);
+        focus.connect_leave(move |_| {
+            if let Some(sidebar) = target.upgrade() {
+                sidebar.focused.set(false);
+                sidebar.syncing.set(true);
+                sidebar.list.select_row(gtk::ListBoxRow::NONE);
+                sidebar.syncing.set(false);
+            }
+        });
+        self.root.add_controller(focus);
+
+        let gesture = gtk::GestureClick::new();
+        gesture.set_button(gdk::BUTTON_SECONDARY);
+        let target = Rc::downgrade(self);
+        gesture.connect_pressed(move |_, _, x, y| {
+            if let Some(sidebar) = target.upgrade() {
+                sidebar.open_menu(x, y);
+            }
+        });
+        self.list.add_controller(gesture);
+
+        let menu = self.menu.clone();
+        self.scroller.connect_destroy(move |_| menu.unparent());
+    }
+
+    /// Chrome resolved from the `sidebar` table. Anything the tree does not own
+    /// goes back to the window, which is where detach and zoom live.
+    fn perform(&self, action: ChromeAction) {
+        match action {
+            ChromeAction::SidebarSelectDown => self.move_selection(1),
+            ChromeAction::SidebarSelectUp => self.move_selection(-1),
+            ChromeAction::SidebarSelectLeft => self.collapse_or_ascend(),
+            ChromeAction::SidebarSelectRight => self.expand_or_descend(),
+            ChromeAction::SidebarSelectFirst => self.select_edge(true),
+            ChromeAction::SidebarSelectLast => self.select_edge(false),
+            ChromeAction::SidebarConfirm => {
+                if let Some(node) = self.selected.get() {
+                    self.activate(node, true);
+                }
+            }
+            ChromeAction::SidebarCancel => self.blur(),
+            ChromeAction::SidebarRename => {
+                if let Some(node) = self.selected.get() {
+                    self.rename(node);
+                }
+            }
+            ChromeAction::SidebarCommandPalette => self
+                .engine
+                .execute(CommandInvocation::new("command-prompt", [] as [&str; 0])),
+            ChromeAction::ToggleSidebar => self.toggle(),
+            other => {
+                let hooks = self.hooks.borrow();
+                if let Some(hooks) = hooks.as_ref() {
+                    (hooks.chrome)(other);
+                }
+            }
+        }
+    }
+
+    /// Activating a row is the daemon's business: a session attaches, a window
+    /// or pane selects — behind an attach when it belongs to another session,
+    /// because the daemon resolves `-t` against the attachment. A row with
+    /// nothing to activate (the host) opens instead.
+    ///
+    /// `release` is what the keyboard asks for: confirming a row hands the
+    /// keyboard back to the pane, while clicking one leaves focus where the
+    /// pointer left it.
+    fn activate(&self, node: TreeNode, release: bool) {
+        let activation = self
+            .tree
+            .borrow()
+            .activation_for_node(node, self.attached_on(node.host()));
+        let Some(activation) = activation else {
+            self.toggle_node(node);
+            return;
+        };
+        self.perform_activation(node.host(), activation);
+        if self.split.is_collapsed() {
+            self.split.set_show_sidebar(false);
+        }
+        if release {
+            self.blur();
+        }
+    }
+
+    fn rename(&self, node: TreeNode) {
+        let activation = self
+            .tree
+            .borrow()
+            .rename_activation_for_node(node, self.attached_on(node.host()));
+        if let Some(activation) = activation {
+            self.perform_activation(node.host(), activation);
+        }
+    }
+
+    /// Where the daemon behind `host` is attached, which is what decides
+    /// whether a row on it can be selected outright or has to be attached to
+    /// first. A host nobody has activated yet is attached to nothing.
+    fn attached_on(&self, host: HostId) -> Option<zz_protocol::SessionId> {
+        if host != self.engine.active_host() {
+            return None;
+        }
+        self.tree
+            .borrow()
+            .host(host)
+            .and_then(|host| host.sessions.iter().find(|session| session.active))
+            .map(|session| session.id)
+    }
+
+    fn perform_activation(&self, host: HostId, activation: Activation) {
+        match activation {
+            Activation::Attach(session) => self.engine.attach_host_session(host, session),
+            Activation::Execute(command) => self.engine.execute_on(host, command),
+            Activation::AttachThenExecute(session, command) => {
+                self.engine.attach_host_session(host, session);
+                self.engine.execute_on(host, command);
+            }
+        }
+    }
+
+    /// Give the keyboard back to the focused pane without hiding the tree.
+    fn blur(&self) {
+        let hooks = self.hooks.borrow();
+        if let Some(hooks) = hooks.as_ref() {
+            (hooks.focus_pane)();
+        }
+    }
+
+    fn toggle_node(&self, node: TreeNode) {
+        {
+            let mut expanded = self.expanded.borrow_mut();
+            if !expanded.remove(&node) {
+                expanded.insert(node);
+            }
+        }
+        self.rebuild_rows();
+        self.select(self.selected.get());
+        if self.focused.get() {
+            self.grab_selected_row();
+        }
+    }
+
+    fn move_selection(&self, delta: isize) {
+        let next = {
+            let rows = self.rows.borrow();
+            if rows.is_empty() {
+                return;
+            }
+            let current = self
+                .selected
+                .get()
+                .and_then(|node| rows.iter().position(|row| row.node == node));
+            let index = match current {
+                Some(index) => (index as isize + delta).clamp(0, rows.len() as isize - 1) as usize,
+                None if delta > 0 => 0,
+                None => rows.len() - 1,
+            };
+            rows[index].node
+        };
+        self.select(Some(next));
+        self.grab_selected_row();
+    }
+
+    fn select_edge(&self, first: bool) {
+        let node = {
+            let rows = self.rows.borrow();
+            if first {
+                rows.first().map(|row| row.node)
+            } else {
+                rows.last().map(|row| row.node)
+            }
+        };
+        if node.is_some() {
+            self.select(node);
+            self.grab_selected_row();
+        }
+    }
+
+    /// Left closes an open row and otherwise climbs to its parent.
+    fn collapse_or_ascend(&self) {
+        let Some(node) = self.selected.get() else {
+            return;
+        };
+        if self.expanded.borrow().contains(&node) {
+            self.toggle_node(node);
+            return;
+        }
+        let parent = self.parent_of(node);
+        if parent.is_some() {
+            self.select(parent);
+            self.grab_selected_row();
+        }
+    }
+
+    /// Right opens a closed row and otherwise steps into its first child.
+    fn expand_or_descend(&self) {
+        let Some(node) = self.selected.get() else {
+            return;
+        };
+        let expandable = self
+            .rows
+            .borrow()
+            .iter()
+            .find(|row| row.node == node)
+            .is_some_and(|row| row.expandable);
+        if !expandable {
+            return;
+        }
+        if self.expanded.borrow().contains(&node) {
+            self.move_selection(1);
+        } else {
+            self.toggle_node(node);
+        }
+    }
+
+    fn parent_of(&self, node: TreeNode) -> Option<TreeNode> {
+        let rows = self.rows.borrow();
+        let index = rows.iter().position(|row| row.node == node)?;
+        let depth = rows[index].depth;
+        rows[..index]
+            .iter()
+            .rev()
+            .find(|row| row.depth < depth)
+            .map(|row| row.node)
+    }
+
+    fn first_node(&self) -> Option<TreeNode> {
+        self.rows.borrow().first().map(|row| row.node)
+    }
+
+    fn node_at(&self, index: i32) -> Option<TreeNode> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|index| self.rows.borrow().get(index).map(|row| row.node))
+    }
+
+    fn index_of(&self, node: TreeNode) -> Option<i32> {
+        self.rows
+            .borrow()
+            .iter()
+            .position(|row| row.node == node)
+            .and_then(|index| i32::try_from(index).ok())
+    }
+
+    /// The keyboard cursor. GTK paints a selected row, and the desktop only
+    /// shows its cursor while the tree has focus, so a blurred sidebar carries
+    /// the selection without drawing it.
+    fn select(&self, node: Option<TreeNode>) {
+        self.selected.set(node);
+        let row = node
+            .filter(|_| self.focused.get())
+            .and_then(|node| self.index_of(node))
+            .and_then(|index| self.list.row_at_index(index));
+        self.syncing.set(true);
+        match row {
+            Some(row) => self.list.select_row(Some(&row)),
+            None => self.list.select_row(gtk::ListBoxRow::NONE),
+        }
+        self.syncing.set(false);
+    }
+
+    fn grab_selected_row(&self) {
+        if let Some(row) = self
+            .selected
+            .get()
+            .and_then(|node| self.index_of(node))
+            .and_then(|index| self.list.row_at_index(index))
+        {
+            row.grab_focus();
+        }
+    }
+
+    fn rebuild_rows(&self) {
+        let tree = self.tree.borrow();
+        let rows = tree.rows(&self.expanded.borrow());
+        if *self.rows.borrow() == rows {
+            return;
+        }
+        self.list.remove_all();
+        for row in &rows {
+            self.list.append(&build_row(row, &tree));
+        }
+        drop(tree);
+        self.rows.replace(rows);
+    }
+
+    fn open_menu(&self, x: f64, y: f64) {
+        let Some(row) = self.list.row_at_y(y as i32) else {
+            return;
+        };
+        let Some(node) = self.node_at(row.index()) else {
+            return;
+        };
+        self.select(Some(node));
+        let menu = row_menu(node, &self.rows.borrow(), &self.tree.borrow());
+        self.menu.set_menu_model(Some(&menu));
+        let point = self
+            .list
+            .compute_point(&self.scroller, &graphene::Point::new(x as f32, y as f32))
+            .unwrap_or_else(|| graphene::Point::new(x as f32, y as f32));
+        self.menu.set_pointing_to(Some(&gdk::Rectangle::new(
+            point.x() as i32,
+            point.y() as i32,
+            1,
+            1,
+        )));
+        self.menu.popup();
+    }
+}
+
+fn resolve_chrome(chrome: &ChromeKeymap, input: &KeyInput) -> Option<ChromeAction> {
+    chrome.resolve(SIDEBAR_TABLE, input)
+}
+
+/// One row is a widget tree rather than an `adw::ActionRow` so the disclosure,
+/// the kind marker and the action gutter sit where the desktop puts them.
+fn build_row(row: &Row, tree: &Tree) -> gtk::ListBoxRow {
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    content.set_margin_start(i32::from(row.depth) * INDENT);
+    content.add_css_class("zz-sidebar-row");
+
+    let target = row.node.to_string().to_variant();
+    if row.expandable {
+        let disclosure_label = format!(
+            "{} {}",
+            if row.expanded { "Collapse" } else { "Expand" },
+            row.label
+        );
+        let disclosure = gtk::Button::builder()
+            .icon_name(if row.expanded {
+                "pan-down-symbolic"
+            } else {
+                "pan-end-symbolic"
+            })
+            .tooltip_text(disclosure_label)
+            .has_frame(false)
+            .action_name("sidebar.toggle")
+            .action_target(&target)
+            .build();
+        disclosure.add_css_class("flat");
+        disclosure.add_css_class("zz-sidebar-disclosure");
+        content.append(&disclosure);
+    } else {
+        content.append(&gtk::Box::builder().width_request(16).build());
+    }
+
+    content.append(&gtk::Image::from_icon_name(row_icon(row.kind)));
+
+    let label = gtk::Label::builder()
+        .label(&row.label)
+        .xalign(0.0)
+        .hexpand(true)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .build();
+    if !row.on_active_path {
+        label.add_css_class("dim-label");
+    }
+    content.append(&label);
+
+    // A host says what its connection is doing where a session would say
+    // nothing at all — the row itself is the only place a machine that is
+    // retrying can report it.
+    if let Some(detail) = &row.detail {
+        let state = gtk::Label::new(Some(detail));
+        state.add_css_class("dim-label");
+        state.add_css_class("caption");
+        content.append(&state);
+    }
+
+    if row.bell {
+        let bell = gtk::Label::new(Some("●"));
+        bell.add_css_class("zz-bell");
+        bell.set_tooltip_text(Some("A bell rang here"));
+        bell.update_property(&[gtk::accessible::Property::Label("Unread Activity")]);
+        content.append(&bell);
+    }
+
+    let gutter = build_gutter(row, &target, tree);
+    content.append(&gutter);
+
+    let list_row = gtk::ListBoxRow::builder().child(&content).build();
+    let mut accessible_label = row.label.clone();
+    if row.active {
+        accessible_label.push_str(", Active");
+    }
+    if let Some(detail) = &row.detail {
+        accessible_label.push_str(", ");
+        accessible_label.push_str(detail);
+    }
+    list_row.update_property(&[gtk::accessible::Property::Label(&accessible_label)]);
+    if let Some(hint) = &row.hint {
+        list_row.set_tooltip_text(Some(hint));
+    }
+    if row.active {
+        list_row.add_css_class("zz-sidebar-active");
+    }
+    if !matches!(row.kind, RowKind::Host) {
+        let hovered = Rc::new(Cell::new(false));
+        let focused = Rc::new(Cell::new(false));
+        let motion = gtk::EventControllerMotion::new();
+        let shown = gutter.clone();
+        let entered = Rc::clone(&hovered);
+        motion.connect_enter(move |_, _, _| {
+            entered.set(true);
+            shown.set_visible(true);
+        });
+        let hidden = gutter.clone();
+        let left = Rc::clone(&hovered);
+        let focus_state = Rc::clone(&focused);
+        motion.connect_leave(move |_| {
+            left.set(false);
+            hidden.set_visible(focus_state.get());
+        });
+        list_row.add_controller(motion);
+
+        let focus = gtk::EventControllerFocus::new();
+        let shown = gutter.clone();
+        let entered = Rc::clone(&focused);
+        focus.connect_enter(move |_| {
+            entered.set(true);
+            shown.set_visible(true);
+        });
+        let hidden = gutter;
+        focus.connect_leave(move |_| {
+            focused.set(false);
+            hidden.set_visible(hovered.get());
+        });
+        list_row.add_controller(focus);
+    }
+    list_row
+}
+
+/// The action gutter: what a row can do without a menu. The host keeps its menu
+/// button visible; everything else appears while the row has pointer or key focus.
+fn build_gutter(row: &Row, target: &glib::Variant, tree: &Tree) -> gtk::Box {
+    let gutter = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    gutter.set_valign(gtk::Align::Center);
+
+    match row.kind {
+        RowKind::Host => {
+            gutter.append(
+                &gtk::MenuButton::builder()
+                    .icon_name("view-more-symbolic")
+                    .tooltip_text("Host Actions")
+                    .menu_model(&host_menu(row.node, tree))
+                    .has_frame(false)
+                    .build(),
+            );
+            return gutter;
+        }
+        RowKind::Session => gutter.append(&gutter_button(
+            "list-add-symbolic",
+            "New Window",
+            "sidebar.new-window",
+            target,
+        )),
+        RowKind::Window { .. } => {
+            let menu = gio::Menu::new();
+            menu.append_item(&item("Split Right", "sidebar.new-pane", target));
+            menu.append_item(&item("Split Bottom", "sidebar.split-bottom", target));
+            gutter.append(
+                &gtk::MenuButton::builder()
+                    .icon_name("view-grid-symbolic")
+                    .tooltip_text("Window Layout")
+                    .menu_model(&menu)
+                    .has_frame(false)
+                    .build(),
+            );
+        }
+        RowKind::Pane(_) => {}
+    }
+    gutter.append(&gutter_button(
+        "user-trash-symbolic",
+        delete_label(row.kind),
+        "sidebar.kill",
+        target,
+    ));
+    gutter.set_visible(false);
+    gutter
+}
+
+fn gutter_button(icon: &str, tooltip: &str, action: &str, target: &glib::Variant) -> gtk::Button {
+    let button = gtk::Button::builder()
+        .icon_name(icon)
+        .tooltip_text(tooltip)
+        .has_frame(false)
+        .action_name(action)
+        .action_target(target)
+        .build();
+    button.add_css_class("flat");
+    button.add_css_class("zz-sidebar-action");
+    button
+}
+
+/// The local root offers the fleet itself; a host offers only what can be done
+/// to that machine. New session is gated on the connection, because a command
+/// aimed at a daemon that is not there is silently dropped.
+fn host_menu(node: TreeNode, tree: &Tree) -> gio::Menu {
+    let host = node.host();
+    let menu = gio::Menu::new();
+    if host == HostId::LOCAL {
+        menu.append(Some("New Session"), Some("sidebar.new-session"));
+        menu.append(Some("Add Host…"), Some("sidebar.add-host"));
+        return menu;
+    }
+    let value = node.to_string().to_variant();
+    let connected = tree
+        .host(host)
+        .is_some_and(|host| host.state.is_connected());
+    if connected {
+        menu.append_item(&item("New Session", "sidebar.host-new-session", &value));
+    } else {
+        menu.append_item(&item("Reconnect", "sidebar.reconnect-host", &value));
+    }
+    menu.append_item(&item("Close Host", "sidebar.close-host", &value));
+    menu
+}
+
+/// The right-click menu. Rename is the daemon's value prompt — the client never
+/// edits a name itself, it asks for the prompt the overlay then renders.
+fn row_menu(node: TreeNode, rows: &[Row], tree: &Tree) -> gio::Menu {
+    let TreeNode::Target(_, target) = node else {
+        return host_menu(node, tree);
+    };
+    let Some(kind) = rows.iter().find(|row| row.node == node).map(|row| row.kind) else {
+        return gio::Menu::new();
+    };
+    let menu = gio::Menu::new();
+    let value = node.to_string().to_variant();
+    menu.append_item(&item(
+        match target {
+            TreeTarget::Session(_) => "Rename Session…",
+            _ => "Rename Window…",
+        },
+        "sidebar.rename",
+        &value,
+    ));
+    match kind {
+        RowKind::Session => menu.append_item(&item("New Window", "sidebar.new-window", &value)),
+        RowKind::Window { .. } => {
+            menu.append_item(&item("Split Right", "sidebar.new-pane", &value));
+            menu.append_item(&item("Split Bottom", "sidebar.split-bottom", &value));
+        }
+        _ => {}
+    }
+    menu.append_item(&item(delete_label(kind), "sidebar.kill", &value));
+    menu
+}
+
+/// `GAction` targets carry the row id, so a menu item is bound to its row
+/// rather than to whatever happens to be selected when it fires.
+fn item(label: &str, action: &str, target: &glib::Variant) -> gio::MenuItem {
+    let item = gio::MenuItem::new(Some(label), None);
+    item.set_action_and_target_value(Some(action), Some(target));
+    item
+}
+
+const fn delete_label(kind: RowKind) -> &'static str {
+    match kind {
+        RowKind::Session => "Delete Session",
+        RowKind::Window { .. } => "Delete Window",
+        _ => "Delete Pane",
+    }
+}
+
+const fn row_icon(kind: RowKind) -> &'static str {
+    match kind {
+        RowKind::Host => "computer-symbolic",
+        RowKind::Session => "view-grid-symbolic",
+        RowKind::Window { .. } => "view-paged-symbolic",
+        RowKind::Pane(PaneKind::Picker) => "list-add-symbolic",
+        RowKind::Pane(PaneKind::Terminal) => "utilities-terminal-symbolic",
+        RowKind::Pane(PaneKind::Browser) => "web-browser-symbolic",
+        RowKind::Pane(PaneKind::Agent) => "system-run-symbolic",
+        RowKind::Pane(PaneKind::Editor) => "text-editor-symbolic",
+    }
+}
+
+fn host_name() -> String {
+    let name = glib::host_name().to_string();
+    if name.trim().is_empty() {
+        "localhost".to_owned()
+    } else {
+        name
+    }
+}

@@ -598,8 +598,10 @@ its atomic writer stores the family and clears explicit roots without changing `
 `set_color` setter, so a preset (or a hand-edit of `zz/config`) updates the swatches without
 re-entering the writer.
 
-Terminal mirrors daemon-resolved appearance into its controls and writes edits back through the
-bounded, comment-preserving `zz/config` writer. Multiplexer mounts the native rope-backed
+Terminal uses the native config editor over an appearance-only view of `zz/config`.
+`appearance_editor_view` hides recognized app, mux, and host keys;
+`save_appearance_editor` merges terminal edits while preserving those entries.
+Multiplexer mounts the native rope-backed
 `CodeEditor` for `zz/mux.conf` with line numbers disabled, 12px monospace text, tmux-grammar
 highlighting (`tree-sitter-tmux`, upstream's own `highlights.scm`), and a deliberately square 2px-
 inset frame . a file surface, not a control. Save uses the
@@ -614,7 +616,7 @@ Additional shortcuts stay in the text editor. Choosing a pane type or pressing E
 field saves an ordinary `bind-key` override through the same atomic writer and reload request.
 Renaming also unbinds the previous key; an occupied destination key is rejected.
 
-`crates/zz/src/config/mux_bindings.rs` preserves unrelated source text and replaces matching overrides
+`zz_mux::settings_bindings`, shared by GPUI and GTK, preserves unrelated source text and replaces matching overrides
 in the trailing generated split-binding group when users change selections again. Simple direction
 flags and `-c "#{pane_current_path}"` map to the dropdown only for the matching direction; opposite-direction bindings, other arguments, or command chains show
 **Custom** and remain editable in the text editor. Shortcut changes retain command arguments,
@@ -653,7 +655,7 @@ shows 0–100%, steps by five percentage points, and stores a 0–1 factor. Vali
 typed; partial or invalid values stay in the field until Enter or blur restores the effective value.
 Reset removes the override and restores 100% through the normal config watcher.
 
-Structured control callbacks, including Terminal, only write `zz/config`; they never mutate the
+Structured controls and the Terminal editor only write `zz/config`; they never mutate the
 GPUI config global directly. Multiplexer writes `zz/mux.conf` and requests a daemon reload. The
 existing 500 ms watcher remains the single `zz/config` apply path, updates effective values and
 provenance, and refreshes the open Settings route.

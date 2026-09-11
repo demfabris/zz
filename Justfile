@@ -211,6 +211,9 @@ release target *flags:
 run platform *args:
     @ZZ_ZIG_VERSION="{{ zig_version }}" scripts/run.sh {{ platform }} {{ args }}
 
+gtk *args:
+    @scripts/run-gtk.sh {{ args }}
+
 # Rebuild and relaunch the development app whenever workspace sources change.
 watch platform *args:
     @scripts/run-watch.sh {{ platform }} {{ args }}

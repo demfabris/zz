@@ -238,6 +238,8 @@ mod tests {
             position_style: style.to_owned(),
             selection_style: String::new(),
             vi_keys: false,
+            match_style: String::new(),
+            current_match_style: String::new(),
         }
     }
 

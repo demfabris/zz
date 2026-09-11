@@ -620,7 +620,8 @@ v101 appends `message_style`, `message_command_style` and `modes: Vec<ModePresen
 `MAX_MODE_PRESENTATIONS` (2) with a third rejected during deserialization. v101 also appends
 `pane_borders: Vec<PaneBorderPresentation>` after `modes`; each style must be empty or parse as a
 style, and the list is capped at `MAX_PANE_BORDER_PRESENTATIONS` (256) with one more rejected during
-deserialization.
+deserialization. v101 also appends `match_style` and `current_match_style` to `ModePresentation`
+after `vi_keys`; each must be empty or parse as a style.
 
 # Versioning & compatibility
 
@@ -641,7 +642,10 @@ deserialization.
   current window: `window_pane_get_border_style` resolved for this client, the expanded
   `pane-active-border-style` for its active pane and `pane-border-style` for every other. The raw
   TUI paints the dividers and the pane status rows in them over the default ground; GUI clients
-  ignore the field. Pure appends; the cycle's gate folds every lane's 101 appends into one entry.
+  ignore the field. v101 also appends `match_style` and `current_match_style` to
+  `ModePresentation` after `vi_keys`: the expanded `copy-mode-match-style` and
+  `copy-mode-current-match-style`, each empty or parsing as a style. The raw TUI paints search
+  matches in them and GUI clients ignore both. Pure appends; the cycle's gate folds every lane's 101 appends into one entry.
 - v100 carries the resolved theme palette. `StatusLine` gains `theme: ThemeColours` appended after
   `customized`, where `ThemeColours` is a new `crates/zz-protocol/src/style.rs` type wrapping
   `[TmuxColour; COLOUR_THEME_COUNT]` (10) in the pin's own `colour_theme_table` order:

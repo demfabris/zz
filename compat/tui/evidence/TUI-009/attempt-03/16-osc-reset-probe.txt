@@ -1,0 +1,6 @@
+PROBE (a temporary unit test, removed before commit), cargo test -p zz-terminal --lib probe_osc_reset -- --nocapture, 2026-09-11 about 15:27, on the working tree of 5db1eba9 without the apply_terminal_appearance hunk: libghostty's effective foreground (fg) against its default (ignoring any OSC override). After OSC 110 the effective colour is the default of that moment and a later set_default_fg_color does not move it.
+test session::tests::probe_osc_reset_then_appearance ... PROBE theme: fg=Some(RgbColor { r: 216, g: 222, b: 233 }) default=Some(RgbColor { r: 216, g: 222, b: 233 })
+PROBE styled-no-osc: fg=Some(RgbColor { r: 0, g: 205, b: 0 }) default=Some(RgbColor { r: 0, g: 205, b: 0 })
+PROBE osc10: fg=Some(RgbColor { r: 255, g: 0, b: 0 }) default=Some(RgbColor { r: 216, g: 222, b: 233 })
+PROBE osc110: fg=Some(RgbColor { r: 216, g: 222, b: 233 }) default=Some(RgbColor { r: 216, g: 222, b: 233 })
+PROBE styled-after-110: fg=Some(RgbColor { r: 216, g: 222, b: 233 }) default=Some(RgbColor { r: 0, g: 205, b: 0 })

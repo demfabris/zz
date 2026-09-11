@@ -1,0 +1,280 @@
+$ PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=... ZZ_COMPAT_CORPUS=... compat/tui-caps.sh target/debug/zz <pin>   (run 1 at 95d3644e, 2026-09-11T15:53:39-03:00)
+outer-terminal capability differential (pin tmux)
+ok    legacy alternate_on: both 1
+ok    legacy bracket_paste_flag: both 1
+ok    legacy cursor_flag: both 1
+ok    legacy cursor_shape: both default
+note  legacy wrap_flag: tmux 1, zz 0
+note  legacy mouse_all_flag: tmux 0, zz 1
+ok    legacy mouse_any_flag: both 1
+note  legacy mouse_button_flag: tmux 1, zz 0
+ok    legacy mouse_sgr_flag: both 1
+ok    legacy mouse_standard_flag: both 0
+ok    legacy mouse_utf8_flag: both 0
+ok    legacy synchronized_output_flag: both 0
+ok    legacy origin_flag: both 0
+note  legacy keypad_flag: tmux 1, zz 0
+note  legacy keypad_cursor_flag: tmux 1, zz 0
+ok    legacy pane_key_mode: both VT10x
+ok    restore/detached alternate_on: both 0
+ok    restore/detached bracket_paste_flag: both 0
+ok    restore/detached cursor_flag: both 1
+ok    restore/detached cursor_shape: both default
+ok    restore/detached wrap_flag: both 1
+ok    restore/detached mouse_all_flag: both 0
+ok    restore/detached mouse_any_flag: both 0
+ok    restore/detached mouse_button_flag: both 0
+ok    restore/detached mouse_sgr_flag: both 0
+ok    restore/detached mouse_standard_flag: both 0
+ok    restore/detached mouse_utf8_flag: both 0
+ok    restore/detached synchronized_output_flag: both 0
+ok    restore/detached origin_flag: both 0
+ok    restore/detached keypad_flag: both 0
+ok    restore/detached keypad_cursor_flag: both 0
+ok    restore/detached pane_key_mode: both VT10x
+ok    keys/off @extkey: both 
+ok    extended alternate_on: both 1
+ok    extended bracket_paste_flag: both 1
+ok    extended cursor_flag: both 1
+ok    extended cursor_shape: both default
+note  extended wrap_flag: tmux 1, zz 0
+note  extended mouse_all_flag: tmux 0, zz 1
+ok    extended mouse_any_flag: both 1
+note  extended mouse_button_flag: tmux 1, zz 0
+ok    extended mouse_sgr_flag: both 1
+ok    extended mouse_standard_flag: both 0
+ok    extended mouse_utf8_flag: both 0
+ok    extended synchronized_output_flag: both 0
+ok    extended origin_flag: both 0
+note  extended keypad_flag: tmux 1, zz 0
+note  extended keypad_cursor_flag: tmux 1, zz 0
+ok    extended pane_key_mode: both Ext 2
+ok    keys/on @extkey: both C-Enter
+ok    extended-always alternate_on: both 1
+ok    extended-always bracket_paste_flag: both 1
+ok    extended-always cursor_flag: both 1
+ok    extended-always cursor_shape: both default
+note  extended-always wrap_flag: tmux 1, zz 0
+note  extended-always mouse_all_flag: tmux 0, zz 1
+ok    extended-always mouse_any_flag: both 1
+note  extended-always mouse_button_flag: tmux 1, zz 0
+ok    extended-always mouse_sgr_flag: both 1
+ok    extended-always mouse_standard_flag: both 0
+ok    extended-always mouse_utf8_flag: both 0
+ok    extended-always synchronized_output_flag: both 0
+ok    extended-always origin_flag: both 0
+note  extended-always keypad_flag: tmux 1, zz 0
+note  extended-always keypad_cursor_flag: tmux 1, zz 0
+ok    extended-always pane_key_mode: both Ext 2
+ok    keys/always @extkey: both C-Enter
+ok    facts/bare client_termname: both xterm
+ok    facts/bare client_utf8: both 0
+ok    facts/bare client_flags: both attached,focused
+note  facts/bare client_colours: tmux 16777216, zz 16
+note  facts/bare client_termfeatures: tmux 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
+note  facts/bare client_theme: tmux , zz dark
+ok    facts/-2 client_termname: both xterm
+ok    facts/-2 client_utf8: both 0
+ok    facts/-2 client_flags: both attached,focused
+note  facts/-2 client_colours: tmux 16777216, zz 256
+note  facts/-2 client_termfeatures: tmux 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle, zz 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
+note  facts/-2 client_theme: tmux , zz dark
+ok    facts/-2 delta-client_flags: both none
+ok    facts/-2 delta-client_termfeatures: both none
+ok    facts/-2 flag-features: both 256:yes
+ok    facts/-u client_termname: both xterm
+ok    facts/-u client_utf8: both 1
+ok    facts/-u client_flags: both attached,focused,UTF-8
+note  facts/-u client_colours: tmux 16777216, zz 16
+note  facts/-u client_termfeatures: tmux 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
+note  facts/-u client_theme: tmux , zz dark
+ok    facts/-u delta-client_flags: both UTF-8
+ok    facts/-u delta-client_termfeatures: both none
+ok    facts/-T client_termname: both xterm
+ok    facts/-T client_utf8: both 0
+ok    facts/-T client_flags: both attached,focused
+note  facts/-T client_colours: tmux 16777216, zz 16
+note  facts/-T client_termfeatures: tmux 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,sixel,strikethrough,title,usstyle, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,sixel,strikethrough,sync,title,usstyle
+note  facts/-T client_theme: tmux , zz dark
+ok    facts/-T delta-client_flags: both none
+ok    facts/-T delta-client_termfeatures: both sixel
+ok    facts/-T flag-features: both sixel:yes
+ok    facts/utf8-locale client_termname: both xterm
+ok    facts/utf8-locale client_utf8: both 1
+ok    facts/utf8-locale client_flags: both attached,focused,UTF-8
+note  facts/utf8-locale client_colours: tmux 16777216, zz 16
+note  facts/utf8-locale client_termfeatures: tmux 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
+note  facts/utf8-locale client_theme: tmux , zz dark
+ok    facts/utf8-locale delta-client_flags: both UTF-8
+ok    facts/utf8-locale delta-client_termfeatures: both none
+ok    widths/cursor: both 20,0
+ok    widths/line: both W M-dM-8M-^VM-gM-^UM-^L | eM-LM-^A | M-pM-^_M-^XM-^@ |$
+ok    widths/non-utf8/cursor: both 20,0
+note  widths/non-utf8/line: tmux W ____ | _ | __ |$, zz W M-dM-8M-^VM-gM-^UM-^L | eM-LM-^A | M-pM-^_M-^XM-^@ |$
+ok    widths/-u/cursor: both 20,0
+ok    widths/-u/line: both W M-dM-8M-^VM-gM-^UM-^L | eM-LM-^A | M-pM-^_M-^XM-^@ |$
+ok    colours/stock glyphs: both CLR R I X B END
+ok    colours/stock cell R: both ^[[31mR
+ok    colours/stock cell I: both ^[[38;5;42mI
+ok    colours/stock cell X: both ^[[38;2;10;20;30mX
+ok    colours/stock cell B: both ^[[41mB
+ok    colours/stock line: both CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+ok    colours/palette glyphs: both CLR R I X B END
+ok    colours/palette cell R: both ^[[38;2;0;255;0mR
+ok    colours/palette cell I: both ^[[38;5;42mI
+ok    colours/palette cell X: both ^[[38;2;10;20;30mX
+ok    colours/palette cell B: both ^[[48;2;0;255;0mB
+ok    colours/palette line: both CLR ^[[38;2;0;255;0mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[48;2;0;255;0mB^[[49m END
+ok    colours/indexed glyphs: both CLR R I X B END
+ok    colours/indexed cell R: both ^[[38;2;0;255;0mR
+ok    colours/indexed cell I: both ^[[38;2;255;0;255mI
+ok    colours/indexed cell X: both ^[[38;2;10;20;30mX
+ok    colours/indexed cell B: both ^[[48;2;0;255;0mB
+ok    colours/indexed line: both CLR ^[[38;2;0;255;0mR^[[39m ^[[38;2;255;0;255mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[48;2;0;255;0mB^[[49m END
+ok    colours/reset glyphs: both CLR R I X B END
+ok    colours/reset cell R: both ^[[31mR
+ok    colours/reset cell I: both ^[[38;5;42mI
+ok    colours/reset cell X: both ^[[38;2;10;20;30mX
+ok    colours/reset cell B: both ^[[41mB
+ok    colours/reset line: both CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+ok    colours/pane glyphs: both CLR R I X B END
+ok    colours/pane cell R: both ^[[38;2;18;52;86mR
+ok    colours/pane cell I: both ^[[38;5;200mI
+ok    colours/pane cell X: both ^[[38;2;10;20;30mX
+ok    colours/pane cell B: both ^[[48;2;18;52;86mB
+ok    colours/pane line: both CLR ^[[38;2;18;52;86mR^[[39m ^[[38;5;200mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[48;2;18;52;86mB^[[49m END
+ok    colours/pane-osc glyphs: both CLR R I X B END
+ok    colours/pane-osc cell R: both ^[[38;2;0;255;0mR
+ok    colours/pane-osc cell I: both ^[[38;5;200mI
+ok    colours/pane-osc cell X: both ^[[38;2;10;20;30mX
+ok    colours/pane-osc cell B: both ^[[48;2;0;255;0mB
+ok    colours/pane-osc line: both CLR ^[[38;2;0;255;0mR^[[39m ^[[38;5;200mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[48;2;0;255;0mB^[[49m END
+ok    colours/pane-osc-reset glyphs: both CLR R I X B END
+ok    colours/pane-osc-reset cell R: both ^[[38;2;18;52;86mR
+ok    colours/pane-osc-reset cell I: both ^[[38;5;200mI
+ok    colours/pane-osc-reset cell X: both ^[[38;2;10;20;30mX
+ok    colours/pane-osc-reset cell B: both ^[[48;2;18;52;86mB
+ok    colours/pane-osc-reset line: both CLR ^[[38;2;18;52;86mR^[[39m ^[[38;5;200mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[48;2;18;52;86mB^[[49m END
+ok    colours/pane-untouched glyphs: both CLR R I X B END
+ok    colours/pane-untouched cell R: both ^[[31mR
+ok    colours/pane-untouched cell I: both ^[[38;5;42mI
+ok    colours/pane-untouched cell X: both ^[[38;2;10;20;30mX
+ok    colours/pane-untouched cell B: both ^[[41mB
+ok    colours/pane-untouched line: both CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+ok    colours/pane-unset glyphs: both CLR R I X B END
+ok    colours/pane-unset cell R: both ^[[31mR
+ok    colours/pane-unset cell I: both ^[[38;5;42mI
+ok    colours/pane-unset cell X: both ^[[38;2;10;20;30mX
+ok    colours/pane-unset cell B: both ^[[41mB
+ok    colours/pane-unset line: both CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+ok    colours/osc-10 glyphs: both CLR R I X B END
+ok    colours/osc-10 cell R: both ^[[31mR
+ok    colours/osc-10 cell I: both ^[[38;5;42mI
+ok    colours/osc-10 cell X: both ^[[38;2;10;20;30mX
+ok    colours/osc-10 cell B: both ^[[41mB
+ok    colours/osc-10 line: both ^[[38;2;255;0;0mCLR ^[[31mR^[[38;2;255;0;0m ^[[38;5;42mI^[[38;2;255;0;0m ^[[38;2;10;20;30mX^[[38;2;255;0;0m ^[[41mB^[[49m END^[[39m
+ok    colours/osc-110 glyphs: both CLR R I X B END
+ok    colours/osc-110 cell R: both ^[[31mR
+ok    colours/osc-110 cell I: both ^[[38;5;42mI
+ok    colours/osc-110 cell X: both ^[[38;2;10;20;30mX
+ok    colours/osc-110 cell B: both ^[[41mB
+ok    colours/osc-110 line: both CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+ok    colours/osc-11 glyphs: both CLR R I X B END
+ok    colours/osc-11 cell R: both ^[[31mR
+ok    colours/osc-11 cell I: both ^[[38;5;42mI
+ok    colours/osc-11 cell X: both ^[[38;2;10;20;30mX
+ok    colours/osc-11 cell B: both ^[[41mB
+ok    colours/osc-11 line: both ^[[48;2;0;0;128mCLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[48;2;0;0;128m END
+ok    colours/osc-111 glyphs: both CLR R I X B END
+ok    colours/osc-111 cell R: both ^[[31mR
+ok    colours/osc-111 cell I: both ^[[38;5;42mI
+ok    colours/osc-111 cell X: both ^[[38;2;10;20;30mX
+ok    colours/osc-111 cell B: both ^[[41mB
+ok    colours/osc-111 line: both CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+ok    colours/window-style glyphs: both CLR R I X B END
+ok    colours/window-style cell R: both ^[[31mR
+ok    colours/window-style cell I: both ^[[38;5;42mI
+ok    colours/window-style cell X: both ^[[38;2;10;20;30mX
+ok    colours/window-style cell B: both ^[[41mB
+ok    colours/window-style line: both ^[[32m^[[44mCLR ^[[31mR^[[32m ^[[38;5;42mI^[[32m ^[[38;2;10;20;30mX^[[32m ^[[41mB^[[44m END^[[39m
+ok    colours/window-style-rgb glyphs: both CLR R I X B END
+ok    colours/window-style-rgb cell R: both ^[[31mR
+ok    colours/window-style-rgb cell I: both ^[[38;5;42mI
+ok    colours/window-style-rgb cell X: both ^[[38;2;10;20;30mX
+ok    colours/window-style-rgb cell B: both ^[[41mB
+ok    colours/window-style-rgb line: both ^[[38;2;16;32;48m^[[48;5;200mCLR ^[[31mR^[[38;2;16;32;48m ^[[38;5;42mI^[[38;2;16;32;48m ^[[38;2;10;20;30mX^[[38;2;16;32;48m ^[[41mB^[[48;5;200m END^[[39m
+ok    colours/window-style-unset glyphs: both CLR R I X B END
+ok    colours/window-style-unset cell R: both ^[[31mR
+ok    colours/window-style-unset cell I: both ^[[38;5;42mI
+ok    colours/window-style-unset cell X: both ^[[38;2;10;20;30mX
+ok    colours/window-style-unset cell B: both ^[[41mB
+ok    colours/window-style-unset line: both CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+ok    silent/bare client_termname: both xterm
+ok    silent/bare client_utf8: both 0
+ok    silent/bare client_flags: both attached,focused
+note  silent/bare client_colours: tmux 8, zz 16
+note  silent/bare client_termfeatures: tmux bpaste,ccolour,clipboard,cstyle,focus,title, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
+note  silent/bare client_theme: tmux , zz dark
+ok    silent/-T client_termname: both xterm
+ok    silent/-T client_utf8: both 0
+ok    silent/-T client_flags: both attached,focused
+note  silent/-T client_colours: both 16777216
+note  silent/-T client_termfeatures: tmux bpaste,ccolour,clipboard,cstyle,focus,RGB,title, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,RGB,strikethrough,sync,title,usstyle
+note  silent/-T client_theme: tmux , zz dark
+ok    silent/-T delta-client_flags: both none
+ok    silent/-T delta-client_termfeatures: both RGB
+ok    silent/-T flag-features: both RGB:yes
+ok    silent/-2 client_termname: both xterm
+ok    silent/-2 client_utf8: both 0
+ok    silent/-2 client_flags: both attached,focused
+note  silent/-2 client_colours: both 256
+note  silent/-2 client_termfeatures: tmux 256,bpaste,ccolour,clipboard,cstyle,focus,title, zz 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
+note  silent/-2 client_theme: tmux , zz dark
+ok    silent/-2 delta-client_flags: both none
+ok    silent/-2 delta-client_termfeatures: both 256
+ok    silent/-2 flag-features: both 256:yes
+ok    silent/extended alternate_on: both 1
+ok    silent/extended bracket_paste_flag: both 1
+ok    silent/extended cursor_flag: both 1
+ok    silent/extended cursor_shape: both default
+note  silent/extended wrap_flag: tmux 1, zz 0
+note  silent/extended mouse_all_flag: tmux 0, zz 1
+ok    silent/extended mouse_any_flag: both 1
+note  silent/extended mouse_button_flag: tmux 1, zz 0
+ok    silent/extended mouse_sgr_flag: both 1
+ok    silent/extended mouse_standard_flag: both 0
+ok    silent/extended mouse_utf8_flag: both 0
+ok    silent/extended synchronized_output_flag: both 0
+ok    silent/extended origin_flag: both 0
+note  silent/extended keypad_flag: tmux 1, zz 0
+note  silent/extended keypad_cursor_flag: tmux 1, zz 0
+note  silent/extended pane_key_mode: tmux VT10x, zz Ext 2
+ok    colours/silent glyphs: both CLR R I X B END
+note  colours/silent cell R: both ^[[31mR
+note  colours/silent cell I: tmux ^[[32mI, zz ^[[38;5;42mI
+note  colours/silent cell X: tmux ^[[30mX, zz ^[[38;2;10;20;30mX
+note  colours/silent cell B: both ^[[41mB
+note  colours/silent line: tmux CLR ^[[31mR^[[39m ^[[32mI^[[39m ^[[30mX^[[39m ^[[41mB^[[49m END, zz CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+ok    colours/silent-2 glyphs: both CLR R I X B END
+note  colours/silent-2 cell R: both ^[[31mR
+note  colours/silent-2 cell I: both ^[[38;5;42mI
+note  colours/silent-2 cell X: tmux ^[[38;5;233mX, zz ^[[38;2;10;20;30mX
+note  colours/silent-2 cell B: both ^[[41mB
+note  colours/silent-2 line: tmux CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;5;233mX^[[39m ^[[41mB^[[49m END, zz CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+ok    cli/-2 -V: both exit=0
+tmux VERSION
+ok    cli/-u -V: both exit=0
+tmux VERSION
+ok    cli/-T sixel -V: both exit=0
+tmux VERSION
+ok    cli/-T: both exit=1
+PROG: option requires an argument -- T
+usage: PROG [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name]
+            [-S socket-path] [-T features] [command [flags]]
+ok    cli/-W -V: both exit=1
+PROG: unknown option -- W
+usage: PROG [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name]
+            [-S socket-path] [-T features] [command [flags]]
+210 asserted rows, 56 recorded rows
+all 210 asserted rows identical
+exit=0

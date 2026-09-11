@@ -1,0 +1,19 @@
+BEFORE THE WIDTHS MARKER FIX: two real runs of compat/tui-caps.sh that hit the shared W1 settle marker. Run A at the working tree of 9c050ebf plus the pane-colours edits (21866fbe before it was committed), 15:03; run B at 5db1eba9's working tree, 15:32. Only their widths rows are kept.
+--- run A
+ok    widths/cursor: both 20,0
+ok    widths/line: both W1 M-dM-8M-^VM-gM-^UM-^L | eM-LM-^A | M-pM-^_M-^XM-^@ |$
+DIFF  widths/non-utf8/cursor: tmux 20,0, zz 0,2
+note  widths/non-utf8/line: tmux W1 ____ | _ | __ |$, zz W1 M-dM-8M-^VM-gM-^UM-^L | eM-LM-^A | M-pM-^_M-^XM-^@ |$ clear; printf 'W%s \344\270\226\347\225\214 | e\314\201 | \3
+ok    widths/-u/cursor: both 20,0
+ok    widths/-u/line: both W1 M-dM-8M-^VM-gM-^UM-^L | eM-LM-^A | M-pM-^_M-^XM-^@ |$
+141 asserted rows, 31 recorded rows
+1 of 141 asserted rows differ
+--- run B
+ok    widths/cursor: both 20,0
+ok    widths/line: both W1 M-dM-8M-^VM-gM-^UM-^L | eM-LM-^A | M-pM-^_M-^XM-^@ |$
+DIFF  widths/non-utf8/cursor: tmux 20,0, zz 0,2
+note  widths/non-utf8/line: tmux W1 ____ | _ | __ |$, zz W1 M-dM-8M-^VM-gM-^UM-^L | eM-LM-^A | M-pM-^_M-^XM-^@ |$ clear; printf 'W%s \344\270\226\347\225\214 | e\314\201 | \3
+ok    widths/-u/cursor: both 20,0
+ok    widths/-u/line: both W1 M-dM-8M-^VM-gM-^UM-^L | eM-LM-^A | M-pM-^_M-^XM-^@ |$
+210 asserted rows, 56 recorded rows
+1 of 210 asserted rows differ

@@ -1,0 +1,54 @@
+$ PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=... ZZ_COMPAT_CORPUS=... compat/attached-client.sh target/debug/zz <pin>   (at 95d3644e, 2026-09-11T16:07:52-03:00): known to stop at the copy-mode badge wait at BASE, which is the modes lane's
+error: zz screen did not visibly become copy-mode within 10 seconds
+zz screen:
+[demfabris@alienware client [literal]*? cwd]$ printf 'ATTACHED_DRAW_%s\n' R[0/0]
+ATTACHED_DRAW_READY
+[demfabris@alienware client [literal]*? cwd]$ printf ATTACHED_ROOT_OK
+ATTACHED_ROOT_OK
+[demfabris@alienware client [literal]*? cwd]$ printf ATTACHED_PREFIX_OK
+ATTACHED_PREFIX_OK
+[demfabris@alienware client [literal]*? cwd]$ printf ATTACHED_PREFIX2_OK
+ATTACHED_PREFIX2_OK
+[demfabris@alienware client [literal]*? cwd]$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[attached]0:main*                                         "bash" 16:07 11-Sep-26
+tmux screen:
+[demfabris@alienware client [literal]*? cwd]$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[attached]0:main*                        "demfabris@alienware:/" 16:07 11-set-26
+zz daemon stderr:
+exit=1

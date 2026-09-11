@@ -1,0 +1,73 @@
+Cargo tests and clippy for every touched crate, all at 95d3644e with a clean worktree, 2026-09-11 16:00 to 16:10, each through the box's slot-and-cap wrapper (systemd-run --user --scope -p MemoryMax=5G -p MemorySwapMax=2G flock /tmp/zz-cargo-slot-N.lock).
+
+$ cargo test -p zz-tui --jobs 4 -- --test-threads=3
+       Running unittests src/lib.rs (target/debug/deps/zz_tui-577ff6b7762e30e0)
+  test result: ok. 186 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+       Running unittests src/main.rs (target/debug/deps/zz_tui-73d8f9bb5bd13790)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo test -p zz-terminal --jobs 4 -- --test-threads=3
+       Running unittests src/terminal_core.rs (target/debug/deps/zz_terminal-9696a009549f740f)
+  test result: ok. 259 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.76s
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo test -p zz-daemon --jobs 4 -- --test-threads=3
+       Running unittests src/lib.rs (target/debug/deps/zz_daemon-a9db643d43e262df)
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 865 filtered out; finished in 0.05s
+  test result: ok. 866 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 124.67s
+       Running tests/agent_soak.rs (target/debug/deps/agent_soak-37d80b9bd4a949ec)
+  test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.16s
+       Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-b4328572046a72f5)
+  test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s
+       Running tests/display_menu_resize_lifecycle.rs (target/debug/deps/display_menu_resize_lifecycle-2e61eb0cf6d5c7ca)
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s
+       Running tests/display_menu_shortcut_grammar.rs (target/debug/deps/display_menu_shortcut_grammar-8c648bdfb1fcb543)
+  test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s
+       Running tests/display_popup_resize_lifecycle.rs (target/debug/deps/display_popup_resize_lifecycle-32b06014ee41315c)
+  test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.11s
+       Running tests/format_client_loop_context.rs (target/debug/deps/format_client_loop_context-977536147af98c8e)
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.73s
+       Running tests/format_environment_loop_context.rs (target/debug/deps/format_environment_loop_context-bc667b6d7cc7a5f7)
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+       Running tests/format_modifier_client_loop.rs (target/debug/deps/format_modifier_client_loop-21dc2a4d5159fc2e)
+  test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.55s
+       Running tests/format_modifier_environment_loop.rs (target/debug/deps/format_modifier_environment_loop-397bdf63ef80bf7a)
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.84s
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo test -p zz --jobs 4 -- --test-threads=3
+       Running unittests src/lib.rs (target/debug/deps/zz-2f801f40cc944225)
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 633 filtered out; finished in 0.00s
+  test result: ok. 634 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.70s
+       Running unittests src/main.rs (target/debug/deps/zz-05ba1019b191b3f5)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+       Running unittests src/bin/zz_browser_fixture.rs (target/debug/deps/zz_browser_fixture-ffc130852d2b2c4e)
+  test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+       Running unittests src/bin/zz_cli.rs (target/debug/deps/zz_cli-17ee0ff3aeb6849e)
+  test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+       Running unittests src/bin/zz_external_texture_fixture.rs (target/debug/deps/zz_external_texture_fixture-0e653368b06ce845)
+  test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+       Running unittests src/bin/zz_helper.rs (target/debug/deps/zz_helper-948b69e59dadcee9)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+       Running tests/buffer_client_file_load.rs (target/debug/deps/buffer_client_file_load-4a485a01e8f800f7)
+  test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.04s
+       Running tests/buffer_client_file_save.rs (target/debug/deps/buffer_client_file_save-2f4db994d78ed540)
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+       Running tests/cli_binary.rs (target/debug/deps/cli_binary-423bfdac64a09eda)
+  test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 88.25s
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo clippy -p zz-terminal --jobs 4 --all-targets --all-features -- -D warnings
+      Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s
+  exit=0
+
+$ cargo clippy -p zz-daemon --jobs 4 --all-targets --all-features -- -D warnings
+      Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.26s
+  exit=0
+
+$ cargo clippy -p zz-tui --jobs 4 --all-targets --all-features -- -D warnings
+      Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+  exit=0
+
+Every cargo test above exited 0. rustfmt: cargo fmt -p zz-terminal -p zz-daemon -p zz-tui left the touched files formatted; it also reformatted crates/zz-tui/src/input.rs, which this branch does not change, and that file was restored untouched.

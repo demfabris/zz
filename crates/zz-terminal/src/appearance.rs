@@ -16,7 +16,7 @@ use serde::{
     ser::SerializeTuple,
 };
 
-use crate::{Color, CursorStyle};
+use crate::{Color, ColourClass, CursorStyle};
 
 const MAX_CONFIG_DEPTH: usize = 16;
 const MAX_CONFIG_BYTES: usize = 1024 * 1024;
@@ -485,6 +485,8 @@ pub struct TerminalAppearance {
     pub cursor_blink_interval_ms: u32,
     pub rounded_selection: bool,
     pub background_opacity: f32,
+    #[serde(skip)]
+    pub palette_classes: Vec<(u8, ColourClass)>,
 }
 
 struct BoundedFontFamily(String);
@@ -657,6 +659,7 @@ impl fmt::Debug for TerminalAppearance {
             .field("cursor_blink_interval_ms", &self.cursor_blink_interval_ms)
             .field("rounded_selection", &self.rounded_selection)
             .field("background_opacity", &self.background_opacity)
+            .field("palette_classes", &self.palette_classes)
             .finish()
     }
 }
@@ -699,6 +702,7 @@ impl Default for TerminalAppearance {
             cursor_blink_interval_ms: 500,
             rounded_selection: true,
             background_opacity: 1.0,
+            palette_classes: Vec::new(),
         }
     }
 }
@@ -798,6 +802,7 @@ impl TerminalAppearance {
         self.cursor_blink_interval_ms.hash(&mut hasher);
         self.rounded_selection.hash(&mut hasher);
         self.background_opacity.to_bits().hash(&mut hasher);
+        self.palette_classes.hash(&mut hasher);
         hasher.finish()
     }
 }

@@ -1,0 +1,23 @@
+$ PATH=/opt/homebrew/bin:$PATH ZZ_BIN=<worktree>/target/debug/zz TMUX_BIN=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_TMUX=... ZZ_COMPAT_CORPUS=... compat/attached-client.sh
+# revision 5d9bf198 plus the wait_for_visible_mode / wait_for_ordered_current_lines change, 2026-09-11
+command-output tmux: stock-search-open
+command-output tmux: stock-search-Escape
+command-output tmux: stock-search-open
+command-output tmux: stock-search-Enter
+command-output zz: stock-search-open
+command-output zz: stock-search-Escape
+command-output zz: stock-search-open
+command-output zz: stock-search-Enter
+command-output navigation: zz
+command-output zz: native copy-mode-search-prompt editor; stock -P lifecycle measured separately
+command-output zz: idle-escape
+command-output zz: selection-escape
+command-output zz: search-escape
+command-output zz: rebound-q
+command-output navigation: tmux
+command-output tmux: idle-escape
+command-output tmux: selection-escape
+command-output tmux: search-escape
+command-output tmux: rebound-q
+attached-client compatibility: PASS
+exit 0

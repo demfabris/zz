@@ -766,13 +766,12 @@ assert_output_mode_stays() {
 wait_for_visible_mode() {
   local side="$1"
   local expected="$2"
-  local pattern
+  local pattern='\[[0-9]+/[0-9]+\]'
   local attempt
   local screen
 
   case "$side" in
-  zz) pattern='(^|[[:space:]])COPY([[:space:]][0-9]+/[0-9]+)?([[:space:]]|$)' ;;
-  tmux) pattern='\[[0-9]+/[0-9]+\]' ;;
+  zz | tmux) ;;
   *) return 2 ;;
   esac
 
@@ -891,7 +890,7 @@ wait_for_ordered_current_lines() {
           line = $0
           sub(/\r$/, "", line)
           sub(/^[[:space:]]+/, "", line)
-          if (side == "tmux") sub(/[[:space:]]+\[[0-9]+\/[0-9]+\]$/, "", line)
+          sub(/[[:space:]]+\[[0-9]+\/[0-9]+\]$/, "", line)
           sub(/[[:space:]]+$/, "", line)
           if (line == marker) {
             count++

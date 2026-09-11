@@ -1,0 +1,97 @@
+zz-daemon daemon::tests::client_focus_closes_display_panes_and_preserves_chooser_modes, exact-solo, 2026-09-11, alienware
+command per run: target/debug/deps/zz_daemon-<hash> --exact daemon::tests::client_focus_closes_display_panes_and_preserves_chooser_modes
+(test binary built with: systemd-run --user --scope -q -p MemoryMax=5G -p MemorySwapMax=2G flock -w 540 /tmp/zz-cargo-slot-N.lock cargo test -p zz-daemon --lib --jobs 4 --no-run)
+
+== 3319ceba-origin-main: 20 of 20 passed
+flm-1: test result: ok. 1 passed; 0 failed
+flm-2: test result: ok. 1 passed; 0 failed
+flm-3: test result: ok. 1 passed; 0 failed
+flm-4: test result: ok. 1 passed; 0 failed
+flm-5: test result: ok. 1 passed; 0 failed
+flm-6: test result: ok. 1 passed; 0 failed
+flm-7: test result: ok. 1 passed; 0 failed
+flm-8: test result: ok. 1 passed; 0 failed
+flm-9: test result: ok. 1 passed; 0 failed
+flm-10: test result: ok. 1 passed; 0 failed
+flm-11: test result: ok. 1 passed; 0 failed
+flm-12: test result: ok. 1 passed; 0 failed
+flm-13: test result: ok. 1 passed; 0 failed
+flm-14: test result: ok. 1 passed; 0 failed
+flm-15: test result: ok. 1 passed; 0 failed
+flm-16: test result: ok. 1 passed; 0 failed
+flm-17: test result: ok. 1 passed; 0 failed
+flm-18: test result: ok. 1 passed; 0 failed
+flm-19: test result: ok. 1 passed; 0 failed
+flm-20: test result: ok. 1 passed; 0 failed
+
+== 5d9bf198-BASE: 15 of 20 passed
+flk-1: test result: ok. 1 passed; 0 failed
+flk-2: test result: ok. 1 passed; 0 failed
+flk-3: test result: FAILED. 0 passed; 1 failed
+flk-4: test result: ok. 1 passed; 0 failed
+flk-5: test result: ok. 1 passed; 0 failed
+flk-6: test result: FAILED. 0 passed; 1 failed
+flk-7: test result: ok. 1 passed; 0 failed
+flk-8: test result: ok. 1 passed; 0 failed
+flk-9: test result: ok. 1 passed; 0 failed
+flk-10: test result: ok. 1 passed; 0 failed
+flk-11: test result: ok. 1 passed; 0 failed
+flk-12: test result: FAILED. 0 passed; 1 failed
+flk-13: test result: ok. 1 passed; 0 failed
+flk-14: test result: ok. 1 passed; 0 failed
+flk-15: test result: FAILED. 0 passed; 1 failed
+flk-16: test result: ok. 1 passed; 0 failed
+flk-17: test result: ok. 1 passed; 0 failed
+flk-18: test result: ok. 1 passed; 0 failed
+flk-19: test result: ok. 1 passed; 0 failed
+flk-20: test result: FAILED. 0 passed; 1 failed
+
+== tip-with-the-title-sync-wait: 40 of 40 passed
+w-1: test result: ok. 1 passed; 0 failed
+w-2: test result: ok. 1 passed; 0 failed
+w-3: test result: ok. 1 passed; 0 failed
+w-4: test result: ok. 1 passed; 0 failed
+w-5: test result: ok. 1 passed; 0 failed
+w-6: test result: ok. 1 passed; 0 failed
+w-7: test result: ok. 1 passed; 0 failed
+w-8: test result: ok. 1 passed; 0 failed
+w-9: test result: ok. 1 passed; 0 failed
+w-10: test result: ok. 1 passed; 0 failed
+w-11: test result: ok. 1 passed; 0 failed
+w-12: test result: ok. 1 passed; 0 failed
+w-13: test result: ok. 1 passed; 0 failed
+w-14: test result: ok. 1 passed; 0 failed
+w-15: test result: ok. 1 passed; 0 failed
+w-16: test result: ok. 1 passed; 0 failed
+w-17: test result: ok. 1 passed; 0 failed
+w-18: test result: ok. 1 passed; 0 failed
+w-19: test result: ok. 1 passed; 0 failed
+w-20: test result: ok. 1 passed; 0 failed
+w-21: test result: ok. 1 passed; 0 failed
+w-22: test result: ok. 1 passed; 0 failed
+w-23: test result: ok. 1 passed; 0 failed
+w-24: test result: ok. 1 passed; 0 failed
+w-25: test result: ok. 1 passed; 0 failed
+w-26: test result: ok. 1 passed; 0 failed
+w-27: test result: ok. 1 passed; 0 failed
+w-28: test result: ok. 1 passed; 0 failed
+w-29: test result: ok. 1 passed; 0 failed
+w-30: test result: ok. 1 passed; 0 failed
+w-31: test result: ok. 1 passed; 0 failed
+w-32: test result: ok. 1 passed; 0 failed
+w-33: test result: ok. 1 passed; 0 failed
+w-34: test result: ok. 1 passed; 0 failed
+w-35: test result: ok. 1 passed; 0 failed
+w-36: test result: ok. 1 passed; 0 failed
+w-37: test result: ok. 1 passed; 0 failed
+w-38: test result: ok. 1 passed; 0 failed
+w-39: test result: ok. 1 passed; 0 failed
+w-40: test result: ok. 1 passed; 0 failed
+
+== the failing assertion at BASE (run flk-3), trimmed:
+thread 'daemon::tests::client_focus_closes_display_panes_and_preserves_chooser_modes' (123794) panicked at crates/zz-daemon/src/daemon.rs:43415:9:
+            sequence: 9,
+            payload: StatusChanged {
+                status: StatusLine {
+                    left: "#[bg=themegreen,fg=themeblack]#[default]#[push-default][focus-mod",
+                    right: "#[bg=themegreen,fg=themeblack]#[default]#[push-default]\"alienware\" 09:42 11-Sep-26",

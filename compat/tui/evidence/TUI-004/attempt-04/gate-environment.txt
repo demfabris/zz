@@ -1,0 +1,9 @@
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+cores: 16
+gate worktree /home/demfabris/dev/zz-gate-tui6 at e5c85cac50064b1fb1eb1b2f4e3c1a9a58fafbb2 (clean tree), rebased onto origin/main f22f8d635d2ae8dd561934a4b33f2285241c9d2c
+zz: cargo build -p zz --jobs 6, sha256 9543036434a786166e6844727fbb9b087d355cc863028d8f62691084e8a16863
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux at d77c9dc6aa021e4bc61f0da128c591af695e6466
+TERM=xterm-ghostty LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8

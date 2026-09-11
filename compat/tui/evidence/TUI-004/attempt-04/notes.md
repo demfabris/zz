@@ -145,6 +145,22 @@ zz-daemon status.rs (`StatusRequest.pane_borders`, `expand_style` made
 `border_presentations`, the focus test's wait);
 knowledge/protocol/wire-protocol.md (the v101 entry).
 
+## Gate, cycle 6
+
+The gate rebased the lane onto origin/main f22f8d63 and applied the review's
+three must-fixes, one commit each: a8f6259a drops the four added doc comments,
+f3f3bea3 names the ModePresentation match-style appends in the v101 wire entry,
+and e5c85cac keeps the border style's attributes on the pane status row.
+grounded() now layers each format segment over the border style with
+apply_style, so bold survives on the border glyphs around the text and after
+`#[default]`. tui-screen-diff.sh gains the review's probe as
+pane-border-attributes-top and pane-border-attributes-bottom, plus a one-sided
+bold sabotage. At the pre-fix build both checkpoints differ on row 11 by bold
+alone (`gate-border-attributes-prefix.txt`); with the fix they match
+(`gate-border-attributes-fix.txt`, both runs from an untracked 80x24-only copy
+of the fixture, deleted after). Every `gate-*.txt` run is at e5c85cac with a
+clean tree (`gate-environment.txt`).
+
 ## Files
 
 | file | what ran |
@@ -172,3 +188,10 @@ knowledge/protocol/wire-protocol.md (the v101 entry).
 cargo fmt: the lines this branch wrote are formatted. `cargo fmt --check` still
 reports a hunk in daemon.rs near `cancel_prefix` (from BASE) and two in
 zz-tui/src/input.rs; neither is this branch's, and neither was reflowed.
+| `gate-environment.txt` | the gate's binary, revision, pin and OS. |
+| `gate-border-attributes-prefix.txt`, `gate-border-attributes-fix.txt` | tui-screen-diff.sh at 80x24 only, before the attribute fix (exit 1) and after it (exit 0). |
+| `gate-screen-diff.txt`, `gate-screen-diff-self-check.txt` | tui-screen-diff.sh and its self-check at the gate tip: 125 asserted, 28 recorded. |
+| `gate-pane-geometry.txt`, `gate-stock-keys.txt`, `gate-status-row.txt` | the other canvas fixtures at the gate tip. |
+| `gate-indicators.txt`, `gate-indicators-self-check.txt`, `gate-copy-mode.txt`, `gate-copy-mode-self-check.txt`, `gate-caps.txt`, `gate-caps-self-check.txt`, `gate-attached-client.txt` | the sibling TUI fixtures and attached-client.sh at the gate tip. |
+| `gate-copy-mode-match-flip.txt`, `gate-copy-mode-match-flip-diff.txt` | the throwaway MATCH flip at the gate tip and its diff. |
+| `gate-cargo.txt`, `gate-corpus.txt` | cargo tests and workspace clippy at the gate tip, and every corpus row's result. |

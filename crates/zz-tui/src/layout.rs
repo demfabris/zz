@@ -96,10 +96,17 @@ pub(crate) struct PaneRect {
     /// while the option is `off`, leaves `yoff` alone and only shrinks `sy`
     /// under `bottom`, and moves `yoff` down one row under `top`.
     pub border_status: PaneBorderStatus,
+    /// `layout_add_horizontal_border`: only a pane whose edge is the window's
+    /// edge on the status side spends a row of its own box. Every other pane
+    /// keeps its box and draws its status line on the border row beside it.
+    pub status_on_border: bool,
 }
 
 impl PaneRect {
     pub const fn content(self) -> Rect {
+        if self.status_on_border {
+            return self.rect;
+        }
         match self.border_status {
             PaneBorderStatus::Off => self.rect,
             PaneBorderStatus::Bottom => Rect {
@@ -111,12 +118,15 @@ impl PaneRect {
     }
 
     pub fn status_row(self) -> Rect {
-        let y = if matches!(self.border_status, PaneBorderStatus::Bottom) {
-            self.rect
+        let bottom = matches!(self.border_status, PaneBorderStatus::Bottom);
+        let y = match (bottom, self.status_on_border) {
+            (true, true) => self.rect.y.saturating_add(self.rect.height),
+            (true, false) => self
+                .rect
                 .y
-                .saturating_add(self.rect.height.saturating_sub(1))
-        } else {
-            self.rect.y
+                .saturating_add(self.rect.height.saturating_sub(1)),
+            (false, true) => self.rect.y.saturating_sub(1),
+            (false, false) => self.rect.y,
         };
         Rect {
             x: self.rect.x,
@@ -291,6 +301,15 @@ pub(crate) fn resolve(
 ) -> ResolvedLayout {
     let mut resolved = ResolvedLayout::default();
     collect(node, rect, active_pane, status, &mut resolved);
+    for pane in &mut resolved.panes {
+        pane.status_on_border = match status {
+            PaneBorderStatus::Top => pane.rect.y > rect.y,
+            PaneBorderStatus::Bottom => {
+                pane.rect.y.saturating_add(pane.rect.height) < rect.y.saturating_add(rect.height)
+            }
+            PaneBorderStatus::Off => false,
+        };
+    }
     let split_colours = indicators.colours() && resolved.panes.len() == 2;
     resolved.dividers = resolved
         .dividers
@@ -428,6 +447,7 @@ fn collect(
             pane: *pane,
             rect,
             border_status,
+            status_on_border: false,
         }),
         LayoutNode::Split {
             axis,
@@ -549,16 +569,19 @@ mod tests {
             pane: PaneId(0),
             rect,
             border_status: PaneBorderStatus::Off,
+            status_on_border: false,
         };
         let top = PaneRect {
             pane: PaneId(0),
             rect,
             border_status: PaneBorderStatus::Top,
+            status_on_border: false,
         };
         let bottom = PaneRect {
             pane: PaneId(0),
             rect,
             border_status: PaneBorderStatus::Bottom,
+            status_on_border: false,
         };
         assert_eq!(off.content(), rect);
         assert_eq!(off.status_row().height, 0);

@@ -184,6 +184,7 @@ pub(crate) struct StatusRequest {
     pub(crate) client_scheme: Option<TerminalColorScheme>,
     pub(crate) message_styles: (String, String),
     pub(crate) modes: Vec<ModeRequest>,
+    pub(crate) pane_borders: Vec<zz_protocol::PaneBorderPresentation>,
 }
 
 pub(crate) struct ModeRequest {
@@ -195,7 +196,7 @@ pub(crate) struct ModeRequest {
     pub(crate) vi_keys: bool,
 }
 
-fn expand_style(
+pub(crate) fn expand_style(
     format: &str,
     context: &StatusContext,
     hooks: &mut DaemonFormatHooks<'_>,
@@ -970,6 +971,7 @@ fn render(
             mode_presentation(mode, &mut hooks)
         })
         .collect::<Vec<_>>();
+    let pane_borders = request.pane_borders.clone();
     if !request.formats.enabled {
         return StatusLine {
             title,
@@ -979,6 +981,7 @@ fn render(
             message_style,
             message_command_style,
             modes,
+            pane_borders,
             ..StatusLine::default()
         };
     }
@@ -1063,6 +1066,7 @@ fn render(
         message_style,
         message_command_style,
         modes,
+        pane_borders,
     }
 }
 
@@ -2229,6 +2233,7 @@ mod tests {
             client_scheme: None,
             message_styles: (String::new(), String::new()),
             modes: Vec::new(),
+            pane_borders: Vec::new(),
         }
     }
 
@@ -2255,6 +2260,7 @@ mod tests {
             client_scheme: None,
             message_styles: engine.message_styles_for_session(session),
             modes: Vec::new(),
+            pane_borders: Vec::new(),
         }
     }
 

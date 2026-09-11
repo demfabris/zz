@@ -764,6 +764,15 @@ impl Model {
         }
     }
 
+    pub fn pane_border_style(&self, pane: PaneId) -> Option<zz_protocol::TmuxStyle> {
+        let border = self
+            .status
+            .pane_borders
+            .iter()
+            .find(|border| border.pane == pane)?;
+        crate::mode_view::resolved_style(&border.style, &self.status.theme)
+    }
+
     pub fn pane_rect(&self, pane: PaneId) -> Option<PaneRect> {
         self.layout
             .panes
@@ -864,6 +873,7 @@ impl Model {
                             pane,
                             rect: canvas,
                             border_status: window.pane_border_status,
+                            status_on_border: false,
                         }],
                         dividers: Vec::new(),
                     }

@@ -217,7 +217,13 @@ pub(crate) struct Renderer {
     browser_placements: HashMap<PaneId, KittyPlacement>,
     browser_painted: HashMap<PaneId, bool>,
     last_title: String,
-    border_chrome: Option<(PaneBorderStatus, PaneBorderLines, PaneBorderIndicators)>,
+    border_chrome: Option<(
+        PaneBorderStatus,
+        PaneBorderLines,
+        PaneBorderIndicators,
+        Vec<zz_protocol::PaneBorderPresentation>,
+        zz_protocol::ThemeColours,
+    )>,
     kitty: KittyBridge,
     writer: TerminalWriter,
     control_replay: Vec<u8>,
@@ -507,8 +513,14 @@ impl Renderer {
     fn paint_workspace(&mut self, model: &Model, force: bool) {
         let lines = model.pane_border_lines();
         let indicators = model.pane_border_indicators();
-        let chrome = (model.pane_border_status(), lines, indicators);
-        let force = force || self.border_chrome != Some(chrome);
+        let chrome = (
+            model.pane_border_status(),
+            lines,
+            indicators,
+            model.status.pane_borders.clone(),
+            model.status.theme.clone(),
+        );
+        let force = force || self.border_chrome.as_ref() != Some(&chrome);
         self.border_chrome = Some(chrome);
         if force {
             let cells = divider_cells(&model.layout.dividers);
@@ -525,6 +537,9 @@ impl Renderer {
                     .map_or(fallback, |colour| {
                         resolve_tmux_colour(colour, fallback, &model.appearance)
                     });
+                let style = divider
+                    .style_pane
+                    .and_then(|pane| model.pane_border_style(pane));
                 let index = divider.style_pane.and_then(|pane| model.pane_index(pane));
                 for row in divider.rect.y..divider.rect.y.saturating_add(divider.rect.height) {
                     for column in divider.rect.x..divider.rect.x.saturating_add(divider.rect.width)
@@ -543,14 +558,25 @@ impl Renderer {
                         let cell_type = cell_type_of(mask);
                         let glyph = border_arrow(model, indicators, column, row)
                             .map_or_else(|| border_glyph(lines, cell_type, index), str::to_owned);
-                        write_colored_text(
-                            &mut self.output,
-                            column,
-                            row,
-                            &glyph,
-                            color,
-                            model.appearance.background,
-                        );
+                        if let Some(style) = &style {
+                            write_border_text(
+                                &mut self.output,
+                                column,
+                                row,
+                                &glyph,
+                                style,
+                                &model.appearance,
+                            );
+                        } else {
+                            write_colored_text(
+                                &mut self.output,
+                                column,
+                                row,
+                                &glyph,
+                                color,
+                                model.appearance.background,
+                            );
+                        }
                     }
                 }
             }
@@ -570,7 +596,7 @@ impl Renderer {
                         entry.status_row(),
                         &header,
                         active,
-                        model.pane_border_colour(entry.pane, active),
+                        entry.pane,
                         lines,
                         model.pane_index(entry.pane),
                         model,
@@ -966,7 +992,7 @@ impl Renderer {
         rect: Rect,
         expanded: &str,
         active: bool,
-        border: Option<TmuxColour>,
+        pane: PaneId,
         lines: PaneBorderLines,
         index: Option<u32>,
         model: &Model,
@@ -979,9 +1005,11 @@ impl Renderer {
         } else {
             model.appearance.foreground
         };
-        let color = border.map_or(fallback, |colour| {
-            resolve_tmux_colour(colour, fallback, &model.appearance)
-        });
+        let color = model
+            .pane_border_colour(pane, active)
+            .map_or(fallback, |colour| {
+                resolve_tmux_colour(colour, fallback, &model.appearance)
+            });
         let glyph = border_glyph(lines, CELL_LR, index);
         let lead = 2.min(rect.width);
         let width = rect.width.saturating_sub(lead);
@@ -992,11 +1020,23 @@ impl Renderer {
             line.push_plain(&glyph);
         }
         line.append(&StyledLine::from_segments(composed.segments));
+        let line = line.truncate(usize::from(rect.width));
+        if let Some(style) = model.pane_border_style(pane) {
+            write_styled_text_over(
+                &mut self.output,
+                rect.x,
+                rect.y,
+                &line,
+                &style,
+                &model.appearance,
+            );
+            return;
+        }
         write_styled_text(
             &mut self.output,
             rect.x,
             rect.y,
-            &line.truncate(usize::from(rect.width)),
+            &line,
             color,
             model.appearance.background,
             &model.appearance,
@@ -2600,6 +2640,65 @@ fn write_styled_text(
     write_cursor_position(output, column, row);
     for segment in &line.segments {
         write_tmux_sgr(output, &segment.style, foreground, background, appearance);
+        output.extend_from_slice(segment.text.as_bytes());
+    }
+    output.extend_from_slice(b"\x1b[0m");
+}
+
+/// `redraw_draw_border_span` starts from `grid_default_cell` and applies
+/// the border style over it, so a ground the style leaves unset stays the
+/// terminal's default.
+fn grounded(style: &TmuxStyle, base: Option<&TmuxStyle>) -> TmuxStyle {
+    TmuxStyle {
+        fg: style
+            .fg
+            .or_else(|| base.and_then(|base| base.fg))
+            .or(Some(TmuxColour::Default)),
+        bg: style
+            .bg
+            .or_else(|| base.and_then(|base| base.bg))
+            .or(Some(TmuxColour::Default)),
+        ..style.clone()
+    }
+}
+
+fn write_border_text(
+    output: &mut Vec<u8>,
+    column: u16,
+    row: u16,
+    text: &str,
+    style: &TmuxStyle,
+    appearance: &TerminalAppearance,
+) {
+    write_cursor_position(output, column, row);
+    write_tmux_sgr(
+        output,
+        &grounded(style, None),
+        appearance.foreground,
+        appearance.background,
+        appearance,
+    );
+    output.extend_from_slice(text.as_bytes());
+    output.extend_from_slice(b"\x1b[0m");
+}
+
+fn write_styled_text_over(
+    output: &mut Vec<u8>,
+    column: u16,
+    row: u16,
+    line: &StyledLine,
+    base: &TmuxStyle,
+    appearance: &TerminalAppearance,
+) {
+    write_cursor_position(output, column, row);
+    for segment in &line.segments {
+        write_tmux_sgr(
+            output,
+            &grounded(&segment.style, Some(base)),
+            appearance.foreground,
+            appearance.background,
+            appearance,
+        );
         output.extend_from_slice(segment.text.as_bytes());
     }
     output.extend_from_slice(b"\x1b[0m");

@@ -380,7 +380,7 @@ run_on_both_active() {
   for side in zz tmux; do
     pane="$(active_pane "$side")"
     [ -n "$pane" ] || die "$side has no active pane"
-    side_command "$side" "$@" -t "$pane" || die "$side refused $1"
+    side_command "$side" "$1" -t "$pane" "${@:2}" || die "$side refused $1"
   done
 }
 run_on_both() {
@@ -465,6 +465,15 @@ screen_has_marker() {
 # not changed between two polls. Both halves are observable and the whole thing
 # is bounded; the 50 ms poll is the same interval every bounded wait in this
 # harness uses, and it is never the settle by itself.
+# A pane too short to keep the marker on screen - one content row under
+# pane-border-status at 80x6 - still has it in its own history. The marker is
+# accepted from there too; the screen still has to hold still between polls.
+pane_holds_marker() {
+  local pane
+  pane="$(active_pane "$1")"
+  [ -n "$pane" ] || return 1
+  side_command "$1" capture-pane -p -S -20 -t "$pane" 2>/dev/null | grep -Fq "$2"
+}
 wait_settled() {
   local side="$1"
   local marker="$2"
@@ -474,7 +483,7 @@ wait_settled() {
   for ((attempt = 0; attempt < 200; attempt++)); do
     current="$(capture_plain "$side" 2>/dev/null || true)"
     if [ -n "$previous" ] && [ "$current" = "$previous" ] &&
-      printf '%s' "$current" | grep -Fq "$marker"; then
+      { printf '%s' "$current" | grep -Fq "$marker" || pane_holds_marker "$side" "$marker"; }; then
       return 0
     fi
     previous="$current"
@@ -671,24 +680,19 @@ run_size() {
   # pane while it is off, so this walks all three values with two panes on the
   # screen and compares the borders, their text and the rows they cost.
   #
-  # MEASURED 2026-09-09: the border TEXT and the rows it costs are the pin's,
-  # cell for cell, and the border COLOUR is not. The pin draws an active border
-  # as \e[38;2;154;205;50m, which is pane-active-border-style fg=themegreen
-  # resolved through the dark theme's yellowgreen; the raw TUI draws
-  # \e[38;2;77;163;235m\e[48;2;16;19;24m, its own blue plus an explicit
-  # background where the pin leaves the ground default. Both halves are somebody
-  # else's: the theme colour is inside the recorded
-  # presentation:tui-status-row-theme-defaults decision, whose scope keeps zz's
-  # theme for every TUI surface other than the status row, and the explicit
-  # ground is the same class as the default-fg record below. So these two run in
-  # `text` mode: every glyph, every column and the cursor asserted, the styles
-  # recorded with that reason.
-  BORDER_STYLE_REASON='the pin draws an active border in themegreen with a default ground; the raw TUI draws its own theme blue over an explicit background'
+  # MEASURED 2026-09-11 (TUI-004 attempt-04): the border text, the rows it
+  # costs and the border colours are the pin's, cell for cell.
+  # redraw_draw_border_span starts from grid_default_cell and applies
+  # window_pane_get_border_style: pane-active-border-style (fg=themegreen) next
+  # to the client's active pane, pane-border-style (fg=themelightgrey) next to
+  # every other, each over the terminal's default ground. The daemon publishes
+  # both, expanded per pane, on StatusLine.pane_borders and the raw TUI paints
+  # them, so both checkpoints assert every cell and its style.
   pin_pane_titles
   set_on_both pane-border-status top
-  checkpoint pane-border-top text "$BORDER_STYLE_REASON"
+  checkpoint pane-border-top "$mode"
   set_on_both pane-border-status bottom
-  checkpoint pane-border-bottom text "$BORDER_STYLE_REASON"
+  checkpoint pane-border-bottom "$mode"
   set_on_both pane-border-status off
   checkpoint pane-border-off "$mode"
 
@@ -755,12 +759,12 @@ run_size() {
   # reads on TMUX_OPTION_CONSUMERS and neither `theme` nor the ten colours are in
   # it. #{client_theme} answers empty on both binaries from a one-shot client, so
   # the terminal's own light/dark REPORT is not a channel this fixture can drive;
-  # the forced option is, and it is recorded here for the whole screen where
-  # status-row.sh records it for one row.
+  # the forced option is. MEASURED 2026-09-11 (TUI-004 attempt-04): since the
+  # theme arm landed (TUI-004 attempt-02) the daemon resolves the ten slots per
+  # client and the whole screen is the pin's at every size, so this asserts.
   clear_both
   run_on_both set-option -s theme light
-  checkpoint theme-light record \
-    'the pin resolves the theme colours per client from the server theme option and zz does not read it'
+  checkpoint theme-light "$mode"
   side_command zz set-option -su theme >/dev/null 2>&1 || true
   side_command tmux set-option -su theme >/dev/null 2>&1 || true
 
@@ -942,6 +946,13 @@ run_self_check() {
   side_command zz set-option -g status-style bg=red || die 'zz refused status-style'
   self_check_checkpoint colour
   self_check_case 'colour, status-style bg=red on one side' rows
+
+  SIZE_LABEL='80x24-border-style'
+  attach_both_at 80 24
+  run_on_both_active split-window -v "$INNER_SHELL"
+  side_command zz set-option -g pane-border-style fg=red || die 'zz refused pane-border-style'
+  self_check_checkpoint border-style
+  self_check_case 'border style, pane-border-style fg=red on one side' rows
 
   SIZE_LABEL='80x24-cursor'
   attach_both_at 80 24

@@ -831,10 +831,6 @@ impl Renderer {
         );
     }
 
-    /// `window_copy_update_style`: a cell inside a search match takes the
-    /// match style's attributes and colours in place of its own, the current
-    /// match's cells `copy-mode-current-match-style` and every other match's
-    /// `copy-mode-match-style`.
     fn write_match_sgr(&mut self, matched: u8) {
         let Some(style) = matched
             .checked_sub(1)
@@ -2686,9 +2682,6 @@ fn write_styled_text(
     output.extend_from_slice(b"\x1b[0m");
 }
 
-/// `redraw_draw_border_span` starts from `grid_default_cell` and applies
-/// the border style over it, so a ground the style leaves unset stays the
-/// terminal's default.
 fn grounded(style: &TmuxStyle, base: Option<&TmuxStyle>) -> TmuxStyle {
     TmuxStyle {
         fg: style

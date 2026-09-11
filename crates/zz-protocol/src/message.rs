@@ -546,10 +546,6 @@ where
 
 pub const MAX_PANE_BORDER_PRESENTATIONS: usize = 256;
 
-/// `window_pane_get_border_style`: the style this client's borders take next
-/// to one pane of its current window, `pane-active-border-style` for the
-/// client's active pane and `pane-border-style` for every other, expanded in
-/// that pane's context.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneBorderPresentation {
     pub pane: PaneId,

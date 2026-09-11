@@ -96,9 +96,6 @@ pub(crate) struct PaneRect {
     /// while the option is `off`, leaves `yoff` alone and only shrinks `sy`
     /// under `bottom`, and moves `yoff` down one row under `top`.
     pub border_status: PaneBorderStatus,
-    /// `layout_add_horizontal_border`: only a pane whose edge is the window's
-    /// edge on the status side spends a row of its own box. Every other pane
-    /// keeps its box and draws its status line on the border row beside it.
     pub status_on_border: bool,
 }
 

@@ -50,11 +50,21 @@ RGB) stays part of the cell, as `tui.status-row` in `compat/tmux-gaps.json` esta
 
 ## State
 
-Cycle 4 integrated at `62a3b957` (2026-09-10, alienware, workflow `wf_a1e4b9b9-8f3`: three Opus
-lanes, one review reject fixed in its fix pass, one serialized gate, 6.5 hours). That cycle verified
-nothing, so the count is still **4/12 baseline verified** (TUI-001, TUI-002, TUI-003, TUI-010),
-added scope 0/1. The close-out rebuilt `62a3b957` and re-ran every TUI fixture there: all exit 0
-(`status-row.sh` under `LC_ALL=C LC_TIME=C`).
+Cycle 5 (2026-09-10 to 11, alienware, workflow `wf_ed7ed5d3-75a`, 13.4 hours) did not reach main.
+Its single gate agent stopped partway through five branches:
+- modes and copy merged and gated green locally, and are pushed as `campaign/tui-cycle5-gated`
+  (`5d9bf198`). The orchestrator's final-tip run there found `compat/attached-client.sh` red in one
+  step: its copy-mode wait still expects zz's old COPY status badge, which the modes landing
+  replaced with the pin's in-pane position indicator. The chain stays off main until cycle 6's
+  modes lane fixes that.
+- caps was skipped on a real corpus regression (`smoke/pane-colours-palette`); its gated tip is
+  `campaign/tui-caps-close-gated`.
+- overlays went red on eight popup cases after the modes merge; its gated tip is
+  `campaign/tui-overlays-gated` (`7c692222`).
+- choosers was never gated.
+
+The count is still **4/12 baseline verified** (TUI-001, TUI-002, TUI-003, TUI-010), added scope
+0/1. Cycle 4 (`62a3b957`) and cycle 5 both ended one or two items short per obligation.
 
 - Cycle 1 (`38c22b9e`, plus the same-day deferral records `ccab35ce`): the fixture baseline.
   TUI-001 and TUI-002 verified on banked, thrice-reproduced proof; the macOS half of TUI-001's
@@ -103,8 +113,14 @@ closes exactly the items the raw TUI starts honouring (the `options.theme-palett
 Cycle 4's gate held TUI-004 over this question, so this decision is what unblocks it
 (`knowledge/designs/tui-parity.md`, Proof and ownership).
 
-Cycle 5 (`compat/tui/run-5.js`, alienware) runs five lanes under one lock front,
-`F-TUI-CYCLE-5-LANES`:
+Cycle 6 (`compat/tui/run-6.js`, lock front `F-TUI-CYCLE-6-LANES`) reruns the same five lanes as
+punch lists of exactly what cycle 5's reviews and gate left open, all built on
+`campaign/tui-cycle5-gated`. The modes lane first makes `attached-client.sh` green again. The
+gate is now one agent per branch in the order modes, copy, caps, overlays, choosers, each pushing
+main when green, so work lands incrementally. PROTOCOL_VERSION stays 101: 100 and 101 are
+unreleased (zz 0.7.0 shipped 99), so cycle-6 appends fold into 101.
+
+Cycle 5 (`compat/tui/run-5.js`) ran five lanes under one lock front, `F-TUI-CYCLE-5-LANES`:
 - modes (TUI-004): the copy-mode position indicator and selection style inside the pane, the
   view-mode surface for command output, and message and prompt styles on `StatusLine`.
 - copy (TUI-005): half-page and page placement, the vi rectangle newline, prefix precedence over

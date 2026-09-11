@@ -105,6 +105,11 @@ merging in a declared order, flips each such case to asserted after that sibling
 the flip only if the fixture and its `--self-check` stay green. This lets a dependent obligation
 start in the same cycle as its dependency and verify in the same records commit.
 
+Since cycle 6 each branch has its own gate agent. The gates run in a fixed order, and each one
+pushes main when its branch is green, so a later lane rebases onto what the earlier ones landed.
+Cycle 5 showed why: one gate agent carrying five branches stopped partway and left nothing on
+main.
+
 # Machine notes
 
 - macOS: `/bin/bash` is 3.2; prefix `PATH=/opt/homebrew/bin:$PATH` on every `compat/` invocation.

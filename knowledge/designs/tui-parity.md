@@ -2,7 +2,7 @@
 type: Design Plan
 title: TUI parity campaign
 description: "The terminal-client parity contract: tmux observable behavior by default, zz additions through superset commands, and proof tied to the tested revision."
-status: Contract agreed 2026-09-09; cycles 1, 3 and 4 integrated (4/12 verified: TUI-001/002/003/010; main at 62a3b957); the sidebar width threshold is gone and the theme landed (protocol 100); TUI-004, TUI-005 and TUI-009 at review; the TUI portion of accepted native-presentation gaps follows this contract (triage 2026-09-10); TUI-013 (the macOS timeout) deferred as added scope
+status: Contract agreed 2026-09-09; cycles 1, 3 and 4 integrated (4/12 verified: TUI-001/002/003/010); cycle 5's modes and copy landings (protocol 101) gated on campaign/tui-cycle5-gated, not yet on main; TUI-004 to TUI-007 and TUI-009 in progress; the TUI portion of accepted native-presentation gaps follows this contract (triage 2026-09-10); TUI-013 (the macOS timeout) deferred as added scope
 resource: compat/tui/campaign.json
 tags:
 - tui

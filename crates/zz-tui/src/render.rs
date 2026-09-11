@@ -522,7 +522,7 @@ impl Renderer {
             lines,
             indicators,
             model.status.pane_borders.clone(),
-            model.status.theme.clone(),
+            model.status.theme,
         );
         let force = force || self.border_chrome.as_ref() != Some(&chrome);
         self.border_chrome = Some(chrome);

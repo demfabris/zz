@@ -85,6 +85,11 @@ impl StatusFormats {
         }
     }
 
+    #[must_use]
+    pub const fn rows(&self) -> u8 {
+        if self.enabled { self.lines } else { 0 }
+    }
+
     pub fn toggle_enabled_choice(&mut self) -> bool {
         let next = match self.lines {
             0 => 1,

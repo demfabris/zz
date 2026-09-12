@@ -4374,6 +4374,7 @@ mod tests {
             selected: 0,
             filter_no_matches: false,
             help: false,
+            prompt: String::new(),
         });
         let mut renderer = Renderer::new();
         renderer.paint_chooser(&model);
@@ -4400,6 +4401,7 @@ mod tests {
             selected: 0,
             filter_no_matches: true,
             help: false,
+            prompt: String::new(),
         });
         let mut renderer = Renderer::new();
         renderer.paint_chooser(&model);

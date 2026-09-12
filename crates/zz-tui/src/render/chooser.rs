@@ -869,10 +869,14 @@ impl Renderer {
                     buffer_lines(state, presentation)?,
                     state.selected,
                     state.help,
-                    state
-                        .search
-                        .as_ref()
-                        .map(|search| format!("(search) {}", search.query)),
+                    if state.prompt.is_empty() {
+                        state
+                            .search
+                            .as_ref()
+                            .map(|search| format!("(search) {}", search.query))
+                    } else {
+                        Some(state.prompt.clone())
+                    },
                     state.filter_no_matches,
                     false,
                 )

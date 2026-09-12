@@ -68,6 +68,7 @@ pub(crate) fn choose_tree_key_action(
         "command-prompt" => Some(ChooseTreeAction::CommandPrompt),
         "preview" => Some(ChooseTreeAction::PreviewCycle),
         "filter" => Some(ChooseTreeAction::FilterPrompt),
+        "clear-filter" => Some(ChooseTreeAction::ClearFilter),
         _ => None,
     }
 }
@@ -148,6 +149,8 @@ pub(crate) fn choose_buffer_key_action(
         "delete-tagged" => Some(ChooseBufferAction::DeleteTagged),
         "paste-tagged" => Some(ChooseBufferAction::PasteTagged),
         "preview" => Some(ChooseBufferAction::PreviewCycle),
+        "filter" => Some(ChooseBufferAction::FilterPrompt),
+        "clear-filter" => Some(ChooseBufferAction::ClearFilter),
         _ => None,
     }
 }

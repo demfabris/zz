@@ -4651,6 +4651,7 @@ mod tests {
                     selected: 0,
                     filter_no_matches: true,
                     help: false,
+                    prompt: String::new(),
                 }),
             },
         });

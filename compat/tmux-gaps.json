@@ -791,7 +791,9 @@
         "native-key:choose-buffer:PPage",
         "native-key:choose-buffer:T",
         "native-key:choose-buffer:Up",
+        "native-key:choose-buffer:c",
         "native-key:choose-buffer:d",
+        "native-key:choose-buffer:f",
         "native-key:choose-buffer:g",
         "native-key:choose-buffer:j",
         "native-key:choose-buffer:k",
@@ -800,6 +802,7 @@
         "native-key:choose-buffer:q",
         "native-key:choose-buffer:r",
         "native-key:choose-buffer:t",
+        "native-key:choose-buffer:v",
         "native-key:choose-tree:+",
         "native-key:choose-tree:-",
         "native-key:choose-tree:/",
@@ -835,6 +838,8 @@
         "native-key:choose-tree:T",
         "native-key:choose-tree:Up",
         "native-key:choose-tree:X",
+        "native-key:choose-tree:c",
+        "native-key:choose-tree:f",
         "native-key:choose-tree:g",
         "native-key:choose-tree:h",
         "native-key:choose-tree:j",
@@ -845,6 +850,7 @@
         "native-key:choose-tree:q",
         "native-key:choose-tree:r",
         "native-key:choose-tree:t",
+        "native-key:choose-tree:v",
         "native-key:choose-tree:x",
         "native-key:copy-mode:Enter",
         "native-key:prefix:e"
@@ -858,7 +864,7 @@
         "Every zz-only default key remains explicitly classified and does not hide a missing or divergent tmux default."
       ],
       "depends_on": [],
-      "reason": "Native chooser navigation, send-last-output, and copy-mode confirmation extend the default key surface beyond tmux. Pin citation added 2026-09-06. The pin's entire default key surface is the string array in key-bindings.c's key_bindings_init, parsed at server start; compat/tmux-oracle.json's key_bindings list is that array read back through list-keys, 303 bindings at d77c9dc6. Measured 2026-09-06 on throwaway servers: zz's prefix table holds 76 rows against the pin's 92, its copy-mode 71 against 77 and copy-mode-vi 81 against 88, and the difference is not only subtraction - zz adds keys the pin has no row for at all, which is what this group tracks. The stance is that a zz-only default must be declared, never discovered: every native key is classified here so a reader comparing the two tables can tell an extension from a missing tmux default, and the manifest test fails if one appears without a row."
+      "reason": "Native chooser navigation, send-last-output, and copy-mode confirmation extend the default key surface beyond tmux. Pin citation added 2026-09-06. The pin's entire default key surface is the string array in key-bindings.c's key_bindings_init, parsed at server start; compat/tmux-oracle.json's key_bindings list is that array read back through list-keys, 303 bindings at d77c9dc6. Measured 2026-09-06 on throwaway servers: zz's prefix table holds 76 rows against the pin's 92, its copy-mode 71 against 77 and copy-mode-vi 81 against 88, and the difference is not only subtraction - zz adds keys the pin has no row for at all, which is what this group tracks. The stance is that a zz-only default must be declared, never discovered: every native key is classified here so a reader comparing the two tables can tell an extension from a missing tmux default, and the manifest test fails if one appears without a row. The chooser rows gained six more on 2026-09-12: mode_tree_key (mode-tree.c) handles v, f and c inside the mode for every mode-tree mode instead of binding them, so the pin's list-keys carries no row for them while zz models the same three as choose-tree and choose-buffer table entries - preview, filter and clear-filter - and the raw TUI reaches them through the table the way it reaches the rest."
     },
     {
       "id": "keys.root-native-mouse",

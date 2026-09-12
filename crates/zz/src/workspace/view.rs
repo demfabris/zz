@@ -3876,6 +3876,7 @@ mod tests {
             selected: 0,
             filter_no_matches: false,
             help: false,
+            prompt: String::new(),
         }
     }
 

@@ -407,6 +407,7 @@ impl Default for KeyTables {
             ("choose-tree", ":", "command-prompt"),
             ("choose-tree", "v", "preview"),
             ("choose-tree", "f", "filter"),
+            ("choose-tree", "c", "clear-filter"),
             ("choose-buffer", "Up", "cursor-up"),
             ("choose-buffer", "k", "cursor-up"),
             ("choose-buffer", "C-p", "cursor-up"),
@@ -445,6 +446,8 @@ impl Default for KeyTables {
             ("choose-buffer", "D", "delete-tagged"),
             ("choose-buffer", "P", "paste-tagged"),
             ("choose-buffer", "v", "preview"),
+            ("choose-buffer", "f", "filter"),
+            ("choose-buffer", "c", "clear-filter"),
         ] {
             tables.bind(
                 table,

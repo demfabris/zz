@@ -1,0 +1,57 @@
+# revision 4a41770936b567a2da761e757c9c34ab206c7868 (the gate tip before the records commit)
+# gate: cycle 6, mux lane, /home/demfabris/dev/zz-gate-tui6, CARGO_TARGET_DIR=/home/demfabris/dev/zz-gate-target
+# every command below ran through S=$((RANDOM % 2)); systemd-run --user --scope -q -p MemoryMax=7G -p MemorySwapMax=2G flock -w 540 /tmp/zz-cargo-slot-$S.lock <cargo ...>
+# HOME and XDG_CONFIG_HOME scrubbed to /tmp/zzgate6-home; CARGO_HOME left at the real one
+
+== cargo test -p zz-mux --jobs 6 -- --test-threads=4
+   test result: ok. 525 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.58s
+   test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+   test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+   test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.42s
+   test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+   test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+   test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+   test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+   test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+   test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== cargo test -p zz-daemon --lib --jobs 6 -- --test-threads=4
+   test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 891 filtered out; finished in 1.36s
+   test result: ok. 892 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 150.33s
+
+== cargo test -p zz-daemon --test '*' --jobs 6 -- --test-threads=4
+   test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 4.04s
+   test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.23s
+   test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.11s
+   test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.98s
+   test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+   test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.08s
+   test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.38s
+   test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.87s
+   test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.00s
+
+== cargo test -p zz --lib --jobs 6 -- --test-threads=4
+   test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 637 filtered out; finished in 0.00s
+   test result: ok. 638 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.86s
+
+== cargo test -p zz --test '*' --jobs 6 -- --test-threads=4
+   test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.38s
+   test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+   test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 97.73s
+
+== cargo clippy --workspace --all-targets --all-features --jobs 6 -- -D warnings -> exit 0
+   warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-gate-tui6/third_party/rust/proc-macro-error2)` was not used in the crate graph
+   (the one warning is cargo's unused-[patch] note for third_party/rust/proc-macro-error2, not a lint)
+
+== cargo build -p zz --jobs 6 -> exit 0
+   /home/demfabris/dev/zz-gate-target/debug/zz sha256 17368cbf8ce768f6a769dab9046e205d77b362eb63882473e05c8e0585017d62
+   built at 4a41770936b567a2da761e757c9c34ab206c7868 on a clean tree; a cargo debug build is not bit-reproducible here, so the hash identifies the artifact and the revision attests it
+
+== named results
+   test daemon::tests::a_client_no_taller_than_its_status_block_keeps_every_row ... ok
+   test daemon::tests::client_focus_closes_display_panes_and_preserves_chooser_modes ... ok
+   test daemon::tests::status_rows_resize_every_window_of_an_interactive_clients_session ... ok
+   test formats::tests::a_style_section_costs_a_trim_no_column_the_way_format_trim_left_does ... ok

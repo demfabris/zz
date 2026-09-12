@@ -1,0 +1,23 @@
+# revision 4a41770936b567a2da761e757c9c34ab206c7868
+# gate environment, cycle 6 mux lane
+
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+bash 5.3.15(1)-release
+cores: 16
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       4,2Gi       3,4Gi       315Mi       8,5Gi        11Gi
+
+worktree: /home/demfabris/dev/zz-gate-tui6 on local branch gate-mux, clean tree
+CARGO_TARGET_DIR=/home/demfabris/dev/zz-gate-target
+HOME and XDG_CONFIG_HOME scrubbed to /tmp/zzgate6-home for every cargo run; CARGO_HOME left at the real one
+the box's own ~/.tmux.conf and ~/.config/zz/mux.conf were never read: every fixture and probe runs on a scrubbed HOME
+
+zz:  /home/demfabris/dev/zz-gate-target/debug/zz
+17368cbf8ce768f6a769dab9046e205d77b362eb63882473e05c8e0585017d62  /home/demfabris/dev/zz-gate-target/debug/zz
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+tmux next-3.8
+
+locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8; status-row.sh ran under LC_ALL=C LC_TIME=C

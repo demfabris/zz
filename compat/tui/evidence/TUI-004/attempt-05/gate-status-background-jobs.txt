@@ -1,0 +1,29 @@
+# revision 4a41770936b567a2da761e757c9c34ab206c7868
+# row: smoke/status-background-jobs, the one corpus row this gate had to settle
+
+IN THE CHUNK (b14, 20 rows, the other agent working beside me):
+  red on the first pass and red again on the harness's own retry-alone in the same run.
+  The assertion is a wall-clock sample:
+    [1;36m==>[0m running smoke/status-background-jobs
+    smoke/status-background-jobs: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 1 WARN divergence(s)
+    [1;33mwarn:[0m smoke/status-background-jobs failed; it is retried alone after the corpus
+        SMOKE STDOUT: divergence
+        --- zz SMOKE STDOUT step 1
+        +++ tmux SMOKE STDOUT step 1
+        @@ -1,4 +1,4 @@
+         status jobs: attach below 1.5s; shared job; slow output; cached output; interval rerun
+         status jobs: window and pane loops each key one job per looped item
+         status jobs: long cached output retains TAIL on both binaries
+        -AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3, 1789252997058395967, b'\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n0:date*                                                                                                           DATE[]\n'))
+        +status jobs: drawn DATE changes at seconds 1, 3, 5 and 7 with interval 2
+
+ALONE AT THIS TIP: green 5 runs of 5.
+  sbj2 exit=0 59s   sbj6 exit=0 59s   sbj7 exit=0 59s   sbj8 exit=0 58s   sbj9 exit=0 59s
+  (four earlier attempts, sbj1/3/4/5, hit a 100 s cap of mine that was simply too short for a 59 s row
+   plus the harness's setup; they returned 124 and are not results.)
+
+WHY IT IS NOT THIS LANE'S. The scenario drives status-interval and watches a drawn DATE change at
+seconds 1, 3, 5 and 7. This lane's only status-option change is the new StatusRowsChanged effect,
+which set_status_option raises only when StatusFormats::rows moves; status-interval does not move it,
+so the row runs the same code path it ran at origin/main. The overlays gate measured the same row in
+this cycle at origin/main on this box and found it red 3 of 4 there, with the same assertion.

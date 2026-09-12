@@ -1,0 +1,24 @@
+# revision 4a41770936b567a2da761e757c9c34ab206c7868
+# command: compat/attached-client.sh
+# started 2026-09-12T20:22:43-03:00
+command-output tmux: stock-search-open
+command-output tmux: stock-search-Escape
+command-output tmux: stock-search-open
+command-output tmux: stock-search-Enter
+command-output zz: stock-search-open
+command-output zz: stock-search-Escape
+command-output zz: stock-search-open
+command-output zz: stock-search-Enter
+command-output navigation: zz
+command-output zz: native copy-mode-search-prompt editor; stock -P lifecycle measured separately
+command-output zz: idle-escape
+command-output zz: selection-escape
+command-output zz: search-escape
+command-output zz: rebound-q
+command-output navigation: tmux
+command-output tmux: idle-escape
+command-output tmux: selection-escape
+command-output tmux: search-escape
+command-output tmux: rebound-q
+attached-client compatibility: PASS
+# exit 0 after 403s

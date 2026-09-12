@@ -1,0 +1,47 @@
+# revision 4a41770936b567a2da761e757c9c34ab206c7868
+# command: ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-gate-target/debug/zz compat/run.sh --strict-geometry --delta origin/main..HEAD --commands set-option,display-message
+#          plus the three keys-or-status scenarios the delta selection missed, added by hand:
+#          copy-mode-stock-action-keys, send-keys-repeat, send-keys-reset
+# selection: 198 rows from --list, 201 with those three. Run as explicit-name chunks so no call exceeded its cap.
+# every keys and status scenario is in the selection, smoke/tui-client-input-backpressure included.
+
+== accounting: every one of the 201 rows has a result
+   194 rows clean on all five channels (TOPO, GEO, FMT, OUT, WARN)
+
+== the two known/ rows, each matching its registered tuple exactly
+   known/known-pane-scrollbar-columns: 4 step(s), 0 TOPO divergence(s), 2 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)
+   known/known-terminal-runtime: 28 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 6 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+== the four rows that are environmental on this box (unchanged from earlier cycles)
+   lane2-store: 193 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 2 OUT divergence(s), 0 WARN divergence(s)
+   micro-flags: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)
+   show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 7 OUT divergence(s), 0 WARN divergence(s)
+   smoke/plugin-runtime-resurrect-restore: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 1 WARN divergence(s)
+   lane2-store:  lock-command, the pin built on Arch defaults to vlock where zz answers 'lock -np'
+   micro-flags:  the %b locale row, pin '12-set-26' against zz '12-Sep-26'
+
+== one load flake, settled: smoke/status-background-jobs
+   red twice inside a 20-row chunk (the harness's own retry-alone included), then green 5 runs of 5 alone at this tip.
+   See gate-status-background-jobs.txt. It is a wall-clock sample with no margin; the overlays gate measured the
+   same row red at origin/main on this box in the same cycle.
+
+== chunk log (tag, rows, exit, seconds)
+   a1    rows=9  exit=0   433s
+   a2    rows=1  exit=124 560s  command-item-format, killed by my own cap under load; not a result
+   a2b   rows=1  exit=0   537s  command-item-format alone, 125 steps clean
+   a3    rows=2  exit=0    36s
+   b1    rows=15 exit=0*  560s  all 15 rows reported; my cap fell during the harness's retry of lane2-store
+   b2    rows=12 exit=0   344s
+   b3    rows=12 exit=0   446s
+   b4    rows=12 exit=0   190s
+   b5    rows=14 exit=124 560s  12 rows reported; the last two were re-run in b6
+   b6    rows=3  exit=0   360s  smoke/command-flag-errors, smoke/command-prompt-chain, smoke/command-prompt-editing
+   b7    rows=12 exit=0   158s
+   b8    rows=16 exit=0   356s
+   b9    rows=16 exit=0   473s
+   b10   rows=12 exit=0   179s
+   b11   rows=16 exit=0   371s
+   b12   rows=14 exit=0   338s
+   b13   rows=14 exit=0   148s
+   b14   rows=20 exit=1   503s  smoke/status-background-jobs red twice, see the flake capture
+   env1  rows=3  exit=1   176s  the three known environmental rows, run together so their retries cost no other chunk

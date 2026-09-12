@@ -212,3 +212,52 @@ locale-independent chrono. TUI-001 records it and it is environmental; the
 
 Nothing on the wire moved. `PROTOCOL_VERSION` is untouched, no message gained a
 field, and `crates/zz-tui` has no change.
+
+## The gate, cycle 6 mux lane
+
+The lane tip 55487e10 rebased onto `origin/main` ccca7282 (which by then carried
+the modes, copy, caps and overlays landings) as local branch `gate-mux` in
+`/home/demfabris/dev/zz-gate-tui6`. One conflict, the generated
+`knowledge/tmux/tui-parity.md`, regenerated. The rebased diff against
+`origin/main` adds and removes exactly the lines the lane's own diff against
+BASE does, file for file; only context moved.
+
+Everything below ran at `4a41770936b567a2da761e757c9c34ab206c7868`, the gate tip
+before this records commit, against a zz built there
+(sha256 `17368cbf8ce768f6a769dab9046e205d77b362eb63882473e05c8e0585017d62`) and
+the pin d77c9dc6. Each capture carries its revision, its command, a start
+timestamp and its exit code, so no two are the same bytes.
+
+`review.md` holds the reviewer's verdict JSON verbatim, its thirty checks, and
+what the gate did with the three nits.
+
+What moved between the review and this tip, and why: `tui-screen-diff.sh` went
+from 135 asserted / 18 recorded to **147 / 6**, because the caps gate flipped
+`default-fg` and `colour-classes`. The six that remain are `cursor-style-request`
+at six sizes, the cursor channel, which verified TUI-002 carries. No checkpoint
+inside a TUI-004 clause is recorded, so TUI-004 is set verified here and TUI-007,
+which was held only on it, is verified with it.
+
+- `gate-environment.txt` — box, worktree, both binaries' sha256, the pin's version.
+- `gate-tui-screen-diff.txt`, `gate-tui-screen-diff-self-check.txt` — 147 asserted
+  identical with 6 recorded; the self-check's 18 expectations, both of this lane's
+  sabotages among them.
+- `gate-tui-pane-geometry.txt` — 6 of 6.
+- `gate-status-row.txt` — 14 of 14 under `LC_ALL=C LC_TIME=C`, none recorded.
+- `gate-tui-indicators.txt`, `gate-tui-indicators-self-check.txt` — 23 of 23 with 0
+  recorded, and the self-check.
+- `gate-tui-stock-keys.txt` — 50 cases agree, 11 recorded (the box's
+  root-binding-detaches wobble moves that count between runs and gates).
+- `gate-tui-copy-mode.txt`, `gate-tui-copy-mode-self-check.txt` — 147 cases, 0
+  recorded, which is the copy gate's flips holding.
+- `gate-tui-caps.txt`, `gate-tui-caps-self-check.txt` — 279 asserted rows identical.
+- `gate-attached-client.txt` — PASS in 403 s.
+- `gate-cargo.txt` — zz-mux, zz-daemon (lib and integration), zz (lib and
+  integration), workspace clippy and the build, with the four named tests.
+- `gate-corpus.txt` — the 201-row delta selection, run as explicit-name chunks.
+- `gate-status-background-jobs.txt` — the one corpus row the gate had to settle.
+
+`compat/tui-overlays.sh`, run three times plus its self-check for TUI-007, is
+captured in that obligation's own directory as
+`compat/tui/evidence/TUI-007/attempt-02/gate-mux-overlays-*.txt`.
+`compat/tui-choosers.sh` is not on main at this tip; that lane gates after this one.

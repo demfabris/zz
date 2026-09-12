@@ -1,4 +1,3 @@
-$ LC_ALL=C LC_TIME=C PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=... ZZ_COMPAT_CORPUS=... compat/status-row.sh target/debug/zz <pin>   (at 95d3644e, 2026-09-11T16:05:39-03:00)
 status-left band below the sidebar auto-hide threshold (pin tmux)
 ok    status-left band at 80 columns
 ok    status-left band at 100 columns
@@ -16,4 +15,3 @@ ok    status-left-style = bold
 ok    status-justify = centre
 ok    status-position = bottom
 all 14 comparisons identical, none recorded
-exit=0

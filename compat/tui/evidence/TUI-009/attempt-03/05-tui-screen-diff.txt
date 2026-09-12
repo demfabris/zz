@@ -1,4 +1,3 @@
-$ PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=... ZZ_COMPAT_CORPUS=... compat/tui-screen-diff.sh target/debug/zz <pin>   (at 95d3644e, 2026-09-11T15:57:24-03:00)
 whole-screen differential (pin tmux)
 ok    80x24 fresh
 ok    80x24 status-off
@@ -292,4 +291,3 @@ ok    120x24-sidebar sidebar-before
 ok    120x24-sidebar sidebar-shown differs from the pin, which is what a drawn sidebar means
 ok    120x24-sidebar sidebar-withdrawn
 all 123 asserted checkpoints identical, 30 recorded not asserted
-exit=0

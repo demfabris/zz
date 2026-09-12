@@ -1,10 +1,9 @@
-$ PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=... ZZ_COMPAT_CORPUS=... compat/tui-caps.sh target/debug/zz <pin>   (run 1 at 95d3644e, 2026-09-11T15:53:39-03:00)
 outer-terminal capability differential (pin tmux)
 ok    legacy alternate_on: both 1
 ok    legacy bracket_paste_flag: both 1
 ok    legacy cursor_flag: both 1
 ok    legacy cursor_shape: both default
-note  legacy wrap_flag: tmux 1, zz 0
+ok    legacy wrap_flag: both 1
 note  legacy mouse_all_flag: tmux 0, zz 1
 ok    legacy mouse_any_flag: both 1
 note  legacy mouse_button_flag: tmux 1, zz 0
@@ -13,8 +12,8 @@ ok    legacy mouse_standard_flag: both 0
 ok    legacy mouse_utf8_flag: both 0
 ok    legacy synchronized_output_flag: both 0
 ok    legacy origin_flag: both 0
-note  legacy keypad_flag: tmux 1, zz 0
-note  legacy keypad_cursor_flag: tmux 1, zz 0
+ok    legacy keypad_flag: both 1
+ok    legacy keypad_cursor_flag: both 1
 ok    legacy pane_key_mode: both VT10x
 ok    restore/detached alternate_on: both 0
 ok    restore/detached bracket_paste_flag: both 0
@@ -37,7 +36,7 @@ ok    extended alternate_on: both 1
 ok    extended bracket_paste_flag: both 1
 ok    extended cursor_flag: both 1
 ok    extended cursor_shape: both default
-note  extended wrap_flag: tmux 1, zz 0
+ok    extended wrap_flag: both 1
 note  extended mouse_all_flag: tmux 0, zz 1
 ok    extended mouse_any_flag: both 1
 note  extended mouse_button_flag: tmux 1, zz 0
@@ -46,15 +45,15 @@ ok    extended mouse_standard_flag: both 0
 ok    extended mouse_utf8_flag: both 0
 ok    extended synchronized_output_flag: both 0
 ok    extended origin_flag: both 0
-note  extended keypad_flag: tmux 1, zz 0
-note  extended keypad_cursor_flag: tmux 1, zz 0
+ok    extended keypad_flag: both 1
+ok    extended keypad_cursor_flag: both 1
 ok    extended pane_key_mode: both Ext 2
 ok    keys/on @extkey: both C-Enter
 ok    extended-always alternate_on: both 1
 ok    extended-always bracket_paste_flag: both 1
 ok    extended-always cursor_flag: both 1
 ok    extended-always cursor_shape: both default
-note  extended-always wrap_flag: tmux 1, zz 0
+ok    extended-always wrap_flag: both 1
 note  extended-always mouse_all_flag: tmux 0, zz 1
 ok    extended-always mouse_any_flag: both 1
 note  extended-always mouse_button_flag: tmux 1, zz 0
@@ -63,48 +62,48 @@ ok    extended-always mouse_standard_flag: both 0
 ok    extended-always mouse_utf8_flag: both 0
 ok    extended-always synchronized_output_flag: both 0
 ok    extended-always origin_flag: both 0
-note  extended-always keypad_flag: tmux 1, zz 0
-note  extended-always keypad_cursor_flag: tmux 1, zz 0
+ok    extended-always keypad_flag: both 1
+ok    extended-always keypad_cursor_flag: both 1
 ok    extended-always pane_key_mode: both Ext 2
 ok    keys/always @extkey: both C-Enter
 ok    facts/bare client_termname: both xterm
 ok    facts/bare client_utf8: both 0
 ok    facts/bare client_flags: both attached,focused
-note  facts/bare client_colours: tmux 16777216, zz 16
+note  facts/bare client_colours: tmux 16777216, zz 8
 note  facts/bare client_termfeatures: tmux 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
-note  facts/bare client_theme: tmux , zz dark
+ok    facts/bare client_theme: both 
 ok    facts/-2 client_termname: both xterm
 ok    facts/-2 client_utf8: both 0
 ok    facts/-2 client_flags: both attached,focused
 note  facts/-2 client_colours: tmux 16777216, zz 256
 note  facts/-2 client_termfeatures: tmux 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle, zz 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
-note  facts/-2 client_theme: tmux , zz dark
+ok    facts/-2 client_theme: both 
 ok    facts/-2 delta-client_flags: both none
 ok    facts/-2 delta-client_termfeatures: both none
 ok    facts/-2 flag-features: both 256:yes
 ok    facts/-u client_termname: both xterm
 ok    facts/-u client_utf8: both 1
 ok    facts/-u client_flags: both attached,focused,UTF-8
-note  facts/-u client_colours: tmux 16777216, zz 16
+note  facts/-u client_colours: tmux 16777216, zz 8
 note  facts/-u client_termfeatures: tmux 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
-note  facts/-u client_theme: tmux , zz dark
+ok    facts/-u client_theme: both 
 ok    facts/-u delta-client_flags: both UTF-8
 ok    facts/-u delta-client_termfeatures: both none
 ok    facts/-T client_termname: both xterm
 ok    facts/-T client_utf8: both 0
 ok    facts/-T client_flags: both attached,focused
-note  facts/-T client_colours: tmux 16777216, zz 16
+note  facts/-T client_colours: tmux 16777216, zz 8
 note  facts/-T client_termfeatures: tmux 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,sixel,strikethrough,title,usstyle, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,sixel,strikethrough,sync,title,usstyle
-note  facts/-T client_theme: tmux , zz dark
+ok    facts/-T client_theme: both 
 ok    facts/-T delta-client_flags: both none
 ok    facts/-T delta-client_termfeatures: both sixel
 ok    facts/-T flag-features: both sixel:yes
 ok    facts/utf8-locale client_termname: both xterm
 ok    facts/utf8-locale client_utf8: both 1
 ok    facts/utf8-locale client_flags: both attached,focused,UTF-8
-note  facts/utf8-locale client_colours: tmux 16777216, zz 16
+note  facts/utf8-locale client_colours: tmux 16777216, zz 8
 note  facts/utf8-locale client_termfeatures: tmux 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
-note  facts/utf8-locale client_theme: tmux , zz dark
+ok    facts/utf8-locale client_theme: both 
 ok    facts/utf8-locale delta-client_flags: both UTF-8
 ok    facts/utf8-locale delta-client_termfeatures: both none
 ok    widths/cursor: both 20,0
@@ -212,24 +211,24 @@ ok    colours/window-style-unset line: both CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m
 ok    silent/bare client_termname: both xterm
 ok    silent/bare client_utf8: both 0
 ok    silent/bare client_flags: both attached,focused
-note  silent/bare client_colours: tmux 8, zz 16
+ok    silent/bare client_colours: both 8
 note  silent/bare client_termfeatures: tmux bpaste,ccolour,clipboard,cstyle,focus,title, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
-note  silent/bare client_theme: tmux , zz dark
+ok    silent/bare client_theme: both 
 ok    silent/-T client_termname: both xterm
 ok    silent/-T client_utf8: both 0
 ok    silent/-T client_flags: both attached,focused
-note  silent/-T client_colours: both 16777216
+ok    silent/-T client_colours: both 16777216
 note  silent/-T client_termfeatures: tmux bpaste,ccolour,clipboard,cstyle,focus,RGB,title, zz bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,RGB,strikethrough,sync,title,usstyle
-note  silent/-T client_theme: tmux , zz dark
+ok    silent/-T client_theme: both 
 ok    silent/-T delta-client_flags: both none
 ok    silent/-T delta-client_termfeatures: both RGB
 ok    silent/-T flag-features: both RGB:yes
 ok    silent/-2 client_termname: both xterm
 ok    silent/-2 client_utf8: both 0
 ok    silent/-2 client_flags: both attached,focused
-note  silent/-2 client_colours: both 256
+ok    silent/-2 client_colours: both 256
 note  silent/-2 client_termfeatures: tmux 256,bpaste,ccolour,clipboard,cstyle,focus,title, zz 256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,strikethrough,sync,title,usstyle
-note  silent/-2 client_theme: tmux , zz dark
+ok    silent/-2 client_theme: both 
 ok    silent/-2 delta-client_flags: both none
 ok    silent/-2 delta-client_termfeatures: both 256
 ok    silent/-2 flag-features: both 256:yes
@@ -237,7 +236,7 @@ ok    silent/extended alternate_on: both 1
 ok    silent/extended bracket_paste_flag: both 1
 ok    silent/extended cursor_flag: both 1
 ok    silent/extended cursor_shape: both default
-note  silent/extended wrap_flag: tmux 1, zz 0
+ok    silent/extended wrap_flag: both 1
 note  silent/extended mouse_all_flag: tmux 0, zz 1
 ok    silent/extended mouse_any_flag: both 1
 note  silent/extended mouse_button_flag: tmux 1, zz 0
@@ -246,21 +245,21 @@ ok    silent/extended mouse_standard_flag: both 0
 ok    silent/extended mouse_utf8_flag: both 0
 ok    silent/extended synchronized_output_flag: both 0
 ok    silent/extended origin_flag: both 0
-note  silent/extended keypad_flag: tmux 1, zz 0
-note  silent/extended keypad_cursor_flag: tmux 1, zz 0
+ok    silent/extended keypad_flag: both 1
+ok    silent/extended keypad_cursor_flag: both 1
 note  silent/extended pane_key_mode: tmux VT10x, zz Ext 2
 ok    colours/silent glyphs: both CLR R I X B END
-note  colours/silent cell R: both ^[[31mR
-note  colours/silent cell I: tmux ^[[32mI, zz ^[[38;5;42mI
-note  colours/silent cell X: tmux ^[[30mX, zz ^[[38;2;10;20;30mX
-note  colours/silent cell B: both ^[[41mB
-note  colours/silent line: tmux CLR ^[[31mR^[[39m ^[[32mI^[[39m ^[[30mX^[[39m ^[[41mB^[[49m END, zz CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+ok    colours/silent cell R: both ^[[31mR
+ok    colours/silent cell I: both ^[[32mI
+ok    colours/silent cell X: both ^[[30mX
+ok    colours/silent cell B: both ^[[41mB
+ok    colours/silent line: both CLR ^[[31mR^[[39m ^[[32mI^[[39m ^[[30mX^[[39m ^[[41mB^[[49m END
 ok    colours/silent-2 glyphs: both CLR R I X B END
-note  colours/silent-2 cell R: both ^[[31mR
-note  colours/silent-2 cell I: both ^[[38;5;42mI
-note  colours/silent-2 cell X: tmux ^[[38;5;233mX, zz ^[[38;2;10;20;30mX
-note  colours/silent-2 cell B: both ^[[41mB
-note  colours/silent-2 line: tmux CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;5;233mX^[[39m ^[[41mB^[[49m END, zz CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;2;10;20;30mX^[[39m ^[[41mB^[[49m END
+ok    colours/silent-2 cell R: both ^[[31mR
+ok    colours/silent-2 cell I: both ^[[38;5;42mI
+ok    colours/silent-2 cell X: both ^[[38;5;233mX
+ok    colours/silent-2 cell B: both ^[[41mB
+ok    colours/silent-2 line: both CLR ^[[31mR^[[39m ^[[38;5;42mI^[[39m ^[[38;5;233mX^[[39m ^[[41mB^[[49m END
 ok    cli/-2 -V: both exit=0
 tmux VERSION
 ok    cli/-u -V: both exit=0
@@ -275,6 +274,5 @@ ok    cli/-W -V: both exit=1
 PROG: unknown option -- W
 usage: PROG [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name]
             [-S socket-path] [-T features] [command [flags]]
-210 asserted rows, 56 recorded rows
-all 210 asserted rows identical
-exit=0
+243 asserted rows, 23 recorded rows
+all 243 asserted rows identical

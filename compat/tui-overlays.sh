@@ -67,14 +67,20 @@
 # key), because display-menu and command-prompt from a one-shot client do not
 # return until the surface is answered.
 #
-# MODES. `same` asserts the whole decoded screen and the cursor. `text` asserts
-# every glyph, every column, the cursor and the style of every row except the
-# prompt/message row (and, under status-position top, the row after it, which
-# only carries the SGR capture-pane continues from row 0), and records only that
-# row's style: the prompt and message STYLE is the modes lane's this cycle
-# (TUI-004, message-style and message-command-style), so a case red only on
-# that row's style says SIBLING:modes. `record` asserts nothing and has to say
-# why.
+# MODES. `same` asserts the whole decoded screen and the cursor, the prompt and
+# message row included: TUI-004 landed message-style and message-command-style,
+# so every case here is asserted and nothing is left out of a comparison.
+# `record` asserts nothing and has to say why; no case uses it.
+#
+# TRAILING SPACES ON THE PROMPT AND MESSAGE ROW. Measured 2026-09-11 against
+# the pin: a space at the END of a message string or of the command prompt's
+# input is not painted in message-style. The pin's decoded row carries the
+# message-style run up to the last non-blank glyph and then the fill's own
+# cell (capture-pane -e emits the fill's SGR right after that glyph and trims
+# the blanks behind it); a side that paints those spaces shows them inside the
+# message-style run instead. Two cases measure it: prompt-trailing-space types
+# two spaces at the end of a command, and the two *-under-message cases pass a
+# message that ends in two spaces.
 #
 # ODD SIZE AND USER STYLES. The pin centres a popup and a -x C -y C menu on the
 # client's full height (cmd_display_menu_get_pos: tty->sy), which at an even
@@ -94,14 +100,16 @@
 # surface sat on: a key that leaked would be on that pane's prompt line.
 #
 # --self-check runs the driver against a deliberate one-sided difference in each
-# channel - a menu item only one side has, a popup border only one side draws
-# rounded, a prompt cursor only one side moves, a keystroke only one side's
-# covered pane receives, an fg-only menu-border-style only one side sets
-# (compared the way `text` compares, with the message row left out, so the
-# exclusion cannot hide a surface's style), and a display-panes-active-colour
-# only one side sets - and requires the comparison to report each one, plus one
-# equivalence it must NOT report. A fixture that only passes has proved
-# nothing.
+# channel - a menu item only one side has, a keystroke only one side's covered
+# pane receives, a popup border only one side draws rounded, a prompt cursor
+# only one side moves, an fg-only menu-border-style only one side sets, a
+# message-style only one side sets under a message, the same message-style
+# under the command prompt, and a display-panes-active-colour only one side
+# sets - and requires the comparison to report each one, plus one equivalence
+# it must NOT report. The two message-style sabotages name the row they expect:
+# the comparison has to report the message row and NOTHING else, which is what
+# holds the prompt, confirm and *-under-message cases to the whole row now that
+# no row is left out. A fixture that only passes has proved nothing.
 #
 # A divergence is a finding: the script exits 1 so a caller can gate on it, and
 # prints both sides so the next lane has the measurement. It reaps every server
@@ -164,8 +172,7 @@ CHECKS=0
 RECORDS=0
 LAST_ROWS_DIFFERED=0
 LAST_CURSOR_DIFFERED=0
-EXCLUDE_ROWS=""
-STATUS_TOP=0
+LAST_DIFFERING_ROWS=""
 MESSAGE_HOLD_MS=20000
 INNER_SHELL="ENV= PS1='\$ ' exec /bin/sh"
 POPUP_JOB="printf 'POPUP-BODY\\n'; read line; printf 'POPUP-GOT-%s\\n' \"\$line\"; read line"
@@ -275,6 +282,9 @@ capture_plain() {
 }
 cursor_tuple() {
   tmux_outer_command display-message -p -t "=$OUTER_SESSION:$1" "$CURSOR_FORMAT"
+}
+cursor_column_is() {
+  [ "$(tmux_outer_command display-message -p -t "=$OUTER_SESSION:$1" '#{cursor_x}' 2>/dev/null)" = "$2" ]
 }
 last_row() {
   capture_plain "$1" | tail -n 1
@@ -533,18 +543,15 @@ compare_rows() {
   total="$ROWS_UNDER_TEST"
   differing=-1
   count=0
+  LAST_DIFFERING_ROWS=""
   for ((index = 0; index < total; index++)); do
-    case " $EXCLUDE_ROWS " in
-    *" $index "*)
-      zz_rows[index]=""
-      tmux_rows[index]=""
-      ;;
-    esac
     if [ "${zz_rows[index]-}" != "${tmux_rows[index]-}" ]; then
       [ "$differing" -ge 0 ] || differing="$index"
       count=$((count + 1))
+      LAST_DIFFERING_ROWS="$LAST_DIFFERING_ROWS $index"
     fi
   done
+  LAST_DIFFERING_ROWS="${LAST_DIFFERING_ROWS# }"
   LAST_ROWS_DIFFERED=0
   LAST_CURSOR_DIFFERED=0
   [ "$differing" -lt 0 ] || LAST_ROWS_DIFFERED=1
@@ -569,41 +576,10 @@ compare_rows() {
   return 1
 }
 
-message_rows() {
-  if [ "$STATUS_TOP" -eq 1 ]; then
-    printf '0 1'
-  else
-    printf '%s' "$((ROWS_UNDER_TEST - 1))"
-  fi
-}
-
 verdict() {
   local name="$1"
   local mode="$2"
   local reason="${3:-}"
-  if [ "$mode" = text ]; then
-    CHECKS=$((CHECKS + 1))
-    RECORDS=$((RECORDS + 1))
-    [ -n "$reason" ] || die "recorded style at $name says nothing about why"
-    local asserted=1
-    compare_rows "$name" plain || asserted=0
-    EXCLUDE_ROWS="$(message_rows)"
-    compare_rows "$name" styled || asserted=0
-    EXCLUDE_ROWS=""
-    if [ "$asserted" -eq 1 ]; then
-      printf 'ok    %s: every glyph, column, the cursor and every row style but the message row identical\n' "$name"
-    else
-      FAILURES=$((FAILURES + 1))
-      printf 'DIFF  %s\n' "$name"
-    fi
-    if compare_rows "$name" styled >/dev/null; then
-      printf 'note  %s: styles identical too, the record can close\n' "$name"
-    else
-      compare_rows "$name" styled || true
-      printf 'note  %s: styles recorded, not asserted: %s\n' "$name" "$reason"
-    fi
-    return 0
-  fi
   if [ "$mode" = same ]; then
     CHECKS=$((CHECKS + 1))
   else
@@ -631,7 +607,6 @@ verdict() {
 # cursor is the prompt's own (status_prompt_cursor). Cases: opened, typed, a
 # long input past the width with the cursor moved back into it, a size change
 # while open, the prompt at the top when status-position is top, and cancelled.
-PROMPT_STYLE='SIBLING:modes the prompt row style is message-style and message-command-style, which TUI-004 publishes and consumes this cycle'
 prompt_case() {
   CASE_LABEL=command-prompt
   mark_both prompt
@@ -639,46 +614,49 @@ prompt_case() {
   wait_for 'the zz prompt' last_row_has zz ':'
   wait_for 'the tmux prompt' last_row_has tmux ':'
   settle_both MARK-prompt 'the command prompt'
-  verdict prompt-opened text "$PROMPT_STYLE"
+  verdict prompt-opened same
   type_on_both -l 'display-message PROMPTTEXT'
   both_last_row_has 'PROMPTTEXT' 'the typed command'
   settle_both MARK-prompt 'the typed command'
-  verdict prompt-typed text "$PROMPT_STYLE"
-  type_on_both -l ' abcdefghijklmnopqrstuvwxyz0123456789 abcdefghijklmnopqrstuvwxyz0123456789 END'
+  verdict prompt-typed same
+  type_on_both -l '  '
+  wait_for 'the zz cursor after the trailing spaces' cursor_column_is zz 29
+  wait_for 'the tmux cursor after the trailing spaces' cursor_column_is tmux 29
+  settle_both MARK-prompt 'the typed trailing spaces'
+  verdict prompt-trailing-space same
+  type_on_both -l 'abcdefghijklmnopqrstuvwxyz0123456789 abcdefghijklmnopqrstuvwxyz0123456789 END'
   wait_for 'the long command on the tmux status row' last_row_has tmux 'END'
   settle_both MARK-prompt 'the long command'
-  verdict prompt-wrapped text "$PROMPT_STYLE"
+  verdict prompt-wrapped same
   type_on_both Home
   type_on_both Right Right Right
   settle_both MARK-prompt 'the cursor moved into the long command'
-  verdict prompt-cursor-home text "$PROMPT_STYLE"
+  verdict prompt-cursor-home same
   resize_both_to 60 20
   settle_both MARK-prompt 'the prompt at 60x20'
-  verdict prompt-resized text "$PROMPT_STYLE"
+  verdict prompt-resized same
   resize_both_to 80 24
   settle_both MARK-prompt 'the prompt back at 80x24'
-  verdict prompt-resized-back text "$PROMPT_STYLE"
+  verdict prompt-resized-back same
   type_on_both Escape
   both_last_row_starts_with 'L' 'the cancelled prompt'
   settle_both MARK-prompt 'the cancelled prompt'
   verdict prompt-cancelled same
 
   set_on_both status-position top
-  STATUS_TOP=1
   mark_both top
   press_on_both ':'
   type_on_both -l 'TOPPROMPT'
   wait_for 'the zz prompt at the top' first_row_has zz 'TOPPROMPT'
   wait_for 'the tmux prompt at the top' first_row_has tmux 'TOPPROMPT'
   settle_both MARK-top 'the prompt at the top'
-  verdict prompt-status-top text "$PROMPT_STYLE"
+  verdict prompt-status-top same
   type_on_both Escape
   wait_for 'the zz top prompt cancelled' screen_lacks zz 'TOPPROMPT'
   wait_for 'the tmux top prompt cancelled' screen_lacks tmux 'TOPPROMPT'
   settle_both MARK-top 'the top prompt cancelled'
   verdict prompt-status-top-cancelled same
   set_on_both status-position bottom
-  STATUS_TOP=0
 }
 
 # CONFIRM-BEFORE is a prompt too (status_prompt_set with PROMPT_SINGLE), so its
@@ -691,10 +669,10 @@ confirm_case() {
     'set-option -g @overlay_confirm yes'
   both_last_row_has 'OVERLAY-CONFIRM?' 'the confirm prompt'
   settle_both MARK-confirm 'the confirm prompt'
-  verdict confirm-opened text "$PROMPT_STYLE"
+  verdict confirm-opened same
   resize_both_to 60 20
   settle_both MARK-confirm 'the confirm prompt at 60x20'
-  verdict confirm-resized text "$PROMPT_STYLE"
+  verdict confirm-resized same
   resize_both_to 80 24
   settle_both MARK-confirm 'the confirm prompt back at 80x24'
   type_on_both n
@@ -729,10 +707,10 @@ menu_case() {
     die 'tmux refused display-message'
   both_last_row_has OVERLAY-MESSAGE 'the message over the menu'
   settle_both MARK-menu 'the message over the menu'
-  verdict menu-under-message text "$PROMPT_STYLE"
+  verdict menu-under-message same
   resize_both_to 100 30
   settle_both MARK-menu 'the menu at 100x30'
-  verdict menu-resized text "$PROMPT_STYLE"
+  verdict menu-resized same
   resize_both_to 80 24
   settle_both MARK-menu 'the menu back at 80x24'
   type_on_both Escape
@@ -800,16 +778,16 @@ popup_case() {
   both_screen_has POPUP-GOT-z 'the popup job read z'
   settle_both MARK-popup 'the popup after a line'
   verdict popup-typed same
-  side_command zz display-message -c "$(client_name zz)" 'OVERLAY-MESSAGE' ||
+  side_command zz display-message -c "$(client_name zz)" 'OVERLAY-MESSAGE  ' ||
     die 'zz refused display-message'
-  side_command tmux display-message -c "$(client_name tmux)" 'OVERLAY-MESSAGE' ||
+  side_command tmux display-message -c "$(client_name tmux)" 'OVERLAY-MESSAGE  ' ||
     die 'tmux refused display-message'
   both_last_row_has OVERLAY-MESSAGE 'the message over the popup'
   settle_both MARK-popup 'the message over the popup'
-  verdict popup-under-message text "$PROMPT_STYLE"
+  verdict popup-under-message same
   resize_both_to 100 30
   settle_both MARK-popup 'the popup at 100x30'
-  verdict popup-resized text "$PROMPT_STYLE"
+  verdict popup-resized same
   resize_both_to 80 24
   settle_both MARK-popup 'the popup back at 80x24'
   type_on_both Enter
@@ -1026,6 +1004,12 @@ self_check_case() {
       outcome='reported a difference where none was planted'
     fi
     ;;
+  rows:*)
+    [ "$LAST_DIFFERING_ROWS" = "${expectation#rows:}" ] ||
+      outcome="rows '${LAST_DIFFERING_ROWS}' differ where only '${expectation#rows:}' were planted"
+    [ "$LAST_CURSOR_DIFFERED" -eq 0 ] ||
+      outcome='a cursor difference where only a row style was planted'
+    ;;
   esac
   if [ "$outcome" = ok ]; then
     printf 'ok    self-check %s\n' "$name"
@@ -1108,13 +1092,37 @@ run_self_check() {
     die 'tmux refused display-message'
   both_last_row_has OVERLAY-MESSAGE 'the message over the styled menu'
   settle_both MARK-style 'the one-sided styled menu'
-  EXCLUDE_ROWS="$(message_rows)"
   compare_rows self-check-style styled || true
-  EXCLUDE_ROWS=""
-  self_check_case 'style, an fg-only menu-border-style only one side sets, message row left out' rows
+  self_check_case 'style, an fg-only menu-border-style only one side sets' rows
   type_on_both Escape
   both_screen_lacks OVERLAY-MENU 'the styled menu cancelled'
   side_command zz set-option -gu menu-border-style || die 'zz refused set-option -gu'
+
+  CASE_LABEL='self-check prompt style'
+  mark_both pstyle
+  side_command zz set-option -g message-style 'bg=colour94' || die 'zz refused set-option'
+  press_on_both ':'
+  type_on_both -l 'STYLEDPROMPT'
+  both_last_row_has STYLEDPROMPT 'the one-sided styled prompt'
+  settle_both MARK-pstyle 'the one-sided styled prompt'
+  compare_rows self-check-prompt-style styled || true
+  self_check_case 'prompt, a message-style only one side sets' "rows:$((ROWS_UNDER_TEST - 1))"
+  type_on_both Escape
+  both_last_row_lacks STYLEDPROMPT 'the styled prompt cancelled'
+
+  CASE_LABEL='self-check message style'
+  mark_both mstyle
+  side_command zz display-message -c "$(client_name zz)" 'OVERLAY-MESSAGE' ||
+    die 'zz refused display-message'
+  side_command tmux display-message -c "$(client_name tmux)" 'OVERLAY-MESSAGE' ||
+    die 'tmux refused display-message'
+  both_last_row_has OVERLAY-MESSAGE 'the one-sided styled message'
+  settle_both MARK-mstyle 'the one-sided styled message'
+  compare_rows self-check-message-style styled || true
+  self_check_case 'message, a message-style only one side sets' "rows:$((ROWS_UNDER_TEST - 1))"
+  type_on_both C-l
+  both_last_row_lacks OVERLAY-MESSAGE 'the styled message cleared'
+  side_command zz set-option -gu message-style || die 'zz refused set-option -gu'
 
   CASE_LABEL='self-check equivalence'
   mark_both equal

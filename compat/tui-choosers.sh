@@ -91,7 +91,10 @@
 # find-window -Z - which zooms the pane for the mode's lifetime and puts Z in
 # the window's flags. The status row is part of every screen compared here, so
 # the zoom is asserted at every checkpoint, and `v` (preview off, big, normal)
-# is driven as the key that resizes the tree itself.
+# is driven as the key that resizes the tree itself. Every case but zoom_case
+# opens its chooser in the single-pane attached window, where window_zoom
+# refuses (window.c, one pane) and the -Z shows nothing; zoom_case splits that
+# window so the zoom, the Z flag and the release on exit are all on screen.
 #
 # MODES. `same` asserts the whole decoded screen and the cursor. `text` asserts
 # every glyph, every column and the cursor and records only the styles. `record`
@@ -100,9 +103,10 @@
 # other recorded case keeps its clause open.
 #
 # --self-check runs the driver against a deliberate one-sided difference in each
-# channel - a tree row, a preview cell, a tag mark, the cursor - and requires the
-# comparison to catch each in that channel, plus two equivalences it must NOT
-# report. A fixture that only passes has proved nothing.
+# channel - a tree row, a preview cell, a tag mark, the cursor, the -Z zoom and
+# the chooser's own prompt row - and requires the comparison to catch each in
+# that channel, plus two equivalences it must NOT report. A fixture that only
+# passes has proved nothing.
 set -eEuo pipefail
 
 usage() {
@@ -679,7 +683,10 @@ tall_case() {
 
 # FILTER, f: the chooser's own `(filter) ` prompt (mode-tree.c, case 'f'), whose
 # answer is a format the window tree keeps a row for when it expands true. The
-# box title then carries `(filter: active)`.
+# box title then carries `(filter: active)`. `c` is the pin's undo for it
+# (mode-tree.c, case 'c'): mode_tree_clear_prompt then mode_tree_clear_filter,
+# which rebuilds the tree from every row again and drops `(filter: active)`
+# from the title while mode_tree_set_current keeps the selected row.
 FILTER_FORMAT='#{==:#{window_name},two}'
 filter_case() {
   CASE_LABEL=filter
@@ -691,6 +698,8 @@ filter_case() {
   verdict filter-typed same
   step '(filter: active)' Enter
   verdict filter-applied same
+  step '0: win' c
+  verdict filter-cleared same
   step 'MARK-filter' q
   verdict filter-closed same
 }
@@ -727,18 +736,40 @@ buffer_case() {
   verdict buffer-tree-closed same
 }
 
-# FIND-WINDOW, prefix f: command-prompt { find-window -Z -- '%%' }. The prompt
-# row is the overlays lane's (message-command-style, TUI-007), so its checkpoint
-# asserts glyphs, columns and the cursor and records the style for that lane.
-# The answer opens the window tree filtered to what matched.
-FIND_PROMPT_REASON='SIBLING:overlays the pin paints the (find-window) prompt in message-command-style and the raw TUI in its own overlay appearance; the overlays lane (TUI-007) owns the prompt row style'
+# THE BUFFER FILTER, f and c inside choose-buffer. mode_tree_key is one
+# function for every mode-tree mode, so the buffer tree takes the same `f` and
+# `c` as the window tree, and the shared help box it draws says so
+# (mode_tree_help_start, `f  Filter %1s`). The filter is expanded per buffer
+# with format_defaults_paste_buffer (window-buffer.c), so a #{buffer_name} test
+# names one of the two buffers; `c` brings the other back.
+BUFFER_FILTER_FORMAT='#{==:#{buffer_name},alpha}'
+buffer_filter_case() {
+  CASE_LABEL=buffer-filter
+  mark_both bufferfilter
+  prefix_step '(sort: creation)' =
+  step '(filter) ' f
+  verdict buffer-filter-prompt same
+  step "(filter) $BUFFER_FILTER_FORMAT" -l "$BUFFER_FILTER_FORMAT"
+  verdict buffer-filter-typed same
+  step '(filter: active)' Enter
+  verdict buffer-filter-applied same
+  step 'beta' c
+  verdict buffer-filter-cleared same
+  step 'MARK-bufferfilter' q
+  verdict buffer-filter-closed same
+}
+
+# FIND-WINDOW, prefix f: command-prompt { find-window -Z -- '%%' }, the one
+# stock chooser prompt with no -P, so it stays on the status row on both sides
+# and is asserted whole. The answer opens the window tree filtered to what
+# matched.
 find_window_case() {
   CASE_LABEL=find-window
   mark_both find
   prefix_step '(find-window)' f
-  verdict find-window-prompt text "$FIND_PROMPT_REASON"
+  verdict find-window-prompt same
   step '(find-window) two' -l two
-  verdict find-window-typed text "$FIND_PROMPT_REASON"
+  verdict find-window-typed same
   step '(filter: active)' Enter
   verdict find-window-tree same
   step 'MARK-find' q
@@ -747,13 +778,36 @@ find_window_case() {
 
 # COMMAND OUTPUT, the second acceptance clause. run-shell's output reaches the
 # pin as a view-mode pane grid (window_view_mode, cmd-run-shell.c) and the raw
-# TUI as its command-output surface; that surface belongs to the modes lane this
-# cycle. Driven fully - the long output, C-s to the stock `(search down)`
-# prompt, a submitted search, a selection, and M-w, which in the stock emacs
-# table is copy-selection-and-cancel and so is also the way back to the pane -
-# with every surface checkpoint recorded for that lane, the restoration asserted
-# and the copied text compared as a note.
-OUTPUT_REASON='SIBLING:modes run-shell output is a view-mode pane grid on the pin and the command-output surface on zz; the modes lane lands the view surface this cycle'
+# TUI as its command-output surface. Driven fully - the long output, C-s to the
+# stock `(search down)` prompt, a submitted search, a selection, and M-w, which
+# in the stock emacs table is copy-selection-and-cancel and so is also the way
+# back to the pane - with the grid, the submitted search and the restoration
+# asserted and the copied text compared as a note.
+# The view surface itself now matches: output-shown and output-searched are
+# asserted whole. Two divergences the modes landing did not carry are recorded
+# with the bytes that name them.
+#
+# THE PANE PROMPT. Both stock search bindings are `command-prompt -P`
+# (key-bindings.c:569-570 and 654), and -P is window_pane_set_prompt, whose
+# prompt redraw_draw_pane_prompt (screen-redraw.c:1524) draws over the pane's
+# LAST row - its first under status-position top - leaving the status row
+# alone. zz raises the same prompt on the client and its raw TUI draws it on
+# the status row instead, so the pin's row 22 carries `(search down) ` while
+# zz's row 23 does and zz's row 22 still carries the output line. Closing it
+# needs the -P flag on the wire with the pane it targets, which is more than
+# this obligation's chooser surfaces.
+#
+# THE SEARCH MARK UNDER A SELECTION. window_copy_command clears
+# `data->searchmark` for every command that is not `search-*` unless the
+# command's clear column says never (window-copy.c:3767), so begin-selection
+# and cursor-right drop the marks: the pin's `77` is plain and only the
+# selection is painted. zz keeps the current-match cell painted under the
+# selection. zz-terminal already carries that rule
+# (CopyModeAction::clears_search_marks, session.rs:8734) and applies it to a
+# pane's copy mode; the retained command output does not reach it.
+OUTPUT_PROMPT_REASON='the pin draws the stock search prompt over the pane with command-prompt -P (window_pane_set_prompt, screen-redraw.c:1524) and zz draws the same prompt on the status row; measured 2026-09-12, pin row 22 `(search down) ` with the status row kept, zz row 23'
+OUTPUT_MARK_REASON='the pin clears the search marks on any non-search copy-mode command (window-copy.c:3767) so the selection alone is painted; zz keeps the current-match cell under the selection in the retained command output; measured 2026-09-12, row 18 `77` plain on the pin and in the current-match style on zz'
+OUTPUT_REASON='the copied text is compared as a note because the view surfaces above it are compared whole'
 command_output_case() {
   CASE_LABEL=command-output
   mark_both output
@@ -763,16 +817,16 @@ command_output_case() {
   on_both_active run-shell -t PANE 'seq 1 200'
   wait_screen tmux hard 'the run-shell output on the tmux screen' "$before_tmux" '/177]'
   wait_screen zz soft 'the run-shell output on the zz screen' "$before_zz" '/177]'
-  verdict output-shown record "$OUTPUT_REASON"
+  verdict output-shown same
   step '(search down)' C-s
-  verdict output-search-prompt record "$OUTPUT_REASON"
+  verdict output-search-prompt record "$OUTPUT_PROMPT_REASON"
   step '(search down)' -l 77
-  verdict output-search-typed record "$OUTPUT_REASON"
+  verdict output-search-typed record "$OUTPUT_PROMPT_REASON"
   step '' Enter
-  verdict output-searched record "$OUTPUT_REASON"
+  verdict output-searched same
   type_on_both C-Space
   step '' Right Right
-  verdict output-selected record "$OUTPUT_REASON"
+  verdict output-selected record "$OUTPUT_MARK_REASON"
   step 'MARK-output' M-w
   verdict output-closed same
   wait_for 'the copied selection on the tmux side' top_buffer_is tmux buffer0
@@ -796,6 +850,49 @@ wait_soft() {
     sleep 0.05
   done
   return 1
+}
+
+# THE ZOOM, -Z. mode_tree_zoom (mode-tree.c:613) reads WINDOW_ZOOMED first and
+# calls window_zoom only when the window was not zoomed already; mode_tree_free
+# unzooms only in that case. Both halves are driven here, in a window split so
+# window_zoom has something to do: prefix w over the split zooms the pane for
+# the mode's lifetime and puts Z in the window's flags on the status row, q
+# gives the split back, and over a window the user zoomed first with prefix z
+# (resize-pane -Z) the same open and close leave the zoom alone. Each of those
+# checkpoints settles on the window's flags in the status row rather than on
+# the tree, because that is the last cell the pin's own redraw of the step
+# touches; the stillness between two polls covers whichever half a client
+# draws first.
+ZOOMED_STATUS="L0:$WINDOW_NAME*Z"
+UNZOOMED_STATUS="L0:$WINDOW_NAME* 1:two"
+zoom_case() {
+  CASE_LABEL=zoom
+  local side pane
+  for side in zz tmux; do
+    side_command "$side" split-window -d -h -t "=$INNER_SESSION:$WINDOW_NAME" "$INNER_SHELL" ||
+      die "$side refused split-window"
+    pane="$(side_command "$side" list-panes -t "=$INNER_SESSION:$WINDOW_NAME" \
+      -F '#{pane_active} #{pane_id}' | awk '$1 == 0 { print $2; exit }')"
+    [ -n "$pane" ] || die "$side has no second pane in $WINDOW_NAME"
+    side_command "$side" select-pane -t "$pane" -T "$PANE_TITLE" || die "$side refused select-pane -T"
+    side_command "$side" send-keys -t "$pane" "printf 'ZOOM-SCENE\\n'" Enter ||
+      die "$side refused send-keys"
+  done
+  wait_screen tmux hard 'the split pane on the tmux screen' '' 'ZOOM-SCENE'
+  wait_screen zz hard 'the split pane on the zz screen' '' 'ZOOM-SCENE'
+  mark_both zoom
+  prefix_step "$ZOOMED_STATUS" w
+  verdict zoom-tree-open same
+  step "$UNZOOMED_STATUS" q
+  verdict zoom-tree-closed same
+  prefix_step "$ZOOMED_STATUS" z
+  verdict zoom-manual same
+  prefix_step '┌ 0 (sort: index)' w
+  verdict zoom-prezoomed-open same
+  step 'MARK-zoom' q
+  verdict zoom-prezoomed-closed same
+  prefix_step "$UNZOOMED_STATUS" z
+  verdict zoom-manual-released same
 }
 
 # CHOOSE-CLIENT, prefix D. Recorded: zz does not implement choose-client at all;
@@ -837,8 +934,10 @@ run_cases() {
   filter_case
   scroll_case
   buffer_case
+  buffer_filter_case
   find_window_case
   command_output_case
+  zoom_case
   client_case
   tall_case
 
@@ -963,6 +1062,49 @@ run_self_check() {
   wait_for 'the space withdrawn' outer_cursor_is "$zz_before"
   compare_rows self-check-restoration styled || true
   self_check_case 'equivalence: the pane restored after a chooser' none
+
+  # A zoom on one side only: the attached window split on both sides, then
+  # prefix z into the pin's client alone. The layout and the window's Z flag on
+  # the status row are the channel zoom_case asserts, and nothing else here
+  # reaches them.
+  CASE_LABEL='self-check zoom'
+  local side pane
+  for side in zz tmux; do
+    side_command "$side" split-window -d -h -t "=$INNER_SESSION:$WINDOW_NAME" "$INNER_SHELL" ||
+      die "$side refused split-window"
+    pane="$(side_command "$side" list-panes -t "=$INNER_SESSION:$WINDOW_NAME" \
+      -F '#{pane_active} #{pane_id}' | awk '$1 == 0 { print $2; exit }')"
+    [ -n "$pane" ] || die "$side has no second pane in $WINDOW_NAME"
+    side_command "$side" select-pane -t "$pane" -T "$PANE_TITLE" || die "$side refused select-pane -T"
+    side_command "$side" send-keys -t "$pane" "printf 'ZOOM-SCENE\\n'" Enter ||
+      die "$side refused send-keys"
+  done
+  wait_screen tmux hard 'the split pane on the tmux screen' '' 'ZOOM-SCENE'
+  wait_screen zz hard 'the split pane on the zz screen' '' 'ZOOM-SCENE'
+  mark_both zoomed
+  before="$(styled_screen_of tmux)"
+  type_on_side tmux C-b
+  wait_for 'the armed prefix on the tmux client' client_prefix_is tmux 1
+  type_on_side tmux z
+  wait_screen tmux hard 'the one-sided zoom' "$before" "$ZOOMED_STATUS"
+  compare_rows self-check-zoom styled || true
+  self_check_case 'zoom, the attached window zoomed on one side only' rows
+  before="$(styled_screen_of tmux)"
+  type_on_side tmux C-b
+  wait_for 'the armed prefix on the tmux client' client_prefix_is tmux 1
+  type_on_side tmux z
+  wait_screen tmux hard 'the one-sided zoom withdrawn' "$before" "$UNZOOMED_STATUS"
+
+  # The chooser's own prompt row: f typed into the pin's buffer tree alone.
+  # Only the prompt row and the cursor on it can carry the difference.
+  CASE_LABEL='self-check buffer filter prompt'
+  mark_both prompt
+  prefix_step '(sort: creation)' =
+  before="$(styled_screen_of tmux)"
+  type_on_side tmux f
+  wait_screen tmux hard 'the one-sided filter prompt' "$before" '(filter) '
+  compare_rows self-check-buffer-filter-prompt styled || true
+  self_check_case 'prompt, the buffer tree filter prompt on one side only' rows
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"

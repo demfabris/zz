@@ -675,24 +675,25 @@ run_size() {
 
   # A SECOND STATUS ROW WITH A SPLIT. MEASURED 2026-09-11 (TUI-004 attempt-04)
   # at 80x10: after `status 2` the pin's window is 8 rows, %0 h=3 and %1 h=4;
-  # zz's server keeps 9, %0 h=4 and %1 h=4. zz-mux set_pane_geometry back-solves
-  # the window extent from the ACTIVE pane's reported size alone, and the active
-  # pane keeps its height when the status block grows, so the other pane keeps
-  # the row the pin takes away and the raw TUI paints its 4-row viewport into a
-  # 3-row box. The same geometry holds at every size; the screen shows it only
-  # where the top pane's content is taller than its box, which is 80x10 and 80x6
-  # here. The fix is in zz-mux's window sizing, outside the modes lane's zones,
-  # so those two sizes record it.
-  STATUS_ROWS_MODE="$mode"
-  STATUS_ROWS_REASON=''
-  if [ "$rows" -le 10 ]; then
-    STATUS_ROWS_MODE=record
-    STATUS_ROWS_REASON='with a split, zz-mux back-solves the window from the active pane only, so status 2 leaves the other pane one row taller than the pin'
-  fi
+  # zz's server kept 9, %0 h=4 and %1 h=4, because zz-mux set_pane_geometry
+  # back-solved the window extent from the ACTIVE pane's reported size alone and
+  # the active pane keeps its height when the status block grows, so the other
+  # pane kept the row the pin takes away and the raw TUI painted a 4-row
+  # viewport into a 3-row box.
+  #
+  # LANDED 2026-09-12 (TUI-004 attempt-05): options.c options_push_changes runs
+  # recalculate_sizes after every write and clients_calculate_size sizes a
+  # window at the client's rows minus status_line_size, so zz-mux now emits
+  # StatusRowsChanged whenever a status write moves the row count and the daemon
+  # resizes every window of the session from its attached clients. Re-measured
+  # on the pin over this exact sequence at 80x10, 80x6 and 80x24: `status 2`
+  # gives window 8/4/22 with %0 3/1/10 beside %1 4/2/11, status-position leaves
+  # every height alone, and the round trip back to `status on` restores 4/4,
+  # 2/2 and 11/11. Both checkpoints assert at every size the file drives.
   set_on_both status 2
-  checkpoint status-two-rows "$STATUS_ROWS_MODE" "$STATUS_ROWS_REASON"
+  checkpoint status-two-rows "$mode"
   set_on_both status-position top
-  checkpoint status-top "$STATUS_ROWS_MODE" "$STATUS_ROWS_REASON"
+  checkpoint status-top "$mode"
   set_on_both status-position bottom
   set_on_both status on
 
@@ -1078,6 +1079,24 @@ run_self_check() {
     die 'zz refused split-window'
   self_check_checkpoint geometry
   self_check_case 'geometry, split-window on one side' rows
+
+  # The status-rows sabotage. Both sides take the second status row, and only
+  # zz is then pinned back to the window height it had before, which is what the
+  # server did before the sizing landed: the row the status block takes came out
+  # of the client's screen but not out of the layout. The upper pane is filled
+  # first, because a pane whose viewport is one row taller than the box it is
+  # painted into only shows it where there is content to push out of the box,
+  # and driven at 80x10 for the same reason.
+  SIZE_LABEL='80x10-status-rows'
+  attach_both_at 80 10
+  send_both "printf 'FILL-%s\\n' 1 2 3 4 5 6 7 8"
+  settle_both 'FILL-8' status-rows-fill
+  run_on_both_active split-window -v "$INNER_SHELL"
+  set_on_both status 2
+  side_command zz resize-window -t "=$INNER_SESSION" -y 9 ||
+    die 'zz refused resize-window'
+  self_check_checkpoint status-rows
+  self_check_case 'status rows, one side keeps the window a row taller' rows
 
   # The pin parses a style into a cell, so the order the attributes were written
   # in is gone by the time capture-pane re-emits it. The foreground is named on

@@ -1106,6 +1106,9 @@ pub enum MuxEffect {
     StatusFormatsChanged {
         session: Option<SessionId>,
     },
+    StatusRowsChanged {
+        session: Option<SessionId>,
+    },
     Attach {
         session: SessionId,
         detach_others: bool,
@@ -7232,6 +7235,19 @@ impl MuxEngine {
         }
     }
 
+    pub fn resize_window_to_extent(&mut self, window: WindowId, columns: u16, rows: u16) -> bool {
+        if self.window_size(window) == WindowSize::Manual {
+            return false;
+        }
+        let Some(state) = self.state.windows.get(&window) else {
+            return false;
+        };
+        if state.layout.extent() == (columns, rows) {
+            return false;
+        }
+        self.state.resize_window(window, columns, rows).is_ok()
+    }
+
     pub fn set_pane_geometry(&mut self, pane: PaneId, columns: u16, rows: u16) -> bool {
         let Some(window_id) = self.state.window_for_pane(pane) else {
             return false;
@@ -11940,13 +11956,14 @@ impl MuxEngine {
                     .set(option, None)
                     .map_err(ServerError::InvalidCommand)?;
             }
-            let changed = self.status_formats_for_session(session) != previous;
+            let current = self.status_formats_for_session(session);
+            let changed = current != previous;
             let unmarked = self.mark_explicit_status_option(session, option.as_str(), false);
-            return Ok(if changed || unmarked {
-                Execution::effect(MuxEffect::StatusFormatsChanged { session })
-            } else {
-                Execution::default()
-            });
+            return Ok(status_option_execution(
+                session,
+                changed || unmarked,
+                current.rows() != previous.rows(),
+            ));
         }
 
         let mut next = previous.clone();
@@ -11994,6 +12011,7 @@ impl MuxEngine {
         next.set(option, Some(value))
             .map_err(ServerError::InvalidCommand)?;
         let changed = next != previous;
+        let rows_changed = next.rows() != previous.rows();
         if let Some(session) = session {
             self.session_status_options
                 .entry(session)
@@ -12003,11 +12021,11 @@ impl MuxEngine {
             self.status = next;
         }
         let marked = self.mark_explicit_status_option(session, option.as_str(), true);
-        Ok(if changed || marked {
-            Execution::effect(MuxEffect::StatusFormatsChanged { session })
-        } else {
-            Execution::default()
-        })
+        Ok(status_option_execution(
+            session,
+            changed || marked,
+            rows_changed,
+        ))
     }
 
     fn set_window_status_option(
@@ -13305,6 +13323,24 @@ fn pane_colours_execution(name: &str, changed: bool) -> Execution {
 /// is pinned name for name against the oracle.
 fn is_theme_option(name: &str) -> bool {
     name == "theme" || name.starts_with("dark-theme-") || name.starts_with("light-theme-")
+}
+
+fn status_option_execution(
+    session: Option<SessionId>,
+    changed: bool,
+    rows_changed: bool,
+) -> Execution {
+    let mut effects = Vec::new();
+    if changed {
+        effects.push(MuxEffect::StatusFormatsChanged { session });
+    }
+    if rows_changed {
+        effects.push(MuxEffect::StatusRowsChanged { session });
+    }
+    Execution {
+        output: RawText::default(),
+        effects,
+    }
 }
 
 fn stored_scalar_execution(name: &str, target: TmuxOptionTarget) -> Execution {

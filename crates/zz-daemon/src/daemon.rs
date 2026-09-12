@@ -9091,6 +9091,24 @@ impl Shared {
                         }
                         None => status_formats_changed = true,
                     },
+                    MuxEffect::StatusRowsChanged { session } => {
+                        let sessions = session.map_or_else(
+                            || inner.engine.state.sessions.keys().copied().collect(),
+                            |session| vec![session],
+                        );
+                        let mut resized = BTreeSet::new();
+                        for session in sessions {
+                            resized.extend(recalculate_window_extents(&mut inner, session));
+                        }
+                        if !resized.is_empty() {
+                            snapshot_changed = true;
+                            let panes = panes_for_windows(&inner, &resized);
+                            for (terminal, geometry) in terminal_resizes_for_panes(&inner, &panes) {
+                                deferred_terminal_commands
+                                    .push(DeferredTerminalCommand::Resize { terminal, geometry });
+                            }
+                        }
+                    }
                     MuxEffect::Attach {
                         session,
                         detach_others,
@@ -31951,11 +31969,7 @@ fn interactive_client_window_extent(
 ) -> Option<(u16, u16)> {
     if let Some((columns, rows)) = inner.client_sizes.get(&client).copied() {
         let status = inner.engine.status_formats_for_session(Some(session));
-        let status_rows = if status.enabled {
-            u16::from(status.lines).min(rows.saturating_sub(1))
-        } else {
-            0
-        };
+        let status_rows = u16::from(status.rows()).min(rows.saturating_sub(1));
         return Some((columns.max(1), rows.saturating_sub(status_rows).max(1)));
     }
     let window_state = inner.engine.state.windows.get(&window)?;
@@ -31975,13 +31989,12 @@ fn interactive_client_window_extent(
         })
 }
 
-fn attached_client_window_extent(
+fn attached_client_extents(
     inner: &ServerState,
+    session: SessionId,
     window: WindowId,
     mode: WindowSize,
-) -> Option<(u16, u16)> {
-    let window_state = inner.engine.state.windows.get(&window)?;
-    let session = window_state.session;
+) -> (Option<(u16, u16)>, Vec<(u16, u16)>) {
     let suppress_ignored = unignored_attached_sizing_client_exists(inner);
     let mut candidates = Vec::new();
     let mut ceilings = Vec::new();
@@ -32012,25 +32025,68 @@ fn attached_client_window_extent(
             candidates.push(extent);
         }
     }
-    let mut extent = candidates.into_iter().reduce(|left, right| {
+    let measured = candidates.into_iter().reduce(|left, right| {
         if mode == WindowSize::Smallest {
             (left.0.min(right.0), left.1.min(right.1))
         } else {
             (left.0.max(right.0), left.1.max(right.1))
         }
     });
-    if extent.is_none() {
-        extent = Some(inner.engine.default_size_for_session(session));
-    }
-    let (mut columns, mut rows) = extent?;
+    (measured, ceilings)
+}
+
+fn clamped_window_extent(extent: (u16, u16), ceilings: &[(u16, u16)]) -> (u16, u16) {
+    let (mut columns, mut rows) = extent;
     for (ceiling_columns, ceiling_rows) in ceilings {
-        columns = columns.min(ceiling_columns);
-        rows = rows.min(ceiling_rows);
+        columns = columns.min(*ceiling_columns);
+        rows = rows.min(*ceiling_rows);
     }
-    Some((
+    (
         columns.clamp(1, WINDOW_SIZE_MAXIMUM),
         rows.clamp(1, WINDOW_SIZE_MAXIMUM),
-    ))
+    )
+}
+
+fn measured_client_window_extent(
+    inner: &ServerState,
+    window: WindowId,
+    mode: WindowSize,
+) -> Option<(u16, u16)> {
+    let session = inner.engine.state.windows.get(&window)?.session;
+    let (measured, ceilings) = attached_client_extents(inner, session, window, mode);
+    Some(clamped_window_extent(measured?, &ceilings))
+}
+
+fn attached_client_window_extent(
+    inner: &ServerState,
+    window: WindowId,
+    mode: WindowSize,
+) -> Option<(u16, u16)> {
+    let session = inner.engine.state.windows.get(&window)?.session;
+    let (measured, ceilings) = attached_client_extents(inner, session, window, mode);
+    let extent = measured.unwrap_or_else(|| inner.engine.default_size_for_session(session));
+    Some(clamped_window_extent(extent, &ceilings))
+}
+
+fn recalculate_window_extents(inner: &mut ServerState, session: SessionId) -> BTreeSet<WindowId> {
+    let windows = inner
+        .engine
+        .state
+        .sessions
+        .get(&session)
+        .map(|state| state.windows.clone())
+        .unwrap_or_default();
+    let mut resized = BTreeSet::new();
+    for window in windows {
+        let mode = inner.engine.window_size(window);
+        let Some((columns, rows)) = measured_client_window_extent(inner, window, mode) else {
+            continue;
+        };
+        if inner.engine.resize_window_to_extent(window, columns, rows) {
+            resized.insert(window);
+        }
+    }
+    resized
 }
 
 fn control_client_geometry(
@@ -80270,6 +80326,88 @@ bind - split-window -v -c "#{pane_current_path}"
             interactive_client_window_extent(&shared.inner.lock(), outer, session, window),
             Some((200, 50))
         );
+    }
+
+    #[test]
+    fn status_rows_resize_every_window_of_an_interactive_clients_session() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, first) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("status-rows")
+            .expect("create session");
+        let second = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .split_pane(first, zz_protocol::Axis::Vertical, PaneKind::Terminal)
+            .expect("split the window");
+        let client = ClientId(1);
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_kinds.insert(client, ClientKind::Interactive);
+            inner.attached.insert(session, BTreeSet::from([client]));
+            inner.client_sizes.insert(client, (80, 10));
+            assert!(inner.engine.resize_window_to_extent(window, 80, 9));
+            assert_eq!(inner.engine.state.windows[&window].active_pane, second);
+            assert_eq!(inner.engine.pane_geometry(first), Some((80, 4)));
+            assert_eq!(inner.engine.pane_geometry(second), Some((80, 4)));
+        }
+
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(second));
+        let set = |option: &str, value: &str, context: &mut ExecutionContext| {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    context,
+                    &CommandInvocation::new("set-option", ["-t", "status-rows", option, value]),
+                )
+                .expect("set the status option");
+        };
+
+        set("status", "2", &mut context);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner
+                    .engine
+                    .window_extent(window, zz_protocol::Axis::Vertical),
+                Some(8)
+            );
+            assert_eq!(inner.engine.pane_geometry(first), Some((80, 3)));
+            assert_eq!(inner.engine.pane_geometry(second), Some((80, 4)));
+        }
+
+        set("status-position", "top", &mut context);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.pane_geometry(first), Some((80, 3)));
+            assert_eq!(inner.engine.pane_geometry(second), Some((80, 4)));
+        }
+
+        set("status-position", "bottom", &mut context);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.pane_geometry(first), Some((80, 3)));
+            assert_eq!(inner.engine.pane_geometry(second), Some((80, 4)));
+        }
+
+        set("status", "on", &mut context);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner
+                    .engine
+                    .window_extent(window, zz_protocol::Axis::Vertical),
+                Some(9)
+            );
+            assert_eq!(inner.engine.pane_geometry(first), Some((80, 4)));
+            assert_eq!(inner.engine.pane_geometry(second), Some((80, 4)));
+        }
     }
 
     /// On pinned tmux d77c9dc6 a pane's pty is its layout cell: a 199x49

@@ -777,18 +777,15 @@ copy_case() {
 # decided 2026-09-10 and lands with the modes lane (SIBLING:modes). The
 # BUFFER channel asserts straight through the divergence: the bytes the two
 # engines copy out of that selection are identical.
-# MATCH_REASON. The pin paints the current search match with
-# copy-mode-current-match-style, pinned here to bg=#cd00cd,fg=#101010; the raw
-# TUI paints it in reverse video. Measured 2026-09-10 on line-12 after `needle`:
-# the pin wrote \e[38;2;16;16;16m\e[48;2;205;0;205mneedle\e[39m\e[49m and zz
-# \e[7mneedle\e[0m, every glyph, the cursor, the view and the buffer identical.
-# The same options.native-mode-styles family as the selection.
-# The cycle-5 gate flipped these cases after the modes landing and they stayed
-# red on the rows channel only (the current-match cells); text, cursor, facts,
-# view and buffer identical. The match painting lives in crates/zz-tui
-# render.rs and is the modes lane's this cycle (cycle 6), so these cases flip at
-# the copy gate once main carries that landing.
-MATCH_REASON='SIBLING:modes the pin paints the current search match with copy-mode-current-match-style; zz paints it in reverse video (measured at the cycle-5 gate after the modes landing: red on rows only, text, cursor, facts, view and buffer identical)'
+# THE CURRENT MATCH, closed at the cycle-6 copy gate. The pin paints the current
+# search match with copy-mode-current-match-style, pinned here to
+# bg=#cd00cd,fg=#101010. Measured 2026-09-10 on line-12 after `needle`, the raw
+# TUI still wrote \e[7mneedle\e[0m where the pin wrote
+# \e[38;2;16;16;16m\e[48;2;205;0;205mneedle\e[39m\e[49m, so the thirteen search
+# cases recorded the rows channel and asserted the other five. The modes lane
+# landed the painting in crates/zz-tui render.rs (options.native-mode-styles),
+# and the copy gate flipped all thirteen back onto rows: every case in this
+# fixture now asserts every channel it drives.
 
 table_keys() {
   case "$1" in
@@ -799,8 +796,8 @@ table_keys() {
     KEY_BEGINSEL=C-Space KEY_RECT=R KEY_COPY=M-w KEY_CANCEL=q
     KEY_SEARCHFWD=C-s KEY_SEARCHBACK=C-r KEY_COUNT=M-5
     SEND_PREFIX_OBSERVABLE='#{copy_cursor_x}=2'
-    SEARCH_OPEN_MODE=text,cursor,facts,view,buffer
-    SEARCH_OPEN_REASON="$MATCH_REASON; the incremental search already paints the current match"
+    SEARCH_OPEN_MODE=rows,text,cursor,facts,view,buffer
+    SEARCH_OPEN_REASON=''
     ;;
   vi)
     KEY_DOWN=j KEY_UP=k KEY_HALFDOWN=C-d KEY_HALFUP=C-u
@@ -1079,19 +1076,19 @@ run_search() {
   copy_case "$table-ordinary-pane-search-backspace" none '' "$SEARCH_OPEN_MODE" "$SEARCH_OPEN_REASON"
 
   type_both Enter
-  copy_case "$table-ordinary-pane-search-submit" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
+  copy_case "$table-ordinary-pane-search-submit" none ''
   assert_mode_formats "$table-ordinary-pane-search-submit"
 
   type_both n
-  copy_case "$table-ordinary-pane-search-again" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
+  copy_case "$table-ordinary-pane-search-again" none ''
 
   type_both N
-  copy_case "$table-ordinary-pane-search-reverse" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
+  copy_case "$table-ordinary-pane-search-reverse" none ''
 
   type_both "$KEY_SEARCHBACK"
   type_both -l 'filler-30'
   type_both Enter
-  copy_case "$table-ordinary-pane-search-backward" none '' text,cursor,facts,view,buffer "$MATCH_REASON"
+  copy_case "$table-ordinary-pane-search-backward" none ''
   assert_mode_formats "$table-ordinary-pane-search-backward"
 
   type_both q
@@ -1106,8 +1103,7 @@ run_search() {
   copy_case "$table-ordinary-pane-search-reentry" format '#{pane_in_mode}=1'
   assert_mode_formats "$table-ordinary-pane-search-reentry"
   type_both n
-  copy_case "$table-ordinary-pane-search-reentry-again" format '#{copy_cursor_line}=line-30 filler-30' \
-    text,cursor,facts,view,buffer "$MATCH_REASON"
+  copy_case "$table-ordinary-pane-search-reentry-again" format '#{copy_cursor_line}=line-30 filler-30'
 
   # The last search above ran backward, so that landing cannot tell the UP rule
   # from a kept direction. A FORWARD search next, sent through the command path
@@ -1124,8 +1120,7 @@ run_search() {
   copy_case "$table-forward-search-reentry" format '#{pane_in_mode}=1'
   assert_mode_formats "$table-forward-search-reentry"
   type_both n
-  copy_case "$table-forward-search-reentry-searches-up" format '#{copy_cursor_line}=line-48 needle-48' \
-    text,cursor,facts,view,buffer "$MATCH_REASON"
+  copy_case "$table-forward-search-reentry-searches-up" format '#{copy_cursor_line}=line-48 needle-48'
   type_both q
   copy_case "$table-forward-search-cancel" format '#{pane_in_mode}=0'
   assert_mode_formats "$table-forward-search-cancel"

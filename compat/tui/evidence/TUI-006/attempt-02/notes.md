@@ -16,7 +16,7 @@ the pin, the toolchain and the hash of the `zz` binary under test, written befor
 | `self-check-01-tip.txt` | `compat/tui-choosers.sh --self-check` | exit 0, six sabotages caught, two equivalences quiet |
 | `self-check-02-tip.txt` | `compat/tui-choosers.sh --self-check` at the final tip | exit 0, same |
 | `stock-keys-regression.txt` | `compat/tui-stock-keys.sh` | exit 0, 50 cases agree |
-| `screen-diff-regression.txt` | `compat/tui-screen-diff.sh` | exit 0, 125 checkpoints identical |
+| `screen-diff-regression.txt` | `compat/tui-screen-diff.sh` | exit 0, 137 checkpoints identical, 16 recorded |
 | `attached-client-regression.txt` | `compat/attached-client.sh target/debug/zz <pin>` | exit 0, PASS |
 | `copy-mode-regression.txt` | `compat/tui-copy-mode.sh` before the message-row rule was narrowed | exit 1, four search-prompt cases differ |
 | `copy-mode-regression-2.txt` | `compat/tui-copy-mode.sh` after it | exit 0, 147 cases agree |

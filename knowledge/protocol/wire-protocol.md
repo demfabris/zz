@@ -636,7 +636,10 @@ a local overlay sees the key, the order `server_client_handle_key` uses, and `Di
 gains a trailing `Dismiss` after `Close`, which closes the labels on a resize without typing an
 Escape into the pane. v102 also appends `prompt: String` to `ChooseBufferState` after `help` and
 adds `ChooseTreeAction::ClearFilter` and `ChooseBufferAction::FilterPrompt` and `ClearFilter` at the
-end of those enums.
+end of those enums, and `PreviewCycle` at the end of each of the two before them. v102 also appends
+`EventPayload::ChooserPresentation { presentation: Option<Box<ChooserPresentation>> }` at tail tag
+52, with the payload types `ChooserPresentation`, `ChooserRow`, `ChooserPreview`,
+`ChooserPreviewSize` and `ChooserPreviewTile` the daemon fills from the mode tree.
 
 # Versioning & compatibility
 
@@ -674,6 +677,18 @@ end of those enums.
   already carried. The daemon publishes them and the raw TUI paints the prompt row; GUI clients read
   the same state through their own chooser. Pure appends; the cycle's gate folds every lane's 102
   appends into one entry.
+- v102 also carries the chooser presentation itself. `EventPayload` appends `ChooserPresentation
+  { presentation: Option<Box<ChooserPresentation>> }` at tail tag 52, the mode screen the daemon
+  composes after every chooser state or delta. `ChooserPresentation` carries `selected`, `rows`,
+  the `sort` and `view` labels, the `filter` flag, `selection_style`, `border_style`,
+  `prompt_style`, `preview_size` and `preview`; `ChooserRow` a row's cached `name`, its expanded
+  row format `text` and whether that text is right-aligned; `ChooserPreviewSize` the `Normal`,
+  `Off` or `Big` the `v` key cycles; `ChooserPreview` either `Tiles` of `ChooserPreviewTile`
+  (`label`, `label_style`, `border_style` and the pane's latest `viewport`), a single `Screen`
+  viewport, or a buffer's `Text` lines. `ChooseTreeAction` and `ChooseBufferAction` each append
+  `PreviewCycle` for that key.
+  These landed with the cycle-5 choosers lane, which was measured against a base carrying 101 and
+  never reached main; they are recorded here rather than reopening 101, which shipped in zz 0.8.0.
 - v101 carries the raw TUI's mode and message presentation. `StatusLine` gains `message_style` and
   `message_command_style`, the two session options expanded for this client, and `modes`, one
   `ModePresentation` per mode screen the client holds (its copy session and its command output):

@@ -308,7 +308,7 @@ main_client set-environment -t =jobs-delay-live TMUX_PANE scheduled-pane
 main_client set-option -g @job_delay_live scheduled-format
 main_client set-option -g default-terminal jobs-delay-live-scheduled
 live_command="sh \"\$HOME/jobs-command-environment.sh\" positive-live $side '#{@job_delay_live}' '#{1}' '$live_session_numeric' '#{2}'"
-main_client run-shell -b -d 1.0 -c "$live_cwd" -t =jobs-delay-live: \
+main_client run-shell -b -d 4.0 -c "$live_cwd" -t =jobs-delay-live: \
     "$live_command" scheduled-argument "$live_cwd"
 mkdir "$live_cwd"
 main_client set-environment -g JOB_DELAY_GLOBAL launch-global

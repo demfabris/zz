@@ -627,7 +627,10 @@ in a patch payload, both after the kitty placements, packing each side's two-bit
 its palette index (`PackedStyle::class_word` in `crates/zz-terminal/src/model.rs`). A word that
 does not round-trip through `with_class_word` is rejected as `packed style colour classes are
 invalid`. v102 also adds the `client-features-v1:<spec>` value token to `ClientHello`
-capabilities, one per terminal feature the caller asked for.
+capabilities, one per terminal feature the caller asked for. v102 also appends
+`prompt: String` to `ChooseBufferState` after `help` and adds
+`ChooseTreeAction::ClearFilter` and `ChooseBufferAction::FilterPrompt` and
+`ClearFilter` at the end of those enums.
 
 # Versioning & compatibility
 
@@ -646,6 +649,18 @@ capabilities, one per terminal feature the caller asked for.
   know. Both are pure appends and both consumer halves shipped with them, but 101 went out in zz
   0.8.0 (`fd3c64e4`) before either landed: a 0.8.0 client would pass the handshake and misdecode a
   frame's style dictionary, so the version moves rather than the entry growing.
+  v102 also carries the chooser keys the pin's mode tree shares across its modes.
+  `ChooseTreeAction` gains `ClearFilter` at the end of the enum and
+  `ChooseBufferAction` gains `FilterPrompt` and `ClearFilter` at the end of
+  theirs, the actions the `f` and `c` entries of the default `choose-tree` and
+  `choose-buffer` tables raise (`mode_tree_key`, mode-tree.c, is one function
+  for every mode-tree mode, so the buffer tree takes the same two keys as the
+  window tree). `ChooseBufferState` appends `prompt: String` after `help`, the
+  `mode_tree_draw_prompt` line the buffer chooser's own `(filter)` prompt draws
+  on its last row, which the tree chooser's state already carried. The daemon
+  publishes them and the raw TUI paints the prompt row; GUI clients read the
+  same state through their own chooser. Pure appends; the cycle's gate folds
+  every lane's 102 appends into one entry.
 - v101 carries the raw TUI's mode and message presentation. `StatusLine` gains `message_style` and
   `message_command_style`, the two session options expanded for this client, and `modes`, one
   `ModePresentation` per mode screen the client holds (its copy session and its command output):

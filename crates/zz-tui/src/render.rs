@@ -222,6 +222,7 @@ pub(crate) struct Renderer {
     kitty: KittyBridge,
     writer: TerminalWriter,
     control_replay: Vec<u8>,
+    terminal_colours: Option<u32>,
 }
 
 impl Renderer {
@@ -251,6 +252,18 @@ impl Renderer {
             kitty: KittyBridge::default(),
             writer: TerminalWriter::spawn(sink),
             control_replay: Vec::new(),
+            terminal_colours: crate::tty::terminal_colours(),
+        }
+    }
+
+    /// `tty_update_features` invalidates the whole terminal when a reply
+    /// raises what it takes, because every cell already on it was written for
+    /// the old answer.
+    fn note_terminal_colours(&mut self) {
+        let colours = crate::tty::terminal_colours();
+        if self.terminal_colours != colours {
+            self.terminal_colours = colours;
+            self.invalidate();
         }
     }
 
@@ -342,6 +355,7 @@ impl Renderer {
     }
 
     pub fn paint(&mut self, model: &Model, force: bool) -> io::Result<()> {
+        self.note_terminal_colours();
         self.output.clear();
         self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
         let popup_visible = model.popup.is_some();
@@ -408,6 +422,7 @@ impl Renderer {
     }
 
     pub fn paint_frames(&mut self, model: &Model) -> io::Result<()> {
+        self.note_terminal_colours();
         if let Some(popup) = model.popup.as_ref()
             && model.menu.is_none()
             && model.confirm.is_none()
@@ -2703,6 +2718,10 @@ fn write_ground(output: &mut Vec<u8>, colour: Option<TmuxColour>, fallback: Colo
 }
 
 fn write_palette_ground(output: &mut Vec<u8>, index: u8, ground: Ground) {
+    let index = match crate::tty::terminal_colours() {
+        Some(colours) => downgrade_palette(index, colours),
+        None => index,
+    };
     let (low, bright, extended) = match ground {
         Ground::Foreground => (30, 90, 38),
         Ground::Background => (40, 100, 48),
@@ -2740,6 +2759,10 @@ fn write_cell_ground(
 }
 
 fn write_rgb_ground(output: &mut Vec<u8>, colour: Color, ground: Ground) {
+    if crate::tty::terminal_colours().is_some_and(|colours| colours < RGB_COLOURS) {
+        write_palette_ground(output, colour_find_rgb(colour), ground);
+        return;
+    }
     let base = match ground {
         Ground::Foreground => 38,
         Ground::Background => 48,
@@ -2750,6 +2773,88 @@ fn write_rgb_ground(output: &mut Vec<u8>, colour: Color, ground: Ground) {
         colour.r, colour.g, colour.b
     )
     .expect("writing to Vec cannot fail");
+}
+
+const RGB_COLOURS: u32 = 16_777_216;
+
+/// `tty_check_fg` and `tty_check_bg` after the palette: a 256-colour index a
+/// terminal with fewer colours cannot take drops to its nearest of sixteen
+/// (`colour_256to16`), and one below sixteen on a terminal with fewer drops
+/// its aixterm half. A cell already inside the terminal's range is written as
+/// it stands. The pin's last step, turning an aixterm colour back into a plain
+/// one plus the bright attribute for a terminal under sixteen colours, and its
+/// black-on-black dodge, both need the other ground and the cell's attributes,
+/// which this writer does not carry; neither is driven.
+fn downgrade_palette(index: u8, colours: u32) -> u8 {
+    if index < 16 || colours >= 256 {
+        return index;
+    }
+    let mapped = colour_256to16(index);
+    if colours >= 16 { mapped } else { mapped & 7 }
+}
+
+/// `colour_256to16`.
+fn colour_256to16(index: u8) -> u8 {
+    const TABLE: [u8; 256] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    0, 4, 4, 4, 12, 12, 2, 6, 4, 4, 12, 12, 2, 2, 6, 4,
+    12, 12, 2, 2, 2, 6, 12, 12, 10, 10, 10, 10, 14, 12, 10, 10,
+    10, 10, 10, 14, 1, 5, 4, 4, 12, 12, 3, 8, 4, 4, 12, 12,
+    2, 2, 6, 4, 12, 12, 2, 2, 2, 6, 12, 12, 10, 10, 10, 10,
+    14, 12, 10, 10, 10, 10, 10, 14, 1, 1, 5, 4, 12, 12, 1, 1,
+    5, 4, 12, 12, 3, 3, 8, 4, 12, 12, 2, 2, 2, 6, 12, 12,
+    10, 10, 10, 10, 14, 12, 10, 10, 10, 10, 10, 14, 1, 1, 1, 5,
+    12, 12, 1, 1, 1, 5, 12, 12, 1, 1, 1, 5, 12, 12, 3, 3,
+    3, 7, 12, 12, 10, 10, 10, 10, 14, 12, 10, 10, 10, 10, 10, 14,
+    9, 9, 9, 9, 13, 12, 9, 9, 9, 9, 13, 12, 9, 9, 9, 9,
+    13, 12, 9, 9, 9, 9, 13, 12, 11, 11, 11, 11, 7, 12, 10, 10,
+    10, 10, 10, 14, 9, 9, 9, 9, 9, 13, 9, 9, 9, 9, 9, 13,
+    9, 9, 9, 9, 9, 13, 9, 9, 9, 9, 9, 13, 9, 9, 9, 9,
+    9, 13, 11, 11, 11, 11, 11, 15, 0, 0, 0, 0, 0, 0, 8, 8,
+    8, 8, 8, 8, 7, 7, 7, 7, 7, 7, 15, 15, 15, 15, 15, 15,
+    ];
+    TABLE[usize::from(index)]
+}
+
+/// `colour_find_rgb`: the nearest entry of the 6x6x6 cube or of the grey ramp,
+/// whichever is closer, as a 256-colour index.
+fn colour_find_rgb(colour: Color) -> u8 {
+    const Q2C: [i32; 6] = [0x00, 0x5f, 0x87, 0xaf, 0xd7, 0xff];
+    let (r, g, b) = (i32::from(colour.r), i32::from(colour.g), i32::from(colour.b));
+    let (qr, qg, qb) = (colour_to_6cube(r), colour_to_6cube(g), colour_to_6cube(b));
+    let (cr, cg, cb) = (Q2C[qr as usize], Q2C[qg as usize], Q2C[qb as usize]);
+    let cube = 16 + (36 * qr) + (6 * qg) + qb;
+    if cr == r && cg == g && cb == b {
+        return cube as u8;
+    }
+    let grey_average = (r + g + b) / 3;
+    let grey_index = if grey_average > 238 {
+        23
+    } else {
+        (grey_average - 3) / 10
+    };
+    let grey = 8 + (10 * grey_index);
+    if colour_distance(grey, grey, grey, r, g, b) < colour_distance(cr, cg, cb, r, g, b) {
+        (232 + grey_index) as u8
+    } else {
+        cube as u8
+    }
+}
+
+/// `colour_to_6cube`.
+fn colour_to_6cube(value: i32) -> i32 {
+    if value < 48 {
+        0
+    } else if value < 114 {
+        1
+    } else {
+        (value - 35) / 40
+    }
+}
+
+/// `colour_dist_sq`.
+fn colour_distance(red: i32, green: i32, blue: i32, r: i32, g: i32, b: i32) -> i32 {
+    (red - r) * (red - r) + (green - g) * (green - g) + (blue - b) * (blue - b)
 }
 
 /// The dark half of `colour_theme_table`, resolved the way
@@ -2957,6 +3062,32 @@ mod tests {
             PackedCell::new('c' as u32, 1, CellWidth::Narrow),
         ]);
         viewport
+    }
+
+    #[test]
+    fn a_terminal_under_its_colours_takes_the_pin_nearest_one() {
+        assert_eq!(downgrade_palette(42, 16_777_216), 42);
+        assert_eq!(downgrade_palette(42, 256), 42);
+        assert_eq!(downgrade_palette(42, 16), 10);
+        assert_eq!(downgrade_palette(42, 8), 2);
+        assert_eq!(downgrade_palette(9, 8), 9);
+        assert_eq!(downgrade_palette(1, 8), 1);
+        let dark = Color::rgb(10, 20, 30);
+        assert_eq!(colour_find_rgb(dark), 233);
+        assert_eq!(downgrade_palette(colour_find_rgb(dark), 256), 233);
+        assert_eq!(downgrade_palette(colour_find_rgb(dark), 8), 0);
+        assert_eq!(colour_find_rgb(Color::rgb(0x5f, 0x87, 0xaf)), 67);
+        assert_eq!(colour_find_rgb(Color::rgb(255, 255, 255)), 231);
+        assert_eq!(colour_find_rgb(Color::rgb(0, 0, 0)), 16);
+    }
+
+    #[test]
+    fn a_terminal_that_answered_nothing_leaves_every_colour_alone() {
+        assert_eq!(crate::tty::terminal_colours(), None);
+        let mut output = Vec::new();
+        write_rgb_ground(&mut output, Color::rgb(10, 20, 30), Ground::Foreground);
+        write_palette_ground(&mut output, 42, Ground::Foreground);
+        assert_eq!(output, b"\x1b[38;2;10;20;30m\x1b[38;5;42m");
     }
 
     #[test]

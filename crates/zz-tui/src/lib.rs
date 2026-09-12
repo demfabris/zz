@@ -33,7 +33,6 @@ use zz_protocol::{
     CommandInvocation, CommandResponse, PreparedCommand, PreparedCommandResult, ProtocolMessage,
     ServerError,
 };
-use zz_terminal::TerminalColorScheme;
 
 use crate::browser::BrowserFrameProvider;
 
@@ -437,11 +436,7 @@ fn initial_connection(
     restart_daemon: bool,
     reconnect: Option<&dyn Fn(&Path, bool) -> Result<InteractiveClient, DaemonError>>,
 ) -> Result<InteractiveClient, Error> {
-    match InteractiveClient::connect_endpoint_with_terminal(
-        endpoint,
-        TerminalColorScheme::Dark,
-        interactive,
-    ) {
+    match InteractiveClient::connect_endpoint_without_theme(endpoint, interactive) {
         Ok(client) => Ok(client),
         Err(error) if matches!(endpoint, Endpoint::Local(_)) => {
             let error = classify_local_connect_error(local_socket, error);
@@ -589,11 +584,8 @@ fn spawn_and_connect_daemon(
 
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        match InteractiveClient::connect_terminal_surface(
-            path,
-            TerminalColorScheme::Dark,
-            client_has_terminal,
-        ) {
+        match InteractiveClient::connect_terminal_surface_without_theme(path, client_has_terminal)
+        {
             Ok(client) => return Ok(client),
             Err(error) if Instant::now() >= deadline => return Err(error),
             Err(_) => thread::sleep(Duration::from_millis(20)),

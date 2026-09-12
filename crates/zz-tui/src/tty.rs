@@ -2,6 +2,7 @@ use std::{
     fs,
     io::{self, Write as _},
     path::PathBuf,
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -70,6 +71,80 @@ pub(crate) struct TerminalGuard {
 }
 
 pub(crate) const MOUSE_DISABLE_SEQUENCE: &[u8] = b"\x1b[?1016l\x1b[?1006l\x1b[?1003l";
+
+const RGB_COLOURS: u32 = 16_777_216;
+
+/// `tty_send_requests`: the primary device attributes the kitty probe already
+/// fences on, then the secondary and the extended ones, whose replies name the
+/// terminal and the features it carries.
+const TERMINAL_REQUESTS: &[u8] = b"\x1b[c\x1b[>c\x1b[>q";
+
+/// How many colours the terminal this client writes to takes. `tty.c` asks it
+/// of every cell it sends (`tty_check_fg` and `tty_check_bg`) and never lowers
+/// it: `tty_term_create` decides it from `TERM`, `COLORTERM` and the requested
+/// features, and `tty_update_features` raises it when the terminal answers a
+/// request. Zero until a terminal is entered, and a writer with no terminal
+/// behind it changes no colour at all.
+static TERMINAL_COLOURS: AtomicU32 = AtomicU32::new(0);
+
+pub(crate) fn terminal_colours() -> Option<u32> {
+    match TERMINAL_COLOURS.load(Ordering::Relaxed) {
+        0 => None,
+        colours => Some(colours),
+    }
+}
+
+fn raise_terminal_colours(colours: u32) {
+    TERMINAL_COLOURS.fetch_max(colours, Ordering::Relaxed);
+}
+
+/// `tty_keys_device_attributes2` reads the first parameter of a secondary DA
+/// as a letter and hands `tty_default_features` the terminal it names. Only
+/// the colours those entries carry reach the cell writer here.
+pub(crate) fn note_secondary_device_attributes(kind: u8) {
+    if let Some(colours) = secondary_device_attributes_colours(kind) {
+        raise_terminal_colours(colours);
+    }
+}
+
+fn secondary_device_attributes_colours(kind: u8) -> Option<u32> {
+    match kind {
+        b'T' | b'M' => Some(RGB_COLOURS),
+        b'U' => Some(256),
+        _ => None,
+    }
+}
+
+/// `tty_keys_extended_device_attributes`: an XTVERSION reply names the
+/// terminal outright, and every entry it can name carries
+/// `TTY_FEATURES_BASE_MODERN_XTERM`, which is 256 and RGB.
+pub(crate) fn note_extended_device_attributes(name: &str) {
+    if let Some(colours) = extended_device_attributes_colours(name) {
+        raise_terminal_colours(colours);
+    }
+}
+
+fn extended_device_attributes_colours(name: &str) -> Option<u32> {
+    const NAMED: [&str; 7] = [
+        "iTerm2 ",
+        "tmux ",
+        "XTerm(",
+        "mintty ",
+        "foot(",
+        "WezTerm ",
+        "ghostty ",
+    ];
+    NAMED
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        .then_some(RGB_COLOURS)
+}
+/// `smkx` and `rmkx` on every vt100-like terminal: `tty_start_tty` puts the
+/// keypad and the cursor keys into application mode for the whole attach and
+/// `tty_stop_tty` puts them back, and `tty_default_raw_keys` decodes what they
+/// then send.
+const KEYPAD_TRANSMIT: &[u8] = b"\x1b[?1h\x1b=";
+const KEYPAD_LOCAL: &[u8] = b"\x1b[?1l\x1b>";
 const EXTENDED_KEYS_ENABLE: &[u8] = b"\x1b[>4;2m";
 const EXTENDED_KEYS_DISABLE: &[u8] = b"\x1b[>4m";
 
@@ -121,8 +196,13 @@ impl TerminalGuard {
             file_probe: Some(file_probe),
             original,
         };
+        TERMINAL_COLOURS.store(
+            zz_daemon::client_terminal_colour_count(),
+            Ordering::Relaxed,
+        );
         let mut output = io::stdout().lock();
-        output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[?1004h")?;
+        output.write_all(b"\x1b[?1049h\x1b[?25l\x1b[?1004h")?;
+        output.write_all(KEYPAD_TRANSMIT)?;
         if mouse {
             output.write_all(&mouse_enable_sequence(guard.pixel_mouse))?;
         }
@@ -135,8 +215,9 @@ impl TerminalGuard {
         }
         write!(
             output,
-            "\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi={FILE_PROBE_IMAGE_ID},s=1,v=1,a=q,t=f,f=32;{encoded_probe_path}\x1b\\\x1b[c"
+            "\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi={FILE_PROBE_IMAGE_ID},s=1,v=1,a=q,t=f,f=32;{encoded_probe_path}\x1b\\"
         )?;
+        output.write_all(TERMINAL_REQUESTS)?;
         output.write_all(b"\x1b[16t\x1b[2J")?;
         output.flush()?;
         Ok(guard)
@@ -184,8 +265,9 @@ impl Drop for TerminalGuard {
         if self.extended_keys {
             let _ = output.write_all(EXTENDED_KEYS_DISABLE);
         }
+        let _ = output.write_all(KEYPAD_LOCAL);
         let _ = output.write_all(
-            b"\x1b[?2004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?1004l\x1b[?7h\x1b[?25h\x1b[?1049l",
+            b"\x1b[?2004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?1004l\x1b[?25h\x1b[?1049l",
         );
         let _ = output.flush();
         #[cfg(unix)]
@@ -244,6 +326,35 @@ mod tests {
             b"\x1b[?1003h\x1b[?1006h\x1b[?1016h"
         );
         assert_eq!(MOUSE_DISABLE_SEQUENCE, b"\x1b[?1016l\x1b[?1006l\x1b[?1003l");
+    }
+
+    #[test]
+    fn the_keypad_is_armed_on_entry_and_put_back_on_exit() {
+        assert_eq!(KEYPAD_TRANSMIT, b"\x1b[?1h\x1b=");
+        assert_eq!(KEYPAD_LOCAL, b"\x1b[?1l\x1b>");
+    }
+
+    #[test]
+    fn only_the_terminals_the_pin_names_carry_colours() {
+        assert_eq!(secondary_device_attributes_colours(b'T'), Some(RGB_COLOURS));
+        assert_eq!(secondary_device_attributes_colours(b'M'), Some(RGB_COLOURS));
+        assert_eq!(secondary_device_attributes_colours(b'U'), Some(256));
+        assert_eq!(secondary_device_attributes_colours(b'V'), None);
+        assert_eq!(
+            extended_device_attributes_colours("ghostty 1.2.3"),
+            Some(RGB_COLOURS)
+        );
+        assert_eq!(
+            extended_device_attributes_colours("XTerm(400)"),
+            Some(RGB_COLOURS)
+        );
+        assert_eq!(extended_device_attributes_colours("Konsole 2.0"), None);
+        assert_eq!(extended_device_attributes_colours("tmux"), None);
+    }
+
+    #[test]
+    fn the_startup_requests_carry_the_pin_three_attribute_queries() {
+        assert!(TERMINAL_REQUESTS.ends_with(b"\x1b[c\x1b[>c\x1b[>q"));
     }
 
     #[test]

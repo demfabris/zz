@@ -412,7 +412,7 @@ impl InteractiveClient {
     ) -> Result<Self, DaemonError> {
         Self::connect_endpoint_with_prompts_and_terminal(
             &Endpoint::Local(path.to_owned()),
-            color_scheme,
+            Some(color_scheme),
             None,
             true,
             false,
@@ -426,7 +426,7 @@ impl InteractiveClient {
     ) -> Result<Self, DaemonError> {
         Self::connect_endpoint_with_prompts_and_terminal(
             &Endpoint::Local(path.to_owned()),
-            color_scheme,
+            Some(color_scheme),
             None,
             client_has_terminal,
             false,
@@ -463,7 +463,7 @@ impl InteractiveClient {
     ) -> Result<Self, DaemonError> {
         Self::connect_endpoint_with_prompts_and_terminal(
             &Endpoint::Local(path.to_owned()),
-            color_scheme,
+            Some(color_scheme),
             None,
             client_has_terminal,
             true,
@@ -474,7 +474,13 @@ impl InteractiveClient {
         endpoint: &Endpoint,
         color_scheme: TerminalColorScheme,
     ) -> Result<Self, DaemonError> {
-        Self::connect_endpoint_with_prompts_and_terminal(endpoint, color_scheme, None, true, true)
+        Self::connect_endpoint_with_prompts_and_terminal(
+            endpoint,
+            Some(color_scheme),
+            None,
+            true,
+            true,
+        )
     }
 
     pub fn connect_endpoint_with_terminal(
@@ -484,7 +490,7 @@ impl InteractiveClient {
     ) -> Result<Self, DaemonError> {
         Self::connect_endpoint_with_prompts_and_terminal(
             endpoint,
-            color_scheme,
+            Some(color_scheme),
             None,
             client_has_terminal,
             true,
@@ -501,7 +507,7 @@ impl InteractiveClient {
     ) -> Result<Self, DaemonError> {
         Self::connect_endpoint_with_prompts_and_terminal(
             endpoint,
-            color_scheme,
+            Some(color_scheme),
             prompts,
             true,
             false,
@@ -515,16 +521,43 @@ impl InteractiveClient {
     ) -> Result<Self, DaemonError> {
         Self::connect_endpoint_with_prompts_and_terminal(
             endpoint,
-            color_scheme,
+            Some(color_scheme),
             prompts,
             true,
             true,
         )
     }
 
+    /// A client that runs inside somebody else's terminal has no theme of its
+    /// own to report until that terminal answers an OSC 11 query. `c->theme`
+    /// stays `THEME_UNKNOWN` for the pin until then, and
+    /// `format_cb_client_theme` gives nothing for it.
+    pub fn connect_endpoint_without_theme(
+        endpoint: &Endpoint,
+        client_has_terminal: bool,
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint_with_prompts_and_terminal(
+            endpoint,
+            None,
+            None,
+            client_has_terminal,
+            true,
+        )
+    }
+
+    pub fn connect_terminal_surface_without_theme(
+        path: &Path,
+        client_has_terminal: bool,
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint_without_theme(
+            &Endpoint::Local(path.to_owned()),
+            client_has_terminal,
+        )
+    }
+
     fn connect_endpoint_with_prompts_and_terminal(
         endpoint: &Endpoint,
-        color_scheme: TerminalColorScheme,
+        color_scheme: Option<TerminalColorScheme>,
         prompts: Option<crate::askpass::SshPrompts>,
         client_has_terminal: bool,
         terminal_surface: bool,
@@ -538,7 +571,7 @@ impl InteractiveClient {
                     path.display(),
                     ClientKind::Interactive,
                     device_name.clone(),
-                    Some(color_scheme),
+                    color_scheme,
                     client_has_terminal,
                     false,
                     if terminal_surface {
@@ -558,7 +591,7 @@ impl InteractiveClient {
                         endpoint,
                         ClientKind::Interactive,
                         device_name,
-                        Some(color_scheme),
+                        color_scheme,
                         client_has_terminal,
                         false,
                         if terminal_surface {
@@ -580,7 +613,7 @@ impl InteractiveClient {
                         endpoint,
                         ClientKind::Interactive,
                         device_name,
-                        Some(color_scheme),
+                        color_scheme,
                         client_has_terminal,
                         false,
                         if terminal_surface {
@@ -1171,6 +1204,22 @@ pub fn set_client_terminal_flags(flags: ClientTerminalFlags) {
 
 fn client_terminal_flags() -> &'static ClientTerminalFlags {
     CLIENT_TERMINAL_FLAGS.get_or_init(ClientTerminalFlags::default)
+}
+
+/// What `tty_check_fg` and `tty_check_bg` ask before they write a cell: how
+/// many colours the terminal this client runs in takes, from its own `TERM`
+/// and `COLORTERM` and the features `-2` and `-T` requested. The reply-driven
+/// half of the pin's answer is not here; a client that learns more from its
+/// terminal raises this itself.
+pub fn client_terminal_colour_count() -> u32 {
+    let flags = client_terminal_flags();
+    crate::terminal_features::terminal_colour_count(
+        &std::env::var("TERM").unwrap_or_default(),
+        &std::env::var("COLORTERM").unwrap_or_default(),
+        crate::terminal_features::terminal_feature_mask(
+            flags.features.iter().map(String::as_str),
+        ),
+    )
 }
 
 fn client_utf8_capability(capabilities: &mut Vec<String>) {

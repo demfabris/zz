@@ -10,12 +10,14 @@ const PASTE_END: &[u8] = b"\x1b[201~";
 pub(crate) enum Event {
     CellSize { width_px: u32, height_px: u32 },
     DeviceAttributes,
+    ExtendedDeviceAttributes(String),
     FocusGained,
     FocusLost,
     Key(KeyEvent),
     KittyGraphicsResponse { image_id: u32, ok: bool },
     Mouse(MouseEvent),
     Paste(String),
+    SecondaryDeviceAttributes(u8),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -240,6 +242,13 @@ fn parse_escape(bytes: &[u8]) -> Option<Parsed> {
             event,
         });
     }
+    if second == b'P' {
+        let terminator = find_subslice(&bytes[2..], b"\x1b\\")? + 2;
+        return Some(Parsed {
+            consumed: terminator + 2,
+            event: parse_extended_device_attributes(&bytes[2..terminator]),
+        });
+    }
     if second == b'[' {
         let final_index = bytes
             .iter()
@@ -280,10 +289,30 @@ fn parse_escape(bytes: &[u8]) -> Option<Parsed> {
     })
 }
 
+/// `tty_keys_extended_device_attributes`: the XTVERSION reply is a device
+/// control string opening `\x1bP>|` and closing on a string terminator, and
+/// what lies between names the terminal.
+fn parse_extended_device_attributes(payload: &[u8]) -> Option<Event> {
+    let name = payload.strip_prefix(b">|")?;
+    Some(Event::ExtendedDeviceAttributes(
+        String::from_utf8_lossy(name).into_owned(),
+    ))
+}
+
 fn parse_csi(parameters: &str, final_byte: u8) -> Option<Event> {
     match (parameters, final_byte) {
         (parameters, b'c') if parameters.starts_with('?') => {
             return Some(Event::DeviceAttributes);
+        }
+        // `tty_keys_device_attributes2` reads the first parameter of a
+        // secondary DA as a letter: 84 is tmux, 77 mintty, 85 rxvt-unicode.
+        (parameters, b'c') if parameters.starts_with('>') => {
+            let kind = parameters[1..]
+                .split(';')
+                .next()
+                .and_then(|field| field.parse::<u32>().ok())
+                .unwrap_or_default() as u8;
+            return Some(Event::SecondaryDeviceAttributes(kind));
         }
         ("", b'I') => return Some(Event::FocusGained),
         ("", b'O') => return Some(Event::FocusLost),
@@ -537,6 +566,26 @@ fn ss3_key(final_byte: u8) -> Option<KeyEvent> {
         b'Q' => KeyCode::F(2),
         b'R' => KeyCode::F(3),
         b'S' => KeyCode::F(4),
+        // The numeric keypad, which a terminal in keypad_xmit mode spells this
+        // way. `tty_default_raw_keys` names the same sixteen sequences and
+        // `input-keys.c` sends what a pane out of application-keypad mode
+        // expects, which is the character on the key.
+        b'p' => KeyCode::Char('0'),
+        b'q' => KeyCode::Char('1'),
+        b'r' => KeyCode::Char('2'),
+        b's' => KeyCode::Char('3'),
+        b't' => KeyCode::Char('4'),
+        b'u' => KeyCode::Char('5'),
+        b'v' => KeyCode::Char('6'),
+        b'w' => KeyCode::Char('7'),
+        b'x' => KeyCode::Char('8'),
+        b'y' => KeyCode::Char('9'),
+        b'n' => KeyCode::Char('.'),
+        b'o' => KeyCode::Char('/'),
+        b'j' => KeyCode::Char('*'),
+        b'k' => KeyCode::Char('+'),
+        b'm' => KeyCode::Char('-'),
+        b'M' => KeyCode::Enter,
         _ => return None,
     };
     Some(KeyEvent::new(code, KeyModifiers::NONE))
@@ -753,6 +802,44 @@ mod tests {
                 width_px: 9,
                 height_px: 18,
             }]
+        );
+    }
+
+    #[test]
+    fn the_keypad_in_application_mode_decodes_to_the_character_on_the_key() {
+        let keys = |bytes: &[u8]| {
+            let mut parser = EventParser::default();
+            let mut events = Vec::new();
+            parser.push(bytes, &mut events);
+            events
+        };
+        assert_eq!(
+            keys(b"\x1bOp\x1bOy\x1bOn\x1bOk\x1bOM"),
+            vec![
+                Event::Key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE)),
+                Event::Key(KeyEvent::new(KeyCode::Char('9'), KeyModifiers::NONE)),
+                Event::Key(KeyEvent::new(KeyCode::Char('.'), KeyModifiers::NONE)),
+                Event::Key(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::NONE)),
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            ]
+        );
+        assert_eq!(
+            keys(b"\x1bOA"),
+            vec![Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))]
+        );
+    }
+
+    #[test]
+    fn a_terminal_that_names_itself_is_read_and_never_typed() {
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        parser.push(b"\x1b[>84;0;0c\x1bP>|tmux 3.8\x1b\\", &mut events);
+        assert_eq!(
+            events,
+            vec![
+                Event::SecondaryDeviceAttributes(84),
+                Event::ExtendedDeviceAttributes("tmux 3.8".to_owned()),
+            ]
         );
     }
 

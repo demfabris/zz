@@ -1,5 +1,5 @@
-zz revision: 30134c35a8c1af0097c280e819bb2644b7f0ef22 (tracked tree clean outside compat/tui/evidence/TUI-007/attempt-02/, which these runs rewrite: yes)
-zz binary: /home/demfabris/dev/zz-tui-overlays/target/debug/zz sha256 67d9fb239dc1d8dce6fd7eaef9904b73d2e3d1607582c43e394dc6455b45602e (cargo build -p zz --jobs 4 at 30134c35a8c1af0097c280e819bb2644b7f0ef22)
+zz revision: b1747c04d4a0fdaf94ec0fadf187b9a9e9a3ac80 (tracked tree clean outside compat/tui/evidence/TUI-007/attempt-02/, which these runs rewrite: yes)
+zz binary: /home/demfabris/dev/zz-tui-overlays/target/debug/zz sha256 dad017daec77848e45e6301549dd3f2c1cbab88c9915a5c02728acf3b8241a01 (cargo build -p zz --jobs 4 at b1747c04d4a0fdaf94ec0fadf187b9a9e9a3ac80)
 prefix binary for tui-overlays-prefix: the crates/ tree of START 7c692222 with this attempt's fixture, sha256 dda19194d113349dfe02fcbb402ec39264b72321a7a40aa2725f1abce0f57476
 pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 (tmux next-3.8, source d77c9dc6)
 os: Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
@@ -10,4 +10,4 @@ shell: /bin/bash
 bash: 5.3.15(1)-release
 outer size: each fixture sets its own outer tmux window size (80x24, 60x20, 100x30, 80x30, 79x23)
 locale: LANG=en_US.UTF-8 LC_ALL= LC_TIME=pt_BR.UTF-8
-date: 2026-09-11T22:24:43-03:00
+date: 2026-09-11T22:48:14-03:00

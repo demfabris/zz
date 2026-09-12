@@ -627,7 +627,14 @@ in a patch payload, both after the kitty placements, packing each side's two-bit
 its palette index (`PackedStyle::class_word` in `crates/zz-terminal/src/model.rs`). A word that
 does not round-trip through `with_class_word` is rejected as `packed style colour classes are
 invalid`. v102 also adds the `client-features-v1:<spec>` value token to `ClientHello`
-capabilities, one per terminal feature the caller asked for.
+capabilities, one per terminal feature the caller asked for. v102 also appends `colour` and
+`active_colour`, both `Option<TmuxColour>`, to `DisplayPanesState` after `indicators`: the client's
+resolved `display-panes-colour` and `display-panes-active-colour`, `None` when the option parses as
+neither a colour nor a style with a foreground. `InputMessage` gains a trailing
+`DismissClientMessage` after `ClientFocus`, which the raw TUI sends to clear a client message before
+a local overlay sees the key, the order `server_client_handle_key` uses, and `DisplayPanesAction`
+gains a trailing `Dismiss` after `Close`, which closes the labels on a resize without typing an
+Escape into the pane.
 
 # Versioning & compatibility
 
@@ -646,6 +653,15 @@ capabilities, one per terminal feature the caller asked for.
   know. Both are pure appends and both consumer halves shipped with them, but 101 went out in zz
   0.8.0 (`fd3c64e4`) before either landed: a 0.8.0 client would pass the handshake and misdecode a
   frame's style dictionary, so the version moves rather than the entry growing.
+- v102 also carries the raw TUI's display-panes colours and two dismissals. `DisplayPanesState`
+  appends `colour` and `active_colour` after `indicators`, the client's resolved
+  `display-panes-colour` and `display-panes-active-colour` and `None` when the option is neither a
+  colour nor a style with a foreground, so the TUI paints the labels from the options instead of
+  guessing. `InputMessage` appends the unit variant `DismissClientMessage` and `DisplayPanesAction`
+  appends the unit variant `Dismiss`. All four are pure end-appends with both consumer halves in the
+  tree. They reached main with the cycle-6 overlays lane, which was measured against a base carrying
+  101; the cycle-5 gate's rebase carried the appends without this entry, so the gate wrote it here
+  rather than reopening 101.
 - v101 carries the raw TUI's mode and message presentation. `StatusLine` gains `message_style` and
   `message_command_style`, the two session options expanded for this client, and `modes`, one
   `ModePresentation` per mode screen the client holds (its copy session and its command output):

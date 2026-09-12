@@ -5,8 +5,9 @@ surfaces themselves and left thirteen cases recorded `SIBLING:modes`, because th
 message row's style was TUI-004's. TUI-004 landed. This attempt flips those thirteen, fixes the
 four that did not simply start matching, and takes the fixture to zero recorded cases.
 
-Every run below except `tui-overlays-prefix` ran at the branch tip `b1a56015`, tracked tree clean
-outside this directory, against the `target/debug/zz` named in `environment.txt`.
+Every run below except `tui-overlays-prefix` ran at the branch tip `3d3b8871`, tracked tree clean
+outside this directory, against the `target/debug/zz` named in `environment.txt`. The commit that
+writes these files is the only thing after them and it touches no Rust and no fixture.
 
 | File | What it is |
 | --- | --- |
@@ -21,7 +22,7 @@ outside this directory, against the `target/debug/zz` named in `environment.txt`
 | `tui-overlays-run-3.stderr.txt`, `tui-overlays-run-3.exit.txt` | stderr (empty) and exit status of run 3 |
 | `tui-overlays-self-check.stdout.txt` | `compat/tui-overlays.sh --self-check`, exit 0: eight sabotages caught, one equivalence passed |
 | `tui-overlays-self-check.stderr.txt`, `tui-overlays-self-check.exit.txt` | stderr (empty) and exit status |
-| `tui-screen-diff.stdout.txt` | `compat/tui-screen-diff.sh`, exit 0: `all 111 asserted checkpoints identical, 42 recorded not asserted` |
+| `tui-screen-diff.stdout.txt` | `compat/tui-screen-diff.sh`, exit 0: `all 111 asserted checkpoints identical, 42 recorded not asserted`. Its one line that is not stable between runs is the zz cursor inside `120x24-sidebar sidebar-shown`, the case whose whole assertion is that zz DIFFERS from the pin because it drew a sidebar; nothing asserted moves |
 | `tui-screen-diff.stderr.txt`, `tui-screen-diff.exit.txt` | its stderr and exit status |
 | `attached-client.stdout.txt` | `compat/attached-client.sh` as this branch carries it, empty: the driver stops in its first probe |
 | `attached-client.stderr.txt` | `error: zz screen did not visibly become copy-mode within 10 seconds`, plus the captured zz screen and the daemon ring log. This is the one red BASE is known to carry and it is not this lane's, see below |

@@ -311,13 +311,15 @@ fn parse_extended_device_attributes(payload: &[u8]) -> Option<Event> {
     ))
 }
 
+/// `tty_keys_device_attributes2` reads the first parameter of a secondary DA
+/// as a letter: 84 is tmux, 77 mintty, 85 rxvt-unicode. `tty_default_raw_keys`
+/// reads `\e[?997;1n` and `\e[?997;2n` as the terminal's answer to `\e[?996n`
+/// and as every theme change after it, while mode 2031 is subscribed.
 fn parse_csi(parameters: &str, final_byte: u8) -> Option<Event> {
     match (parameters, final_byte) {
         (parameters, b'c') if parameters.starts_with('?') => {
             return Some(Event::DeviceAttributes);
         }
-        // `tty_keys_device_attributes2` reads the first parameter of a
-        // secondary DA as a letter: 84 is tmux, 77 mintty, 85 rxvt-unicode.
         (parameters, b'c') if parameters.starts_with('>') => {
             let kind = parameters[1..]
                 .split(';')
@@ -326,8 +328,6 @@ fn parse_csi(parameters: &str, final_byte: u8) -> Option<Event> {
                 .unwrap_or_default() as u8;
             return Some(Event::SecondaryDeviceAttributes(kind));
         }
-        // `tty_default_raw_keys`: the terminal's answer to `\e[?996n` and every
-        // theme change after it, while mode 2031 is subscribed.
         ("?997;1", b'n') => return Some(Event::DarkTheme),
         ("?997;2", b'n') => return Some(Event::LightTheme),
         ("", b'I') => return Some(Event::FocusGained),
@@ -570,6 +570,10 @@ fn control_key(byte: u8) -> KeyEvent {
     }
 }
 
+/// The `b'p'`..`b'y'` arms are the numeric keypad, which a terminal in
+/// `keypad_xmit` mode spells this way. `tty_default_raw_keys` names the same
+/// sixteen sequences and `input-keys.c` sends what a pane out of
+/// application-keypad mode expects, which is the character on the key.
 fn ss3_key(final_byte: u8) -> Option<KeyEvent> {
     let code = match final_byte {
         b'A' => KeyCode::Up,
@@ -582,10 +586,6 @@ fn ss3_key(final_byte: u8) -> Option<KeyEvent> {
         b'Q' => KeyCode::F(2),
         b'R' => KeyCode::F(3),
         b'S' => KeyCode::F(4),
-        // The numeric keypad, which a terminal in keypad_xmit mode spells this
-        // way. `tty_default_raw_keys` names the same sixteen sequences and
-        // `input-keys.c` sends what a pane out of application-keypad mode
-        // expects, which is the character on the key.
         b'p' => KeyCode::Char('0'),
         b'q' => KeyCode::Char('1'),
         b'r' => KeyCode::Char('2'),

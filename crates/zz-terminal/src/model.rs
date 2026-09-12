@@ -34,6 +34,13 @@ pub const ATTR_STRIKETHROUGH: u16 = 1 << 5;
 pub const ATTR_OVERLINE: u16 = 1 << 6;
 pub const ATTR_EXPLICIT_RGB: u16 = 1 << 7;
 pub const ATTR_HYPERLINK: u16 = 1 << 8;
+
+/// The highest attribute bit defined above. [`PackedStyle`] spends bits
+/// `CLASS_SHIFT`..15 on the two colour-class codes and masks the rest away, so
+/// an attribute that reached them would be dropped without a word.
+const ATTR_HIGHEST: u16 = ATTR_HYPERLINK;
+const _: () = assert!(ATTR_HIGHEST < 1 << CLASS_SHIFT);
+
 pub const OVERLAY_RECTANGLE: u8 = 1 << 0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]

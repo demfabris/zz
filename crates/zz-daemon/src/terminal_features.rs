@@ -35,7 +35,6 @@ pub(crate) fn terminal_feature_bit(name: &str) -> Option<u32> {
         .map(|index| 1 << index)
 }
 
-
 #[cfg(feature = "daemon")]
 pub(crate) fn terminal_features_list(features: u32) -> String {
     TERMINAL_FEATURES
@@ -46,7 +45,6 @@ pub(crate) fn terminal_features_list(features: u32) -> String {
         .collect::<Vec<_>>()
         .join(",")
 }
-
 
 /// `tty_term_create` over `tty_default_features`, then `tty_check_fg`'s own
 /// question: `TERM_RGBCOLOURS` from a `RGB` feature or a truecolor

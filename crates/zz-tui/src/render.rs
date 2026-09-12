@@ -2923,6 +2923,7 @@ fn downgrade_palette(index: u8, colours: u32) -> u8 {
 
 /// `colour_256to16`.
 fn colour_256to16(index: u8) -> u8 {
+    #[rustfmt::skip]
     const TABLE: [u8; 256] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
     0, 4, 4, 4, 12, 12, 2, 6, 4, 4, 12, 12, 2, 2, 6, 4,

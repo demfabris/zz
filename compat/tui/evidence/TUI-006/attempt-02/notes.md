@@ -22,6 +22,9 @@ the pin, the toolchain and the hash of the `zz` binary under test, written befor
 | `copy-mode-regression-2.txt` | `compat/tui-copy-mode.sh` after it | exit 0, 147 cases agree |
 | `run-05-rebased-tip.txt` | `compat/tui-choosers.sh` after the rebase onto the caps landing | exit 0, same |
 | `self-check-03-rebased-tip.txt` | `compat/tui-choosers.sh --self-check` after that rebase | exit 0, same |
+| `run-06-rebased-tip.txt` | `compat/tui-choosers.sh`, second run at the rebased tip | exit 0, same |
+| `run-07-rebased-tip.txt` | `compat/tui-choosers.sh`, third run at the rebased tip | exit 0, same |
+| `self-check-04-rebased-tip.txt` | `compat/tui-choosers.sh --self-check`, second run there | exit 0, same |
 | `pin-filter-clear.txt` | pin-only probe: `prefix w`, `f`, a window filter, `Enter`, `c` | the rebuild rule |
 | `pin-filter-clear-sessions.txt` | pin-only probe: `prefix s`, the same, plus a session created while the tree is open | the same rule under `-s` |
 | `zz-protocol-unit-tests.txt` | `cargo test -p zz-protocol` | exit 0 |

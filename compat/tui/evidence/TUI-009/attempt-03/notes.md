@@ -198,8 +198,11 @@ TUI-009 stays `active`.
   `TERMINAL_COLOURS` cell and the two reply notes; `enter` writes the requests
   and no longer writes `\e[?7l`, `Drop` no longer writes `\e[?7h`.
 - `crates/zz-tui/src/terminal_event.rs`: `SecondaryDeviceAttributes`,
-  `ExtendedDeviceAttributes`, `DarkTheme` and `LightTheme`; a DCS branch in
-  `parse_escape`; the keypad arms of `ss3_key`.
+  `ExtendedDeviceAttributes`, `DarkTheme` and `LightTheme`; a device control
+  string branch in `parse_escape`, bounded at 256 bytes the way the control
+  sequence branch is bounded at 64, so an unterminated one is read as the
+  escape it would have been rather than buffered; the keypad arms of
+  `ss3_key`.
 - `crates/zz-tui/src/input.rs`: the four new events, three of them terminal
   facts and one a `set_color_scheme`.
 - `crates/zz-tui/src/render.rs`, by function: `Renderer::new` and the new
@@ -214,11 +217,13 @@ TUI-009 stays `active`.
 - The wire is unchanged: no message, field or variant was added or altered,
   and PROTOCOL_VERSION stays 101.
 
-The two halves of this cycle's work landed as one commit each: the terminal's
-own answers and the cell writer that reads them in the first, the theme
-subscription and the gap it closes in the second. Autowrap, the keypad and the
-colour rule sit in the first with the negotiation they share `tty.rs` and
-`compat/tui-caps.sh` with.
+This cycle's work landed in three commits: the terminal's own answers and the
+cell writer that reads them in the first, the theme subscription and the gap it
+closes in the second, the device control string's bound in the third. Autowrap,
+the keypad and the colour rule sit in the first, with the negotiation they
+share `tty.rs` and `compat/tui-caps.sh` with; splitting those out would have
+meant a half-reverted `tty.rs` and a half-reverted fixture in the same commit,
+which is worse to read than the one they are in.
 
 ## Files
 

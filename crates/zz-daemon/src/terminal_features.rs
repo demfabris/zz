@@ -3,6 +3,7 @@
 //! of this crate read it: the daemon to publish `client_termfeatures` and
 //! `client_colours`, and a client to know what its own terminal takes.
 
+#[cfg_attr(not(feature = "daemon"), allow(dead_code))]
 pub(crate) const TERMINAL_FEATURES: [&str; 21] = [
     "256",
     "bpaste",
@@ -35,6 +36,7 @@ pub(crate) fn terminal_feature_bit(name: &str) -> Option<u32> {
 }
 
 
+#[cfg(feature = "daemon")]
 pub(crate) fn terminal_features_list(features: u32) -> String {
     TERMINAL_FEATURES
         .iter()

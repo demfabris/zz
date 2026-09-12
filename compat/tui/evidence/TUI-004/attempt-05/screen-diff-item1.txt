@@ -1,0 +1,287 @@
+whole-screen differential (pin tmux)
+ok    80x24 fresh
+ok    80x24 status-off
+ok    80x24 status-on
+ok    80x24 split
+ok    80x24 zoom
+ok    80x24 unzoom
+ok    120x24-from-80x24 resized
+ok    80x24 restored
+ok    80x24 status-two-rows
+ok    80x24 status-top
+ok    80x24 pane-border-top
+ok    80x24 pane-border-bottom
+ok    80x24 pane-border-attributes-top
+ok    80x24 pane-border-attributes-bottom
+ok    80x24 pane-border-off
+ok    80x24 status-style-named
+ok    80x24 status-style-indexed
+ok    80x24 status-style-rgb
+ok    80x24 format-colour-classes
+ok    80x24 wide-glyphs
+      checkpoint default-fg at 80x24
+      first differing row 23 of 24
+        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+      cursor tmux: 2,14 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,14 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  80x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+      checkpoint colour-classes at 80x24
+      first differing row 14 of 24
+        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+      cursor tmux: 2,17 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,17 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  80x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+ok    80x24 theme-light
+      checkpoint styled-left-trim at 80x24
+      first differing row 23 of 24
+        tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      cursor tmux: 2,14 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,14 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  80x24 styled-left-trim recorded, not asserted: zz counts a #[...] section against status-left-length where the pin does not
+      checkpoint cursor-style-request at 80x24
+      all 24 rows identical
+      cursor tmux: 2,15 flag=1 pane=80x24 shape=bar blinking=1 very_visible=0 colour=none
+      cursor zz:   2,15 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  80x24 cursor-style-request recorded, not asserted: the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request
+ok    100x24 fresh
+ok    100x24 status-off
+ok    100x24 status-on
+ok    100x24 split
+ok    100x24 zoom
+ok    100x24 unzoom
+ok    80x24-from-100x24 resized
+ok    100x24 restored
+ok    100x24 status-two-rows
+ok    100x24 status-top
+ok    100x24 pane-border-top
+ok    100x24 pane-border-bottom
+ok    100x24 pane-border-attributes-top
+ok    100x24 pane-border-attributes-bottom
+ok    100x24 pane-border-off
+ok    100x24 status-style-named
+ok    100x24 status-style-indexed
+ok    100x24 status-style-rgb
+ok    100x24 format-colour-classes
+ok    100x24 wide-glyphs
+      checkpoint default-fg at 100x24
+      first differing row 23 of 24
+        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+      cursor tmux: 2,14 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,14 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
+note  100x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+      checkpoint colour-classes at 100x24
+      first differing row 13 of 24
+        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+      cursor tmux: 2,16 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,16 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
+note  100x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+ok    100x24 theme-light
+      checkpoint styled-left-trim at 100x24
+      first differing row 23 of 24
+        tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      cursor tmux: 2,14 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,14 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
+note  100x24 styled-left-trim recorded, not asserted: zz counts a #[...] section against status-left-length where the pin does not
+      checkpoint cursor-style-request at 100x24
+      all 24 rows identical
+      cursor tmux: 2,15 flag=1 pane=100x24 shape=bar blinking=1 very_visible=0 colour=none
+      cursor zz:   2,15 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
+note  100x24 cursor-style-request recorded, not asserted: the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request
+ok    80x10 fresh
+ok    80x10 status-off
+ok    80x10 status-on
+ok    80x10 split
+ok    80x10 zoom
+ok    80x10 unzoom
+ok    100x10-from-80x10 resized
+ok    80x10 restored
+ok    80x10 status-two-rows
+ok    80x10 status-top
+ok    80x10 pane-border-top
+ok    80x10 pane-border-bottom
+ok    80x10 pane-border-attributes-top
+ok    80x10 pane-border-attributes-bottom
+ok    80x10 pane-border-off
+ok    80x10 status-style-named
+ok    80x10 status-style-indexed
+ok    80x10 status-style-rgb
+ok    80x10 format-colour-classes
+ok    80x10 wide-glyphs
+      checkpoint default-fg at 80x10
+      first differing row 9 of 10
+        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+      cursor tmux: 2,7 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,7 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
+note  80x10 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+      checkpoint colour-classes at 80x10
+      first differing row 5 of 10
+        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+      cursor tmux: 2,8 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,8 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
+note  80x10 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+ok    80x10 theme-light
+      checkpoint styled-left-trim at 80x10
+      first differing row 9 of 10
+        tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      cursor tmux: 2,7 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,7 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
+note  80x10 styled-left-trim recorded, not asserted: zz counts a #[...] section against status-left-length where the pin does not
+      checkpoint cursor-style-request at 80x10
+      all 10 rows identical
+      cursor tmux: 2,8 flag=1 pane=80x10 shape=bar blinking=1 very_visible=0 colour=none
+      cursor zz:   2,8 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
+note  80x10 cursor-style-request recorded, not asserted: the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request
+ok    80x6 fresh
+ok    80x6 status-off
+ok    80x6 status-on
+ok    80x6 split
+ok    80x6 zoom
+ok    80x6 unzoom
+ok    100x6-from-80x6 resized
+ok    80x6 restored
+ok    80x6 status-two-rows
+ok    80x6 status-top
+ok    80x6 pane-border-top
+ok    80x6 pane-border-bottom
+ok    80x6 pane-border-attributes-top
+ok    80x6 pane-border-attributes-bottom
+ok    80x6 pane-border-off
+ok    80x6 status-style-named
+ok    80x6 status-style-indexed
+ok    80x6 status-style-rgb
+ok    80x6 format-colour-classes
+ok    80x6 wide-glyphs
+      checkpoint default-fg at 80x6
+      first differing row 5 of 6
+        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+      cursor tmux: 2,4 flag=1 pane=80x6 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,4 flag=1 pane=80x6 shape=default blinking=0 very_visible=0 colour=none
+note  80x6 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+ok    80x6 colour-classes
+ok    80x6 theme-light
+      checkpoint styled-left-trim at 80x6
+      first differing row 5 of 6
+        tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      cursor tmux: 2,4 flag=1 pane=80x6 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,4 flag=1 pane=80x6 shape=default blinking=0 very_visible=0 colour=none
+note  80x6 styled-left-trim recorded, not asserted: zz counts a #[...] section against status-left-length where the pin does not
+      checkpoint cursor-style-request at 80x6
+      all 6 rows identical
+      cursor tmux: 2,4 flag=1 pane=80x6 shape=bar blinking=1 very_visible=0 colour=none
+      cursor zz:   2,4 flag=1 pane=80x6 shape=default blinking=0 very_visible=0 colour=none
+note  80x6 cursor-style-request recorded, not asserted: the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request
+ok    109x24 fresh
+ok    109x24 status-off
+ok    109x24 status-on
+ok    109x24 split
+ok    109x24 zoom
+ok    109x24 unzoom
+ok    120x24-from-109x24 resized
+ok    109x24 restored
+ok    109x24 status-two-rows
+ok    109x24 status-top
+ok    109x24 pane-border-top
+ok    109x24 pane-border-bottom
+ok    109x24 pane-border-attributes-top
+ok    109x24 pane-border-attributes-bottom
+ok    109x24 pane-border-off
+ok    109x24 status-style-named
+ok    109x24 status-style-indexed
+ok    109x24 status-style-rgb
+ok    109x24 format-colour-classes
+ok    109x24 wide-glyphs
+      checkpoint default-fg at 109x24
+      first differing row 23 of 24
+        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+      cursor tmux: 2,14 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,14 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
+note  109x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+      checkpoint colour-classes at 109x24
+      first differing row 13 of 24
+        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+      cursor tmux: 2,16 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,16 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
+note  109x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+ok    109x24 theme-light
+      checkpoint styled-left-trim at 109x24
+      first differing row 23 of 24
+        tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      cursor tmux: 2,14 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,14 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
+note  109x24 styled-left-trim recorded, not asserted: zz counts a #[...] section against status-left-length where the pin does not
+      checkpoint cursor-style-request at 109x24
+      all 24 rows identical
+      cursor tmux: 2,15 flag=1 pane=109x24 shape=bar blinking=1 very_visible=0 colour=none
+      cursor zz:   2,15 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
+note  109x24 cursor-style-request recorded, not asserted: the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request
+ok    120x24 fresh
+ok    120x24 status-off
+ok    120x24 status-on
+ok    120x24 split
+ok    120x24 zoom
+ok    120x24 unzoom
+ok    100x24-from-120x24 resized
+ok    120x24 restored
+ok    120x24 status-two-rows
+ok    120x24 status-top
+ok    120x24 pane-border-top
+ok    120x24 pane-border-bottom
+ok    120x24 pane-border-attributes-top
+ok    120x24 pane-border-attributes-bottom
+ok    120x24 pane-border-off
+ok    120x24 status-style-named
+ok    120x24 status-style-indexed
+ok    120x24 status-style-rgb
+ok    120x24 format-colour-classes
+ok    120x24 wide-glyphs
+      checkpoint default-fg at 120x24
+      first differing row 23 of 24
+        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
+        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
+      cursor tmux: 2,14 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,14 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+note  120x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+      checkpoint colour-classes at 120x24
+      first differing row 13 of 24
+        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
+      cursor tmux: 2,16 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,16 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+note  120x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+ok    120x24 theme-light
+      checkpoint styled-left-trim at 120x24
+      first differing row 23 of 24
+        tmux: ^[[1m^[[31m^[[48;2;154;205;50mLEFT^[[0;4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      cursor tmux: 2,14 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,14 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+note  120x24 styled-left-trim recorded, not asserted: zz counts a #[...] section against status-left-length where the pin does not
+      checkpoint cursor-style-request at 120x24
+      all 24 rows identical
+      cursor tmux: 2,15 flag=1 pane=120x24 shape=bar blinking=1 very_visible=0 colour=none
+      cursor zz:   2,15 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+note  120x24 cursor-style-request recorded, not asserted: the pin forwards a DECSCUSR the pane asked for and zz has nowhere to carry the request
+ok    120x24-sidebar sidebar-before
+      checkpoint sidebar-shown at 120x24-sidebar
+      first differing row 0 of 24
+        tmux: $ printf 'MARK-%s\n' sidebar-before
+        zz:   ^[[38;2;16;19;24m^[[48;2;77;163;235mzz at alienware             ^[[38;2;216;222;233m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$ printf 'MARK-%s\n' sidebar-before
+      cursor tmux: 2,2 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   29,22 flag=0 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
+ok    120x24-sidebar sidebar-shown differs from the pin, which is what a drawn sidebar means
+ok    120x24-sidebar sidebar-withdrawn
+all 129 asserted checkpoints identical, 24 recorded not asserted

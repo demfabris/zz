@@ -1,0 +1,53 @@
+WINDOW SIZING UNDER STATUS ROWS, probed 2026-09-12 on alienware.
+Each side is an inner server attached from one outer pinned tmux pane of
+exactly 80 columns by the named rows (the outer session's status is off),
+driven through the same sequence the screen-diff fixture drives.
+
+pin at 80x10
+  status off, 1 pane     %0:h=10:active=1 | window 80x10
+  status on, 1 pane      %0:h=9:active=1 | window 80x9
+  split                  %0:h=4:active=0 %1:h=4:active=1 | window 80x9
+  status 2               %0:h=3:active=0 %1:h=4:active=1 | window 80x8
+  status 2, position top %0:h=3:active=0 %1:h=4:active=1 | window 80x8
+  status 2, position bottom %0:h=3:active=0 %1:h=4:active=1 | window 80x8
+  status on              %0:h=4:active=0 %1:h=4:active=1 | window 80x9
+zz at 80x10
+  status off, 1 pane     %0:h=10:active=1 | window 80x10
+  status on, 1 pane      %0:h=9:active=1 | window 80x9
+  split                  %0:h=4:active=0 %1:h=4:active=1 | window 80x9
+  status 2               %0:h=3:active=0 %1:h=4:active=1 | window 80x8
+  status 2, position top %0:h=3:active=0 %1:h=4:active=1 | window 80x8
+  status 2, position bottom %0:h=3:active=0 %1:h=4:active=1 | window 80x8
+  status on              %0:h=4:active=0 %1:h=4:active=1 | window 80x9
+pin at 80x6
+  status off, 1 pane     %0:h=6:active=1 | window 80x6
+  status on, 1 pane      %0:h=5:active=1 | window 80x5
+  split                  %0:h=2:active=0 %1:h=2:active=1 | window 80x5
+  status 2               %0:h=1:active=0 %1:h=2:active=1 | window 80x4
+  status 2, position top %0:h=1:active=0 %1:h=2:active=1 | window 80x4
+  status 2, position bottom %0:h=1:active=0 %1:h=2:active=1 | window 80x4
+  status on              %0:h=2:active=0 %1:h=2:active=1 | window 80x5
+zz at 80x6
+  status off, 1 pane     %0:h=6:active=1 | window 80x6
+  status on, 1 pane      %0:h=5:active=1 | window 80x5
+  split                  %0:h=2:active=0 %1:h=2:active=1 | window 80x5
+  status 2               %0:h=1:active=0 %1:h=2:active=1 | window 80x4
+  status 2, position top %0:h=1:active=0 %1:h=2:active=1 | window 80x4
+  status 2, position bottom %0:h=1:active=0 %1:h=2:active=1 | window 80x4
+  status on              %0:h=2:active=0 %1:h=2:active=1 | window 80x5
+pin at 80x24
+  status off, 1 pane     %0:h=24:active=1 | window 80x24
+  status on, 1 pane      %0:h=23:active=1 | window 80x23
+  split                  %0:h=11:active=0 %1:h=11:active=1 | window 80x23
+  status 2               %0:h=10:active=0 %1:h=11:active=1 | window 80x22
+  status 2, position top %0:h=10:active=0 %1:h=11:active=1 | window 80x22
+  status 2, position bottom %0:h=10:active=0 %1:h=11:active=1 | window 80x22
+  status on              %0:h=11:active=0 %1:h=11:active=1 | window 80x23
+zz at 80x24
+  status off, 1 pane     %0:h=24:active=1 | window 80x24
+  status on, 1 pane      %0:h=23:active=1 | window 80x23
+  split                  %0:h=11:active=0 %1:h=11:active=1 | window 80x23
+  status 2               %0:h=10:active=0 %1:h=11:active=1 | window 80x22
+  status 2, position top %0:h=10:active=0 %1:h=11:active=1 | window 80x22
+  status 2, position bottom %0:h=10:active=0 %1:h=11:active=1 | window 80x22
+  status on              %0:h=11:active=0 %1:h=11:active=1 | window 80x23

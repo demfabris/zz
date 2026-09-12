@@ -136,6 +136,7 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "status-justify",
     "status-position",
     "message-line",
+    "message-style",
     "pane-status-style",
     "pane-status-current-style",
     "session-status-style",
@@ -34269,7 +34270,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 144);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 145);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

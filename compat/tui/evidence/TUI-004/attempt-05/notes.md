@@ -1,9 +1,10 @@
 # TUI-004 attempt-05: window sizing under status rows, and the styled trim
 
-Cycle 6, the mux lane, punch list items 1 to 3. Base `origin/main` 33ecbd86.
-Every `*-tip.txt` run here is at code revision df1dedcb with a clean tree,
-against the binary whose sha256 is in `environment.txt`. The commit that adds
-this directory changes nothing but evidence and the ledger.
+Cycle 6, the mux lane, punch list items 1 to 3, plus one divergence found on
+the way. Base `origin/main` 33ecbd86. Every `*-tip.txt` run here is at code
+revision 451cf194 with a clean tree, against the binary whose sha256 is in
+`environment.txt`. The commit that records this directory changes nothing but
+evidence and the ledger.
 
 ## What asserts, and what remains
 
@@ -13,6 +14,10 @@ with two new sabotages; `tui-pane-geometry.sh` 6 of 6; `status-row.sh` 14 of 14
 under `LC_ALL=C LC_TIME=C` with none recorded; `tui-indicators.sh` 23 of 23
 with 0 recorded; `attached-client.sh` PASS; `cargo test` green for zz-mux,
 zz-daemon and zz; clippy clean on both touched crates.
+
+What remains, and it is NOT inside a fixture: a client shorter than five rows
+whose status block would leave the window a single row. See "Found on the way"
+below.
 
 The two checkpoints this lane owned flipped. `status-two-rows` and
 `status-top` were recorded at 80x10 and 80x6 and now assert at all six sizes;
@@ -126,6 +131,36 @@ unterminated `#[fg=red`), with and without a `...` marker, left and right: 72
 answers, 72 agree. 27 of them are pinned in the zz-mux unit test
 `a_style_section_costs_a_trim_no_column_the_way_format_trim_left_does`.
 
+## Found on the way: a window the pin takes down to one row
+
+Probing item 1 at heights below the fixture's smallest (`80x6`) turned up a
+divergence no punch-list item names. `pin-and-zz-short-client.txt` walks one
+pane at 80 columns by 6, 5, 4, 3 and 2 rows against `status` 1 to 4 on both
+binaries: 16 of the 20 agree, and the 4 that differ are exactly the rows where
+the pin's window would come out one row tall (rows=5 status=4, rows=4 status=3,
+rows=3 status=2, rows=2 status=1). zz answers the client's full height there.
+
+Half of it was the daemon's, and landed. `resize.c` `recalculate_sizes_now`
+raises `CLIENT_STATUSOFF` when `c->tty.sy <= s->statuslines`, so
+`status_line_size` answers 0 and the window keeps every row; zz clamped the
+subtraction to `rows - 1` instead, which took a row away where the pin takes
+none. `interactive_client_window_extent` now carries the pin's rule, which
+converged rows=3 status=3, rows=2 status=2 and rows=4 status=4 (zz answered 1
+at each and now answers the pin's 3, 2 and 4), pinned by the zz-daemon unit
+test `a_client_no_taller_than_its_status_block_keeps_every_row` against the
+probe's numbers at a 3-row client. It changes nothing at any height a fixture
+drives: it only fires when the client is no taller than its status block.
+
+The other half is not this lane's. zz never takes a window down to a single
+row: the raw TUI reports a full-height pane at those heights and
+`set_pane_geometry` back-solves the extent from that report, so the four rows
+above stay open. Closing them needs a rule in `crates/zz-tui`, which this
+lane's zones exclude, and no compat fixture drives a client shorter than six
+rows, so there is nowhere inside this lane's fixture zone to record it as a
+case. `rows=2 status=1` also diverges at BASE and is untouched by this branch:
+`status 1` is the value a fresh session already holds, so no status write
+happens and no resize is attempted.
+
 ## The two sabotages
 
 Both are in `compat/tui-screen-diff.sh`'s `--self-check`, and both work the
@@ -151,9 +186,11 @@ behaviour that landed away.
 - `environment.txt` — box, revision, both binaries' hashes, server hygiene.
 - `pin-and-zz-status-sizing.txt` — item 1's probe, both binaries, three sizes.
 - `pin-and-zz-styled-trim.txt` — item 2's probe, 72 answers, both binaries.
+- `pin-and-zz-short-client.txt` — the short-client probe, 20 rows, both
+  binaries, and what each of the four open ones needs.
 - `screen-diff-tip-1.txt`, `screen-diff-tip-2.txt`, `screen-diff-tip-3.txt` —
   three runs at the tip, identical dispositions, 135 asserted and 18 recorded.
-- `screen-diff-self-check-tip.txt` — `--self-check` at the tip, 15 expectations
+- `screen-diff-self-check-tip.txt` — `--self-check` at the tip, 16 expectations
   met, both new sabotages caught in the rows channel.
 - `screen-diff-item1.txt` — the run after item 1 only, 129 asserted and 24
   recorded: the four status-row checkpoints flipped, styled-left-trim not yet.

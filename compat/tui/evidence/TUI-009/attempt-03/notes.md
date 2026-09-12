@@ -1,188 +1,256 @@
-# TUI-009 attempt-03: the pane-colours regression, default grounds, -T RGB and a silent terminal
+# TUI-009 attempt-03: what the raw TUI's terminal says, and what it writes back
 
 Cycle 6, the caps lane, on alienware against pinned tmux d77c9dc6. Both
-binaries attach inside one outer pinned tmux, except for the silent-terminal
-cases described below. attempt-01 and attempt-02 are read-only history.
-Everything from `01` to `13` ran at `95d3644e` with a clean worktree. The files
-`14` to `16` are real runs from earlier in the attempt, and each one names the
-tree it ran on.
+binaries attach inside one outer pinned tmux, except the silent-terminal cases,
+which run through the relay described in compat/tui-caps.sh. attempt-01 and
+attempt-02 are read-only history. Every file from `01` to `13`, and `17` and
+`18`, ran at `3f6dc460` with a clean worktree. `14` to `16` are real runs from
+earlier in the attempt and each one names the tree it ran on.
+
+`compat/tui-caps.sh` asserts **243 rows** and records **23**, three runs with
+identical dispositions and identical recorded values, and its `--self-check`
+catches **21 one-sided sabotages** with **3 controls quiet**. At the start of
+this attempt it asserted 210 and recorded 56.
 
 ## The punch list
 
-**1. The regression that skipped this branch: fixed.** smoke/pane-colours-palette
-was green at origin/main and red here (7 of 18 zz-side checks). The attached
-client never wrote the pane-colours RGB. `daemon.rs` `pane_palette` writes the
-option into the pane's default palette. `palette_class` compared a cell
-against that same default palette, so an option entry never looked changed.
-The cell went out as `\e[31m` where the pin writes `38;2;18;52;86`. Now:
+**1. The regression that skipped this branch: fixed.**
+`smoke/pane-colours-palette` was green at origin/main and red here (7 of 18
+zz-side checks). `daemon.rs` `pane_palette` wrote the option into the pane's
+default palette and `palette_class` compared a cell against that same default,
+so an option entry never looked changed and the cell went out as `\e[31m`
+where the pin writes `38;2;18;52;86`. The daemon now hands the terminal worker
+the class of every entry it overlays (`TerminalAppearance::palette_classes`:
+RGB for `#rrggbb`, the colour's own index for `colourN`), the worker's
+`Classifier` uses it while the entry still equals the default, an OSC 4 over
+the entry still goes RGB, and OSC 104 returns to the option. `07` is the
+corpus row, 0 divergences.
 
-- The daemon hands the terminal worker the class of every entry it overlays.
-  RGB for `#rrggbb`, the colour's own index for `colourN`
-  (`TerminalAppearance::palette_classes`).
-- The worker's `Classifier` uses that class when the current entry still
-  equals the default.
-- An OSC 4 over the entry still goes RGB, and OSC 104 returns to the option.
+**2. The -2 screen effect on a silent terminal: fixed and asserted.**
+This was the one item the cycle-5 record left measured and unfixed. The pin
+turns an RGB colour into its nearest 256 colour when the terminal has no RGB
+(`colour_find_rgb`) and a 256 colour into its nearest of sixteen when it has
+fewer (`colour_256to16`), in `tty_check_fg` and `tty_check_bg`. The raw TUI
+never downgraded. Matching it needed the client to know what its terminal
+takes, which is what the old record called
+`options.client-terminal-negotiation` and left for later:
 
-`07` is the corpus row, exit 0. tui-caps.sh gains the pane stages (an RGB and
-an indexed entry, an OSC 4 over the option and OSC 104 back to it, an
-untouched entry, the array unset) and two sabotages. Clause 3 is re-proved
-whole in `01`-`06`.
+- `TerminalGuard::enter` now writes `\e[c\e[>c\e[>q`, the three requests
+  `tty_send_requests` writes, where it used to write the primary one alone.
+- `terminal_event.rs` decodes the secondary DA reply and the XTVERSION reply
+  instead of leaving their bytes to be typed into a pane, and `tty.rs` raises
+  what the terminal takes from the name they carry, exactly as
+  `tty_keys_device_attributes2` and `tty_keys_extended_device_attributes` hand
+  `tty_default_features` a name: `T` and `M` and the seven XTVERSION names
+  carry `TTY_FEATURES_BASE_MODERN_XTERM`, which is 256 and RGB; `U` carries
+  256 alone.
+- `render.rs` `write_palette_ground` and `write_rgb_ground` drop a colour the
+  terminal cannot take, through ports of `colour_find_rgb`, `colour_to_6cube`,
+  `colour_dist_sq` and `colour_256to16`. A change in what the terminal takes
+  invalidates the screen, which is what `tty_update_features` does.
+- The colour count itself moved out of `daemon.rs` into
+  `crates/zz-daemon/src/terminal_features.rs`, so the daemon's roster and a
+  client's own writer read one rule. A terminal with no 256, no RGB and no
+  `*-16color` name now carries the **eight** colours terminfo gives `xterm`
+  and `screen`, where the roster assumed sixteen; that is what
+  `#{client_colours}` reports for the pin on the same terminal.
 
-**2. What the cycle-5 record left open.**
+Measured: on the silent terminal under TERM=xterm both sides write the
+`38;5;42` cell as `32` and the `38;2;10;20;30` cell as `30`; under `-2` both
+write `38;5;42` and `38;5;233`. Under the outer tmux, which answers, both keep
+their classes, and all 123 checkpoints of `compat/tui-screen-diff.sh` stay
+identical. The sabotages are `-2` on one side alone, in both directions, with
+a control.
 
-- **-T RGB: fixed and asserted.** `client_term_features` added `256`
-  whenever the client's colour count reached 256, and a requested RGB raises
-  the count to 16777216. So `-T RGB` gave `256,RGB` where the pin's
+**3. What else the cycle-5 record left open.**
+
+- **-T RGB: fixed and asserted** in the earlier half of this attempt.
+  `client_term_features` added `256` whenever the colour count reached 256 and
+  a requested RGB raised that count, so `-T RGB` gave `256,RGB` where
   `tty_feature_rgb` adds only `RGB`. The roster now takes its derived colour
-  bits from TERM and COLORTERM alone. `client_colours` still counts the
-  requested features. The daemon test
-  `requested_colour_features_join_the_roster_alone` failed under the old rule
-  (the roster carried 256 beside RGB) and passes now.
-  - The outer pinned tmux cannot show this. It answers every query, and the
-    pin learns 256 and RGB from the reply. So tui-caps.sh gains a **silent
-    terminal**: a relay that runs the client on its own pty, copies
-    everything it writes to the outer pane (still the decoder), and sends
-    nothing back. That is what script(1) is.
-  - There, neither baseline carries 256 or RGB. `silent/-T
-    delta-client_termfeatures` is `RGB` on both sides and `silent/-2` is
-    `256`. The sabotage hands the pin `-T 256,RGB` against zz's `-T RGB`,
-    which is the shape of the old bug, and it is caught.
-- **The -2 screen effect: measured and recorded, not fixed.**
-  - On the silent terminal under TERM=xterm, the pin writes the `38;5;42`
-    cell as `32` and the RGB cell as `30`. Under `-2` it writes the RGB cell
-    as `38;5;233`.
-  - The mechanism is tty.c `tty_check_fg` over `colour_find_rgb` and
-    `colour_256to16`. The raw TUI writes both cells unchanged
-    (`colours/silent`, `colours/silent-2`, recorded).
-  - A downgrade from TERM alone would break every terminal that answers,
-    because the pin learns RGB there. The fixture's own colour case under
-    xterm-256color would lose its RGB cell. Matching needs the raw TUI to
-    learn its terminal's features from the replies, which is
-    options.client-terminal-negotiation.
-- **Extended keys: the exact remaining difference.**
-  - Under the outer tmux, both sides arm and every extended-keys row asserts,
-    as in attempt-02.
-  - On the silent terminal with `extended-keys on`, `pane_key_mode` is
-    `VT10x` on the pin and `Ext 2` on zz. The pin writes Eneks only for a
-    terminal carrying extkeys (tty.c `tty_update_features`), and
-    `terminal-features` gives xterm* none. tty.rs arms whenever the option is
-    not off.
-  - Recorded as `silent/extended pane_key_mode`. It needs the same reply
-    negotiation.
-- **OSC 10/11 and window-style: driven and fixed.**
-  - The pin paints every cell that names no colour, and every clear, in the
-    pane's default ground (tty.c `tty_default_colours`).
-  - Old behaviour: the raw TUI wrote `39` and `49` for all of them.
-  - Now:
-    - The daemon hands the worker the class of the window-style ground
-      (`TerminalAppearance::default_classes`).
-    - The worker classes an uncoloured ground as RGB when the terminal's
-      current ground differs from the configured one (an OSC 10/11
-      override). Otherwise it takes the window-style class, or default.
-    - The viewport's style 0 carries the same classes.
-    - The raw TUI's trailing clear sets that background before it erases.
-  - Measured: OSC 10 as `38;2;255;0;0`, OSC 11 as `48;2;0;0;128`,
-    `fg=colour2,bg=colour4` as `32`/`44`, `fg=#102030,bg=colour200` as
-    RGB/`48;5;200`. OSC 110, OSC 111 and unsetting all go back to `39`/`49`.
-  - Decided 2026-09-11 by the orchestrator under fabrico's TUI parity contract
-    of 2026-09-09; reversible.
-- **Found on the way: OSC 110 and OSC 111 froze the default grounds.**
-  libghostty resets a dynamic colour to the default *of that moment* and
-  keeps it as an override (`16`). So a later theme or window-style change
+  bits from TERM and COLORTERM alone. The daemon test
+  `requested_colour_features_join_the_roster_alone` pins it.
+- **OSC 10/11 and window-style: driven and fixed** in the earlier half. The
+  pin paints every cell that names no colour, and every clear, in the pane's
+  default ground (`tty_default_colours`); the raw TUI wrote `39` and `49`
+  whatever the pane's ground. Now the daemon hands the worker the class of the
+  window-style ground, the worker classes an uncoloured ground as RGB when the
+  terminal's current ground differs from the configured one, the viewport's
+  style 0 carries the same class, and the raw TUI's trailing clear sets that
+  background before it erases. Measured: OSC 10 as `38;2;255;0;0`, OSC 11 as
+  `48;2;0;0;128`, `fg=colour2,bg=colour4` as `32`/`44`,
+  `fg=#102030,bg=colour200` as RGB/`48;5;200`, and OSC 110, OSC 111 and
+  unsetting all back to `39`/`49`. Decided 2026-09-11 by the orchestrator
+  under fabrico's TUI parity contract of 2026-09-09; reversible.
+- **Found on the way, earlier in the attempt: OSC 110 and OSC 111 froze the
+  default grounds.** libghostty resets a dynamic colour to the default of that
+  moment and keeps it as an override, so a later theme or window-style change
   never reached a pane whose program had reset its colours, in the GUI too.
-  `14` is the fixture catching it: the window-style stages after the OSC
-  stages painted zz's stale theme grounds.
-  - `apply_terminal_appearance` now notes which ground was following its
-    default. After setting the new default it writes OSC 110 or 111 again for
-    that ground.
-  - A real OSC override survives an appearance change, as the pin's does.
-  - The unit test
-    `an_osc_reset_leaves_the_default_grounds_following_the_appearance` pins
-    both halves.
-- **Named, not driven:**
-  - An OSC 4 or OSC 10 that sets exactly the configured value. libghostty
-    exposes no override mask.
-  - OSC 10 under a window-style foreground. The pin's window-style wins over
-    the pane's OSC 10 colour. zz applies window-style as the terminal's
-    configured default and OSC 10 overrides it, in the GUI too.
+  `apply_terminal_appearance` now re-resets a ground that was following its
+  default, and a real OSC override survives as the pin's does. `14` is the
+  fixture catching the old behaviour and `16` the libghostty probe.
+- **Extended keys: the exact remaining difference, unchanged.** Under the
+  outer tmux both sides arm and every extended-keys row asserts. On the silent
+  terminal with `extended-keys on`, `pane_key_mode` is `VT10x` on the pin and
+  `Ext 2` on zz: `tty_update_features` writes Eneks only for a terminal
+  carrying `extkeys`, which `terminal-features` does not give `xterm*` and no
+  reply supplied, while `tty.rs` arms whenever the option is not off. The
+  arming decision is taken in `TerminalGuard::enter`, before any reply can
+  arrive; deferring it until the terminal has answered is the remaining work
+  and it is named in `next_action`. Recorded as
+  `silent/extended pane_key_mode`.
 
-**3. Ledger.** TUI-009 stays `active`. Clause 3 asserts with no recorded row.
-Clauses 1 and 2 still hold recorded rows this lane cannot close in its zones:
+## Found inside the obligation and fixed, beyond the punch list
 
-- `wrap_flag`
-- `mouse_all_flag` and `mouse_button_flag` (app.rs)
-- `keypad_flag` and `keypad_cursor_flag`
-- `silent/extended pane_key_mode`
-- the roster rows
-- `widths/non-utf8 line` (render.rs's glyph path)
-- `colours/silent` and `colours/silent-2`
+Each of these was a recorded row of clause 1 or clause 2 that this lane's own
+zones could close.
 
-No compat/tmux-gaps.json item is closed: this landing makes none of the named
-gaps' items match that did not match before.
+- **Autowrap.** `TerminalGuard::enter` wrote `\e[?7l` and restored `\e[?7h`;
+  `tty_start_tty` never touches DECAWM and tracks the last cell itself. Both
+  removed, and the renderer places the cursor absolutely before every row it
+  writes, so nothing wraps. `wrap_flag` asserts in all four cases. The
+  sabotage turns autowrap off on zz's outer pane just before its client
+  reaches it, with every other mode row recorded so wrap_flag is the only row
+  that can report.
+- **The keypad.** The pin writes `smkx` on start and `rmkx` on stop and
+  decodes the sixteen sequences `tty_default_raw_keys` names; the raw TUI
+  wrote neither and decoded none. `tty.rs` now writes `\e[?1h\e=` and
+  `\e[?1l\e>`, and `ss3_key` decodes the keypad to the character on the key,
+  which is what `input-keys.c` sends a pane out of application-keypad mode.
+  `keypad_flag` and `keypad_cursor_flag` assert in all four cases. The
+  sabotage detaches zz alone: those two rows are 1 only while a client that
+  armed smkx is attached.
+- **The theme.** `c->theme` stays `THEME_UNKNOWN` until the terminal answers,
+  and `format_cb_client_theme` gives nothing for it; a zz client always
+  carried one and answered `dark` from the moment it attached. `tty.rs` now
+  writes `\e[?2031h\e[?996n` on entry and `\e[?2031l` on exit, the parser
+  decodes `\e[?997;1n` and `\e[?997;2n`, `input.rs` hands the daemon the
+  scheme it was told, and the connect path reports no scheme until then. All
+  eight `client_theme` rows assert. The sabotage gives the pin's outer window
+  a background its decoder can answer an OSC 11 query with (`input_osc_11`
+  declines while `window_pane_get_bg` is -1, which is why neither side learns
+  anything here otherwise), and the pin's client_theme leaves empty while
+  zz's stays.
+  - This closes `semantic:harness-theme-steering` on
+    `options.client-terminal-negotiation` for the raw TUI, with the dated
+    measurement in the gap's reason. The gap keeps its decision for the
+    desktop client, which is the terminal and reads its own appearance, and
+    for the seven items it still holds. Its third acceptance clause is
+    rewritten to say so.
+  - `compat/scenarios/smoke/fixtures/format-listing.sh` recorded the old
+    stance with a per-side branch. It no longer branches: both sides answer
+    the empty string before any reply and `dark` after it, and
+    `smoke/format-listing` is 0 divergences (`09`).
 
-## Fixture hygiene found this attempt
+## What is still recorded, and why
 
-Every widths case printed `W1` into the same inner pane, and the pane keeps
-the previous case's output across the re-attach. A case could settle on the
-old line before its own command ran, and then read the cursor off the typed
-command. That is `widths/non-utf8/cursor tmux 20,0, zz 0,2` in two of five
-runs (`15`). Each case now prints and waits for its own number.
+23 rows, in two families and two singletons.
+
+- `mouse_all_flag` and `mouse_button_flag`, four cases each: zz arms
+  `\e[?1003h` for the whole attach where the pin arms `\e[?1002h` and raises
+  MODE_MOUSE_ALL only while a menu is up. The two rows move together and are
+  one divergence, whose fix is per-menu arming in `crates/zz-tui/src/app.rs`,
+  owned with the overlays this cycle and outside this lane's zones.
+- `client_colours` (five cases) and `client_termfeatures` (eight): the roster
+  half of `options.client-terminal-negotiation`. The raw TUI's own cell writer
+  now reads the terminal's replies, but the daemon derives a client's roster
+  from its TERM, its COLORTERM and its flags alone, because the hello is sent
+  before any reply can arrive and nothing carries a later one. Under the outer
+  tmux the pin's roster is the `tmux` entry of `tty-features.c` and zz's is
+  its own fixed list; on a silent terminal the pin's is what terminfo gives
+  `xterm` and zz's is again the fixed list. `client_colours` asserts on the
+  silent terminal, where there is no reply for either side to learn from.
+- `widths/non-utf8 line`: under LANG=C with no `-u` the pin draws each
+  non-ASCII cell as underscores (`tty_check_codeset`) and the raw TUI writes
+  the UTF-8 glyph. That is `render.rs`'s glyph path, outside this lane's zone
+  for that file.
+- `silent/extended pane_key_mode`: above.
+
+Clause 3 asserts with no recorded row. Clause 1 holds the mouse rows, the
+widths row and the silent pane_key_mode row; clause 2 holds the roster rows.
+TUI-009 stays `active`.
 
 ## Code, by place
 
-- `crates/zz-daemon/src/daemon.rs`:
-  - `pane_palette` and `pane_terminal_appearance` carry each colour's class
-    through the new `tmux_colour_class`.
-  - `client_term_features` derives its colour bits through
-    `client_colour_count_with(.., 0)`.
-  - The new test `requested_colour_features_join_the_roster_alone`.
+- `crates/zz-daemon/src/terminal_features.rs`, new: the feature table,
+  `terminal_feature_bit`, `terminal_features_list`, `terminal_feature_mask`
+  and `terminal_colour_count`, moved out of `daemon.rs` unchanged except for
+  the colour rule's eight-colour floor and its `*-16color` case. Always
+  compiled, so a client build without the daemon feature reads the same rule.
+- `crates/zz-daemon/src/daemon.rs`: `client_colour_count_with` and
+  `client_features_fact` call it; `pane_palette` and
+  `pane_terminal_appearance` carry each colour's class; `client_term_features`
+  derives its colour bits through `client_colour_count_with(.., 0)`; the test
+  `requested_colour_features_join_the_roster_alone`.
+- `crates/zz-daemon/src/client.rs`: `client_terminal_colour_count` for a
+  client asking about its own terminal;
+  `connect_endpoint_with_prompts_and_terminal` takes an optional scheme and
+  `connect_endpoint_without_theme` and `connect_terminal_surface_without_theme`
+  pass none.
 - `crates/zz-terminal/src/appearance.rs`: `palette_classes` and
   `default_classes`, both `serde(skip)`, so the GUI sees nothing new.
-- `crates/zz-terminal/src/session.rs`:
-  - `ClassHints` and `Classifier` replace `ground_class` and `palette_class`,
-    with the hints kept in `ViewportDictionary`.
-  - `build_snapshot` and `capture_history` class every ground through them
-    and class style 0.
-  - `apply_terminal_appearance` does the OSC reset follow-up.
-  - Three unit tests.
-- `crates/zz-tui/src/render.rs`: one hunk, in `Renderer::blit_row`, the
-  trailing clear. It writes the default style's background class before the
-  ECH, and only when that class is not plain default, so the bytes are
-  unchanged when no pane ground is set.
-- The wire is unchanged. The class word per style already existed. Style 0
-  now carries a class too.
+- `crates/zz-terminal/src/session.rs`: `ClassHints` and `Classifier` replace
+  `ground_class` and `palette_class`, kept in `ViewportDictionary`;
+  `build_snapshot` and `capture_history` class every ground and style 0
+  through them; `apply_terminal_appearance` does the OSC reset follow-up.
+- `crates/zz-tui/src/tty.rs`: `TERMINAL_REQUESTS`, `KEYPAD_TRANSMIT` and
+  `KEYPAD_LOCAL`, `THEME_SUBSCRIBE` and `THEME_UNSUBSCRIBE`, the
+  `TERMINAL_COLOURS` cell and the two reply notes; `enter` writes the requests
+  and no longer writes `\e[?7l`, `Drop` no longer writes `\e[?7h`.
+- `crates/zz-tui/src/terminal_event.rs`: `SecondaryDeviceAttributes`,
+  `ExtendedDeviceAttributes`, `DarkTheme` and `LightTheme`; a DCS branch in
+  `parse_escape`; the keypad arms of `ss3_key`.
+- `crates/zz-tui/src/input.rs`: the four new events, three of them terminal
+  facts and one a `set_color_scheme`.
+- `crates/zz-tui/src/render.rs`, by function: `Renderer::new` and the new
+  `Renderer::note_terminal_colours` (the field and the invalidation);
+  `Renderer::paint` and `Renderer::paint_frames` (one call each, first line);
+  `Renderer::blit_row`'s trailing clear (the earlier half of the attempt);
+  `write_palette_ground` and `write_rgb_ground` (the downgrade); the new free
+  functions `downgrade_palette`, `colour_256to16`, `colour_find_rgb`,
+  `colour_to_6cube` and `colour_distance`. Nothing else in the file moved.
+- `crates/zz-tui/src/lib.rs` and `app.rs`: the connect call sites, three
+  tokens each, and their imports.
+- The wire is unchanged: no message, field or variant was added or altered,
+  and PROTOCOL_VERSION stays 101.
+
+The two halves of this cycle's work landed as one commit each: the terminal's
+own answers and the cell writer that reads them in the first, the theme
+subscription and the gap it closes in the second. Autowrap, the keypad and the
+colour rule sit in the first with the negotiation they share `tty.rs` and
+`compat/tui-caps.sh` with.
 
 ## Files
 
-- `environment.txt`: the revision and worktree state, both binary hashes,
-  the pin, the OS line, TERM, shell, python and locale.
-- `01-tui-caps-run-1.txt`, `02-tui-caps-run-2.txt`, `03-tui-caps-run-3.txt`:
-  three runs, exit 0, 210 asserted rows identical and 56 recorded, with
-  identical row dispositions and identical recorded values.
-- `04-tui-caps-self-check.txt`: 16 sabotages caught, both controls quiet,
+- `environment.txt`: the revision and worktree state, both binary hashes, the
+  pin, the OS line, TERM, shell, python, locale and the cargo wrapper.
+- `01`, `02`, `03`: three `compat/tui-caps.sh` runs, exit 0, 243 asserted rows
+  identical and 23 recorded, with identical row dispositions and identical
+  recorded values.
+- `04`: `--self-check`, 21 sabotages caught, 3 controls quiet, exit 0.
+- `05`: `compat/tui-screen-diff.sh`, 123 asserted checkpoints identical, 30
+  recorded, exit 0.
+- `06`: its `--self-check`, every sabotage caught and every equivalence
+  passed, exit 0.
+- `07`: `compat/run.sh smoke/pane-colours-palette`, 0 divergences, exit 0.
+- `08`: `compat/status-row.sh` under `LC_ALL=C LC_TIME=C`, 14/14, exit 0.
+- `09`: the corpus rows this landing can reach: `smoke/terminal-facts`,
+  `smoke/format-listing`, `renderer-styles`, `pane-selection-input-style` and
+  `pane-spawn-style-title-v2`, 0 divergences each, exit 0.
+- `10`: `compat/tui-copy-mode.sh`, exit 0; its recorded cases are the
+  SIBLING:modes search-match rows.
+- `11`: `compat/attached-client.sh`, exit 1 at the known copy-mode badge wait,
+  which is the modes lane's; nothing past that step.
+- `12`: clippy for zz-tui, zz-daemon, zz-terminal, zz-protocol and zz, and
+  `cargo test` for all five, `cli_binary` included.
+- `13`: the ledger validators.
+- `14`: before the OSC reset fix, the window-style stages painting stale theme
+  grounds.
+- `15`: the two runs that hit the shared widths marker, before each widths
+  case printed its own.
+- `16`: libghostty's effective and default foreground across OSC 10, OSC 110
+  and an appearance change, before the fix.
+- `17`: `compat/tui-stock-keys.sh`, which the keypad arming could have moved,
   exit 0.
-- `05-tui-screen-diff.txt`: 123 asserted checkpoints identical, 30 recorded,
-  exit 0.
-- `06-tui-screen-diff-self-check.txt`: every sabotage caught and every
-  equivalence passed, exit 0.
-- `07-pane-colours-palette.txt`: `compat/run.sh smoke/pane-colours-palette`,
-  0 divergences, exit 0.
-- `08-status-row-c-locale.txt`: `LC_ALL=C LC_TIME=C`, 14/14, exit 0.
-- `09-related-corpus-rows.txt`: the rows that set window-style
-  (pane-selection-input-style, renderer-styles, pane-spawn-style-title-v2) or
-  read `client_termfeatures` (smoke/terminal-facts, smoke/format-listing),
-  0 divergences, exit 0.
-- `10-tui-copy-mode.txt`: `capture_history` changed, so this was re-run.
-  Exit 0, and the recorded cases are the SIBLING:modes search-match rows.
-- `11-attached-client.txt`: stops at the known copy-mode badge wait (the
-  modes lane's), exit 1. Nothing past that step.
-- `12-cargo-and-clippy.txt`: `cargo test` for zz-tui, zz-terminal, zz-daemon
-  and zz (cli_binary included), and clippy for the three touched crates, all
-  at `95d3644e`.
-- `13-tracker-check.txt`: the ledger validator.
-- `14-before-osc-reset-window-style.txt`: before the OSC reset fix, the
-  window-style stages painting stale theme grounds.
-- `15-before-widths-marker.txt`: the two runs that hit the shared widths
-  marker.
-- `16-osc-reset-probe.txt`: libghostty's effective and default foreground
-  across OSC 10, OSC 110 and an appearance change, before the fix.
+- `18`: `compat/tui-indicators.sh` and `compat/tui-pane-geometry.sh`, exit 0
+  each.

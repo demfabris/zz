@@ -1,9 +1,14 @@
-$ ZZ_COMPAT_ZZ=target/debug/zz ZZ_COMPAT_TMUX=<pin> compat/run.sh smoke/pane-colours-palette   (at 95d3644e, 2026-09-11T16:01:16-03:00)
 [1;36m==>[0m checking pinned tmux
 [1;36m==>[0m checking tmux oracle and compatibility tracker
 compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
 compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
-[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-tui-caps/target/debug/zz
+[1;36m==>[0m building zz
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-caps/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42s
 [1;36m==>[0m running smoke/pane-colours-palette
 smoke/pane-colours-palette: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
 
@@ -22,4 +27,3 @@ Status: `not run`
 Nothing failed on the first pass.
 
 [1;36m==>[0m partial run complete; full summary left unchanged
-exit=0

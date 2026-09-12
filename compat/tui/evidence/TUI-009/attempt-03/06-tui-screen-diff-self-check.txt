@@ -1,4 +1,3 @@
-$ PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=... ZZ_COMPAT_CORPUS=... compat/tui-screen-diff.sh --self-check target/debug/zz <pin>   (at 95d3644e, 2026-09-11T15:59:59-03:00)
 self-check: one deliberate difference per channel, plus three the pin collapses
       checkpoint glyph at 80x24-glyph
       first differing row 1 of 24
@@ -73,4 +72,3 @@ ok    self-check equivalence: attribute order in a style
 ok    self-check equivalence: bg=red and bg=colour1 reach the same cell
 ok    self-check equivalence: two spellings of the same bold cell
 self-check complete: every sabotage was caught in its own channel and every equivalence passed
-exit=0

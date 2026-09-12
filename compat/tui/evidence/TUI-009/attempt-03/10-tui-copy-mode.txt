@@ -1,4 +1,3 @@
-$ PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_TMUX=... ZZ_COMPAT_CORPUS=... compat/tui-copy-mode.sh target/debug/zz <pin>   (at 95d3644e, 2026-09-11T16:05:53-03:00): capture_history now classes default grounds
 copy mode and search through the client stdin at 80x24 (pin tmux)
 ok    emacs-enter
 ok    emacs-cursor-up
@@ -173,4 +172,3 @@ ok    presentation-copy-mode-position
 ok    presentation-cancel
 all 115 cases agree on every channel they assert, 13 recorded a difference elsewhere
 115 of those cases assert at least one channel; 0 assert none and are recorded in full
-exit=0

@@ -1,4 +1,3 @@
-$ compat/tui-caps.sh --self-check target/debug/zz <pin>   (at 95d3644e, 2026-09-11T15:55:38-03:00)
 outer-terminal capability differential (pin tmux)
 self-check: one deliberate one-sided difference per channel
 ok    self-check control, facts with no sabotage: no difference reported
@@ -9,6 +8,12 @@ ok    self-check an OSC 10 sent to zz only: caught
 ok    self-check window-style set on zz only: caught
 ok    self-check control, a silent terminal with no sabotage: no difference reported
 ok    self-check a one-sided 256 beside -T RGB on the pin, silent terminal: caught
+ok    self-check control, the silent colour sample with no sabotage: no difference reported
+ok    self-check a one-sided -2 on the pin only, silent terminal: caught
+ok    self-check a one-sided -2 on zz only, silent terminal: caught
+ok    self-check autowrap turned off on zz side before it attaches: caught
+ok    self-check zz detached while the pin stays attached: caught
+ok    self-check a theme reply the pin alone can get: caught
 ok    self-check a named cell spelled as its RGB colour on the pin only: caught
 ok    self-check a one-sided palette entry: caught
 ok    self-check an OSC 4 on an indexed entry sent to zz only: caught
@@ -20,4 +25,3 @@ ok    self-check an extended key with extended keys on the pin only: caught
 ok    self-check a one-sided unknown CLI option: caught
 ok    self-check a one-sided wide codepoint: caught
 self-check: every sabotage caught in its own channel
-exit=0

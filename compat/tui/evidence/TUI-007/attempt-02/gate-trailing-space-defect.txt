@@ -1,0 +1,72 @@
+# THE TRAILING-SPACE DEFECT THE GATE FOUND, AND ITS FIX
+# revision at the find: 751e2101184994ce7e7d45f27ec5dba7477e4e14 (the rebase tip)
+# revision at the fix:  1a45ce91f13d86a61cdf44540e94a883e770d13e
+# pin: d77c9dc6aa021e4bc61f0da128c591af695e6466, tmux next-3.8
+# captured: cycle 6 overlays gate, alienware, 2026-09-12
+
+WHAT WENT RED. compat/tui-copy-mode.sh at the rebase tip, exit 1:
+  "4 of 147 cases differ in a channel they assert, 0 recorded elsewhere"
+  DIFF  emacs-ordinary-pane-search-prompt
+  DIFF  emacs-fresh-entry-search-prompt
+  DIFF  vi-ordinary-pane-search-prompt
+  DIFF  vi-fresh-entry-search-prompt
+
+That fixture is green at origin/main (the copy gate and the caps gate both record
+147 of 147, 0 recorded), so the red is this lane's. It could not have been seen
+before now: the four cases were among the thirteen the copy lane carried as
+SIBLING:modes, and the copy gate flipped them onto the rows channel at 33ecbd86,
+after this lane was measured.
+
+THE BYTES. compat/tui-copy-mode.sh, case emacs-ordinary-pane-search-prompt,
+first differing row 23 of 24:
+  tmux: ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) ^[[39m^[[49m
+  zz:   ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down)^[[39m^[[49m
+The pin paints the prompt's trailing space inside the message-style run. zz did not.
+
+THE CAUSE. status_overlay in crates/zz-tui/src/render.rs ran every message-area
+front through text.trim_end_matches(' '). The lane added that for the overlays
+fixture, where it is right, and applied it everywhere.
+
+WHY BOTH FIXTURES ARE RIGHT. The two measure the same prompt in different grounds.
+
+  compat/tui-overlays.sh keeps `status on`. status.c status_prompt_redraw draws the
+  prompt into the status area, which already carries the message style's background,
+  so tty_draw_line folds a trailing space whose background matches the row's erase
+  into that erase and the cell never reaches the wire. Measured by dropping only the
+  trim and re-running the fixture: exit 1, exactly 5 DIFFs, the same five the lane's
+  reviewer got from the same sabotage (prompt-trailing-space, confirm-opened,
+  confirm-resized, popup-under-message, popup-resized), with
+    tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-CONFIRM?^[[39m
+    zz:   ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-CONFIRM?  ^[[39m
+  The pin's fill keeps the message background (only the foreground resets), which is
+  what absorbs the spaces.
+
+  compat/tui-copy-mode.sh runs with `status off` (line 424, set-option -g status off),
+  and all four differing cases are in that region. With no status line the prompt is
+  drawn straight onto the pane's own default ground, the space's message background
+  differs from the erase background, and the pin writes the cell out: the fill after
+  it resets both grounds (^[[39m^[[49m) where the confirm row resets only the
+  foreground.
+
+THE FIX (1a45ce91). status_overlay trims only when a status block sits under the
+overlay: `let filled = model.status_block_rows() > 0;`. That is the same predicate
+paint_status_block_in already uses to choose between painting over the status rows
+and painting the single virtual row over the pane.
+
+PROOF AT THE FIX. Both fixtures green from one build, and again at the gate tip:
+  compat/tui-overlays.sh    exit 0  all 48 asserted comparisons identical, 0 recorded
+  compat/tui-copy-mode.sh   exit 0  147 of 147 assert at least one channel, 0 recorded
+  compat/tui-overlays.sh --self-check   exit 0
+  compat/tui-copy-mode.sh --self-check  exit 0
+  cargo test -p zz-tui      exit 0  204 passed
+
+BOTH HALVES ARE PINNED. trailing_prompt_spaces_are_left_to_the_fill gains a status
+row (it had none, so before this commit it was passing on the status-off path and
+measuring the wrong half), and trailing_prompt_spaces_survive_with_no_status_row_
+under_them is the other side. Each fails if the condition is inverted.
+
+The fixture header in compat/tui-overlays.sh stated the rule without its condition;
+it now names the ground the rule depends on and points at the copy-mode cases. It
+also said "the two *-under-message cases pass a message that ends in two spaces"
+where only popup-under-message does, the overstatement the lane's reviewer flagged
+as a nit; corrected in the same commit.

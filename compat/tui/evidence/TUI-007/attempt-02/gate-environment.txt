@@ -1,0 +1,35 @@
+# environment, cycle 6 overlays gate
+# captured: alienware, 2026-09-12
+
+host          alienware, CachyOS Linux, 7.2.3-1-cachyos-deckify x86_64, 16 cores,
+              15 GB RAM plus 15 GB zram swap, btrfs, /tmp is tmpfs
+shell         bash 5.3.15(1)-release
+terminal      TERM=xterm-ghostty
+locale        LANG=en_US.UTF-8 with LC_TIME=pt_BR.UTF-8. compat/status-row.sh was run
+              under LC_ALL=C LC_TIME=C, the control this box needs because %b differs
+              under the box locale.
+worktree      /home/demfabris/dev/zz-gate-tui6, local branch gate-overlays, clean
+gate tip      ad4444f0d950891c4bdcce3c863a289da1eb290e
+              (campaign/tui-overlays-2 tip 5d335240 rebased onto origin/main e63c5333,
+              plus the two gate commits 1a45ce91 and ad4444f0)
+zz            /home/demfabris/dev/zz-gate-target/debug/zz
+              sha256 922cfc3a56733ce88093e446f4663d3f60aac5d843816712551608b29617fac4
+              built at ad4444f0 and relinked by `cargo test -p zz` at the same tip;
+              its mtime 17:00:59 -0300 precedes every fixture run below (17:03 to 17:33)
+pin           /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+              d77c9dc6aa021e4bc61f0da128c591af695e6466
+              sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+              tmux -V next-3.8
+cargo         CARGO_TARGET_DIR=/home/demfabris/dev/zz-gate-target, CARGO_HOME left at
+              the real one so no registry was re-downloaded, HOME and XDG_CONFIG_HOME
+              scrubbed to /tmp/zzgate6-home so the box's real ~/.tmux.conf and
+              ~/.config/zz/mux.conf were never read. Every cargo command went through
+              the box's two-slot lock: systemd-run --user --scope -q
+              -p MemoryMax=7G -p MemorySwapMax=2G flock -w 540 /tmp/zz-cargo-slot-$S.lock
+fixtures      one at a time, each starting its own throwaway servers on short /tmp
+              sockets under their own scrubbed home
+
+A cargo debug build of zz is not bit-reproducible on this box, so the hash identifies
+the artifact and cannot attest it. The attestation is the revision plus a clean
+worktree; the provenance is reproduction, since this gate re-ran every proof itself on
+the accumulated main rather than trusting the lane's or the reviewer's numbers.

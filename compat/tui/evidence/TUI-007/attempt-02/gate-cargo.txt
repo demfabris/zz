@@ -1,0 +1,29 @@
+# cargo suites at the cycle 6 overlays gate
+# revision: ad4444f0d950891c4bdcce3c863a289da1eb290e (the tests below ran at this tip;
+#   the earlier suites in this file ran at 751e2101, the rebase tip, and are marked)
+# every command went through the box's two-slot lock with MemoryMax=7G and
+# MemorySwapMax=2G, HOME and XDG_CONFIG_HOME scrubbed to /tmp/zzgate6-home,
+# CARGO_HOME left at the real one, CARGO_TARGET_DIR=/home/demfabris/dev/zz-gate-target
+# captured: cycle 6 overlays gate, alienware, 2026-09-12
+
+cargo test -p zz-tui --jobs 6 -- --test-threads=4          exit 0   204 passed (at ad4444f0)
+cargo test -p zz --jobs 6 -- --test-threads=4              exit 0   638 lib + 125 cli_binary + 19 across 8 more targets (at ad4444f0)
+cargo clippy --workspace --all-targets --all-features
+  --jobs 6 -- -D warnings                                  exit 0   (at ad4444f0)
+cargo build -p zz --jobs 6                                 exit 0   (at ad4444f0)
+cargo fmt -p zz-tui -- --check                             exit 1   4 spots, none this lane's:
+  lib.rs:585, render.rs:3037, tty.rs:126, tty.rs:202. render.rs alone is dirty at
+  origin/main too (rustfmt --check on `git show origin/main:crates/zz-tui/src/render.rs`
+  reports 1 diff), and lib.rs and tty.rs are the caps lane's. The one spot this gate
+  added was reformatted before the commit.
+
+At the rebase tip 751e2101, before the trailing-space fix:
+cargo test -p zz-tui                                       exit 0   203 passed
+cargo test -p zz-mux -p zz-protocol -p zz-client           exit 0   524 + 222 + the small suites
+cargo test -p zz-daemon --lib                              exit 0   890 passed
+cargo test -p zz-daemon --test '*'                         exit 0   every integration target
+cargo test -p zz                                           exit 0   638 lib + 125 cli_binary
+cargo clippy --workspace --all-targets --all-features      exit 0
+
+The named zz-daemon flake client_focus_closes_display_panes_and_preserves_chooser_modes
+did not fire: 890 of 890 in the lib run.

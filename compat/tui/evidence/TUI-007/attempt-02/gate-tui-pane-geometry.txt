@@ -1,0 +1,16 @@
+# compat/tui-pane-geometry.sh at the gate tip
+# revision: ad4444f0d950891c4bdcce3c863a289da1eb290e
+# zz sha256: 922cfc3a56733ce88093e446f4663d3f60aac5d843816712551608b29617fac4
+# pin: d77c9dc6aa021e4bc61f0da128c591af695e6466 sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 (tmux next-3.8)
+# command: PATH=/opt/homebrew/bin:$PATH ZZ_BIN=<build> TMUX_BIN=<pin> ZZ_COMPAT_TMUX=<pin> ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/tui-pane-geometry.sh
+# exit: 0
+# captured: cycle 6 overlays gate, alienware, 2026-09-12 17:03:42
+
+pane geometry differential (pin tmux)
+ok    80x24 columns: both 80
+ok    80x24 rows: both 23
+ok    100x24 columns: both 100
+ok    100x24 rows: both 23
+ok    120x24 columns: both 120
+ok    120x24 rows: both 23
+all 6 asserted measurements identical

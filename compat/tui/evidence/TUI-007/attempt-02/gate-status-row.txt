@@ -1,0 +1,25 @@
+# compat/status-row.sh at the gate tip
+# revision: ad4444f0d950891c4bdcce3c863a289da1eb290e
+# zz sha256: 922cfc3a56733ce88093e446f4663d3f60aac5d843816712551608b29617fac4
+# pin: d77c9dc6aa021e4bc61f0da128c591af695e6466 sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 (tmux next-3.8)
+# command: LC_ALL=C LC_TIME=C compat/status-row.sh <build> <pin>
+# exit: 0
+# captured: cycle 6 overlays gate, alienware, 2026-09-12 17:08:37
+
+status-left band below the sidebar auto-hide threshold (pin tmux)
+ok    status-left band at 80 columns
+ok    status-left band at 100 columns
+status row differential at 79x24 (pin tmux)
+ok    defaults
+ok    -s dark-theme-green = colour124
+ok    -s dark-theme-black = colour231
+ok    -s theme = light
+ok    status-left = [#{session_name}]
+ok    status-right = #{window_width}x#{window_height} #{client_width}
+ok    window-status-format = #I:#W#F
+ok    window-status-current-format = #I:#W#F*
+ok    status-style = bg=blue,fg=white
+ok    status-left-style = bold
+ok    status-justify = centre
+ok    status-position = bottom
+all 14 comparisons identical, none recorded

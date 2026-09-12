@@ -1,0 +1,35 @@
+# compat/tui-caps.sh --self-check at the gate tip
+# revision: ad4444f0d950891c4bdcce3c863a289da1eb290e
+# zz sha256: 922cfc3a56733ce88093e446f4663d3f60aac5d843816712551608b29617fac4
+# pin: d77c9dc6aa021e4bc61f0da128c591af695e6466 sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 (tmux next-3.8)
+# command: PATH=/opt/homebrew/bin:$PATH ZZ_BIN=<build> TMUX_BIN=<pin> ZZ_COMPAT_TMUX=<pin> ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/tui-caps.sh --self-check
+# exit: 0
+# captured: cycle 6 overlays gate, alienware, 2026-09-12 17:08:20
+
+outer-terminal capability differential (pin tmux)
+self-check: one deliberate one-sided difference per channel
+ok    self-check control, facts with no sabotage: no difference reported
+ok    self-check a one-sided flag, -u on the pin only: caught
+ok    self-check a one-sided -T sixel on the pin only: caught
+ok    self-check a one-sided -2 on the pin only: caught
+ok    self-check an OSC 10 sent to zz only: caught
+ok    self-check window-style set on zz only: caught
+ok    self-check control, a silent terminal with no sabotage: no difference reported
+ok    self-check a one-sided 256 beside -T RGB on the pin, silent terminal: caught
+ok    self-check control, the silent colour sample with no sabotage: no difference reported
+ok    self-check a one-sided -2 on the pin only, silent terminal: caught
+ok    self-check a one-sided -2 on zz only, silent terminal: caught
+ok    self-check autowrap turned off on zz side before it attaches: caught
+ok    self-check zz detached while the pin stays attached: caught
+ok    self-check a theme reply the pin alone can get: caught
+ok    self-check a named cell spelled as its RGB colour on the pin only: caught
+ok    self-check a one-sided palette entry: caught
+ok    self-check an OSC 4 on an indexed entry sent to zz only: caught
+ok    self-check an OSC 104 sent to zz only: caught
+ok    self-check pane-colours set on zz only: caught
+ok    self-check pane-colours naming the untouched entry on the pin only: caught
+ok    self-check the legacy case driven with extended keys on the pin: caught
+ok    self-check an extended key with extended keys on the pin only: caught
+ok    self-check a one-sided unknown CLI option: caught
+ok    self-check a one-sided wide codepoint: caught
+self-check: every sabotage caught in its own channel

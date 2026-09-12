@@ -1,0 +1,29 @@
+# smoke/status-background-jobs: measured at origin/main, not this lane's
+# revision under test: 751e2101184994ce7e7d45f27ec5dba7477e4e14
+# revision compared against: origin/main e63c5333675d0cd7f558f6db8dbdb426b1517b73
+# captured: cycle 6 overlays gate, alienware, 2026-09-12
+
+The row went red twice in its chunk (the harness's own retry-alone included), which
+is what the caps gate saw too. It is not on this box's four known environmental rows,
+so the gate measured it rather than assuming.
+
+THE ASSERTION. compat/scenarios/smoke/fixtures/status-background-jobs.py:146, the
+status-right job DATE[#(date +%s%N)] with status-interval 2, sampled at seconds
+1, 3, 5 and 7 after the recorder attaches. It fails when a sample finds the drawn
+expansion momentarily empty (DATE[]).
+
+AT THIS TIP, 5 runs: 3 red, 2 green. Every red is offset 3.
+AT origin/main, 4 runs, same fixture, same pin, same box, binary rebuilt in the same
+target dir at the same path (sha256 b093fe204f13a5c43073000ea4e5c9a64b943d5917092f3a47af56ec177a47ce,
+the exact hash the caps gate recorded for origin/main): 3 red, 1 green. Two of those
+reds are at offset 1, which never happened at this tip.
+
+  main run 1 exit 1  AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3, ...
+  main run 2 exit 0
+  main run 3 exit 1  AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, ...
+  main run 4 exit 1  AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 1, 0, ...
+
+Same assertion, no worse at this tip than at origin/main and by the sample slightly
+better. It is the box's, and it is the same shape as the fixture-margin problem the
+caps gate settled for smoke/jobs-command-environment: a wall-clock sample with no
+margin for a loaded box. Worth someone's ten minutes; not this lane's to spend.

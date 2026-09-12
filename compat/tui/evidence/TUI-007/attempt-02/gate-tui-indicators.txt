@@ -1,0 +1,33 @@
+# compat/tui-indicators.sh at the gate tip
+# revision: ad4444f0d950891c4bdcce3c863a289da1eb290e
+# zz sha256: 922cfc3a56733ce88093e446f4663d3f60aac5d843816712551608b29617fac4
+# pin: d77c9dc6aa021e4bc61f0da128c591af695e6466 sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 (tmux next-3.8)
+# command: PATH=/opt/homebrew/bin:$PATH ZZ_BIN=<build> TMUX_BIN=<pin> ZZ_COMPAT_TMUX=<pin> ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/tui-indicators.sh
+# exit: 0
+# captured: cycle 6 overlays gate, alienware, 2026-09-12 17:04:10
+
+indicator, message and prompt differential at 80x24 (pin tmux)
+ok    baseline
+ok    scrollback
+ok    copy-mode-entered
+ok    copy-mode-restored
+ok    view-surface-shown
+ok    view-surface-restored
+ok    view-long-shown
+ok    view-long-down
+ok    view-long-restored
+ok    prefix-armed
+ok    prefix-released
+ok    message-shown
+ok    message-restored
+ok    prompt-opened
+ok    prompt-typed
+ok    prompt-cancelled
+ok    selection-emacs
+ok    selection-vi
+ok    selection-styled
+ok    view-hidden-opened
+ok    view-hidden-typed
+ok    view-inactive-opened (divider row 11 asserted whole)
+ok    view-inactive-typed (divider row 11 asserted whole)
+all 23 asserted comparisons identical, 0 recorded not asserted

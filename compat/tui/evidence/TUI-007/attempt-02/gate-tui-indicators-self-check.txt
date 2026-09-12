@@ -1,0 +1,88 @@
+# compat/tui-indicators.sh --self-check at the gate tip
+# revision: ad4444f0d950891c4bdcce3c863a289da1eb290e
+# zz sha256: 922cfc3a56733ce88093e446f4663d3f60aac5d843816712551608b29617fac4
+# pin: d77c9dc6aa021e4bc61f0da128c591af695e6466 sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 (tmux next-3.8)
+# command: PATH=/opt/homebrew/bin:$PATH ZZ_BIN=<build> TMUX_BIN=<pin> ZZ_COMPAT_TMUX=<pin> ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/tui-indicators.sh --self-check
+# exit: 0
+# captured: cycle 6 overlays gate, alienware, 2026-09-12 17:05:37
+
+self-check: one deliberate difference per channel, plus one the pin collapses
+      case self-check-prefix-hint
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m                                                                  PREFIX
+      cursor tmux: 2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check prefix, an extra hint cell on one status row
+      case self-check-message
+      first differing row 23 of 24
+        tmux: SABOTAGE-MSG-B
+        zz:   SABOTAGE-MSG-A
+      cursor tmux: 2,2 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check message, one character of the text differs
+      case self-check-prompt-residue
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+        zz:   ^[[38;2;13;13;13m^[[48;2;184;134;11m:^[[39m
+      cursor tmux: 2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check prompt, one side leaves the prompt open as residue
+      case self-check-copy-position
+      first differing row 0 of 24
+        tmux: $ printf 'MARK-%s\n' position                                              ^[[38;2;13;13;13m^[[48;2;184;134;11m[0/0]
+        zz:   $ printf 'MARK-%s\n' position                                              ^[[37m^[[41m[0/0]
+      cursor tmux: 2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check copy mode, one side paints the position in another style
+      case self-check-view-position
+      first differing row 0 of 24
+        tmux: VIEWLINE-S                                                                 ^[[38;2;13;13;13m^[[48;2;184;134;11m[0/0]
+        zz:   VIEWLINE-S                                                                   ^[[38;2;13;13;13m^[[48;2;184;134;11m<0>
+      cursor tmux: 0,0 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,0 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check view surface, one side draws another position format
+      case self-check-message-style
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mSABOTAGE-STYLE^[[39m
+        zz:   ^[[37m^[[41mSABOTAGE-STYLE^[[38;2;13;13;13m^[[48;2;154;205;50m
+      cursor tmux: 2,2 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check message, one side paints the message in another style
+      case self-check-prompt-style
+      first differing row 23 of 24
+        tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m:^[[39m
+        zz:   ^[[37m^[[41m:^[[4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m
+      cursor tmux: 1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   1,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check prompt, one side paints the prompt in another style
+      case self-check-selection-keys
+      first differing row 1 of 24
+        tmux: MARK^[[39m^[[49m-selsab
+        zz:   MARK-^[[39m^[[49mselsab
+      cursor tmux: 4,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   4,1 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check selection, one side selects with the vi table
+      case self-check-view-owner
+      first differing row 2 of 24
+        tmux: $ printf 'TYPED-%s\n' HIDDEN
+        zz:   $
+      cursor tmux: 2,4 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,2 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check view, one side opens it on the active pane and swallows the keys
+      case self-check-view-owner-split (divider row 11 asserted whole)
+      first differing row 0 of 24
+        tmux: NONACTIVEOUT                                                               ^[[38;2;13;13;13m^[[48;2;184;134;11m[0/0]
+        zz:   $ printf 'MARK-%s\n' splitsab
+      cursor tmux: 2,14 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,12 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check view in a split, one side opens it on the active pane
+      case self-check-divider-style (divider row 11 asserted whole)
+      first differing row 11 of 24
+        tmux: ^[[38;2;179;179;179mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[38;2;154;205;50mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+        zz:   ^[[31mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[38;2;154;205;50mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+      cursor tmux: 2,14 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,14 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+ok    self-check divider, pane-border-style fg=red on one side
+ok    self-check equivalence: the same armed prefix on both sides
+self-check complete: every sabotage was caught and the equivalence passed

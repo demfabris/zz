@@ -1,0 +1,33 @@
+# compat/run.sh at the cycle 6 overlays gate
+# revision: 751e2101184994ce7e7d45f27ec5dba7477e4e14 (the rebase tip; the two commits
+#   after it change crates/zz-tui/src/render.rs, compat/tui-overlays.sh and
+#   knowledge/protocol/wire-protocol.md, none of which a corpus row reads)
+# selection: --strict-geometry --delta origin/main..HEAD --commands
+#   set-option,show-options,display-message,command-prompt,confirm-before,
+#   display-popup,display-menu,display-panes  -> 203 rows.
+#   Every keys and status scenario is already in it, smoke/tui-client-input-backpressure
+#   included; the three the delta missed were added by hand
+#   (copy-mode-stock-action-keys, send-keys-repeat, send-keys-reset) -> 206 rows.
+# run as explicit-name chunks under ZZ_COMPAT_ZZ so every chunk used one build
+# captured: cycle 6 overlays gate, alienware, 2026-09-12
+
+206 of 206 rows have a result. 202 are clean on all five channels.
+
+Not clean, and none of them this lane's:
+
+  lane2-store                             0 0 0 2 0   known environmental on this box
+  micro-flags                             0 0 0 1 0   known environmental on this box
+  show-options-hooks                      0 0 0 7 0   known environmental on this box
+  smoke/plugin-runtime-resurrect-restore  0 0 0 1 1   known environmental on this box
+  smoke/status-background-jobs            0 0 0 1 1   intermittent; measured at
+      origin/main and red there 3 runs of 4 against this tip's 3 of 5, so it is the
+      box's, not this lane's. See gate-status-background-jobs.txt.
+  smoke/source-replay-diagnostics         0 0 0 1 0   load flake in a chunk, clean alone
+
+The two known/ rows in the selection match their registered tuples exactly and are
+therefore green: known/known-pane-scrollbar-columns 0 2 0 1 0 and
+known/known-terminal-runtime 0 0 6 0 0.
+
+Slow rows run alone: command-item-format 564 s exit 0, smoke/command-prompt-editing
+217 s exit 0, copy-mode-stock-action-keys 17 s exit 0, daemon-command-item-format
+exit 0.

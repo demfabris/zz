@@ -62,6 +62,14 @@ their classes, and all 123 checkpoints of `compat/tui-screen-diff.sh` stay
 identical. The sabotages are `-2` on one side alone, in both directions, with
 a control.
 
+The product decision this carries: the raw TUI used to write every cell's own
+class at every terminal, so an RGB cell left as `38;2;r;g;b` even where the
+terminal takes eight colours. It now writes what its terminal takes, which
+means a terminal that sets no truecolor `COLORTERM` and answers no request
+loses truecolor in the raw TUI, exactly as it does under the pin. Decided
+2026-09-11 by the orchestrator under fabrico's TUI parity contract of
+2026-09-09; reversible.
+
 **3. What else the cycle-5 record left open.**
 
 - **-T RGB: fixed and asserted** in the earlier half of this attempt.
@@ -131,6 +139,12 @@ zones could close.
   declines while `window_pane_get_bg` is -1, which is why neither side learns
   anything here otherwise), and the pin's client_theme leaves empty while
   zz's stays.
+  - The product decision this carries: a zz client used to carry a theme
+    always and answer `dark` from the moment it attached, which is the stance
+    the gap accepted on 2026-09-07; a raw TUI client now reports nothing until
+    its terminal answers, and dark or light on the answer. Decided 2026-09-11
+    by the orchestrator under fabrico's TUI parity contract of 2026-09-09;
+    reversible.
   - This closes `semantic:harness-theme-steering` on
     `options.client-terminal-negotiation` for the raw TUI, with the dated
     measurement in the gap's reason. The gap keeps its decision for the

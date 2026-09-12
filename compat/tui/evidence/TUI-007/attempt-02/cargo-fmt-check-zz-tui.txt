@@ -1,0 +1,13 @@
+Diff in /home/demfabris/dev/zz-tui-overlays/crates/zz-tui/src/render.rs:3055:
+ 
+         let mut renderer = Renderer::new();
+         renderer.blit_row(&viewport, 0, rect);
+[31m-        assert!(String::from_utf8(renderer.output).unwrap().contains("\x1b[7m"));
+(B[m[32m+        assert!(
+(B[m[32m+            String::from_utf8(renderer.output)
+(B[m[32m+                .unwrap()
+(B[m[32m+                .contains("\x1b[7m")
+(B[m[32m+        );
+(B[m 
+         viewport.overlays = Arc::from([OverlaySpan::new(0, 1, 2, OverlayKind::CopyCursor)]);
+         let mut renderer = Renderer::new();

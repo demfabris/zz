@@ -5,7 +5,7 @@ surfaces themselves and left thirteen cases recorded `SIBLING:modes`, because th
 message row's style was TUI-004's. TUI-004 landed. This attempt flips those thirteen, fixes the
 four that did not simply start matching, and takes the fixture to zero recorded cases.
 
-Every run below except `tui-overlays-prefix` ran at the branch tip `0752c9b8`, tracked tree clean
+Every run below except `tui-overlays-prefix` ran at the branch tip `b1a56015`, tracked tree clean
 outside this directory, against the `target/debug/zz` named in `environment.txt`.
 
 | File | What it is |
@@ -34,6 +34,7 @@ outside this directory, against the `target/debug/zz` named in `environment.txt`
 | `cargo-test-zz-mux.txt` | `cargo test -p zz-mux`, 524 + 105 passed |
 | `cargo-clippy-zz-mux.txt` | `cargo clippy -p zz-mux --all-targets --all-features -- -D warnings`, clean |
 | `cargo-test-zz.txt` | `cargo test -p zz`, 634 unit and 125 `cli_binary` tests passed |
+| `cargo-fmt-check-zz-tui.txt` | `cargo fmt -p zz-tui -- --check` after the wrapping commit, exit 1 with one spot left: `render.rs:3055`, which is BASE's and not this lane's, see the formatting section |
 | `notes.md` | this file |
 
 Environment for every fixture run: `PATH=/opt/homebrew/bin:$PATH`,
@@ -68,6 +69,9 @@ two-slot lock at `MemoryMax=5G`, `--jobs 4 -- --test-threads=3`.
 5. `Make StatusOverlay a struct now that it has one shape` (`b1747c04`). Confirm-before was the
    second variant; with it gone the enum carried one and every use of it was an irrefutable
    pattern. No behaviour changes.
+6. `Measure attached-client.sh past the BASE red with main's driver` (`291a0bbf`) and
+   `Wrap this obligation's own lines the way rustfmt wants them` (`b1a56015`). Evidence and
+   three rustfmt spots; no behaviour changes.
 
 ## The thirteen SIBLING:modes cases
 
@@ -144,6 +148,19 @@ scratch, and the fixture was re-run three times plus `--self-check` against the 
 The false red is kept as `cargo-test-zz-tui-stale-artifact.txt` so the next agent who meets a
 compile-free cargo run on this box after a kill recognises it. A killed rustc can leave a
 fingerprint that lies; `Finished` with no `Compiling` line after a kill is not a result.
+
+## Formatting
+
+`cargo fmt --all -- --check` fails in this worktree, and it fails at `origin/main` too:
+`crates/zz/src/config/settings.rs`, `crates/zz/src/lib.rs`, `crates/zz/tests/cli_binary.rs`,
+`crates/zz-client/src/chrome.rs`, `crates/zz-daemon/src/daemon.rs`, `crates/zz-terminal/src/session.rs`
+and `crates/zz-tui/src/render.rs:3055` all predate this lane, none of them is code this obligation
+wrote, and reflowing them would be exactly the kind of unrelated edit the code boundaries forbid.
+Three spots WERE this obligation's, and only those three were wrapped in `b1a56015`: the
+`zz_client` import line and the `SIDEBAR_TABLE` assertion attempt-01 landed in
+`crates/zz-tui/src/input.rs`, and the `collect()` in attempt-02's
+`trailing_prompt_spaces_are_left_to_the_fill`. `cargo fmt -p zz-tui -- --check` afterwards names
+`render.rs:3055` and nothing else, which is BASE's; `cargo-fmt-check-zz-tui.txt` is that run.
 
 ## Gap
 

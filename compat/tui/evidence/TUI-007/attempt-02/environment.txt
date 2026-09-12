@@ -1,5 +1,5 @@
-zz revision: 0752c9b888b9bde8aaabcb02f705e8775a611fb5 (tracked tree clean outside compat/tui/evidence/TUI-007/attempt-02/, which these runs rewrite: yes)
-zz binary: /home/demfabris/dev/zz-tui-overlays/target/debug/zz sha256 d4f9386cea441c8540fcd7b7adf42881e0ee1f61f69028518f72bcf7769ccb7e, the binary every fixture run below used. Built from the tree of 0752c9b8 after `touch crates/*/src/*.rs crates/*/Cargo.toml Cargo.toml` forced eleven crates to recompile, then relinked by `cargo test -p zz` for its cli_binary target; a debug build is not bit-reproducible on this box, so the revision plus the clean tree is the attestation and the hash only identifies the artifact
+zz revision: b1a5601585ef00346cd447232181b9845510a493 (tracked tree clean outside compat/tui/evidence/TUI-007/attempt-02/, which these runs rewrite: yes)
+zz binary: /home/demfabris/dev/zz-tui-overlays/target/debug/zz sha256 b44f54791463166d3a75dcf955a0f354798ea0ac1e0aa17aab635ee18ea00ed8, the binary on disk and the one every run below used. Built from the tree of b1a56015 and last relinked by `cargo test -p zz` for its cli_binary target, after which every fixture was run again; a debug build is not bit-reproducible on this box, so the revision plus the clean tree is the attestation and the hash only identifies the artifact
 prefix binary for tui-overlays-prefix: the crates/ tree of START 7c692222 with this attempt's fixture, sha256 dda19194d113349dfe02fcbb402ec39264b72321a7a40aa2725f1abce0f57476
 main's attached-client driver: git show origin/main:compat/attached-client.sh sha256 21ee7922f26568d391aa21035d21eb2be099a37fc5bc7e4fcf1ce5a33cc2e06a at origin/main 33ecbd86
 pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 (tmux next-3.8, source d77c9dc6)
@@ -11,4 +11,4 @@ shell: /bin/bash
 bash: 5.3.15(1)-release (x86_64-pc-linux-gnu)
 outer size: each fixture sets its own outer tmux window size (80x24, 60x20, 100x30, 80x30, 79x23)
 locale: LANG=en_US.UTF-8 LC_ALL= LC_TIME=pt_BR.UTF-8
-date: 2026-09-12T06:53:33-03:00
+date: 2026-09-12T07:41:42-03:00

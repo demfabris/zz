@@ -63,13 +63,14 @@ fn chooser_states_append_the_v72_filter_fallback_flag() {
         selected: 3,
         filter_no_matches: true,
         help: false,
+        prompt: String::new(),
     };
     assert_eq!(
         postcard::to_stdvec(&buffer).expect("encode buffer chooser state"),
-        [0, 0, 3, 1, 0]
+        [0, 0, 3, 1, 0, 0]
     );
     assert_eq!(
-        postcard::from_bytes::<zz_protocol::ChooseBufferState>(&[0, 0, 3, 1, 0])
+        postcard::from_bytes::<zz_protocol::ChooseBufferState>(&[0, 0, 3, 1, 0, 0])
             .expect("decode buffer chooser state"),
         buffer
     );

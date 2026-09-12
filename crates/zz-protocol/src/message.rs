@@ -2542,6 +2542,7 @@ pub enum ChooseTreeAction {
     CommandPrompt,
     PreviewCycle,
     FilterPrompt,
+    ClearFilter,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2580,6 +2581,8 @@ pub struct ChooseBufferState {
     /// outright, which is why `choose-tree -y` has no counterpart here.
     #[serde(default)]
     pub help: bool,
+    #[serde(default)]
+    pub prompt: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2683,6 +2686,8 @@ pub enum ChooseBufferAction {
     /// chooser the way a single paste does.
     PasteTagged,
     PreviewCycle,
+    FilterPrompt,
+    ClearFilter,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

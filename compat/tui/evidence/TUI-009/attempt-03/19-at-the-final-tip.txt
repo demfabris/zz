@@ -1,0 +1,19 @@
+Re-run at 883ded30, the tip after the ledger and evidence commit, 2026-09-12T07:11:42-03:00.
+The tree's code and fixtures are identical to 3f6dc460, where 01-13, 17 and 18 ran:
+$ git diff --stat 3f6dc460 HEAD -- crates/ compat/tui-caps.sh compat/tui-screen-diff.sh compat/scenarios/
+(no output above means no difference)
+
+$ compat/tui-caps.sh
+243 asserted rows, 23 recorded rows
+all 243 asserted rows identical
+
+$ compat/tui-caps.sh --self-check
+self-check: every sabotage caught in its own channel
+
+$ compat/run.sh smoke/pane-colours-palette
+smoke/pane-colours-palette: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+$ python3 compat/tui/tracker.py check
+compat/tui/campaign.json is valid and knowledge/tmux/tui-parity.md is current
+$ python3 compat/tmux-tracker.py check
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current

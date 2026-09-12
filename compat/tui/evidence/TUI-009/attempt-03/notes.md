@@ -254,3 +254,7 @@ colour rule sit in the first with the negotiation they share `tty.rs` and
   exit 0.
 - `18`: `compat/tui-indicators.sh` and `compat/tui-pane-geometry.sh`, exit 0
   each.
+- `19`: the tip after the ledger and evidence commit, whose code and fixtures
+  are identical to `3f6dc460`: `compat/tui-caps.sh`, its `--self-check`,
+  `smoke/pane-colours-palette` and both ledger validators, all green there
+  too.

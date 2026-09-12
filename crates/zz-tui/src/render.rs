@@ -3680,7 +3680,11 @@ mod tests {
         let Some(StatusOverlay { front, .. }) = status_overlay(&model, 40) else {
             panic!("confirm is a message-area overlay");
         };
-        let text: String = front.segments.iter().map(|segment| segment.text.as_str()).collect();
+        let text: String = front
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect();
         assert_eq!(text, "Go on?");
     }
 

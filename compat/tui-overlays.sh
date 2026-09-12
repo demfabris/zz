@@ -73,14 +73,23 @@
 # `record` asserts nothing and has to say why; no case uses it.
 #
 # TRAILING SPACES ON THE PROMPT AND MESSAGE ROW. Measured 2026-09-11 against
-# the pin: a space at the END of a message string or of the command prompt's
-# input is not painted in message-style. The pin's decoded row carries the
-# message-style run up to the last non-blank glyph and then the fill's own
+# the pin, and only while a status row sits under the overlay, which every case
+# in this file does: a space at the END of a message string or of the command
+# prompt's input is not painted in message-style. The pin's decoded row carries
+# the message-style run up to the last non-blank glyph and then the fill's own
 # cell (capture-pane -e emits the fill's SGR right after that glyph and trims
 # the blanks behind it); a side that paints those spaces shows them inside the
 # message-style run instead. Two cases measure it: prompt-trailing-space types
-# two spaces at the end of a command, and the two *-under-message cases pass a
-# message that ends in two spaces.
+# two spaces at the end of a command, and popup-under-message passes a message
+# that ends in two spaces (menu-under-message passes one with no trailing
+# space, and measures the nesting rather than the fill).
+#
+# The fill is what absorbs them, so the rule stops where the fill does. With
+# `status off` the pin draws the prompt straight onto the pane's own ground,
+# tty_draw_line cannot fold a message-background space into an erase on a
+# default-background row, and the pin paints it: compat/tui-copy-mode.sh runs
+# with status off and its four *-search-prompt cases assert the pin's
+# `(search down) ` with the trailing space inside the message-style run.
 #
 # ODD SIZE AND USER STYLES. The pin centres a popup and a -x C -y C menu on the
 # client's full height (cmd_display_menu_get_pos: tty->sy), which at an even

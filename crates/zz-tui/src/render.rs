@@ -2333,9 +2333,14 @@ fn client_message_hides_the_cursor(model: &Model) -> bool {
 
 fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
     let message_style = crate::mode_view::message_style(model, false);
+    let filled = model.status_block_rows() > 0;
     let message = |text: &str| StatusOverlay {
         front: StyledLine::from_segments(crate::mode_view::message_front(
-            text.trim_end_matches(' '),
+            if filled {
+                text.trim_end_matches(' ')
+            } else {
+                text
+            },
             width,
             &message_style,
         )),
@@ -4013,6 +4018,7 @@ mod tests {
     #[test]
     fn trailing_prompt_spaces_are_left_to_the_fill() {
         let mut model = block_model(40, 10);
+        model.set_status(block_status(vec!["STATUS"], true));
         model.confirm = Some(zz_protocol::ConfirmState {
             prompt: "Go on?  ".to_owned(),
             confirm_key: b'y',
@@ -4027,6 +4033,29 @@ mod tests {
             .map(|segment| segment.text.as_str())
             .collect();
         assert_eq!(text, "Go on?");
+    }
+
+    #[test]
+    fn trailing_prompt_spaces_survive_with_no_status_row_under_them() {
+        let mut model = block_model(40, 10);
+        model.set_status(zz_protocol::StatusLine {
+            customized: true,
+            ..zz_protocol::StatusLine::default()
+        });
+        model.confirm = Some(zz_protocol::ConfirmState {
+            prompt: "Go on?  ".to_owned(),
+            confirm_key: b'y',
+            default_yes: false,
+        });
+        let Some(StatusOverlay { front, .. }) = status_overlay(&model, 40) else {
+            panic!("confirm is a message-area overlay");
+        };
+        let text: String = front
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect();
+        assert_eq!(text, "Go on?  ");
     }
 
     #[test]

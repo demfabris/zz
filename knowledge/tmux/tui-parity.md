@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **5/12 verified**. Added scope: **0/1 verified**.
 
-Status counts: unmeasured: 5, different: 0, active: 2, review: 1, blocked: 0, verified: 5.
+Status counts: unmeasured: 5, different: 0, active: 3, review: 0, blocked: 0, verified: 5.
 
 Dependency-ready obligations, by priority: TUI-004, TUI-009, TUI-013.
 

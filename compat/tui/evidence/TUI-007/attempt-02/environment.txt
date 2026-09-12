@@ -1,13 +1,14 @@
-zz revision: b1747c04d4a0fdaf94ec0fadf187b9a9e9a3ac80 (tracked tree clean outside compat/tui/evidence/TUI-007/attempt-02/, which these runs rewrite: yes)
-zz binary: /home/demfabris/dev/zz-tui-overlays/target/debug/zz sha256 dad017daec77848e45e6301549dd3f2c1cbab88c9915a5c02728acf3b8241a01 (cargo build -p zz --jobs 4 at b1747c04d4a0fdaf94ec0fadf187b9a9e9a3ac80)
+zz revision: 0752c9b888b9bde8aaabcb02f705e8775a611fb5 (tracked tree clean outside compat/tui/evidence/TUI-007/attempt-02/, which these runs rewrite: yes)
+zz binary: /home/demfabris/dev/zz-tui-overlays/target/debug/zz sha256 d4f9386cea441c8540fcd7b7adf42881e0ee1f61f69028518f72bcf7769ccb7e, the binary every fixture run below used. Built from the tree of 0752c9b8 after `touch crates/*/src/*.rs crates/*/Cargo.toml Cargo.toml` forced eleven crates to recompile, then relinked by `cargo test -p zz` for its cli_binary target; a debug build is not bit-reproducible on this box, so the revision plus the clean tree is the attestation and the hash only identifies the artifact
 prefix binary for tui-overlays-prefix: the crates/ tree of START 7c692222 with this attempt's fixture, sha256 dda19194d113349dfe02fcbb402ec39264b72321a7a40aa2725f1abce0f57476
+main's attached-client driver: git show origin/main:compat/attached-client.sh sha256 21ee7922f26568d391aa21035d21eb2be099a37fc5bc7e4fcf1ce5a33cc2e06a at origin/main 33ecbd86
 pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5 (tmux next-3.8, source d77c9dc6)
 os: Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
 NAME="CachyOS Linux"
 PRETTY_NAME="CachyOS"
 TERM: xterm-ghostty
 shell: /bin/bash
-bash: 5.3.15(1)-release
+bash: 5.3.15(1)-release (x86_64-pc-linux-gnu)
 outer size: each fixture sets its own outer tmux window size (80x24, 60x20, 100x30, 80x30, 79x23)
 locale: LANG=en_US.UTF-8 LC_ALL= LC_TIME=pt_BR.UTF-8
-date: 2026-09-11T22:48:14-03:00
+date: 2026-09-12T06:53:33-03:00

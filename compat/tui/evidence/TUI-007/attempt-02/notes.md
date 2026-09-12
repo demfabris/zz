@@ -5,12 +5,12 @@ surfaces themselves and left thirteen cases recorded `SIBLING:modes`, because th
 message row's style was TUI-004's. TUI-004 landed. This attempt flips those thirteen, fixes the
 four that did not simply start matching, and takes the fixture to zero recorded cases.
 
-Every run below except `tui-overlays-prefix` ran at `b1747c04` with the tracked tree clean outside
-this directory and `target/debug/zz` built from that tree.
+Every run below except `tui-overlays-prefix` ran at the branch tip `0752c9b8`, tracked tree clean
+outside this directory, against the `target/debug/zz` named in `environment.txt`.
 
 | File | What it is |
 | --- | --- |
-| `environment.txt` | both binaries' sha256, the zz revision and clean state, the prefix binary, the pin, OS, TERM, shell, bash, locale |
+| `environment.txt` | the zz revision and clean state, the binary's sha256 and how it was built, the prefix binary, main's attached-client driver, the pin, OS, TERM, shell, bash, locale |
 | `tui-overlays-prefix.stdout.txt` | this attempt's `compat/tui-overlays.sh` against the `crates/` tree of START `7c692222`, exit 1: `11 of 48 asserted comparisons differ, 0 recorded` - `prompt-trailing-space`, `confirm-opened`, `confirm-resized`, `popup-opened`, `popup-typed`, `popup-under-message`, `popup-resized`, `centre-popup-fg`, `centre-popup-fg-typed`, `centre-popup-fgbg`, `centre-popup-fgbg-typed`. That is the whole of what the three landings fix |
 | `tui-overlays-prefix.stderr.txt`, `tui-overlays-prefix.exit.txt` | its stderr (empty) and exit status |
 | `tui-overlays-run-1.stdout.txt` | `compat/tui-overlays.sh`, exit 0: `all 48 asserted comparisons identical, 0 recorded not asserted` |
@@ -23,10 +23,13 @@ this directory and `target/debug/zz` built from that tree.
 | `tui-overlays-self-check.stderr.txt`, `tui-overlays-self-check.exit.txt` | stderr (empty) and exit status |
 | `tui-screen-diff.stdout.txt` | `compat/tui-screen-diff.sh`, exit 0: `all 111 asserted checkpoints identical, 42 recorded not asserted` |
 | `tui-screen-diff.stderr.txt`, `tui-screen-diff.exit.txt` | its stderr and exit status |
-| `attached-client.stdout.txt` | `compat/attached-client.sh`, empty: the driver stops in its first probe |
-| `attached-client.stderr.txt` | `error: zz screen did not visibly become copy-mode within 10 seconds`, plus the daemon ring log. This is the one red BASE is known to carry and it is not this lane's: `wait_for_visible_mode` still looks for zz's old `COPY` status badge, which the modes landing replaced with the pin's in-pane position indicator. `origin/main` already carries the modes lane's fix to that function; this branch sits on BASE, so it does not. Nothing runs past that step, so there is nothing past it to report |
+| `attached-client.stdout.txt` | `compat/attached-client.sh` as this branch carries it, empty: the driver stops in its first probe |
+| `attached-client.stderr.txt` | `error: zz screen did not visibly become copy-mode within 10 seconds`, plus the captured zz screen and the daemon ring log. This is the one red BASE is known to carry and it is not this lane's, see below |
 | `attached-client.exit.txt` | its exit status (1) |
+| `attached-client-main-driver.stdout.txt` | the same driver taken from `origin/main` (`git show origin/main:compat/attached-client.sh`, sha256 in `environment.txt`) against this branch's binary, exit 0: `attached-client compatibility: PASS`, the whole driver in one 425-second run |
+| `attached-client-main-driver.stderr.txt`, `attached-client-main-driver.exit.txt` | stderr (empty) and exit status (0) |
 | `cargo-test-zz-tui.txt` | `cargo test -p zz-tui`, 192 passed |
+| `cargo-test-zz-tui-stale-artifact.txt` | the same command's FIRST run at this tip, exit 101, two failures, kept because it is a trap rather than a result: see the stale-artifact section |
 | `cargo-clippy-zz-tui.txt` | `cargo clippy -p zz-tui --all-targets --all-features -- -D warnings`, clean |
 | `cargo-test-zz-mux.txt` | `cargo test -p zz-mux`, 524 + 105 passed |
 | `cargo-clippy-zz-mux.txt` | `cargo clippy -p zz-mux --all-targets --all-features -- -D warnings`, clean |
@@ -35,9 +38,9 @@ this directory and `target/debug/zz` built from that tree.
 
 Environment for every fixture run: `PATH=/opt/homebrew/bin:$PATH`,
 `ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux`,
-`ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins`; `attached-client.sh` also takes
-`ZZ_BIN=$PWD/target/debug/zz TMUX_BIN=<pin>`. Every cargo command went through the box's two-slot
-lock at `MemoryMax=5G`, `--jobs 4 -- --test-threads=3`.
+`ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins`; both `attached-client` runs also
+take `ZZ_BIN=$PWD/target/debug/zz TMUX_BIN=<pin>`. Every cargo command went through the box's
+two-slot lock at `MemoryMax=5G`, `--jobs 4 -- --test-threads=3`.
 
 ## What changed, and what each change is worth
 
@@ -73,7 +76,8 @@ Nine matched at the merged tip and were flipped as they stood: `prompt-opened`, 
 `prompt-status-top`, `menu-under-message`, `menu-resized`. Four needed the landings above:
 `confirm-opened` and `confirm-resized` (the confirm overlay), `popup-under-message` and
 `popup-resized` (the trailing spaces, on top of the popup erase). `tui-overlays-prefix` shows all
-four failing without them. No case is recorded for any reason.
+four failing without them. No case is recorded for any reason, so nothing of this obligation is
+waiting on a sibling lane.
 
 ## The sabotages
 
@@ -96,6 +100,51 @@ other `Escape` in this fixture is answered by an open surface. Measured while wr
 cases: the run stalled at `pstyle settled on the zz screen did not settle within 10 seconds`, on
 both sides identically.
 
+## attached-client.sh: the BASE red is the driver's, and there is nothing behind it
+
+Measured 2026-09-12 at `0752c9b8`. The file this branch carries stops in its first probe with
+`error: zz screen did not visibly become copy-mode within 10 seconds`. The captured zz screen in
+`attached-client.stderr.txt` shows why, in plain sight: the pane row reads
+`printf 'ATTACHED_DRAW_%s\n' R[0/0]`. The pin's in-pane position indicator IS on the screen. BASE's
+`wait_for_visible_mode` looks for zz's old `COPY` status badge instead, which the modes landing
+replaced with exactly that indicator, so the wait can never be satisfied and nothing after it runs.
+Nothing in this lane's diff touches `compat/attached-client.sh`, which is not in this lane's zones.
+
+`origin/main` (`33ecbd86`) carries the modes lane's fix to that one function. `diff`ing main's copy
+against this branch's gives three hunks and nothing else: the `zz` arm of the `case` drops its own
+pattern so both sides use `\[[0-9]+/[0-9]+\]`, and the awk that strips the indicator stops being
+guarded by `side == "tmux"`. All three are copy-mode detection; none of them is an overlay probe or
+an assertion.
+
+So the honest measurement is main's driver against this branch's binary, and it is
+`attached-client-main-driver.stdout.txt`: exit 0, `attached-client compatibility: PASS`, the whole
+driver end to end in 425 seconds, no split needed. That covers `probe_command_prompt`,
+`probe_confirm_before`, `probe_display_menu`, `probe_display_popup` and
+`probe_display_panes_target_no_select` - the behavioural closures this obligation's third clause
+asks be reused as regressions - along with every other probe in the driver. Nothing is left behind
+the BASE red. The gate rebasing onto the main that carries the modes landing gets this green from
+the tree's own copy.
+
+## The stale artifact the OOM left, kept as a trap
+
+Worth recording because it nearly cost this cycle a false red. The first `cargo test -p zz-tui` at
+this tip reported `190 passed; 2 failed`, and the two failures were exactly the two unit tests that
+pin this attempt's two landings, `popup_blank_rows_keep_the_popup_style_instead_of_an_erase` and
+`trailing_prompt_spaces_are_left_to_the_fill`. Both failed deterministically, solo and loaded, and
+both failed in a way that reads like a straight revert - an `\e[10X` still ending the popup's blank
+rows, `"Go on?  "` where `"Go on?"` was expected.
+
+The source was not reverted: `blit_row`'s `grounded_defaults` guard and `status_overlay`'s
+`trim_end_matches(' ')` are both present at this tip. Cargo simply never recompiled - it printed
+`Finished \`test\` profile in 0.34s` and ran a `zz_tui-577ff6b7762e30e0` test binary the run this
+batch resumes from had left behind when it was OOM-killed mid-compile, with a fingerprint that
+still claimed to be fresh. `touch crates/zz-tui/src/*.rs crates/zz-tui/Cargo.toml` and the same
+command again: `192 passed`, `cargo-test-zz-tui.txt`. Every crate was then touched and rebuilt from
+scratch, and the fixture was re-run three times plus `--self-check` against the relinked binary.
+The false red is kept as `cargo-test-zz-tui-stale-artifact.txt` so the next agent who meets a
+compile-free cargo run on this box after a kill recognises it. A killed rustc can leave a
+fingerprint that lies; `Finished` with no `Compiling` line after a kill is not a result.
+
 ## Gap
 
 `option:message-style` left `options.native-overlay-styles` for a closed `options.tui-message-style`
@@ -108,9 +157,10 @@ keeps its native overlay presentation.
 
 ## Not measured
 
-Nothing on the wire changed this attempt. `message-command-style` under `status-keys vi` is not
-exercised by this fixture and is not claimed. `attached-client.sh` does not run past its first
-probe on this branch, for the reason above.
+Nothing on the wire changed this attempt; `PROTOCOL_VERSION` stays 101. `message-command-style`
+under `status-keys vi` is not exercised by this fixture and is not claimed. The three hunks that
+separate main's `attached-client.sh` from this branch's are the modes lane's and are not this
+lane's to land; this attempt measures around them rather than editing a file outside its zones.
 
 ## Carried from attempt-01's evidence note
 

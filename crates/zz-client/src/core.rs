@@ -1591,6 +1591,7 @@ mod tests {
                 selected: 0,
                 filter_no_matches: true,
                 help: false,
+                prompt: String::new(),
             }),
         }));
         core.handle_message(event(EventPayload::ChooseBufferUpdate {
@@ -1753,6 +1754,7 @@ mod tests {
             selected: 0,
             filter_no_matches: false,
             help: false,
+            prompt: String::new(),
         });
         core.display_panes = Some(DisplayPanesState {
             window: zz_protocol::WindowId(2),

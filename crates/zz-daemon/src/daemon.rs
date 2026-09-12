@@ -8625,6 +8625,7 @@ impl Shared {
                         sort,
                         key_format,
                         template,
+                        zoom,
                     } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
@@ -8668,6 +8669,11 @@ impl Shared {
                             &mut resume_client_terminals,
                         );
                         inner.swallowed_keys.remove(&client);
+                        if hold_chooser_zoom(&mut inner, client, *pane, *zoom) {
+                            snapshot_changed = true;
+                            let facts = format_hook_facts(&inner);
+                            chooser.rebuild(&inner.engine, attached_session, &facts);
+                        }
                         let state = chooser.rendered.clone();
                         inner.choose_trees.insert(client, chooser);
                         direct_events.push(EventPayload::ChooseTree { state: Some(state) });
@@ -8686,6 +8692,7 @@ impl Shared {
                         sort,
                         key_format,
                         template,
+                        zoom,
                     } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
@@ -8726,6 +8733,9 @@ impl Shared {
                             &mut resume_client_terminals,
                         );
                         inner.swallowed_keys.remove(&client);
+                        if hold_chooser_zoom(&mut inner, client, *pane, *zoom) {
+                            snapshot_changed = true;
+                        }
                         let state = chooser.rendered.clone();
                         inner.choose_buffers.insert(client, chooser);
                         direct_events.push(EventPayload::ChooseBuffer { state: Some(state) });
@@ -18555,7 +18565,20 @@ impl Shared {
             }
         }
         self.reap_chooser_kill_panes(client, kind, context);
+        self.release_closed_chooser_zoom(client);
         Ok(())
+    }
+
+    fn release_closed_chooser_zoom(self: &Arc<Self>, client: ClientId) {
+        let pending = {
+            let inner = self.inner.lock();
+            inner.chooser_zooms.contains_key(&client)
+                && !inner.choose_trees.contains_key(&client)
+                && !inner.choose_buffers.contains_key(&client)
+        };
+        if pending {
+            self.publish_snapshot();
+        }
     }
 
     fn input_choose_buffer(
@@ -18594,13 +18617,25 @@ impl Shared {
             let Some(mut chooser) = inner.choose_buffers.remove(&client) else {
                 return Ok(());
             };
-            let swallowed_help = chooser.help && matches!(action, ChooseBufferAction::Key(_));
-            if chooser.help {
+            let prompt_edit = match (&action, chooser.prompt.is_some()) {
+                (ChooseBufferAction::Key(input), true) => {
+                    let Some(edit) = chooser_prompt_edit(input) else {
+                        inner.choose_buffers.insert(client, chooser);
+                        return Ok(());
+                    };
+                    Some(edit)
+                }
+                _ => None,
+            };
+            let swallowed_help = chooser.help
+                && prompt_edit.is_none()
+                && matches!(action, ChooseBufferAction::Key(_));
+            if chooser.help && prompt_edit.is_none() {
                 chooser.help = false;
             }
             let action = match action {
                 _ if swallowed_help => ChooseBufferAction::Close,
-                ChooseBufferAction::Key(input) => {
+                ChooseBufferAction::Key(input) if prompt_edit.is_none() => {
                     let searching = chooser.search.is_some();
                     if let Some(row) =
                         chooser_row_for_key(&chooser.rendered.items, &input, searching, |item| {
@@ -18632,6 +18667,8 @@ impl Shared {
             } else {
                 let result = if swallowed_help {
                     ChooseBufferResult::Rebuild
+                } else if let Some(edit) = prompt_edit {
+                    chooser.edit_prompt(edit)
                 } else {
                     match chooser.apply(action, &inner.paste_buffers) {
                         Ok(result) => result,
@@ -18781,6 +18818,7 @@ impl Shared {
             }
         }
         self.reap_chooser_kill_panes(client, kind, context);
+        self.release_closed_chooser_zoom(client);
         Ok(())
     }
 
@@ -22554,6 +22592,7 @@ impl Shared {
                 ..
             } = &mut *inner;
             window_latest_clients.retain(|window, _| engine.state.windows.contains_key(window));
+            release_chooser_zooms(&mut inner);
             let snapshot = inner.engine.state.snapshot();
             inner.last_published_mux_generation = snapshot.generation;
             let presence = snapshot_presence(&inner);
@@ -27903,6 +27942,7 @@ struct ServerState {
     command_prompts: BTreeMap<ClientId, CommandPrompt>,
     choose_trees: BTreeMap<ClientId, ChooseTreeSession>,
     choose_buffers: BTreeMap<ClientId, ChooseBufferSession>,
+    chooser_zooms: BTreeMap<ClientId, WindowId>,
     chooser_kill_panes: Vec<PaneId>,
     /// The pane a `copy-mode -k` in the current effect batch armed, consumed
     /// by the entry that follows it.
@@ -28352,6 +28392,7 @@ struct ChooseBufferSession {
     rendered: ChooseBufferState,
     presentation_rows: Vec<ChooserRow>,
     preview_size: ChooserPreviewSize,
+    prompt: Option<ChooserPrompt>,
 }
 
 impl ChooseBufferSession {
@@ -28396,9 +28437,11 @@ impl ChooseBufferSession {
                 selected: 0,
                 filter_no_matches: false,
                 help: false,
+                prompt: String::new(),
             },
             presentation_rows: Vec::new(),
             preview_size: ChooserPreviewSize::Normal,
+            prompt: None,
         };
         chooser.rebuild(engine, buffers, attached_session, facts);
         Ok(Some(chooser))
@@ -28529,6 +28572,10 @@ impl ChooseBufferSession {
             selected: u32::try_from(selected).unwrap_or(u32::MAX),
             filter_no_matches,
             help: self.help,
+            prompt: self
+                .prompt
+                .as_ref()
+                .map_or_else(String::new, ChooserPrompt::line),
         };
         self.presentation_rows = chooser_presentation::buffer_rows(
             engine,
@@ -28540,6 +28587,29 @@ impl ChooseBufferSession {
             attached_session,
             facts,
         );
+    }
+
+    fn edit_prompt(&mut self, edit: ChooserPromptEdit) -> ChooseBufferResult {
+        let Some(prompt) = self.prompt.as_mut() else {
+            return ChooseBufferResult::Updated;
+        };
+        match edit {
+            ChooserPromptEdit::Append(text) => {
+                if prompt.input.len().saturating_add(text.len()) <= MAX_CHOOSE_TREE_QUERY_BYTES {
+                    prompt.input.push_str(&text);
+                }
+            }
+            ChooserPromptEdit::Backspace => {
+                prompt.input.pop();
+            }
+            ChooserPromptEdit::Cancel => self.prompt = None,
+            ChooserPromptEdit::Accept => {
+                let input = std::mem::take(&mut prompt.input);
+                self.prompt = None;
+                self.filter = (!input.is_empty()).then_some(input);
+            }
+        }
+        ChooseBufferResult::Rebuild
     }
 
     fn apply(
@@ -28678,6 +28748,20 @@ impl ChooseBufferSession {
             ChooseBufferAction::PreviewCycle => {
                 self.preview_size = chooser_presentation::next_preview_size(self.preview_size);
                 return Ok(ChooseBufferResult::Updated);
+            }
+            ChooseBufferAction::FilterPrompt => {
+                self.prompt = Some(ChooserPrompt {
+                    kind: ChooserPromptKind::Filter,
+                    text: "(filter) ".to_owned(),
+                    input: self.filter.clone().unwrap_or_default(),
+                    targets: Vec::new(),
+                });
+                return Ok(ChooseBufferResult::Rebuild);
+            }
+            ChooseBufferAction::ClearFilter => {
+                self.prompt = None;
+                self.filter = None;
+                return Ok(ChooseBufferResult::Rebuild);
             }
             ChooseBufferAction::CollapseAll | ChooseBufferAction::ExpandAll => {
                 return Ok(ChooseBufferResult::Rebuild);
@@ -28838,6 +28922,46 @@ fn choose_tree_kill_prompt(engine: &MuxEngine, target: ChooseTreeTarget) -> Opti
 /// `window_tree_pull_item`: a session row resolves to its current window's
 /// active pane and a window row to its own active pane, which is the pane
 /// `server_set_marked` takes.
+fn hold_chooser_zoom(inner: &mut ServerState, client: ClientId, pane: PaneId, zoom: bool) -> bool {
+    if !zoom {
+        return false;
+    }
+    let Some(window) = inner.engine.state.window_for_pane(pane) else {
+        return false;
+    };
+    if inner.engine.state.windows[&window].zoomed_pane.is_some() {
+        return false;
+    }
+    if inner.engine.state.toggle_zoom(pane).is_err() {
+        return false;
+    }
+    inner.chooser_zooms.entry(client).or_insert(window);
+    inner.engine.state.windows[&window].zoomed_pane.is_some()
+}
+
+fn release_chooser_zooms(inner: &mut ServerState) {
+    let released = inner
+        .chooser_zooms
+        .iter()
+        .filter(|(client, _)| {
+            !inner.choose_trees.contains_key(client) && !inner.choose_buffers.contains_key(client)
+        })
+        .map(|(client, window)| (*client, *window))
+        .collect::<Vec<_>>();
+    for (client, window) in released {
+        inner.chooser_zooms.remove(&client);
+        if let Some(pane) = inner
+            .engine
+            .state
+            .windows
+            .get(&window)
+            .and_then(|window| window.zoomed_pane)
+        {
+            let _ = inner.engine.state.toggle_zoom(pane);
+        }
+    }
+}
+
 fn choose_tree_row_pane(engine: &MuxEngine, target: ChooseTreeTarget) -> Option<PaneId> {
     let state = &engine.state;
     let window = match target {
@@ -29031,6 +29155,7 @@ struct ChooseTreeSession {
     template: Option<String>,
     expanded_sessions: BTreeSet<SessionId>,
     expanded_windows: BTreeSet<zz_protocol::WindowId>,
+    built: Option<(BTreeSet<SessionId>, BTreeSet<zz_protocol::WindowId>)>,
     selected: Option<ChooseTreeTarget>,
     search: Option<ChooseTreeSearchState>,
     last_search: Option<ChooseTreeSearchState>,
@@ -29101,6 +29226,7 @@ impl ChooseTreeSession {
             template: None,
             expanded_sessions,
             expanded_windows,
+            built: None,
             selected,
             search: None,
             last_search: None,
@@ -29340,6 +29466,30 @@ impl ChooseTreeSession {
         }
     }
 
+    fn expand_rows_the_last_build_dropped(
+        &mut self,
+        branches: &[(SessionId, Vec<(zz_protocol::WindowId, Vec<PaneId>)>)],
+    ) {
+        let sessions = branches.iter().map(|(session, _)| *session).collect();
+        let windows = branches
+            .iter()
+            .flat_map(|(_, windows)| windows.iter().map(|(window, _)| *window))
+            .collect::<BTreeSet<_>>();
+        if let Some((built_sessions, built_windows)) = self.built.take() {
+            for session in &sessions {
+                if !built_sessions.contains(session) {
+                    self.expanded_sessions.insert(*session);
+                }
+            }
+            for window in &windows {
+                if !built_windows.contains(window) {
+                    self.expanded_windows.insert(*window);
+                }
+            }
+        }
+        self.built = Some((sessions, windows));
+    }
+
     fn rebuild(
         &mut self,
         engine: &MuxEngine,
@@ -29352,6 +29502,7 @@ impl ChooseTreeSession {
         if filter_no_matches {
             branches = self.branches(engine, attached_session, facts, false);
         }
+        self.expand_rows_the_last_build_dropped(&branches);
         let mut items = Vec::new();
         'sessions: for (session_id, windows) in branches {
             let session = &state.sessions[&session_id];
@@ -29720,6 +29871,12 @@ impl ChooseTreeSession {
                 };
                 self.rendered.prompt = prompt.line();
                 self.prompt = Some(prompt);
+                update = ChooseTreeUpdateKind::Full;
+            }
+            ChooseTreeAction::ClearFilter => {
+                self.prompt = None;
+                self.rendered.prompt.clear();
+                self.filter = None;
                 update = ChooseTreeUpdateKind::Full;
             }
             ChooseTreeAction::CollapseAll | ChooseTreeAction::ExpandAll => {
@@ -77969,6 +78126,8 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("matching session");
         rebuilt_tree.rebuild(&engine, Some(z), &facts);
         assert!(!rebuilt_tree.rendered.filter_no_matches);
+        let missing_window = engine.state.sessions[&missing].active_window;
+        let missing_pane = engine.state.windows[&missing_window].active_pane;
         assert_eq!(
             rebuilt_tree
                 .rendered
@@ -77976,7 +78135,11 @@ bind - split-window -v -c "#{pane_current_path}"
                 .iter()
                 .map(|item| item.target)
                 .collect::<Vec<_>>(),
-            [ChooseTreeTarget::Session(missing)]
+            [
+                ChooseTreeTarget::Session(missing),
+                ChooseTreeTarget::Window(missing_window),
+                ChooseTreeTarget::Pane(missing_pane),
+            ]
         );
         engine
             .state

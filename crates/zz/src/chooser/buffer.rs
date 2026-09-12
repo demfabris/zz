@@ -78,6 +78,10 @@ impl ChooserSpec for BufferChooser {
         state.help
     }
 
+    fn prompt(state: &Self::State) -> Option<&str> {
+        (!state.prompt.is_empty()).then_some(state.prompt.as_str())
+    }
+
     fn title(_: &Self::State) -> &'static str {
         "Paste buffer"
     }

@@ -1546,6 +1546,7 @@ fn choosers_take_a_key_format_and_refuse_the_large_preview() {
             sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
             key_format: Some("#{line}".to_owned()),
             template: None,
+            zoom: false,
         }]
     );
 
@@ -1562,6 +1563,7 @@ fn choosers_take_a_key_format_and_refuse_the_large_preview() {
             sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Creation)).unwrap(),
             key_format: Some("x".to_owned()),
             template: None,
+            zoom: false,
         }]
     );
 

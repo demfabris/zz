@@ -1038,6 +1038,7 @@ pub enum MuxEffect {
         sort: TmuxSort,
         key_format: Option<String>,
         template: Option<String>,
+        zoom: bool,
     },
     FocusSidebar {
         pane: PaneId,
@@ -1050,6 +1051,7 @@ pub enum MuxEffect {
         sort: TmuxSort,
         key_format: Option<String>,
         template: Option<String>,
+        zoom: bool,
     },
     DisplayPanes {
         pane: PaneId,
@@ -8154,6 +8156,7 @@ impl MuxEngine {
             sort,
             key_format: options.value("-K").map(str::to_owned),
             template: chooser_command_template(invocation, positional_start, &positional),
+            zoom: options.has("-Z"),
         }))
     }
 
@@ -8198,6 +8201,7 @@ impl MuxEngine {
             sort,
             key_format: options.value("-K").map(str::to_owned),
             template: chooser_command_template(invocation, positional_start, &positional),
+            zoom: options.has("-Z"),
         }))
     }
 
@@ -39253,6 +39257,7 @@ mod tests {
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
+                zoom: true,
             }]
         );
         assert_eq!(
@@ -39278,6 +39283,7 @@ mod tests {
                 sort: TmuxSort::parse(Some("name"), true, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
+                zoom: true,
             }]
         );
         assert_eq!(
@@ -39305,6 +39311,7 @@ mod tests {
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
+                zoom: false,
             }]
         );
 
@@ -39325,6 +39332,7 @@ mod tests {
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
+                zoom: false,
             }]
         );
         let typed =
@@ -39402,6 +39410,7 @@ mod tests {
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
                 template: None,
+                zoom: false,
             }]
         );
 
@@ -39459,6 +39468,7 @@ mod tests {
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Creation)).unwrap(),
                 key_format: None,
                 template: None,
+                zoom: true,
             }]
         );
         assert!(matches!(

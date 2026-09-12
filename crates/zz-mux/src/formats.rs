@@ -4572,40 +4572,96 @@ fn format_byte_width(value: &[u8]) -> usize {
         .sum()
 }
 
-/// format-draw.c `format_trim_left` and `format_trim_right`. Both rebuild the
-/// value out of the units they walked, so a byte neither of them counts is gone
-/// from a left trim even when the value was short enough to keep whole; a right
-/// trim hands back the original string in that case and keeps the byte.
+fn format_trim_left(bytes: &[u8], limit: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut width = 0usize;
+    let mut position = 0usize;
+    while position < bytes.len() && width < limit {
+        if bytes[position] == b'#' {
+            let (end, leading) = leading_hashes(bytes, position);
+            let leading = leading.min(limit - width);
+            if leading != 0 {
+                if end == position + 1 {
+                    out.push(b'#');
+                } else {
+                    out.extend(std::iter::repeat_n(b'#', 2 * leading));
+                }
+                width += leading;
+            }
+            position = end;
+            if bytes.get(position) == Some(&b'#') {
+                let Some(end) = find_measured_style_end(bytes, position + 2) else {
+                    break;
+                };
+                out.extend_from_slice(&bytes[position..=end]);
+                position = end + 1;
+            }
+            continue;
+        }
+        let (length, unit, kept) = next_format_unit(bytes, position);
+        if kept && width + unit <= limit {
+            out.extend_from_slice(&bytes[position..position + length]);
+        }
+        width += unit;
+        position += length;
+    }
+    out
+}
+
+fn format_trim_right(bytes: &[u8], skip: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut width = 0usize;
+    let mut position = 0usize;
+    while position < bytes.len() {
+        if bytes[position] == b'#' {
+            let (end, leading) = leading_hashes(bytes, position);
+            let mut copy_width = leading;
+            if width <= skip {
+                copy_width = copy_width.saturating_sub(skip - width);
+            }
+            if copy_width != 0 {
+                if end == position + 1 {
+                    out.push(b'#');
+                } else {
+                    out.extend(std::iter::repeat_n(b'#', 2 * copy_width));
+                }
+            }
+            width += leading;
+            position = end;
+            if bytes.get(position) == Some(&b'#') {
+                let Some(end) = find_measured_style_end(bytes, position + 2) else {
+                    break;
+                };
+                out.extend_from_slice(&bytes[position..=end]);
+                position = end + 1;
+            }
+            continue;
+        }
+        let (length, unit, kept) = next_format_unit(bytes, position);
+        if kept && width >= skip {
+            out.extend_from_slice(&bytes[position..position + length]);
+        }
+        width += unit;
+        position += length;
+    }
+    out
+}
+
 fn truncate_value(value: &RawText, limit: isize, marker: Option<&str>) -> RawText {
     if limit == 0 {
         return value.clone();
     }
     let keep = limit.unsigned_abs();
     let bytes = value.as_bytes();
-    let units = format_units(bytes);
-    let total: usize = units.iter().map(|(_, width, _)| width).sum();
-    if limit < 0 && total <= keep {
-        return value.clone();
-    }
-    let skip = total.saturating_sub(keep);
-    let mut trimmed = Vec::with_capacity(bytes.len());
-    let mut width = 0usize;
-    let mut offset = 0usize;
-    for (length, unit, kept) in &units {
-        let wanted = if limit > 0 {
-            if width >= keep {
-                break;
-            }
-            *kept && width + unit <= keep
-        } else {
-            *kept && width >= skip
-        };
-        if wanted {
-            trimmed.extend_from_slice(&bytes[offset..offset + length]);
+    let trimmed = if limit > 0 {
+        format_trim_left(bytes, keep)
+    } else {
+        let total = styled_display_width(bytes);
+        if total <= keep {
+            return value.clone();
         }
-        width += unit;
-        offset += length;
-    }
+        format_trim_right(bytes, total - keep)
+    };
     if trimmed == bytes {
         return value.clone();
     }
@@ -4873,6 +4929,48 @@ mod tests {
             RawText::from_bytes(b"a\xffb".to_vec())
         );
         assert_eq!(format_byte_width(b"a\xffb"), 2);
+    }
+
+    #[test]
+    fn a_style_section_costs_a_trim_no_column_the_way_format_trim_left_does() {
+        let trim = |value: &str, limit: isize| {
+            truncate_value(&RawText::from(value), limit, None).to_string()
+        };
+        let marked = |value: &str, limit: isize| {
+            truncate_value(&RawText::from(value), limit, Some("...")).to_string()
+        };
+
+        assert_eq!(trim("#[fg=red,bold]LEFT", 10), "#[fg=red,bold]LEFT");
+        assert_eq!(trim("#[fg=red,bold]LEFT", 4), "#[fg=red,bold]LEFT");
+        assert_eq!(trim("#[fg=red,bold]LEFT", 2), "#[fg=red,bold]LE");
+        assert_eq!(trim("#[fg=red,bold]LEFT", 1), "#[fg=red,bold]L");
+        assert_eq!(trim("#[fg=red,bold]LEFT", -10), "#[fg=red,bold]LEFT");
+        assert_eq!(trim("#[fg=red,bold]LEFT", -4), "#[fg=red,bold]LEFT");
+        assert_eq!(trim("#[fg=red,bold]LEFT", -2), "#[fg=red,bold]FT");
+        assert_eq!(marked("#[fg=red,bold]LEFT", 2), "#[fg=red,bold]LE...");
+        assert_eq!(marked("#[fg=red,bold]LEFT", -2), "...#[fg=red,bold]FT");
+        assert_eq!(marked("#[fg=red,bold]LEFT", 4), "#[fg=red,bold]LEFT");
+
+        let two = "AB#[fg=red]CD#[default]EF";
+        assert_eq!(trim(two, 6), two);
+        assert_eq!(trim(two, 3), "AB#[fg=red]C");
+        assert_eq!(trim(two, -3), "#[fg=red]D#[default]EF");
+        assert_eq!(trim(two, -2), "#[fg=red]#[default]EF");
+
+        assert_eq!(trim("####AB", 3), "####A");
+        assert_eq!(trim("####AB", 2), "####");
+        assert_eq!(trim("####AB", 1), "##");
+        assert_eq!(trim("####AB", -1), "B");
+        assert_eq!(trim("###[fg=red]AB", 2), "###[fg=red]A");
+        assert_eq!(trim("###[fg=red]AB", 1), "###[fg=red]");
+        assert_eq!(trim("###[fg=red]AB", -1), "#[fg=red]B");
+
+        assert_eq!(trim("#[fg=red]\u{65e5}\u{672c}\u{8a9e}", 2), "#[fg=red]\u{65e5}");
+        assert_eq!(trim("#[fg=red]\u{65e5}\u{672c}\u{8a9e}", 3), "#[fg=red]\u{65e5}");
+        assert_eq!(trim("#[fg=red]\u{65e5}\u{672c}\u{8a9e}", -2), "#[fg=red]\u{8a9e}");
+
+        assert_eq!(trim("#[fg=red", 2), "");
+        assert_eq!(trim("#[fg=red", -2), "#[fg=red");
     }
 
     fn expand_session_path(engine: &MuxEngine, session: Option<SessionId>) -> String {

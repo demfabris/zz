@@ -812,21 +812,25 @@ run_size() {
   side_command zz set-option -su theme >/dev/null 2>&1 || true
   side_command tmux set-option -su theme >/dev/null 2>&1 || true
 
-  # A STYLED status-left longer than status-left-length. The pin's status-left
-  # is L everywhere else in this file, one character, which no length limit ever
-  # reaches; this case is the one that does. format.c format_trim_left copies a
-  # #[...] section through without counting it against the limit, so the pin's
-  # row draws LEFT; crates/zz-mux/src/formats.rs truncate_value counts every
-  # printable byte, so #{T;=/10:status-left} answers `#[fg=red,b` on zz and the
-  # unterminated marker takes the whole band off the row. Probed on both
-  # binaries 2026-09-09: display-message -p '#{T;=/#{status-left-length}:status-left}'
-  # answers '#[fg=red,bold]LEFT' on the pin and '#[fg=red,b' on zz, and the same
-  # arithmetic loses ten characters of a styled status-right. Recorded, not
-  # asserted: the fix is in the format engine's trim, which this lane does not own.
+  # A STYLED status-left against status-left-length. The pin's status-left is L
+  # everywhere else in this file, one character, which no length limit ever
+  # reaches; this case is the one that meets it. format-draw.c format_trim_left
+  # copies a #[...] section through without counting it against the limit and
+  # counts a character by the columns it draws in, so the pin's row draws LEFT.
+  # Probed on both binaries 2026-09-09: display-message -p
+  # '#{T;=/#{status-left-length}:status-left}' answered '#[fg=red,bold]LEFT' on
+  # the pin and '#[fg=red,b' on zz, whose truncate_value counted every printable
+  # byte, and the unterminated marker took the whole band off the row.
+  #
+  # LANDED 2026-09-12 (TUI-004 attempt-05): the trim walks format_width's units,
+  # so a style section is copied through at no cost, a run of #s costs the
+  # columns it draws escaped and a wide character costs two. Re-measured on the
+  # pin over 27 answers, left and right, with markers, escaped hashes, a style
+  # after them, wide characters and an unterminated section
+  # (crates/zz-mux/src/formats.rs, a_style_section_costs_a_trim_no_column...).
   clear_both
   set_on_both status-left '#[fg=red,bold]LEFT'
-  checkpoint styled-left-trim record \
-    'zz counts a #[...] section against status-left-length where the pin does not'
+  checkpoint styled-left-trim "$mode"
   set_on_both status-left L
 
   # THE RESIDUE OF THE CURSOR FIX, driven identically on both sides and left
@@ -1097,6 +1101,18 @@ run_self_check() {
     die 'zz refused resize-window'
   self_check_checkpoint status-rows
   self_check_case 'status rows, one side keeps the window a row taller' rows
+
+  # The styled-trim sabotage. Both sides are given the same styled status-left,
+  # and zz is then given the value a trim that counted the style section by
+  # bytes would have left behind, which is what the row drew before the trim
+  # landed: an unterminated #[ and none of the text.
+  SIZE_LABEL='80x24-styled-trim'
+  attach_both_at 80 24
+  set_on_both status-left '#[fg=red,bold]LEFT'
+  side_command zz set-option -g status-left '#[fg=red,b' ||
+    die 'zz refused status-left'
+  self_check_checkpoint styled-trim
+  self_check_case 'styled trim, one side keeps what a byte count leaves' rows
 
   # The pin parses a style into a cell, so the order the attributes were written
   # in is gone by the time capture-pane re-emits it. The foreground is named on

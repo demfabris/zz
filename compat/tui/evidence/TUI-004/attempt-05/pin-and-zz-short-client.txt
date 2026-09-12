@@ -1,0 +1,39 @@
+A CLIENT AS SHORT AS ITS STATUS BLOCK, probed 2026-09-12 on alienware.
+One pane, the client attached from an outer pinned tmux pane 80 columns
+wide by the named rows. resize.c recalculate_sizes_now sets CLIENT_STATUSOFF
+when c->tty.sy <= s->statuslines, so status_line_size answers 0 and the
+window keeps every row.
+
+  agree  rows=6 status=1 -> window h=5
+  agree  rows=6 status=2 -> window h=4
+  agree  rows=6 status=3 -> window h=3
+  agree  rows=6 status=4 -> window h=2
+  agree  rows=5 status=1 -> window h=4
+  agree  rows=5 status=2 -> window h=3
+  agree  rows=5 status=3 -> window h=2
+  DIFFER rows=5 status=4 -> pin h=1 zz h=5
+  agree  rows=4 status=1 -> window h=3
+  agree  rows=4 status=2 -> window h=2
+  DIFFER rows=4 status=3 -> pin h=1 zz h=4
+  agree  rows=4 status=4 -> window h=4
+  agree  rows=3 status=1 -> window h=2
+  DIFFER rows=3 status=2 -> pin h=1 zz h=3
+  agree  rows=3 status=3 -> window h=3
+  agree  rows=3 status=4 -> window h=3
+  DIFFER rows=2 status=1 -> pin h=1 zz h=2
+  agree  rows=2 status=2 -> window h=2
+  agree  rows=2 status=3 -> window h=2
+  agree  rows=2 status=4 -> window h=2
+
+The four that differ are exactly the rows where the pin's window would be one
+row: zz will not take a window down to a single row, because the raw TUI
+reports a full-height pane there and set_pane_geometry back-solves the extent
+from that report. Closing them needs a rule in crates/zz-tui, which this lane
+does not own. Three of them moved here: before this branch zz answered h=1
+where the pin answers h=3 at rows=3 status=3, h=1 against h=2 at rows=2
+status=2, and h=1 against h=4 at rows=4 status=4. `rows=2 status=1` is
+untouched by this branch and diverges at BASE too: `status 1` on a fresh server
+is the value the session already holds, so no status write happens and no
+resize is attempted.
+
+No compat fixture drives a client shorter than six rows.

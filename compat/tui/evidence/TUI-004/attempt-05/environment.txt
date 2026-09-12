@@ -1,6 +1,6 @@
 TUI-004 attempt-05 (cycle 6, the mux lane) environment
 
-date: 2026-09-12T11:37:51-03:00
+date: 2026-09-12 (runs between 11:37 and 12:26 -03)
 uname: Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
 NAME="CachyOS Linux"
 PRETTY_NAME="CachyOS"
@@ -9,11 +9,11 @@ TERM: xterm-ghostty  LANG: en_US.UTF-8  LC_TIME: pt_BR.UTF-8
 cores: 16
 worktree: /home/demfabris/dev/zz-tui-mux
 branch base: origin/main 33ecbd86
-revision: df1dedcbebf789fcdc14a399bed00f54e5079645
+revision: 451cf194d5631e7eae4b50d1ec405a9b683100c6
 tree: 1 modified paths
 zz build: cargo build -p zz --jobs 4 through systemd-run MemoryMax=5G and a two-slot flock
 zz binary: /home/demfabris/dev/zz-tui-mux/target/debug/zz
-zz sha256: a5d4ca14d39b4d1acffff8e784d580d24b9b7bffded5ae50463a63b39d456334
+zz sha256: 07dee273fc5950b9d76a33e823f52d5bc483174ae5a7a029624249efb15af5c3
 pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
 pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
 pin -V: tmux next-3.8

@@ -10,4 +10,3 @@ python3 -B compat/tui/tracker_test.py
 Ran 8 tests in 0.009s
 
 OK
-exit=0

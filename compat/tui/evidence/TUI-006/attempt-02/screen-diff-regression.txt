@@ -19,20 +19,8 @@ ok    80x24 status-style-indexed
 ok    80x24 status-style-rgb
 ok    80x24 format-colour-classes
 ok    80x24 wide-glyphs
-      checkpoint default-fg at 80x24
-      first differing row 23 of 24
-        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
-        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
-      cursor tmux: 2,14 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,14 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
-note  80x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
-      checkpoint colour-classes at 80x24
-      first differing row 14 of 24
-        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
-        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
-      cursor tmux: 2,17 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,17 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
-note  80x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+ok    80x24 default-fg
+ok    80x24 colour-classes
 ok    80x24 theme-light
       checkpoint styled-left-trim at 80x24
       first differing row 23 of 24
@@ -66,20 +54,8 @@ ok    100x24 status-style-indexed
 ok    100x24 status-style-rgb
 ok    100x24 format-colour-classes
 ok    100x24 wide-glyphs
-      checkpoint default-fg at 100x24
-      first differing row 23 of 24
-        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
-        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
-      cursor tmux: 2,14 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,14 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
-note  100x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
-      checkpoint colour-classes at 100x24
-      first differing row 13 of 24
-        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
-        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
-      cursor tmux: 2,16 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,16 flag=1 pane=100x24 shape=default blinking=0 very_visible=0 colour=none
-note  100x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+ok    100x24 default-fg
+ok    100x24 colour-classes
 ok    100x24 theme-light
       checkpoint styled-left-trim at 100x24
       first differing row 23 of 24
@@ -125,20 +101,8 @@ ok    80x10 status-style-indexed
 ok    80x10 status-style-rgb
 ok    80x10 format-colour-classes
 ok    80x10 wide-glyphs
-      checkpoint default-fg at 80x10
-      first differing row 9 of 10
-        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
-        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
-      cursor tmux: 2,7 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,7 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
-note  80x10 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
-      checkpoint colour-classes at 80x10
-      first differing row 5 of 10
-        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
-        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
-      cursor tmux: 2,8 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,8 flag=1 pane=80x10 shape=default blinking=0 very_visible=0 colour=none
-note  80x10 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+ok    80x10 default-fg
+ok    80x10 colour-classes
 ok    80x10 theme-light
       checkpoint styled-left-trim at 80x10
       first differing row 9 of 10
@@ -184,13 +148,7 @@ ok    80x6 status-style-indexed
 ok    80x6 status-style-rgb
 ok    80x6 format-colour-classes
 ok    80x6 wide-glyphs
-      checkpoint default-fg at 80x6
-      first differing row 5 of 6
-        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
-        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
-      cursor tmux: 2,4 flag=1 pane=80x6 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,4 flag=1 pane=80x6 shape=default blinking=0 very_visible=0 colour=none
-note  80x6 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
+ok    80x6 default-fg
 ok    80x6 colour-classes
 ok    80x6 theme-light
       checkpoint styled-left-trim at 80x6
@@ -225,20 +183,8 @@ ok    109x24 status-style-indexed
 ok    109x24 status-style-rgb
 ok    109x24 format-colour-classes
 ok    109x24 wide-glyphs
-      checkpoint default-fg at 109x24
-      first differing row 23 of 24
-        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
-        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
-      cursor tmux: 2,14 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,14 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
-note  109x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
-      checkpoint colour-classes at 109x24
-      first differing row 13 of 24
-        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
-        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
-      cursor tmux: 2,16 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,16 flag=1 pane=109x24 shape=default blinking=0 very_visible=0 colour=none
-note  109x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+ok    109x24 default-fg
+ok    109x24 colour-classes
 ok    109x24 theme-light
       checkpoint styled-left-trim at 109x24
       first differing row 23 of 24
@@ -272,20 +218,8 @@ ok    120x24 status-style-indexed
 ok    120x24 status-style-rgb
 ok    120x24 format-colour-classes
 ok    120x24 wide-glyphs
-      checkpoint default-fg at 120x24
-      first differing row 23 of 24
-        tmux: ^[[44mL^[[4m0:win*^[[0m^[[44m
-        zz:   ^[[38;2;216;222;233m^[[44mL^[[4m0:win*^[[0m^[[38;2;216;222;233m^[[44m
-      cursor tmux: 2,14 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,14 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
-note  120x24 default-fg recorded, not asserted: zz writes an explicit RGB foreground where the pin leaves the foreground default
-      checkpoint colour-classes at 120x24
-      first differing row 13 of 24
-        tmux: ^[[31mNAMED^[[39m ^[[38;5;196mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
-        zz:   ^[[38;2;205;0;0mNAMED^[[39m ^[[38;2;255;0;0mINDEXED^[[39m ^[[38;2;1;2;3mRGB^[[39m
-      cursor tmux: 2,16 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   2,16 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
-note  120x24 colour-classes recorded, not asserted: zz resolves a named and an indexed colour to RGB before writing to the terminal
+ok    120x24 default-fg
+ok    120x24 colour-classes
 ok    120x24 theme-light
       checkpoint styled-left-trim at 120x24
       first differing row 23 of 24
@@ -303,9 +237,9 @@ ok    120x24-sidebar sidebar-before
       checkpoint sidebar-shown at 120x24-sidebar
       first differing row 0 of 24
         tmux: $ printf 'MARK-%s\n' sidebar-before
-        zz:   ^[[38;2;16;19;24m^[[48;2;77;163;235mzz at alienware             ^[[38;2;216;222;233m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$ printf 'MARK-%s\n' sidebar-before
+        zz:   zz at alienware             ^[[38;2;216;222;233m^[[48;2;16;19;24mM-bM-^TM-^B^[[39m^[[49m$ printf 'MARK-%s\n' sidebar-before
       cursor tmux: 2,2 flag=1 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
       cursor zz:   29,22 flag=0 pane=120x24 shape=default blinking=0 very_visible=0 colour=none
 ok    120x24-sidebar sidebar-shown differs from the pin, which is what a drawn sidebar means
 ok    120x24-sidebar sidebar-withdrawn
-all 125 asserted checkpoints identical, 28 recorded not asserted
+all 137 asserted checkpoints identical, 16 recorded not asserted

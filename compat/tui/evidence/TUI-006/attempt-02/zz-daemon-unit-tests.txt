@@ -4,10 +4,10 @@ help: Check that the patched package version and available features are compatib
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
    Compiling zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-daemon)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.68s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.89s
      Running unittests src/lib.rs (target/debug/deps/zz_daemon-f5c330b4220b5cf8)
 
-running 886 tests
+running 889 tests
 test agent::claude_peers::tests::descendants_come_shallowest_first_and_skip_strangers ... ok
 test agent::claude_peers::tests::peer_name_uses_the_option_or_pane_fallback ... ok
 test agent::claude_peers::tests::inbound_lines_parse_messages_and_controls ... ok
@@ -34,16 +34,16 @@ test agent::environment::login_shell::tests::version_manager_bins_land_after_bot
 test agent::environment::warm_tests::a_custom_binary_is_not_warmed ... ok
 test agent::environment::warm_tests::a_raw_stdio_json_configuration_is_not_warmed ... ok
 test agent::environment::warm_tests::an_npx_command_without_a_package_is_not_warmed ... ok
-test agent::environment::login_shell::tests::version_manager_bins_are_existence_checked_and_newest_first ... ok
 test agent::environment::warm_tests::extracts_the_spec_from_a_default_command ... ok
 test agent::environment::warm_tests::skips_environment_assignments_and_flags ... ok
+test agent::environment::login_shell::tests::version_manager_bins_are_existence_checked_and_newest_first ... ok
 test agent::environment::workspace_tests::an_unresolved_path_leaves_the_agent_alone ... ok
 test agent::environment::workspace_tests::missing_identity_pieces_are_simply_left_out ... ok
 test agent::environment::workspace_tests::a_user_configured_value_is_never_clobbered ... ok
 test agent::environment::workspace_tests::pane_identity_is_adopted_without_touching_the_socket ... ok
-test agent::environment::workspace_tests::the_repaired_path_never_replaces_an_explicit_one ... ok
 test agent::environment::workspace_tests::workspace_identity_is_injected_for_the_pane ... ok
 test agent::environment::workspace_tests::the_installed_claude_is_offered_to_the_adapter_unless_already_set ... ok
+test agent::environment::workspace_tests::the_repaired_path_never_replaces_an_explicit_one ... ok
 test agent::fanout::tests::a_flush_settles_and_drains_before_replay_admission ... ok
 test agent::fanout::tests::a_replay_inside_the_ring_serves_only_what_the_client_missed ... ok
 test agent::fanout::tests::a_replay_older_than_the_ring_without_a_complete_journal_resets_only_the_asker ... ok
@@ -63,8 +63,8 @@ test agent::fanout::tests::switching_provider_allows_the_new_conversation_to_nam
 test agent::fanout::tests::the_first_prompt_names_the_pane_and_later_ones_leave_it_alone ... ok
 test agent::fanout::tests::the_pane_state_is_published_only_when_something_a_client_renders_moves ... ok
 test agent::fanout::tests::zero_byte_reclaimed_prompts_stay_inside_the_count_bound ... ok
-test agent::fanout::tests::a_large_journal_replay_keeps_its_reset_and_every_frame ... ok
 test agent::git_summary::tests::clean_repo_reports_branch_with_zero_changes ... ok
+test agent::fanout::tests::a_large_journal_replay_keeps_its_reset_and_every_frame ... ok
 test agent::git_summary::tests::command_output_has_a_hard_deadline ... ok
 test agent::git_summary::tests::command_output_drains_stderr_without_blocking_stdout ... ok
 test agent::git_summary::tests::directory_outside_git_has_no_summary ... ok
@@ -73,22 +73,22 @@ test agent::git_summary::tests::detached_head_has_no_branch_but_keeps_changes ..
 test agent::host::tests::a_pane_rejects_commands_beyond_its_bounded_backlog ... ok
 test agent::host::tests::a_pane_streams_from_spawn_through_a_prompt_to_a_finished_turn ... ok
 test agent::host::tests::a_prompt_past_the_queue_limit_settles_as_reclaimed ... ok
-test agent::git_summary::tests::dirty_repo_counts_tracked_and_untracked_content ... ok
 test agent::host::tests::a_prompt_queued_behind_a_hung_turn_is_handed_back_on_cancel ... ok
-test agent::git_summary::tests::summary_leaves_the_real_index_unchanged ... ok
+test agent::host::tests::a_prompt_typed_during_a_turn_queues_and_dispatches_when_it_settles ... ok
 test agent::host::tests::a_session_change_cannot_cross_an_active_turn ... ok
 test agent::host::tests::a_session_the_agent_cannot_load_is_replayed_out_of_the_journal ... ok
-test agent::host::tests::a_prompt_typed_during_a_turn_queues_and_dispatches_when_it_settles ... ok
+test agent::host::tests::a_surfaced_permission_waits_for_an_answer_and_then_resolves ... ok
 test agent::host::tests::a_waiting_prompt_receives_the_turns_text ... ok
 test agent::host::tests::an_auto_approved_tool_never_reaches_a_client ... ok
+test agent::git_summary::tests::dirty_repo_counts_tracked_and_untracked_content ... ok
 test agent::host::tests::close_preempts_a_runner_that_never_reads_shutdown ... ok
-test agent::host::tests::a_surfaced_permission_waits_for_an_answer_and_then_resolves ... ok
 test agent::host::tests::blocked_waiter_returns_without_settling_the_turn ... ok
+test agent::host::tests::closing_a_pane_cancels_what_it_still_owed ... ok
 test agent::host::tests::dispatch_publishes_running_with_a_turn_boundary_before_the_agent_speaks ... ok
 test agent::host::tests::git_refresh_gate_invalidation_discards_only_older_pending_work ... ok
 test agent::host::tests::git_refresh_gate_is_single_flight_and_latest_wins ... ok
 test agent::host::tests::git_refresh_gate_recovers_after_spawn_failure ... ok
-test agent::host::tests::closing_a_pane_cancels_what_it_still_owed ... ok
+test agent::git_summary::tests::summary_leaves_the_real_index_unchanged ... ok
 test agent::host::tests::pane_outside_git_has_no_summary_on_session_ready ... ok
 test agent::host::tests::permission_selection_uses_advertised_ids_and_kinds ... ok
 test agent::host::tests::queued_prompts_stay_inside_one_reclaim_frame ... ok
@@ -99,12 +99,12 @@ test agent::host::tests::unqueueing_hands_the_queued_prompts_back_with_their_ima
 test agent::journal::tests::a_coalesced_journal_reduces_like_the_chunks_it_replaced ... ok
 test agent::journal::tests::a_coalesced_record_consumes_one_seq ... ok
 test agent::journal::tests::a_journal_of_updates_alone_reads_exactly_as_it_did ... ok
-test agent::journal::tests::a_runaway_message_is_flushed_at_the_pending_bound ... ok
 test agent::host::tests::git_summary_refreshes_on_session_ready_and_prompt_finished ... ok
-test agent::journal::tests::adjacent_chunks_of_one_message_become_one_record ... ok
 test agent::journal::tests::a_token_stream_collapses_to_one_record_per_message ... ok
-test agent::journal::tests::an_open_record_holds_its_slot_against_the_record_cap ... ok
+test agent::journal::tests::adjacent_chunks_of_one_message_become_one_record ... ok
+test agent::journal::tests::a_runaway_message_is_flushed_at_the_pending_bound ... ok
 test agent::journal::tests::append_is_refused_past_the_record_cap ... ok
+test agent::journal::tests::an_open_record_holds_its_slot_against_the_record_cap ... ok
 test agent::journal::tests::appends_round_trip_in_order ... ok
 test agent::journal::tests::chunks_merge_only_within_one_coalescing_identity ... ok
 test agent::journal::tests::coalesced_length_accounting_matches_the_encoder ... ok
@@ -147,6 +147,7 @@ test client::tests::client_environment_carries_non_utf8_os_strings_as_bytes ... 
 test client::tests::client_environment_is_sorted_deduplicated_and_bounded ... ok
 test client::tests::client_environment_skips_oversized_entries_and_caps_aggregate_deterministically ... ok
 test client::tests::client_environment_still_rejects_nul_and_malformed_names ... ok
+test client::tests::global_feature_flags_travel_as_one_bounded_token_per_flag ... ok
 test client::tests::local_client_fact_scopes_carry_non_utf8_working_directory_bytes ... ok
 test client::tests::local_client_fact_scopes_omit_oversized_working_directories ... ok
 test client::tests::local_client_fact_scopes_publish_the_supplied_working_directory ... ok
@@ -174,8 +175,8 @@ test daemon::tests::a_pending_repeat_prefix_is_spent_by_one_mode_command ... ok
 test daemon::tests::a_replaced_message_survives_the_deadline_it_replaced ... ok
 test daemon::tests::a_source_path_no_utf8_string_can_spell_reaches_the_file_system_whole ... ok
 test daemon::tests::a_swallowed_chord_press_pairs_with_its_bare_release ... ok
-test daemon::tests::a_prompt_clears_the_message_it_covers_and_owns_the_freeze ... ok
 test daemon::tests::a_zero_duration_message_installs_no_timer_and_a_key_clears_it ... ok
+test daemon::tests::a_prompt_clears_the_message_it_covers_and_owns_the_freeze ... ok
 test daemon::tests::activity_action_and_visual_activity_fan_out_with_pin_texts ... ok
 test daemon::tests::activating_a_belled_window_allows_later_bells ... ok
 test daemon::tests::agent::a_multiframe_agent_replay_is_admitted_atomically ... ok
@@ -187,9 +188,9 @@ test daemon::tests::agent::a_waiting_agent_send_returns_the_turns_reply ... ok
 test daemon::tests::agent::agent_panes_project_their_transcript_into_a_capturable_terminal ... ok
 test daemon::tests::agent::agent_request_replies_reach_only_the_requesting_client ... ok
 test daemon::tests::agent::agent_permission_default_wait_and_explicit_non_agent_target ... ok
-test daemon::tests::agent::an_agent_pane_is_visible_before_its_runtime_starts ... ok
 test agent::host::tests::close_reclaims_a_prompt_the_runtime_has_not_accepted ... ok
 test daemon::tests::agent::an_overflowing_agent_lane_asks_for_a_replay_instead_of_closing ... ok
+test daemon::tests::agent::an_agent_pane_is_visible_before_its_runtime_starts ... ok
 test daemon::tests::agent::on_block_fail_reports_permission_and_preserves_queued_turn_attribution ... ok
 test daemon::tests::agent::the_agent_lane_batches_per_pane_and_drains_behind_the_reliable_one ... ok
 test daemon::tests::agent::agent_updates_reach_only_the_clients_the_pane_is_visible_to ... ok
@@ -201,30 +202,30 @@ test daemon::tests::agent_send_parser_reads_target_context_and_trailing_text ...
 test daemon::tests::agent_send_parser_reads_wait_and_timeout ... ok
 test daemon::tests::agent_send_payload_enforces_bounds_and_wraps_context ... ok
 test daemon::tests::agent_send_reads_stdin_only_when_argv_carries_no_text ... ok
+test daemon::tests::agent::the_agent_options_reconfigure_what_the_next_pane_spawns ... ok
 ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 885 filtered out; finished in 0.93s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 888 filtered out; finished in 0.80s
 
 test daemon::tests::agent_send_delivers_to_claude_terminal_peer ... ok
-test daemon::tests::agent::the_agent_options_reconfigure_what_the_next_pane_spawns ... ok
 test daemon::tests::agent_state_transitions_wake_parked_and_late_waiters_without_noop_edges ... ok
 test daemon::tests::agent_state_formats_reach_commands_and_control_subscriptions ... ok
+test daemon::tests::alert_expiry_does_not_resume_while_a_prompt_still_freezes ... ok
 test daemon::tests::agent_send_round_trips_through_the_attached_gui ... ok
 test daemon::tests::allow_set_title_gates_terminal_title_synchronization ... ok
-test daemon::tests::alert_expiry_does_not_resume_while_a_prompt_still_freezes ... ok
 test daemon::tests::an_attached_client_keeps_the_daemon_alive_with_zero_sessions ... ok
 test daemon::tests::an_ordinary_message_freezes_only_the_requesting_client ... ok
 test daemon::tests::an_incremental_prompt_fires_on_entry_and_on_every_edit ... ok
 test daemon::tests::alert_messages_fan_out_with_owned_lifecycle_and_bounded_log ... ok
 test daemon::tests::app_clipboard_writes_reach_every_viewer_only_under_set_clipboard_on ... ok
-test daemon::tests::attach_environment_refresh_runs_after_terminal_preflight_and_honors_dash_e ... ok
 test daemon::tests::attach_and_switch_publish_the_effective_map_only_when_it_changes ... ok
+test daemon::tests::attach_environment_refresh_runs_after_terminal_preflight_and_honors_dash_e ... ok
 test daemon::tests::attach_flags_follow_resolution_and_precede_the_terminal_open_error ... ok
 test daemon::tests::attach_session_r_marks_the_client_read_only_and_gates_its_routes ... ok
 test daemon::tests::attach_and_terminal_input_update_only_their_activity_boundaries ... ok
 test daemon::tests::attached_client_extents_subtract_status_project_gui_and_clamp_control ... ok
-test daemon::tests::attached_client_extents_clamp_retained_and_default_dimensions ... ok
 test daemon::tests::attached_context_sync_follows_a_same_session_window_switch ... ok
+test daemon::tests::attached_client_extents_clamp_retained_and_default_dimensions ... ok
 test daemon::tests::attached_interactive_client_opens_the_startup_configuration_error_view ... ok
 test daemon::tests::attached_fresh_new_session_applies_flags_after_terminal_materialization ... ok
 test daemon::tests::attaching_clears_current_window_alerts_without_suppressing_later_bells ... ok
@@ -235,70 +236,70 @@ test daemon::tests::background_command_insertion_and_if_shell_return_before_thei
 test daemon::tests::automatic_window_modes_share_the_global_ignore_size_fallback ... ok
 test daemon::tests::bell_action_and_visual_bell_fan_out_from_the_session_active_window ... ok
 test daemon::tests::bell_activity_and_silence_messages_share_the_client_lifecycle ... ok
-test daemon::tests::browser_url_formats_follow_active_tab_and_subscription_changes ... ok
-test daemon::tests::buffer_file_commands_bound_input_and_reject_unsupported_stream_modes ... ok
 test daemon::tests::buffer_chooser_rows_carry_the_same_key_ladder ... ok
-test daemon::tests::browser_committed_text_respects_pairing_and_modal_consumption ... ok
+test daemon::tests::buffer_file_commands_bound_input_and_reject_unsupported_stream_modes ... ok
+test daemon::tests::browser_url_formats_follow_active_tab_and_subscription_changes ... ok
 test daemon::tests::buffer_formats_read_named_rows_and_the_top_automatic_buffer ... ok
+test daemon::tests::browser_committed_text_respects_pairing_and_modal_consumption ... ok
 test daemon::tests::callback_group_action_uses_direct_source_depth_and_fail_priority ... ok
 test daemon::tests::callback_parse_capture_qualifies_only_marked_events ... ok
 test daemon::tests::cancel_prefix_disarms_only_the_prefix_table ... ok
 test daemon::tests::capture_boundaries_use_the_selected_format_client ... ok
 test daemon::tests::capture_browser_and_send_last_output_parsers_reject_stray_positionals ... ok
-test daemon::tests::capture_browser_rejects_non_browser_panes_and_relative_paths ... ok
+test daemon::tests::buffer_file_paths_expand_once_in_the_selected_client_context ... ok
 test daemon::tests::capture_pane_parser_rejects_unimplemented_flags ... ok
 test daemon::tests::capture_pane_parser_supports_history_mode_and_wrapped_output ... ok
-test daemon::tests::buffer_file_paths_expand_once_in_the_selected_client_context ... ok
+test daemon::tests::capture_browser_rejects_non_browser_panes_and_relative_paths ... ok
 test daemon::tests::catalogued_positional_maximums_precede_daemon_targets_and_effects ... ok
 test daemon::tests::catalogued_positional_minimums_precede_daemon_targets_and_effects ... ok
 test daemon::tests::checkshell_rejects_relative_non_executable_and_own_binary_paths ... ok
 test daemon::tests::choose_buffer_model_bounds_metadata_and_searches_server_side_contents ... ok
+test daemon::tests::capture_pane_routes_stdout_buffers_and_reversed_ranges_like_tmux ... ok
 test daemon::tests::choose_tree_closes_when_its_source_pane_is_removed ... ok
 test daemon::tests::choose_tree_model_flattens_mixed_panes_and_supports_collapse_and_search ... ok
-test daemon::tests::capture_pane_routes_stdout_buffers_and_reversed_ranges_like_tmux ... ok
-test daemon::tests::chooser_key_formats_expand_per_row_and_drop_unpressable_keys ... ok
 test daemon::tests::buffer_writes_reach_only_the_target_client_and_ignore_set_clipboard ... ok
-test daemon::tests::chooser_actions_count_once_and_raw_keys_stay_client_scoped ... ok
+test daemon::tests::chooser_key_formats_expand_per_row_and_drop_unpressable_keys ... ok
 test daemon::tests::chooser_rows_wear_the_pin_key_ladder_and_run_out_at_thirty_six ... ok
+test daemon::tests::chooser_actions_count_once_and_raw_keys_stay_client_scoped ... ok
 test daemon::tests::chooser_specs_sort_filter_and_fall_back_when_filters_match_nothing ... ok
-test daemon::tests::clear_selection_or_cancel_clears_before_leaving_copy_mode ... ok
 test daemon::tests::chooser_templates_substitute_targets_and_resolve_aliases_at_selection ... ok
+test daemon::tests::clear_selection_or_cancel_clears_before_leaving_copy_mode ... ok
 test daemon::tests::client_environment_entries_become_an_immutable_name_value_map ... ok
 test daemon::tests::chooser_mouse_activity_preserves_bell_and_read_only_updates_latest_geometry ... ok
 test daemon::tests::client_context_formats_share_retained_facts_across_surfaces ... ok
 test daemon::tests::client_focus_and_activity_hooks_preserve_reports_order_and_latest_changes ... ok
-test daemon::tests::client_focus_any_prefers_chooser_and_copy_modes_then_falls_back_to_root ... ok
 test daemon::tests::client_focus_closes_display_panes_and_preserves_chooser_modes ... ok
+test daemon::tests::client_focus_any_prefers_chooser_and_copy_modes_then_falls_back_to_root ... ok
 test daemon::tests::client_focus_refreshes_non_latest_owner_cell_metrics ... ok
-test daemon::tests::client_focus_obeys_writable_command_prompt_prequeue ... ok
 test daemon::tests::client_focus_dispatches_any_after_writable_prequeue_and_latest_accounting ... ok
+test daemon::tests::client_focus_obeys_writable_command_prompt_prequeue ... ok
 test daemon::tests::client_hello_mismatch_gets_a_legible_reply_before_disconnect ... ok
 test daemon::tests::client_hook_name_matches_client_format_name_fallbacks ... ok
 test daemon::tests::client_registration_guard_cleans_up_automatic_and_explicit_exits ... ok
-test daemon::tests::client_focus_resizes_unchanged_owner_siblings_after_layout_write_back ... ok
 test daemon::tests::client_resize_and_theme_hooks_fire_for_every_interactive_report ... ok
-test daemon::tests::client_terminal_facts_are_parsed_and_stored ... ok
+test daemon::tests::client_focus_resizes_unchanged_owner_siblings_after_layout_write_back ... ok
+test daemon::tests::client_focus_updates_activity_and_focus_in_owns_latest_geometry ... ok
 test daemon::tests::closed_shutdown_gate_rejects_late_job_admission ... ok
 test daemon::tests::client_target_collisions_follow_global_creation_order_after_session_switches ... ok
-test daemon::tests::client_focus_updates_activity_and_focus_in_owns_latest_geometry ... ok
+test daemon::tests::client_terminal_facts_are_parsed_and_stored ... ok
 test daemon::tests::command_alias_drains_children_before_server_shutdown ... ok
 test daemon::tests::command_alias_reaches_daemon_owned_commands ... ok
+test daemon::tests::cold_prepare_abort_requires_an_exclusive_owner_and_disconnect ... ok
 test daemon::tests::command_alias_defers_structural_hooks_until_its_children_finish ... ok
 test daemon::tests::command_alias_rechecks_transient_empty_state_at_queue_completion ... ok
-test daemon::tests::cold_prepare_abort_requires_an_exclusive_owner_and_disconnect ... ok
 test daemon::tests::command_connection_waits_without_hiding_peer_disconnects ... ok
 test daemon::tests::command_error_hook_output_opens_only_the_triggering_interactive_client_view ... ok
 test daemon::tests::command_and_search_prompt_histories_never_mix ... ok
+test daemon::tests::command_error_that_mutates_mux_state_publishes_snapshot ... ok
 test daemon::tests::command_hook_output_joins_the_triggering_client_response_in_pin_order ... ok
 test daemon::tests::command_output_encoding_releases_state_lock_and_revalidates_before_enqueue ... ok
-test daemon::tests::command_error_that_mutates_mux_state_publishes_snapshot ... ok
 test daemon::tests::command_output_hands_the_key_table_back_while_keys_target_another_pane ... ok
-test daemon::tests::command_hooks_fire_at_the_daemon_boundary_with_formats_and_nohooks ... ok
+test daemon::tests::command_output_ids_advance_and_stay_with_each_actor ... ok
 test daemon::tests::command_prompt_editor_preserves_unicode_boundaries_and_history_drafts ... ok
 test daemon::tests::command_prompt_focus_actions_match_tmux_prequeue ... ok
 test daemon::tests::command_prompt_from_a_command_client_needs_a_target_client ... ok
 test daemon::tests::command_prompt_output_is_joined_and_bounded_on_utf8_boundaries ... ok
-test daemon::tests::command_output_ids_advance_and_stay_with_each_actor ... ok
+test daemon::tests::command_hooks_fire_at_the_daemon_boundary_with_formats_and_nohooks ... ok
 test daemon::tests::command_prompt_typed_and_string_aliases_freeze_at_different_stages ... ok
 test daemon::tests::command_response_carries_shell_output_and_nonzero_exit_status_together ... ok
 test daemon::tests::command_prompt_templates_and_output_use_native_view_mode ... ok
@@ -306,16 +307,16 @@ test daemon::tests::committed_text_fifo_is_bounded_and_empty_text_retires_one_su
 test daemon::tests::concurrent_default_interactive_attaches_atomically_share_session_zero ... ok
 test daemon::tests::command_output_retires_with_its_pane_or_attached_session ... ok
 test daemon::tests::committed_text_fifo_handles_overlap_mismatch_switch_and_cleanup ... ok
-test daemon::tests::config_alias_groups_preserve_authoritative_client_terminal ... ok
+test daemon::tests::config_alias_snapshot_aborts_file_and_preserves_parse_only ... ok
 test daemon::tests::config_alias_snapshot_spans_startup_roots ... ok
 test daemon::tests::config_assignments_hidden_readback_expansion_and_conditions_match_the_pin ... ok
 test daemon::tests::config_diagnostics_pin_the_control_mode_sniffer_wording ... ok
+test daemon::tests::config_alias_groups_preserve_authoritative_client_terminal ... ok
 test daemon::tests::config_files_is_empty_when_loading_is_disabled_and_retains_the_default_selection ... ok
-test daemon::tests::config_replay_drops_failed_same_line_groups ... ok
 test daemon::tests::config_report_keeps_top_level_unknown_command_source_line ... ok
-test daemon::tests::config_alias_snapshot_spans_source_batches_and_refreshes_nested_sources ... ok
-test daemon::tests::config_alias_snapshot_aborts_file_and_preserves_parse_only ... ok
 test daemon::tests::config_report_routes_bound_command_failures_as_runtime_errors ... ok
+test daemon::tests::config_replay_drops_failed_same_line_groups ... ok
+test daemon::tests::config_alias_snapshot_spans_source_batches_and_refreshes_nested_sources ... ok
 test daemon::tests::configured_buffer_limit_controls_daemon_automatic_eviction ... ok
 test daemon::tests::configured_engine_receives_boot_defaults_before_initialization ... ok
 test daemon::tests::configuration_override_updates_state_provenance_and_broadcast ... ok
@@ -328,8 +329,8 @@ test daemon::tests::confirm_before_blocking_status_background_state_and_overlay_
 test daemon::tests::confirm_before_mixed_depth_callbacks_preserve_physical_groups ... ok
 test daemon::tests::confirm_before_parses_first_shapes_prompts_and_uses_one_reply ... ok
 test daemon::tests::context_references_keep_colons_that_are_not_line_ranges ... ok
-test daemon::tests::control_alias_command_exits_end_and_continue ... ok
 test daemon::tests::confirm_before_reported_source_failure_keeps_inner_and_outer_groups ... ok
+test daemon::tests::control_alias_command_exits_end_and_continue ... ok
 test daemon::tests::control_alias_groups_emit_only_child_guards_and_stop_after_failure ... ok
 test daemon::tests::control_alias_self_shutdown_marks_the_kill_guard_before_clean_exit ... ok
 test daemon::tests::control_alias_source_failure_stops_the_remaining_children ... ok
@@ -337,14 +338,14 @@ test daemon::tests::confirm_before_types_freeze_environment_aliases_and_error_ch
 test daemon::tests::control_argv_source_status_and_frames_compose_through_groups ... ok
 test daemon::tests::control_alias_hooks_emit_only_child_guards ... ok
 test daemon::tests::control_command_event_capture_does_not_intercept_other_threads ... ok
-test daemon::tests::control_background_inserted_commands_emit_flags_zero_frames ... ok
 test daemon::tests::control_command_hook_mixed_source_retains_status_without_error_guard ... ok
+test daemon::tests::control_background_inserted_commands_emit_flags_zero_frames ... ok
 test daemon::tests::control_config_alias_snapshot_freezes_deferred_error_classification ... ok
 test daemon::tests::control_config_diagnostics_are_typed_rather_than_recognized_by_prose ... ok
 test daemon::tests::control_background_callbacks_cancel_after_disconnect ... ok
 test daemon::tests::control_command_hooks_use_flags_zero_without_folding_or_leaking ... ok
-test daemon::tests::control_connection_attaches_rejects_input_and_sends_no_terminal_frames ... ok
 test daemon::tests::control_construction_warning_follows_nested_source_batch_replay ... ok
+test daemon::tests::control_connection_attaches_rejects_input_and_sends_no_terminal_frames ... ok
 test daemon::tests::control_foreground_callback_aggregates_only_after_forced_shutdown ... ok
 test daemon::tests::control_home_lookup_reads_the_server_home_then_the_daemon_passwd_entry ... ok
 test daemon::tests::control_hook_inventory_carries_every_rendering_variable ... ok
@@ -363,8 +364,8 @@ test daemon::tests::control_source_read_events_preserve_tree_order_and_completio
 test daemon::tests::control_source_read_preserves_not_found_after_the_match_boundary ... ok
 test daemon::tests::control_source_replay_accepts_alias_groups ... ok
 test daemon::tests::control_size_feeds_aggressive_resize_and_menu_gating ... ok
-test daemon::tests::control_source_callback_parse_errors_preserve_framing ... ok
 test daemon::tests::control_sourced_unknown_command_does_not_run_command_error_hook ... ok
+test daemon::tests::control_source_callback_parse_errors_preserve_framing ... ok
 test daemon::tests::control_startup_delivery_keeps_the_raw_tail_beyond_the_interactive_preview ... ok
 test daemon::tests::control_startup_transaction_retains_causes_when_resync_overflows ... ok
 test daemon::tests::control_source_run_shell_command_parse_failures_use_source_owner ... ok
@@ -372,10 +373,10 @@ test daemon::tests::copy_mode_ed_instant_exit_frees_the_key_table_without_observ
 test daemon::tests::control_switch_publishes_the_new_attachment_before_its_live_layout_notice ... ok
 test daemon::tests::copy_mode_entry_and_exit_fire_pane_mode_changed ... ok
 test daemon::tests::copy_mode_kill_does_not_survive_an_errored_entry ... ok
-test daemon::tests::copy_mode_dash_h_publishes_a_hidden_position_and_nothing_else ... ok
 test daemon::tests::copy_mode_scroll_exit_reconciles_the_client_copy_session ... ok
-test daemon::tests::copy_mode_styles_patch_the_published_appearance_only_when_set ... ok
 test daemon::tests::copy_mode_style_writes_broadcast_the_patched_appearance ... ok
+test daemon::tests::copy_mode_dash_h_publishes_a_hidden_position_and_nothing_else ... ok
+test daemon::tests::copy_mode_styles_patch_the_published_appearance_only_when_set ... ok
 test daemon::tests::copy_pipe_receives_the_selection_on_standard_input ... ok
 test daemon::tests::copy_pipe_rejects_work_past_the_process_limit ... ok
 test daemon::tests::copy_pipe_failure_is_a_reliable_client_message_and_releases_its_permit ... ok
@@ -393,8 +394,8 @@ test daemon::tests::daemon_display_panes_routes_keys_and_expires_reliably ... ok
 test daemon::tests::daemon_cross_session_swap_transfers_visibility_without_restarting_surfaces ... ok
 test daemon::tests::daemon_keeps_pty_and_mux_state_across_interactive_detach ... ok
 test daemon::tests::daemon_native_split_resize_commits_exactly_and_rejects_stale_contexts ... ok
-test daemon::tests::daemon_rotation_preserves_terminal_actors_and_moves_zoom_visibility ... ok
 test daemon::tests::default_attach_survives_command_materializing_after_the_empty_check ... ok
+test daemon::tests::daemon_rotation_preserves_terminal_actors_and_moves_zoom_visibility ... ok
 test daemon::tests::default_command_is_injected_only_when_nonempty_at_create ... ok
 test daemon::tests::default_rename_bindings_prefill_and_submit_native_prompts ... ok
 test daemon::tests::default_shell_readback_is_the_resolved_runtime_value ... ok
@@ -421,8 +422,8 @@ test daemon::tests::detaching_drops_the_message_and_its_deadline_stays_inert ...
 test daemon::tests::detaching_latest_client_promotes_a_surviving_control_client ... ok
 test daemon::tests::direct_shell_formats_resolve_target_options_before_variables ... ok
 test daemon::tests::direct_shutdown_runs_session_close_hooks ... ok
-test daemon::tests::direct_control_confirm_source_failure_preserves_guard_order ... ok
 test daemon::tests::detach_on_destroy_selects_each_policy_survivor ... ok
+test daemon::tests::direct_control_confirm_source_failure_preserves_guard_order ... ok
 test daemon::tests::direct_shutdown_waits_for_preexisting_foreground_jobs ... ok
 test daemon::tests::disconnected_pipe_tap_closes_child_and_formats ... ok
 test daemon::tests::direct_spawn_failure_is_retained_with_status_one_and_no_output ... ok
@@ -438,9 +439,9 @@ test daemon::tests::display_message_ignore_keys_preempts_writable_terminal_input
 test daemon::tests::display_panes_labels_expand_the_format_per_pane ... ok
 test daemon::tests::display_panes_model_uses_pane_order_and_tmux_selection_keys ... ok
 test daemon::tests::display_message_target_client_routes_and_selects_format_client ... ok
-test daemon::tests::display_message_unattached_target_uses_global_format_client ... ok
-test daemon::tests::display_popup_parser_keeps_repeated_values_and_command_shape ... ok
 test daemon::tests::display_panes_targets_client_window_and_no_select_keys_fall_through ... ok
+test daemon::tests::display_popup_parser_keeps_repeated_values_and_command_shape ... ok
+test daemon::tests::display_message_unattached_target_uses_global_format_client ... ok
 test daemon::tests::displayed_pid_fallback_is_an_attached_client_target ... ok
 test daemon::tests::editor_derived_keys_reach_status_keys_as_well_as_mode_keys ... ok
 test daemon::tests::editor_option_uses_daemon_boot_environment_precedence ... ok
@@ -449,13 +450,13 @@ test daemon::tests::envelope_mismatch_gets_a_legible_reply_before_disconnect ...
 test daemon::tests::display_popup_creates_modifies_and_clears_one_dead_overlay_safely ... ok
 test daemon::tests::event_hooks_are_fully_dropped_inside_hooks ... ok
 test daemon::tests::event_hooks_fire_after_mutation_with_captured_formats ... ok
-test daemon::tests::display_popup_resolves_styles_from_the_sessions_current_window ... ok
 test daemon::tests::existing_blocker_keeps_all_forced_shutdown_hook_items ... ok
+test daemon::tests::display_popup_resolves_styles_from_the_sessions_current_window ... ok
 test daemon::tests::explicit_boot_configs_replace_default_discovery_and_load_in_order ... ok
 test daemon::tests::explicit_exit_empty_off_keeps_an_armed_empty_daemon_alive_until_unset ... ok
 test daemon::tests::explicit_exit_empty_on_shuts_down_without_the_session_latch ... ok
-test daemon::tests::explicit_exit_unattached_exits_with_live_sessions_but_never_under_a_subscriber ... ok
 test daemon::tests::exiting_copy_session_stays_claimed_until_live_mode_is_published ... ok
+test daemon::tests::explicit_exit_unattached_exits_with_live_sessions_but_never_under_a_subscriber ... ok
 test daemon::tests::failing_commands_log_pin_shaped_message_and_command_pairs ... ok
 test daemon::tests::failed_startup_winner_keeps_causes_for_the_waiting_healthy_client ... ok
 test daemon::tests::first_command_session_uses_zero_ids_and_arms_last_session_shutdown ... ok
@@ -485,9 +486,9 @@ test daemon::tests::interactive_startup_output_retains_blank_history_from_beginn
 test daemon::tests::interactive_connection_fires_attach_and_detach_event_hooks ... ok
 test daemon::tests::invalid_mux_override_is_diagnostic_and_later_entries_still_apply ... ok
 test daemon::tests::invalid_status_lines_are_rejected_and_surfaced_at_the_outbound_seam ... ok
+test daemon::tests::history_request_is_guarded_clamped_and_returns_self_contained_rows ... ok
 test daemon::tests::interactive_startup_transaction_retires_and_retries_when_resync_overflows ... ok
 test daemon::tests::key_binding_command_exits_are_queue_status_not_input_errors ... ok
-test daemon::tests::history_request_is_guarded_clamped_and_returns_self_contained_rows ... ok
 test daemon::tests::kill_server_flushes_waiters ... ok
 test daemon::tests::kill_server_reaps_running_shell_job_process_groups ... ok
 test daemon::tests::key_binding_command_groups_continue_after_a_failed_physical_line ... ok
@@ -534,8 +535,8 @@ test daemon::tests::nested_source_replay_keeps_the_explicit_client_base ... ok
 test daemon::tests::nested_source_yields_an_inherited_shutdown_queue_at_its_root ... ok
 test daemon::tests::nested_attach_refuses_only_preexisting_sessions_when_the_caller_tty_matches_a_pane ... ok
 test daemon::tests::new_and_split_window_apply_local_environment_and_spawn_empty_panes ... ok
-test daemon::tests::new_session_attach_or_create_cwd_survives_preflight_and_control_attach ... ok
 test daemon::tests::new_session_creation_environment_reaches_the_first_terminal ... ok
+test daemon::tests::new_session_attach_or_create_cwd_survives_preflight_and_control_attach ... ok
 test daemon::tests::newer_command_output_close_cancels_an_older_pending_frame ... ok
 test daemon::tests::one_startup_source_command_can_load_more_than_fifty_paths ... ok
 test daemon::tests::only_default_interactive_attach_materializes_an_empty_daemon ... ok
@@ -573,22 +574,22 @@ test daemon::tests::pause_after_uses_unsigned_scan_prefix_and_u32_wrap ... ok
 test daemon::tests::pinned_hook_producer_partition_matches_the_oracle ... ok
 test daemon::tests::pipe_pane_enforces_arity_and_hard_targets ... ok
 test daemon::tests::paste_uploads_from_separate_daemons_never_share_a_directory_or_a_file ... ok
-test daemon::tests::pipe_pane_rejects_dead_targets_before_closing_the_existing_pipe ... ok
 test daemon::tests::pipe_pane_has_no_gap_when_control_attaches_during_a_flood ... ok
+test daemon::tests::pipe_pane_rejects_dead_targets_before_closing_the_existing_pipe ... ok
 test daemon::tests::pipe_pane_streams_single_shell_burst_without_loss ... ok
-test daemon::tests::pipe_pane_survives_respawn_with_the_same_child ... ok
-test daemon::tests::pipe_pane_streams_raw_output_toggles_formats_injects_and_expands_time ... ok
-test daemon::tests::popup_close_flag_matrix_distinguishes_e_ee_k_and_reset ... ok
+test daemon::tests::mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode ... ok
 test daemon::tests::popup_client_resolution_errors_are_exact_and_precede_target_lookup ... ok
+test daemon::tests::popup_close_flag_matrix_distinguishes_e_ee_k_and_reset ... ok
+test daemon::tests::pipe_pane_survives_respawn_with_the_same_child ... ok
 test daemon::tests::popup_command_shape_preserves_shell_and_direct_exec_rows ... ok
 test daemon::tests::popup_dimensions_percentages_and_errors_match_the_pin ... ok
-test daemon::tests::mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode ... ok
 test daemon::tests::popup_command_client_blocks_for_exit_signal_and_early_dismissal_statuses ... ok
+test daemon::tests::pipe_pane_streams_raw_output_toggles_formats_injects_and_expands_time ... ok
 test daemon::tests::popup_geometry_uses_the_clients_terminal_metrics_when_an_agent_is_active ... ok
 test daemon::tests::popup_escape_exit_flags_and_dead_any_key_follow_the_close_matrix ... ok
 test daemon::tests::popup_positions_use_left_and_bottom_coordinates_then_clamp ... ok
-test daemon::tests::positive_delay_shell_job_freezes_selected_client_working_directory ... ok
 test daemon::tests::popup_expands_title_cwd_and_environment_into_the_pty ... ok
+test daemon::tests::positive_delay_shell_job_freezes_selected_client_working_directory ... ok
 test daemon::tests::popup_jobs_receive_sigterm_on_target_detach_and_kill_server ... ok
 test daemon::tests::prepare_rpc_echoes_request_ids_for_every_client_kind ... ok
 test daemon::tests::positive_delay_shell_job_retains_destroyed_target_and_keeps_missing_target_sessionless ... ok
@@ -606,21 +607,21 @@ test daemon::tests::read_only_command_requests_authorize_the_expanded_alias_once
 test daemon::tests::read_only_client_focus_updates_activity_and_focus_in_owns_stored_geometry ... ok
 test daemon::tests::read_only_display_panes_bypasses_overlay_consumption_and_preserves_bell ... ok
 test daemon::tests::read_only_detach_client_is_limited_to_itself ... ok
-test daemon::tests::read_only_key_bindings_authorize_the_expanded_alias_once ... ok
 test daemon::tests::read_only_prompt_keys_bypass_consumption_and_preserve_prompt_and_bell ... ok
-test daemon::tests::read_only_pane_focus_never_reaches_application_focus_reporting ... ok
+test daemon::tests::read_only_key_bindings_authorize_the_expanded_alias_once ... ok
 test daemon::tests::read_only_terminal_view_actions_use_the_typed_navigation_allowlist ... ok
+test daemon::tests::read_only_pane_focus_never_reaches_application_focus_reporting ... ok
+test daemon::tests::record_only_paste_upload_stays_encoded_and_opens_a_pending_binding_window ... ok
 test daemon::tests::ready_guard_ends_with_the_daemon_despite_a_passive_command_client ... ok
 test daemon::tests::refresh_client_a_requires_control_and_flags_round_trip ... ok
-test daemon::tests::record_only_paste_upload_stays_encoded_and_opens_a_pending_binding_window ... ok
-test daemon::tests::refresh_client_b_parses_replaces_removes_and_emits_changed_scopes ... ok
 test daemon::tests::refresh_client_abc_uses_pin_precedence_and_b_c_reject_non_control_targets ... ok
+test daemon::tests::refresh_client_b_parses_replaces_removes_and_emits_changed_scopes ... ok
 test daemon::tests::read_only_send_keys_and_binding_preflight_are_all_or_nothing ... ok
 test daemon::tests::reliable_overflow_delivers_the_control_exit_reason_before_closing ... ok
-test daemon::tests::reliable_overflow_flushes_the_reason_and_closes_the_transport ... ok
-test daemon::tests::reload_config_files_tracks_the_selected_file_or_empty_selection ... ok
-test daemon::tests::reload_config_preserves_explicit_root_bindings ... ok
 test daemon::tests::refresh_client_controls_pane_entry_gates_and_state_notifications ... ok
+test daemon::tests::reliable_overflow_flushes_the_reason_and_closes_the_transport ... ok
+test daemon::tests::reload_config_preserves_explicit_root_bindings ... ok
+test daemon::tests::reload_config_files_tracks_the_selected_file_or_empty_selection ... ok
 test daemon::tests::reload_config_replays_the_root_under_one_startup_budget ... ok
 test daemon::tests::reload_user_config_resets_key_tables_to_the_file ... ok
 test daemon::tests::reload_updates_live_actor_kinds_and_broadcasts_the_appearance ... ok
@@ -635,34 +636,35 @@ test daemon::tests::replayed_error_hook_output_stays_in_stdout_order ... ok
 test daemon::tests::replayed_command_stdout_is_ordered_and_routed_once_per_invoking_client ... ok
 test daemon::tests::replayed_indirect_source_stdout_is_routed_once ... ok
 test daemon::tests::request_full_enqueues_only_the_requested_visible_pane ... ok
+test daemon::tests::requested_colour_features_join_the_roster_alone ... ok
 test daemon::tests::requested_control_flags_use_the_common_mutation_and_format_contract ... ok
 test daemon::tests::respawn_with_new_argv_reuses_the_creation_shell ... ok
 test daemon::tests::resync_skips_only_the_reliably_admitted_command_output_id ... ok
-test daemon::tests::retained_signal_exit_exposes_the_tmux_signal_name ... ok
 test daemon::tests::requested_client_flags_mutate_in_tmux_order_and_survive_detach_and_switch ... ok
+test daemon::tests::retained_signal_exit_exposes_the_tmux_signal_name ... ok
 test daemon::tests::run_shell_command_mode_and_if_shell_execute_inserted_commands ... ok
 test daemon::tests::runtime_source_invocations_release_between_sequential_commands ... ok
 test daemon::tests::run_shell_routes_to_command_interactive_control_and_background_sinks ... ok
 test daemon::tests::save_buffer_fails_instead_of_writing_locally_when_the_command_client_is_gone ... ok
 test daemon::tests::same_session_join_delivers_destination_wrap_search_to_the_worker ... ok
 test daemon::tests::seeded_global_environment_and_session_markers_reach_terminal_spawn ... ok
-test daemon::tests::scoped_status_format_writes_refresh_only_that_sessions_clients ... ok
 test daemon::tests::select_window_updates_client_focus_when_session_already_selected_it ... ok
+test daemon::tests::scoped_status_format_writes_refresh_only_that_sessions_clients ... ok
 test daemon::tests::resize_window_from_attached_clients_filters_scope_and_freezes_manual_extent ... ok
 test daemon::tests::send_keys_and_send_prefix_into_copy_mode_run_the_copy_table ... ok
-test daemon::tests::send_last_output_requires_a_terminal_and_an_agent_pane ... ok
 test daemon::tests::send_keys_count_prefix_moves_once_with_the_armed_count ... ok
+test daemon::tests::send_last_output_requires_a_terminal_and_an_agent_pane ... ok
 test daemon::tests::selecting_a_belled_window_clears_it ... ok
 test daemon::tests::send_text_verifies_the_echo_then_submits ... ok
 test daemon::tests::send_text_reports_a_stall_when_nothing_echoes ... ok
 test daemon::tests::set_buffer_append_updates_named_buffers_but_creates_automatic_buffers_without_a_name ... ok
 test daemon::tests::set_buffer_rename_replaces_destinations_ignores_data_and_uses_the_top_automatic ... ok
 test daemon::tests::shell_command_arguments_match_the_pin_grammar ... ok
-test daemon::tests::session_closed_hook_keeps_payload_after_the_session_is_gone ... ok
-test daemon::tests::shell_job_closes_stdin_and_ignores_inherited_output_descriptors_after_exit ... ok
-test daemon::tests::shell_job_term_identity_preserves_startup_and_replaces_post_startup_values ... ok
-test daemon::tests::shell_job_working_directory_follows_tmux_precedence ... ok
 test daemon::tests::send_text_rejects_non_terminal_panes_and_bad_flags ... ok
+test daemon::tests::shell_job_closes_stdin_and_ignores_inherited_output_descriptors_after_exit ... ok
+test daemon::tests::session_closed_hook_keeps_payload_after_the_session_is_gone ... ok
+test daemon::tests::shell_job_working_directory_follows_tmux_precedence ... ok
+test daemon::tests::shell_job_term_identity_preserves_startup_and_replaces_post_startup_values ... ok
 test daemon::tests::shell_jobs_receive_the_global_and_session_environment_overlays ... ok
 test daemon::tests::shell_jobs_receive_both_socket_contracts_without_tmux_pane ... ok
 test daemon::tests::shell_jobs_resolve_literal_tmux_through_the_private_zz_shim ... ok
@@ -674,8 +676,8 @@ test daemon::tests::snapshot_publication_prunes_destroyed_latest_windows ... ok
 test daemon::tests::snapshots_expand_client_formats_for_each_session ... ok
 test daemon::tests::source_construction_failure_aborts_file_before_replay ... ok
 test daemon::tests::source_file_batches_parsing_before_replay ... ok
-test daemon::tests::source_file_callback_parse_errors_preserve_replay_groups ... ok
 test daemon::tests::source_file_diagnostics_split_streams_for_command_clients_only ... ok
+test daemon::tests::source_file_callback_parse_errors_preserve_replay_groups ... ok
 test daemon::tests::source_file_globs_follow_the_posix_dialect_losslessly ... ok
 test daemon::tests::source_file_globs_nested_sources_and_refuses_standard_input ... ok
 test daemon::tests::source_file_flags_preserve_parse_target_verbose_and_client_semantics ... ok
@@ -687,15 +689,15 @@ test daemon::tests::source_mixed_depth_alias_callback_failures_prune_caller_grou
 test daemon::tests::source_nested_only_alias_callback_failure_keeps_caller_groups ... ok
 test daemon::tests::sourced_direct_callback_command_parse_hooks_match_wrapper_ownership ... ok
 test daemon::tests::sourced_mux_config_file_binds_keys_and_missing_file_is_tolerated ... ok
-test daemon::tests::sourced_prepared_runtime_command_parse_is_unlocated_for_direct_and_alias_commands ... ok
 test daemon::tests::sourced_foreground_shell_output_follows_its_empty_guard ... ok
+test daemon::tests::sourced_prepared_runtime_command_parse_is_unlocated_for_direct_and_alias_commands ... ok
 test daemon::tests::sourced_wait_yields_an_inherited_shutdown_queue ... ok
 test daemon::tests::stale_command_output_close_preserves_the_newer_pending_frame ... ok
 test daemon::tests::stale_command_output_frame_preserves_the_newer_pending_frame ... ok
-test daemon::tests::sourced_runtime_command_parse_preserves_control_frames_hook_and_continuation ... ok
+test daemon::tests::stale_owned_publication_cannot_outlive_the_authoritative_message ... ok
 test daemon::tests::stalled_writer_and_failed_response_admission_remain_bounded ... ok
 test daemon::tests::standard_buffer_streams_preserve_bytes_empty_input_and_stdin_bound ... ok
-test daemon::tests::stale_owned_publication_cannot_outlive_the_authoritative_message ... ok
+test daemon::tests::sourced_runtime_command_parse_preserves_control_frames_hook_and_continuation ... ok
 test daemon::tests::startup_causes_obey_wire_count_item_and_aggregate_bounds ... ok
 test daemon::tests::startup_cause_delivery_is_atomic_across_control_and_interactive_clients ... ok
 test daemon::tests::startup_command_and_source_causes_keep_declaring_locations ... ok
@@ -708,19 +710,19 @@ test daemon::tests::startup_rollback_does_not_retire_a_replacement_command_outpu
 test daemon::tests::startup_roots_parse_before_replay_and_retain_ordered_causes ... ok
 test daemon::tests::startup_source_cwd_overrides_a_registered_reentry_client ... ok
 test daemon::tests::startup_display_causes_follow_root_and_nested_depth_first_order ... ok
-test daemon::tests::startup_source_depth_does_not_count_the_top_level_config ... ok
-test daemon::tests::startup_source_read_errors_keep_location_and_normalized_child_path ... ok
 test daemon::tests::startup_source_invocations_share_one_budget_across_explicit_configs ... ok
+test daemon::tests::startup_source_read_errors_keep_location_and_normalized_child_path ... ok
+test daemon::tests::startup_source_depth_does_not_count_the_top_level_config ... ok
 test daemon::tests::startup_source_refusal_keeps_the_declaring_location ... ok
 test daemon::tests::startup_sources_use_the_initial_client_cwd_until_replay_finishes ... ok
 test daemon::tests::startup_transactions_retain_causes_under_control_and_interactive_byte_pressure ... ok
 test daemon::tests::shell_formats_use_the_selected_current_client ... ok
 test daemon::tests::status_options_cross_the_socket_with_markers_and_pin_readback_shapes ... ok
 test daemon::tests::status_position_publishes_per_recipient_for_session_scoped_writes ... ok
-test daemon::tests::string_command_prompt_preflights_the_substituted_source_before_execution ... ok
 test daemon::tests::steal_attach_notifies_peer_and_releases_focus_views_and_geometry ... ok
-test daemon::tests::stored_callbacks_do_not_reexpand_constructed_commands ... ok
+test daemon::tests::string_command_prompt_preflights_the_substituted_source_before_execution ... ok
 test daemon::tests::sub_three_by_three_popup_refuses_a_live_border_transition ... ok
+test daemon::tests::stored_callbacks_do_not_reexpand_constructed_commands ... ok
 test daemon::tests::surviving_text_and_explicit_paste_dismiss_messages_but_read_only_input_does_not ... ok
 test daemon::tests::switch_client_key_table_and_formats_are_client_local ... ok
 test daemon::tests::switch_client_notifies_when_the_session_does_not_change ... ok
@@ -737,19 +739,19 @@ test daemon::tests::switch_client_resolves_origin_errors_names_and_walks_name_or
 test daemon::tests::terminal_cwd_flag_prefers_a_valid_literal_and_bogus_paths_land_in_home ... ok
 test daemon::tests::terminal_events_fire_rename_title_and_bell_hooks ... ok
 test daemon::tests::terminal_agent_and_editor_panes_inherit_live_working_directory ... ok
-test daemon::tests::terminal_mouse_is_rejected_only_for_sized_clients_when_mouse_is_off ... ok
 test daemon::tests::terminal_exit_fires_pane_exited_or_pane_died_by_retention ... ok
+test daemon::tests::terminal_mouse_is_rejected_only_for_sized_clients_when_mouse_is_off ... ok
 test daemon::tests::terminal_process_exit_removes_its_owning_pane_and_requests_shutdown_with_no_client ... ok
 test daemon::tests::terminal_watcher_classifies_failed_workers_as_reapable ... ok
 test daemon::tests::terminal_watcher_does_not_retain_idle_session_after_pane_removal ... ok
 test daemon::tests::terminal_watcher_persists_dynamic_viewport_titles_in_mux_snapshots ... ok
 test daemon::tests::text_suppression_filter_borrows_the_normal_path_and_owns_changes ... ok
 test daemon::tests::text_that_fails_to_repay_a_binding_disarms_the_suppression ... ok
-test daemon::tests::timed_message_ids_increase_monotonically ... ok
+test daemon::tests::terminal_resize_fires_layout_then_window_resized ... ok
 test daemon::tests::tmux_environment_uses_socket_pid_and_numeric_session ... ok
 test daemon::tests::tmux_import_comments_unsupported_constructs_without_running_commands ... ok
 test daemon::tests::tmux_import_missing_path_reports_the_path ... ok
-test daemon::tests::terminal_resize_fires_layout_then_window_resized ... ok
+test daemon::tests::timed_message_ids_increase_monotonically ... ok
 test daemon::tests::tmux_import_without_path_uses_discover_tmux_config ... ok
 test daemon::tests::tmux_option_preflight_covers_daemon_commands_and_display_panes ... ok
 test daemon::tests::tmux_reimport_ignores_marker_comments_inside_the_donor ... ok
@@ -762,11 +764,11 @@ test daemon::tests::tmux_import_prepends_and_reloads_a_binding ... ok
 test daemon::tests::terminal_preview_streams_inactive_windows_without_owning_geometry ... ok
 test daemon::tests::typed_command_prompt_substitution_keeps_argument_boundaries ... ok
 test daemon::tests::tracked_popup_mouse_is_accepted_when_the_global_mouse_option_is_off ... ok
-test daemon::tests::unattached_client_key_input_builds_no_key_state_and_runs_no_binding ... ok
 test daemon::tests::unattached_sourced_show_buffer_yields_an_inherited_shutdown_queue ... ok
-test daemon::tests::typed_command_prompt_templates_execute_their_constructed_commands ... ok
-test daemon::tests::unnamed_buffer_commands_target_the_newest_automatic_buffer ... ok
+test daemon::tests::unattached_client_key_input_builds_no_key_state_and_runs_no_binding ... ok
 test daemon::tests::unchanged_pane_runtime_facts_do_not_bump_the_mux_generation ... ok
+test daemon::tests::unnamed_buffer_commands_target_the_newest_automatic_buffer ... ok
+test daemon::tests::typed_command_prompt_templates_execute_their_constructed_commands ... ok
 test daemon::tests::unregistered_control_argv_source_callback_error_returns_failure ... ok
 test daemon::tests::unset_lifecycle_trio_keeps_the_armed_latch_rules_intact ... ok
 test daemon::tests::unparsable_alias_shadows_fail_direct_commands_while_bindings_stay_frozen ... ok
@@ -811,7 +813,7 @@ test endpoint::tests::remote_probe_requires_a_matching_reported_protocol ... ok
 test endpoint::tests::remote_probe_tolerates_login_profile_noise_and_a_pathless_zz ... ok
 test endpoint::tests::remote_socket_probe_falls_back_to_slash_tmp_when_getconf_rejects_the_variable ... ok
 test endpoint::tests::remote_socket_probe_prefers_xdg_runtime_dir_then_tmpdir ... ok
-test daemon::tests::word_separator_changes_reconfigure_existing_and_future_terminal_actors ... ok
+test endpoint::tests::remote_socket_probe_resolves_the_launchd_temporary_directory ... ok
 test endpoint::tests::shell_quoting_survives_the_login_shell_and_the_inner_sh ... ok
 test endpoint::tests::ssh_failures_read_as_advice_and_parse_errors_stay_out_of_the_host_row ... ok
 test endpoint::tests::ssh_hosts_may_not_open_with_a_dash ... ok
@@ -821,16 +823,16 @@ test fleet_hosts::tests::candidate_order_matches_each_client_platform ... ok
 test fleet_hosts::tests::hosts_parse_in_config_order_and_ignore_other_entries ... ok
 test fleet_hosts::tests::invalid_and_duplicate_hosts_keep_the_existing_error_contract ... ok
 test fleet_hosts::tests::writer_appends_to_a_new_config_file ... ok
-test endpoint::tests::remote_socket_probe_resolves_the_launchd_temporary_directory ... ok
+test fleet_hosts::tests::writer_rejects_edits_over_the_config_limit ... ok
 test fleet_hosts::tests::writer_replaces_the_last_line_and_preserves_surrounding_bytes ... ok
 test fleet_hosts::tests::writer_reuses_the_existing_validation_errors ... ok
 test keys::tests::a_platform_chord_never_names_a_bare_key ... ok
-test fleet_hosts::tests::writer_rejects_edits_over_the_config_limit ... ok
 test keys::tests::chooser_bindings_are_rebindable_through_the_tables ... ok
 test keys::tests::chooser_search_mode_edits_and_navigates ... ok
-test keys::tests::modified_keys_keep_their_base_spelling ... ok
 test keys::tests::default_chooser_tables_resolve_navigation_keys ... ok
+test keys::tests::modified_keys_keep_their_base_spelling ... ok
 test keys::tests::named_keys_round_trip_through_the_shared_fold ... ok
+test keys::tests::shifted_punctuation_resolves_by_typed_character ... ok
 test keys::tests::tmux_named_keys_map_to_terminal_keys ... ok
 test lifecycle::tests::deleted_executable_requires_the_exact_zz_basename ... ok
 test lifecycle::tests::executable_and_daemon_argument_are_both_required ... ok
@@ -839,37 +841,37 @@ test lifecycle::tests::identity_protocol_helper_distinguishes_missing_v1_and_v2 
 test lifecycle::tests::malformed_and_public_identity_files_are_rejected ... ok
 test lifecycle::tests::native_helper_requires_exact_name_and_daemon_subcommand ... ok
 test lifecycle::tests::peer_pid_and_identity_must_match ... ok
-test keys::tests::shifted_punctuation_resolves_by_typed_character ... ok
 test lifecycle::tests::reused_pid_with_a_different_start_time_is_rejected ... ok
-test lifecycle::tests::stale_socket_cleanup_refuses_a_replacement_inode ... ok
 test lifecycle::tests::stale_socket_cleanup_refuses_a_live_endpoint_with_matching_identity ... ok
-test lifecycle::tests::v1_and_v2_identities_round_trip_strictly ... ok
+test lifecycle::tests::stale_socket_cleanup_refuses_a_replacement_inode ... ok
 test lifecycle::tests::stale_socket_cleanup_removes_an_unowned_stale_endpoint ... ok
+test lifecycle::tests::v1_and_v2_identities_round_trip_strictly ... ok
 test paths::tests::macos_candidates_keep_xdg_home_ahead_of_application_support ... ok
 test paths::tests::relative_bases_are_rejected ... ok
 test paths::tests::tmux_candidates_dedupe_xdg_matching_home_config ... ok
 test paths::tests::tmux_candidates_follow_pinned_system_home_xdg_fallback_order ... ok
 test paths::tests::unix_candidates_prefer_xdg_and_dedupe ... ok
 test paths::tests::windows_candidates_follow_appdata_precedence ... ok
-test status::terminfo_tests::the_infocmp_reader_speaks_both_ncurses_generations ... ok
 test status::terminfo_tests::the_infocmp_reader_finds_the_extended_section ... ok
-test status::tests::a_disabled_status_renders_empty ... ok
+test status::terminfo_tests::the_infocmp_reader_speaks_both_ncurses_generations ... ok
 test status::terminfo_tests::the_stock_arrays_move_the_other_terms_the_way_the_pin_does ... ok
-test status::tests::a_tick_forgets_commands_no_format_names_any_more ... ok
+test status::tests::a_disabled_status_renders_empty ... ok
 test status::tests::a_running_job_publishes_lines_and_is_cancelled_on_forget ... ok
-test status::tests::an_unparseable_expanded_status_style_degrades_instead_of_dropping_the_event ... ok
+test status::tests::a_tick_forgets_commands_no_format_names_any_more ... ok
 test status::tests::agent_formats_cover_phases_permissions_and_other_panes ... ok
+test status::tests::an_unparseable_expanded_status_style_degrades_instead_of_dropping_the_event ... ok
+test status::tests::attached_status_jobs_start_in_each_clients_working_directory ... ok
 test status::tests::base_style_applies_status_style_then_fg_bg_overrides ... ok
 test status::tests::browser_url_status_uses_active_tab_and_is_empty_for_terminal ... ok
 test status::tests::buffer_samples_preserve_utf8_and_escape_control_and_invalid_bytes ... ok
-test status::tests::attached_status_jobs_start_in_each_clients_working_directory ... ok
 test status::tests::commands_run_once_and_then_come_from_the_cache ... ok
+test status::tests::content_search_reads_visible_terminal_rows ... ok
 test status::tests::copy_mode_toggle_and_selection_formats_answer_from_the_copy_view ... ok
 test status::tests::daemon_delegated_format_consumers_match_mux_inventory ... ok
 test status::tests::message_line_clamps_against_the_published_row_count ... ok
-test status::tests::content_search_reads_visible_terminal_rows ... ok
 test status::tests::only_changed_clients_are_published ... ok
 test status::tests::oversized_row_title_and_base_style_stay_inside_the_wire_limit ... ok
+test daemon::tests::word_separator_changes_reconfigure_existing_and_future_terminal_actors ... ok
 test status::tests::per_window_status_overrides_style_the_rendered_row ... ok
 test status::tests::personalized_rows_expand_per_session_and_dedupe ... ok
 test status::tests::sparse_session_status_formats_keep_blank_rows_without_compaction ... ok
@@ -894,14 +896,15 @@ test status::tests::the_same_job_in_two_status_formats_runs_once ... ok
 test status::tests::status_row_counts_follow_the_status_option ... ok
 test status::tests::window_cell_metrics_default_to_the_pin_size_and_follow_a_reporting_client ... ok
 test status::tests::window_status_separator_uses_each_item_scope_and_skips_the_trailing_item ... ok
+test terminal_features::tests::a_terminal_takes_the_colours_its_name_and_its_features_give_it ... ok
 test tests::classifier_finds_protocol_versions_through_error_sources ... ok
 test tests::eof_classifier_uses_identity_and_treats_a_matching_v2_as_dying ... ok
 test transport::tests::explicit_socket_path_takes_precedence ... ok
 test transport::tests::platform_default_uses_std_temp_dir_when_xdg_runtime_dir_is_unset ... ok
-test status::tests::the_status_line_publishes_the_theme_the_way_the_pin_resolves_it_per_client ... ok
 test daemon::tests::window_size_and_aggressive_resize_compose_for_each_viewed_window ... ok
+test status::tests::the_status_line_publishes_the_theme_the_way_the_pin_resolves_it_per_client ... ok
 
-test result: ok. 886 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 137.93s
+test result: ok. 889 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 143.62s
 
      Running tests/agent_soak.rs (target/debug/deps/agent_soak-34e184aa767fca0c)
 
@@ -910,7 +913,7 @@ test agent_stream_soak ... ignored, streaming soak: minutes of adapter output, r
 test agent_send_wait_round_trip ... ok
 test agent_stream_soak_slow_client ... ok
 
-test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.51s
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.57s
 
      Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-78a2cd37f4fd2948)
 
@@ -919,14 +922,14 @@ test a_long_row_still_opens_a_menu_a_narrow_client_can_show ... ok
 test the_title_seeds_the_menu_width_and_an_overwide_title_refuses_the_menu ... ok
 test menu_rows_fit_the_clients_cells_and_keep_their_action_keys ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.09s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.04s
 
      Running tests/display_menu_resize_lifecycle.rs (target/debug/deps/display_menu_resize_lifecycle-e8b8f10c120260b0)
 
 running 1 test
 test a_resize_moves_the_menu_and_keeps_everything_else ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.09s
 
      Running tests/display_menu_shortcut_grammar.rs (target/debug/deps/display_menu_shortcut_grammar-f02a8bec8ca4f869)
 
@@ -934,7 +937,7 @@ running 2 tests
 test a_disabled_row_carries_no_shortcut ... ok
 test display_menu_keeps_only_shortcuts_an_attached_client_can_press ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s
 
      Running tests/display_popup_resize_lifecycle.rs (target/debug/deps/display_popup_resize_lifecycle-72a13db1c868da15)
 
@@ -942,7 +945,7 @@ running 2 tests
 test a_borderless_popup_resizes_to_the_whole_viewport ... ok
 test a_resize_rebuilds_the_popup_from_what_it_asked_for ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.40s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.32s
 
      Running tests/format_client_loop_context.rs (target/debug/deps/format_client_loop_context-b60b7b7d137b5291)
 
@@ -953,18 +956,18 @@ test a_nested_loop_owns_the_position_only_while_its_rows_run ... ok
 test the_position_formats_stay_empty_outside_every_loop ... ok
 test two_clients_count_from_zero_and_only_the_final_row_carries_the_flag ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.92s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.21s
 
      Running tests/format_environment_loop_context.rs (target/debug/deps/format_environment_loop_context-be802b3accdcfb80)
 
 running 5 tests
-test hidden_and_removed_entries_report_their_own_flags ... ok
 test each_row_reports_its_own_entry_and_its_position ... ok
+test hidden_and_removed_entries_report_their_own_flags ... ok
 test a_nested_loop_owns_the_row_formats_only_while_its_rows_run ... ok
 test none_of_the_six_formats_answer_outside_a_loop ... ok
 test the_global_and_client_stores_carry_the_same_six_formats ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.18s
 
      Running tests/format_modifier_client_loop.rs (target/debug/deps/format_modifier_client_loop-3b2c5e281c411624)
 
@@ -976,21 +979,21 @@ test a_row_answers_the_client_formats_for_its_own_client ... ok
 test nested_and_malformed_client_loops_keep_the_pinned_fallback ... ok
 test the_order_flags_and_reversal_follow_the_pinned_comparator ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.89s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.70s
 
      Running tests/format_modifier_environment_loop.rs (target/debug/deps/format_modifier_environment_loop-9f9e111100619526)
 
 running 8 tests
 test an_emptied_session_store_produces_no_rows_while_the_global_one_keeps_its_own ... ok
-test an_unspelled_flag_word_leaves_no_store_and_no_rows ... ok
 test hidden_and_removed_entries_keep_their_rows ... ok
+test an_unspelled_flag_word_leaves_no_store_and_no_rows ... ok
 test each_flag_word_reads_its_own_store_when_the_names_collide ... ok
 test nested_and_malformed_environment_loops_keep_the_pinned_fallback ... ok
 test the_default_and_the_session_flag_walk_the_sessions_own_store ... ok
 test the_client_store_is_the_invoking_clients_own_environment ... ok
 test the_row_formats_stay_empty_outside_a_loop ... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.16s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.05s
 
    Doc-tests zz_daemon
 

@@ -3,23 +3,24 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.22s
+   Compiling zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-mux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.46s
      Running unittests src/lib.rs (target/debug/deps/zz_mux-cffa50930ba4cb6c)
 
 running 524 tests
-test command::tests::agent_auto_approve_reads_by_default_and_still_takes_the_flag_spellings ... ok
-test command::tests::a_parsed_alias_group_name_never_becomes_an_alias_group ... ok
 test command::tests::agent_session_metadata_persists_restore_identity_and_working_directory ... ok
+test command::tests::a_parsed_alias_group_name_never_becomes_an_alias_group ... ok
+test command::tests::agent_auto_approve_reads_by_default_and_still_takes_the_flag_spellings ... ok
 test command::tests::alternating_three_pane_measurements_reach_a_fixed_extent ... ok
-test command::tests::aggressive_resize_stores_inherits_and_unsets_window_values ... ok
 test command::tests::an_outer_command_variable_outranks_the_command_item_name ... ok
+test command::tests::aggressive_resize_stores_inherits_and_unsets_window_values ... ok
 test command::tests::attach_session_preserves_detach_others_flag_in_effect ... ok
 test command::tests::attach_session_working_directory_and_flags_follow_target_resolution ... ok
 test command::tests::attaching_commands_keep_only_the_last_requested_flag_mutation ... ok
 test command::tests::automatic_session_names_use_the_first_canonical_numeric_gap ... ok
 test command::tests::attach_session_working_directory_uses_target_context_and_isolation ... ok
-test command::tests::alert_window_steps_cover_pinned_bell_activity_and_silence_flags ... ok
 test command::tests::bare_status_option_listings_include_the_full_wave_a_family ... ok
+test command::tests::alert_window_steps_cover_pinned_bell_activity_and_silence_flags ... ok
 test command::tests::behavior_option_defaults_match_pin_readback ... ok
 test command::tests::base_index_drives_default_allocation_but_not_explicit_targets ... ok
 test command::tests::bind_key_blocks_expand_the_live_global_environment ... ok
@@ -43,14 +44,14 @@ test command::tests::browser_commands_and_send_keys_produce_server_effects ... o
 test command::tests::browser_profile_commands_create_and_switch_named_profiles ... ok
 test command::tests::bind_key_validates_and_prints_native_long_options_without_short_clustering ... ok
 test command::tests::buffer_limit_is_a_validated_global_server_option ... ok
-test command::tests::callback_construction_carries_one_alias_layer_per_branch ... ok
 test command::tests::callback_construction_freezes_aliases_and_tracks_physical_groups ... ok
+test command::tests::callback_construction_carries_one_alias_layer_per_branch ... ok
 test command::tests::catalogued_positional_maximums_precede_mux_targets_and_effects ... ok
 test command::tests::catalogued_positional_minimums_precede_mux_targets_and_effects ... ok
 test command::tests::choose_buffer_builds_native_and_command_template_effects ... ok
 test command::tests::chooser_row_flags_parse_the_way_cmd_choose_tree_reads_them ... ok
-test command::tests::chooser_swap_leaves_the_other_window_of_the_pair_as_last ... ok
 test command::tests::client_environment_refresh_uses_session_patterns_and_marker_rules ... ok
+test command::tests::chooser_swap_leaves_the_other_window_of_the_pair_as_last ... ok
 test command::tests::clientless_new_session_forces_detached_creation ... ok
 test command::tests::clientless_attach_commands_are_silent_noops ... ok
 test command::tests::command_alias_group_round_trips_option_boundaries_empty_args_and_blocks ... ok
@@ -105,11 +106,11 @@ test command::tests::command_alias_satisfies_bind_hook_and_option_command_valida
 test command::tests::every_consumer_option_resolves_as_a_format ... ok
 test command::tests::exact_match_prefix_is_scoped_to_the_session_and_window_slots ... ok
 test command::tests::explicit_status_writes_flip_and_clear_customized ... ok
+test command::tests::bind_key_chains_execute_in_order_and_list_keys_round_trips_them ... ok
 test command::tests::explicit_window_names_pin_automatic_rename_off ... ok
 test command::tests::extent_probe_memo_accepts_a_different_measurement ... ok
-test command::tests::bind_key_chains_execute_in_order_and_list_keys_round_trips_them ... ok
-test command::tests::fed_mode_keys_default_precedes_explicit_configuration ... ok
 test command::tests::first_window_uses_the_default_extent ... ok
+test command::tests::fed_mode_keys_default_precedes_explicit_configuration ... ok
 test command::tests::format_activity_tracks_each_rows_window_and_pane ... ok
 test command::tests::format_geometry_reads_tree_allocations_and_tracks_measurements ... ok
 test command::tests::format_monitor_hook_variables_carry_notify_monitor_cb_names ... ok
@@ -122,8 +123,8 @@ test command::tests::has_session_uses_existing_target_errors_and_aliases ... ok
 test command::tests::hex_ascii_keys_keep_distinct_tmux_identity_and_render_like_the_pin ... ok
 test command::tests::hidden_pane_measurement_is_ignored_while_zoomed ... ok
 test command::tests::every_remaining_named_scalar_stores_and_bare_listings_cover_the_pin_table ... ok
-test command::tests::history_trickle_is_a_validated_global_server_option ... ok
 test command::tests::history_limit_inherits_by_session_and_only_configures_new_panes ... ok
+test command::tests::history_trickle_is_a_validated_global_server_option ... ok
 test command::tests::hook_format_variables_cover_arguments_positionals_and_flags ... ok
 test command::tests::hook_validation_and_bound_command_support_match_the_command_surface ... ok
 test command::tests::hooks_store_show_and_override_in_numeric_first_order ... ok
@@ -153,8 +154,8 @@ test command::tests::lane2_scalar_families_store_read_back_unset_and_validate ..
 test command::tests::list_keys_default_pads_repeat_table_and_key_columns_like_the_pin ... ok
 test command::tests::list_keys_filters_before_single_and_computes_aggregate_facts_after ... ok
 test command::tests::list_keys_format_expands_the_pinned_per_binding_facts ... ok
-test command::tests::gap_queries_are_silent_sorted_and_catalog_backed ... ok
 test command::tests::list_keys_key_command_orders_flags_like_the_pinned_args_print ... ok
+test command::tests::gap_queries_are_silent_sorted_and_catalog_backed ... ok
 test command::tests::list_keys_key_command_uses_the_pinned_escaped_command_shape ... ok
 test command::tests::list_keys_note_flags_preserve_parser_and_table_error_precedence ... ok
 test command::tests::list_keys_key_filter_errors_follow_the_pinned_precedence_and_shapes ... ok
@@ -165,8 +166,8 @@ test command::tests::list_keys_notes_sort_prefix_and_root_independently ... ok
 test command::tests::list_keys_notes_only_matches_the_pinned_tables_filter_and_fallback ... ok
 test command::tests::literal_control_caret_keys_work_across_key_callers_without_state_drift ... ok
 test command::tests::list_keys_sorts_key_and_order_and_only_reverses_an_explicit_order ... ok
-test command::tests::marked_pane_formats_scope_to_the_marked_session_and_window ... ok
 test command::tests::literal_delete_spellings_keep_distinct_identity_rendering_and_effects ... ok
+test command::tests::marked_pane_formats_scope_to_the_marked_session_and_window ... ok
 test command::tests::marked_target_alias_is_a_whole_target_and_names_its_own_miss ... ok
 test command::tests::measurement_write_back_bumps_generation_and_reports_change ... ok
 test command::tests::marked_pane_stays_with_the_session_it_was_taken_in_like_the_pin ... ok
@@ -183,8 +184,8 @@ test command::tests::move_window_renumbers_from_base_index_and_preflights_option
 test command::tests::monitor_options_store_read_back_unset_validate_and_emit_the_silence_effect ... ok
 test command::tests::move_window_supports_insertion_replacement_and_cross_session_moves ... ok
 test command::tests::name_commands_use_pin_format_types ... ok
-test command::tests::native_splits_print_the_created_pane_and_picker_ids_survive_materialization ... ok
 test command::tests::native_splits_reveal_by_default_and_preserve_zoom_when_detached ... ok
+test command::tests::native_splits_print_the_created_pane_and_picker_ids_survive_materialization ... ok
 test command::tests::nested_new_session_preflight_expands_each_item_once_with_canonical_command ... ok
 test command::tests::nested_new_session_preflight_matches_tmux_validation_order ... ok
 test command::tests::new_and_split_window_carry_pane_local_environment ... ok
@@ -201,12 +202,12 @@ test command::tests::new_session_honors_explicit_window_extent ... ok
 test command::tests::new_session_empty_cwd_is_session_state_but_not_a_pane_spawn_override ... ok
 test command::tests::new_session_name_expands_once_before_attach_and_duplicate_lookup ... ok
 test command::tests::new_session_name_keeps_empty_values_and_applies_pin_name_cleaning ... ok
-test command::tests::list_keys_uses_the_selected_target_format_client ... ok
 test command::tests::new_session_name_rejects_ascii_control_values_before_creation ... ok
-test command::tests::new_session_prints_the_created_session_with_the_requested_format ... ok
-test command::tests::new_session_requests_attachment_after_creating_its_terminal ... ok
+test command::tests::list_keys_uses_the_selected_target_format_client ... ok
 test command::tests::new_session_name_uses_canonical_and_explicit_command_item_values ... ok
+test command::tests::new_session_requests_attachment_after_creating_its_terminal ... ok
 test command::tests::new_session_print_format_uses_post_attach_client_state_only_when_attaching ... ok
+test command::tests::new_session_prints_the_created_session_with_the_requested_format ... ok
 test command::tests::new_session_seeds_patterns_from_the_client_snapshot ... ok
 test command::tests::new_window_cwd_origin_is_the_target_session_not_the_context_pane ... ok
 test command::tests::new_window_dash_a_keeps_an_explicit_free_index ... ok
@@ -265,17 +266,17 @@ test command::tests::select_layout_applies_serialized_layouts_and_reports_window
 test command::tests::select_layout_resolves_window_typed_session_targets ... ok
 test command::tests::select_layout_restore_without_history_primes_the_next_restore ... ok
 test command::tests::select_layout_unzooms_before_success_or_failure ... ok
-test command::tests::select_pane_changes_pane_activity_without_touching_window_or_session_selection ... ok
 test command::tests::select_pane_directions_follow_layout_geometry_from_explicit_targets ... ok
+test command::tests::select_pane_changes_pane_activity_without_touching_window_or_session_selection ... ok
 test command::tests::select_pane_input_flags_retarget_without_selecting ... ok
-test command::tests::select_pane_mark_skips_zoom_hidden_panes_but_clear_still_lands ... ok
 test command::tests::select_pane_mark_moves_toggles_and_dies_like_the_pin ... ok
+test command::tests::select_pane_mark_skips_zoom_hidden_panes_but_clear_still_lands ... ok
 test command::tests::select_pane_title_expands_from_the_original_directional_target ... ok
 test command::tests::select_pane_style_flag_writes_both_pane_styles_and_then_selects ... ok
 test command::tests::select_pane_title_updates_metadata_without_changing_the_active_pane ... ok
 test command::tests::send_keys_inject_routes_to_the_client_and_replays_the_invoking_key ... ok
-test command::tests::send_keys_parses_action_local_flags_and_double_dash ... ok
 test command::tests::send_keys_preserves_copy_pipe_command_size_errors ... ok
+test command::tests::send_keys_parses_action_local_flags_and_double_dash ... ok
 test command::tests::send_keys_rejects_outer_copy_action_flags_with_pin_errors ... ok
 test command::tests::send_keys_repeat_count_uses_the_copy_mode_action_policy ... ok
 test command::tests::send_keys_repeat_count_matches_pinned_bounds_duplicates_and_clusters ... ok
@@ -284,20 +285,20 @@ test command::tests::send_keys_swallows_invalid_action_local_grammar ... ok
 test command::tests::session_alert_flag_formats_follow_the_resolved_window ... ok
 test command::tests::session_and_window_rows_backfill_the_active_pane_like_tmux ... ok
 test command::tests::session_spawn_string_append_uses_only_the_sessions_own_value ... ok
+test command::tests::per_window_status_overrides_reach_the_label_surface_and_row_variables ... ok
 test command::tests::set_hook_block_failures_follow_hook_replacement_order ... ok
 test command::tests::set_hook_command_blocks_normalize_for_every_storage_path ... ok
-test command::tests::per_window_status_overrides_reach_the_label_surface_and_row_variables ... ok
-test command::tests::set_hook_run_now_returns_effective_units_in_index_order ... ok
 test command::tests::set_hook_empty_builtin_values_follow_array_assignment ... ok
+test command::tests::set_hook_run_now_returns_effective_units_in_index_order ... ok
 test command::tests::set_option_command_block_rejections_preserve_existing_state ... ok
 test command::tests::set_hook_storage_constructs_aliases_at_the_typed_or_string_boundary ... ok
 test command::tests::set_option_matches_full_table_prefixes_and_quiets_unknown_names ... ok
 test command::tests::session_listing_and_loops_use_creation_and_logical_activity_orders ... ok
+test command::tests::set_option_command_block_values_normalize_before_format_expansion ... ok
 test command::tests::set_titles_readers_resolve_scope_and_emit_status_effects ... ok
 test command::tests::show_hooks_does_not_expand_forwarded_option_names_twice ... ok
-test command::tests::set_option_command_block_values_normalize_before_format_expansion ... ok
-test command::tests::show_hooks_renders_commands_like_the_pinned_cmd_print ... ok
 test command::tests::set_options_expand_names_and_dash_f_expands_values ... ok
+test command::tests::show_hooks_renders_commands_like_the_pinned_cmd_print ... ok
 test command::tests::show_options_h_lists_hook_catalogues_in_table_order_and_scope ... ok
 test command::tests::split_agent_creates_one_generation_with_provider_cwd_and_printed_id ... ok
 test command::tests::show_options_uses_pin_escaping_and_declared_scope_readback ... ok
@@ -313,8 +314,8 @@ test command::tests::static_command_chain_recurses_into_typed_callback_blocks ..
 test command::tests::static_command_chain_rejects_later_name_option_and_arity_errors ... ok
 test command::tests::static_command_chain_validates_unimplemented_tmux_syntax ... ok
 test command::tests::split_window_retain_flags_write_the_pins_pane_local_key_retention ... ok
-test command::tests::status_format_array_exposes_sparse_session_effective_entries ... ok
 test command::tests::split_window_style_and_title_flags_match_pinned_spawn_semantics ... ok
+test command::tests::status_format_array_exposes_sparse_session_effective_entries ... ok
 test command::tests::status_format_writes_emit_status_effects_with_their_scope ... ok
 test command::tests::status_options_store_inherit_unset_and_validate ... ok
 test command::tests::status_readback_uses_the_pin_defaults ... ok
@@ -354,8 +355,8 @@ test command::tests::window_extent_survives_a_zoomed_measurement ... ok
 test command::tests::word_separators_are_live_inherited_session_options ... ok
 test command::tests::zoomed_pane_measurement_sets_the_window_extent_directly ... ok
 test command::tests::zoomed_pane_reports_the_full_window_extent_like_tmux ... ok
-test compat_manifest_tests::args_parse_gaps_match_the_pinned_oracle ... ok
 test command::tests::window_and_pane_lists_sort_then_filter_with_pin_line_values ... ok
+test compat_manifest_tests::args_parse_gaps_match_the_pinned_oracle ... ok
 test compat_manifest_tests::command_flag_fixture_matches_the_pin ... ok
 test compat_manifest_tests::daemon_invalid_flag_runtime_inventory_matches_the_pin ... ok
 test compat_manifest_tests::missing_copy_actions_keep_their_behavior_item_open ... ok
@@ -373,31 +374,32 @@ test formats::tests::an_environment_value_no_utf8_holds_is_counted_the_way_forma
 test formats::tests::attach_session_cwd_update_is_visible_on_the_next_expansion ... ok
 test compat_manifest_tests::tmux_option_consumer_partition_matches_pinned_inventory ... ok
 test formats::tests::comparisons_logic_truthiness_and_nested_conditionals_match_the_pin ... ok
-test formats::tests::built_scene_backfills_scope_and_reports_live_shapes ... ok
 test formats::tests::expansion_output_keeps_every_byte_past_the_status_wire_bound ... ok
+test formats::tests::built_scene_backfills_scope_and_reports_live_shapes ... ok
 test formats::tests::match_supports_fnmatch_regex_casefold_and_fuzzy_results ... ok
 test formats::tests::padding_arithmetic_ascii_and_colour_match_the_pin ... ok
 test formats::tests::path_length_literal_and_quote_modifiers_are_lookup_scoped ... ok
 test formats::tests::pin_null_backings_are_empty_instead_of_zero ... ok
 test formats::tests::recursive_expansion_stops_at_the_pinned_depth ... ok
-test formats::tests::repeat_modifier_expands_operands_and_runs_before_post_transforms ... ok
+test command::tests::unsupported_command_alias_bodies_never_fall_through ... ok
 test formats::tests::repeat_modifier_rejects_missing_or_out_of_range_counts ... ok
 test formats::tests::session_active_expands_null_false_and_true_as_a_boolean ... ok
-test command::tests::unsupported_command_alias_bodies_never_fall_through ... ok
+test formats::tests::repeat_modifier_expands_operands_and_runs_before_post_transforms ... ok
 test formats::tests::session_activity_expands_as_seconds_and_time ... ok
 test formats::tests::session_path_is_empty_without_retained_or_existing_state ... ok
 test formats::tests::session_path_is_scoped_to_the_selected_session ... ok
-test formats::tests::name_checks_and_nested_scope_loops_use_the_engine_universe ... ok
-test formats::tests::substitutions_are_global_case_aware_and_preserve_invalid_patterns ... ok
 test formats::tests::session_path_preserves_lexical_utf8 ... ok
+test formats::tests::substitutions_are_global_case_aware_and_preserve_invalid_patterns ... ok
+test formats::tests::the_client_loop_body_traces_through_the_shared_sink ... ok
 test formats::tests::the_client_sanitizer_spends_one_underscore_per_column_the_pin_would_have_drawn ... ok
-test formats::tests::session_active_uses_a_distinct_tri_state_format_client ... ok
+test formats::tests::name_checks_and_nested_scope_loops_use_the_engine_universe ... ok
 test formats::tests::time_expand_again_and_expand_again_with_time_are_distinct ... ok
 test formats::tests::truncation_uses_display_cells_markers_and_byte_length ... ok
 test formats::tests::unknown_and_malformed_forms_follow_source_fallbacks ... ok
 test formats::tests::vocabulary_is_the_sorted_pinned_198_entry_table ... ok
 test formats::tests::width_modifier_counts_display_cells_around_style_spans ... ok
 test formats::tests::width_modifier_gives_control_characters_no_width ... ok
+test formats::tests::session_active_uses_a_distinct_tri_state_format_client ... ok
 test formats::tests::width_modifier_runs_after_the_other_value_transforms ... ok
 test formats::tests::window_activity_keeps_plain_boolean_equality_and_time_views_consistent ... ok
 test layout::tests::divider_ratio_resizes_the_matching_boundary ... ok
@@ -405,7 +407,6 @@ test layout::tests::dump_checksum_and_identity_mutations_work ... ok
 test layout::tests::pane_count_counts_every_leaf ... ok
 test layout::tests::pane_resize_to_inverts_from_last_child ... ok
 test layout::tests::pane_resize_walks_victims_steps_back_and_clamps ... ok
-test formats::tests::the_client_loop_body_traces_through_the_shared_sink ... ok
 test layout::tests::pane_resize_without_a_matching_ancestor_is_a_silent_noop ... ok
 test layout::tests::parsed_layout_corrects_the_root_and_assigns_dfs_panes ... ok
 test layout::tests::parsed_layout_leaf_pane_numbers_are_optional ... ok
@@ -415,18 +416,18 @@ test layout::tests::preset_options_resolve_percentages_other_sizes_and_tiled_cap
 test layout::tests::presets_match_exact_three_and_five_pane_geometry ... ok
 test layout::tests::projection_is_right_associative_and_keeps_dividers_stable ... ok
 test layout::tests::refresh_divider_ids_replaces_every_projected_id ... ok
-test formats::tests::the_loop_limit_counts_recursion_depth_and_not_a_running_total ... ok
 test layout::tests::remap_is_simultaneous ... ok
 test layout::tests::remove_gifts_after_and_preserves_promoted_same_axis_nodes ... ok
 test layout::tests::remove_reports_last_pane_and_guards_single_child_nodes ... ok
 test layout::tests::replace_panes_in_order_is_atomic_on_count_mismatch ... ok
 test layout::tests::split_sizes_before_full_and_no_space_match_tmux ... ok
 test layout::tests::spread_biases_remainders_to_first_children ... ok
+test layout::tests::parsed_layout_enforces_the_protocol_depth_budget ... ok
 test layout::tests::spread_refuses_a_mixed_parent_the_pin_corrupts ... ok
 test layout::tests::spread_skips_parents_with_node_children_like_the_pin ... ok
-test layout::tests::parsed_layout_enforces_the_protocol_depth_budget ... ok
 test layout::tests::two_pane_main_presets_size_the_other_pane ... ok
 test layout::tests::unrelated_split_keeps_the_existing_divider_id ... ok
+test formats::tests::the_loop_limit_counts_recursion_depth_and_not_a_running_total ... ok
 test layout::tests::validate_rejects_corrupt_tree ... ok
 test layout::tests::window_resize_uses_round_robin_with_first_remainders ... ok
 test model::tests::break_and_join_follow_tmux_window_activity_transitions ... ok
@@ -440,8 +441,8 @@ test model::tests::deeply_segmented_targets_do_not_recurse_between_resolvers ...
 test model::tests::directional_navigation_uses_geometry_wrapping_and_mru_tie_breaking ... ok
 test layout_pin_tests::pinned_tmux_layout_fixtures_parse_and_dump_exactly ... ok
 test model::tests::failed_cross_window_join_restores_the_source_and_target_layouts ... ok
-test model::tests::fnmatch_uses_tmux_flags_zero_metacharacters ... ok
 test model::tests::failed_split_keeps_the_cell_tree_and_allocators_unchanged ... ok
+test model::tests::fnmatch_uses_tmux_flags_zero_metacharacters ... ok
 test model::tests::joining_the_last_sibling_splits_the_promoted_root ... ok
 test model::tests::kill_and_move_window_touch_only_newly_selected_windows ... ok
 test model::tests::layout_cycle_restore_and_spread_are_reversible_and_atomic ... ok
@@ -449,14 +450,14 @@ test model::tests::pane_bells_ride_the_snapshot_and_only_move_on_a_transition ..
 test model::tests::named_layouts_rebuild_only_the_cells_with_tmux_geometry ... ok
 test model::tests::pane_removal_fallback_preserves_the_replacement_active_point ... ok
 test model::tests::pane_indexes_and_compound_targets_resolve_without_weakening_absolute_ids ... ok
+test model::tests::pane_swaps_preserve_layout_identity_active_slots_and_cross_window_state ... ok
 test model::tests::pane_titles_change_snapshot_generation_without_overwriting_static_window_names ... ok
 test model::tests::recent_agent_pane_follows_focus_history_then_layout_order ... ok
-test model::tests::pane_swaps_preserve_layout_identity_active_slots_and_cross_window_state ... ok
 test model::tests::remove_promotes_the_surviving_cell_subtree_without_reallocating_descendants ... ok
 test model::tests::same_window_join_matches_tmux_active_pane_transitions ... ok
 test model::tests::serialized_layout_have_need_error_is_atomic ... ok
-test model::tests::session_activity_marks_keep_exact_seconds_and_logical_mru ... ok
 test model::tests::same_window_join_reparents_a_pane_beside_the_target ... ok
+test model::tests::session_activity_marks_keep_exact_seconds_and_logical_mru ... ok
 test model::tests::serialized_layouts_adopt_extent_assign_pane_order_and_trim_bottom_right ... ok
 test model::tests::session_working_directory_changes_generation_only_when_value_changes ... ok
 test model::tests::session_targets_follow_id_exact_prefix_and_fnmatch_passes ... ok
@@ -470,24 +471,24 @@ test model::tests::window_activity_time_tracks_only_creation_selection_and_outpu
 test model::tests::window_alert_flags_move_on_transition_and_clear_on_activation ... ok
 test model::tests::window_rotation_moves_surfaces_through_stable_layout_slots_and_preserves_zoom ... ok
 test model::tests::window_targets_accept_pane_forms_like_tmux ... ok
-test parser::tests::a_home_missing_from_the_batch_is_the_pinned_syntax_error ... ok
 test model::tests::zoom_tracks_the_active_pane_and_layout_mutations_unzoom ... ok
+test parser::tests::a_home_missing_from_the_batch_is_the_pinned_syntax_error ... ok
 test model::tests::window_targets_follow_tokens_indexes_names_prefixes_and_fnmatch ... ok
 test parser::tests::accepts_empty_blocks_and_final_escaped_separators ... ok
-test parser::tests::assignment_overlay_can_be_disabled_without_dropping_records ... ok
 test parser::tests::an_unquoted_percent_word_is_a_condition_in_every_argument_position ... ok
-test parser::tests::assignments_expand_in_order_and_preserve_hidden_state ... ok
+test parser::tests::assignment_overlay_can_be_disabled_without_dropping_records ... ok
 test parser::tests::assignments_reduced_before_pin_parse_errors_survive ... ok
-test parser::tests::braces_stay_literal_inside_quotes_and_words ... ok
+test parser::tests::assignments_expand_in_order_and_preserve_hidden_state ... ok
 test parser::tests::balanced_condition_formats_include_whitespace_and_nesting ... ok
+test parser::tests::braces_stay_literal_inside_quotes_and_words ... ok
 test parser::tests::command_block_types_follow_argument_positions ... ok
 test parser::tests::command_blocks_keep_quoted_separators_and_report_unterminated_blocks ... ok
+test parser::tests::command_blocks_nest_and_span_lines_and_comments ... ok
 test parser::tests::condition_formats_after_else_or_endif_are_syntax_errors ... ok
 test parser::tests::continues_lines_and_finishes_open_quotes_at_eof ... ok
-test parser::tests::command_blocks_nest_and_span_lines_and_comments ... ok
 test parser::tests::evaluates_same_line_and_semicolon_conditionals ... ok
-test parser::tests::evaluates_conditionals_with_elif_else_and_nesting ... ok
 test parser::tests::expands_every_pin_escape_in_bare_and_double_quoted_words ... ok
+test parser::tests::evaluates_conditionals_with_elif_else_and_nesting ... ok
 test parser::tests::expands_leading_tildes_like_the_pin ... ok
 test parser::tests::finishes_a_trailing_open_quote_before_command_validation ... ok
 test parser::tests::expands_variables_in_bare_and_double_quoted_words_only ... ok
@@ -516,8 +517,8 @@ test sort::tests::stepping_an_order_wraps_from_the_end_and_from_outside_the_sequ
 test status::tests::option_names_round_trip ... ok
 test status::tests::option_values_parse_like_tmux ... ok
 test status::tests::status_family_defaults_and_rejections_match_the_pin ... ok
-test status::tests::status_style_options_defer_dynamic_values ... ok
 test status::tests::window_status_defaults_match_the_pin ... ok
+test status::tests::status_style_options_defer_dynamic_values ... ok
 test terminfo::tests::override_rows_split_on_single_colons_and_unvis_their_values ... ok
 test terminfo::tests::a_vt100_like_clear_adds_the_three_features_without_xt ... ok
 test terminfo::tests::the_interrogate_matches_the_pinned_client_terminal ... ok
@@ -532,7 +533,7 @@ test tmux_options::tests::implemented_options_carry_their_pin_defaults_and_types
 test tmux_options::tests::listing_order_covers_every_non_hook_table_option_once ... ok
 test tmux_options::tests::exact_names_win_and_prefixes_must_be_unique ... ok
 
-test result: ok. 524 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.55s
+test result: ok. 524 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.79s
 
      Running tests/attached_pane_width.rs (target/debug/deps/attached_pane_width-6a2576df286e0389)
 
@@ -550,27 +551,27 @@ test clustered_flags_reject_an_unknown_member ... ok
 test attaching_commands_accept_client_flag_values ... ok
 test double_dash_allows_a_positional_starting_with_dash ... ok
 test kill_server_rejects_unknown_flag_before_shutdown ... ok
-test option_value_starting_with_dash_is_not_validated_as_a_flag ... ok
 test last_window_rejects_unknown_flag_before_switching ... ok
+test option_value_starting_with_dash_is_not_validated_as_a_flag ... ok
 test resize_window_attached_size_flags_are_valueless_and_largest_wins ... ok
 test send_prefix_rejects_unknown_flag_before_emitting_input ... ok
 test every_catalog_command_rejects_a_mechanically_absent_flag ... ok
 
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
 
      Running tests/chaos.rs (target/debug/deps/chaos-e89268efc5949e9e)
 
 running 1 test
 test interleaved_connections_never_panic_and_always_heal ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.09s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.25s
 
      Running tests/config_fixture.rs (target/debug/deps/config_fixture-8a5bbc50c9c52c93)
 
 running 1 test
 test existing_tmux_config_applies_supported_subset_and_skips_the_rest ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
      Running tests/config_non_utf8_bytes.rs (target/debug/deps/config_non_utf8_bytes-ee81a8eb8060f4e0)
 
@@ -604,8 +605,8 @@ test a_row_answers_only_for_its_own_client_and_leaks_nothing_outside_the_loop ..
 test an_unknown_order_letter_falls_back_to_the_name_order_without_reversing ... ok
 test client_loops_nest_and_each_level_keeps_its_own_row ... ok
 test the_default_and_the_index_and_name_flags_all_order_by_client_name ... ok
-test the_time_flag_orders_by_activity_newest_first ... ok
 test reversal_negates_the_finished_comparison_including_the_name_tie_break ... ok
+test the_time_flag_orders_by_activity_newest_first ... ok
 
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -627,7 +628,7 @@ test option_loop_flag_precedence_matches_the_pin ... ok
 test option_loop_selects_the_stored_scope_per_flag ... ok
 test option_loop_rows_carry_the_pinned_fields_and_order ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
      Running tests/format_option_loop_context.rs (target/debug/deps/format_option_loop_context-deb0f8054aea88dc)
 
@@ -645,14 +646,14 @@ running 60 tests
 test bind_clustered_nr_flags_bind_a_repeatable_root_table_key ... ok
 test bind_key_accepts_open_quotes_and_empty_endings ... ok
 test bind_key_validates_payloads_before_storing_them ... ok
-test attach_session_routes_the_steal_hangup_flag_through_the_attach_effect ... ok
 test attaching_client_flag_values_reach_the_daemon_effect_without_mux_interpretation ... ok
+test attach_session_routes_the_steal_hangup_flag_through_the_attach_effect ... ok
 test catalog_covers_the_options_the_handlers_read ... ok
 test brace_command_lists_bind_as_a_single_command_sequence ... ok
 test copy_mode_combines_dash_u_and_dash_d_like_tmux ... ok
 test choosers_take_a_key_format_and_refuse_the_large_preview ... ok
-test copy_mode_composes_hide_position_with_scroll_exit ... ok
 test detach_client_dash_a_leaves_the_caller_attached ... ok
+test copy_mode_composes_hide_position_with_scroll_exit ... ok
 test copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit ... ok
 test kill_pane_dash_a_keeps_only_the_target ... ok
 test kill_commands_refuse_positional_targets_like_tmux ... ok
@@ -663,8 +664,8 @@ test new_session_dash_t_is_rejected_instead_of_leaking_into_the_pane_command ...
 test new_window_dash_t_prefers_a_window_index_then_a_session_name ... ok
 test list_keys_remaining_selectors_share_the_catalog_and_runtime_contract ... ok
 test next_and_previous_window_target_a_session_and_follow_alerts ... ok
-test removing_the_active_window_clears_the_replacement_bell ... ok
 test resize_pane_accepts_percentages_above_one_hundred_and_clamps_layout ... ok
+test removing_the_active_window_clears_the_replacement_bell ... ok
 test resize_pane_dash_r_grows_a_nested_pane_toward_its_right_neighbor ... ok
 test resize_pane_dash_r_on_the_right_pane_grows_the_left_share ... ok
 test resize_pane_dash_x_sets_an_absolute_width_from_either_side ... ok
@@ -703,7 +704,7 @@ test split_window_dash_l_takes_a_percentage_and_headless_cell_count ... ok
 test window_steps_error_instead_of_landing_in_place ... ok
 test the_scroll_exit_family_maps_to_typed_latch_and_forced_exit_actions ... ok
 
-test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
 
    Doc-tests zz_mux
 

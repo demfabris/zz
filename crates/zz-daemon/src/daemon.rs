@@ -31091,7 +31091,7 @@ fn client_colour_count_with(inner: &ServerState, client: ClientId, requested: u3
     }
     let term = client_environment_value(inner, client, "TERM").unwrap_or_default();
     let colour_term = client_environment_value(inner, client, "COLORTERM").unwrap_or_default();
-    Some(terminal_colour_count(&term, &colour_term, requested))
+    Some(terminal_colour_count(term, colour_term, requested))
 }
 
 fn client_term_features(inner: &ServerState, client: ClientId) -> String {

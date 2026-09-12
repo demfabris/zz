@@ -1,6 +1,6 @@
-Re-run at 883ded30, the tip after the ledger and evidence commit, 2026-09-12T07:11:42-03:00.
-The tree's code and fixtures are identical to 3f6dc460, where 01-13, 17 and 18 ran:
-$ git diff --stat 3f6dc460 HEAD -- crates/ compat/tui-caps.sh compat/tui-screen-diff.sh compat/scenarios/
+Re-run at 3234e9ba, the tip after the evidence commit, 2026-09-12T07:38:13-03:00.
+The tree's code and fixtures are identical to 0ff4a261, where 01-13, 17 and 18 ran:
+$ git diff --stat 0ff4a261 HEAD -- crates/ compat/tui-caps.sh compat/tui-screen-diff.sh compat/scenarios/
 (no output above means no difference)
 
 $ compat/tui-caps.sh

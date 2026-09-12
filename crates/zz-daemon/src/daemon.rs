@@ -31969,7 +31969,8 @@ fn interactive_client_window_extent(
 ) -> Option<(u16, u16)> {
     if let Some((columns, rows)) = inner.client_sizes.get(&client).copied() {
         let status = inner.engine.status_formats_for_session(Some(session));
-        let status_rows = u16::from(status.rows()).min(rows.saturating_sub(1));
+        let lines = u16::from(status.rows());
+        let status_rows = if rows <= lines { 0 } else { lines };
         return Some((columns.max(1), rows.saturating_sub(status_rows).max(1)));
     }
     let window_state = inner.engine.state.windows.get(&window)?;
@@ -80326,6 +80327,48 @@ bind - split-window -v -c "#{pane_current_path}"
             interactive_client_window_extent(&shared.inner.lock(), outer, session, window),
             Some((200, 50))
         );
+    }
+
+    #[test]
+    fn a_client_no_taller_than_its_status_block_keeps_every_row() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "status-floor", "target");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .expect("pane window");
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        shared.attach(client, session).expect("attach");
+        shared.inner.lock().client_sizes.insert(client, (80, 3));
+
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let extent = || {
+            interactive_client_window_extent(&shared.inner.lock(), client, session, window)
+        };
+        let set = |value: &str, context: &mut ExecutionContext| {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    context,
+                    &CommandInvocation::new("set-option", ["-t", "status-floor", "status", value]),
+                )
+                .expect("set status");
+        };
+
+        assert_eq!(extent(), Some((80, 2)));
+        set("2", &mut context);
+        assert_eq!(extent(), Some((80, 1)));
+        set("3", &mut context);
+        assert_eq!(extent(), Some((80, 3)));
+        set("4", &mut context);
+        assert_eq!(extent(), Some((80, 3)));
+        set("off", &mut context);
+        assert_eq!(extent(), Some((80, 3)));
     }
 
     #[test]

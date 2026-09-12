@@ -1,0 +1,29 @@
+TUI-004 attempt-05 (cycle 6, the mux lane) environment
+
+date: 2026-09-12T11:37:51-03:00
+uname: Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+bash: 5.3.15(1)-release
+TERM: xterm-ghostty  LANG: en_US.UTF-8  LC_TIME: pt_BR.UTF-8
+cores: 16
+worktree: /home/demfabris/dev/zz-tui-mux
+branch base: origin/main 33ecbd86
+revision: df1dedcbebf789fcdc14a399bed00f54e5079645
+tree: 1 modified paths
+zz build: cargo build -p zz --jobs 4 through systemd-run MemoryMax=5G and a two-slot flock
+zz binary: /home/demfabris/dev/zz-tui-mux/target/debug/zz
+zz sha256: a5d4ca14d39b4d1acffff8e784d580d24b9b7bffded5ae50463a63b39d456334
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+pin -V: tmux next-3.8
+pin commit: d77c9dc6aa021e4bc61f0da128c591af695e6466
+
+A cargo debug build of zz is not bit-reproducible on this box, so the hash
+identifies the artifact and does not attest it; the attestation is the
+revision above plus a clean worktree.
+
+Every tmux and zz server started here was a throwaway: the fixtures' own
+scrubbed HOME and XDG_CONFIG_HOME, and for the hand probes a scratch HOME
+under /tmp with -L zzprobe-* -f /dev/null and a /tmp socket for zz. The
+box's real ~/.tmux.conf and ~/.config/zz/mux.conf were never read.

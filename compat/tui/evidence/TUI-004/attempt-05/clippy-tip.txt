@@ -1,0 +1,10 @@
+cargo clippy -p zz-mux -p zz-daemon --all-targets --all-features --jobs 4 -- -D warnings
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-mux/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+    Checking zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-mux/crates/zz-mux)
+    Checking zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-mux/crates/zz-daemon)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.32s
+exit=0

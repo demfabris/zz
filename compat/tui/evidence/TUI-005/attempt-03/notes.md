@@ -150,3 +150,40 @@ rectangle newline, prefix precedence, selection_active and rectangle_toggle, the
 search outliving the mode, the two settle races, and the cycle-5 gate's sibling flips) is kept in
 `../attempt-02/notes.md` and the git history of `compat/tui/campaign.json` at 5d9bf198. The ledger
 now carries only the current measurement.
+
+## Cycle-6 copy gate, 2026-09-11
+
+Revision bcf9d12328ed2ef15b56d9d4aa12c229273901c6, the copy lane rebased onto
+origin/main fd3c64e4 plus two gate commits. Command lines, exit codes and start
+times are in the `gate-*.txt` files beside this one; the reviewer's verdict and
+what the gate did with it are in `review.md`.
+
+THE REBASE. The five lane commits replayed with one conflict, the generated
+`knowledge/tmux/tui-parity.md` status-count line, resolved by regenerating.
+The rebased diff against origin/main is byte for byte the lane's own diff
+against BASE, so nothing came along with it.
+
+`git merge-tree --write-tree origin/main 8d766d0d` exits 1 with fifteen
+conflicted paths, which is not a real prediction here: the modes gate put the
+cycle-5 chain on main as new commits by rebasing it, so BASE's own hunks sit on
+both sides with no ancestor between them.
+
+THE FLIP. The thirteen cases that recorded `SIBLING:modes` now assert the rows
+channel: the twelve MATCH_REASON search cases and
+`emacs-ordinary-pane-search-backspace`. The modes lane landed
+copy-mode-current-match-style in `crates/zz-tui` render.rs, so zz paints the
+current match where it used to write reverse video. Three consecutive green
+runs and a green `--self-check` at this revision, after which the fixture has
+no recorded case at all: 147 of 147 assert every channel they drive.
+
+ONE GATE COMMIT THE LANE DID NOT OWE. `knowledge/tmux/gaps.md` was stale AT
+origin/main: main's own 268ccd9d edited `compat/tmux-gaps.json`
+(config.discovery, presentation.native-status) without regenerating the report,
+and `compat/run.sh` and `compat/check.sh` both refuse while the two disagree.
+Checking out origin/main's two files alone into the gate worktree reproduces
+`knowledge/tmux/gaps.md is stale`. Commit 1166303b regenerates it.
+
+WHAT THE GATE DID NOT DO. `compat/tui-overlays.sh` and `compat/tui-choosers.sh`
+are not on main at this tip; they belong to later lanes in the cycle-6 order.
+`knowledge/tmux/key-tables.md`, the lane's declared zone excursion, was left
+alone: no keys or modes lane touched that sentence, so there was no collision.

@@ -1,0 +1,14 @@
+revision: bcf9d12328ed2ef15b56d9d4aa12c229273901c6
+command: PATH=/opt/homebrew/bin:$PATH ZZ_BIN=/home/demfabris/dev/zz-gate-target/debug/zz TMUX_BIN=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/tui-pane-geometry.sh
+started: 2026-09-11T21:46:42-03:00 (ran 5 s, finished 2026-09-11T21:46:47-03:00)
+exit: 0
+
+pane geometry differential (pin tmux)
+ok    80x24 columns: both 80
+ok    80x24 rows: both 23
+ok    100x24 columns: both 100
+ok    100x24 rows: both 23
+ok    120x24 columns: both 120
+ok    120x24 rows: both 23
+all 6 asserted measurements identical
+EXIT=0 secs=5 LOG=/tmp/zzgate6-logs/fix-pane-geometry2.txt

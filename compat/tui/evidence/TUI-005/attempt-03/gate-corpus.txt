@@ -1,0 +1,185 @@
+revision: 1166303b0d64e78f30f9739f24e9f9f87318312c (gate tip with the regenerated gaps report; the later flip commit touches only compat/tui-copy-mode.sh, which the corpus does not read)
+command: PATH=/opt/homebrew/bin:$PATH ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-gate-target/debug/zz ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/run.sh --strict-geometry <explicit scenario names>
+selection: compat/run.sh --strict-geometry --delta origin/main..HEAD --commands send-keys,send-prefix,copy-mode --list gives 163 rows (every smoke row, the changed rows, and every row naming a touched command); status-options.txt was added by hand so that every keys and status scenario is covered. 164 rows, run as explicit-name chunks.
+started: 2026-09-11T20:20-03:00 through 2026-09-11T21:26-03:00
+exit: 1 on the two chunks holding a known environmental row, 0 on every other chunk
+
+RESULT: every one of the 164 rows has a result. 162 clean on all five channels.
+The two red rows are the box's known environmental ones, red at origin/main here too:
+  micro-flags                            OUT differs
+  smoke/plugin-runtime-resurrect-restore OUT and WARN differ
+(the other two environmental rows on this box, lane2-store and show-options-hooks, are not in the selection)
+
+chunks and result lines (run.sh re-runs a red row once alone, so a re-run row counts twice):
+  zzgate6-chunk-00      10 rows
+  b1                    21 rows
+  b2                    10 rows
+  b2a                    5 rows
+  b3                    15 rows
+  b4                    20 rows
+  b5                    20 rows
+  b6                    20 rows
+  b7                    21 rows
+  b8                    20 rows
+  b9                     2 rows
+  slow1                  1 rows
+  slow2                  1 rows
+
+smoke/client-exit-actions was cut short when chunk b2 hit its own 570 s timeout under the other lane's load;
+its leftover daemon, driver and tray on /tmp/zzc-2032519.sock were reaped and the row was re-run in b2a, green.
+
+every row and its channels:
+| alerts | 62 | yes | 0 | yes | yes | yes |
+| capture-pane | 23 | yes | 0 | yes | yes | yes |
+| census-hooks | 152 | yes | 0 | yes | yes | yes |
+| census-options | 55 | yes | 0 | yes | yes | yes |
+| copy-mode-bindings | 20 | yes | 0 | yes | yes | yes |
+| copy-mode-cursor-view | 13 | yes | 0 | yes | yes | yes |
+| copy-mode-goto-line | 18 | yes | 0 | yes | yes | yes |
+| copy-mode-previous-bracket | 23 | yes | 0 | yes | yes | yes |
+| copy-mode-recentre | 8 | yes | 0 | yes | yes | yes |
+| copy-mode-scroll-exit | 11 | yes | 0 | yes | yes | yes |
+| copy-mode-selection-lifecycle | 19 | yes | 0 | yes | yes | yes |
+| copy-mode-stock-action-keys | 17 | yes | 0 | yes | yes | yes |
+| formats-values | 45 | yes | 0 | yes | yes | yes |
+| list-keys-padding | 46 | yes | 0 | yes | yes | yes |
+| micro-flags | 17 | yes | 0 | yes | no | yes |
+| prefix2 | 15 | yes | 0 | yes | yes | yes |
+| renderer-styles | 12 | yes | 0 | yes | yes | yes |
+| send-keys-repeat | 16 | yes | 0 | yes | yes | yes |
+| send-keys-reset | 16 | yes | 0 | yes | yes | yes |
+| smoke/alias-group-forgery | 7 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-bind-key | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-choosers | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-command-prompt | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-confirm-before | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-display-menu | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-display-panes | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-if-shell | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-run-shell | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-set-hook | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-set-option | 3 | yes | 0 | yes | yes | yes |
+| smoke/buffer-clipboard-write | 3 | yes | 0 | yes | yes | yes |
+| smoke/client-exit-actions | 3 | yes | 0 | yes | yes | yes |
+| smoke/client-non-utf8-cwd | 4 | yes | 0 | yes | yes | yes |
+| smoke/client-resized-context | 3 | yes | 0 | yes | yes | yes |
+| smoke/client-utf8-sanitizer | 2 | yes | 0 | yes | yes | yes |
+| smoke/cli-output-bytes | 2 | yes | 0 | yes | yes | yes |
+| smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |
+| smoke/command-prompt-chain | 2 | yes | 0 | yes | yes | yes |
+| smoke/command-prompt-editing | 2 | yes | 0 | yes | yes | yes |
+| smoke/command-prompt-target | 3 | yes | 0 | yes | yes | yes |
+| smoke/config-alias-parse-unit | 2 | yes | 0 | yes | yes | yes |
+| smoke/config-chain-parse-abort | 2 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery | 12 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery-explicit | 13 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery-launcher | 12 | yes | 0 | yes | yes | yes |
+| smoke/config-grammar | 17 | yes | 0 | yes | yes | yes |
+| smoke/config-non-utf8-byte-matrix | 2 | yes | 0 | yes | yes | yes |
+| smoke/config-non-utf8-file-bytes | 8 | yes | 0 | yes | yes | yes |
+| smoke/continuum-init | 2 | yes | 0 | yes | yes | yes |
+| smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
+| smoke/control-eof-drain | 2 | yes | 0 | yes | yes | yes |
+| smoke/control-hard-loss | 2 | yes | 0 | yes | yes | yes |
+| smoke/control-notify | 2 | yes | 0 | yes | yes | yes |
+| smoke/control-tilde-environment | 2 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-command-errors | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-copy-line | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-formats | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-mode-keys | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-mode-keys-tail | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-prompt-bindings | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-search | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-source-pane | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-selection-clipboard-bytes | 3 | yes | 0 | yes | yes | yes |
+| smoke/daemon-invalid-flags | 3 | yes | 0 | yes | yes | yes |
+| smoke/default-client-command | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-action-queue | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-cell-layout | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-mouse | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-paste | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-shortcut-grammar | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-style-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-message-client-aliases | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-panes-template | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-drag | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-kitty | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-kitty-noresize | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-menu | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-menu-policy | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-style-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-to-pane | 3 | yes | 0 | yes | yes | yes |
+| smoke/environment-bytes | 2 | yes | 0 | yes | yes | yes |
+| smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |
+| smoke/focus-follows-mouse | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-client-loop-context | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-environment-loop-context | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-listing | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-modifier-client-loop | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-modifier-environment-loop | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-modifier-interrogate | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-monitor-hooks | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-pane-process | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-pane-progress | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-trace | 29 | yes | 0 | yes | yes | yes |
+| smoke/format-window-bigger | 3 | yes | 0 | yes | yes | yes |
+| smoke/fpp-init | 2 | yes | 0 | yes | yes | yes |
+| smoke/hooks-pane-focus | 3 | yes | 0 | yes | yes | yes |
+| smoke/hooks-pane-focus-clients | 2 | yes | 0 | yes | yes | yes |
+| smoke/jobs-command-environment | 3 | yes | 0 | yes | yes | yes |
+| smoke/jobs-display-popup-environment | 3 | yes | 0 | yes | yes | yes |
+| smoke/jobs-shell-job-cwd | 3 | yes | 0 | yes | yes | yes |
+| smoke/keys-prefix-attached | 3 | yes | 0 | yes | yes | yes |
+| smoke/keys-prefix-remainder | 6 | yes | 0 | yes | yes | yes |
+| smoke/keys-prefix-stock | 40 | yes | 0 | yes | yes | yes |
+| smoke/keys-shift-attached | 3 | yes | 0 | yes | yes | yes |
+| smoke/keys-table-lifecycle | 3 | yes | 0 | yes | yes | yes |
+| smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |
+| smoke/launcher-installed-layout | 7 | yes | 0 | yes | yes | yes |
+| smoke/oh-my-tmux | 15 | yes | 0 | yes | yes | yes |
+| smoke/own-conf | 6 | yes | 0 | yes | yes | yes |
+| smoke/pane-border-indicators | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-border-lines | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-border-status | 34 | yes | 0 | yes | yes | yes |
+| smoke/pane-border-zorder | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-colours-palette | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-engine-knobs | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-engine-knobs-input | 3 | yes | 0 | yes | yes | yes |
+| smoke/pane-runtime-facts | 2 | yes | 0 | yes | yes | yes |
+| smoke/pane-tmux-path | 3 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-continuum | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-fpp | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-oh-my-tmux | 4 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-resurrect-restore | 2 | yes | 0 | yes | no | no |
+| smoke/plugin-runtime-tpm-install | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-vim-tmux-navigator | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-yank | 2 | yes | 0 | yes | yes | yes |
+| smoke/positional-maximums | 3 | yes | 0 | yes | yes | yes |
+| smoke/positional-minimums | 3 | yes | 0 | yes | yes | yes |
+| smoke/refresh-status | 2 | yes | 0 | yes | yes | yes |
+| smoke/remain-on-exit-format | 3 | yes | 0 | yes | yes | yes |
+| smoke/resurrect-init | 3 | yes | 0 | yes | yes | yes |
+| smoke/resurrect-save | 2 | yes | 0 | yes | yes | yes |
+| smoke/send-keys-client-selection | 3 | yes | 0 | yes | yes | yes |
+| smoke/send-keys-control | 3 | yes | 0 | yes | yes | yes |
+| smoke/send-keys-inject | 3 | yes | 0 | yes | yes | yes |
+| smoke/sensible | 6 | yes | 0 | yes | yes | yes |
+| smoke/source-file-byte-name | 2 | yes | 0 | yes | yes | yes |
+| smoke/source-file-control | 12 | yes | 0 | yes | yes | yes |
+| smoke/source-file-depth | 4 | yes | 0 | yes | yes | yes |
+| smoke/source-file-diagnostics | 12 | yes | 0 | yes | yes | yes |
+| smoke/source-file-tilde | 3 | yes | 0 | yes | yes | yes |
+| smoke/source-replay-diagnostics | 60 | yes | 0 | yes | yes | yes |
+| smoke/split-window-wait | 2 | yes | 0 | yes | yes | yes |
+| smoke/status-background-jobs | 2 | yes | 0 | yes | yes | yes |
+| smoke/status-keys-editor-default | 2 | yes | 0 | yes | yes | yes |
+| smoke/terminal-facts | 2 | yes | 0 | yes | yes | yes |
+| smoke/tpm-init | 5 | yes | 0 | yes | yes | yes |
+| smoke/tui-client-input-backpressure | 2 | yes | 0 | yes | yes | yes |
+| smoke/vim-tmux-navigator | 8 | yes | 0 | yes | yes | yes |
+| smoke/yank | 3 | yes | 0 | yes | yes | yes |
+| status-options | 79 | yes | 0 | yes | yes | yes |

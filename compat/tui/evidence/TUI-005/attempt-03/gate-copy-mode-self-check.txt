@@ -1,0 +1,184 @@
+revision: bcf9d12328ed2ef15b56d9d4aa12c229273901c6
+command: PATH=/opt/homebrew/bin:$PATH ZZ_BIN=/home/demfabris/dev/zz-gate-target/debug/zz TMUX_BIN=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins compat/tui-copy-mode.sh --self-check
+started: 2026-09-11T21:36:15-03:00 (ran 148 s, finished 2026-09-11T21:38:43-03:00)
+exit: 0
+
+self-check: one deliberate one-sided difference per asserted channel, plus two the fixture must not report
+      case one-sided-movement
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   6,22 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=2 selection=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 column=6 selection=0 search=[] line=[SEEDEND]
+      view tmux:  row=23 scroll=0
+      view zz:    row=22 scroll=0
+ok    self-check cursor: one extra cursor-up on the zz side
+ok    self-check facts: one extra cursor-up on the zz side
+ok    self-check view: one extra cursor-up on the zz side
+      case one-sided-page-up
+      first differing row 0 of 24
+        tmux: line-17 filler-17
+        zz:   line-39 filler-39
+      first differing glyph row 0 of 24
+        tmux text: line-17 filler-17
+        zz text:   line-39 filler-39
+      cursor tmux: 16,23 flag=1 pane=80x24
+      cursor zz:   2,23 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=16 selection=0 search=[] line=[line-40 filler-40]
+      facts zz:   mode=copy-mode in=1 column=2 selection=0 search=[] line=[$]
+      view tmux:  row=23 scroll=22
+      view zz:    row=23 scroll=0
+ok    self-check rows: a page-up typed on the pin side only
+ok    self-check text: a page-up typed on the pin side only
+      case one-sided-mode-style
+      first differing row 23 of 24
+        tmux: ^[[38;2;255;255;255m^[[48;2;0;0;255m$  ^[[39m^[[49m
+        zz:   ^[[38;2;16;16;16m^[[48;2;205;205;0m$  ^[[39m^[[49m
+ok    self-check rows alone: copy-mode-selection-style changed on the pin side only
+      case one-sided-buffer
+      buffer tmux: 0000000   t   m   u   x   -   c   o   p   i   e   d   -   b   y   t   e|0000020   s|0000021|
+      buffer zz:   0000000   z   z   -   c   o   p   i   e   d   -   b   y   t   e   s|0000017|
+ok    self-check buffer: a different byte string in the paste buffer
+      case one-sided-rectangle-copy
+      buffer tmux: 0000000   l   i   n   e   -  \n   l   i   n   e   -|0000013|
+      buffer zz:   0000000   l   i   n   e   -  \n   l   i   n   e   -  \n   l   i   n   e|0000020   -|0000021|
+ok    self-check buffer: one extra line inside a rectangle copy on the zz side
+ok    self-check equivalence: 5k and five k land on the same cell
+ok    self-check equivalence: prefix [ and the copy-mode command open the same mode
+      case half-page-or-cursor-rows
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-27 filler-27
+      first differing glyph row 0 of 24
+        tmux text: line-39 filler-39
+        zz text:   line-27 filler-27
+      cursor tmux: 6,9 flag=1 pane=80x24
+      cursor zz:   6,21 flag=1 pane=80x24
+      view tmux:  row=9 scroll=0
+      view zz:    row=21 scroll=12
+ok    self-check view alone: a half page on the zz side, twelve cursor-ups on the pin side
+      case page-or-twenty-four-rows
+      first differing row 0 of 24
+        tmux: line-36 filler-36
+        zz:   line-17 filler-17
+      first differing glyph row 0 of 24
+        tmux text: line-36 filler-36
+        zz text:   line-17 filler-17
+      cursor tmux: 6,0 flag=1 pane=80x24
+      cursor zz:   6,21 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=6 selection=0 search=[] line=[line-36 filler-36]
+      facts zz:   mode=copy-mode in=1 column=6 selection=0 search=[] line=[line-38 filler-38]
+      view tmux:  row=0 scroll=3
+      view zz:    row=21 scroll=22
+ok    self-check facts: a page on the zz side, twenty-four cursor-ups on the pin side
+      case rectangle-final-newline
+      buffer tmux: 0000000   l   i   n   e   -   5   8       f   i   l   l   e   r   -   5|0000020   8  \n   l   i   n   e   -   5   9       f   i   l   l   e   r|0000040   -   5   9|0000043|
+      buffer zz:   0000000   l   i   n   e   -   5   8       f   i   l   l   e   r   -   5|0000020   8  \n   l   i   n   e   -   5   9       f   i   l   l   e   r|0000040   -   5   9  \n|0000044|
+ok    self-check buffer: the vi rectangle final newline kept on the zz side only
+      case copy-binding-or-prefix
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   line-17 filler-17
+      first differing glyph row 0 of 24
+        tmux text: line-39 filler-39
+        zz text:   line-17 filler-17
+      facts tmux: mode=copy-mode in=1 column=6 selection=0 search=[] line=[line-60 filler-60]
+      facts zz:   mode=copy-mode in=1 column=6 selection=0 search=[] line=[line-38 filler-38]
+      view tmux:  row=21 scroll=0
+      view zz:    row=21 scroll=22
+ok    self-check facts: C-b as page-up on the zz side, as the prefix on the pin side
+      case one-sided-mode-formats
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   $ cat /tmp/zzcm.pfanKL/lines.txt
+      first differing glyph row 0 of 24
+        tmux text: line-39 filler-39
+        zz text:   $ cat /tmp/zzcm.pfanKL/lines.txt
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   8,12 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=2 selection=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 column=8 selection=0 search=[needle] line=[line-12 needle-12]
+      view tmux:  row=23 scroll=0
+      view zz:    row=12 scroll=39
+DIFF  one-sided-mode-formats-formats
+      formats tmux: selection_active=[0] rectangle_toggle=[0] pane_search_string=[]
+      formats zz:   selection_active=[1] rectangle_toggle=[1] pane_search_string=[needle]
+ok    self-check formats: selection_active, rectangle_toggle and pane_search_string on the zz side only
+      case one-sided-open-prompt
+      first differing row 23 of 24
+        tmux: $
+        zz:   ^[[38;2;16;16;16m^[[48;2;205;205;0m(search down) ^[[39m^[[49m
+      first differing glyph row 23 of 24
+        tmux text: $
+        zz text:   (search down)
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   14,23 flag=1 pane=80x24
+ok    self-check text: a search prompt open on the zz side only
+DIFF  one-sided-search-after-cancel-formats
+      formats tmux: selection_active=[] rectangle_toggle=[] pane_search_string=[]
+      formats zz:   selection_active=[] rectangle_toggle=[] pane_search_string=[needle]
+ok    self-check formats: pane_search_string after cancel, searched on the zz side only
+      case one-sided-search-after-cancel-facts
+      facts tmux: mode= in=0 column= selection= search=[] line=[]
+      facts zz:   mode= in=0 column= selection= search=[needle] line=[]
+ok    self-check facts: pane_search_string after cancel, searched on the zz side only
+DIFF  one-sided-search-on-reentry-formats
+      formats tmux: selection_active=[0] rectangle_toggle=[0] pane_search_string=[]
+      formats zz:   selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+ok    self-check formats: pane_search_string on a fresh entry, searched on the zz side only
+      case one-sided-reentry-search-again
+      first differing row 9 of 24
+        tmux: line-48 ^[[38;2;16;16;16m^[[48;2;205;0;205mneedle^[[39m^[[49m-48
+        zz:   line-48 needle-48
+      cursor tmux: 8,9 flag=1 pane=80x24
+      cursor zz:   2,23 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=8 selection=0 search=[needle] line=[line-48 needle-48]
+      facts zz:   mode=copy-mode in=1 column=2 selection=0 search=[needle] line=[$]
+      view tmux:  row=9 scroll=0
+      view zz:    row=23 scroll=0
+ok    self-check cursor: n on a fresh entry on the pin side only
+ok    self-check facts: n on a fresh entry on the pin side only
+      case reentry-direction
+      first differing row 0 of 24
+        tmux: line-39 filler-39
+        zz:   $ cat /tmp/zzcm.pfanKL/lines.txt
+      first differing glyph row 0 of 24
+        tmux text: line-39 filler-39
+        zz text:   $ cat /tmp/zzcm.pfanKL/lines.txt
+      cursor tmux: 8,9 flag=1 pane=80x24
+      cursor zz:   8,12 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=8 selection=0 search=[needle] line=[line-48 needle-48]
+      facts zz:   mode=copy-mode in=1 column=8 selection=0 search=[needle] line=[line-12 needle-12]
+      view tmux:  row=9 scroll=0
+      view zz:    row=12 scroll=39
+ok    self-check facts: n (up) on the pin side, N (down) on the zz side on a fresh entry
+      case page-clamp
+      cursor tmux: 1,23 flag=1 pane=80x24
+      cursor zz:   0,23 flag=1 pane=80x24
+      facts tmux: mode=copy-mode in=1 column=1 selection=0 search=[] line=[$]
+      facts zz:   mode=copy-mode in=1 column=0 selection=0 search=[] line=[$]
+ok    self-check cursor: the page landing on column 0 on the zz side only
+ok    self-check facts: the page landing on column 0 on the zz side only
+      case send-prefix-one-sided
+      first differing row 0 of 24
+        tmux: line-17 filler-17
+        zz:   line-39 filler-39
+      first differing glyph row 0 of 24
+        tmux text: line-17 filler-17
+        zz text:   line-39 filler-39
+      facts tmux: mode=copy-mode in=1 column=6 selection=0 search=[] line=[line-38 filler-38]
+      facts zz:   mode=copy-mode in=1 column=6 selection=0 search=[] line=[line-60 filler-60]
+      view tmux:  row=21 scroll=22
+      view zz:    row=21 scroll=0
+ok    self-check facts: C-b C-b on the pin side only
+ok    self-check view: C-b C-b on the pin side only
+      case send-keys-reach-the-shell
+      first differing row 23 of 24
+        tmux: $
+        zz:   $ ZkZk
+      first differing glyph row 23 of 24
+        tmux text: $
+        zz text:   $ ZkZk
+      cursor tmux: 2,23 flag=1 pane=80x24
+      cursor zz:   6,23 flag=1 pane=80x24
+ok    self-check text: keys sent into copy mode reach the shell on the zz side only
+self-check complete: every sabotage was caught in its own channel and every equivalence passed

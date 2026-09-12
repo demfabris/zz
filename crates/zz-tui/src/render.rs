@@ -2914,7 +2914,7 @@ const RGB_COLOURS: u32 = 16_777_216;
 /// black-on-black dodge, both need the other ground and the cell's attributes,
 /// which this writer does not carry; neither is driven.
 fn downgrade_palette(index: u8, colours: u32) -> u8 {
-    if index < 16 || colours >= 256 {
+    if colours >= 256 || (index < 16 && colours >= 16) {
         return index;
     }
     let mapped = colour_256to16(index);
@@ -3198,7 +3198,9 @@ mod tests {
         assert_eq!(downgrade_palette(42, 256), 42);
         assert_eq!(downgrade_palette(42, 16), 10);
         assert_eq!(downgrade_palette(42, 8), 2);
-        assert_eq!(downgrade_palette(9, 8), 9);
+        assert_eq!(downgrade_palette(9, 16), 9);
+        assert_eq!(downgrade_palette(9, 8), 1);
+        assert_eq!(downgrade_palette(12, 8), 4);
         assert_eq!(downgrade_palette(1, 8), 1);
         let dark = Color::rgb(10, 20, 30);
         assert_eq!(colour_find_rgb(dark), 233);

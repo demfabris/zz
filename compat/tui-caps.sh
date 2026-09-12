@@ -50,7 +50,11 @@
 #   extended keys, silent          pane_key_mode with extended-keys on,  driven
 #     terminal                     recorded below
 #   the -2 screen effect, silent   the colour sample with and without    driven
-#     terminal                     -2 under TERM=xterm
+#     terminal                     -2 under TERM=xterm, including the two
+#                                  aixterm cells `38;5;12` and `38;5;9` that
+#                                  a terminal under sixteen colours folds
+#                                  into their low half, where tty.c
+#                                  tty_check_fg masks `fg &= 7`
 #   flag diagnostics               missing argument, unknown option      driven
 #   colour class, stock palette    a named, an indexed and an RGB        driven
 #                                  cell and a named background
@@ -814,10 +818,10 @@ case_restore() {
 # The colour case reads the decoder's own grid, where the class survives. The
 # sample line carries one named cell, one indexed cell, one RGB cell and one
 # named background, and every stage asserts all four cells and the whole line.
-COLOUR_SAMPLE="printf 'CLR \\033[31mR\\033[0m \\033[38;5;42mI\\033[0m \\033[38;2;10;20;30mX\\033[0m \\033[41mB\\033[0m END\\n'"
+COLOUR_SAMPLE="printf 'CLR \\033[31mR\\033[0m \\033[38;5;42mI\\033[0m \\033[38;2;10;20;30mX\\033[0m \\033[41mB\\033[0m \\033[38;5;12mA\\033[0m \\033[38;5;9mQ\\033[0m END\\n'"
 # The same line with the named cell spelled as the RGB colour it resolves to on
 # a stock xterm palette: the same colour in a different class.
-COLOUR_SAMPLE_RGB="printf 'CLR \\033[38;2;205;0;0mR\\033[0m \\033[38;5;42mI\\033[0m \\033[38;2;10;20;30mX\\033[0m \\033[41mB\\033[0m END\\n'"
+COLOUR_SAMPLE_RGB="printf 'CLR \\033[38;2;205;0;0mR\\033[0m \\033[38;5;42mI\\033[0m \\033[38;2;10;20;30mX\\033[0m \\033[41mB\\033[0m \\033[38;5;12mA\\033[0m \\033[38;5;9mQ\\033[0m END\\n'"
 PALETTE_NAMED='\033]4;1;rgb:00/ff/00\033\\'
 PALETTE_INDEXED='\033]4;42;rgb:ff/00/ff\033\\'
 PALETTE_RESET='\033]104\033\\'
@@ -852,7 +856,7 @@ colour_stage() {
   zz_line="$(colour_line zz)"
   pin_line="$(colour_line tmux)"
   assert_row "colours/$stage glyphs" "$(strip_escapes "$zz_line")" "$(strip_escapes "$pin_line")"
-  for glyph in R I X B; do
+  for glyph in R I X B A Q; do
     "$row" "colours/$stage cell $glyph" \
       "$(cell_class "$zz_line" "$glyph")" "$(cell_class "$pin_line" "$glyph")"
   done

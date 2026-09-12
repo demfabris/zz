@@ -1520,19 +1520,15 @@ impl Renderer {
             let row = model.status.rows.get(index).map_or("", String::as_str);
             let composed = zz_client::compose_status_row(row, width, &model.status.base_style);
             let mut line = StyledLine::from_segments(composed.segments);
-            if usize::from(model.status.message_line).min(block.saturating_sub(1)) == index {
-                match &overlay {
-                    Some(StatusOverlay::Row(full)) => line = full.clone(),
-                    Some(StatusOverlay::Message { front, fill }) => {
-                        line = StyledLine::from_segments(crate::mode_view::over_underlay(
-                            &front.segments,
-                            *fill,
-                            &line.segments,
-                            width,
-                        ));
-                    }
-                    None => {}
-                }
+            if usize::from(model.status.message_line).min(block.saturating_sub(1)) == index
+                && let Some(StatusOverlay::Message { front, fill }) = &overlay
+            {
+                line = StyledLine::from_segments(crate::mode_view::over_underlay(
+                    &front.segments,
+                    *fill,
+                    &line.segments,
+                    width,
+                ));
             }
             line.resolve_theme(&model.status.theme);
             lines.push(line);
@@ -1554,13 +1550,14 @@ impl Renderer {
         }
         self.status_rows = lines;
         self.status_geometry = Some(geometry);
-        let virtual_row = match overlay {
-            Some(StatusOverlay::Row(line)) => Some(line),
-            Some(StatusOverlay::Message { front, fill }) => Some(StyledLine::from_segments(
-                crate::mode_view::over_underlay(&front.segments, fill, &[], width),
-            )),
-            None => None,
-        };
+        let virtual_row = overlay.map(|StatusOverlay::Message { front, fill }| {
+            StyledLine::from_segments(crate::mode_view::over_underlay(
+                &front.segments,
+                fill,
+                &[],
+                width,
+            ))
+        });
         if block == 0
             && let Some(mut line) = virtual_row
             && let Some(y) = model.message_row_y()
@@ -2208,7 +2205,6 @@ fn sidebar_status_lines(model: &Model) -> Vec<StyledLine> {
 }
 
 enum StatusOverlay {
-    Row(StyledLine),
     Message {
         front: StyledLine,
         fill: Option<TmuxColour>,
@@ -2233,24 +2229,22 @@ fn client_message_hides_the_cursor(model: &Model) -> bool {
 }
 
 fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
-    let style = overlay_style(&model.appearance);
-    if let Some(confirm) = &model.confirm {
-        if model.sidebar_visible() {
-            return None;
-        }
-        let mut line = StyledLine::default();
-        line.push_segment(&padded_segment(&confirm.prompt, width, ' '), style);
-        return Some(StatusOverlay::Row(line));
-    }
     let message_style = crate::mode_view::message_style(model, false);
     let message = |text: &str| StatusOverlay::Message {
         front: StyledLine::from_segments(crate::mode_view::message_front(
-            text,
+            text.trim_end_matches(' '),
             width,
             &message_style,
         )),
         fill: message_style.fill,
     };
+    if let Some(confirm) = &model.confirm {
+        if model.sidebar_visible() {
+            return None;
+        }
+        let view = crate::overlay::prompt_view(&confirm.prompt, "", 0, width);
+        return Some(message(&view.text));
+    }
     if model.command_output_focus().is_some()
         && let Some(query) = &model.command_output_search
     {
@@ -2452,14 +2446,6 @@ fn floating_border_line(left: &str, horizontal: &str, right: &str, width: u16) -
             "{left}{}{right}",
             horizontal.repeat(usize::from(width.saturating_sub(2)))
         ),
-    }
-}
-
-fn overlay_style(appearance: &TerminalAppearance) -> TmuxStyle {
-    TmuxStyle {
-        fg: Some(TmuxColour::Rgb(appearance.background.packed())),
-        bg: Some(TmuxColour::Rgb(appearance.foreground.packed())),
-        ..TmuxStyle::default()
     }
 }
 
@@ -3683,6 +3669,21 @@ mod tests {
             "bottom virtual row: {output:?}"
         );
         assert!(output.contains("virtual"));
+    }
+
+    #[test]
+    fn trailing_prompt_spaces_are_left_to_the_fill() {
+        let mut model = block_model(40, 10);
+        model.confirm = Some(zz_protocol::ConfirmState {
+            prompt: "Go on?  ".to_owned(),
+            confirm_key: b'y',
+            default_yes: false,
+        });
+        let Some(StatusOverlay::Message { front, .. }) = status_overlay(&model, 40) else {
+            panic!("confirm is a message-area overlay");
+        };
+        let text: String = front.segments.iter().map(|segment| segment.text.as_str()).collect();
+        assert_eq!(text, "Go on?");
     }
 
     #[test]

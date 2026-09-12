@@ -1,11 +1,11 @@
-TUI-009 attempt-03 environment, recorded 2026-09-12T07:08:54-03:00
+TUI-009 attempt-03 environment, recorded 2026-09-12T07:38:00-03:00
 box: alienware
 os: Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
 NAME="CachyOS Linux"
 PRETTY_NAME="CachyOS"
-zz revision: 3f6dc46033cc76e3459c214ba1cc5b405b524a1c (Subscribe the raw TUI to its terminal's theme and report what it answers)
+zz revision: 0ff4a26158a667c5396472a109d1bd082c468662 (Bound the device control string the way the parser bounds a control sequence)
 worktree state at build: 0 tracked changes outside this evidence directory
-zz binary: target/debug/zz sha256 ca05ebf6659421f85d8b4bb1178be85e3894a0740057dfe5aa2d64a2b036152d (debug builds are not bit-reproducible here; the revision plus a clean worktree is the attestation)
+zz binary: target/debug/zz sha256 5d23774a6a9f64fb9534b761d704741369bb7afaac91f320a304850dca99058e (debug builds are not bit-reproducible here; the revision plus a clean worktree is the attestation)
 pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
 pin commit: d77c9dc6 (next-3.8), tmux next-3.8
 base: origin/campaign/tui-cycle5-gated 5d9bf198; start: 9c050ebf (origin/campaign/tui-caps-close-gated)

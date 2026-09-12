@@ -1,13 +1,9 @@
 === compat/tui-indicators.sh ===
-ok    view-inactive-opened (divider row 11 compared by glyph)
 ok    view-inactive-typed (divider row 11 compared by glyph)
 all 23 asserted comparisons identical, 0 recorded not asserted
-exit=0
-
 === compat/tui-pane-geometry.sh ===
-ok    120x24 columns: both 120
 ok    120x24 rows: both 23
 all 6 asserted measurements identical
-exit=0
+
 compat/tui-overlays.sh and compat/tui-choosers.sh are cycle 5's overlays and
 choosers landings; neither is on this branch's base, so neither ran.

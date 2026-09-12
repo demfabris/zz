@@ -1,4 +1,4 @@
-$ python3 compat/tui/tracker.py check   (at 3f6dc460+ledger, 2026-09-12T07:11:12-03:00)
+$ python3 compat/tui/tracker.py check   (at 0ff4a261+ledger, 2026-09-12T07:38:00-03:00)
 compat/tui/campaign.json is valid and knowledge/tmux/tui-parity.md is current
 exit=0
 

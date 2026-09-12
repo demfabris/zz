@@ -4,7 +4,9 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.45s
+    Checking zz-terminal v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-terminal)
+    Checking zz-protocol v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-protocol)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.96s
 exit=0
 === cargo clippy -p zz-mux --all-targets --all-features -- -D warnings ===
 warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-choosers/third_party/rust/proc-macro-error2)` was not used in the crate graph
@@ -12,7 +14,8 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
+    Checking zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-mux)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.96s
 exit=0
 === cargo clippy -p zz-tui --all-targets --all-features -- -D warnings ===
 warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-choosers/third_party/rust/proc-macro-error2)` was not used in the crate graph
@@ -20,9 +23,12 @@ help: Check that the patched package version and available features are compatib
       with the dependency requirements. If the patch has a different version from
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
+    Checking zz-terminal v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-terminal)
+    Checking zz-protocol v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-protocol)
+    Checking zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-daemon)
     Checking zz-client v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-client)
     Checking zz-tui v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-tui)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.24s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.22s
 exit=0
 === cargo clippy -p zz-client --all-targets --all-features -- -D warnings ===
 warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-choosers/third_party/rust/proc-macro-error2)` was not used in the crate graph
@@ -35,7 +41,7 @@ help: Check that the patched package version and available features are compatib
     Checking zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-mux)
     Checking zz-client v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-client)
     Checking zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-daemon)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.33s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 20.60s
 exit=0
 === cargo clippy -p zz-daemon --all-targets --all-features -- -D warnings ===
 warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-choosers/third_party/rust/proc-macro-error2)` was not used in the crate graph
@@ -44,7 +50,7 @@ help: Check that the patched package version and available features are compatib
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
     Checking zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-daemon)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.79s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 14.95s
 exit=0
 === cargo clippy -p zz --all-targets --all-features -- -D warnings ===
 warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-choosers/third_party/rust/proc-macro-error2)` was not used in the crate graph
@@ -53,8 +59,6 @@ help: Check that the patched package version and available features are compatib
       what is locked in the Cargo.lock file, run `cargo update` to use the new
       version. This may also occur with an optional dependency that is not enabled.
     Checking zz-terminal v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-terminal)
-   Compiling cef-dll-sys v151.2.0+151.3.14
-    Checking cef v151.2.0+151.3.14
     Checking zz-protocol v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-protocol)
     Checking zz-client v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-client)
     Checking zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-mux)
@@ -65,5 +69,5 @@ help: Check that the patched package version and available features are compatib
     Checking zz-tui v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-tui)
     Checking zz-config v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-config)
     Checking zz v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 18.51s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 31.55s
 exit=0

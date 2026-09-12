@@ -20,6 +20,8 @@ the pin, the toolchain and the hash of the `zz` binary under test, written befor
 | `attached-client-regression.txt` | `compat/attached-client.sh target/debug/zz <pin>` | exit 0, PASS |
 | `copy-mode-regression.txt` | `compat/tui-copy-mode.sh` before the message-row rule was narrowed | exit 1, four search-prompt cases differ |
 | `copy-mode-regression-2.txt` | `compat/tui-copy-mode.sh` after it | exit 0, 147 cases agree |
+| `run-05-rebased-tip.txt` | `compat/tui-choosers.sh` after the rebase onto the caps landing | exit 0, same |
+| `self-check-03-rebased-tip.txt` | `compat/tui-choosers.sh --self-check` after that rebase | exit 0, same |
 | `pin-filter-clear.txt` | pin-only probe: `prefix w`, `f`, a window filter, `Enter`, `c` | the rebuild rule |
 | `pin-filter-clear-sessions.txt` | pin-only probe: `prefix s`, the same, plus a session created while the tree is open | the same rule under `-s` |
 | `zz-protocol-unit-tests.txt` | `cargo test -p zz-protocol` | exit 0 |
@@ -32,6 +34,14 @@ the pin, the toolchain and the hash of the `zz` binary under test, written befor
 
 Every cargo command ran through the box's two-slot lock under `MemoryMax=5G`, `--jobs 4` and
 `--test-threads=3`.
+
+The branch was rebased onto `origin/main` once more after the cycle-6 caps gate pushed the wire to
+102 and the colour-class frames with it. Everything above except `run-01`..`run-04`,
+`self-check-01`, `self-check-02` and `copy-mode-regression.txt` was re-run at that rebased tip and
+is the run recorded here; `run-05` and `self-check-03` are the obligation's fixture at it. The two
+v102 entries were merged by hand into one, keeping both lanes' text. `screen-diff-regression.txt`
+reads 137 asserted and 16 recorded there against 125 and 28 before it, which is the caps landing's
+colour-class work closing twelve of its own records.
 
 ## the two pin probes
 

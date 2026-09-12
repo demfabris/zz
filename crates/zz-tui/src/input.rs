@@ -11,8 +11,8 @@ use zz_protocol::{
     PopupPointerButton,
 };
 use zz_terminal::{
-    KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent, SearchQuery, TerminalMouseButton,
-    TerminalMouseInput, TerminalMousePhase, TerminalViewAction,
+    KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent, SearchQuery, TerminalColorScheme,
+    TerminalMouseButton, TerminalMouseInput, TerminalMousePhase, TerminalViewAction,
 };
 
 use crate::{
@@ -155,6 +155,17 @@ pub(crate) fn handle(
             model.size.with_cell_pixels(width_px, height_px),
         )),
         TerminalEvent::DeviceAttributes | TerminalEvent::KittyGraphicsResponse { .. } => {
+            Ok(InputOutcome::None)
+        }
+        TerminalEvent::DarkTheme | TerminalEvent::LightTheme => {
+            let scheme = if matches!(event, TerminalEvent::DarkTheme) {
+                TerminalColorScheme::Dark
+            } else {
+                TerminalColorScheme::Light
+            };
+            client
+                .set_color_scheme(scheme)
+                .map_err(|error| error.to_string())?;
             Ok(InputOutcome::None)
         }
         TerminalEvent::SecondaryDeviceAttributes(kind) => {

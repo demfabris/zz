@@ -1,0 +1,52 @@
+# The wire moves to 102, this gate's own commit 6bae21ff
+# captured: cycle 6 caps gate, alienware
+
+WHY
+101 shipped in zz 0.8.0, tagged on main at fd3c64e4, before this lane landed.
+This lane appends, after that tag:
+  - one u32 colour class word per style on the Terminal lane's viewport
+    payload and per appended style on its patch payload, after the kitty
+    placements (crates/zz-protocol/src/terminal_codec.rs);
+  - the `client-features-v1:<spec>` value token on ClientHello capabilities
+    (crates/zz-protocol/src/message.rs).
+Both are pure trailing appends with their consumer halves in the same commit,
+which is why the lane and its reviewer both read the rule as satisfied at 101.
+But the envelope version is a gate, not a negotiation: a released 0.8.0 client
+passes the version check and then misdecodes the style dictionary of every
+frame. So the version moves.
+
+WHAT ELSE LANDED ON THE WIRE SINCE THE TAG
+  git log fd3c64e4..origin/main -- crates/zz-protocol   ->   empty
+The cycle-6 copy lane changed nothing under crates/zz-protocol, so the v102
+entry names this lane's two appends and nothing else.
+
+THE CHANGE
+  crates/zz-protocol/src/message.rs        PROTOCOL_VERSION 101 -> 102, and the
+                                           assertion that pins it
+  crates/zz-protocol/tests/hunt_claims.rs  the version test, renamed, and the
+                                           byte-exact hello frame (0x65 -> 0x66
+                                           in the envelope u16 and in the
+                                           postcard varint)
+  knowledge/protocol/wire-protocol.md      title, frontmatter, the overview
+                                           line, the envelope table row, the
+                                           versioning bullet; the v101 history
+                                           entry closes with the tag it shipped
+                                           in and a v102 entry opens with the
+                                           two appends
+  knowledge/protocol/terminal-lanes.md     the class array in both payload
+                                           tables and the PackedStyle row now
+                                           read v102
+  knowledge/protocol/index.md              listing title
+  knowledge/index.md                       directory table
+AGENTS.md names no wire version, so nothing there moved.
+
+PROOF
+  cargo test -p zz-protocol --jobs 6 -- --test-threads=4   exit 0
+      222 + 7 + 16 passed
+      the first attempt caught the byte-exact hello frame:
+        left:  [16,0,0,0,0,0,102,0,0,102,0,0,0,0,1,1,0,0,0,7]
+        right: [16,0,0,0,0,0,101,0,0,101,0,0,0,0,1,1,0,0,0,7]
+      which is the pin working; the expectation was updated, not the code.
+  cargo test -p zz-daemon --lib --jobs 6 -- --test-threads=4   exit 0, 889 passed
+  cargo test -p zz-daemon --test '*' --jobs 6 -- --test-threads=4   exit 0
+  cargo clippy --workspace --all-targets --all-features --jobs 6 -- -D warnings  exit 0

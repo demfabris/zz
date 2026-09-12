@@ -274,6 +274,93 @@ which is worse to read than the one they are in.
 - `18`: `compat/tui-indicators.sh` and `compat/tui-pane-geometry.sh`, exit 0
   each.
 - `19`: the tip after the ledger and evidence commit, whose code and fixtures
-  are identical to `3f6dc460`: `compat/tui-caps.sh`, its `--self-check`,
+  are identical to `0ff4a261` (the cycle-6 caps review caught this line naming
+  `3f6dc460`, which is a commit earlier: `0ff4a261` changed
+  `crates/zz-tui/src/terminal_event.rs` after it, 1 file and 24 insertions, and
+  file `19` itself already named `0ff4a261` correctly): `compat/tui-caps.sh`,
+  its `--self-check`,
   `smoke/pane-colours-palette` and both ledger validators, all green there
   too.
+
+# The cycle-6 caps gate
+
+Rebased as local `gate-caps` onto origin/main `33ecbd86` (the cycle-6 copy
+gate) in /home/demfabris/dev/zz-gate-tui6. The reviewer's verdict, its
+checks_run, what this gate did with each finding and how the suspicions were
+weighed are in `review.md`. Everything this gate ran is in `gate-01` to
+`gate-16`, each carrying its revision, its command, its exit code and the wall
+clock it was taken at, so no two captures are byte-identical.
+
+## What moved on top of the lane
+
+Three commits from the earlier, reboot-killed run of this gate, each checked
+against the review and re-proved here:
+
+- `dfeff8cf` the sub-16-colour guard in `downgrade_palette`, with
+  `\e[38;5;12mA` and `\e[38;5;9mQ` permanently in the colour sample.
+- `0394293c` the two wire appends named in `wire-protocol.md`, and the
+  `style_classes` array in both payload tables in `terminal-lanes.md`.
+- `82d83713` the three comment blocks in `terminal_event.rs` promoted to `///`
+  documentation, and a const assertion guarding the attribute bits.
+
+Two of this run's own:
+
+- `6bae21ff` **PROTOCOL_VERSION 102**. The review judged the appends against
+  101 and found them clean as pure appends, which they are; but 101 shipped in
+  zz 0.8.0 at `fd3c64e4` before this lane landed, so a released client would
+  pass the envelope check and misdecode every frame's style dictionary. The
+  v101 entry closes with the tag it shipped in and a v102 entry opens with this
+  lane's two appends; `git log fd3c64e4..origin/main -- crates/zz-protocol` is
+  empty, so v102 is this lane's alone. Whole story in `gate-16`.
+- `5c28f025` the delayed live job in `smoke/jobs-command-environment` gets the
+  same four seconds its two siblings in that file already get. Whole story in
+  `gate-15`.
+
+## The numbers at the merged tip
+
+The fixtures read differently here than they did on the lane's own base,
+because origin/main now carries the modes and copy lanes:
+
+| fixture | lane tip | gate tip |
+|---|---|---|
+| `tui-caps.sh` | 243 asserted / 23 recorded | **279 / 23** |
+| `tui-caps.sh --self-check` | 21 sabotages, 3 controls | unchanged |
+| `tui-screen-diff.sh` | 123 asserted / 30 recorded | **137 / 16** |
+| `tui-copy-mode.sh` | 115 cases, 13 recorded | **147 cases, 0 recorded** |
+| `tui-stock-keys.sh` | 50 agree, 18 recorded | 50 agree, **12** recorded |
+| `attached-client.sh` | exit 1 at the copy-mode step | **PASS** |
+
+The caps rows go 243 to 279 because the two aixterm cells now ride in every
+colour stage. The screen-diff rows go 123/30 to 137/16 because the modes lane's
+border checkpoints are on main and twelve colour checkpoints flipped from
+recorded to asserted. copy-mode and attached-client are the copy and modes
+lanes landing. The stock-keys recorded count is this box's known wobble.
+
+## The 23 recorded rows, still recorded
+
+Unchanged in count and in identity from what the lane and the reviewer both
+report, and reproduced at this tip in `gate-01`:
+
+- 8 mouse rows, `mouse_all_flag` and `mouse_button_flag` on legacy, extended,
+  extended-always and silent/extended. zz arms `\e[?1003h` for the whole
+  attach; the pin arms `\e[?1002h` and raises MODE_MOUSE_ALL only while a menu
+  is up. Per-menu arming in `crates/zz-tui/src/app.rs`, the overlays lane's.
+- 5 `client_colours` and 8 `client_termfeatures`, the roster half of
+  `options.client-terminal-negotiation`. The daemon derives a client's roster
+  from TERM, COLORTERM and flags alone because the hello precedes any reply.
+  Needs a wire append with its consumer, which is now a v102 conversation.
+- `widths/non-utf8/line`. `render.rs`'s glyph path, excluded from this batch's
+  zones for that file.
+- `silent/extended pane_key_mode`. The arming has to be deferred to the reply
+  path, whose only interleave-safe channel is the renderer's control queue in
+  `app.rs`.
+
+## What this gate ran
+
+- `gate-01` .. `gate-12`: every TUI fixture on main at this tip, with its
+  `--self-check` where it has one, plus `attached-client.sh`. All exit 0.
+  `tui-overlays.sh` and `tui-choosers.sh` are later lanes in the cycle-6 order
+  and are not on main at this tip.
+- `gate-13`: the five touched packages and workspace clippy, all exit 0.
+- `gate-14`: the 182-row corpus selection, every row with a result.
+- `gate-15`, `gate-16`: the two findings of this gate's own.

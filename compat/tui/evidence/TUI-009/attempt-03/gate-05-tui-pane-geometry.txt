@@ -1,0 +1,16 @@
+# compat/tui-pane-geometry.sh at the gate tip
+# revision: 5c28f025a1dee2b36b78f0cafc068bf710e2dd15 (code identical to 6bae21ff; 5c28f025 touches only a corpus scenario)
+# zz sha256: b093fe204f13a5c43073000ea4e5c9a64b943d5917092f3a47af56ec177a47ce
+# pin: d77c9dc6aa021e4bc61f0da128c591af695e6466 sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+# command: compat/tui-pane-geometry.sh <build> <pin>
+# exit: 0
+# captured: cycle 6 caps gate, alienware, 2026-09-12T13:41:05-03:00
+
+pane geometry differential (pin tmux)
+ok    80x24 columns: both 80
+ok    80x24 rows: both 23
+ok    100x24 columns: both 100
+ok    100x24 rows: both 23
+ok    120x24 columns: both 120
+ok    120x24 rows: both 23
+all 6 asserted measurements identical

@@ -1,0 +1,162 @@
+# compat/tui-copy-mode.sh at the gate tip
+# revision: 5c28f025a1dee2b36b78f0cafc068bf710e2dd15 (code identical to 6bae21ff; 5c28f025 touches only a corpus scenario)
+# zz sha256: b093fe204f13a5c43073000ea4e5c9a64b943d5917092f3a47af56ec177a47ce
+# pin: d77c9dc6aa021e4bc61f0da128c591af695e6466 sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+# command: compat/tui-copy-mode.sh <build> <pin>
+# exit: 0
+# captured: cycle 6 caps gate, alienware, 2026-09-12T13:41:05-03:00
+
+copy mode and search through the client stdin at 80x24 (pin tmux)
+ok    emacs-enter
+ok    emacs-cursor-up
+ok    emacs-cursor-down
+ok    emacs-count-five-up
+ok    emacs-end-of-line
+ok    emacs-start-of-line
+ok    emacs-scroll-start
+ok    emacs-halfpage-up
+ok    emacs-halfpage-down
+ok    emacs-page-start
+ok    emacs-page-up
+ok    emacs-page-down
+ok    emacs-selection-start
+ok    emacs-begin-selection
+ok    emacs-selection-extends
+ok    emacs-selection-extends-formats selection_active=[1] rectangle_toggle=[0] pane_search_string=[]
+ok    emacs-rectangle-on
+ok    emacs-rectangle-on-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    emacs-rectangle-off
+ok    emacs-copy-and-cancel
+ok    emacs-rectangle-inside-line
+ok    emacs-rectangle-inside-line-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    emacs-rectangle-inside-line-copy
+ok    emacs-rectangle-past-end-of-line
+ok    emacs-rectangle-past-end-of-line-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    emacs-rectangle-past-end-of-line-copy
+ok    emacs-reenter
+ok    emacs-cancel
+ok    emacs-terminal-input-returns
+ok    emacs-prefix-takes-precedence
+ok    emacs-prefix-returns-to-the-copy-table
+ok    emacs-send-prefix-start
+ok    emacs-send-prefix-runs-the-copy-binding
+ok    emacs-send-keys-runs-the-copy-table
+ok    emacs-send-keys-cancel
+ok    vi-enter
+ok    vi-cursor-up
+ok    vi-cursor-down
+ok    vi-count-five-up
+ok    vi-end-of-line
+ok    vi-start-of-line
+ok    vi-scroll-start
+ok    vi-halfpage-up
+ok    vi-halfpage-down
+ok    vi-page-start
+ok    vi-page-up
+ok    vi-page-down
+ok    vi-selection-start
+ok    vi-begin-selection
+ok    vi-selection-extends
+ok    vi-selection-extends-formats selection_active=[1] rectangle_toggle=[0] pane_search_string=[]
+ok    vi-rectangle-on
+ok    vi-rectangle-on-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    vi-rectangle-off
+ok    vi-copy-and-cancel
+ok    vi-rectangle-inside-line
+ok    vi-rectangle-inside-line-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    vi-rectangle-inside-line-copy
+ok    vi-rectangle-past-end-of-line
+ok    vi-rectangle-past-end-of-line-formats selection_active=[1] rectangle_toggle=[1] pane_search_string=[]
+ok    vi-rectangle-past-end-of-line-copy
+ok    vi-reenter
+ok    vi-cancel
+ok    vi-terminal-input-returns
+ok    vi-prefix-takes-precedence
+ok    vi-prefix-returns-to-the-copy-table
+ok    vi-send-prefix-start
+ok    vi-send-prefix-runs-the-copy-binding
+ok    vi-send-keys-runs-the-copy-table
+ok    vi-send-keys-cancel
+ok    emacs-clamp-enter
+ok    emacs-clamp-count-five-up
+ok    emacs-clamp-halfpage-up-twice
+ok    emacs-clamp-halfpage-down-twice
+ok    emacs-clamp-halfpage-down-onto-the-prompt
+ok    emacs-clamp-page-count-five-up
+ok    emacs-clamp-page-down-onto-the-prompt
+ok    vi-clamp-enter
+ok    vi-clamp-count-five-up
+ok    vi-clamp-halfpage-up-twice
+ok    vi-clamp-halfpage-down-twice
+ok    vi-clamp-halfpage-down-onto-the-prompt
+ok    vi-clamp-page-count-five-up
+ok    vi-clamp-page-down-onto-the-prompt
+ok    emacs-ordinary-pane-enter
+ok    emacs-ordinary-pane-search-prompt
+ok    emacs-ordinary-pane-search-typed
+ok    emacs-ordinary-pane-search-backspace
+ok    emacs-ordinary-pane-search-submit
+ok    emacs-ordinary-pane-search-submit-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+ok    emacs-ordinary-pane-search-again
+ok    emacs-ordinary-pane-search-reverse
+ok    emacs-ordinary-pane-search-backward
+ok    emacs-ordinary-pane-search-backward-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[filler-30]
+ok    emacs-ordinary-pane-search-cancel
+ok    emacs-ordinary-pane-search-cancel-formats selection_active=[] rectangle_toggle=[] pane_search_string=[filler-30]
+ok    emacs-ordinary-pane-search-reentry
+ok    emacs-ordinary-pane-search-reentry-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[filler-30]
+ok    emacs-ordinary-pane-search-reentry-again
+ok    emacs-forward-search-reentry
+ok    emacs-forward-search-reentry-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+ok    emacs-forward-search-reentry-searches-up
+ok    emacs-forward-search-cancel
+ok    emacs-forward-search-cancel-formats selection_active=[] rectangle_toggle=[] pane_search_string=[needle]
+ok    emacs-fresh-entry-before-the-prompt-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+ok    emacs-fresh-entry-search-prompt
+ok    emacs-fresh-entry-search-prompt-escape
+ok    emacs-fresh-entry-search-prompt-cancel
+ok    emacs-fresh-entry-search-prompt-cancel-formats selection_active=[] rectangle_toggle=[] pane_search_string=[needle]
+ok    vi-ordinary-pane-enter
+ok    vi-ordinary-pane-search-prompt
+ok    vi-ordinary-pane-search-typed
+ok    vi-ordinary-pane-search-backspace
+ok    vi-ordinary-pane-search-submit
+ok    vi-ordinary-pane-search-submit-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+ok    vi-ordinary-pane-search-again
+ok    vi-ordinary-pane-search-reverse
+ok    vi-ordinary-pane-search-backward
+ok    vi-ordinary-pane-search-backward-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[filler-30]
+ok    vi-ordinary-pane-search-cancel
+ok    vi-ordinary-pane-search-cancel-formats selection_active=[] rectangle_toggle=[] pane_search_string=[filler-30]
+ok    vi-ordinary-pane-search-reentry
+ok    vi-ordinary-pane-search-reentry-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[filler-30]
+ok    vi-ordinary-pane-search-reentry-again
+ok    vi-forward-search-reentry
+ok    vi-forward-search-reentry-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+ok    vi-forward-search-reentry-searches-up
+ok    vi-forward-search-cancel
+ok    vi-forward-search-cancel-formats selection_active=[] rectangle_toggle=[] pane_search_string=[needle]
+ok    vi-fresh-entry-before-the-prompt-formats selection_active=[0] rectangle_toggle=[0] pane_search_string=[needle]
+ok    vi-fresh-entry-search-prompt
+ok    vi-fresh-entry-search-prompt-escape
+ok    vi-fresh-entry-search-prompt-cancel
+ok    vi-fresh-entry-search-prompt-cancel-formats selection_active=[] rectangle_toggle=[] pane_search_string=[needle]
+note  native-search-command zz exit 0: <no output>
+note  native-search-command tmux exit 1: unknown command: copy-mode-search-prompt
+note  native-search-command zz last row: terminal search is unsupported here
+note  native-search-command tmux last row: L0:win*
+ok    live-mode-keys-emacs-entry
+ok    live-mode-keys-emacs-ignores-j
+ok    live-mode-keys-emacs-cancel
+ok    live-mode-keys-vi-entry
+ok    live-mode-keys-vi-moves-on-j
+ok    live-mode-keys-vi-cancel
+ok    live-binding-before-the-bind
+ok    live-binding-unbound-key-does-nothing
+ok    live-binding-runs-without-a-re-entry
+ok    live-binding-cancel
+ok    presentation-live-status-row
+ok    presentation-copy-mode-position
+ok    presentation-cancel
+all 147 cases agree on every channel they assert, 0 recorded a difference elsewhere
+147 of those cases assert at least one channel; 0 assert none and are recorded in full

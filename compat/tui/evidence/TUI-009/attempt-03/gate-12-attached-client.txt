@@ -1,0 +1,28 @@
+# compat/attached-client.sh at the gate tip
+# revision: 5c28f025a1dee2b36b78f0cafc068bf710e2dd15 (code identical to 6bae21ff; 5c28f025 touches only a corpus scenario)
+# zz sha256: b093fe204f13a5c43073000ea4e5c9a64b943d5917092f3a47af56ec177a47ce
+# pin: d77c9dc6aa021e4bc61f0da128c591af695e6466 sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+# command: TMUX_BIN=<pin> ZZ_BIN=<build> compat/attached-client.sh
+# exit: 0
+# captured: cycle 6 caps gate, alienware, 2026-09-12T13:41:05-03:00
+
+command-output tmux: stock-search-open
+command-output tmux: stock-search-Escape
+command-output tmux: stock-search-open
+command-output tmux: stock-search-Enter
+command-output zz: stock-search-open
+command-output zz: stock-search-Escape
+command-output zz: stock-search-open
+command-output zz: stock-search-Enter
+command-output navigation: zz
+command-output zz: native copy-mode-search-prompt editor; stock -P lifecycle measured separately
+command-output zz: idle-escape
+command-output zz: selection-escape
+command-output zz: search-escape
+command-output zz: rebound-q
+command-output navigation: tmux
+command-output tmux: idle-escape
+command-output tmux: selection-escape
+command-output tmux: search-escape
+command-output tmux: rebound-q
+attached-client compatibility: PASS

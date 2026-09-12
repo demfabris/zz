@@ -1,0 +1,68 @@
+# smoke/jobs-command-environment: the corpus red this gate found, and what it was
+# revision under test: 6bae21ff (gate tip before the fix), fixed in 5c28f025
+# captured: cycle 6 caps gate, alienware
+
+WHAT WAS RED
+compat/run.sh --strict-geometry smoke/jobs-command-environment
+    at 6bae21ff: exit 1, five runs out of five
+    3 step(s), 0 TOPO, 0 GEO, 0 FMT, 1 OUT, 2 WARN divergence(s)
+    the zz side prints `jobs-command-environment-zz: positive-live` and never
+    sets JOBS_COMMAND_ENVIRONMENT, so step 3's show-environment diverges too.
+
+IS IT MINE
+origin/main 33ecbd86, built in the same target dir at the same path
+(sha256 94ec4d607e1e6cbdb81e87ca37750460bb6faee2bb8f24f2da32a86264574b91,
+the same binary hash the cycle-6 copy gate recorded):
+    exit 0, twice.
+So yes: green at origin/main on this box, red at the tip. This gate's to settle.
+
+WHICH ASSERTION
+The fixture's positive-live branch checks ten things at once and writes only
+`broken`. Instrumented it in a throwaway edit to dump all ten. Nine agree; one
+does not:
+
+    tmux side: TERM=[jobs-delay-live-terminal]
+    zz side:   TERM=[jobs-delay-live-scheduled]
+
+and everything else on the zz side already carries its launch-time value
+(JOB_DELAY_GLOBAL=launch-global, JOB_DELAY_SESSION=launch-session,
+TMUX_PANE=launch-pane, JOB_DELAY_HIDDEN and JOB_DELAY_UNSET unset). So the job
+fired between the sixth and the seventh of the seven CLI calls the fixture
+makes after scheduling it with `-d 1.0`.
+
+NOT A BEHAVIOUR CHANGE
+The job path is untouched by this branch: crates/zz-mux is not in the diff at
+all, `default_terminal_for_spawn` is unchanged, and
+`configure_shell_job_environment` in crates/zz-daemon/src/lib.rs is unchanged.
+A hand probe on the tip's build (schedule with -d 1.0, change default-terminal
+straight away, read the job's TERM) reads the launch-time value on both sides,
+so the option is still read at launch.
+
+WHAT IT IS
+The fixture's margin. Timing the fixture's own seven calls, three runs each,
+same box, same target dir, same scratch home:
+
+    origin/main 94ec4d60:  0.963 s  0.884 s  0.880 s  0.972 s
+    gate tip    b093fe20:  1.009 s  0.993 s  0.983 s  1.009 s
+
+The threshold is the 1.0 s delay. main sits under it, the tip sits on it. The
+gap is about 11 ms a call, which is load time from the code this lane adds --
+the per-call breakdown is flat on both sides (a 260 ms first call, then 110-130
+ms each) with no call standing out.
+
+THE FIX, 5c28f025
+The live job's delay goes from `-d 1.0` to `-d 4.0`, which is what the
+destroyed job (line 343) and the missing job (line 377) in the same file
+already use. The assertion does not move: the job still has to read the option
+the launch set rather than the one standing when it was scheduled, and the
+instrumented dump at 4.0 reads jobs-delay-live-terminal on both sides.
+
+    compat/run.sh --strict-geometry smoke/jobs-command-environment at 5c28f025
+        run 1: exit 0, 3 step(s), 0/0/0/0/0
+        run 2: exit 0, 3 step(s), 0/0/0/0/0
+        run 3: exit 0, 3 step(s), 0/0/0/0/0
+
+FOR WHOEVER READS THIS NEXT
+Any other corpus row that schedules a job with a delay shorter than its own
+setup is one small slowdown away from the same red. This is the only one in
+this lane's 182-row selection.

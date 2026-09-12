@@ -1,0 +1,58 @@
+# cargo suites and workspace clippy at the gate tip
+# revision: 5c28f025a1dee2b36b78f0cafc068bf710e2dd15
+# every command through: S=$((RANDOM % 2)); systemd-run --user --scope -q -p MemoryMax=7G -p MemorySwapMax=2G flock -w 200 /tmp/zz-cargo-slot-$S.lock env HOME=/tmp/zzgate6c-home XDG_CONFIG_HOME=... CARGO_TARGET_DIR=/home/demfabris/dev/zz-gate-target <cargo>
+# captured: cycle 6 caps gate, alienware, 2026-09-12T13:41:17-03:00
+
+== cargo test -p zz-protocol --jobs 6 -- --test-threads=4  (exit 0)
+test result: ok. 222 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== cargo test -p zz-terminal --jobs 6 -- --test-threads=4  (exit 0)
+test result: ok. 260 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.40s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== cargo test -p zz-tui --jobs 6 -- --test-threads=4  (exit 0)
+test result: ok. 194 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== cargo test -p zz-daemon --lib --jobs 6 -- --test-threads=4  (exit 0)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 888 filtered out; finished in 0.72s
+test result: ok. 889 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 99.29s
+
+== cargo test -p zz-daemon --test '*' --jobs 6 -- --test-threads=4  (exit 0)
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.28s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.89s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.76s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.58s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.30s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.56s
+
+== cargo test -p zz --jobs 6 -- --test-threads=4  (exit 0)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 637 filtered out; finished in 0.00s
+test result: ok. 638 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.71s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s
+test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 84.08s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== cargo clippy --workspace --all-targets --all-features --jobs 6 -- -D warnings  (exit 0)
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-gate-tui6/third_party/rust/proc-macro-error2)` was not used in the crate graph
+(the one line above is the pre-existing unused-patch manifest note, not a lint)
+    Checking zz-client-ffi v0.8.0 (/home/demfabris/dev/zz-gate-tui6/crates/zz-client-ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 41.58s
+
+== cargo build -p zz --jobs 6  (exit 0)
+b093fe204f13a5c43073000ea4e5c9a64b943d5917092f3a47af56ec177a47ce  /home/demfabris/dev/zz-gate-target/debug/zz
+
+zz-daemon client_focus_closes_display_panes_and_preserves_chooser_modes, the named 1-in-10 flake, did not fire: 889 of 889 in the lib run.

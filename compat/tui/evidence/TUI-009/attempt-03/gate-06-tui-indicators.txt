@@ -1,0 +1,33 @@
+# compat/tui-indicators.sh at the gate tip
+# revision: 5c28f025a1dee2b36b78f0cafc068bf710e2dd15 (code identical to 6bae21ff; 5c28f025 touches only a corpus scenario)
+# zz sha256: b093fe204f13a5c43073000ea4e5c9a64b943d5917092f3a47af56ec177a47ce
+# pin: d77c9dc6aa021e4bc61f0da128c591af695e6466 sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+# command: compat/tui-indicators.sh <build> <pin>
+# exit: 0
+# captured: cycle 6 caps gate, alienware, 2026-09-12T13:41:05-03:00
+
+indicator, message and prompt differential at 80x24 (pin tmux)
+ok    baseline
+ok    scrollback
+ok    copy-mode-entered
+ok    copy-mode-restored
+ok    view-surface-shown
+ok    view-surface-restored
+ok    view-long-shown
+ok    view-long-down
+ok    view-long-restored
+ok    prefix-armed
+ok    prefix-released
+ok    message-shown
+ok    message-restored
+ok    prompt-opened
+ok    prompt-typed
+ok    prompt-cancelled
+ok    selection-emacs
+ok    selection-vi
+ok    selection-styled
+ok    view-hidden-opened
+ok    view-hidden-typed
+ok    view-inactive-opened (divider row 11 asserted whole)
+ok    view-inactive-typed (divider row 11 asserted whole)
+all 23 asserted comparisons identical, 0 recorded not asserted

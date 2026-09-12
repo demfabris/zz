@@ -154,6 +154,7 @@ pub(crate) fn over_underlay(
     width: u16,
 ) -> Vec<StyledSegment> {
     let width = usize::from(width);
+    let filled_row = fill.is_some();
     let blank = grounded(TmuxStyle::default());
     let mut cells = vec![(" ".to_owned(), blank); width];
     match fill {
@@ -171,9 +172,11 @@ pub(crate) fn over_underlay(
     }
     let mut drawn = vec![(String::new(), TmuxStyle::default()); width];
     cells_of(front, width, &mut drawn);
+    let written =
+        |(text, _): &(String, TmuxStyle)| !text.is_empty() && (!filled_row || text != " ");
     let front_width = drawn
         .iter()
-        .rposition(|(text, _)| !text.is_empty())
+        .rposition(written)
         .map_or(0, |last| last + 1);
     for (column, cell) in drawn.into_iter().enumerate().take(front_width) {
         cells[column] = cell;

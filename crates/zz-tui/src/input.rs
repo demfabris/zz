@@ -1,6 +1,4 @@
-use zz_client::{
-    ChromeAction, MenuKeyResult, MenuPointerKind, SIDEBAR_TABLE, resolve_menu_key,
-};
+use zz_client::{ChromeAction, MenuKeyResult, MenuPointerKind, SIDEBAR_TABLE, resolve_menu_key};
 use zz_daemon::{
     Endpoint, InteractiveClient, configured_fleet_hosts, validate_fleet_host, write_fleet_host,
 };
@@ -3126,7 +3124,10 @@ mod tests {
         assert_eq!(
             chrome.resolve(
                 SIDEBAR_TABLE,
-                &key_input(KeyEvent::new(TerminalKeyCode::Char('q'), KeyModifiers::NONE))
+                &key_input(KeyEvent::new(
+                    TerminalKeyCode::Char('q'),
+                    KeyModifiers::NONE
+                ))
             ),
             Some(ChromeAction::ToggleSidebar)
         );

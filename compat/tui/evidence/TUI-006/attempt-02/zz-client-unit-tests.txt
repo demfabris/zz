@@ -1,0 +1,126 @@
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-choosers/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+   Compiling zz-terminal v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-terminal)
+   Compiling zz-protocol v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-protocol)
+   Compiling zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-mux)
+   Compiling zz-client v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-client)
+   Compiling zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-choosers/crates/zz-daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.57s
+     Running unittests src/lib.rs (target/debug/deps/zz_client-6d893ebe7063b4f0)
+
+running 87 tests
+test agent_completion::tests::available_commands_use_standard_slash_semantics ... ok
+test agent_completion::tests::command_hints_follow_standard_slash_semantics ... ok
+test agent_completion::tests::completion_matching_supports_bare_command_names ... ok
+test agent_completion::tests::completion_replacement_keeps_unicode_prefixes_and_the_remaining_text ... ok
+test agent_completion::tests::placeholder_only_command_descriptions_are_hidden ... ok
+test agent_completion::tests::completion_results_keep_every_available_command ... ok
+test chrome::tests::a_rebound_chord_reports_the_action_it_now_carries ... ok
+test chrome::tests::bindings_flatten_for_help_surfaces ... ok
+test chrome::tests::chrome_keys_canonicalize_their_modifier_spellings ... ok
+test chrome::tests::defaults_resolve_the_stock_chrome_chords ... ok
+test chrome::tests::a_shifted_chord_falls_back_to_the_unshifted_spelling ... ok
+test chrome::tests::overrides_rebind_and_unbind ... ok
+test chrome::tests::desktop_browser_chords_resolve_per_platform ... ok
+test chrome::tests::terminal_chrome_never_claims_an_unshifted_control_chord ... ok
+test chrome::tests::every_action_round_trips_through_its_name ... ok
+test chrome::tests::the_sidebar_tells_a_shifted_letter_from_its_bare_press ... ok
+test completion::tests::completion_acceptance_preserves_text_after_the_replaced_token ... ok
+test completion::tests::command_alias_and_history_ranking_are_deterministic ... ok
+test completion::tests::empty_input_deduplicates_history_in_recency_order ... ok
+test completion::tests::index_option_completions_follow_table_declared_scope ... ok
+test completion::tests::options_and_live_targets_follow_command_context ... ok
+test completion::tests::quoted_unicode_tokens_have_valid_replacement_ranges ... ok
+test completion::tests::daemon_native_commands_and_their_arguments_are_completed_from_the_catalog ... ok
+test completion::tests::used_flags_are_not_suggested_twice ... ok
+test core::tests::agent_attention_edges_are_lossless_core_events ... ok
+test core::tests::agent_state_drops_with_its_pane ... ok
+test core::tests::agent_state_is_stored_and_notified ... ok
+test core::tests::agent_stream_payloads_pass_through_without_retention ... ok
+test completion::tests::native_command_completion_respects_pane_kind_availability ... ok
+test core::tests::attachment_clears_session_state_and_notifies_changes ... ok
+test core::tests::attachment_options_track_the_daemon_and_survive_detach_for_reconnect ... ok
+test core::tests::chooser_deltas_preserve_static_filter_fallback_state ... ok
+test completion::tests::static_values_and_description_discovery_are_contextual ... ok
+test core::tests::command_output_actor_updates_replace_and_ignore_stale_traffic ... ok
+test core::tests::command_output_newer_close_and_zero_resync_prevent_resurrection ... ok
+test core::tests::command_output_watermark_resets_when_adopting_a_handshake ... ok
+test core::tests::command_output_watermark_resets_with_the_connection ... ok
+test core::tests::detached_reason_is_retained_without_changing_the_shell_event_shape ... ok
+test core::tests::menu_and_confirm_descriptors_reduce_and_clear_with_attachment_state ... ok
+test core::tests::popup_descriptor_owns_its_synthetic_viewport_lifetime ... ok
+test core::tests::prefix_cancel_ack_passes_through_with_its_request_id ... ok
+test core::tests::timed_messages_carry_their_identity_and_the_clear_arrives_on_its_own ... ok
+test core::tests::reconnect_and_session_reset_clear_agent_state ... ok
+test layout::tests::invalid_ratios_are_resolved_deterministically ... ok
+test layout::tests::nested_splits_compose_normalized_geometry ... ok
+test layout::tests::nested_splits_on_the_same_axis_stay_inside_the_parent ... ok
+test layout::tests::single_pane_fills_the_layout ... ok
+test menu::tests::enter_chooses_enabled_rows_and_closes_unusable_selections ... ok
+test menu::tests::every_cancel_key_closes_and_releases_are_consumed ... ok
+test menu::tests::navigation_skips_unusable_rows_wraps_and_handles_edges ... ok
+test menu::tests::paging_uses_raw_rows_and_clamps_at_edges ... ok
+test menu::tests::shift_tab_is_backtab_and_repeat_matches_press ... ok
+test menu::tests::shortcuts_win_before_cancel_and_disabled_shortcuts_do_not ... ok
+test menu::tests::unselected_and_all_disabled_navigation_keeps_raw_boundary_rows ... ok
+test status::tests::a_range_left_open_at_the_end_of_the_row_is_discarded ... ok
+test status::tests::absolute_centre_lands_in_the_middle_of_the_full_width ... ok
+test status::tests::alignment_sections_land_left_centre_and_right ... ok
+test status::tests::an_underflowing_centre_offset_clips_at_the_right_edge_like_the_pin ... ok
+test status::tests::an_unparseable_base_style_means_theme_default ... ok
+test status::tests::an_unterminated_marker_draws_nothing_like_format_draw ... ok
+test status::tests::base_style_backs_blank_and_default_cells ... ok
+test status::tests::escaped_hashes_render_literally_and_never_open_a_style ... ok
+test status::tests::default_row_places_left_list_and_right ... ok
+test status::tests::blank_rows_compose_to_base_styled_spaces ... ok
+test status::tests::fill_cells_take_only_the_fill_background_never_base_fg_or_attributes ... ok
+test status::tests::fill_paints_uncovered_columns ... ok
+test status::tests::pane_and_session_ranges_carry_wire_sized_ids ... ok
+test status::tests::push_and_pop_default_restore_the_marker_scoped_style ... ok
+test status::tests::wide_glyphs_cut_at_a_copy_boundary_become_spaces ... ok
+test status::tests::zero_width_output_is_empty ... ok
+test status_bar::tests::attached_session_owns_the_window_list_and_recipient_focus ... ok
+test status::tests::truncated_list_keeps_the_focus_visible_and_paints_markers ... ok
+test status_bar::tests::badges_do_not_control_the_agents_item ... ok
+test status_bar::tests::badges_use_window_and_pane_flags_and_agents_count_only_live_panes ... ok
+test status_bar::tests::settings_defaults_enable_every_item ... ok
+test status_bar::tests::settings_hide_presentational_items_without_hiding_windows ... ok
+test status_bar::tests::window_projection_keeps_every_attached_window ... ok
+test status_bar::tests::zero_agents_and_missing_attachments_are_empty ... ok
+test url_input::tests::defaults_public_hosts_to_https_and_preserves_explicit_schemes ... ok
+test url_input::tests::defaults_local_development_addresses_to_http ... ok
+test url_input::tests::keeps_explicit_schemes_out_of_search ... ok
+test url_input::tests::normalizes_addresses ... ok
+test url_input::tests::redacts_diagnostic_urls ... ok
+test url_input::tests::navigates_to_anything_that_looks_like_an_address ... ok
+test url_input::tests::round_trips_provider_names ... ok
+test url_input::tests::searches_everything_that_does_not ... ok
+test url_input::tests::searches_on_the_configured_provider ... ok
+
+test result: ok. 87 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-483aa242bebcd865)
+
+running 2 tests
+test a_row_with_no_annotation_still_answers_its_action_key ... ok
+test a_trimmed_row_keeps_its_marker_and_its_key ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/simulator.rs (target/debug/deps/simulator-a400e290b66afae2)
+
+running 2 tests
+test seeded_convergence_seed_c0ffee ... ok
+test seeded_convergence_seed_5eed ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.41s
+
+   Doc-tests zz_client
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

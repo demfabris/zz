@@ -1,0 +1,135 @@
+chooser and command-output differential at 80x24 (pin tmux)
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+ok    filter-cleared
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    buffer-filter-prompt
+ok    buffer-filter-typed
+ok    buffer-filter-applied
+ok    buffer-filter-cleared
+ok    buffer-filter-closed
+ok    find-window-prompt
+ok    find-window-typed
+ok    find-window-tree
+ok    find-window-closed
+ok    output-shown
+      case output-search-prompt
+      2 of 24 rows differ, first differing row 22
+        22 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(search down) ^[[39m^[[49m
+        22 zz:   23
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;13;13;13m^[[48;2;184;134;11m(search down)^[[39m
+      cursor tmux: 14,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   14,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  output-search-prompt recorded, not asserted: the pin draws the stock search prompt over the pane with command-prompt -P (window_pane_set_prompt, screen-redraw.c:1524) and zz draws the same prompt on the status row; measured 2026-09-12, pin row 22 `(search down) ` with the status row kept, zz row 23
+      case output-search-typed
+      2 of 24 rows differ, first differing row 22
+        22 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(search down) 77^[[39m^[[49m
+        22 zz:   81
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;13;13;13m^[[48;2;184;134;11m(search down) 77^[[39m
+      cursor tmux: 16,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   16,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  output-search-typed recorded, not asserted: the pin draws the stock search prompt over the pane with command-prompt -P (window_pane_set_prompt, screen-redraw.c:1524) and zz draws the same prompt on the status row; measured 2026-09-12, pin row 22 `(search down) ` with the status row kept, zz row 23
+ok    output-searched
+      case output-selected
+      1 of 24 rows differ, first differing row 18
+        18 tmux: 77^[[38;2;13;13;13m^[[48;2;184;134;11m
+        18 zz:   ^[[38;2;13;13;13m^[[48;2;147;112;219m77^[[48;2;184;134;11m
+      cursor tmux: 1,19 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   1,19 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  output-selected recorded, not asserted: the pin clears the search marks on any non-search copy-mode command (window-copy.c:3767) so the selection alone is painted; zz keeps the current-match cell under the selection in the retained command output; measured 2026-09-12, row 18 `77` plain on the pin and in the current-match style on zz
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+ok    zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+ok    zoom-manual-released
+note  the client tree on the zz screen: the zz screen changed and then held still for 2 seconds without it
+      case client-tree-open
+      24 of 24 rows differ, first differing row 0
+         0 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) /dev/pts/38: 14:57: session cho^[[39m
+         0 zz:   $ printf 'MARK-%s\n' baseline           ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$ printf 'ZOOM-SCENE\n'
+         1 tmux: 
+         1 zz:   MARK-baseline                           ^[[38;2;154;205;50mM-bM-^TM-^B^[[39mZOOM-SCENE
+         2 tmux: 
+         2 zz:   $ printf 'MARK-%s\n' sessions           ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$
+         3 tmux: 
+         3 zz:   MARK-sessions                           ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         4 tmux: 
+         4 zz:   $ printf 'MARK-%s\n' windows            ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         5 tmux: 
+         5 zz:   MARK-windows                            ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         6 tmux: 
+         6 zz:   $ printf 'MARK-%s\n' filter             ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         7 tmux: 
+         7 zz:   MARK-filter                             ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         8 tmux: 
+         8 zz:   $ printf 'MARK-%s\n' scroll             ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+         9 tmux: 
+         9 zz:   MARK-scroll                             ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        10 tmux: 
+        10 zz:   $ printf 'MARK-%s\n' buffers            ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        11 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/pts/38 (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        11 zz:   MARK-buffers                            ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
+        12 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' output                                                  ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        12 zz:   $ printf 'MARK-%s\n' bufferfilter       ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        13 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-output                                                                  ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        13 zz:   MARK-bufferfilter                       ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        14 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' zoom                                                    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        14 zz:   $ printf 'MARK-%s\n' find               ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        15 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-zoom                                                                    ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        15 zz:   MARK-find                               ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        16 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' clients                                                 ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        16 zz:   $ printf 'MARK-%s\n' output             ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        17 tmux: M-bM-^TM-^B^[[39m^[[49m MARK-clients                                                                 ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        17 zz:   MARK-output                             ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        18 tmux: M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                                                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        18 zz:   $ printf 'MARK-%s\n' zoom               ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        19 tmux: M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        19 zz:   MARK-zoom                               ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        20 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        20 zz:   $ printf 'MARK-%s\n' clients            ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        21 tmux: M-bM-^TM-^B^[[39m^[[49m ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two                                                               ^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        21 zz:   MARK-clients                            ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        22 tmux: M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        22 zz:   $                                       ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*Z^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+      cursor tmux: 0,0 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   2,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  client-tree-open recorded, not asserted: commands.native-client-tools, accepted and outside this lane: zz does not implement choose-client, and the pin lists each client by its tty
+ok    tall-window-tree-open
+ok    tall-window-tree-help
+ok    tall-window-tree-help-closed
+ok    tall-buffer-tree-open
+ok    tall-buffer-tree-help
+ok    tall-buffer-tree-help-closed
+ok    tall-closed
+all 53 asserted comparisons identical, 4 recorded not asserted (0 for a sibling lane)

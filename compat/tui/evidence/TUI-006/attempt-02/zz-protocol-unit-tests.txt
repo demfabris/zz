@@ -1,0 +1,275 @@
+warning: patch `proc-macro-error2 v2.0.1 (/home/demfabris/dev/zz-tui-choosers/third_party/rust/proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.32s
+     Running unittests src/lib.rs (target/debug/deps/zz_protocol-1a6e0bd8f90ea89f)
+
+running 222 tests
+test agent_stream::tests::the_seq_and_the_variant_tag_sit_side_by_side_in_the_object ... ok
+test agent_stream::tests::image_bytes_ride_as_base64_rather_than_a_number_array ... ok
+test catalog::tests::attaching_commands_accept_client_flags ... ok
+test catalog::tests::bind_key_args_parse_accepts_every_positional_as_command_or_string ... ok
+test catalog::tests::attach_session_working_directory_is_supported_and_advertised ... ok
+test agent_stream::tests::every_payload_shape_round_trips_through_json ... ok
+test catalog::tests::catalog_covers_every_executable_command_arm ... ok
+test catalog::tests::command_prompt_args_parse_accepts_only_the_template_as_a_block ... ok
+test catalog::tests::chooser_args_parse_accepts_a_command_or_string_template ... ok
+test catalog::tests::confirm_before_args_parse_accepts_only_the_command_as_a_block ... ok
+test catalog::tests::default_args_parse_requires_string_positionals_and_option_values ... ok
+test catalog::tests::display_menu_args_parse_tracks_names_keys_actions_and_separators ... ok
+test catalog::tests::display_panes_args_parse_accepts_a_command_or_string_template ... ok
+test catalog::tests::catalog_names_aliases_and_options_are_unique ... ok
+test catalog::tests::command_resolution_follows_the_pin_contract ... ok
+test catalog::tests::if_shell_args_parse_distinguishes_conditions_branches_and_option_values ... ok
+test catalog::tests::external_command_name_lists_are_unique_and_disjoint ... ok
+test catalog::tests::run_shell_args_parse_switches_every_positional_with_leading_command_mode ... ok
+test catalog::tests::send_keys_outer_options_match_the_tmux_pin ... ok
+test catalog::tests::set_hook_args_parse_switches_positionals_for_format_monitors ... ok
+test catalog::tests::set_option_args_parse_accepts_only_the_value_as_a_command_block ... ok
+test catalog::tests::split_window_spawn_style_and_title_options_are_supported_values ... ok
+test catalog::tests::every_usage_string_matches_its_accepted_options ... ok
+test catalog::tests::tmux_option_diagnostics_use_the_canonical_command ... ok
+test catalog::tests::native_names_do_not_change_the_affected_tmux_prefixes ... ok
+test catalog::tests::tmux_option_scanning_stops_at_the_first_positional_or_boundary ... ok
+test catalog::tests::tmux_optional_values_follow_the_pinned_lookahead ... ok
+test catalog::tests::tmux_required_values_accept_attached_and_flag_looking_arguments ... ok
+test catalog::tests::unimplemented_table_matches_the_flat_list ... ok
+test catalog::tests::unknown_commands_remain_available_for_structured_errors ... ok
+test framing::tests::in_place_envelope_builder_rejects_oversized_capacity_before_allocating ... ok
+test framing::tests::in_place_envelope_builder_reuses_its_payload_allocation ... ok
+test framing::tests::stream_reader_borrows_and_reuses_its_following_buffer ... ok
+test id::tests::stable_ids_round_trip ... ok
+test key::tests::a_key_is_spelled_the_same_on_press_and_release ... ok
+test key::tests::a_none_valued_second_prefix_reads_as_unset ... ok
+test catalog::tests::unimplemented_tmux_syntax_matches_the_pinned_oracle ... ok
+test key::tests::a_platform_chord_never_names_a_bare_key ... ok
+test key::tests::a_space_bearing_key_folds_inside_a_modifier_chord ... ok
+test catalog::tests::tmux_option_catalog_matches_the_pinned_oracle ... ok
+test key::tests::already_resolved_shifted_symbols_are_left_alone ... ok
+test key::tests::alt_keeps_the_shift_and_control_folds_it_away ... ok
+test key::tests::a_second_prefix_arms_and_rearms_without_touching_bindings ... ok
+test key::tests::a_space_bearing_prefix_can_still_send_a_literal_prefix ... ok
+test key::tests::changing_the_prefix_carries_the_send_prefix_binding ... ok
+test key::tests::changing_the_prefix_leaves_a_customized_binding_alone ... ok
+test key::tests::changing_the_prefix_never_overwrites_the_new_keys_binding ... ok
+test key::tests::common_tmux_key_names_stay_in_stack_storage ... ok
+test key::tests::command_decisions_report_the_binding_repeat_bit ... ok
+test key::tests::copy_jump_bindings_capture_exactly_one_following_key ... ok
+test key::tests::configured_v_motion_y_sequences_remain_composable ... ok
+test key::tests::copy_mode_emacs_m_f_moves_to_the_next_word_end ... ok
+test key::tests::copy_mode_emacs_meta_digits_capture_the_same_numeric_prefix ... ok
+test key::tests::copy_mode_vi_numeric_prefix_carries_count_into_one_action ... ok
+test key::tests::copy_mode_prompts_keep_the_armed_prefix_for_their_answer ... ok
+test key::tests::copy_mode_vi_numeric_prefix_counts_only_the_first_action_in_a_chain ... ok
+test key::tests::every_pressable_key_name_validates_as_one ... ok
+test key::tests::copy_mode_vi_numeric_prefix_waits_for_an_action_and_defers_to_its_repeat ... ok
+test key::tests::copy_table_exit_keys_match_tmux_semantics ... ok
+test key::tests::explicit_copy_table_is_one_shot_but_pane_copy_mode_persists ... ok
+test key::tests::externally_armed_copy_prefix_starts_a_fresh_native_digit_capture ... ok
+test key::tests::initial_repeat_time_applies_to_first_and_different_repeat_bindings ... ok
+test key::tests::key_names_accept_only_spellings_a_press_can_produce ... ok
+test key::tests::metadata_updates_preserve_commands_and_unspecified_fields ... ok
+test key::tests::modifier_aliases_canonicalize_in_live_order ... ok
+test key::tests::inverse_order_modifier_binding_resolves_live_input ... ok
+test key::tests::invalid_copy_action_resets_prefix_before_the_next_digit ... ok
+test key::tests::native_copy_mode_emacs_keyboard_table_matches_the_audited_key_set ... ok
+test key::tests::native_copy_mode_search_bindings_match_tmux_tables ... ok
+test key::tests::native_copy_mode_vi_bindings_cover_pinned_tmux_motions_and_aliases ... ok
+test key::tests::native_copy_mode_vi_keyboard_table_matches_the_audited_key_set ... ok
+test key::tests::neutral_external_repeat_counts_clear_live_native_capture ... ok
+test key::tests::persistent_copy_tables_consume_unbound_keys_without_exiting ... ok
+test key::tests::prefix_interrupts_switched_tables_and_explicit_root_forwards_unbound_keys ... ok
+test key::tests::prefix_takes_precedence_over_a_copy_table_binding_and_returns_to_the_mode ... ok
+test key::tests::prefix_table_executes_then_resets ... ok
+test key::tests::prefix_timeout_expires_lazily_and_exempts_exact_active_repeat_bindings ... ok
+test key::tests::repeat_any_uses_the_resolved_binding_identity ... ok
+test key::tests::repeatable_bindings_refresh_expire_disable_and_retry_root ... ok
+test key::tests::resolve_input_prefers_the_typed_character ... ok
+test key::tests::root_and_custom_bindings_work ... ok
+test key::tests::shifted_letters_fold_to_their_uppercase_name ... ok
+test key::tests::shifted_special_keys_use_the_pinned_modifier_order_and_backtab_name ... ok
+test key::tests::shifted_alt_emacs_navigation_names_reach_the_stock_bindings ... ok
+test key::tests::published_tables_canonicalize_command_names_and_cover_every_table ... ok
+test key::tests::stock_copy_mode_emacs_navigation_bindings_match_the_pin ... ok
+test key::tests::stock_copy_mode_emacs_non_navigation_bindings_match_the_pin ... ok
+test key::tests::stock_copy_tables_keep_runtime_repetition_out_of_binding_metadata ... ok
+test key::tests::switched_repeat_tables_keep_only_repeating_bindings_until_the_deadline ... ok
+test key::tests::synthetic_any_explicit_custom_table_falls_back_and_retires ... ok
+test key::tests::synthetic_any_honors_prefix_repeat_nonrepeat_and_expiry ... ok
+test key::tests::synthetic_focus_dispatches_only_any_in_effective_default_tables ... ok
+test key::tests::switched_tables_reset_before_dispatch_and_retry_unbound_keys_in_root ... ok
+test key::tests::transient_mode_synthetic_any_precedes_default_without_leaving_mode ... ok
+test key::tests::synthetic_any_preserves_and_consumes_both_copy_prefix_states ... ok
+test key::tests::the_prefix_key_sends_a_literal_prefix_by_default ... ok
+test key::tests::transient_synthetic_jump_any_does_not_claim_the_next_real_key ... ok
+test key::tests::transient_synthetic_jump_any_preserves_pending_jump_target ... ok
+test message::tests::agent_runtime_variants_hold_the_wire_tails_they_were_appended_to ... ok
+test message::tests::chooser_row_keys_are_bounded_at_sixty_four_bytes ... ok
+test key::tests::unbound_copy_keys_preserve_armed_and_capturing_prefixes ... ok
+test message::tests::client_exit_actions_append_after_the_detach_reason ... ok
+test message::tests::client_focus_input_holds_wire_tag_eighteen ... ok
+test message::tests::client_terminal_size_input_holds_wire_tag_seventeen ... ok
+test message::tests::command_invocation_command_blocks_round_trip_and_append ... ok
+test message::tests::command_invocation_new_has_no_typed_blocks ... ok
+test message::tests::command_invocation_split_omits_typed_command_names ... ok
+test message::tests::command_invocation_split_preserves_typed_positions_across_chains ... ok
+test message::tests::command_parse_error_holds_wire_tag_twelve ... ok
+test message::tests::command_prompt_appends_type_mode_and_no_freeze ... ok
+test message::tests::command_request_carries_the_v74_prepared_bit ... ok
+test message::tests::command_success_appends_stderr_after_exit_code ... ok
+test message::tests::control_command_guard_holds_wire_tag_forty_seven_and_round_trips_flags ... ok
+test message::tests::control_command_output_holds_wire_tag_fifty ... ok
+test message::tests::control_event_variants_hold_the_appended_wire_tails ... ok
+test message::tests::control_source_file_holds_wire_tag_forty_eight_and_round_trips_events ... ok
+test message::tests::counted_copy_mode_action_holds_wire_tag_twenty_eight_without_recursive_actions ... ok
+test message::tests::detached_reason_holds_its_appended_wire_field ... ok
+test message::tests::enter_copy_mode_with_holds_wire_tag_twenty_seven ... ok
+test message::tests::packed_terminal_mouse_input_preserves_the_control_wire_layout ... ok
+test message::tests::pane_indicator_labels_are_bounded_at_one_kibibyte ... ok
+test message::tests::popup_variants_hold_the_appended_wire_tails ... ok
+test message::tests::post_admission_callback_holds_wire_tag_thirteen ... ok
+test message::tests::recent_mux_options_are_appended_with_their_defaults ... ok
+test message::tests::repeated_browser_keys_hold_wire_tag_seven ... ok
+test message::tests::server_error_tmux_message_strips_only_invalid_command_prefixes ... ok
+test message::tests::startup_config_causes_hold_wire_tag_forty_nine_and_round_trip ... ok
+test message::tests::status_line_appends_after_the_v70_halves ... ok
+test message::tests::status_position_default_bottom_is_the_tag_one_variant ... ok
+test message::tests::terminal_modifiers_use_one_validated_control_byte ... ok
+test message::tests::the_auto_approve_tiers_keep_the_flag_spellings_they_shipped_with ... ok
+test message::tests::status_rows_accept_zero_through_five_and_reject_a_sixth_before_allocation ... ok
+test message::tests::timed_message_identity_and_clear_hold_the_appended_wire_tail ... ok
+test message::tests::v71_mux_option_keys_hold_appended_tags_and_defaults ... ok
+test snapshot::tests::editor_kind_round_trips_on_the_control_encoding ... ok
+test snapshot::tests::focused_window_resolves_stamped_valid_and_default_fallbacks ... ok
+test snapshot::tests::editor_descriptor_rejects_relative_oversized_and_control_paths ... ok
+test snapshot::tests::layout_deserialization_accepts_the_depth_boundary ... ok
+test snapshot::tests::layout_deserialization_rejects_excessive_depth ... ok
+test snapshot::tests::normalizes_browser_profile_names_and_legacy_default_alias ... ok
+test snapshot::tests::rejects_invalid_browser_profile_names ... ok
+test snapshot::tests::window_status_label_deserialization_is_bounded ... ok
+test style::tests::default_stack_matches_format_draw ... ok
+test style::tests::parsed_styles_carry_typed_values_and_explicit_resets ... ok
+test style::tests::parses_the_pinned_style_tokens_and_attributes ... ok
+test message::tests::status_line_validation_enforces_rows_style_and_message_line_rules ... ok
+test style::tests::rejects_invalid_pinned_values ... ok
+test style::tests::tmux_colour_wire_rejects_rgb_above_24_bits ... ok
+test style::tests::styled_segments_are_cumulative_and_honor_resets_and_escaping ... ok
+test terminal_codec::tests::agent_commands_round_trip_and_reject_oversized_payloads ... ok
+test terminal_codec::tests::agent_identifiers_bound_options_modes_methods_and_sessions ... ok
+test snapshot::tests::layout_deserialization_rejects_excessive_node_count ... ok
+test terminal_codec::tests::agent_runtime_commands_round_trip_on_the_control_lane ... ok
+test terminal_codec::tests::agent_state_bounds_blobs_permissions_and_results ... ok
+test terminal_codec::tests::agent_stream_events_round_trip_on_the_control_lane ... ok
+test terminal_codec::tests::agent_prompts_bound_their_text_images_and_formats ... ok
+test terminal_codec::tests::appearance_change_round_trips_and_rejects_invalid_values ... ok
+test terminal_codec::tests::borrowed_viewport_encode_matches_owned_event_encode ... ok
+test terminal_codec::tests::browser_screenshot_requests_bound_their_path ... ok
+test terminal_codec::tests::caller_owned_decoder_reuses_transport_capacity_across_lanes ... ok
+test terminal_codec::tests::caller_owned_encoder_reuses_frame_capacity_across_lanes_and_errors ... ok
+test terminal_codec::tests::cancel_prefix_round_trips_as_control_input ... ok
+test terminal_codec::tests::choose_buffer_updates_use_the_reliable_control_lane ... ok
+test terminal_codec::tests::choose_tree_updates_use_the_reliable_control_lane ... ok
+test terminal_codec::tests::client_hello_bounds_working_directories_on_encode_and_decode ... ok
+test terminal_codec::tests::client_hello_debug_omits_environment_contents ... ok
+test terminal_codec::tests::agent_update_batches_bound_their_bytes_and_sequence_space ... ok
+test terminal_codec::tests::client_hello_rejects_capabilities_before_materializing_them ... ok
+test terminal_codec::tests::client_messages_use_the_reliable_control_lane ... ok
+test terminal_codec::tests::cold_terminal_statuses_preserve_the_wire_format ... ok
+test terminal_codec::tests::command_output_close_uses_the_reliable_control_lane ... ok
+test terminal_codec::tests::command_output_viewports_use_the_terminal_lane ... ok
+test terminal_codec::tests::command_output_zero_id_is_reserved_for_empty_resync ... ok
+test terminal_codec::tests::command_prompt_actions_round_trip_on_the_control_lane ... ok
+test terminal_codec::tests::command_prompt_updates_use_the_reliable_control_lane ... ok
+test terminal_codec::tests::compact_terminal_metadata_rejects_oversized_wire_values ... ok
+test terminal_codec::tests::config_overrides_round_trip_in_order_with_repeated_keys ... ok
+test terminal_codec::tests::control_frame_flavor_stops_before_exceeding_its_limit ... ok
+test terminal_codec::tests::copy_mode_vi_actions_round_trip_on_the_control_lane ... ok
+test terminal_codec::tests::display_panes_updates_use_the_reliable_control_lane ... ok
+test terminal_codec::tests::focus_sidebar_uses_the_reliable_control_lane ... ok
+test terminal_codec::tests::gui_responses_round_trip_and_reject_oversized_text ... ok
+test terminal_codec::tests::key_input_and_prefix_state_round_trip ... ok
+test terminal_codec::tests::kitty_image_controls_round_trip_and_enforce_byte_budgets ... ok
+test terminal_codec::tests::malformed_server_hello_appearance_is_rejected_on_encode_and_decode ... ok
+test terminal_codec::tests::mux_option_payloads_reject_missing_keys_and_oversized_values ... ok
+test terminal_codec::tests::mux_options_round_trip_in_current_hello_and_change_event ... ok
+test terminal_codec::tests::native_split_resize_round_trips_as_fixed_point_control_input ... ok
+test terminal_codec::tests::niche_encoded_terminal_metadata_preserves_the_wire_format ... ok
+test terminal_codec::tests::osc8_open_uri_uses_the_reliable_control_lane ... ok
+test terminal_codec::tests::paste_upload_bounds_also_reject_hand_built_frames ... ok
+test terminal_codec::tests::paste_upload_extensions_stay_inside_one_path_segment ... ok
+test terminal_codec::tests::paste_uploads_reject_oversized_totals_and_chunks ... ok
+test terminal_codec::tests::paste_uploads_round_trip_on_the_control_lane ... ok
+test terminal_codec::tests::pasted_image_fetch_controls_round_trip_and_enforce_byte_budgets ... ok
+test terminal_codec::tests::rejects_reserved_envelope_flags ... ok
+test terminal_codec::tests::rejects_truncated_frames ... ok
+test terminal_codec::tests::repeated_browser_keys_round_trip_without_expansion ... ok
+test terminal_codec::tests::request_full_round_trips_on_the_control_lane ... ok
+test terminal_codec::tests::server_hello_rejects_appearance_vectors_before_materializing_them ... ok
+test terminal_codec::tests::server_hello_rejects_capabilities_before_materializing_them ... ok
+test terminal_codec::tests::server_hello_rejects_inner_version_mismatch ... ok
+test terminal_codec::tests::server_hello_rejects_invalid_font_feature_tags ... ok
+test terminal_codec::tests::server_hello_round_trips_the_validated_terminal_appearance ... ok
+test terminal_codec::tests::startup_config_causes_enforce_count_item_and_aggregate_bounds ... ok
+test terminal_codec::tests::status_payloads_round_trip_and_reject_oversized_text ... ok
+test terminal_codec::tests::stream_messages_round_trip ... ok
+test terminal_codec::tests::terminal_decoder_preflights_declared_sections_before_allocating ... ok
+test terminal_codec::tests::terminal_decoder_rejects_every_truncated_packed_frame ... ok
+test terminal_codec::tests::terminal_decoder_validates_text_utf8_only_after_structural_preflight ... ok
+test terminal_codec::tests::terminal_lane_rejects_bad_cell_style_ids ... ok
+test terminal_codec::tests::terminal_lane_rejects_invalid_hovered_uri_metadata ... ok
+test terminal_codec::tests::terminal_lane_rejects_invalid_working_directory_metadata ... ok
+test terminal_codec::tests::terminal_lane_rejects_kitty_placement_caps_and_malformed_records ... ok
+test terminal_codec::tests::terminal_lane_rejects_noncanonical_patch_rows ... ok
+test terminal_codec::tests::terminal_lane_round_trips_and_applies_row_patches ... ok
+test terminal_codec::tests::terminal_lane_round_trips_fixed_width_arrays ... ok
+test terminal_codec::tests::terminal_preview_toggle_round_trips_on_the_control_lane ... ok
+test terminal_codec::tests::terminal_ui_commands_use_the_reliable_control_lane ... ok
+test terminal_codec::tests::truncated_server_hello_palette_is_rejected ... ok
+test terminal_codec::tests::agent_bounds_also_reject_hand_built_frames ... ok
+test terminal_codec::tests::client_hello_environment_enforces_count_item_aggregate_and_syntax_bounds ... ok
+
+test result: ok. 222 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-4803bf5f04924dc5)
+
+running 7 tests
+test a_disabled_row_never_annotates_its_key ... ok
+test an_empty_key_never_annotates ... ok
+test annotates_a_key_that_fits_a_quarter_of_the_room ... ok
+test drops_the_annotation_when_the_key_alone_fills_the_room ... ok
+test annotates_a_wider_key_only_while_the_whole_name_still_fits_beside_it ... ok
+test trims_an_overlong_name_from_the_left_and_marks_it ... ok
+test measuring_and_trimming_skip_style_runs_and_count_wide_cells ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/hunt_claims.rs (target/debug/deps/hunt_claims-f91bf2707e8f59f8)
+
+running 16 tests
+test browser_descriptor_is_tabs_not_a_single_url ... ok
+test chooser_states_append_the_v72_filter_fallback_flag ... ok
+test command_error_round_trips_output_after_the_error ... ok
+test client_hello_carries_a_non_utf8_working_directory_verbatim ... ok
+test command_output_keeps_event_tag_eleven_and_carries_its_output_id ... ok
+test control_client_kind_keeps_frozen_wire_tag_two ... ok
+test command_success_round_trips_output_and_exit_code ... ok
+test dark_interactive_hello_encodes_version_instance_and_process_id_as_varints ... ok
+test mux_option_key_has_eighteen_daemon_owned_keys ... ok
+test control_events_and_window_layout_fields_keep_the_frozen_wire_tail ... ok
+test pane_snapshot_carries_bell ... ok
+test pane_snapshot_border_colours_round_trip_and_reject_invalid_rgb ... ok
+test paste_upload_begin_carries_purpose ... ok
+test postcard_tags_put_input_before_event_before_gui_response ... ok
+test protocol_version_on_this_commit_is_one_hundred_and_two ... ok
+test target_lookup_errors_use_tmux_wording ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests zz_protocol
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,25 @@
+TUI-006 attempt-02, cycle 6 choosers punch list
+2026-09-12T14:10:14-03:00
+
+host
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+
+repo
+f4ab0610bfc5def5223d905ae22ec9fe2fa07255
+   M compat/tmux-gaps.json
+   M knowledge/tmux/gaps.md
+  ?? compat/tui/evidence/TUI-006/attempt-02/
+
+pin
+tmux next-3.8
+d77c9dc6aa021e4bc61f0da128c591af695e6466
+
+toolchain
+cargo 1.97.0 (c980f4866 2026-06-30)
+rustc 1.97.0 (2d8144b78 2026-07-07)
+
+zz binary
+-rwxr-xr-x 2 demfabris demfabris 791602200 set 12 14:03 target/debug/zz
+fc5deb678f42742972245d6fc86f1724f8b667692ad13c15b26627f9afd6dd48  target/debug/zz

@@ -18,7 +18,7 @@ use zz_protocol::{
     GuiResponse, InputMessage, NEW_SESSION_ATTACH_CAPABILITY, PaneId, PaneKindSnapshot,
     ProtocolMessage, ServerError, ServerHello, TerminalUiCommand,
 };
-use zz_terminal::{SearchQuery, TerminalColorScheme, TerminalViewAction, TerminalViewport};
+use zz_terminal::{SearchQuery, TerminalViewAction, TerminalViewport};
 
 use crate::{
     browser::{BrowserFrameProvider, BrowserState, BrowserSurface, BrowserWait, SurfaceChanges},
@@ -1028,7 +1028,7 @@ fn exec_client_command(shell: &str, _command: &str) -> String {
 }
 
 fn connect(endpoint: &Endpoint) -> Result<InteractiveClient, String> {
-    InteractiveClient::connect_endpoint(endpoint, TerminalColorScheme::Dark)
+    InteractiveClient::connect_endpoint_without_theme(endpoint, true)
         .map_err(|error| error.to_string())
 }
 

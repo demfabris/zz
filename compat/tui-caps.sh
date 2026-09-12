@@ -50,7 +50,7 @@
 #   extended keys, silent          pane_key_mode with extended-keys on,  driven
 #     terminal                     recorded below
 #   the -2 screen effect, silent   the colour sample with and without    driven
-#     terminal                     -2 under TERM=xterm, recorded below
+#     terminal                     -2 under TERM=xterm
 #   flag diagnostics               missing argument, unknown option      driven
 #   colour class, stock palette    a named, an indexed and an RGB        driven
 #                                  cell and a named background
@@ -100,11 +100,16 @@
 #                                  decoded line after a wide CJK pair, a
 #                                  combining sequence and an emoji, with
 #                                  UTF-8 clients on both sides
-#   OSC 10/11 and DA replies       the reply path reaches the pin's       named
-#                                  feature set, which the negotiation row
-#                                  above measures as a whole; the
-#                                  individual replies are not driven here.
-#                                  The theme reply itself is measured by
+#   secondary and extended DA      the same colour sample on a terminal  driven
+#     replies                      that answers them and on one that
+#                                  answers nothing: the reply names the
+#                                  terminal, the name carries 256 and RGB,
+#                                  and those decide whether a cell keeps
+#                                  its class or drops to the nearest
+#                                  colour the terminal takes
+#   OSC 10/11 replies              the reply path reaches the pin's       named
+#                                  theme and its feature set; the theme
+#                                  reply itself is measured by
 #                                  compat/scenarios/smoke/fixtures/format-listing.sh
 #
 # RECORDED DIVERGENCES. These rows print their two measured values and do not
@@ -114,18 +119,19 @@
 # lets --self-check sabotage the same row in a case where it asserts. Every one
 # of them is written down in TUI-009's evidence with the source line that
 # produces it.
-#   wrap_flag              zz emits `\e[?7l` on entry (tty.rs TerminalGuard
-#                          enter) and restores `\e[?7h` on exit; the pin leaves
-#                          autowrap on and tracks the last cell itself.
 #   mouse_all_flag         zz arms `\e[?1003h` (any-event) for the whole
 #   mouse_button_flag      attach; the pin arms `\e[?1002h` (button-event) and
 #                          raises MODE_MOUSE_ALL only while a menu is up. The
 #                          two rows move together and are one divergence.
-#   keypad_flag            the pin sends smkx; zz sends neither.
-#   keypad_cursor_flag
 #   client_termfeatures    the pin's list is negotiated from the terminal's
-#   client_colours         replies; zz derives its roster from TERM and
-#                          COLORTERM.
+#   client_colours         replies; the daemon derives a client's roster from
+#                          its TERM, its COLORTERM and its flags alone, so
+#                          wherever the terminal answered, the two rosters
+#                          count different colours. The raw TUI's own cell
+#                          writer does read those replies, which is what the
+#                          colour rows compare; on a silent terminal, where
+#                          there is no reply to learn from, client_colours
+#                          asserts.
 #   widths/non-utf8 line   under LANG=C with no -u the pin draws each non-ASCII
 #                          cell as underscores (tty.c tty_check_codeset); the
 #                          raw TUI writes the UTF-8 glyph.
@@ -136,23 +142,6 @@
 #                          -T or terminal-features, whose default gives xterm*
 #                          none; tty.rs arms \e[>4;2m whenever extended-keys is
 #                          not off. Under the outer tmux both arm and it asserts.
-#   colours/silent and     on a silent terminal only: tty.c tty_check_fg and
-#   colours/silent-2       tty_check_bg turn an RGB colour into its nearest 256
-#     cells and line       colour (colour_find_rgb) when the terminal has no
-#                          RGB and a 256 colour into 16 (colour_256to16) when
-#                          it has fewer than 256; render.rs never downgrades.
-#                          Without -2 the pin writes the indexed cell as 32 and
-#                          the RGB cell as 30, with -2 the RGB cell as
-#                          38;5;233. A downgrade from TERM alone would break
-#                          every terminal that answers, where the pin learns
-#                          RGB, so matching it needs the raw TUI to learn its
-#                          terminal's features from the replies as the pin does
-#                          (options.client-terminal-negotiation).
-#   client_theme           a zz client always carries a theme and the pin's is
-#                          empty until its terminal answers. That is the
-#                          recorded stance on
-#                          options.client-terminal-negotiation, not a new
-#                          finding; the row keeps it under this fixture's eye.
 #
 # CONTROLLED DYNAMIC VALUES, set on both sides and never left to chance:
 #   the inner shell     ENV= PS1='$ ' exec /bin/sh, handed to new-session as
@@ -300,11 +289,24 @@ MODE_NAMES=(
 MODE_FORMAT='#{alternate_on}|#{bracket_paste_flag}|#{cursor_flag}|#{cursor_shape}|#{wrap_flag}|#{mouse_all_flag}|#{mouse_any_flag}|#{mouse_button_flag}|#{mouse_sgr_flag}|#{mouse_standard_flag}|#{mouse_utf8_flag}|#{synchronized_output_flag}|#{origin_flag}|#{keypad_flag}|#{keypad_cursor_flag}|#{pane_key_mode}'
 # Rows the two sides are measured to disagree on. Each one is explained in the
 # header block above and written into TUI-009's evidence.
-MODE_RECORDED="wrap_flag mouse_all_flag mouse_button_flag keypad_flag keypad_cursor_flag"
+MODE_RECORDED="mouse_all_flag mouse_button_flag"
+# Every mode row but the named ones, for a sabotage that has to report through
+# the rows it names and no other.
+modes_except() {
+  local keep=" $* " name out=""
+  for name in "${MODE_NAMES[@]}"; do
+    [[ "$keep" == *" $name "* ]] && continue
+    out="$out $name"
+  done
+  printf '%s\n' "${out# }"
+}
 
 FACT_NAMES=(client_termname client_utf8 client_flags client_colours client_termfeatures client_theme)
 FACT_FORMAT='#{client_termname}|#{client_utf8}|#{client_flags}|#{client_colours}|#{client_termfeatures}|#{client_theme}'
-FACT_RECORDED="client_colours client_termfeatures client_theme"
+FACT_RECORDED="client_colours client_termfeatures"
+# On a silent terminal neither side learns anything from a reply, so the two
+# rosters count the same colours and client_colours asserts there.
+FACT_RECORDED_SILENT="client_termfeatures"
 # Each global flag adds its own rows: what the flag CHANGED on its own side,
 # against that side's own unflagged baseline. That delta is the flag's
 # disposition, and it is what makes an ignored flag visible instead of hidden
@@ -577,10 +579,16 @@ compare_tuple() {
   done
 }
 
+# A sabotage sets this to an escape zz's outer pane is given just before zz's
+# client starts on it; it is empty for every driven case.
+ZZ_ATTACH_PREFIX=""
 write_attach() {
   local side="$1" destination="$2" term="$3"
   shift 3
   printf '#!/usr/bin/env bash\n' >"$destination"
+  if [ "$side" = zz ] && [ -n "$ZZ_ATTACH_PREFIX" ]; then
+    printf 'printf %q\n' "$ZZ_ATTACH_PREFIX" >>"$destination"
+  fi
   if [ "$side" = zz ]; then
     printf 'exec env -i HOME=%q XDG_CONFIG_HOME=%q XDG_RUNTIME_DIR=%q ZZ_LOG_DIR=%q LANG=%q LC_ALL=%q TERM=%q PATH=%q TMUX_TMPDIR=/tmp %q --socket %q %s attach-session -t %q\n' \
       "$ZZ_HOME" "$ZZ_HOME/config" "$RUNTIME_DIR" "$ZZ_LOG_DIR" "$CASE_LOCALE" "$CASE_LOCALE" \
@@ -858,24 +866,72 @@ colour_stage() {
 # terminal under TERM=xterm neither baseline carries them, so each flag's delta
 # is exactly what the flag added on its side: RGB alone for -T RGB (the pin's
 # tty_feature_rgb is one bit, whatever colours it implies) and 256 for -2.
-# pane_key_mode with extended-keys on and the colour line with and without -2
-# are measured here and recorded: the pin arms no extended keys and downgrades
-# 256 and RGB colours for a terminal it learned nothing about, and the raw TUI
-# does neither (see RECORDED DIVERGENCES).
+# The colour line with and without -2 asserts here: a terminal that answered
+# nothing carries the eight colours TERM=xterm gives it, so both writers turn
+# the indexed cell into 32 and the RGB cell into 30 (tty.c tty_check_fg over
+# colour_find_rgb and colour_256to16), and -2 raises both to 256, where the
+# indexed cell keeps its index and the RGB cell becomes 38;5;233. pane_key_mode
+# with extended-keys on is measured here and recorded: the pin arms no extended
+# keys for a terminal it learned nothing about and the raw TUI arms them anyway
+# (see RECORDED DIVERGENCES).
+# One colour sample on a silent terminal. The flags are per side so a sabotage
+# can hand -2 to one of them, which is the whole question the downgrade asks:
+# 256 colours instead of the eight TERM=xterm carries.
+# The two sabotages the mode rows need. Neither invents a channel: the first
+# hands zz's terminal one mode before its client reaches it, the second takes
+# one client away.
+case_one_sided_autowrap() {
+  ZZ_ATTACH_PREFIX='\033[?7l'
+  case_modes 'sc/one-sided-autowrap' xterm '' '' "$(modes_except wrap_flag)"
+  ZZ_ATTACH_PREFIX=""
+}
+
+pin_theme_known() {
+  [ -n "$(tuple_field "$(read_facts tmux)" 5)" ]
+}
+
+case_one_sided_theme_reply() {
+  open_case 'sc/one-sided-theme' xterm '' ''
+  tmux_outer_command set-option -w -t "$(outer_window tmux)" window-style bg=colour4 \
+    >/dev/null
+  wait_for 'the pin learned a theme from its outer window' pin_theme_known
+  compare_tuple 'sc/one-sided-theme' "$FACT_RECORDED" \
+    "$(read_facts zz)" "$(read_facts tmux)" "${FACT_NAMES[@]}"
+  tmux_outer_command set-option -w -t "$(outer_window tmux)" -u window-style \
+    >/dev/null 2>&1 || true
+}
+
+case_one_sided_detach() {
+  open_case 'sc/one-sided-detach' xterm '' ''
+  checkpoint sconesideddetach
+  side_command zz detach-client -s "=$INNER_SESSION" >/dev/null 2>&1 || true
+  wait_for 'zz client detached for sc/one-sided-detach' client_gone zz
+  compare_tuple 'sc/one-sided-detach' \
+    "$(modes_except keypad_flag keypad_cursor_flag)" \
+    "$(read_modes zz)" "$(read_modes tmux)" "${MODE_NAMES[@]}"
+}
+
+case_silent_colours() {
+  local name="$1" stage="$2" zz_flags="$3" pin_flags="$4"
+  local previous="$SILENT_TERMINAL"
+  SILENT_TERMINAL=1
+  open_case "$name" xterm "$zz_flags" "$pin_flags"
+  colour_stage "$stage" '' '' "$COLOUR_SAMPLE" "$COLOUR_SAMPLE"
+  SILENT_TERMINAL="$previous"
+}
+
 case_silent() {
   SILENT_TERMINAL=1
-  case_facts 'silent/bare' xterm '' '' "$FACT_RECORDED" baseline
-  case_facts 'silent/-T' xterm '-T RGB' '-T RGB' "$FACT_RECORDED" '' RGB
-  case_facts 'silent/-2' xterm -2 -2 "$FACT_RECORDED" '' 256
+  case_facts 'silent/bare' xterm '' '' "$FACT_RECORDED_SILENT" baseline
+  case_facts 'silent/-T' xterm '-T RGB' '-T RGB' "$FACT_RECORDED_SILENT" '' RGB
+  case_facts 'silent/-2' xterm -2 -2 "$FACT_RECORDED_SILENT" '' 256
   side_command zz set-option -s extended-keys on >/dev/null
   side_command tmux set-option -s extended-keys on >/dev/null
   case_modes 'silent/extended' xterm-256color '' '' "$MODE_RECORDED pane_key_mode"
   side_command zz set-option -s extended-keys off >/dev/null
   side_command tmux set-option -s extended-keys off >/dev/null
-  open_case 'silent/colours' xterm '' ''
-  colour_stage silent '' '' "$COLOUR_SAMPLE" "$COLOUR_SAMPLE" record_row
-  open_case 'silent/colours-2' xterm -2 -2
-  colour_stage silent-2 '' '' "$COLOUR_SAMPLE" "$COLOUR_SAMPLE" record_row
+  case_silent_colours 'silent/colours' silent '' ''
+  case_silent_colours 'silent/colours-2' silent-2 -2 -2
   SILENT_TERMINAL=0
   BASELINE_ZZ=""
   BASELINE_PIN=""
@@ -1160,10 +1216,45 @@ self_check_case 'window-style set on zz only' catches case_colours window-style
 # in delta-client_termfeatures, which the silent baseline leaves free of both.
 SILENT_TERMINAL=1
 self_check_case 'control, a silent terminal with no sabotage' quiet \
-  case_facts 'sc/silent-control' xterm '' '' "$FACT_RECORDED" baseline
+  case_facts 'sc/silent-control' xterm '' '' "$FACT_RECORDED_SILENT" baseline
 self_check_case 'a one-sided 256 beside -T RGB on the pin, silent terminal' catches \
-  case_facts 'sc/silent-T' xterm '-T RGB' '-T 256,RGB' "$FACT_RECORDED" '' RGB
+  case_facts 'sc/silent-T' xterm '-T RGB' '-T 256,RGB' "$FACT_RECORDED_SILENT" '' RGB
 SILENT_TERMINAL=0
+
+# The silent terminal's colour downgrade, in both directions. -2 is what raises
+# a silent terminal from the eight colours TERM=xterm carries to 256, so the
+# side that gets it alone has to keep the indexed cell at 38;5;42 and write the
+# RGB cell as 38;5;233 while the other side writes 32 and 30.
+self_check_case 'control, the silent colour sample with no sabotage' quiet \
+  case_silent_colours 'sc/silent-colours' sc-silent '' ''
+self_check_case 'a one-sided -2 on the pin only, silent terminal' catches \
+  case_silent_colours 'sc/silent-colours-pin-2' sc-silent-pin-2 '' -2
+self_check_case 'a one-sided -2 on zz only, silent terminal' catches \
+  case_silent_colours 'sc/silent-colours-zz-2' sc-silent-zz-2 -2 ''
+
+# THE MODE ROWS READ THE LIVE ATTACH. Autowrap is the one mode neither client
+# touches: tty.c tty_start_tty never writes DECAWM and neither does
+# TerminalGuard::enter, so turning it off on zz's outer pane just before zz's
+# client starts on it has to leave wrap_flag at 0 there against the pin's 1.
+# Every other mode row is recorded for that run, so wrap_flag is the only row
+# that can report.
+self_check_case 'autowrap turned off on zz side before it attaches' catches \
+  case_one_sided_autowrap
+
+# The keypad rows are 1 only while a client that armed smkx is attached, so
+# detaching zz alone has to drop keypad_flag and keypad_cursor_flag there
+# against the pin's, and those two are the only rows that can report.
+self_check_case 'zz detached while the pin stays attached' catches \
+  case_one_sided_detach
+
+# The theme reply. Neither terminal answers an OSC 11 query in this fixture:
+# the outer decoder declines while its own pane carries no background of its
+# own (input.c input_osc_11 over window_pane_get_bg), so both clients stay
+# theme-unknown and client_theme asserts empty on both. Giving the pin's outer
+# window a background alone makes that decoder answer the pin's next request
+# (tty.c tty_repeat_requests), and client_theme has to report it.
+self_check_case 'a theme reply the pin alone can get' catches \
+  case_one_sided_theme_reply
 
 # The colour class itself: the pin's side writes the named cell as the RGB
 # colour it resolves to, the same colour in another class, and the stock stage

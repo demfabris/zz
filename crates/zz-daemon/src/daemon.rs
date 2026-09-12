@@ -94,6 +94,9 @@ use crate::{
         client_environment_rows, client_terminal_facts, host_names, status_context,
         warm_terminfo_entries,
     },
+    terminal_features::{
+        terminal_colour_count, terminal_feature_bit, terminal_feature_mask, terminal_features_list,
+    },
     transport::{LocalTransport, Transport, TransportListener, TransportStream},
 };
 
@@ -31491,60 +31494,10 @@ fn client_utf8_fact(capabilities: &[String]) -> bool {
         .any(|capability| capability == ClientHello::CLIENT_UTF8_CAPABILITY)
 }
 
-const TERMINAL_FEATURES: [&str; 21] = [
-    "256",
-    "bpaste",
-    "ccolour",
-    "clipboard",
-    "hyperlinks",
-    "cstyle",
-    "extkeys",
-    "focus",
-    "ignorefkeys",
-    "margins",
-    "mouse",
-    "osc7",
-    "overline",
-    "progressbar",
-    "rectfill",
-    "RGB",
-    "sixel",
-    "strikethrough",
-    "sync",
-    "title",
-    "usstyle",
-];
-
-fn terminal_feature_bit(name: &str) -> Option<u32> {
-    TERMINAL_FEATURES
-        .iter()
-        .position(|feature| feature.eq_ignore_ascii_case(name))
-        .map(|index| 1 << index)
-}
-
 fn client_features_fact(capabilities: &[String]) -> u32 {
-    let mut features = 0;
-    for spec in capabilities.iter().filter_map(|capability| {
+    terminal_feature_mask(capabilities.iter().filter_map(|capability| {
         capability.strip_prefix(ClientHello::CLIENT_FEATURES_CAPABILITY_PREFIX)
-    }) {
-        for name in spec.split([':', ',']) {
-            let Some(bit) = terminal_feature_bit(name) else {
-                break;
-            };
-            features |= bit;
-        }
-    }
-    features
-}
-
-fn terminal_features_list(features: u32) -> String {
-    TERMINAL_FEATURES
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| features & (1 << index) != 0)
-        .map(|(_, name)| *name)
-        .collect::<Vec<_>>()
-        .join(",")
+    }))
 }
 
 fn client_size_fact(capabilities: &[String]) -> Option<(u16, u16)> {
@@ -31935,22 +31888,8 @@ fn client_colour_count_with(inner: &ServerState, client: ClientId, requested: u3
         return None;
     }
     let term = client_environment_value(inner, client, "TERM").unwrap_or_default();
-    let colour_term = client_environment_value(inner, client, "COLORTERM")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let has = |name| terminal_feature_bit(name).is_some_and(|bit| requested & bit != 0);
-    if has("RGB")
-        || matches!(colour_term.as_str(), "truecolor" | "24bit")
-        || term.to_ascii_lowercase().contains("truecolor")
-    {
-        Some(16_777_216)
-    } else if has("256") || term.to_ascii_lowercase().contains("256color") {
-        Some(256)
-    } else if term == "dumb" {
-        Some(2)
-    } else {
-        Some(16)
-    }
+    let colour_term = client_environment_value(inner, client, "COLORTERM").unwrap_or_default();
+    Some(terminal_colour_count(&term, &colour_term, requested))
 }
 
 fn client_term_features(inner: &ServerState, client: ClientId) -> String {
@@ -64474,7 +64413,7 @@ set-option -g @alias-mixed-next yes
         assert_eq!(client_features_fact(&["client-terminal-v1".to_owned()]), 0);
         assert_eq!(
             terminal_features_list(u32::MAX),
-            TERMINAL_FEATURES.join(",")
+            crate::terminal_features::TERMINAL_FEATURES.join(",")
         );
         assert_eq!(
             client_working_directory_fact(
@@ -84939,7 +84878,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(!has(&roster, "RGB"), "{roster}");
 
         let (colours, roster) = facts("");
-        assert_eq!(colours, Some(16));
+        assert_eq!(colours, Some(8));
         assert!(!has(&roster, "256") && !has(&roster, "RGB"), "{roster}");
     }
 

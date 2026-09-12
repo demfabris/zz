@@ -157,6 +157,14 @@ pub(crate) fn handle(
         TerminalEvent::DeviceAttributes | TerminalEvent::KittyGraphicsResponse { .. } => {
             Ok(InputOutcome::None)
         }
+        TerminalEvent::SecondaryDeviceAttributes(kind) => {
+            crate::tty::note_secondary_device_attributes(kind);
+            Ok(InputOutcome::None)
+        }
+        TerminalEvent::ExtendedDeviceAttributes(name) => {
+            crate::tty::note_extended_device_attributes(&name);
+            Ok(InputOutcome::None)
+        }
         TerminalEvent::FocusGained => {
             send_focus(model, client, true)?;
             Ok(InputOutcome::None)

@@ -14,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_one_hundred_and_one() {
-    assert_eq!(PROTOCOL_VERSION, 101);
+fn protocol_version_on_this_commit_is_one_hundred_and_two() {
+    assert_eq!(PROTOCOL_VERSION, 102);
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x65, 0x00, 0x00, 0x65, 0x00, 0x00, 0x00, 0x00,
+            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x66, 0x00, 0x00, 0x66, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00, 0x00, 0x07,
         ]
     );

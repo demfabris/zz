@@ -86,7 +86,7 @@ grapheme_bytes  (UTF-8 arena)                                     × grapheme_by
 overlays [row:u16 start:u16 end:u16 kind_and_flags:u16] × overlay_count (8 B each)
 kitty_placement_count:u32
 kitty placements [72 B each] × kitty_placement_count              (see table)
-style_classes [class_word:u32] × style_count                      (4 B each, v101)
+style_classes [class_word:u32] × style_count                      (4 B each, v102)
 ```
 
 `COMMAND_OUTPUT_VIEWPORT` uses kind 2 and inserts a nonzero `output_id:u64` at offset 17, after
@@ -149,7 +149,7 @@ appended_grapheme_bytes (UTF-8)            × appended_grapheme_byte_count
 overlays × overlay_count                   (8 B each)
 kitty_placement_count:u32
 kitty placements [72 B each] × kitty_placement_count
-style_classes [class_word:u32] × appended_style_count  (4 B each, v101)
+style_classes [class_word:u32] × appended_style_count  (4 B each, v102)
 ```
 
 The 143 fixed bytes are the 95 above `mode` plus `unseen_output` (8) plus the ten `u32` counts (40).
@@ -163,7 +163,7 @@ grid: positive shifts must re-supply the newly-exposed top rows, negative the bo
 | Element | Bytes | Fields (LE) |
 |---------|-------|-------------|
 | Cell (`PackedCell`) | 8 | `glyph:u32`, `style_id:u16`, `flags:u16`. `glyph` is a Unicode scalar, or a grapheme-dictionary index when `GRAPHEME_TABLE_BIT` is set |
-| Style (`PackedStyle`) | 16 | `foreground:u32`, `background:u32`, `underline_color:u32`, `attributes:u16`, `underline_kind:u8`, reserved `0:u8`. The 16 bytes are unchanged since v100: `foreground_raw` masks off the palette index the in-memory struct keeps in bits 24..31 and `attributes` masks off the class codes it keeps in bits 12..15, so both travel in the v101 `style_classes` array instead |
+| Style (`PackedStyle`) | 16 | `foreground:u32`, `background:u32`, `underline_color:u32`, `attributes:u16`, `underline_kind:u8`, reserved `0:u8`. The 16 bytes are unchanged since v100: `foreground_raw` masks off the palette index the in-memory struct keeps in bits 24..31 and `attributes` masks off the class codes it keeps in bits 12..15, so both travel in the v102 `style_classes` array instead |
 | Style class word | 4 | `foreground_code:2` in bits 0..1 and `background_code:2` in bits 2..3, `foreground_index:u8` in bits 8..15, `background_index:u8` in bits 16..23. Code 0 resolved, 1 default, 2 palette, 3 RGB. One per style, appended after the kitty placements; a word that does not round-trip through `PackedStyle::with_class_word` is rejected as `packed style colour classes are invalid` |
 | Grapheme offset | 4 | `u32` byte-offset into the grapheme arena (monotonic, first `0`, last = arena len) |
 | Overlay (`OverlaySpan`) | 8 | `row:u16`, `start:u16`, `end:u16`, `kind_and_flags:u16` |

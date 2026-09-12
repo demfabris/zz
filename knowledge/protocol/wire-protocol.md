@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v101)
+title: zz wire protocol (v102)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 101`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 102`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (101) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (102) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -621,19 +621,31 @@ v101 appends `message_style`, `message_command_style` and `modes: Vec<ModePresen
 `pane_borders: Vec<PaneBorderPresentation>` after `modes`; each style must be empty or parse as a
 style, and the list is capped at `MAX_PANE_BORDER_PRESENTATIONS` (256) with one more rejected during
 deserialization. v101 also appends `match_style` and `current_match_style` to `ModePresentation`
-after `vi_keys`; each must be empty or parse as a style. v101 also appends the per-style colour
+after `vi_keys`; each must be empty or parse as a style. v102 appends the per-style colour
 class word to terminal frames: one `u32` per style in a viewport payload and one per appended style
 in a patch payload, both after the kitty placements, packing each side's two-bit class code with
 its palette index (`PackedStyle::class_word` in `crates/zz-terminal/src/model.rs`). A word that
 does not round-trip through `with_class_word` is rejected as `packed style colour classes are
-invalid`. v101 also adds the `client-features-v1:<spec>` value token to `ClientHello`
+invalid`. v102 also adds the `client-features-v1:<spec>` value token to `ClientHello`
 capabilities, one per terminal feature the caller asked for.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 101`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 102`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v102 carries the colour class each style's two grounds came from, and the client's own terminal
+  features. Viewport and patch payloads append one `u32` class word per style, per appended style
+  for a patch, after the kitty placements; the word packs the two-bit class code and the palette
+  index of the foreground and the background, and a word that does not round-trip through
+  `PackedStyle::with_class_word` is rejected. The raw TUI writes a named or indexed colour back in
+  the shape it arrived in instead of resolving it to RGB; GUI clients read the RGB and ignore the
+  classes. `ClientHello` gains `client-features-v1:<spec>` value tokens, one per `-T` spec and one
+  reading `256` for `-2`, at most 16 tokens of at most 200 bytes each, which the daemon folds into
+  the client's feature bits for `#{client_termfeatures}`, stopping at the first name it does not
+  know. Both are pure appends and both consumer halves shipped with them, but 101 went out in zz
+  0.8.0 (`fd3c64e4`) before either landed: a 0.8.0 client would pass the handshake and misdecode a
+  frame's style dictionary, so the version moves rather than the entry growing.
 - v101 carries the raw TUI's mode and message presentation. `StatusLine` gains `message_style` and
   `message_command_style`, the two session options expanded for this client, and `modes`, one
   `ModePresentation` per mode screen the client holds (its copy session and its command output):
@@ -651,17 +663,9 @@ capabilities, one per terminal feature the caller asked for.
   ignore the field. v101 also appends `match_style` and `current_match_style` to
   `ModePresentation` after `vi_keys`: the expanded `copy-mode-match-style` and
   `copy-mode-current-match-style`, each empty or parsing as a style. The raw TUI paints search
-  matches in them and GUI clients ignore both. v101 also carries the colour class each style's two
-  grounds came from. Viewport and patch payloads append one `u32` class word per style, per
-  appended style for a patch, after the kitty placements; the word packs the two-bit class code and
-  the palette index of the foreground and the background, and a word that does not round-trip
-  through `PackedStyle::with_class_word` is rejected. The raw TUI writes a named or indexed colour
-  back in the shape it arrived in instead of resolving it to RGB; GUI clients read the RGB and
-  ignore the classes. v101 also carries the client's own terminal features: `ClientHello` gains
-  `client-features-v1:<spec>` value tokens, one per `-T` spec and one reading `256` for `-2`, at
-  most 16 tokens of at most 200 bytes each, which the daemon folds into the client's feature bits
-  for `#{client_termfeatures}`, stopping at the first name it does not know. Pure appends; the
-  cycle's gate folds every lane's 101 appends into one entry.
+  matches in them and GUI clients ignore both. Pure appends; the cycle's gate folded every lane's
+  101 appends into one entry. Shipped in zz 0.8.0, so 101 is closed: a released client speaks it
+  and anything appended after the tag needs its own version.
 - v100 carries the resolved theme palette. `StatusLine` gains `theme: ThemeColours` appended after
   `customized`, where `ThemeColours` is a new `crates/zz-protocol/src/style.rs` type wrapping
   `[TmuxColour; COLOUR_THEME_COUNT]` (10) in the pin's own `colour_theme_table` order:

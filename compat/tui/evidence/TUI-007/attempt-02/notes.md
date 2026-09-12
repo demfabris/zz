@@ -5,7 +5,7 @@ surfaces themselves and left thirteen cases recorded `SIBLING:modes`, because th
 message row's style was TUI-004's. TUI-004 landed. This attempt flips those thirteen, fixes the
 four that did not simply start matching, and takes the fixture to zero recorded cases.
 
-Every run below except `tui-overlays-prefix` ran at `30134c35` with the tracked tree clean outside
+Every run below except `tui-overlays-prefix` ran at `b1747c04` with the tracked tree clean outside
 this directory and `target/debug/zz` built from that tree.
 
 | File | What it is |
@@ -62,6 +62,9 @@ lock at `MemoryMax=5G`, `--jobs 4 -- --test-threads=3`.
    cursor. Two new measurements come with the flip: `prompt-trailing-space` types two spaces at the
    end of a command, and the two `*-under-message` cases pass a message that ends in two spaces.
 4. `Close option:message-style for the raw TUI` (`30134c35`).
+5. `Make StatusOverlay a struct now that it has one shape` (`b1747c04`). Confirm-before was the
+   second variant; with it gone the enum carried one and every use of it was an irrefutable
+   pattern. No behaviour changes.
 
 ## The thirteen SIBLING:modes cases
 

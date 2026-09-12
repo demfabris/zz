@@ -824,10 +824,11 @@ run_size() {
   #
   # LANDED 2026-09-12 (TUI-004 attempt-05): the trim walks format_width's units,
   # so a style section is copied through at no cost, a run of #s costs the
-  # columns it draws escaped and a wide character costs two. Re-measured on the
-  # pin over 27 answers, left and right, with markers, escaped hashes, a style
-  # after them, wide characters and an unterminated section
-  # (crates/zz-mux/src/formats.rs, a_style_section_costs_a_trim_no_column...).
+  # columns it draws escaped and a wide character costs two. Re-probed on both
+  # binaries over 72 answers, left and right, with and without a marker, over
+  # escaped hashes, a style after them, wide characters and an unterminated
+  # section: all 72 agree, and 27 of them are pinned as the zz-mux unit test
+  # a_style_section_costs_a_trim_no_column_the_way_format_trim_left_does.
   clear_both
   set_on_both status-left '#[fg=red,bold]LEFT'
   checkpoint styled-left-trim "$mode"

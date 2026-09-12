@@ -1,0 +1,232 @@
+overlay differential at 80x24 (pin tmux)
+ok    baseline
+ok    prompt-opened
+ok    prompt-typed
+      case prompt-trailing-space
+      1 of 24 rows differ, first 23
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m:display-message PROMPTTEXT^[[39m
+        row 23 zz:   ^[[38;2;13;13;13m^[[48;2;184;134;11m:display-message PROMPTTEXT  ^[[39m
+      cursor tmux: 29,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   29,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  prompt-trailing-space
+ok    prompt-wrapped
+ok    prompt-cursor-home
+ok    prompt-resized
+ok    prompt-resized-back
+ok    prompt-cancelled
+ok    prompt-status-top
+ok    prompt-status-top-cancelled
+      case confirm-opened
+      1 of 24 rows differ, first 23
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-CONFIRM?^[[39m
+        row 23 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233mOVERLAY-CONFIRM?
+      cursor tmux: 18,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   18,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  confirm-opened
+      case confirm-resized
+      1 of 20 rows differ, first 19
+        row 19 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-CONFIRM?^[[39m
+        row 19 zz:   ^[[38;2;16;19;24m^[[48;2;216;222;233mOVERLAY-CONFIRM?
+      cursor tmux: 18,19 flag=1 pane=60x20 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   18,19 flag=1 pane=60x20 shape=default blinking=0 very_visible=0 colour=none
+DIFF  confirm-resized
+ok    confirm-refused
+ok    menu-opened
+ok    menu-down
+ok    menu-down-separator
+ok    menu-unanswered-key
+ok    menu-under-message
+ok    menu-resized
+ok    menu-cancelled
+ok    menu-shortcut-closed
+ok    menu-mouse-opened
+ok    menu-click-closed
+      case popup-opened
+      7 of 24 rows differ, first 7
+        row 7 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-BODY                      ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 7 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-BODY^[[39m^[[49m                      ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 8 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 8 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 9 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 9 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 10 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 10 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 11 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 11 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 12 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 12 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 13 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 13 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+      cursor tmux: 23,8 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   23,8 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  popup-opened
+      case popup-typed
+      7 of 24 rows differ, first 7
+        row 7 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-BODY                      ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 7 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-BODY^[[39m^[[49m                      ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 8 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mz                               ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 8 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mz^[[39m^[[49m                               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 9 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-GOT-z                     ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 9 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-GOT-z^[[39m^[[49m                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 10 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 10 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 11 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 11 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 12 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 12 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 13 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 13 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+      cursor tmux: 23,10 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   23,10 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  popup-typed
+      case popup-under-message
+      8 of 24 rows differ, first 7
+        row 7 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-BODY                      ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 7 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-BODY^[[39m^[[49m                      ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 8 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mz                               ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 8 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mz^[[39m^[[49m                               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 9 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-GOT-z                     ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 9 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-GOT-z^[[39m^[[49m                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 10 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 10 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 11 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 11 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 12 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 12 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 13 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 13 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-MESSAGE^[[39m
+        row 23 zz:   ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-MESSAGE  ^[[39m
+      cursor tmux: 23,10 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   23,10 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  popup-under-message
+      case popup-resized
+      8 of 30 rows differ, first 7
+        row 7 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-BODY                      ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 7 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-BODY^[[39m^[[49m                      ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 8 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mz                               ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 8 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mz^[[39m^[[49m                               ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 9 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-GOT-z                     ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 9 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229mPOPUP-GOT-z^[[39m^[[49m                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 10 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 10 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 11 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 11 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 12 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 12 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 13 tmux:                       ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m                                ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 13 zz:                         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m                                ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[39m^[[49m
+        row 29 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-MESSAGE^[[39m
+        row 29 zz:   ^[[38;2;13;13;13m^[[48;2;184;134;11mOVERLAY-MESSAGE  ^[[39m
+      cursor tmux: 23,10 flag=0 pane=100x30 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   23,10 flag=0 pane=100x30 shape=default blinking=0 very_visible=0 colour=none
+DIFF  popup-resized
+ok    popup-closed
+ok    panes-split
+ok    panes-shown
+ok    panes-resized
+ok    panes-selected
+ok    panes-closed-by-key
+ok    centre-menu-fg
+ok    centre-menu-fg-down
+      case centre-popup-fg
+      9 of 23 rows differ, first 6
+        row 6 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159mPOPUP-BODY                           ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 6 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[38;5;159mPOPUP-BODY^[[39m                           ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 7 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 7 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 8 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 8 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 9 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 9 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 10 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 10 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 11 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 11 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 12 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 12 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 13 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 13 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 14 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 14 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+      cursor tmux: 21,7 flag=1 pane=79x23 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   21,7 flag=1 pane=79x23 shape=default blinking=0 very_visible=0 colour=none
+DIFF  centre-popup-fg
+      case centre-popup-fg-typed
+      9 of 23 rows differ, first 6
+        row 6 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159mPOPUP-BODY                           ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 6 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[38;5;159mPOPUP-BODY^[[39m                           ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 7 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159mz                                    ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 7 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[38;5;159mz^[[39m                                    ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 8 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159mPOPUP-GOT-z                          ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 8 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[38;5;159mPOPUP-GOT-z^[[39m                          ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 9 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 9 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 10 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 10 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 11 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 11 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 12 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 12 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 13 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 13 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 14 tmux:                     ^[[38;5;46mM-bM-^TM-^B^[[38;5;159m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+        row 14 zz:                       ^[[38;5;46mM-bM-^TM-^B^[[39m                                     ^[[38;5;46mM-bM-^TM-^B^[[39m
+      cursor tmux: 21,9 flag=1 pane=79x23 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   21,9 flag=1 pane=79x23 shape=default blinking=0 very_visible=0 colour=none
+DIFF  centre-popup-fg-typed
+ok    centre-popup-fg-closed
+ok    centre-menu-fgbg
+ok    centre-menu-fgbg-down
+      case centre-popup-fgbg
+      9 of 23 rows differ, first 6
+        row 6 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17mPOPUP-BODY                           ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 6 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17mPOPUP-BODY^[[39m^[[49m                           ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 7 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 7 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 8 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 8 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 9 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 9 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 10 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 10 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 11 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 11 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 12 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 12 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 13 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 13 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 14 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 14 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+      cursor tmux: 21,7 flag=1 pane=79x23 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   21,7 flag=1 pane=79x23 shape=default blinking=0 very_visible=0 colour=none
+DIFF  centre-popup-fgbg
+      case centre-popup-fgbg-typed
+      9 of 23 rows differ, first 6
+        row 6 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17mPOPUP-BODY                           ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 6 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17mPOPUP-BODY^[[39m^[[49m                           ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 7 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17mz                                    ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 7 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17mz^[[39m^[[49m                                    ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 8 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17mPOPUP-GOT-z                          ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 8 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17mPOPUP-GOT-z^[[39m^[[49m                          ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 9 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 9 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 10 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 10 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 11 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 11 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 12 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 12 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 13 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 13 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 14 tmux:                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[38;5;159m^[[48;5;17m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+        row 14 zz:                       ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m                                     ^[[38;5;46m^[[48;5;22mM-bM-^TM-^B^[[39m^[[49m
+      cursor tmux: 21,9 flag=1 pane=79x23 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   21,9 flag=1 pane=79x23 shape=default blinking=0 very_visible=0 colour=none
+DIFF  centre-popup-fgbg-typed
+ok    centre-popup-fgbg-closed
+ok    centre-menu-mouse-opened
+ok    centre-menu-click-closed
+ok    panes-coloured-shown
+ok    panes-coloured-selected
+11 of 48 asserted comparisons differ, 0 recorded

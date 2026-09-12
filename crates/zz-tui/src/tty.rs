@@ -145,6 +145,12 @@ fn extended_device_attributes_colours(name: &str) -> Option<u32> {
 /// then send.
 const KEYPAD_TRANSMIT: &[u8] = b"\x1b[?1h\x1b=";
 const KEYPAD_LOCAL: &[u8] = b"\x1b[?1l\x1b>";
+
+/// `tty_start_tty` subscribes to theme changes and asks for the theme now;
+/// `tty_stop_tty` unsubscribes. The terminal answers, and goes on answering,
+/// with `\e[?997;1n` for dark and `\e[?997;2n` for light.
+const THEME_SUBSCRIBE: &[u8] = b"\x1b[?2031h\x1b[?996n";
+const THEME_UNSUBSCRIBE: &[u8] = b"\x1b[?2031l";
 const EXTENDED_KEYS_ENABLE: &[u8] = b"\x1b[>4;2m";
 const EXTENDED_KEYS_DISABLE: &[u8] = b"\x1b[>4m";
 
@@ -218,6 +224,7 @@ impl TerminalGuard {
             "\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi={FILE_PROBE_IMAGE_ID},s=1,v=1,a=q,t=f,f=32;{encoded_probe_path}\x1b\\"
         )?;
         output.write_all(TERMINAL_REQUESTS)?;
+        output.write_all(THEME_SUBSCRIBE)?;
         output.write_all(b"\x1b[16t\x1b[2J")?;
         output.flush()?;
         Ok(guard)
@@ -265,6 +272,7 @@ impl Drop for TerminalGuard {
         if self.extended_keys {
             let _ = output.write_all(EXTENDED_KEYS_DISABLE);
         }
+        let _ = output.write_all(THEME_UNSUBSCRIBE);
         let _ = output.write_all(KEYPAD_LOCAL);
         let _ = output.write_all(
             b"\x1b[?2004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?1004l\x1b[?25h\x1b[?1049l",
@@ -332,6 +340,8 @@ mod tests {
     fn the_keypad_is_armed_on_entry_and_put_back_on_exit() {
         assert_eq!(KEYPAD_TRANSMIT, b"\x1b[?1h\x1b=");
         assert_eq!(KEYPAD_LOCAL, b"\x1b[?1l\x1b>");
+        assert_eq!(THEME_SUBSCRIBE, b"\x1b[?2031h\x1b[?996n");
+        assert_eq!(THEME_UNSUBSCRIBE, b"\x1b[?2031l");
     }
 
     #[test]

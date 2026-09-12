@@ -9,12 +9,14 @@ const PASTE_END: &[u8] = b"\x1b[201~";
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Event {
     CellSize { width_px: u32, height_px: u32 },
+    DarkTheme,
     DeviceAttributes,
     ExtendedDeviceAttributes(String),
     FocusGained,
     FocusLost,
     Key(KeyEvent),
     KittyGraphicsResponse { image_id: u32, ok: bool },
+    LightTheme,
     Mouse(MouseEvent),
     Paste(String),
     SecondaryDeviceAttributes(u8),
@@ -314,6 +316,10 @@ fn parse_csi(parameters: &str, final_byte: u8) -> Option<Event> {
                 .unwrap_or_default() as u8;
             return Some(Event::SecondaryDeviceAttributes(kind));
         }
+        // `tty_default_raw_keys`: the terminal's answer to `\e[?996n` and every
+        // theme change after it, while mode 2031 is subscribed.
+        ("?997;1", b'n') => return Some(Event::DarkTheme),
+        ("?997;2", b'n') => return Some(Event::LightTheme),
         ("", b'I') => return Some(Event::FocusGained),
         ("", b'O') => return Some(Event::FocusLost),
         (parameters, b'M' | b'm') if parameters.starts_with('<') => {

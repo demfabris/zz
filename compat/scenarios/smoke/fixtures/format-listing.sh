@@ -152,26 +152,17 @@ env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
 client_pid=$!
 await_clients 1 || { echo "format-listing-$side: attach"; exit 0; }
 
-# Before any reply, the two sides disagree and this records it rather than
-# steering past it. The pin's c->theme is THEME_UNKNOWN and
+# Before any reply neither side carries a theme. c->theme is THEME_UNKNOWN and
 # format_cb_client_theme returns NULL for that, so #{client_theme} is empty and
-# the name is absent from the -a listing entirely. zz has no unknown state and
-# answers dark from the moment the client attaches. Measured 2026-09-06 and
-# accepted as native 2026-09-07: semantic:harness-theme-steering moved to
-# options.client-terminal-negotiation, where the stance is that a zz client
-# always carries a theme, so client_theme is never empty and the dark and
-# light theme hooks fire on the terminal's reply rather than on attach.
-if [ "$side" = tmux ]; then
-    check_equal theme-unsteered '' \
-        "$(main_client display-message -p -t "$pane" '#{client_theme}')"
-    check_equal theme-unsteered-listed 0 \
-        "$(main_client display-message -a -p -t "$pane" | grep -c '^client_theme=')"
-else
-    check_equal theme-unsteered dark \
-        "$(main_client display-message -p -t "$pane" '#{client_theme}')"
-    check_equal theme-unsteered-listed 1 \
-        "$(main_client display-message -a -p -t "$pane" | grep -c '^client_theme=')"
-fi
+# the name is absent from the -a listing entirely. zz used to answer dark from
+# the moment the client attached, measured 2026-09-06 and accepted as native
+# 2026-09-07 as semantic:harness-theme-steering on
+# options.client-terminal-negotiation; the raw TUI now subscribes to theme
+# changes and reports what its terminal answers, so both sides start unknown.
+check_equal theme-unsteered '' \
+    "$(main_client display-message -p -t "$pane" '#{client_theme}')"
+check_equal theme-unsteered-listed 0 \
+    "$(main_client display-message -a -p -t "$pane" | grep -c '^client_theme=')"
 
 # c->theme is THEME_UNKNOWN until the terminal answers the query, and
 # format_cb_client_theme returns NULL for that, so the client reports dark the

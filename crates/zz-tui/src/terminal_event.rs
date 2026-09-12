@@ -3,6 +3,10 @@
 use std::ops::BitOr;
 
 const MAX_BUFFER_BYTES: usize = 4 * 1024 * 1024;
+/// A device control string with no terminator in sight is not one, the way a
+/// control sequence with no final byte is not one either; past this many bytes
+/// the escape is read as the key it would have been.
+const MAX_DEVICE_CONTROL_BYTES: usize = 256;
 const PASTE_START: &[u8] = b"\x1b[200~";
 const PASTE_END: &[u8] = b"\x1b[201~";
 
@@ -245,7 +249,13 @@ fn parse_escape(bytes: &[u8]) -> Option<Parsed> {
         });
     }
     if second == b'P' {
-        let terminator = find_subslice(&bytes[2..], b"\x1b\\")? + 2;
+        let Some(terminator) = find_subslice(&bytes[2..], b"\x1b\\") else {
+            return (bytes.len() > MAX_DEVICE_CONTROL_BYTES).then_some(Parsed {
+                consumed: 1,
+                event: Some(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))),
+            });
+        };
+        let terminator = terminator + 2;
         return Some(Parsed {
             consumed: terminator + 2,
             event: parse_extended_device_attributes(&bytes[2..terminator]),
@@ -832,6 +842,19 @@ mod tests {
         assert_eq!(
             keys(b"\x1bOA"),
             vec![Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))]
+        );
+    }
+
+    #[test]
+    fn a_device_control_string_with_no_terminator_is_read_as_an_escape() {
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        parser.push(b"\x1bP>|half", &mut events);
+        assert!(events.is_empty());
+        parser.push(&vec![b'x'; MAX_DEVICE_CONTROL_BYTES], &mut events);
+        assert_eq!(
+            events.first(),
+            Some(&Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)))
         );
     }
 

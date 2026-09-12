@@ -1521,7 +1521,7 @@ impl Renderer {
             let composed = zz_client::compose_status_row(row, width, &model.status.base_style);
             let mut line = StyledLine::from_segments(composed.segments);
             if usize::from(model.status.message_line).min(block.saturating_sub(1)) == index
-                && let Some(StatusOverlay::Message { front, fill }) = &overlay
+                && let Some(StatusOverlay { front, fill }) = &overlay
             {
                 line = StyledLine::from_segments(crate::mode_view::over_underlay(
                     &front.segments,
@@ -1550,7 +1550,7 @@ impl Renderer {
         }
         self.status_rows = lines;
         self.status_geometry = Some(geometry);
-        let virtual_row = overlay.map(|StatusOverlay::Message { front, fill }| {
+        let virtual_row = overlay.map(|StatusOverlay { front, fill }| {
             StyledLine::from_segments(crate::mode_view::over_underlay(
                 &front.segments,
                 fill,
@@ -2204,11 +2204,9 @@ fn sidebar_status_lines(model: &Model) -> Vec<StyledLine> {
         .collect()
 }
 
-enum StatusOverlay {
-    Message {
-        front: StyledLine,
-        fill: Option<TmuxColour>,
-    },
+struct StatusOverlay {
+    front: StyledLine,
+    fill: Option<TmuxColour>,
 }
 
 /// A message on the status row takes the cursor off the screen. Measured
@@ -2230,7 +2228,7 @@ fn client_message_hides_the_cursor(model: &Model) -> bool {
 
 fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
     let message_style = crate::mode_view::message_style(model, false);
-    let message = |text: &str| StatusOverlay::Message {
+    let message = |text: &str| StatusOverlay {
         front: StyledLine::from_segments(crate::mode_view::message_front(
             text.trim_end_matches(' '),
             width,
@@ -3679,7 +3677,7 @@ mod tests {
             confirm_key: b'y',
             default_yes: false,
         });
-        let Some(StatusOverlay::Message { front, .. }) = status_overlay(&model, 40) else {
+        let Some(StatusOverlay { front, .. }) = status_overlay(&model, 40) else {
             panic!("confirm is a message-area overlay");
         };
         let text: String = front.segments.iter().map(|segment| segment.text.as_str()).collect();
@@ -3816,7 +3814,7 @@ mod tests {
             command_output_search_prompt(model.command_output_search.as_ref().unwrap()),
             "?needle"
         );
-        let Some(StatusOverlay::Message { front, fill }) = status_overlay(&model, 12) else {
+        let Some(StatusOverlay { front, fill }) = status_overlay(&model, 12) else {
             panic!("command output search did not replace the status row");
         };
         assert_eq!(front.plain_text(), "?needle");
@@ -3845,7 +3843,7 @@ mod tests {
         sidebar_model.command_output_search = Some(SearchQuery::literal("visible"));
         assert!(matches!(
             status_overlay(&sidebar_model, 120),
-            Some(StatusOverlay::Message { .. })
+            Some(StatusOverlay { .. })
         ));
 
         let query = SearchQuery::literal("界e\u{301}界");
@@ -4027,7 +4025,7 @@ mod tests {
         assert_eq!(model.command_output_focus(), Some(PaneId(1)));
         assert!(matches!(
             status_overlay(&model, 40),
-            Some(StatusOverlay::Message { .. })
+            Some(StatusOverlay { .. })
         ));
     }
 

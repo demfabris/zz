@@ -4959,6 +4959,14 @@ impl Shared {
             return;
         }
         let changed = self.status.lock().render_changed(&requests, refresh);
+        if !changed.is_empty() {
+            let mut inner = self.inner.lock();
+            for (client, status) in &changed {
+                inner
+                    .client_status_rows
+                    .insert(*client, (status.rows.clone(), status.base_style.clone()));
+            }
+        }
         for (client, status) in changed {
             self.publish_to_client(client, EventPayload::StatusChanged { status });
         }
@@ -5458,6 +5466,10 @@ impl Shared {
         drop(inner);
         let mut hello = hello;
         hello.status = self.status.lock().render_initial(&request);
+        self.inner.lock().client_status_rows.insert(
+            client,
+            (hello.status.rows.clone(), hello.status.base_style.clone()),
+        );
         Some((client, hello))
     }
 
@@ -5664,6 +5676,7 @@ impl Shared {
             inner.client_origins.remove(&client);
             inner.client_activity.remove(&client);
             inner.client_activity_times.remove(&client);
+            inner.client_status_rows.remove(&client);
             inner.client_created_times.remove(&client);
             inner.client_focused.remove(&client);
             inner.client_pids.remove(&client);
@@ -8616,6 +8629,7 @@ impl Shared {
                     MuxEffect::ChooseTree {
                         pane,
                         kind: tree_kind,
+                        info_preview,
                         sessions_only,
                         filter,
                         format,
@@ -8633,15 +8647,29 @@ impl Shared {
                             if command_name == "find-window" {
                                 continue;
                             }
-                            return Err(ServerError::InvalidCommand(
-                                "choose-tree requires an interactive client".to_owned(),
-                            )
+                            return Err(ServerError::InvalidCommand(format!(
+                                "{command_name} requires an interactive client"
+                            ))
                             .into());
+                        }
+                        if *tree_kind == ChooseTreeKind::Clients && inner.attached.is_empty() {
+                            continue;
                         }
                         let attached_session = client_attached_session(&inner, client);
                         let facts = format_hook_facts(&inner);
+                        let client_rows = if *tree_kind == ChooseTreeKind::Clients {
+                            chooser_presentation::client_chooser_rows(
+                                &inner,
+                                format.as_deref(),
+                                filter.as_deref(),
+                            )
+                        } else {
+                            Vec::new()
+                        };
                         let mut chooser = ChooseTreeSession::new(
                             *tree_kind,
+                            *info_preview,
+                            client_rows,
                             *sessions_only,
                             *pane,
                             &inner.engine,
@@ -8655,7 +8683,10 @@ impl Shared {
                             *sort,
                             key_format.clone(),
                         )?;
-                        chooser.template.clone_from(template);
+                        chooser.template = template.clone().or_else(|| {
+                            (*tree_kind == ChooseTreeKind::Clients)
+                                .then(|| CLIENT_MODE_DEFAULT_COMMAND.to_owned())
+                        });
                         if attached_session != Some(chooser.source_session) {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
@@ -18450,6 +18481,13 @@ impl Shared {
             }
             let attached_session = client_attached_session(&inner, client);
             let facts = format_hook_facts(&inner);
+            if chooser.kind == ChooseTreeKind::Clients {
+                chooser.clients = chooser_presentation::client_chooser_rows(
+                    &inner,
+                    chooser.format.as_deref(),
+                    chooser.filter.as_deref(),
+                );
+            }
             let filter_before = chooser.filter.clone();
             let result = if let Some(step) = prompt_step {
                 match step {
@@ -18473,6 +18511,12 @@ impl Shared {
                             choose_tree_key_action(&inner.engine.keys, &input, searching)
                         {
                             action
+                        } else if let Some(action) = (chooser.kind == ChooseTreeKind::Clients
+                            && !searching)
+                            .then(|| crate::keys::client_mode_key_action(&input))
+                            .flatten()
+                        {
+                            action
                         } else {
                             inner.choose_trees.insert(client, chooser);
                             return Ok(());
@@ -18490,6 +18534,13 @@ impl Shared {
             };
             if chooser.filter != filter_before {
                 let previous = (chooser.rendered.selected, chooser.selected);
+                if chooser.kind == ChooseTreeKind::Clients {
+                    chooser.clients = chooser_presentation::client_chooser_rows(
+                        &inner,
+                        chooser.format.as_deref(),
+                        chooser.filter.as_deref(),
+                    );
+                }
                 chooser.rebuild(&inner.engine, attached_session, &facts);
                 if previous.1.is_some_and(|target| {
                     !chooser
@@ -18509,16 +18560,17 @@ impl Shared {
             let delta = (result == ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta))
                 .then(|| (chooser.rendered.selected, chooser.rendered.search.clone()));
             let command = match (&result, chooser.template.clone()) {
-                (ChooseTreeResult::Activate(target), Some(template)) => {
-                    Some((template, choose_tree_command_target(&inner.engine, *target)))
-                }
+                (ChooseTreeResult::Activate(target), Some(template)) => Some((
+                    template,
+                    choose_tree_command_target(&inner.engine, &chooser.clients, *target),
+                )),
                 _ => None,
             };
             let runs: Vec<(String, String, Option<ExecutionContext>)> = match &result {
                 ChooseTreeResult::Kill(targets) => targets
                     .iter()
                     .filter_map(|target| {
-                        choose_tree_command_target(&inner.engine, *target)
+                        choose_tree_command_target(&inner.engine, &chooser.clients, *target)
                             .ok()
                             .map(|name| (choose_tree_kill_command(*target).to_owned(), name, None))
                     })
@@ -18526,7 +18578,7 @@ impl Shared {
                 ChooseTreeResult::Command { template, targets } => targets
                     .iter()
                     .filter_map(|target| {
-                        choose_tree_command_target(&inner.engine, *target)
+                        choose_tree_command_target(&inner.engine, &chooser.clients, *target)
                             .ok()
                             .map(|name| {
                                 (
@@ -19183,6 +19235,9 @@ impl Shared {
         let (selection, session) = {
             let inner = self.inner.lock();
             let (selection, session) = match target {
+                // `window_client_mode` always carries a command, so a client
+                // row never reaches the tree's own activation.
+                ChooseTreeTarget::Client(_) => return Ok(()),
                 ChooseTreeTarget::Session(session) => (None, session),
                 ChooseTreeTarget::Window(window) => {
                     let session = inner
@@ -22715,6 +22770,13 @@ impl Shared {
                     continue;
                 }
                 let facts = format_hook_facts(&inner);
+                if chooser.kind == ChooseTreeKind::Clients {
+                    chooser.clients = chooser_presentation::client_chooser_rows(
+                        &inner,
+                        chooser.format.as_deref(),
+                        chooser.filter.as_deref(),
+                    );
+                }
                 chooser.rebuild(&inner.engine, attached_session, &facts);
                 let state = chooser.rendered.clone();
                 inner.choose_trees.insert(client, chooser);
@@ -27973,6 +28035,9 @@ struct ServerState {
     client_flags: ClientFlags,
     client_activity: BTreeMap<ClientId, u64>,
     client_activity_times: BTreeMap<ClientId, u64>,
+    /// `c->status.screen`, the rows last published to each client, which
+    /// `window_client_draw` copies into the client mode's preview box.
+    client_status_rows: BTreeMap<ClientId, (Vec<String>, String)>,
     client_created_times: BTreeMap<ClientId, u64>,
     client_focused: BTreeMap<ClientId, bool>,
     pane_focus: BTreeSet<PaneId>,
@@ -28989,6 +29054,9 @@ fn choose_tree_kill_prompt(engine: &MuxEngine, target: ChooseTreeTarget) -> Opti
                 .position(|candidate| *candidate == pane)?;
             Some(format!("Kill pane {index}? "))
         }
+        // `window_client_key` detaches straight from `d`, `x`, `D` and `X`:
+        // the client mode raises no confirm prompt.
+        ChooseTreeTarget::Client(_) => None,
     }
 }
 
@@ -29041,6 +29109,7 @@ fn choose_tree_row_pane(engine: &MuxEngine, target: ChooseTreeTarget) -> Option<
         ChooseTreeTarget::Pane(pane) => return state.window_for_pane(pane).map(|_| pane),
         ChooseTreeTarget::Window(window) => window,
         ChooseTreeTarget::Session(session) => state.sessions.get(&session)?.active_window,
+        ChooseTreeTarget::Client(_) => return None,
     };
     Some(state.windows.get(&window)?.active_pane)
 }
@@ -29050,6 +29119,8 @@ fn choose_tree_kill_command(target: ChooseTreeTarget) -> &'static str {
         ChooseTreeTarget::Session(_) => "kill-session -t %%",
         ChooseTreeTarget::Window(_) => "kill-window -t %%",
         ChooseTreeTarget::Pane(_) => "kill-pane -t %%",
+        // `window_client_do_detach` for `x` and `X`, which pass MSG_DETACHKILL.
+        ChooseTreeTarget::Client(_) => "detach-client -P -t %%",
     }
 }
 
@@ -29076,6 +29147,7 @@ fn choose_tree_target_context(
             let window = state.window_for_pane(pane)?;
             (state.windows.get(&window)?.session, window, pane)
         }
+        ChooseTreeTarget::Client(_) => return None,
     };
     Some(ExecutionContext::new(
         Some(session),
@@ -29086,9 +29158,16 @@ fn choose_tree_target_context(
 
 fn choose_tree_command_target(
     engine: &MuxEngine,
+    clients: &[ClientChooserRow],
     target: ChooseTreeTarget,
 ) -> Result<String, ServerError> {
     match target {
+        // `mode_tree_run_command` substitutes the client row's `ttyname`.
+        ChooseTreeTarget::Client(id) => clients
+            .iter()
+            .find(|row| row.client == id)
+            .map(|row| row.name.clone())
+            .ok_or_else(|| ServerError::MissingTarget(id.to_string())),
         ChooseTreeTarget::Session(session) => {
             let session = engine
                 .state
@@ -29197,11 +29276,37 @@ enum ChooseTreeUpdateKind {
     Full,
 }
 
+/// `window_client_itemdata` plus the row text `window_client_build` expands in
+/// the client's own format tree, which the chooser cannot reach on a rebuild.
+#[derive(Clone, Debug)]
+struct ClientChooserRow {
+    client: ClientId,
+    name: String,
+    text: String,
+    activity: u64,
+    created: u64,
+    width: u16,
+    height: u16,
+    matches: bool,
+    /// `c->session->curw->window`'s active pane, the preview's subject.
+    pane: Option<PaneId>,
+}
+
+/// `WINDOW_CLIENT_DEFAULT_COMMAND`.
+const CLIENT_MODE_DEFAULT_COMMAND: &str = "detach-client -t '%%'";
+/// `window_client_do_detach` for `d` and `D`, which pass `MSG_DETACH`.
+const CLIENT_MODE_DETACH_COMMAND: &str = "detach-client -t %%";
+
 #[derive(Debug)]
 struct ChooseTreeSession {
     source_pane: PaneId,
     source_session: SessionId,
     kind: ChooseTreeKind,
+    /// `data->preview_is_info`: the client mode's `i` view.
+    info_preview: bool,
+    /// `window_client_build`'s item list, rebuilt from the server whenever the
+    /// daemon hands the chooser a fresh view of its clients.
+    clients: Vec<ClientChooserRow>,
     sessions_only: bool,
     filter: Option<String>,
     format: Option<String>,
@@ -29241,6 +29346,8 @@ impl ChooseTreeSession {
     #[allow(clippy::fn_params_excessive_bools)]
     fn new(
         kind: ChooseTreeKind,
+        info_preview: bool,
+        clients: Vec<ClientChooserRow>,
         sessions_only: bool,
         source_pane: PaneId,
         engine: &MuxEngine,
@@ -29269,21 +29376,31 @@ impl ChooseTreeSession {
         } else {
             BTreeSet::new()
         };
-        let selected = Some(if sessions_only {
-            ChooseTreeTarget::Session(source_session)
+        let selected = if kind == ChooseTreeKind::Clients {
+            None
         } else {
-            match kind {
-                ChooseTreeKind::Windows => ChooseTreeTarget::Window(source_window),
-                ChooseTreeKind::Panes if engine.state.windows[&source_window].panes.len() == 1 => {
-                    ChooseTreeTarget::Window(source_window)
+            Some(if sessions_only {
+                ChooseTreeTarget::Session(source_session)
+            } else {
+                match kind {
+                    ChooseTreeKind::Windows => ChooseTreeTarget::Window(source_window),
+                    ChooseTreeKind::Panes
+                        if engine.state.windows[&source_window].panes.len() == 1 =>
+                    {
+                        ChooseTreeTarget::Window(source_window)
+                    }
+                    ChooseTreeKind::Panes | ChooseTreeKind::Clients => {
+                        ChooseTreeTarget::Pane(source_pane)
+                    }
                 }
-                ChooseTreeKind::Panes => ChooseTreeTarget::Pane(source_pane),
-            }
-        });
+            })
+        };
         let mut chooser = Self {
             source_pane,
             source_session,
             kind,
+            info_preview,
+            clients,
             sessions_only,
             filter,
             format,
@@ -29489,6 +29606,7 @@ impl ChooseTreeSession {
                     .get(&window)
                     .map(|entry| ExecutionContext::new(Some(entry.session), Some(window), None)),
                 ChooseTreeTarget::Pane(pane) => ExecutionContext::for_pane(&engine.state, pane),
+                ChooseTreeTarget::Client(_) => Some(ExecutionContext::new(None, None, None)),
             };
             item.key = context.map_or_else(String::new, |context| {
                 let variables = chooser_row_variables(line);
@@ -29525,6 +29643,7 @@ impl ChooseTreeSession {
                     .get(&window)
                     .map(|entry| ExecutionContext::new(Some(entry.session), Some(window), None)),
                 ChooseTreeTarget::Pane(pane) => ExecutionContext::for_pane(&engine.state, pane),
+                ChooseTreeTarget::Client(_) => Some(ExecutionContext::new(None, None, None)),
             };
             item.text = context.map_or_else(String::new, |context| {
                 let mut hooks = DaemonFormatHooks::command(facts);
@@ -29569,6 +29688,10 @@ impl ChooseTreeSession {
         attached_session: Option<SessionId>,
         facts: &FormatHookFacts,
     ) {
+        if self.kind == ChooseTreeKind::Clients {
+            self.rebuild_clients(engine, attached_session, facts);
+            return;
+        }
         let state = &engine.state;
         let mut branches = self.branches(engine, attached_session, facts, self.filter.is_some());
         let filter_no_matches = branches.is_empty() && self.filter.is_some();
@@ -29686,13 +29809,91 @@ impl ChooseTreeSession {
             } else {
                 match self.kind {
                     ChooseTreeKind::Windows => ChooseTreeTarget::Window(window),
-                    ChooseTreeKind::Panes if state.windows[&window].panes.len() == 1 => {
+                    ChooseTreeKind::Panes | ChooseTreeKind::Clients
+                        if state.windows[&window].panes.len() == 1 =>
+                    {
                         ChooseTreeTarget::Window(window)
                     }
-                    ChooseTreeKind::Panes => ChooseTreeTarget::Pane(self.source_pane),
+                    ChooseTreeKind::Panes | ChooseTreeKind::Clients => {
+                        ChooseTreeTarget::Pane(self.source_pane)
+                    }
                 }
             }
         });
+        self.finish_rebuild(
+            items,
+            filter_no_matches,
+            fallback,
+            engine,
+            attached_session,
+            facts,
+        );
+    }
+
+    /// `window_client_build`: the flat client list, sorted by the mode's own
+    /// criterion and filtered by `-f`, with the row text already expanded in
+    /// each client's own format tree.
+    fn rebuild_clients(
+        &mut self,
+        engine: &MuxEngine,
+        attached_session: Option<SessionId>,
+        facts: &FormatHookFacts,
+    ) {
+        let mut rows = self.clients.clone();
+        let filter_no_matches = self.filter.is_some() && !rows.iter().any(|row| row.matches);
+        if !filter_no_matches {
+            rows.retain(|row| row.matches);
+        }
+        let sort = self.sort;
+        sort.apply(&mut rows, |left, right| {
+            let ordering = match sort.order() {
+                Some(TmuxSortOrder::Activity) => right.activity.cmp(&left.activity),
+                Some(TmuxSortOrder::Creation) => left.created.cmp(&right.created),
+                Some(TmuxSortOrder::Size) => {
+                    (left.width, left.height).cmp(&(right.width, right.height))
+                }
+                _ => left.name.cmp(&right.name),
+            };
+            ordering.then_with(|| left.name.cmp(&right.name))
+        });
+        let mut items = Vec::new();
+        for row in &rows {
+            if !push_choose_tree_item(
+                &mut items,
+                ChooseTreeItem {
+                    label: bounded_choose_tree_text(&row.name),
+                    detail: String::new(),
+                    target: ChooseTreeTarget::Client(row.client),
+                    depth: 0,
+                    flags: 0,
+                    pane_kind: None,
+                    key: String::new(),
+                    text: bounded_choose_item_text(&row.text),
+                },
+            ) {
+                break;
+            }
+        }
+        self.assign_row_keys(&mut items, engine, attached_session, facts);
+        self.finish_rebuild(
+            items,
+            filter_no_matches,
+            None,
+            engine,
+            attached_session,
+            facts,
+        );
+    }
+
+    fn finish_rebuild(
+        &mut self,
+        items: Vec<ChooseTreeItem>,
+        filter_no_matches: bool,
+        fallback: Option<ChooseTreeTarget>,
+        engine: &MuxEngine,
+        attached_session: Option<SessionId>,
+        facts: &FormatHookFacts,
+    ) {
         let selected = self
             .pending_row
             .take()
@@ -29896,6 +30097,9 @@ impl ChooseTreeSession {
                 let Some(target) = self.rendered.items.get(current).map(|item| item.target) else {
                     return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
                 };
+                if matches!(target, ChooseTreeTarget::Client(_)) {
+                    return Ok(ChooseTreeResult::Kill(vec![target]));
+                }
                 let Some(text) = choose_tree_kill_prompt(engine, target) else {
                     return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
                 };
@@ -29912,13 +30116,53 @@ impl ChooseTreeSession {
                 if targets.is_empty() {
                     return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
                 }
+                if self.kind == ChooseTreeKind::Clients {
+                    return Ok(ChooseTreeResult::Kill(targets));
+                }
                 let text = format!("Kill {} tagged? ", targets.len());
                 return Ok(self.raise_kill_prompt(text, targets));
+            }
+            ChooseTreeAction::ClientDetach => {
+                let Some(target) = self.rendered.items.get(current).map(|item| item.target) else {
+                    return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
+                };
+                if !matches!(target, ChooseTreeTarget::Client(_)) {
+                    return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
+                }
+                return Ok(ChooseTreeResult::Command {
+                    template: CLIENT_MODE_DETACH_COMMAND.to_owned(),
+                    targets: vec![target],
+                });
+            }
+            ChooseTreeAction::ClientDetachTagged => {
+                let targets = self
+                    .rendered
+                    .items
+                    .iter()
+                    .filter(|item| self.tagged.contains(&item.target))
+                    .filter(|item| matches!(item.target, ChooseTreeTarget::Client(_)))
+                    .map(|item| item.target)
+                    .collect::<Vec<_>>();
+                if targets.is_empty() {
+                    return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
+                }
+                return Ok(ChooseTreeResult::Command {
+                    template: CLIENT_MODE_DETACH_COMMAND.to_owned(),
+                    targets,
+                });
+            }
+            ChooseTreeAction::ClientInfo => {
+                self.info_preview = !self.info_preview;
+                update = ChooseTreeUpdateKind::Full;
             }
             ChooseTreeAction::SwapUp => return Ok(self.swap(engine, current, false)),
             ChooseTreeAction::SwapDown => return Ok(self.swap(engine, current, true)),
             ChooseTreeAction::SortNext => {
-                self.sort.next_order(&zz_mux::WINDOW_TREE_ORDER_SEQ);
+                if self.kind == ChooseTreeKind::Clients {
+                    self.sort.next_order(&zz_mux::WINDOW_CLIENT_ORDER_SEQ);
+                } else {
+                    self.sort.next_order(&zz_mux::WINDOW_TREE_ORDER_SEQ);
+                }
                 self.rebuild(engine, attached_session, facts);
                 update = ChooseTreeUpdateKind::Full;
             }
@@ -30201,7 +30445,7 @@ impl ChooseTreeSession {
                     self.expanded_windows.remove(&window);
                 }
             }
-            ChooseTreeTarget::Pane(_) => {}
+            ChooseTreeTarget::Pane(_) | ChooseTreeTarget::Client(_) => {}
         }
     }
 
@@ -65551,7 +65795,7 @@ set-option -g @alias-mixed-next yes
         let specs = zz_protocol::command_specs()
             .filter(|spec| spec.uses_tmux_option_grammar())
             .collect::<Vec<_>>();
-        assert_eq!(specs.len(), 83);
+        assert_eq!(specs.len(), 84);
         assert_eq!(
             specs.iter().map(|spec| spec.aliases.len()).sum::<usize>(),
             74
@@ -65609,9 +65853,9 @@ set-option -g @alias-mixed-next yes
                 }
             }
         }
-        assert_eq!(spellings, 157);
-        assert_eq!(diagnostic_cases, 628);
-        assert_eq!(required_cases, 408);
+        assert_eq!(spellings, 158);
+        assert_eq!(diagnostic_cases, 632);
+        assert_eq!(required_cases, 413);
 
         let mut prefix_cases = 0;
         for spec in &specs {
@@ -65633,7 +65877,7 @@ set-option -g @alias-mixed-next yes
                 );
             }
         }
-        assert_eq!(prefix_cases, 517);
+        assert_eq!(prefix_cases, 522);
 
         for spec in &specs {
             let unknown = ('0'..='9')
@@ -65695,7 +65939,7 @@ set-option -g @alias-mixed-next yes
             .filter(|spec| !zz_protocol::NATIVE_COMMAND_NAMES.contains(&spec.name))
             .filter(|spec| spec.positional_maximum().is_some())
             .collect::<Vec<_>>();
-        assert_eq!(specs.len(), 72);
+        assert_eq!(specs.len(), 73);
         for spec in specs {
             let maximum = spec.positional_maximum().expect("finite maximum");
             let arguments = vec![argument.clone(); maximum.saturating_add(1)];
@@ -77482,6 +77726,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let mut chooser = ChooseTreeSession::new(
             ChooseTreeKind::Panes,
             false,
+            Vec::new(),
+            false,
             terminal,
             &engine,
             Some(session),
@@ -77649,18 +77895,23 @@ bind - split-window -v -c "#{pane_current_path}"
             assert_eq!(
                 choose_tree_command_target(
                     &inner.engine,
+                    &[],
                     ChooseTreeTarget::Session(source_session)
                 )
                 .unwrap(),
                 "=popup-test:"
             );
             assert_eq!(
-                choose_tree_command_target(&inner.engine, ChooseTreeTarget::Window(source_window))
-                    .unwrap(),
+                choose_tree_command_target(
+                    &inner.engine,
+                    &[],
+                    ChooseTreeTarget::Window(source_window),
+                )
+                .unwrap(),
                 "=popup-test:0."
             );
             assert_eq!(
-                choose_tree_command_target(&inner.engine, ChooseTreeTarget::Pane(source_pane))
+                choose_tree_command_target(&inner.engine, &[], ChooseTreeTarget::Pane(source_pane))
                     .unwrap(),
                 format!("=popup-test:0.{source_pane}")
             );
@@ -77831,6 +78082,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let facts = FormatHookFacts::default();
         let chooser = ChooseTreeSession::new(
             ChooseTreeKind::Windows,
+            false,
+            Vec::new(),
             true,
             first_pane,
             &engine,
@@ -77902,6 +78155,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let keys = |format: &str| {
             ChooseTreeSession::new(
                 ChooseTreeKind::Windows,
+                false,
+                Vec::new(),
                 true,
                 first_pane,
                 &engine,
@@ -77946,6 +78201,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let facts = FormatHookFacts::default();
         let mut chooser = ChooseTreeSession::new(
             ChooseTreeKind::Windows,
+            false,
+            Vec::new(),
             true,
             first_pane,
             &engine,
@@ -78048,6 +78305,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let session_state = |filter: Option<&str>, reversed: bool| {
             ChooseTreeSession::new(
                 ChooseTreeKind::Windows,
+                false,
+                Vec::new(),
                 true,
                 z_pane,
                 &engine,
@@ -78106,6 +78365,8 @@ bind - split-window -v -c "#{pane_current_path}"
         );
         let mut collapsed_sessions = ChooseTreeSession::new(
             ChooseTreeKind::Windows,
+            false,
+            Vec::new(),
             true,
             z_pane,
             &engine,
@@ -78133,6 +78394,8 @@ bind - split-window -v -c "#{pane_current_path}"
 
         let mut collapsed_windows = ChooseTreeSession::new(
             ChooseTreeKind::Windows,
+            false,
+            Vec::new(),
             false,
             z_pane,
             &engine,
@@ -78165,6 +78428,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let default_tree = ChooseTreeSession::new(
             ChooseTreeKind::Panes,
             false,
+            Vec::new(),
+            false,
             z_pane,
             &engine,
             Some(z),
@@ -78186,6 +78451,8 @@ bind - split-window -v -c "#{pane_current_path}"
 
         let mut rebuilt_tree = ChooseTreeSession::new(
             ChooseTreeKind::Windows,
+            false,
+            Vec::new(),
             true,
             z_pane,
             &engine,
@@ -94354,6 +94621,8 @@ bind - split-window -v -c "#{pane_current_path}"
             let facts = format_hook_facts(&inner);
             let chooser = ChooseTreeSession::new(
                 ChooseTreeKind::Panes,
+                false,
+                Vec::new(),
                 false,
                 source,
                 &inner.engine,

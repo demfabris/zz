@@ -88,6 +88,7 @@ impl ChooserSpec for TreeChooser {
         match state.kind {
             ChooseTreeKind::Windows => "Choose window",
             ChooseTreeKind::Panes => "Choose pane",
+            ChooseTreeKind::Clients => "Choose client",
         }
     }
 
@@ -95,6 +96,7 @@ impl ChooserSpec for TreeChooser {
         let targets = match state.kind {
             ChooseTreeKind::Windows => "sessions and windows",
             ChooseTreeKind::Panes => "sessions, windows, and panes",
+            ChooseTreeKind::Clients => "clients",
         };
         chooser_subtitle(format!("{count} {targets}"), state.filter_no_matches)
     }

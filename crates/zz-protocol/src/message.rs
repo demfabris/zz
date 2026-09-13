@@ -2378,6 +2378,10 @@ pub struct CommandPromptState {
 pub enum ChooseTreeKind {
     Windows,
     Panes,
+    /// `window_client_mode`: the flat list of attached clients `choose-client`
+    /// opens, which shares the mode tree with the session tree and differs in
+    /// its rows, its sort sequence, its preview and its own keys.
+    Clients,
 }
 
 #[repr(u8)]
@@ -2394,6 +2398,7 @@ pub enum ChooseTreeTarget {
     Session(SessionId),
     Window(WindowId),
     Pane(PaneId),
+    Client(ClientId),
 }
 
 impl std::fmt::Display for ChooseTreeTarget {
@@ -2402,6 +2407,7 @@ impl std::fmt::Display for ChooseTreeTarget {
             Self::Session(id) => id.fmt(formatter),
             Self::Window(id) => id.fmt(formatter),
             Self::Pane(id) => id.fmt(formatter),
+            Self::Client(id) => id.fmt(formatter),
         }
     }
 }
@@ -2554,6 +2560,13 @@ pub enum ChooseTreeAction {
     PreviewCycle,
     FilterPrompt,
     ClearFilter,
+    /// `d` in `window_client_key`: detach the client the current row names.
+    ClientDetach,
+    /// `D`: the same for every tagged client row.
+    ClientDetachTagged,
+    /// `i`: swap the client mode's preview between the pane view and
+    /// `window_client_draw_info`.
+    ClientInfo,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2636,6 +2649,22 @@ pub enum ChooserPreview {
         viewport: TerminalViewport,
     },
     Text {
+        lines: Vec<String>,
+    },
+    /// `window_client_draw`: the chosen client's current pane above a rule and
+    /// a copy of that client's own status rows, which is what the preview box
+    /// of the client mode holds.
+    Client {
+        viewport: Option<TerminalViewport>,
+        status: Vec<String>,
+        status_style: String,
+        /// The previewed client's own width, which its status screen was
+        /// composed at before the box copies the first columns of it.
+        status_width: u32,
+    },
+    /// `window_client_draw_info`: the info view `i` raises, already expanded
+    /// into the pin's own styled lines.
+    Markup {
         lines: Vec<String>,
     },
 }

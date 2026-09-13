@@ -16,8 +16,10 @@
 # THE ROSTER
 # ---------------------------------------------------------------------------
 # entry                     pin d77c9dc6                     zz today                        disposition
-# choose-client [-hikNrZ]   window_pane_set_mode, client      hard-rejected in
-#   [-F -f -K -O -t] [tmpl]   mode on the target pane           UNIMPLEMENTED_TMUX_COMMANDS   CHILD TUI-014
+# choose-client [-hikNrZ]   window_pane_set_mode, client      opens the same client mode on
+#   [-F -f -K -O -t] [tmpl]   mode on the target pane           the attached client, and a     PROVED (CLI errors)
+#                                                               clientless CLI answers the     + DECLARED (the
+#                                                               attached-client error          clientless entry)
 # clock-mode [-t]           clock mode on the target pane     hard-rejected                  CHILD TUI-014
 # customize-mode [-kNZ]     customize mode on the pane        hard-rejected                  CHILD TUI-014
 #   [-F -f -t]
@@ -675,6 +677,7 @@ LOG_IDENTITY='the server log names the client that ran each command - client-<pi
 SERVER_ACCESS='zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape'
 ESCAPE_TRIM='capture.rich-transports, owner terminal: the -e transform runs through the vendored formatter in crates/zz-terminal/src/session.rs, whose Vt format keeps one trailing cell the pin trims, and that file is outside this lane'
 MESSAGES_CHILD='TUI-016: show-messages -J lists the running format jobs and -T the known terminals, neither of which zz publishes yet'
+CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin sets a mode on the pane whether or not the caller is a client. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
 
 refresh_client_cases() {
   case_run refresh-bare same '' -- refresh-client
@@ -777,8 +780,11 @@ lock_cases() {
 
 client_tool_cases() {
   CASE_NEEDLE_MODE=1
-  case_run client-tree-open record "$NATIVE_CLIENT_TOOLS" -- choose-client -t PANE
+  case_run client-tree-open record "$CLIENT_TREE_CLIENTLESS" -- choose-client -t PANE
   restore_case client-tree-closed
+  case_run client-tree-unknown-flag same '' -- choose-client -Q -t PANE
+  case_run client-tree-bad-sort same '' -- choose-client -O zzcc-nope -t PANE
+  case_run client-tree-usage same '' -- choose-client -t PANE one two
   CASE_NEEDLE_MODE=1
   case_run clock-mode-open record "$NATIVE_CLIENT_TOOLS" -- clock-mode -t PANE
   restore_case clock-mode-closed

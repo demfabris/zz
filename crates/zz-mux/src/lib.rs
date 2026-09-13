@@ -56,7 +56,10 @@ pub use parser::{
     ParsedConfig, ParsedConfigBytes, command_block_body, config_expansion_names, parse_config,
     parse_config_with_expansions, user_home,
 };
-pub use sort::{TmuxSort, TmuxSortOrder, WINDOW_BUFFER_ORDER_SEQ, WINDOW_TREE_ORDER_SEQ};
+pub use sort::{
+    TmuxSort, TmuxSortOrder, WINDOW_BUFFER_ORDER_SEQ, WINDOW_CLIENT_ORDER_SEQ,
+    WINDOW_TREE_ORDER_SEQ,
+};
 pub use status::{
     DEFAULT_STATUS_INTERVAL, DEFAULT_STATUS_LEFT, DEFAULT_STATUS_RIGHT, DEFAULT_STATUS_STYLE,
     DEFAULT_WINDOW_STATUS_FORMAT, FormatJobTag, FormatUniverse, StatusContext, StatusFormats,

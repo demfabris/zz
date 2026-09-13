@@ -642,7 +642,13 @@ end of those enums, and `PreviewCycle` at the end of each of the two before them
 `ChooserPreviewSize` and `ChooserPreviewTile` the daemon fills from the mode tree. v102 also
 appends `InputMessage::MouseKey { key, pane, window, column, row }` after `DismissClientMessage`,
 the pin's own mouse key name a client resolved from a decoded pointer event together with the pane
-and window that event landed on and its cell in the client's screen.
+and window that event landed on and its cell in the client's screen. v102 also carries the client
+mode `choose-client` opens: `ChooseTreeKind` gains a trailing `Clients`, `ChooseTreeTarget` a
+trailing `Client(ClientId)`, `ChooserPreview` the trailing `Client { viewport, status,
+status_style, status_width }` and `Markup { lines }` that `window_client_draw` and
+`window_client_draw_info` fill, and `ChooseTreeAction` the trailing `ClientDetach`,
+`ClientDetachTagged` and `ClientInfo` the daemon resolves `d`, `D` and `i` to inside that mode.
+All five are pure end-appends with both halves in the same push.
 
 # Versioning & compatibility
 

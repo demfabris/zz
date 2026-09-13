@@ -421,6 +421,10 @@ pub static COMMAND_ARGS_PARSE_SPECS: &[CommandArgsParseSpec] = &[
         rule: CommandArgsParseRule::CommandsOrString,
     },
     CommandArgsParseSpec {
+        name: "choose-client",
+        rule: CommandArgsParseRule::CommandsOrString,
+    },
+    CommandArgsParseSpec {
         name: "choose-tree",
         rule: CommandArgsParseRule::CommandsOrString,
     },
@@ -465,6 +469,7 @@ pub static COMMAND_ARGS_PARSE_SPECS: &[CommandArgsParseSpec] = &[
 pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[
     "bind-key",
     "choose-buffer",
+    "choose-client",
     "choose-tree",
     "command-prompt",
     "confirm-before",
@@ -493,6 +498,10 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     (
         "choose-buffer",
         "[-kNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
+    ),
+    (
+        "choose-client",
+        "[-hikNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
     ),
     (
         "choose-tree",
@@ -628,7 +637,6 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "newp",
     "server-access",
     "customize-mode",
-    "choose-client",
     "clock-mode",
     "suspend-client",
     "suspendc",
@@ -640,28 +648,6 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
 ];
 
 static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
-    CommandSpec {
-        name: "choose-client",
-        aliases: &[],
-        description: "Unsupported tmux command",
-        usage: "[-hikNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
-        options: &[
-            CommandOptionSpec::unsupported_value("-F"),
-            CommandOptionSpec::unsupported_value("-K"),
-            CommandOptionSpec::unsupported_flag("-N"),
-            CommandOptionSpec::unsupported_value("-O"),
-            CommandOptionSpec::unsupported_flag("-Z"),
-            CommandOptionSpec::unsupported_value("-f"),
-            CommandOptionSpec::unsupported_flag("-h"),
-            CommandOptionSpec::unsupported_flag("-i"),
-            CommandOptionSpec::unsupported_flag("-k"),
-            CommandOptionSpec::unsupported_flag("-r"),
-            CommandOptionSpec::unsupported_value("-t"),
-            CommandOptionSpec::unsupported_flag("-y"),
-        ],
-        positionals: &[FreeForm],
-        variadic: None,
-    },
     CommandSpec {
         name: "clock-mode",
         aliases: &[],
@@ -2165,6 +2151,28 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         variadic: None,
     },
     CommandSpec {
+        name: "choose-client",
+        aliases: &[],
+        description: "Choose an attached client",
+        usage: "[-hikNryZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
+        options: &[
+            CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::flag("-Z", "zoom the chooser, always full window in zz"),
+            CommandOptionSpec::value("-F", FreeForm, "per-row format"),
+            CommandOptionSpec::value("-f", FreeForm, "filter"),
+            CommandOptionSpec::flag("-h", "hide the preview of the pane the chooser is in"),
+            CommandOptionSpec::flag("-i", "open on the info view"),
+            CommandOptionSpec::value("-K", FreeForm, "per-row shortcut key format"),
+            CommandOptionSpec::flag("-k", "kill the source pane when the chooser exits"),
+            CommandOptionSpec::flag("-N", "disable the preview, already zz's only layout"),
+            CommandOptionSpec::value("-O", FreeForm, "sort order"),
+            CommandOptionSpec::flag("-r", "reverse sort order"),
+            CommandOptionSpec::flag("-y", "answer the kill prompt for x and X"),
+        ],
+        positionals: &[FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
         name: "focus-sidebar",
         aliases: &[],
         description: "Focus the workspace sidebar",
@@ -2875,15 +2883,15 @@ mod tests {
                 usage_overrides.insert(spec.name);
             }
         }
-        assert_eq!(implemented, 83);
+        assert_eq!(implemented, 84);
         assert_eq!(aliases, 74);
-        assert_eq!(flag_shapes.values().sum::<usize>(), 503);
+        assert_eq!(flag_shapes.values().sum::<usize>(), 515);
         assert_eq!(
             flag_shapes,
-            BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
+            BTreeMap::from([("none", 287), ("optional", 8), ("required", 220)])
         );
-        assert_eq!((supported, unsupported), (471, 32));
-        assert_eq!(usage_overrides.len(), 20);
+        assert_eq!((supported, unsupported), (483, 32));
+        assert_eq!(usage_overrides.len(), 21);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES
@@ -2902,7 +2910,7 @@ mod tests {
             .into_iter()
             .map(|command| (command.name.clone(), command))
             .collect::<BTreeMap<_, _>>();
-        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 9);
+        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 8);
         for spec in UNIMPLEMENTED_TMUX_COMMAND_SPECS {
             let command = &oracle[spec.name];
             assert_eq!(spec.aliases, command.aliases, "aliases for {}", spec.name);
@@ -3576,7 +3584,11 @@ mod tests {
 
     #[test]
     fn chooser_args_parse_accepts_a_command_or_string_template() {
-        for (name, flags) in [("choose-buffer", "-kNrZ"), ("choose-tree", "-GhkNrswZ")] {
+        for (name, flags) in [
+            ("choose-buffer", "-kNrZ"),
+            ("choose-client", "-hikNrZ"),
+            ("choose-tree", "-GhkNrswZ"),
+        ] {
             let spec = catalog_command_spec(name).expect("chooser");
             for command in [
                 CommandInvocation::new(name, ["{ display-message action }"])
@@ -4025,6 +4037,7 @@ mod tests {
             "command-prompt",
             "focus-sidebar",
             "choose-tree",
+            "choose-client",
             "choose-buffer",
             "display-message",
             "show-messages",

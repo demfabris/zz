@@ -1722,6 +1722,7 @@ impl Renderer {
             let title = match state.kind {
                 zz_protocol::ChooseTreeKind::Windows => "Choose window",
                 zz_protocol::ChooseTreeKind::Panes => "Choose pane",
+                zz_protocol::ChooseTreeKind::Clients => "Choose client",
             };
             write_colored_text(
                 &mut self.output,

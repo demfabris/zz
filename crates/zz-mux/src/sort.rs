@@ -22,6 +22,14 @@ pub const WINDOW_TREE_ORDER_SEQ: [TmuxSortOrder; 4] = [
     TmuxSortOrder::Z,
 ];
 
+/// `window_client_order_seq`, the sequence `O` steps in `choose-client`.
+pub const WINDOW_CLIENT_ORDER_SEQ: [TmuxSortOrder; 4] = [
+    TmuxSortOrder::Name,
+    TmuxSortOrder::Size,
+    TmuxSortOrder::Creation,
+    TmuxSortOrder::Activity,
+];
+
 /// `window_buffer_order_seq`, the sequence `O` steps in `choose-buffer`.
 pub const WINDOW_BUFFER_ORDER_SEQ: [TmuxSortOrder; 3] = [
     TmuxSortOrder::Creation,

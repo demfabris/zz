@@ -73,6 +73,18 @@ pub(crate) fn choose_tree_key_action(
     }
 }
 
+/// `window_client_key`: the keys the client mode answers after
+/// `mode_tree_key` has had the press. They are not in the `choose-tree` table
+/// because the pin keeps them in the mode rather than in a key table.
+pub(crate) fn client_mode_key_action(input: &KeyInput) -> Option<ChooseTreeAction> {
+    match input_typed_text(input)? {
+        "d" => Some(ChooseTreeAction::ClientDetach),
+        "D" => Some(ChooseTreeAction::ClientDetachTagged),
+        "i" => Some(ChooseTreeAction::ClientInfo),
+        _ => None,
+    }
+}
+
 /// `prompt_key` under `PROMPT_TYPE_COMMAND` without `PROMPT_SINGLE`: the line
 /// is edited until an explicit close, so a key is either a character to append,
 /// one of the two closers, or nothing at all.

@@ -56,9 +56,16 @@
 #                        pins it, so the indicator draws and carries no clock.
 #   the inner shell      ENV= PS1='$ ' exec /bin/sh: no rc file, and a prompt
 #                        that carries no host, user, path or clock.
-# DECLARED, NOT PINNED: choose-client lists each client by its tty, and the two
-#   inner clients run on two different outer ptys. The client case is recorded
-#   (see CLIENT_REASON), so that value is never asserted.
+# MASKED, BECAUSE IT CANNOT BE PINNED: choose-client lists each client by its
+#   tty (`server_client_dispatch_identify` names a client after its ttyname and
+#   nothing renames it), and the two inner clients sit on two different outer
+#   ptys. The client case, and only it, therefore compares through
+#   `client_row_mask`: each side's own client name, read from that side's
+#   `list-clients`, becomes one fixed token, and on the rows that carried it the
+#   run of box fill that follows collapses, because a name of a different width
+#   moves the fill by a column. Every other cell of those screens - the row's
+#   key column, its text, the whole preview box, the copied status row, the
+#   selection colours and the cursor - is asserted whole.
 # Nothing else is masked. Anything not in those lists is compared.
 #
 # SETTLED CHECKPOINTS. A chooser swallows every key typed into it, so, as in
@@ -498,6 +505,25 @@ mark_both() {
   wait_screen tmux hard "MARK-$name on the tmux screen" '' "MARK-$name"
 }
 
+# The masked comparison, see the header. Reads one side's rows on stdin and
+# writes them back with that side's own client name replaced by a fixed token,
+# and with the box fill that follows it on the same row collapsed.
+client_row_mask() {
+  local name
+  name="$(client_name "$1")"
+  [ -n "$name" ] || die "the $1 side has no client name to mask"
+  ZZ_MASK_NAME="$name" python3 -c '
+import os, re, sys
+
+name = re.escape(os.environ["ZZ_MASK_NAME"])
+for line in sys.stdin.read().split("\n"):
+    if re.search(name, line):
+        line = re.sub(name, "/dev/CLIENT", line)
+        line = re.sub("\u2500{2,}", "\u2500", line)
+    sys.stdout.write(line + "\n")
+'
+}
+
 compare_rows() {
   local name="$1"
   local styled="$2"
@@ -508,6 +534,10 @@ compare_rows() {
   else
     mapfile -t zz_rows < <(capture_plain zz)
     mapfile -t tmux_rows < <(capture_plain tmux)
+  fi
+  if [ -n "${ROW_MASK:-}" ]; then
+    mapfile -t zz_rows < <(printf '%s\n' "${zz_rows[@]}" | "$ROW_MASK" zz)
+    mapfile -t tmux_rows < <(printf '%s\n' "${tmux_rows[@]}" | "$ROW_MASK" tmux)
   fi
   zz_cursor="$(cursor_tuple zz)"
   tmux_cursor="$(cursor_tuple tmux)"
@@ -852,6 +882,26 @@ wait_soft() {
   return 1
 }
 
+# CHOOSE-CLIENT, prefix D: `choose-client -Z`, whose `window_client_mode` is
+# the same mode tree over a flat list of attached clients. One client is
+# attached on each side, so the tree is one row: its key column, the client
+# name, and `#{t/p:client_activity}: session #{session_name}` after it. The
+# preview box underneath is `window_client_draw` rather than the tree's own:
+# the chosen client's current pane over a rule, and a copy of that client's own
+# status row at the bottom of the box. The client name is the one value this
+# fixture cannot pin, so this case, and only it, compares through the mask the
+# header describes. q ends the mode and the pane comes back whole.
+client_case() {
+  CASE_LABEL=client-tree
+  ROW_MASK=client_row_mask
+  mark_both clients
+  prefix_step 'session cho' D
+  verdict client-tree-open same
+  step 'MARK-clients' q
+  verdict client-tree-closed same
+  ROW_MASK=
+}
+
 # THE ZOOM, -Z. mode_tree_zoom (mode-tree.c:613) reads WINDOW_ZOOMED first and
 # calls window_zoom only when the window was not zoomed already; mode_tree_free
 # unzooms only in that case. Both halves are driven here, in a window split so
@@ -895,26 +945,6 @@ zoom_case() {
   verdict zoom-manual-released same
 }
 
-# CHOOSE-CLIENT, prefix D. Recorded: zz does not implement choose-client at all;
-# the command sits in commands.native-client-tools, an accepted gap outside this
-# lane. The pin's client tree lists each client by its tty, a value this
-# fixture cannot pin (see the header). Last case of its attach: q ends the pin's
-# mode, and on zz, where no mode opened, it would be typed into the shell.
-CLIENT_REASON='commands.native-client-tools, accepted and outside this lane: zz does not implement choose-client, and the pin lists each client by its tty'
-client_case() {
-  CASE_LABEL=client-tree
-  mark_both clients
-  type_on_both C-b
-  wait_for 'the armed prefix on the zz client' client_prefix_is zz 1
-  wait_for 'the armed prefix on the tmux client' client_prefix_is tmux 1
-  local before_tmux
-  before_tmux="$(styled_screen_of tmux)"
-  type_on_both D
-  wait_screen tmux hard 'the client tree on the tmux screen' "$before_tmux" 'session cho'
-  wait_screen zz soft 'the client tree on the zz screen' '' 'session cho'
-  verdict client-tree-open record "$CLIENT_REASON"
-}
-
 write_attach zz "$SCRATCH_DIR/attach-zz.sh"
 write_attach tmux "$SCRATCH_DIR/attach-tmux.sh"
 
@@ -937,8 +967,8 @@ run_cases() {
   buffer_filter_case
   find_window_case
   command_output_case
-  zoom_case
   client_case
+  zoom_case
   tall_case
 
   if [ "$FAILURES" -ne 0 ]; then
@@ -1062,6 +1092,24 @@ run_self_check() {
   wait_for 'the space withdrawn' outer_cursor_is "$zz_before"
   compare_rows self-check-restoration styled || true
   self_check_case 'equivalence: the pane restored after a chooser' none
+
+  # The client mode's own preview: i typed into the pin's client tree alone
+  # swaps `window_client_draw` for `window_client_draw_info`, which no other
+  # sabotage here reaches. The mask is on, so a difference reported here is not
+  # the two clients' names.
+  CASE_LABEL='self-check client info view'
+  ROW_MASK=client_row_mask
+  mark_both clientinfo
+  prefix_step 'session cho' D
+  before="$(styled_screen_of tmux)"
+  type_on_side tmux i
+  wait_screen tmux hard 'the one-sided info view' "$before" 'Client Name'
+  compare_rows self-check-client-info styled || true
+  self_check_case 'client info, the pin client tree on its info view alone' rows
+  type_on_side tmux i
+  wait_screen tmux hard 'the one-sided info view withdrawn' '' 'session cho'
+  step 'MARK-clientinfo' q
+  ROW_MASK=
 
   # A zoom on one side only: the attached window split on both sides, then
   # prefix z into the pin's client alone. The layout and the window's Z flag on

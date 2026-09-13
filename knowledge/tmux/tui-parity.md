@@ -4,7 +4,7 @@ title: "TUI parity campaign"
 description: "TUI parity obligations, their proof status, and progress against the fixed baseline."
 resource: compat/tui/campaign.json
 tags: [tmux, tui, compatibility, campaign]
-timestamp: 2026-09-12T00:00:00Z
+timestamp: 2026-09-13T00:00:00Z
 ---
 
 # TUI parity campaign
@@ -17,11 +17,11 @@ The contract compares CLI stdout, stderr and exit codes exactly, and rendered ce
 
 Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or closed source gaps do not establish TUI parity. Only obligations with verified proof count as complete.
 
-Fixed baseline: **7/12 verified**. Added scope: **0/1 verified**.
+Fixed baseline: **7/12 verified**. Added scope: **0/6 verified**.
 
-Status counts: unmeasured: 4, different: 0, active: 2, review: 0, blocked: 0, verified: 7.
+Status counts: unmeasured: 8, different: 0, active: 2, review: 1, blocked: 0, verified: 7.
 
-Dependency-ready obligations, by priority: TUI-006, TUI-008, TUI-009, TUI-013.
+Dependency-ready obligations, by priority: TUI-006, TUI-008, TUI-009, TUI-013, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018.
 
 ## everyday: Everyday terminal use
 
@@ -48,8 +48,13 @@ Dependency-ready obligations, by priority: TUI-006, TUI-008, TUI-009, TUI-013.
 | --- | --- | ---: | --- |
 | TUI-009: Outer-terminal capabilities and fidelity | active | 9 | TUI-002, TUI-003 |
 | TUI-010: Slow output, recovery and client lifecycle | verified | 10 | TUI-001, TUI-002 |
-| TUI-011: Remaining stock client command inventory | unmeasured | 11 | TUI-003, TUI-006, TUI-007 |
+| TUI-011: Remaining stock client command inventory | review | 11 | TUI-003, TUI-006, TUI-007, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018 |
 | TUI-012: Superset commands beside tmux behavior | unmeasured | 12 | TUI-003, TUI-004, TUI-008, TUI-009, TUI-010 |
+| TUI-014: Client mode tools in the raw TUI | unmeasured | 14 | TUI-003 |
+| TUI-015: A lock surface a client can draw | unmeasured | 15 | none |
+| TUI-016: Server log and terminal introspection | unmeasured | 16 | none |
+| TUI-017: Rich capture transports and the snapshot residues | unmeasured | 17 | none |
+| TUI-018: Caller stream forms | unmeasured | 18 | none |
 
 ## Obligation details
 
@@ -518,7 +523,7 @@ Review: `compat/tui/evidence/TUI-010/attempt-01/review.md`.
 
 ### TUI-011: Remaining stock client command inventory
 
-Status: unmeasured.
+Status: review.
 
 Acceptance:
 
@@ -530,16 +535,19 @@ Sources:
 
 - `compat/tmux-oracle.json`
 - `compat/tmux-gaps.json`
-- `crates/zz/src/lib.rs`
-- `crates/zz-tui/src/app.rs`
+- `compat/tui-client-commands.sh`
 - `compat/attached-client.sh`
-- `compat/diff-scenario.sh`
+- `compat/scenarios/capture-pane.txt`
+- `compat/scenarios/smoke/refresh-status.txt`
+- `crates/zz/src/lib.rs`
+- `crates/zz-daemon/src/daemon.rs`
+- `crates/zz-protocol/src/catalog.rs`
 
 Tmux gap references: `commands.native-client-tools`, `clients.interactive-refresh`, `options.lock-program`, `protocol.binary-streams`, `capture.rich-transports`.
 
-The previous campaign accepts several native client-tool and transport choices. Everyday terminal and selected query tests cannot establish this remaining inventory.
+THE ROSTER IS COMPLETE AND COMPARED. compat/tui-client-commands.sh carries it: its header table names every remaining client-side command and flag with the pin behaviour, zz's disposition and which of the three dispositions it takes, and one case below it invokes that entry clientless against both binaries inside one outer pinned tmux and compares five channels - exit status, stdout bytes, stderr bytes, the attached client's whole decoded screen with its cursor, and a fixed list-* state. WHAT ASSERTS: 57 comparisons identical on three consecutive runs at 80x24, 37 recorded, none SIBLING. Proved whole: refresh-client bare, -S, -t, a missing -t, -f, -F, -A, -B, -C and the -r argument error; capture-pane over an explicit range with -J, -T, reversed bounds, a history start, -q on a missing target, the loud missing target, -b into a named buffer and show-buffer of it; load-buffer - from caller stdin, save-buffer - and -a -, show-buffer named, missing and with no buffers at all; show-hooks bare, -g, -w, -p, -B, a named hook and a missing one; the lock family's exit, stdout and stderr for lock-server, lock-session, lock-client with -t and with none, both missing-target errors, the after-lock-server hook firing and both lock options' stored values. THE ONE LANDING: cmd_find_client with no -t is cmd_find_current_client (cmd-find.c:1274) - the invoking client when it has a session, then the best client of the session the invocation came from, then the best client of the best session. zz already had that rule in resolve_client_target and a stricter one in resolve_attached_client, which refresh-client and lock-client use, so a clientless CLI answered `no current client` against a server with one attached client where the pin refreshed or locked it. Measured 2026-09-13: eight cases moved from differing to identical (refresh-client bare, -S, -f, -F, -f '' and the three control-only flags, which now answer the pin's `not a control client`), and the fallback is one function both resolvers call. WHAT IS RECORDED, AND WHY. (1) commands.native-client-tools: choose-client, clock-mode, customize-mode and switch-mode are hard-rejected in UNIMPLEMENTED_TMUX_COMMANDS, so the CLI prints `unsupported command: <name>` and the attached screen never moves, while the pin opens a mode on the target pane. Measured on the pin at 80x24 on 2026-09-13, choose-client -t %0 draws row 0 `(0) /dev/pts/N: HH:MM: session cli` in the message style, an empty row area to row 11, the preview box header `┌ /dev/pts/N (sort: name) (view: preview)` on row 12 and the client's own session pane inside it to row 23, and q gives the pane back cell for cell. suspend-client is the same rejection against a pin that sends SIGTSTP to the client process: its case is deliberately the last in the file, because the pin's client stops for good. server-access is rejected against a pin that keeps a socket access list. (2) options.lock-program: the lock family's three CLI channels, its hook and its two stored options are identical, and what differs is only what the pin draws - it spawns lock-command on each client tty. Under lock-command true the pin's client comes straight back and every lock case's screen and state are identical too. (3) capture.rich-transports: -C, -F, -H, -L, -P and -R stay loudly refused; with no -S or -E the pin prints every visible row and zz stops at the last written one; -N keeps trailing spaces to the pane edge on the pin and to the last written cell on zz; -M falls back to the pane on the pin and errors on zz; -a's wording differs; and -e keeps one trailing cell the pin trims, in the vendored formatter in crates/zz-terminal/src/session.rs, which this lane does not own. (4) protocol.binary-streams: source-file -, display-message -I and split-window -I stay refused, and the pin's source-file - really does apply its stdin, which is why the follow-up option read is recorded too. (5) show-messages: the log line shape matches, but every row names the client that ran the command - client-<pid> on the pin, device-<n> on zz - and the pin reprints each command through its own argument printer, so the bytes cannot match; -J, -T and -t are refused against a pin that lists jobs, terminals and tolerates the target. PRODUCT DECISION, THE CLIENT MODE TOOLS. The old behaviour is commands.native-client-tools' reading of 2026-09-06: choose-client, clock-mode, customize-mode and suspend-client are cell-drawn client chrome that zz answers with the picker, settings and client list, and the CLI rejects them. The pin's measured behaviour is the mode screen above, drawn in the target pane and reachable only with a client attached. The raw TUI renders the pin's cells and the GUI keeps its native presentation: decided 2026-09-13 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible. TUI-014 carries it. PRODUCT DECISION, THE LOCK SURFACE. The old behaviour is options.lock-program's reading: lock-server, lock-session and lock-client parse and fire their hook and no lock program is spawned onto a client terminal. The pin's measured behaviour is that server_lock runs lock-command on each attached client's tty and the client's screen is that program until it exits. The raw TUI renders the pin's cells and the GUI keeps its native presentation: decided 2026-09-13 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible. TUI-015 carries it, as a client-rendered lock rather than a spawned tty process. CHOOSE-CLIENT DID NOT LAND HERE AND TUI-006 STAYS OPEN ON ITS ONE CASE. The daemon can build the rows, and chooser_presentation.rs already hands the raw TUI everything it draws, but the client tree needs a ChooseTreeKind and a ChooseTreeTarget the wire does not have, and the appended ChooseTreeKind variant needs one match arm in paint_chooser in crates/zz-tui/src/render.rs, which this lane's zones exclude - the input and superset lanes own that file this cycle. Threading a client row through ChooseTreeSession is a further ~1000 lines of session/window/pane assumptions (branches, the expanded sets, assign_row_keys, assign_row_text, relatives and the kill prompts each match on ChooseTreeTarget) plus a client format context for `#{t/p:client_activity}: session #{session_name}`. That is TUI-014's first clause, with the pin measurement above already taken. compat/tui-choosers.sh's client-tree-open therefore keeps cycle 6's record; this lane did not touch TUI-006. EVIDENCE compat/tui/evidence/TUI-011/attempt-01/, notes.md names every file.
 
-Next action: Extract the command roster from the linked gaps and pin inventory; split independent command families before implementation.
+Next action: TUI-011 cannot verify before its children do: TUI-014 (the client mode tools, choose-client first, which also flips compat/tui-choosers.sh's client-tree-open and lets TUI-006 verify), TUI-015 (the lock surface), TUI-016 (show-messages -J, -T and -t), TUI-017 (the rich capture transports and the three text-snapshot residues) and TUI-018 (the caller stream forms). Each child owns one accepted gap, so each closes its own items with its own measurement; when all five are verified this parent's roster has no recorded entry left and it verifies on the same fixture.
 
 ### TUI-012: Superset commands beside tmux behavior
 
@@ -586,3 +594,118 @@ Tmux gap references: `harness.proof-holes`, `tui.client-input-backpressure`.
 SPLIT FROM TUI-001 CLAUSE 2 on 2026-09-09 (decided 2026-09-09 by fabrico, relayed in-session: 'can we continue for now and record that test for later'; reversible). THE RECORD: an exploratory run on 2026-09-09 on the macbook exited 2 with 'zz geometry report did not happen within 10 seconds' from an unattested, never-rebuilt target/debug/zz whose revision is unrecoverable. ALREADY KNOWN: the stale-pre-fix-binary explanation is refuted twice by tui.client-input-backpressure's resolution (the fixture exited 0 at pre-fix 012b4dcc, and the outer pinned tmux drains continuously so the stalled backpressure can never build in this fixture on any platform); cycle 1 made compat/tui-pane-geometry.sh retain the full timeout dump on every expiry, proven by sabotage (see compat/tui/evidence/TUI-001/attempt-01/timeout-diagnostics/), so any macOS recurrence self-documents; an attested Linux build passes six of six runs in 4-5s against the 10s bound. WHAT THIS NEEDS: one attested build and three fixture runs on the macbook.
 
 Next action: Whenever fabrico is next on the macbook: follow compat/tui/README.md 'Launching the deferred macOS run' (mint F-TUI-MACOS-TIMEOUT, launch compat/tui/run-2.js). Nothing blocks on this meanwhile.
+
+### TUI-014: Client mode tools in the raw TUI
+
+Status: unmeasured.
+
+Acceptance:
+
+- Implement choose-client so the raw TUI draws the pin's client mode: the row's key column, the client name and the `#{t/p:client_activity}: session #{session_name}` text, the preview of that client's current pane, the info preview `i` raises, the sort orders name, size, creation and activity, the filter, the help box, and d, D, x, X, t, T, C-t and Enter with the pin's `detach-client -t '%%'` default command. Flip compat/tui-choosers.sh's client-tree-open to asserted with a --self-check sabotage.
+- Implement clock-mode, customize-mode and switch-mode on the same mode surface, each compared whole-screen against the pin at 80x24 and after the mode ends, and compare suspend-client and server-access exactly: either the pin's behaviour or a refusal whose exit status, stdout and stderr match a measured pin refusal.
+- Every entry keeps its exact stdout, stderr and exit status in compat/tui-client-commands.sh, and each command closed here closes its item in commands.native-client-tools with a dated measurement.
+
+Sources:
+
+- `compat/tui-client-commands.sh`
+- `compat/tui-choosers.sh`
+- `crates/zz-protocol/src/catalog.rs`
+- `crates/zz-protocol/src/message.rs`
+- `crates/zz-mux/src/command.rs`
+- `crates/zz-daemon/src/daemon.rs`
+- `crates/zz-daemon/src/daemon/chooser_presentation.rs`
+- `crates/zz-tui/src/render/chooser.rs`
+
+Tmux gap references: `commands.native-client-tools`, `clients.interactive-refresh`.
+
+SPLIT FROM TUI-011 on 2026-09-13, one child per accepted gap. THE MEASUREMENT: catalog.rs's UNIMPLEMENTED_TMUX_COMMANDS hard-rejects choose-client, clock-mode, customize-mode, switch-mode, suspend-client and server-access, so the CLI prints `unsupported command: <name>` with exit 1 and the attached screen never moves. The pin opens a mode on the target pane for the first four and exits 0. Measured on the pin at 80x24 on 2026-09-13 with one attached client: choose-client -t %0 draws row 0 `(0) /dev/pts/N: HH:MM: session cli` in the message style, rows 1-11 empty, the preview box header `┌ /dev/pts/N (sort: name) (view: preview)` on row 12 and the client's current pane inside the box to row 23; q gives the pane back cell for cell, which compat/tui-client-commands.sh asserts today as client-tools-restored. suspend-client sends SIGTSTP to the client process (cmd-detach-client.c) and really does stop an attached raw client, so its case is the last in that fixture. THE BLOCKER THAT KEPT IT OUT OF CYCLE 7's roster lane: the client tree needs an appended ChooseTreeKind and a ChooseTreeTarget for a client, and the appended kind needs one match arm in paint_chooser in crates/zz-tui/src/render.rs, a file the roster lane's zones exclude; ChooseTreeSession then needs a client row source beside its session, window and pane targets, and a client format context for the row text. commands.native-client-tools stays accepted for the GUI: the product decision recorded in TUI-011 covers only the raw TUI.
+
+Next action: Take choose-client first: it is the one case compat/tui-choosers.sh still records, so TUI-006 verifies as soon as it lands. Build the rows in the daemon and publish them through chooser_presentation.rs, which already carries rows, sort label, filter flag, styles and preview to the raw TUI.
+
+### TUI-015: A lock surface a client can draw
+
+Status: unmeasured.
+
+Acceptance:
+
+- Specify and build what a locked zz client shows, including ownership, cancellation, what a raw-terminal client draws and what the GUI does, and arm it from lock-after-time as well as from the three lock commands.
+- Compare a locked client whole-screen against the pin under a fixed lock-command at 80x24, and keep the three commands' exact stdout, stderr, exit status and after-lock-server hook, which compat/tui-client-commands.sh already asserts.
+
+Sources:
+
+- `compat/tui-client-commands.sh`
+- `crates/zz-daemon/src/daemon.rs`
+- `crates/zz-mux/src/tmux_options.rs`
+- `knowledge/tmux/divergences.md`
+
+Tmux gap references: `options.lock-program`.
+
+SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT: lock-server, lock-session and lock-client validate their target and return an empty execution, and compat/tui-client-commands.sh asserts on 2026-09-13 that their exit status, stdout and stderr match the pin for lock-server, lock-session, lock-client with -t and with no target at all, both missing-target errors, that after-lock-server fires on both, and that lock-after-time and lock-command read back the same way. What differs is only what the pin draws: server_lock spawns lock-command on each attached client's tty and that program owns the client's screen until it exits, while zz spawns nothing. Under lock-command true the pin's client returns at once and even the screen and state are identical, which is why the fixture can hold the lock cases at all. The pin's own default is TMUX_LOCK_CMD, whatever configure found on the machine that built the oracle - vlock here - so the default value is not a parity target. The product decision recorded in TUI-011 puts the pin's cells in the raw TUI and keeps the GUI native.
+
+Next action: Specify the surface before writing code: options.lock-program says to reopen only when ownership, cancellation and what a raw-terminal client shows are settled. A daemon idle timer plus a client-rendered lock, not a spawned tty process.
+
+### TUI-016: Server log and terminal introspection
+
+Status: unmeasured.
+
+Acceptance:
+
+- Answer show-messages -J with the running format jobs and -T with the known terminals in the pin's shape, and tolerate -t the way the pin does, comparing exact stdout, stderr and exit status.
+- Decide and record what the server log prints for the client that ran a command, given that a clientless CLI is client-<pid> on the pin and device-<n> on zz, and either close that difference or register it with the measurement.
+
+Sources:
+
+- `compat/tui-client-commands.sh`
+- `crates/zz-protocol/src/catalog.rs`
+- `crates/zz-daemon/src/daemon.rs`
+
+Tmux gap references: `clients.interactive-refresh`.
+
+SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT, 2026-09-13: show-messages itself is the same shape on both - `HH:MM: <client> command: <text>` and `HH:MM: <client> message: <text>`, newest first - but no run can match byte for byte, because every row names the invoking client, client-<pid> on the pin and device-<n> on zz, and the pin reprints each command through args_print, so `capture-pane -pa` comes back as `capture-pane -ap`. show-messages -J and -T are refused with `unsupported command: show-messages -J` and `-T` against a pin that prints the running jobs and, for -T, 234 lines of terminal capabilities per attached terminal; -t is refused against a pin that accepts it and prints the same log.
+
+Next action: Start with -T: the daemon already knows each client's terminal features, so the missing half is the pin's print shape. -J needs the format job table. The client naming question is a decision to record before either is written.
+
+### TUI-017: Rich capture transports and the snapshot residues
+
+Status: unmeasured.
+
+Acceptance:
+
+- Answer capture-pane -C, -F, -H, -L, -P and -R with the pin's bytes over a rich snapshot the terminal worker owns, or keep each refusal with a measured reason that names the workload it would serve.
+- Close the three text residues the roster measured: the default range printing every visible row rather than stopping at the last written one, -N keeping trailing spaces to the pane edge, and -M falling back to the pane when it is in no mode, plus the -a wording and the one trailing cell -e keeps.
+
+Sources:
+
+- `compat/tui-client-commands.sh`
+- `compat/scenarios/capture-pane.txt`
+- `crates/zz-daemon/src/daemon.rs`
+- `crates/zz-terminal/src/session.rs`
+
+Tmux gap references: `capture.rich-transports`.
+
+SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT, 2026-09-13 at 80x24 on a pane holding three written rows: `capture-pane -p` prints 24 rows on the pin and 3 on zz; `-p -N -S 0 -E 0` prints the row padded with trailing spaces on the pin and trimmed at the last written cell on zz; `-p -M` prints the pane on the pin and answers `pane is not in a native mode` on zz; `-p -a` says `no alternate screen` on the pin and `alternate screen is not active` on zz; `-p -e -S 0 -E 2` differs in one trailing cell on the prompt row, because the -e transform runs through the vendored formatter in crates/zz-terminal/src/session.rs whose Vt format keeps a cell the pin trims. Every explicit-range form without -e is identical, and so are -J, -T, reversed bounds, a history start, -q on a missing target, the loud missing target and -b into a named buffer. The six rich flags are refused with `unsupported command: capture-pane -X`. The residues are terminal-owned: the capture path is CaptureOptions in crates/zz-terminal/src/session.rs, which is why the roster lane recorded them.
+
+Next action: The three residues are worth more than the six rich flags and are a smaller change: they live in the terminal worker's capture, not in a new transport. Take them first and keep compat/scenarios/capture-pane.txt green, since its explicit ranges already pass on both.
+
+### TUI-018: Caller stream forms
+
+Status: unmeasured.
+
+Acceptance:
+
+- Design one bounded command-stream channel covering stdin, stdout, binary bytes, backpressure, cancellation and process lifetime, and carry source-file -, display-message -I and split-window -I over it, or keep each refusal with the workload it would serve.
+- Compare each form's exact stdout, stderr, exit status and the state it leaves behind, including that the pin's source-file - really applies its stdin.
+
+Sources:
+
+- `compat/tui-client-commands.sh`
+- `crates/zz/src/lib.rs`
+- `crates/zz-protocol/src/catalog.rs`
+- `crates/zz-daemon/src/daemon.rs`
+- `knowledge/designs/tmux-superset-roadmap.md`
+
+Tmux gap references: `protocol.binary-streams`.
+
+SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT, 2026-09-13: `printf 'set -g @x one' | source-file -` exits 0 on the pin and the option reads back `one`; zz answers `source-file from standard input is not supported` with exit 1 and the option stays unset. `display-message -I` answers `pane is not empty` on the pin against a shell pane and `unsupported command: display-message -I` on zz. `split-window -I` builds a pane on the pin, which the fixture kills again, and is refused on zz. The two adopted forms are already at parity: load-buffer - from caller stdin, save-buffer - and save-buffer -a - to caller stdout all compare identical on exit, stdout, stderr, screen and state. protocol.binary-streams' second acceptance clause is the shape of this obligation: one reviewed channel, not five transports.
+
+Next action: Nothing in the roster blocks on this: it is the last uncovered family and the design is milestone 5 of knowledge/designs/tmux-superset-roadmap.md. Measure a named workload first - the corpus supplies one for the buffer forms and none yet for the other three.

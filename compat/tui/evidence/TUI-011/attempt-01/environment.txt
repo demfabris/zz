@@ -1,0 +1,22 @@
+TUI-011 attempt-01, the remaining stock client command inventory
+
+2026-09-13T03:07:50-03:00
+
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+
+repository /home/demfabris/dev/zz-tui-roster
+revision   53d206dc5167ab009f41b6bbd1a15af6ecea6c18
+branch     HEAD
+worktree   3 modified paths at the time of writing
+
+zz         /home/demfabris/dev/zz-tui-roster/target/debug/zz
+zz built   2026-09-13T02:59:49-03:00
+pin        /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+pin commit d77c9dc6aa021e4bc61f0da128c591af695e6466
+tmux next-3.8
+
+locale     LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8
+cargo      cargo 1.97.0 (c980f4866 2026-06-30)
+rustc      rustc 1.97.0 (2d8144b78 2026-07-07)

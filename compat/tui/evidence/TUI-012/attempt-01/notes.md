@@ -18,7 +18,7 @@ none of them, and the only row that names a superset verb at all,
 - `environment.txt` - box, revision, binaries, pin, locale, and the environment every run used.
 - `tui-superset.self-check.txt` - `compat/tui-superset.sh --self-check`, exit 0.
 - `tui-superset.run-1.txt`, `run-2.txt`, `run-3.txt` - three consecutive runs, each exit 0,
-  147 asserted cases, 0 recorded.
+  189 asserted cases, 0 recorded.
 - `tui-screen-diff.txt`, `tui-screen-diff.self-check.txt` - the sidebar cases this lane owns,
   unchanged and still green, exit 0.
 - `tui-pane-geometry.txt`, `status-row.C-locale.txt`, `attached-client.txt` - the surfaces every
@@ -37,6 +37,15 @@ verb a raw TUI can run is then driven twice, once from the CLI and once through 
 `bind-key -n` binding, and each case asserts either what it draws or the exact message it refuses
 with. A refusal is a declared case, not a divergence: the pin has no `agent-send` to compare with.
 
+The binding half is a pass of its own, `bindings`, and it covers all twenty-five names: one key is
+rebound before each case so no case inherits the one before it, and the answer is read from the
+client's message row, which is where a command's answer lands when the command came from a key.
+`reload-config` says `Reloaded zz configuration` there, the sixteen argument-validation and
+target-resolution refusals say their exact message, `send-text` is read from the pane's own grid,
+`focus-sidebar`, `tools`, `split-picker`, `split-browser` and `split-agent` are read from the
+screen, `new-browser` from the window count, and `debug-marker`, which answers nothing anywhere, is
+bound as a sequence whose first command reports on the row.
+
 The refusals asserted whole, message for message: `focus-sidebar requires an interactive client`
 (the CLI is not an interactive client, the way the pin refuses a client command with no client),
 `browser screenshots require the zz app`, `agent commands require the zz app`, `editor panes are
@@ -53,11 +62,17 @@ bound binding; the Agent card with its provider label following `set-agent-provi
 command-output overlay opened by `tools`.
 
 **Clause 2, the terminal around them.** For the sidebar, the picker, a browser pane, an Agent pane
-and the command-output overlay: the same ordinary commands run on both sides against explicit
-targets, the pin's own pane arithmetic is compared while the surface is up, and once the surface
-is gone the whole decoded screen and the whole cursor tuple are the pin's. A pane surface is
-removed rather than withdrawn, so the pin gets the same pane arithmetic - an ordinary split where
-zz gets the zz kind, and a kill on both sides afterwards.
+and the command-output overlay: create (`new-window`), select (`select-window`, `select-pane`),
+split, resize, detach and reattach run on both sides against explicit targets, the pin's own pane
+and window inventory is compared while the surface is up, and once the surface is gone the whole
+decoded screen and the whole cursor tuple are the pin's. A pane surface is removed rather than
+withdrawn, so the pin gets the same pane arithmetic - an ordinary split where zz gets the zz kind,
+and a kill on both sides afterwards.
+
+Detach and reattach separate the two kinds of state and both halves are asserted: a pane surface is
+session state and is still drawn for the client that comes back, with the layout the pin has; the
+sidebar and the command-output overlay are the client's and are gone, with the canvas the pin
+draws.
 
 Input ownership is asserted where it lives: a key in the sidebar's own table never reaches the
 pane while the sidebar is focused, and the pane owns the keyboard again the moment the sidebar is
@@ -98,6 +113,17 @@ screenshot verb says so in the message a raw TUI gives.
 - **The clear and the marker are one command line.** Sent as two, the second line's echo can
   interleave with the first's before the shell has read it - measured here as
   `pprintf 'MARK-%s\n' closedrintf '\033[2J...'` in the pane's own grid, with neither command run.
+- **A bound command sequence does not stop at a failure, on either binary.** Measured 2026-09-13
+  on both: a key bound to `<failing command> ; rename-window TOKEN` renames the window on the pin
+  and on zz alike, so a later command in a bound sequence proves that the binding fired, never that
+  an earlier command succeeded. A zz client message otherwise stays on the row indefinitely - still
+  there after eleven seconds - but a status repaint that follows it overwrites it, which is why the
+  binding pass reads a verb's outcome from the message it prints and not from a token after it.
+- **The client's message row is cut at the client's width.** The two shell-integration messages are
+  longer than 120 columns, and their cases assert the cut text rather than a prefix they chose.
+- **The picker's card is drawn for the active pane only** (`render.rs` draws the picker arm under
+  `if active`), where a browser or Agent card draws either way. Clause 2 selects the picker pane
+  again after the ordinary commands before asking for its marker.
 - **The picker's Editor choice is refused behind a product setting**, not behind a parity profile:
   the other three kinds need no flag, and the refusal is drawn on the client's message row while
   the card stays up.
@@ -117,5 +143,6 @@ start honouring. Each of the three carries a dated 2026-09-13 measurement saying
 `--self-check` drives one deliberate fault per channel and requires the same code the real cases
 use to report it: a name the server does not know, a refusal message that does not match, a verb
 that accepts where a refusal is declared, a surface that never drew, a message row that never
-carried the message, a key the pane really did take, a canvas that is not the pin's, and a layout
-only one side has. Eight faults, eight reports.
+carried the message, a cut message the row never carried, a bound verb whose key was never
+pressed, a key the pane really did take, a canvas that is not the pin's, and a layout only one
+side has. Ten faults, ten reports.

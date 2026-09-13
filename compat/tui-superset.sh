@@ -21,6 +21,23 @@
 # profile, no activation mode and no width invokes any of them; the only paths
 # are the CLI and a user binding, and every verb here is driven through both.
 #
+# THE TWO PATHS. Every verb is driven from the CLI, where its answer is stdout,
+# stderr and an exit status, and through an ordinary `bind-key -n` binding,
+# where its answer is the client's message row. A verb that answers nothing
+# visible is bound as a sequence, `verb ; rename-window TOKEN`, and the case
+# waits for the token on that same row: a bound sequence runs its second command
+# on both binaries even when the first one failed, so the rename alone proves
+# nothing, but a zz client message stays on the row indefinitely, so a verb that
+# refused keeps its message where the status row would be and the token never
+# arrives. A message longer than the client is cut at the client's width, and
+# the two that are asserted whole rather than cut.
+#
+# WHAT CLAUSE 2 DRIVES AROUND EACH SURFACE: create (new-window), select
+# (select-window, select-pane), split, resize, detach and reattach, the same
+# commands against the same explicit targets on both sides. A pane surface
+# survives a reattach because a pane is session state; the sidebar and the
+# command-output overlay do not, because they are the client's.
+#
 # THE DECODED SCREEN IS THE CONTRACT. Every screen comparison reads the outer
 # pinned tmux's own grid through `capture-pane -p -e`, so attribute order,
 # batching and cursor spelling collapse on both sides before anything is
@@ -247,6 +264,18 @@ dump_diagnostics() {
   ls -1 -- "$dir" >&2 || true
 }
 
+# The reporting form of wait_for: a case that owns the failure message uses this
+# and prints its own, where wait_for's own timeout is a fixture error.
+wait_for_quietly() {
+  local attempt
+  for ((attempt = 0; attempt < WAIT_ATTEMPTS; attempt++)); do
+    if "$@" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  return 1
+}
 wait_for() {
   local label="$1"
   local attempt
@@ -293,9 +322,12 @@ client_message_row() {
 # Every zz verb in this file runs through here: the combined output and the
 # status are kept so a case can assert the exact message and nothing else has
 # to re-run the command.
+# Standard input is closed for every one of them: agent-send and send-text read
+# it when no text is on the command line, and a one-shot that blocks on an
+# inherited terminal is a hang, not a measurement.
 run_zz() {
   set +e
-  LAST_OUTPUT="$(zz_command "$@" 2>&1)"
+  LAST_OUTPUT="$(zz_command "$@" 2>&1 </dev/null)"
   LAST_STATUS=$?
   set -e
 }
@@ -401,6 +433,22 @@ screen_lacks() {
     pass "$name"
   else
     fail "$name" "the $side screen still carries: $text"
+  fi
+}
+# A message longer than the client is cut at the client's width before it
+# reaches the row, so a case whose message does not fit asserts the cut text
+# rather than a prefix it chose: that asserts the truncation too.
+message_row_is_truncated() {
+  local name="$1"
+  local side="$2"
+  local message="$3"
+  local want="${message:0:COLUMNS_UNDER_TEST}"
+  if wait_message_row "$side" "$want"; then
+    pass "$name"
+  else
+    fail "$name" "the $side message row never carried the message cut to $COLUMNS_UNDER_TEST columns"
+    printf '      want: %s\n' "$want"
+    printf '      row:  %s\n' "$(client_message_row "$side")"
   fi
 }
 message_row_has() {
@@ -978,8 +1026,10 @@ run_output_verbs() {
   pane_grid_lacks overlay-owns-its-keys "$pane" z
   screen_lacks tools-overlay-closed zz '# Workspace tools'
 
+  accepts search-direct copy-mode-search-prompt -t "$pane"
+  message_row_has search-without-an-overlay-direct zz 'terminal search is unsupported here'
   bind_and_press F6 copy-mode-search-prompt -t "$pane"
-  message_row_has search-without-an-overlay zz 'terminal search is unsupported here'
+  message_row_has search-without-an-overlay-bound zz 'terminal search is unsupported here'
 }
 
 overlay_closed() {
@@ -1010,6 +1060,137 @@ run_misc_verbs() {
   refuses import-with-nothing-to-import 'no tmux configuration found' import-tmux-config
 }
 
+# EVERY declared verb through a user binding, which is the second of the two
+# paths the contract names. One key is rebound before each case, so the case
+# that follows cannot inherit the one before it.
+#
+# A verb that answers nothing visible is bound as a SEQUENCE, `verb ; rename-window
+# TOKEN`, and the case waits for the token on the client's message row. Both
+# halves of that were measured on 2026-09-13 rather than assumed: a bound
+# sequence runs its second command on BOTH binaries even when the first one
+# failed, so the rename alone proves nothing, and a zz client message stays on
+# the row indefinitely (still there after eleven seconds), so a verb that
+# refused keeps its message where the status row would be and the token never
+# arrives. The token is therefore a positive observable for `the verb ran and
+# said nothing`.
+BOUND_KEY=F8
+bind_the_key() {
+  zz_command bind-key -n "$BOUND_KEY" "$@" || die "zz refused bind-key -n $BOUND_KEY $*"
+  press "$BOUND_KEY"
+}
+bound_message() {
+  local name="$1"
+  local message="$2"
+  shift 2
+  bind_the_key "$@"
+  message_row_has "$name" zz "$message"
+}
+bound_screen() {
+  local name="$1"
+  local text="$2"
+  shift 2
+  bind_the_key "$@"
+  screen_has "$name" zz "$text"
+}
+# The verb that answers nothing at all. The binding is a sequence whose second
+# command reports on the client's own message row, so the case asserts that the
+# key ran the verb through the binding; WHAT the verb answered is asserted on
+# the direct path, where the answer is stdout, stderr and an exit status. That
+# split is deliberate and measured: a bound sequence runs its later commands on
+# both binaries even when an earlier one failed, and a status repaint overwrites
+# a message that a failure had just put on the row, so a token here cannot tell
+# success from failure and is not asked to.
+bound_reaches_the_verb() {
+  local name="$1"
+  shift
+  local token="BOUND-$name"
+  # The reporter is the FIRST command of the sequence, not the last: the verb
+  # this form is for takes free-form arguments and swallows the `;` separator
+  # along with everything after it. The sequence still runs in order and zz does
+  # not stop at a failure, so the token says the binding fired and the verb ran
+  # after it.
+  bind_the_key display-message "$token" ';' "$@"
+  message_row_has "$name" zz "$token"
+}
+
+run_binding_pass() {
+  fresh_group bindings 0
+  attach_default_clients
+  local pane picker_pane browser_pane
+  pane="$(first_pane zz)"
+
+  # The two that answer nothing go first, while the message row is still the
+  # status row and no earlier refusal is sitting on it.
+  bound_reaches_the_verb debug-marker debug-marker bound-pass-marker
+  bound_message reload-config 'Reloaded zz configuration' reload-config
+
+  bound_message agent-respond \
+    'agent-respond needs exactly one of --allow, --deny, or --option ID' agent-respond
+  bound_message agent-send \
+    'agent-send needs text on the command line or on standard input' agent-send
+  bound_message capture-browser 'capture-browser needs an output path (-o)' capture-browser
+  bound_message copy-mode-search-prompt 'terminal search is unsupported here' \
+    copy-mode-search-prompt -t "$pane"
+  bound_message import-tmux-config 'no tmux configuration found' import-tmux-config
+  bound_message restart-agent-pane "pane $pane is not an agent" restart-agent-pane -t "$pane"
+  bound_message select-pane-kind \
+    'select-pane-kind requires exactly one of: terminal, browser, agent, editor' select-pane-kind
+  bind_the_key send-last-output -t "$pane"
+  message_row_is_truncated send-last-output zz "$(marks_message "$pane" send-last-output)"
+  bind_the_key show-last-output -t "$pane"
+  message_row_is_truncated show-last-output zz "$(marks_message "$pane" show-last-output)"
+  bound_message set-agent-provider 'set-agent-provider needs exactly one provider' set-agent-provider
+  bound_message set-agent-session 'set-agent-session needs exactly one ACP session ID' set-agent-session
+  bound_message set-browser-profile 'set-browser-profile needs exactly one profile name' set-browser-profile
+  bound_message set-browser-tabs 'set-browser-tabs needs at least one URL' set-browser-tabs
+  bound_message set-browser-url 'set-browser-url needs a URL' set-browser-url
+  bound_message set-editor-path "pane $pane is not an editor" \
+    set-editor-path -t "$pane" /tmp/zz-superset-editor.txt
+  bound_message show-agent-permission "invalid target: $pane is not an agent pane" \
+    show-agent-permission -t "$pane"
+
+  bind_the_key send-text -t "$pane" BOUNDPASSTEXT
+  if wait_for_quietly pane_grid_has zz "$pane" BOUNDPASSTEXT; then
+    pass send-text
+  else
+    fail send-text 'the bound send-text never reached the pane'
+  fi
+
+  bound_screen focus-sidebar "$SIDEBAR_MARKER" focus-sidebar
+  press q
+  wait_for 'the sidebar withdrawn' sidebar_down
+
+  bound_screen tools '# Workspace tools' tools
+  press Escape
+  wait_for 'the overlay closed' overlay_closed
+
+  bound_screen split-picker "$PICKER_MARKER" split-picker
+  wait_for 'the bound picker pane' pane_count_is zz 2
+  picker_pane="$(active_pane zz)"
+  press Escape
+  wait_for 'the bound picker cancelled' pane_count_is zz 1
+
+  bound_screen split-browser 'about:blank' split-browser
+  wait_for 'the bound browser pane' pane_count_is zz 2
+  browser_pane="$(active_pane zz)"
+  run_zz kill-pane -t "$browser_pane"
+  wait_for 'the bound browser pane killed' pane_count_is zz 1
+
+  bound_screen split-agent 'Agent' split-agent
+  wait_for 'the bound agent pane' pane_count_is zz 2
+  run_zz kill-pane -t "$(active_pane zz)"
+  wait_for 'the bound agent pane killed' pane_count_is zz 1
+
+  bind_the_key new-browser
+  if wait_for_quietly window_count_is zz 2; then
+    pass new-browser
+  else
+    fail new-browser 'the bound new-browser added no window'
+  fi
+  run_zz kill-window -t "=$INNER_SESSION:1"
+  wait_for 'the bound browser window killed' window_count_is zz 1
+}
+
 # --- clause 2: the terminal around the surfaces -----------------------------
 
 both() {
@@ -1023,10 +1204,16 @@ pane_widths() {
 # target so neither binary has to agree about what a loose target means while
 # one of them has a zz surface up.
 ordinary_sequence() {
+  both new-window -d -n extra "$INNER_SHELL"
+  both select-window -t "=$INNER_SESSION:0"
   both split-window -v -t "=$INNER_SESSION:0.0" "$INNER_SHELL"
   both select-pane -t "=$INNER_SESSION:0.0"
   both resize-pane -t "=$INNER_SESSION:0.0" -D 3
   both select-pane -t "=$INNER_SESSION:0.1"
+}
+window_inventory() {
+  side_command "$1" list-windows -t "=$INNER_SESSION" \
+    -F '#{window_index} #{window_name} #{window_width}x#{window_height} active=#{window_active}' | sort
 }
 ordinary_commands_agree() {
   local name="$1"
@@ -1038,9 +1225,21 @@ ordinary_commands_agree() {
   equals "$name-pin-panes-fill-the-window" \
     "$(side_command tmux display-message -p -t "=$INNER_SESSION:0" '#{window_width} ')" \
     "$(pane_widths tmux)"
+  # The window a surface is not in has to be the pin's too, name, size, active
+  # flag and all, except for the columns the sidebar takes from the session.
+  if [ "$(window_size zz)" = "$(window_size tmux)" ]; then
+    equals "$name-windows" "$(window_inventory tmux)" "$(window_inventory zz)"
+  else
+    equals "$name-window-inventory-apart-from-the-sidebar-columns" \
+      "$(window_inventory tmux | sed "s/ [0-9]*x/ x/")" \
+      "$(window_inventory zz | sed "s/ [0-9]*x/ x/")"
+    equals "$name-window-columns-under-the-sidebar" \
+      "$((COLUMNS_UNDER_TEST - 29))x$((ROWS_UNDER_TEST - 1))" "$(window_size zz)"
+  fi
 }
 drop_extra_panes() {
   both kill-pane -t "=$INNER_SESSION:0.1"
+  both kill-window -t "=$INNER_SESSION:1"
 }
 
 detach_and_reattach() {
@@ -1095,10 +1294,23 @@ run_terminal_around_a_pane_surface() {
     die "tmux refused split-window"
   screen_has surface zz "$marker"
   equals layout "$(pane_geometry tmux)" "$(pane_geometry zz)"
+
+  # A pane is session state, so it is still there for the client that comes
+  # back, and the layout it comes back to is the pin's.
+  detach_and_reattach
+  screen_has surface-survives-a-reattach zz "$marker"
+  equals layout-after-a-reattach "$(pane_geometry tmux)" "$(pane_geometry zz)"
+
   both select-pane -t "=$INNER_SESSION:0.0"
   both resize-pane -t "=$INNER_SESSION:0.0" -D 3
   equals layout-after-ordinary-commands "$(pane_geometry tmux)" "$(pane_geometry zz)"
-  drop_extra_panes
+  # The picker's card is drawn for the ACTIVE pane only (render.rs draws the
+  # picker arm under `if active`), so the surface is selected again before the
+  # marker is asked for; a browser or Agent card draws either way.
+  both select-pane -t "=$INNER_SESSION:0.1"
+  screen_has surface-after-ordinary-commands zz "$marker"
+
+  both kill-pane -t "=$INNER_SESSION:0.1"
   screen_lacks surface-gone zz "$marker"
   canvas_is_the_pin removed
 }
@@ -1110,6 +1322,14 @@ run_terminal_around_the_overlay() {
 
   bind_and_press F9 tools
   screen_has overlay zz '# Workspace tools'
+
+  # The overlay is client state, not session state: it does not survive the
+  # client, and the canvas the next client draws is the pin's.
+  detach_and_reattach
+  screen_lacks overlay-does-not-survive-a-reattach zz '# Workspace tools'
+  canvas_is_the_pin reattached
+  bind_and_press F9 tools
+  screen_has overlay-again zz '# Workspace tools'
 
   # A command that does not move the layout leaves the overlay up and means
   # exactly what it means on the pin.
@@ -1245,6 +1465,15 @@ run_self_check() {
     screen_has sabotage zz "$SIDEBAR_MARKER"
   expect_report 'a message row that never carried the message' \
     message_row_has sabotage zz 'a message no zz verb ever prints'
+  expect_report 'a cut message the row never carried' \
+    message_row_is_truncated sabotage zz \
+    'a message no zz verb ever prints, written long enough that the row would have to cut it at the client width before it could ever match'
+
+  # The binding channel: the key the case bound is not the key it presses, so
+  # the verb never runs and the row never carries its token.
+  zz_command bind-key -n F8 display-message BOUND-sabotage >/dev/null
+  expect_report 'a bound verb whose key was never pressed' \
+    message_row_has sabotage zz BOUND-sabotage
 
   # The input-ownership channel: the key really does reach the pane when it is
   # typed into the pane, so pane_grid_lacks has to report it.
@@ -1301,6 +1530,7 @@ run_group browser run_browser_verbs
 run_group agent run_agent_verbs
 run_group output run_output_verbs
 run_group misc run_misc_verbs
+run_group bindings run_binding_pass
 run_group around-sidebar run_terminal_around_the_sidebar
 run_group around-picker run_terminal_around_a_pane_surface picker split-picker "$PICKER_MARKER"
 run_group around-browser run_terminal_around_a_pane_surface browser split-browser "$CARD_FOOTER"

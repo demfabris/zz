@@ -682,6 +682,48 @@ case_click_user_binding_target() {
   run_on_both unbind-key -n MouseDown1Pane
   run_on_both set-option -gu @mousectx
 }
+# The target spelling only a bound mouse event can resolve. `cmd_find_target`
+# answers a bare `=` and a bare `{mouse}` from `cmdq_get_event(item)->m`, so a
+# command a mouse binding runs against `-t=` reaches the pane the pointer
+# landed on rather than the active one. The click here lands in pane 1 while
+# pane 0 is active and the binding writes a PANE option through `-t=`, so the
+# pane the spelling resolved to is the pane that carries the option afterwards.
+case_click_mouse_target() {
+  CASE_LABEL=click-mouse-target
+  split_both
+  local spelling left top
+  for spelling in '=' '{mouse}'; do
+    run_on_both set-option -pu -t "=$INNER_SESSION:0.0" @mousetgt
+    run_on_both set-option -pu -t "=$INNER_SESSION:0.1" @mousetgt
+    run_on_both bind-key -n MouseDown1Pane set-option -p -t "$spelling" @mousetgt clicked
+    mark_both mousetgt
+    left="$(pane_field tmux "=$INNER_SESSION:0.1" 1)"
+    top="$(pane_field tmux "=$INNER_SESSION:0.1" 2)"
+    click_both 0 "$((left + 3))" "$((top + 3))"
+    wait_for "the pin resolved $spelling to the clicked pane" \
+      pin_pane_option_set "=$INNER_SESSION:0.1" @mousetgt
+    settle_both MARK-mousetgt "the $spelling target click"
+    assert_value "click-mouse-target/$spelling-clicked-pane" \
+      "$(pane_option_value zz "=$INNER_SESSION:0.1" @mousetgt)" \
+      "$(pane_option_value tmux "=$INNER_SESSION:0.1" @mousetgt)"
+    assert_value "click-mouse-target/$spelling-other-pane" \
+      "$(pane_option_value zz "=$INNER_SESSION:0.0" @mousetgt)" \
+      "$(pane_option_value tmux "=$INNER_SESSION:0.0" @mousetgt)"
+    run_on_both unbind-key -n MouseDown1Pane
+    run_on_both select-pane -t "=$INNER_SESSION:0.0"
+    wait_for 'the pin back on pane 0' active_pane_index_is tmux 0
+  done
+  run_on_both set-option -pu -t "=$INNER_SESSION:0.0" @mousetgt
+  run_on_both set-option -pu -t "=$INNER_SESSION:0.1" @mousetgt
+  unsplit_both
+}
+pane_option_value() {
+  side_command "$1" show-options -pqv -t "$2" "$3" 2>/dev/null
+}
+pin_pane_option_set() {
+  [ -n "$(pane_option_value tmux "$1" "$2")" ]
+}
+
 # What the root mouse binding sets. Both sides set the same word in every
 # driven case; the self-check gives one side another.
 BINDING_VALUE_ZZ=""
@@ -1167,6 +1209,7 @@ run_cases() {
   case_click_selects_pane
   case_click_user_binding
   case_click_user_binding_target
+  case_click_mouse_target
   case_wheel_up_pane
   case_drag_selects
   case_multi_click
@@ -1281,6 +1324,15 @@ sc_one_sided_mouse_context() {
   CLICK_SABOTAGE_SIDE=""
   CLICK_SABOTAGE_COLUMN=""
 }
+# zz's target click aimed into pane 0 while the pin's lands in pane 1, so the
+# pane each side's `-t=` resolved to is a different pane.
+sc_one_sided_mouse_target() {
+  CLICK_SABOTAGE_SIDE=zz
+  CLICK_SABOTAGE_COLUMN=3
+  case_click_mouse_target
+  CLICK_SABOTAGE_SIDE=""
+  CLICK_SABOTAGE_COLUMN=""
+}
 # zz's border drag released four cells short of the pin's.
 sc_one_sided_border_drag() {
   local right
@@ -1332,6 +1384,8 @@ run_self_check() {
     sc_one_sided_mouse_context
   self_check_case "zz's border drag released four cells short" catches \
     sc_one_sided_border_drag
+  self_check_case "zz's mouse-target click aimed into the other pane" catches \
+    sc_one_sided_mouse_target
   self_check_case 'zz out of copy mode before the paste' catches \
     sc_one_sided_copy_mode_paste
   self_check_case 'only the focus-out report sent to zz with focus-events off' catches \

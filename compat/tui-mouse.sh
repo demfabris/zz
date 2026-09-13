@@ -40,6 +40,10 @@
 #                               `bind -n MouseDown1Pane` sets
 #   click-user-binding-target   `#{mouse_x}`, `#{mouse_y}` and `#{mouse_pane}`
 #                               as that binding's own command expands them
+#   border-user-binding         a global option a user's own
+#                               `bind -n MouseDown1Border` sets
+#   status-user-binding         a global option a user's own
+#                               `bind -n WheelDownStatus` sets
 #   drag-selects                the paste buffer the drag leaves, plus
 #                               `#{pane_in_mode}` and `#{selection_present}`
 #                               once the button is up
@@ -688,6 +692,60 @@ pin_option_set() {
   [ -n "$(option_value tmux "$1")" ]
 }
 
+# The LOCATION half of a mouse key name, on the two locations that are not a
+# pane body. These run AFTER case_status_clicks, because rebinding a name the
+# pin has a stock binding for takes that stock binding away for the rest of the
+# run and status-clicks is what measures it. `server_client_check_mouse` resolves a divider cell to
+# KEYC_MOUSE_LOCATION_BORDER and a status cell inside a window range to
+# KEYC_MOUSE_LOCATION_STATUS, so `MouseDown1Border` and `WheelDownStatus` are
+# the names those gestures carry, and a user's own binding on either has to
+# fire on both binaries.
+case_border_user_binding() {
+  CASE_LABEL=border-user-binding
+  local right top
+  split_both
+  run_on_both set-option -gu @borderkey
+  local side
+  for side in zz tmux; do
+    side_command "$side" bind-key -n MouseDown1Border set-option -g @borderkey \
+      "$(binding_value_for "$side")" >/dev/null || die "$side refused bind-key"
+  done
+  mark_both borderbind
+  right="$(pane_field tmux "=$INNER_SESSION:0.0" 3)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  click_both 0 "$((right + 2))" "$((top + 4))"
+  wait_for 'the pin ran its own border binding' option_is tmux @borderkey \
+    "$(binding_value_for tmux)"
+  settle_both MARK-borderbind 'the border click'
+  assert_value border-user-binding/option \
+    "$(option_value zz @borderkey)" "$(option_value tmux @borderkey)"
+  run_on_both unbind-key -n MouseDown1Border
+  run_on_both set-option -gu @borderkey
+  unsplit_both
+}
+
+case_status_user_binding() {
+  CASE_LABEL=status-user-binding
+  run_on_both new-window -d -t "=$INNER_SESSION:" -n second "$INNER_SHELL"
+  run_on_both select-window -t "=$INNER_SESSION:0"
+  run_on_both set-option -gu @statuskey
+  run_on_both bind-key -n WheelDownStatus set-option -g @statuskey fired
+  mark_both statusbind
+  local column row
+  row="$(status_row)"
+  column="$(status_column_of second)"
+  [ -n "$column" ] || die 'the second window is not on the status row'
+  send_mouse_both 65 "$column" "$row" M
+  wait_for 'the pin ran its own status binding' option_is tmux @statuskey fired
+  settle_both 'second' 'the status wheel binding'
+  assert_value status-user-binding/option \
+    "$(option_value zz @statuskey)" "$(option_value tmux @statuskey)"
+  run_on_both unbind-key -n WheelDownStatus
+  run_on_both set-option -gu @statuskey
+  run_on_both kill-window -t "=$INNER_SESSION:1"
+  wait_for 'the pin back to one window' pin_window_count_is 1
+}
+
 # `bind -n WheelUpPane { if -F '#{||:#{alternate_on},#{pane_in_mode},#{mouse_any_flag}}' { send -M } { copy-mode -e } }`:
 # a wheel over a pane whose program asked for nothing enters copy mode.
 case_wheel_up_pane() {
@@ -1100,6 +1158,8 @@ run_cases() {
   case_right_click_pane
   case_border_drag
   case_status_clicks
+  case_border_user_binding
+  case_status_user_binding
   case_app_mouse mouse-on on
   case_app_mouse mouse-off off
   case_paste_into_pane
@@ -1150,6 +1210,12 @@ self_check_case() {
 sc_one_sided_binding_value() {
   BINDING_VALUE_ZZ=other
   case_click_user_binding
+  BINDING_VALUE_ZZ=""
+}
+# The border name's own binding set differently on one side.
+sc_one_sided_border_binding() {
+  BINDING_VALUE_ZZ=other
+  case_border_user_binding
   BINDING_VALUE_ZZ=""
 }
 # zz's click aimed at the pane it is already in while the pin's lands in the
@@ -1210,6 +1276,8 @@ run_self_check() {
     sc_one_sided_click_target
   self_check_case 'the same root mouse binding set differently on zz' catches \
     sc_one_sided_binding_value
+  self_check_case 'the border mouse binding set differently on zz' catches \
+    sc_one_sided_border_binding
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check cases did not behave as required\n' "$SELF_CHECK_FAILURES"

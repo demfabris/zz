@@ -1328,17 +1328,40 @@ fn mouse_key_location(
         };
         return Some((location, None, window));
     }
-    let entry = model.pane_at(global_column, global_row)?;
-    let location = if entry.content().contains(global_column, global_row) {
-        "Pane"
-    } else {
-        "Border"
+    let window = model.window().map(|window| window.id);
+    if let Some(entry) = model.pane_at(global_column, global_row) {
+        let location = if entry.content().contains(global_column, global_row) {
+            "Pane"
+        } else {
+            "Border"
+        };
+        return Some((location.to_owned(), Some(entry.pane), window));
+    }
+    let entry = divider_owner(model, global_column, global_row)?;
+    Some(("Border".to_owned(), Some(entry), window))
+}
+
+/// A divider cell belongs to the pane it is the far edge of.
+/// `server_client_check_mouse_in_pane` walks the window's panes and matches
+/// each one's own right column and bottom row, so a vertical divider is the
+/// border of the pane to its left and a horizontal one of the pane above it.
+/// The raw TUI resolves a divider outside every pane's rect, which is why this
+/// looks the cell up rather than reading the rect back.
+fn divider_owner(
+    model: &Model,
+    global_column: u16,
+    global_row: u16,
+) -> Option<zz_protocol::PaneId> {
+    let divider = model
+        .layout
+        .dividers
+        .iter()
+        .find(|divider| divider.rect.contains(global_column, global_row))?;
+    let (column, row) = match divider.axis {
+        zz_protocol::Axis::Horizontal => (global_column.checked_sub(1)?, global_row),
+        zz_protocol::Axis::Vertical => (global_column, global_row.checked_sub(1)?),
     };
-    Some((
-        location.to_owned(),
-        Some(entry.pane),
-        model.window().map(|window| window.id),
-    ))
+    model.pane_at(column, row).map(|entry| entry.pane)
 }
 
 /// The event and button half of the name, in the pin's own spelling.

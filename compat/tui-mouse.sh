@@ -335,6 +335,8 @@ send_mouse_both() {
 # fixture most needs to be able to make.
 CLICK_SABOTAGE_SIDE=""
 CLICK_SABOTAGE_COLUMN=""
+BORDER_SABOTAGE_COLUMN=""
+COPY_PASTE_SABOTAGE_SIDE=""
 click_both() {
   local button="$1" column="$2" row="$3" side aimed
   for side in zz tmux; do
@@ -876,9 +878,13 @@ case_border_drag() {
   right="$(pane_field tmux "=$INNER_SESSION:0.0" 3)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
   border_column="$((right + 2))"
+  local drag_column=$((border_column - 8)) zz_drag_column
+  zz_drag_column="${BORDER_SABOTAGE_COLUMN:-$drag_column}"
   send_mouse_both 0 "$border_column" "$((top + 4))" M
-  send_mouse_both 32 "$((border_column - 8))" "$((top + 4))" M
-  send_mouse_both 0 "$((border_column - 8))" "$((top + 4))" m
+  send_mouse zz 32 "$zz_drag_column" "$((top + 4))" M
+  send_mouse tmux 32 "$drag_column" "$((top + 4))" M
+  send_mouse zz 0 "$zz_drag_column" "$((top + 4))" m
+  send_mouse tmux 0 "$drag_column" "$((top + 4))" m
   wait_for 'the pin resized on a border drag' pin_pane_width_changed "$before_width"
   settle_both MARK-border 'the border drag'
   check_value BORDER border-drag/pane-width \
@@ -930,7 +936,7 @@ case_status_clicks() {
   send_mouse_both 2 "$column" "$row" M
   wait_for 'the pin raised its window menu' screen_has tmux 'Rename'
   settle_both 'second' 'the status right click'
-  check_screen STATUS status-clicks/right-click-screen
+  check_screen STATUS_MENU status-clicks/right-click-screen
   send_bytes zz $'\033'
   send_bytes tmux $'\033'
   both_screen_lacks 'Rename' 'the window menu closed'
@@ -1029,6 +1035,13 @@ case_paste_into_copy_mode() {
   wait_for 'the pin in copy mode' pane_in_mode_is tmux "=$INNER_SESSION:0.0" 1
   wait_for 'zz in copy mode' pane_in_mode_is zz "=$INNER_SESSION:0.0" 1
   settle_both MARK-pastecopy 'copy mode before the paste'
+  if [ -n "$COPY_PASTE_SABOTAGE_SIDE" ]; then
+    side_command "$COPY_PASTE_SABOTAGE_SIDE" send-keys -X -t "=$INNER_SESSION:0.0" cancel \
+      >/dev/null 2>&1 || true
+    wait_for 'the sabotaged side out of copy mode' \
+      pane_in_mode_is "$COPY_PASTE_SABOTAGE_SIDE" "=$INNER_SESSION:0.0" 0
+    settle_both MARK-pastecopy 'copy mode left on one side before the paste'
+  fi
   send_bytes zz "$(paste_bytes_for zz)"
   send_bytes tmux "$(paste_bytes_for tmux)"
   settle_both MARK-pastecopy 'the paste under copy mode'
@@ -1126,24 +1139,26 @@ case_focus() {
 # sabotage can drive a recorded channel in a case where it asserts.
 USER_BINDING_MODE=same
 USER_BINDING_REASON=""
-MOUSE_CONTEXT_MODE=record
-MOUSE_CONTEXT_REASON="the invoking event now travels with the command, but no format reads it: the eight mouse_* names are unimplemented in crates/zz-mux/src/formats.rs, which this batch's zones do not open (formats.mouse-context)"
+MOUSE_CONTEXT_MODE=same
+MOUSE_CONTEXT_REASON=""
 WHEEL_MODE=record
 WHEEL_REASON="WheelUpPane is a root binding running copy-mode -e on the pin; the raw TUI scrolls its own viewport instead (keys.root-native-mouse)"
 DRAG_MODE=record
 DRAG_REASON="MouseDrag1Pane is a root binding running copy-mode -M on the pin; the raw TUI drives zz-terminal's own selection, which does not put the pane in a mode (keys.root-native-mouse)"
 MULTI_CLICK_MODE=record
 MULTI_CLICK_REASON="input.rs sets click_count to 0 or 1 only, so no gesture ever becomes DoubleClick1Pane or TripleClick1Pane and zz-terminal's own multi-click path is unreachable from the raw TUI (keys.root-native-mouse)"
-BORDER_MODE=record
-BORDER_REASON="the raw TUI has no border hit test, so MouseDrag1Border and its resize-pane -M cannot exist (keys.root-native-mouse, mouse.bound-context flag:resize-pane:-M)"
-STATUS_MODE=record
-STATUS_REASON="the raw TUI answers a status click only on TmuxRange::Window and only with select-window; MouseDown1Status, WheelUpStatus, WheelDownStatus and MouseDown3Status are root bindings it never runs (keys.root-native-mouse)"
+BORDER_MODE=same
+BORDER_REASON=""
+STATUS_MODE=same
+STATUS_REASON=""
+STATUS_MENU_MODE=record
+STATUS_MENU_REASON="MouseDown3Status raises the pin's window menu through a root binding whose command is a display-menu of eleven items over swap-window, kill-window, respawn-window, select-pane -m and a command-prompt rename; the raw TUI has no pointer menu (keys.root-native-mouse key:root:MouseDown3Status)"
 PASTE_MENU_MODE=record
 PASTE_MENU_REASON="the same direct write: under a menu the pin's overlay key handler consumes the paste-start key and the characters behind it, and the pane sees only what the menu did not eat, while the raw TUI hands the whole bracketed paste to the pane (input.rs handle_paste); the menu ITEM the paste's characters select is identical on both"
-FOCUS_OFF_MODE=record
-FOCUS_OFF_REASON="focus-events on the pin decides only whether tty_start_tty arms Enfcs at its own terminal; a report that arrives anyway is still handed to a pane that asked for it. tty.rs now reads that same server option once and arms \\e[?1004h only when it is on, so a real terminal sends the raw TUI nothing here either, but the daemon still gates the DELIVERY of a report on the option, which is what this case injects past. That gate is the GUI's too - crates/zz/src/terminal/view.rs sends the same Focus action from window focus and has no arming of its own - so moving it into each client is a change these zones do not open"
-PASTE_COPY_MODE=record
-PASTE_COPY_REASON="a bracketed paste under copy mode is a direct write to the pane in the raw TUI (input.rs handle_paste), so the text lands in the program behind the mode and appears the moment copy mode is left; the pin's window-mode consumes the paste key and the pane never sees it"
+FOCUS_OFF_MODE=same
+FOCUS_OFF_REASON=""
+PASTE_COPY_MODE=same
+PASTE_COPY_REASON=""
 RIGHT_CLICK_MODE=record
 RIGHT_CLICK_REASON="MouseDown3Pane raises the pin's pane menu through a root binding; the raw TUI has no pointer menu (keys.root-native-mouse)"
 
@@ -1256,6 +1271,41 @@ sc_one_sided_status_left() {
   side_command zz set-option -g status-left L >/dev/null
 }
 
+# The context click aimed one cell further along on zz. The binding sets the
+# same word on both sides, so click-user-binding-target/context is the only
+# asserted check that can carry it, and it carries it in mouse_x.
+sc_one_sided_mouse_context() {
+  CLICK_SABOTAGE_SIDE=zz
+  CLICK_SABOTAGE_COLUMN=$(($(pane_field tmux "=$INNER_SESSION:0.0" 1) + 9))
+  case_click_user_binding_target
+  CLICK_SABOTAGE_SIDE=""
+  CLICK_SABOTAGE_COLUMN=""
+}
+# zz's border drag released four cells short of the pin's.
+sc_one_sided_border_drag() {
+  local right
+  right="$(pane_field tmux "=$INNER_SESSION:0.0" 3)"
+  BORDER_SABOTAGE_COLUMN=$((right + 2 - 4))
+  case_border_drag
+  BORDER_SABOTAGE_COLUMN=""
+}
+# zz out of copy mode before the paste, so its pane takes the text the mode
+# would have eaten. paste-into-copy-mode/after-cancel-screen is where the two
+# screens part.
+sc_one_sided_copy_mode_paste() {
+  COPY_PASTE_SABOTAGE_SIDE=zz
+  case_paste_into_copy_mode
+  COPY_PASTE_SABOTAGE_SIDE=""
+}
+# Only the focus-out report sent to one side, with focus-events OFF: the pane
+# asked for reports and gets them on both sides whatever the option says, so
+# the case asserts and the missing report is a difference.
+sc_one_sided_focus_off() {
+  FOCUS_BYTES_ZZ=$'\033[O'
+  case_focus sc-focus-off off
+  FOCUS_BYTES_ZZ=""
+}
+
 run_self_check() {
   start_both
   printf 'self-check: one deliberate one-sided difference per channel\n'
@@ -1278,6 +1328,14 @@ run_self_check() {
     sc_one_sided_binding_value
   self_check_case 'the border mouse binding set differently on zz' catches \
     sc_one_sided_border_binding
+  self_check_case "zz's context click aimed one cell further along" catches \
+    sc_one_sided_mouse_context
+  self_check_case "zz's border drag released four cells short" catches \
+    sc_one_sided_border_drag
+  self_check_case 'zz out of copy mode before the paste' catches \
+    sc_one_sided_copy_mode_paste
+  self_check_case 'only the focus-out report sent to zz with focus-events off' catches \
+    sc_one_sided_focus_off
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check cases did not behave as required\n' "$SELF_CHECK_FAILURES"

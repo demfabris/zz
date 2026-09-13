@@ -24,13 +24,14 @@
 # switch-mode [-kswZ]       switches an open mode in place    hard-rejected                  CHILD TUI-014
 #   [-F -t] [command]
 # suspend-client [-t]       SIGTSTP to the client process     hard-rejected                  CHILD TUI-014
-# server-access [-adglrw]   socket access control list        hard-rejected                  DECLARED, no
-#   [-t] [user|group]                                                                         multi-user socket
+# server-access [-adglrw]   socket access control list        hard-rejected                  CHILD TUI-014, zz
+#   [-t] [user|group]                                                                         has no socket ACL
 # lock-server               locks every client, runs          validates, empty execution,    PROVED (CLI) +
-#                             lock-command on each tty          after-lock-server fires       DECLARED (screen)
+#                             lock-command on each tty          after-lock-server fires       DECLARED (screen),
+#                                                                                             CHILD TUI-015
 # lock-session [-t]         locks that session's clients      same                           PROVED + DECLARED
 # lock-client [-t]          locks that one client             same                           PROVED + DECLARED
-# lock-after-time           arms a per-client server timer    store-only                     DECLARED
+# lock-after-time           arms a per-client server timer    store-only                     DECLARED, CHILD TUI-015
 # lock-command              spawned on the client tty         store-only; the pin's own      DECLARED, the pin's
 #                                                               default is a build-time        default is whatever
 #                                                               choice                         configure found
@@ -42,27 +43,28 @@
 # refresh-client -c -D -L   pans a terminal client's view     loudly unsupported             DECLARED
 #   -R -U -l -r [adjust]                                                                      clients.interactive-refresh
 # capture-pane -p -S -E     the requested line range          the same range                 PROVED
-# capture-pane -e -J -q -T  escape, join, quiet, trailing     same                           PROVED
+# capture-pane -J -q -T     join, quiet, trailing positions   same                           PROVED
 # capture-pane -b           fills a named buffer              same                           PROVED
-# capture-pane (no -S -E)   every visible row, trailing       stops at the last written row  DECLARED
+# capture-pane -e           the range with SGR, trimmed       one trailing cell kept         DECLARED, CHILD TUI-017
+# capture-pane (no -S -E)   every visible row, trailing       stops at the last written row  DECLARED, CHILD TUI-017
 #                             blanks included                                                 capture.rich-transports
-# capture-pane -N           trailing spaces to the pane edge  trailing spaces to the last    DECLARED, same item
+# capture-pane -N           trailing spaces to the pane edge  trailing spaces to the last    DECLARED, CHILD TUI-017
 #                                                               written cell
-# capture-pane -M           the mode screen, the pane when    errors when the pane is in no  DECLARED, same item
+# capture-pane -M           the mode screen, the pane when    errors when the pane is in no  DECLARED, CHILD TUI-017
 #                             there is no mode                  native mode
-# capture-pane -a           `no alternate screen`             `alternate screen is not       DECLARED, same item
+# capture-pane -a           `no alternate screen`             `alternate screen is not       DECLARED, CHILD TUI-017
 #                                                               active`
-# capture-pane -C -F -H     grid internals and the pending    loudly unsupported             DECLARED
+# capture-pane -C -F -H     grid internals and the pending    loudly unsupported             DECLARED, CHILD TUI-017
 #   -L -P -R                  input parser state                                              capture.rich-transports
 # load-buffer -             caller stdin into a buffer        adopted, same                  PROVED
 # save-buffer - / -a -      buffer bytes to caller stdout     adopted, same                  PROVED
 # show-buffer [-b]          buffer bytes to stdout            same                           PROVED
-# source-file -             caller stdin as a config file     loudly unsupported             DECLARED
+# source-file -             caller stdin as a config file     loudly unsupported             DECLARED, CHILD TUI-018
 #                                                                                             protocol.binary-streams
-# display-message -I        caller stdin into the pane        loudly unsupported             DECLARED, same gap
-# split-window -I           caller stdin into the new pane    loudly unsupported             DECLARED, same gap
+# display-message -I        caller stdin into the pane        loudly unsupported             DECLARED, CHILD TUI-018
+# split-window -I           caller stdin into the new pane    loudly unsupported             DECLARED, CHILD TUI-018
 # show-hooks [-Bgpw] [-t]   the hook table                    same                           PROVED
-# show-messages             the server log                    same shape, but the invoking   DECLARED, the log
+# show-messages             the server log                    same shape, but the invoking   CHILD TUI-016, the log
 #                                                               client is named device-<n>     carries client
 #                                                               and the pin reprints a         identity
 #                                                               command through args_print

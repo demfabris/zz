@@ -70,7 +70,7 @@ pub(crate) struct TerminalGuard {
     original: Termios,
 }
 
-pub(crate) const MOUSE_DISABLE_SEQUENCE: &[u8] = b"\x1b[?1016l\x1b[?1006l\x1b[?1003l";
+const MOUSE_CLEAR_SEQUENCE: &[u8] = b"\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l";
 
 const RGB_COLOURS: u32 = 16_777_216;
 
@@ -166,8 +166,26 @@ fn extended_keys_armed(value: &str) -> bool {
     !matches!(value.trim(), "" | "off")
 }
 
-pub(crate) fn mouse_enable_sequence(pixel_mouse: bool) -> Vec<u8> {
-    let mut sequence = b"\x1b[?1003h\x1b[?1006h".to_vec();
+/// `tty_update_mode`: which of the pin's three mouse trackings the outer
+/// terminal is put in. `Button` is `\e[?1000h\e[?1002h`, `Any` adds
+/// `\e[?1003h`, and every change clears all four first.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum MouseArming {
+    #[default]
+    Off,
+    Button,
+    Any,
+}
+
+pub(crate) fn mouse_mode_sequence(arming: MouseArming, pixel_mouse: bool) -> Vec<u8> {
+    let mut sequence = MOUSE_CLEAR_SEQUENCE.to_vec();
+    match arming {
+        MouseArming::Off => return sequence,
+        MouseArming::Button => sequence.extend_from_slice(b"\x1b[?1006h\x1b[?1000h\x1b[?1002h"),
+        MouseArming::Any => {
+            sequence.extend_from_slice(b"\x1b[?1006h\x1b[?1000h\x1b[?1002h\x1b[?1003h");
+        }
+    }
     if pixel_mouse {
         sequence.extend_from_slice(b"\x1b[?1016h");
     }
@@ -176,7 +194,7 @@ pub(crate) fn mouse_enable_sequence(pixel_mouse: bool) -> Vec<u8> {
 
 impl TerminalGuard {
     #[cfg(unix)]
-    pub fn enter(mouse: bool, extended_keys: bool) -> io::Result<Self> {
+    pub fn enter(mouse: MouseArming, extended_keys: bool) -> io::Result<Self> {
         let original = rustix::termios::tcgetattr(io::stdin())?;
         let file_probe = probe_file_path();
         remove_file_if_present(&file_probe)?;
@@ -200,8 +218,8 @@ impl TerminalGuard {
         let mut output = io::stdout().lock();
         output.write_all(b"\x1b[?1049h\x1b[?25l\x1b[?1004h")?;
         output.write_all(KEYPAD_TRANSMIT)?;
-        if mouse {
-            output.write_all(&mouse_enable_sequence(guard.pixel_mouse))?;
+        if mouse != MouseArming::Off {
+            output.write_all(&mouse_mode_sequence(mouse, guard.pixel_mouse))?;
         }
         output.write_all(b"\x1b[?2004h")?;
         if guard.kitty_keyboard {
@@ -222,7 +240,7 @@ impl TerminalGuard {
     }
 
     #[cfg(not(unix))]
-    pub fn enter(_mouse: bool, _extended_keys: bool) -> io::Result<Self> {
+    pub fn enter(_mouse: MouseArming, _extended_keys: bool) -> io::Result<Self> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "zz-tui currently requires a Unix terminal",
@@ -266,7 +284,7 @@ impl Drop for TerminalGuard {
         let _ = output.write_all(THEME_UNSUBSCRIBE);
         let _ = output.write_all(KEYPAD_LOCAL);
         let _ = output.write_all(
-            b"\x1b[?2004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?1004l\x1b[?25h\x1b[?1049l",
+            b"\x1b[?2004l\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?25h\x1b[?1049l",
         );
         let _ = output.flush();
         #[cfg(unix)]
@@ -319,12 +337,22 @@ mod tests {
 
     #[test]
     fn mouse_sequences_emit_and_retract_the_tmux_outer_modes() {
-        assert_eq!(mouse_enable_sequence(false), b"\x1b[?1003h\x1b[?1006h");
         assert_eq!(
-            mouse_enable_sequence(true),
-            b"\x1b[?1003h\x1b[?1006h\x1b[?1016h"
+            mouse_mode_sequence(MouseArming::Button, false),
+            b"\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006h\x1b[?1000h\x1b[?1002h"
         );
-        assert_eq!(MOUSE_DISABLE_SEQUENCE, b"\x1b[?1016l\x1b[?1006l\x1b[?1003l");
+        assert_eq!(
+            mouse_mode_sequence(MouseArming::Any, false),
+            b"\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006h\x1b[?1000h\x1b[?1002h\x1b[?1003h"
+        );
+        assert_eq!(
+            mouse_mode_sequence(MouseArming::Any, true),
+            b"\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1016h"
+        );
+        assert_eq!(
+            mouse_mode_sequence(MouseArming::Off, true),
+            b"\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l"
+        );
     }
 
     #[test]

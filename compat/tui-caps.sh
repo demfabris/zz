@@ -33,7 +33,9 @@
 #   origin mode                    origin_flag                           driven
 #   synchronized output            synchronized_output_flag              driven
 #   application keypad             keypad_flag, keypad_cursor_flag       driven
-#   mouse arming                   the five mouse flags, mouse on        driven
+#   mouse arming                   the five mouse flags, mouse on, and    driven
+#                                  the any-event arming
+#                                  `focus-follows-mouse` forces
 #   legacy keys                    pane_key_mode with extended-keys off  driven
 #   extended keys                  pane_key_mode with extended-keys on   driven
 #   client terminal name           client_termname                       driven
@@ -123,10 +125,6 @@
 # lets --self-check sabotage the same row in a case where it asserts. Every one
 # of them is written down in TUI-009's evidence with the source line that
 # produces it.
-#   mouse_all_flag         zz arms `\e[?1003h` (any-event) for the whole
-#   mouse_button_flag      attach; the pin arms `\e[?1002h` (button-event) and
-#                          raises MODE_MOUSE_ALL only while a menu is up. The
-#                          two rows move together and are one divergence.
 #   client_termfeatures    the pin's list is negotiated from the terminal's
 #   client_colours         replies; the daemon derives a client's roster from
 #                          its TERM, its COLORTERM and its flags alone, so
@@ -293,7 +291,7 @@ MODE_NAMES=(
 MODE_FORMAT='#{alternate_on}|#{bracket_paste_flag}|#{cursor_flag}|#{cursor_shape}|#{wrap_flag}|#{mouse_all_flag}|#{mouse_any_flag}|#{mouse_button_flag}|#{mouse_sgr_flag}|#{mouse_standard_flag}|#{mouse_utf8_flag}|#{synchronized_output_flag}|#{origin_flag}|#{keypad_flag}|#{keypad_cursor_flag}|#{pane_key_mode}'
 # Rows the two sides are measured to disagree on. Each one is explained in the
 # header block above and written into TUI-009's evidence.
-MODE_RECORDED="mouse_all_flag mouse_button_flag"
+MODE_RECORDED=""
 # Every mode row but the named ones, for a sabotage that has to report through
 # the rows it names and no other.
 modes_except() {
@@ -894,6 +892,21 @@ pin_theme_known() {
   [ -n "$(tuple_field "$(read_facts tmux)" 5)" ]
 }
 
+# `focus-follows-mouse` on one side or both, read back through the mode tuple.
+# The option lives in the inner session's options, so it outlives the attach
+# the case opens and both clients pick it up on their first redraw.
+case_one_sided_focus_follows_mouse() {
+  local who="$1" recorded="$2" side
+  for side in zz tmux; do
+    [ "$who" = both ] || [ "$who" = "$side" ] || continue
+    side_command "$side" set-option -g focus-follows-mouse on >/dev/null
+  done
+  case_modes "sc/focus-follows-mouse-$who" xterm-256color '' '' "$recorded"
+  for side in zz tmux; do
+    side_command "$side" set-option -gu focus-follows-mouse >/dev/null 2>&1 || true
+  done
+}
+
 case_one_sided_theme_reply() {
   open_case 'sc/one-sided-theme' xterm '' ''
   tmux_outer_command set-option -w -t "$(outer_window tmux)" window-style bg=colour4 \
@@ -931,7 +944,7 @@ case_silent() {
   case_facts 'silent/-2' xterm -2 -2 "$FACT_RECORDED_SILENT" '' 256
   side_command zz set-option -s extended-keys on >/dev/null
   side_command tmux set-option -s extended-keys on >/dev/null
-  case_modes 'silent/extended' xterm-256color '' '' "$MODE_RECORDED pane_key_mode"
+  case_modes 'silent/extended' xterm-256color '' '' pane_key_mode
   side_command zz set-option -s extended-keys off >/dev/null
   side_command tmux set-option -s extended-keys off >/dev/null
   case_silent_colours 'silent/colours' silent '' ''
@@ -1244,6 +1257,17 @@ self_check_case 'a one-sided -2 on zz only, silent terminal' catches \
 # that can report.
 self_check_case 'autowrap turned off on zz side before it attaches' catches \
   case_one_sided_autowrap
+
+# THE MOUSE ARMING. `focus-follows-mouse` is the option that decides between
+# the pin's two mouse trackings without any pane asking for one
+# (server-client.c server_client_reset_state), so turning it on for the pin
+# alone has to raise MODE_MOUSE_ALL there and leave MODE_MOUSE_BUTTON on zz.
+# Those two rows are the only ones that can report, and with the option on
+# both sides the same case has to be quiet.
+self_check_case 'control, focus-follows-mouse on both sides' quiet \
+  case_one_sided_focus_follows_mouse both ''
+self_check_case 'focus-follows-mouse on the pin only' catches \
+  case_one_sided_focus_follows_mouse tmux "$(modes_except mouse_all_flag mouse_button_flag)"
 
 # The keypad rows are 1 only while a client that armed smkx is attached, so
 # detaching zz alone has to drop keypad_flag and keypad_cursor_flag there

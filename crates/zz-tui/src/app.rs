@@ -30,7 +30,7 @@ use crate::{
     render::{FrameDamage, Renderer, merge_damage},
     state::{ClientMessage, HostSwitch, Model},
     terminal_event::{Event as TerminalEvent, EventParser},
-    tty::{TerminalGuard, TerminalSize},
+    tty::{MouseArming, TerminalGuard, TerminalSize},
 };
 
 enum MainEvent {
@@ -513,7 +513,11 @@ pub(crate) fn run(
         lock_core(&core).mux_options(),
     )));
     let mut terminal = TerminalGuard::enter(
-        mouse_option_enabled(lock_core(&core).mux_options()),
+        if mouse_option_enabled(lock_core(&core).mux_options()) {
+            MouseArming::Button
+        } else {
+            MouseArming::Off
+        },
         extended_keys,
     )
     .map_err(|error| error.to_string())?;
@@ -1093,32 +1097,60 @@ fn refresh_terminal_options(model: &mut Model, core: &Mutex<ClientCore>, escape_
     model.focus_follows_mouse = focus_follows_mouse_enabled(options);
 }
 
-/// The pin's `server_client_reset_state`: outer mouse modes follow the option,
-/// or the active pane's own request while the option is off.
-fn sync_mouse_modes(model: &mut Model, pixel_mouse: bool) -> Option<Vec<u8>> {
-    let viewport_tracks_mouse = model.popup.as_ref().map_or_else(
-        || {
-            model
-                .active_viewport()
-                .is_some_and(|viewport| viewport.mouse_tracking)
-        },
-        |popup| {
+/// `server_client_reset_state`: the mode starts as the overlay's screen mode
+/// when one is drawn and the active pane's otherwise, and only then does the
+/// `mouse` option speak. With the option on and no overlay the pin clears all
+/// three trackings and raises `MODE_MOUSE_ALL` for a pane that asked for it;
+/// `focus-follows-mouse` raises it too, and anything short of it settles on
+/// `MODE_MOUSE_BUTTON`. A menu is the overlay that carries `MODE_MOUSE_ALL`
+/// of its own (`menu.c` `menu_prepare`), so it keeps any-event tracking up
+/// while it is on screen. With the option off nothing is added and the pane's
+/// own request is what the outer terminal sees.
+pub(crate) fn desired_mouse_arming(model: &Model) -> MouseArming {
+    let overlay_any = if model.menu.is_some() {
+        Some(true)
+    } else {
+        model.popup.as_ref().map(|popup| {
             model
                 .viewports
                 .get(&popup.pane)
                 .is_some_and(|viewport| viewport.mouse_tracking)
-        },
-    );
-    let desired = model.mouse_option || viewport_tracks_mouse;
-    if desired == model.mouse_modes_active {
+        })
+    };
+    if !model.mouse_option {
+        let tracking = overlay_any.unwrap_or_else(|| {
+            model
+                .active_viewport()
+                .is_some_and(|viewport| viewport.mouse_tracking)
+        });
+        return if tracking {
+            MouseArming::Any
+        } else {
+            MouseArming::Off
+        };
+    }
+    let any = overlay_any.unwrap_or_else(|| {
+        model.layout.panes.iter().any(|entry| {
+            model
+                .viewports
+                .get(&entry.pane)
+                .is_some_and(|viewport| viewport.mouse_tracking)
+        })
+    });
+    if any || model.focus_follows_mouse {
+        MouseArming::Any
+    } else {
+        MouseArming::Button
+    }
+}
+
+fn sync_mouse_modes(model: &mut Model, pixel_mouse: bool) -> Option<Vec<u8>> {
+    let desired = desired_mouse_arming(model);
+    if desired == model.mouse_arming {
         return None;
     }
-    model.mouse_modes_active = desired;
-    Some(if desired {
-        crate::tty::mouse_enable_sequence(pixel_mouse)
-    } else {
-        crate::tty::MOUSE_DISABLE_SEQUENCE.to_vec()
-    })
+    model.mouse_arming = desired;
+    Some(crate::tty::mouse_mode_sequence(desired, pixel_mouse))
 }
 
 fn prepare_host_switch<T>(
@@ -2257,29 +2289,29 @@ mod tests {
     fn app_requested_mouse_lights_the_outer_modes_while_the_option_is_off() {
         let (mut model, pane) = paned_model();
         model.mouse_option = false;
-        model.mouse_modes_active = false;
+        model.mouse_arming = MouseArming::Off;
 
         assert!(sync_mouse_modes(&mut model, false).is_none());
 
         model.viewports.insert(pane, tracking_viewport(true));
         assert_eq!(
             sync_mouse_modes(&mut model, false).as_deref(),
-            Some(b"\x1b[?1003h\x1b[?1006h".as_slice())
+            Some(crate::tty::mouse_mode_sequence(MouseArming::Any, false).as_slice())
         );
-        assert!(model.mouse_modes_active);
+        assert_eq!(model.mouse_arming, MouseArming::Any);
         assert!(sync_mouse_modes(&mut model, false).is_none());
 
         model.viewports.insert(pane, tracking_viewport(false));
         assert_eq!(
             sync_mouse_modes(&mut model, false).as_deref(),
-            Some(crate::tty::MOUSE_DISABLE_SEQUENCE)
+            Some(crate::tty::mouse_mode_sequence(MouseArming::Off, false).as_slice())
         );
-        assert!(!model.mouse_modes_active);
+        assert_eq!(model.mouse_arming, MouseArming::Off);
 
         model.mouse_option = true;
         assert_eq!(
             sync_mouse_modes(&mut model, true).as_deref(),
-            Some(b"\x1b[?1003h\x1b[?1006h\x1b[?1016h".as_slice())
+            Some(crate::tty::mouse_mode_sequence(MouseArming::Button, true).as_slice())
         );
     }
 
@@ -2287,33 +2319,33 @@ mod tests {
     fn popup_descriptor_owns_outer_mouse_tracking_even_before_its_frame() {
         let (mut model, pane) = paned_model();
         model.mouse_option = false;
-        model.mouse_modes_active = true;
+        model.mouse_arming = MouseArming::Any;
         model.viewports.insert(pane, tracking_viewport(true));
         let popup = PaneId(u64::MAX - 1);
         model.popup = Some(popup_state(popup));
 
         assert_eq!(
             sync_mouse_modes(&mut model, false).as_deref(),
-            Some(crate::tty::MOUSE_DISABLE_SEQUENCE)
+            Some(crate::tty::mouse_mode_sequence(MouseArming::Off, false).as_slice())
         );
-        assert!(!model.mouse_modes_active);
+        assert_eq!(model.mouse_arming, MouseArming::Off);
 
         model.viewports.insert(popup, tracking_viewport(true));
         assert_eq!(
             sync_mouse_modes(&mut model, false).as_deref(),
-            Some(b"\x1b[?1003h\x1b[?1006h".as_slice())
+            Some(crate::tty::mouse_mode_sequence(MouseArming::Any, false).as_slice())
         );
-        assert!(model.mouse_modes_active);
+        assert_eq!(model.mouse_arming, MouseArming::Any);
 
         model.viewports.insert(popup, tracking_viewport(false));
         assert_eq!(
             sync_mouse_modes(&mut model, false).as_deref(),
-            Some(crate::tty::MOUSE_DISABLE_SEQUENCE)
+            Some(crate::tty::mouse_mode_sequence(MouseArming::Off, false).as_slice())
         );
         model.popup = None;
         assert_eq!(
             sync_mouse_modes(&mut model, false).as_deref(),
-            Some(b"\x1b[?1003h\x1b[?1006h".as_slice())
+            Some(crate::tty::mouse_mode_sequence(MouseArming::Any, false).as_slice())
         );
     }
 

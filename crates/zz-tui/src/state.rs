@@ -126,7 +126,7 @@ pub(crate) struct Model {
     pub last_sent_command_output_geometry: Option<(u16, u16, u32, u32)>,
     pub mouse_option: bool,
     pub focus_follows_mouse: bool,
-    pub mouse_modes_active: bool,
+    pub mouse_arming: crate::tty::MouseArming,
     client_focus: ClientFocusState,
     local_host_label: String,
     local_endpoint: Endpoint,
@@ -193,7 +193,11 @@ impl Model {
             last_sent_command_output_geometry: None,
             mouse_option: crate::app::mouse_option_enabled(core.mux_options()),
             focus_follows_mouse: crate::app::focus_follows_mouse_enabled(core.mux_options()),
-            mouse_modes_active: crate::app::mouse_option_enabled(core.mux_options()),
+            mouse_arming: if crate::app::mouse_option_enabled(core.mux_options()) {
+                crate::tty::MouseArming::Button
+            } else {
+                crate::tty::MouseArming::Off
+            },
             client_focus: ClientFocusState::default(),
             local_host_label,
             local_endpoint,

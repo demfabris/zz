@@ -708,6 +708,15 @@ tall_case() {
   step '(sort: creation)' j
   verdict tall-buffer-tree-help-closed same
   step 'MARK-tall' q
+  ROW_MASK=client_row_mask
+  prefix_step 'session cho' D
+  verdict tall-client-tree-open same
+  step 'Suspend selected client' F1
+  verdict tall-client-tree-help same
+  step '(sort: name)' j
+  verdict tall-client-tree-help-closed same
+  step 'MARK-tall' q
+  ROW_MASK=
   verdict tall-closed same
 }
 
@@ -897,8 +906,40 @@ client_case() {
   mark_both clients
   prefix_step 'session cho' D
   verdict client-tree-open same
+  step '(sort: size)' O
+  verdict client-sort-size same
+  step '(sort: creation)' O
+  verdict client-sort-creation same
+  step '(sort: activity)' O
+  verdict client-sort-activity same
+  step '(sort: name)' O
+  verdict client-sort-name same
+  step '(sort: name, reversed)' r
+  verdict client-sort-reversed same
+  step '(sort: name)' r
+  verdict client-sort-forward same
+  step '*: ' t
+  verdict client-tagged same
+  step '(sort: name)' T
+  verdict client-untagged same
+  step '*: ' C-t
+  verdict client-tag-all same
+  step '(sort: name)' T
+  verdict client-tag-all-cleared same
+  step '(filter) ' f
+  verdict client-filter-prompt same
+  step '(sort: name)' Escape
+  verdict client-filter-cancelled same
   step 'MARK-clients' q
   verdict client-tree-closed same
+  run_on_both bind-key -T prefix Y choose-client -Z "display-message -d 0 CHOSE-%%"
+  prefix_step 'session cho' Y
+  verdict client-run-open same
+  step 'CHOSE-/dev/pts/' Enter
+  verdict client-run-chosen same
+  step 'MARK-clients' C-c
+  verdict client-run-dismissed same
+  run_on_both unbind-key -T prefix Y
   ROW_MASK=
 }
 

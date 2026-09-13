@@ -1,0 +1,34 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m building zz
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.45s
+[1;36m==>[0m running census-options
+census-options: 55 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running census-formats
+census-formats: 40 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/terminal-facts
+smoke/terminal-facts: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running known/known-terminal-runtime
+known/known-terminal-runtime: 28 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 6 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;33mwarn:[0m known/known-terminal-runtime has its exact documented divergence (0 0 6 0 0)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| census-options | 55 | yes | 0 | yes | yes | yes |
+| census-formats | 40 | yes | 0 | yes | yes | yes |
+| smoke/terminal-facts | 2 | yes | 0 | yes | yes | yes |
+| known/known-terminal-runtime | 28 | yes | 0 | no | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged

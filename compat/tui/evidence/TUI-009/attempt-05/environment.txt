@@ -1,0 +1,27 @@
+TUI-009 attempt-05, cycle 8, the caps lane
+
+date: 2026-09-13T17:38:40-03:00
+host: Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+bash: 5.3.15(1)-release
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+python3: Python 3.14.6
+
+repo: /home/demfabris/dev/zz-tui-caps-8 (worktree of /home/demfabris/dev/zz)
+branch base: origin/main b17232ace3704980919dc4bb787c84d9051f7db7
+tip at these runs: 7eb3eb85086b6b41e0463a098719a9a6386341d9
+worktree: 1 uncommitted path(s) at the runs (evidence only)
+
+zz:   /home/demfabris/dev/zz-tui-caps-8/target/debug/zz
+      size 796833152  mtime set 13 17:27
+      sha256 d3e177fbc3d382a0314c78e0b7db2bc8e923a3a2d071ae5cc7343774fb3105b4
+pin:  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+      tmux next-3.8
+      sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+      pin commit d77c9dc6 (next-3.8)
+
+locale of the shell that ran the fixtures: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8
+every fixture case names its own TERM, LANG and LC_ALL, and status-row.sh ran under
+LC_ALL=C LC_TIME=C, which is the control this box needs (its LC_TIME is pt_BR.UTF-8).

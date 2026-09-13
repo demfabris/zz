@@ -4,6 +4,8 @@ ok    self-check a refusal message that does not match
 ok    self-check a verb that accepts where a refusal is declared
 ok    self-check a surface that never drew
 ok    self-check a message row that never carried the message
+ok    self-check a cut message the row never carried
+ok    self-check a bound verb whose key was never pressed
 ok    self-check a key the pane really did take
 ok    self-check a canvas that is not the pin
 ok    self-check a layout only one side has

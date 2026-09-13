@@ -1,18 +1,37 @@
 TUI-011 attempt-01, the remaining stock client command inventory
+retaken at the cycle 7 roster gate
 
-2026-09-13T03:07:50-03:00
+2026-09-13T12:53:09-03:00
 
 Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
 NAME="CachyOS Linux"
 PRETTY_NAME="CachyOS"
 
-repository /home/demfabris/dev/zz-tui-roster
-revision   53d206dc5167ab009f41b6bbd1a15af6ecea6c18
-branch     HEAD
-worktree   3 modified paths at the time of writing
+repository /home/demfabris/dev/zz-gate-tui7
+branch     gate-roster (the lane rebased onto origin/main a1b865e4)
+revision   96f777aad42050fdd5054d53b058bae22f50077a
+worktree   git status --short: clean (no output)
 
-zz         /home/demfabris/dev/zz-tui-roster/target/debug/zz
-zz built   2026-09-13T02:59:49-03:00
+Every .txt beside this file was produced by the fixture as it stands at
+that revision, against a zz built from that revision. The two exceptions
+are named, and both are deliberate:
+
+  before-the-landing.txt is the SAME committed fixture at the SAME
+  revision with one file reverted - git checkout origin/main --
+  crates/zz-daemon/src/daemon.rs - and zz rebuilt, so it is the tip
+  minus the current-client landing and nothing else. It exits 1 with
+  '9 of 58 asserted comparisons differ'.
+
+  corpus.txt is the worker's own corpus run, taken in
+  /home/demfabris/dev/zz-tui-roster before the rebase. The gate's own
+  145-row delta corpus is gate-corpus.txt.
+
+A cargo debug build of zz is not bit-reproducible on this box, so the
+revision plus a clean worktree is what attests which binary produced
+these files; the sizes below are an identifier, not a reproduction.
+
+zz         /home/demfabris/dev/zz-gate-target/debug/zz
+zz size    790561904 bytes, built 2026-09-13T12:47:14-03:00
 pin        /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
 pin commit d77c9dc6aa021e4bc61f0da128c591af695e6466
 tmux next-3.8

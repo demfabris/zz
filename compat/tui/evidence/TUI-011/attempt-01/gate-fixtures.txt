@@ -1,0 +1,33 @@
+# revision 96f777aad42050fdd5054d53b058bae22f50077a
+# every TUI fixture at the cycle 7 roster gate tip, run one at a time in the
+# foreground against the pin at d77c9dc6, ZZ_BIN=/home/demfabris/dev/zz-gate-target/debug/zz
+
+compat/tui-client-commands.sh          exit 0  all 58 asserted comparisons identical, 37 recorded not asserted (0 for a sibling lane)   [x3]
+compat/tui-client-commands.sh --self-check  exit 0  self-check complete: every sabotage was caught in its own channel and both equivalences passed
+compat/tui-screen-diff.sh              exit 0  all 147 asserted checkpoints identical, 6 recorded not asserted
+compat/tui-screen-diff.sh --self-check exit 0  self-check complete: every sabotage was caught in its own channel and every equivalence passed
+compat/tui-pane-geometry.sh            exit 0  all 6 asserted measurements identical
+compat/tui-stock-keys.sh               exit 0  all 50 cases agree on every channel they assert, 8 recorded a difference elsewhere
+compat/tui-stock-keys.sh --self-check  exit 0  self-check complete: every sabotage was caught in its own channel and every equivalence passed
+compat/status-row.sh (LC_ALL=C LC_TIME=C)  exit 0  all 14 comparisons identical, none recorded
+compat/tui-indicators.sh               exit 0  all 23 asserted comparisons identical, 0 recorded not asserted
+compat/tui-indicators.sh --self-check  exit 0  self-check complete: every sabotage was caught and the equivalence passed
+compat/tui-copy-mode.sh                exit 0  147 of those cases assert at least one channel; 0 assert none and are recorded in full
+compat/tui-copy-mode.sh --self-check   exit 0  self-check complete: every sabotage was caught in its own channel and every equivalence passed
+compat/tui-caps.sh                     exit 0  all 351 asserted rows identical
+compat/tui-caps.sh --self-check        exit 0  self-check: every sabotage caught in its own channel
+compat/tui-overlays.sh                 exit 0  all 48 asserted comparisons identical, 0 recorded not asserted
+compat/tui-overlays.sh --self-check    exit 0  self-check complete: every sabotage was caught and the equivalence passed
+compat/tui-choosers.sh                 exit 0  all 53 asserted comparisons identical, 4 recorded not asserted (0 for a sibling lane)
+compat/tui-choosers.sh --self-check    exit 0  self-check complete: every sabotage was caught and both equivalences passed
+compat/attached-client.sh              exit 0  attached-client compatibility: PASS
+
+compat/tui-stock-keys.sh was green on its first run here. The detach-timestamp
+flake the cycle 7 input gate hit (3 reds in 4) did not reproduce; its recorded
+count came back 8, where that gate saw 9, which is the documented wobble.
+
+compat/tui-choosers.sh keeps four recorded cases, so TUI-006 does not verify at
+this gate. They are output-search-prompt, output-search-typed and
+output-selected (the stock search prompt's row and the current-match style in
+retained command output), and client-tree-open, which is choose-client - the
+command this lane did not land and handed to TUI-014.

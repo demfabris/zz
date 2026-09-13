@@ -1,0 +1,40 @@
+# revision 96f777aad42050fdd5054d53b058bae22f50077a
+# row: smoke/status-background-jobs, the one corpus row this gate had to settle
+
+WHAT IT LOOKS LIKE. The scenario stages a python fixture that watches a status
+job with interval 2 and asserts the drawn DATE changes at seconds 1, 3, 5 and 7.
+It is a wall-clock sample, and it fails on the zz side with the DATE list short:
+
+    AssertionError(('drawn DATE changes at seconds 1, 3, 5 and 7', 3,
+     1789312874182492703, b'...0:date*   DATE[1789312874182492703]\n'))
+
+THE COUNT, taken alone, one run at a time, nothing else of mine running:
+
+  at the gate tip (the landing in):   red 6 of 6
+    (once inside chunk l, once on the harness's own retry-alone in that run,
+     once on my solo retry, then four more solo runs)
+  at BASE (git checkout origin/main -- crates/zz-daemon/src/daemon.rs,
+  rebuilt, same worktree, same binary path): red 4 of 5
+
+WHY IT IS NOT THIS LANE'S. Both sides of the landing are red on almost every
+run; one BASE run in five came back green and nothing else did. Beyond the
+count: the scenario is four lines and invokes neither refresh-client nor
+lock-client nor any command that reaches resolve_attached_client or
+resolve_client_target, so it runs the same code at the tip that it ran at
+origin/main. The landing changes one error path into a success path for a
+clientless refresh-client and lock-client and touches nothing else.
+
+CORROBORATION, two independent measurements already in the tree and one review:
+  compat/tui/evidence/TUI-004/attempt-05/gate-status-background-jobs.txt - the
+    cycle 6 canvas gate found this row red in a chunk and green 5 of 5 alone at
+    its tip, and records that the cycle 6 overlays gate measured it at
+    origin/main on this box and found it red 3 of 4 there, same assertion.
+  the cycle 7 roster reviewer built BASE in their own worktree and found it
+    equally red there.
+
+SO: this is the box's fifth environmental corpus row, alongside micro-flags,
+show-options-hooks, lane2-store and smoke/plugin-runtime-resurrect-restore. It
+should be added to the cycle note before the next cycle so no further gate pays
+a BASE build to re-establish it. Its real fault is the fixture's, not zz's: a
+1-second-resolution sample of an interval-2 job has no margin on a box under
+any load at all.

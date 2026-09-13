@@ -1,18 +1,70 @@
-cargo test -p zz-daemon --jobs 4 -- --test-threads=3
+TUI-011 attempt-01, the cargo record, retaken at the gate.
 
+Every command below ran in /home/demfabris/dev/zz-gate-tui7 at gate-roster
+96f777aad42050fdd5054d53b058bae22f50077a, through the box's two-slot lock at
+MemoryMax=7G, one at a time. The exit code on each heading is the shell's.
+The body keeps every 'Running'/'Doc-tests' target line and every 'test result:'
+line of that command's output, so each target's count is visible; the per-test
+name lines are the only thing left out.
+
+=== cargo test -p zz-daemon --lib --jobs 6 -- --test-threads=4
+    exit 0
+     Running unittests src/lib.rs (/home/demfabris/dev/zz-gate-target/debug/deps/zz_daemon-25b6c34994675b2c)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 892 filtered out; finished in 0.73s
+test result: ok. 893 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 101.82s
+
+=== cargo test -p zz-daemon --tests --jobs 6 -- --test-threads=4
+    exit 0
+     Running unittests src/lib.rs (/home/demfabris/dev/zz-gate-target/debug/deps/zz_daemon-25b6c34994675b2c)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 892 filtered out; finished in 0.75s
+test result: ok. 893 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 102.05s
+     Running tests/agent_soak.rs (/home/demfabris/dev/zz-gate-target/debug/deps/agent_soak-e9471454b924362b)
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.43s
+     Running tests/display_menu_cell_layout.rs (/home/demfabris/dev/zz-gate-target/debug/deps/display_menu_cell_layout-090c13876f77317c)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s
+     Running tests/display_menu_resize_lifecycle.rs (/home/demfabris/dev/zz-gate-target/debug/deps/display_menu_resize_lifecycle-11f2e0540a79e615)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.95s
+     Running tests/display_menu_shortcut_grammar.rs (/home/demfabris/dev/zz-gate-target/debug/deps/display_menu_shortcut_grammar-d5e14ebdbbf0298d)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+     Running tests/display_popup_resize_lifecycle.rs (/home/demfabris/dev/zz-gate-target/debug/deps/display_popup_resize_lifecycle-d99901d4c1c722e9)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+     Running tests/format_client_loop_context.rs (/home/demfabris/dev/zz-gate-target/debug/deps/format_client_loop_context-4e703dad132fcbff)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.53s
+     Running tests/format_environment_loop_context.rs (/home/demfabris/dev/zz-gate-target/debug/deps/format_environment_loop_context-8006ddd193925b3c)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s
+     Running tests/format_modifier_client_loop.rs (/home/demfabris/dev/zz-gate-target/debug/deps/format_modifier_client_loop-3538dc30c55407c6)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.24s
+     Running tests/format_modifier_environment_loop.rs (/home/demfabris/dev/zz-gate-target/debug/deps/format_modifier_environment_loop-728a74b96e0ac708)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.76s
+
+=== cargo test -p zz --jobs 6 -- --test-threads=4
+    exit 0
+     Running unittests src/lib.rs (/home/demfabris/dev/zz-gate-target/debug/deps/zz-1ce6c8f5eb9597d9)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 637 filtered out; finished in 0.00s
+test result: ok. 638 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.75s
+     Running unittests src/main.rs (/home/demfabris/dev/zz-gate-target/debug/deps/zz-d7beb3e66b610370)
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-
-
-cargo clippy -p zz-daemon --all-targets --all-features --jobs 4 -- -D warnings
-    Checking zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-roster/crates/zz-daemon)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 32.35s
-
-cargo test -p zz --jobs 4 -- --test-threads=3
+     Running unittests src/bin/zz_browser_fixture.rs (/home/demfabris/dev/zz-gate-target/debug/deps/zz_browser_fixture-391910b51965ebb7)
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/zz_cli.rs (/home/demfabris/dev/zz-gate-target/debug/deps/zz_cli-10b79e635e3ac490)
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/zz_external_texture_fixture.rs (/home/demfabris/dev/zz-gate-target/debug/deps/zz_external_texture_fixture-e8a9ddad8cccbb50)
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/zz_helper.rs (/home/demfabris/dev/zz-gate-target/debug/deps/zz_helper-0d0fa9aa053eb876)
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s
-test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 90.74s
+     Running tests/buffer_client_file_load.rs (/home/demfabris/dev/zz-gate-target/debug/deps/buffer_client_file_load-9af7bfdaab5fea56)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+     Running tests/buffer_client_file_save.rs (/home/demfabris/dev/zz-gate-target/debug/deps/buffer_client_file_save-37c73ca8cb89e634)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.95s
+     Running tests/cli_binary.rs (/home/demfabris/dev/zz-gate-target/debug/deps/cli_binary-1803822e71f859fb)
+test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 82.16s
+   Doc-tests zz
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== cargo clippy --workspace --all-targets --all-features --jobs 6 -- -D warnings
+    exit 0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 18.83s
+
+=== cargo build -p zz --jobs 6
+    exit 0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.56s

@@ -9,7 +9,7 @@ use gpui::{
     ScrollWheelEvent, Size, Style, UniformListScrollHandle, Window, fill, point, px, relative,
     size, transparent_black,
 };
-use instant::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use crate::ActiveTheme as _;
 use crate::Colorize as _;
@@ -766,8 +766,6 @@ impl Element for Scrollbar {
 
                                         scroll_handle.start_drag();
                                         state.set(state.get().with_drag_pos(axis, pos));
-
-                                        cx.notify(view_id);
                                     } else {
                                         let offset = scroll_handle.offset();
                                         let percentage = if is_vertical {
@@ -793,6 +791,8 @@ impl Element for Scrollbar {
                                             ));
                                         }
                                     }
+
+                                    cx.notify(view_id);
                                 }
                             }
                         });
@@ -885,7 +885,64 @@ impl Element for Scrollbar {
 
 #[cfg(test)]
 mod tests {
-    use super::{Axis, Duration, FADE_TICK, ScrollbarState, fade_frame};
+    use super::*;
+    use gpui::{Context, Modifiers, MouseButton, ParentElement as _, Render, Styled as _, div};
+
+    #[gpui::test]
+    fn track_click_notifies_after_changing_custom_handle_offset(cx: &mut gpui::TestAppContext) {
+        #[derive(Clone, Default)]
+        struct TestHandle(Rc<Cell<Point<Pixels>>>);
+
+        impl ScrollbarHandle for TestHandle {
+            fn offset(&self) -> Point<Pixels> {
+                self.0.get()
+            }
+
+            fn set_offset(&self, offset: Point<Pixels>) {
+                self.0.set(offset);
+            }
+
+            fn content_size(&self) -> Size<Pixels> {
+                size(px(100.), px(600.))
+            }
+        }
+
+        struct TestRoot(TestHandle);
+
+        impl Render for TestRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(100.))
+                    .h(px(200.))
+                    .relative()
+                    .child(Scrollbar::vertical(&self.0).scrollbar_show(ScrollbarShow::Always))
+            }
+        }
+
+        cx.update(crate::init);
+        let handle = TestHandle::default();
+        let (root, cx) = cx.add_window_view(|_, _| TestRoot(handle.clone()));
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        cx.simulate_mouse_move(point(px(92.), px(150.)), None, Modifiers::default());
+
+        let notified = Rc::new(Cell::new(false));
+        let _subscription = cx.update(|_, cx| {
+            let notified = notified.clone();
+            cx.observe(&root, move |_, _| notified.set(true))
+        });
+
+        cx.simulate_mouse_down(
+            point(px(92.), px(150.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+
+        assert!(handle.offset().y < Pixels::ZERO);
+        assert!(notified.get(), "track click should request a repaint");
+    }
 
     #[test]
     fn hovered_axis_only_changes_on_track_transition() {

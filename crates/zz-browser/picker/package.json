@@ -9,10 +9,10 @@
     "test": "node scripts/test.mjs"
   },
   "dependencies": {
-    "react-grab": "0.1.48"
+    "react-grab": "0.2.0"
   },
   "devDependencies": {
-    "esbuild": "0.28.1"
+    "esbuild": "0.28.2"
   },
-  "packageManager": "pnpm@11.3.0"
+  "packageManager": "pnpm@11.27.0"
 }

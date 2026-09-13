@@ -58,7 +58,6 @@ pub use agent::stream::{
 pub use askpass::run_helper;
 pub use askpass::{ASKPASS_SOCKET_ENV, AskpassPrompt, AskpassPromptKind, AskpassReply, SshPrompts};
 pub use client::{ClientTerminalFlags, client_terminal_colour_count, set_client_terminal_flags};
-pub use terminal_features::{terminal_colour_count, terminal_feature_mask};
 pub use client::{CommandClient, CommandOutcome, InteractiveClient, short_device_name};
 #[cfg(feature = "daemon")]
 pub use daemon::{Daemon, agent_send_reads_stdin, load_buffer_reads_stdin, send_text_reads_stdin};
@@ -76,6 +75,7 @@ pub use paths::{
 };
 #[cfg(target_os = "ios")]
 pub use russh_client::ios_ssh_public_key;
+pub use terminal_features::{terminal_colour_count, terminal_feature_mask};
 pub use transport::default_socket_path;
 
 /// Every failure a client can see from the daemon, whether it hosts one or only talks to one.

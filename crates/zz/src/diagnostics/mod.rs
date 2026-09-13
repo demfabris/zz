@@ -894,14 +894,14 @@ fn process_sampler() {
         return;
     };
     let mut system = System::new();
-    let refresh = ProcessRefreshKind::new()
+    let refresh = ProcessRefreshKind::nothing()
         .with_memory()
         .with_cpu()
         .with_disk_usage()
         .with_cmd(UpdateKind::OnlyIfNotSet)
         .with_exe(UpdateKind::OnlyIfNotSet);
     loop {
-        system.refresh_processes_specifics(ProcessesToUpdate::All, refresh);
+        system.refresh_processes_specifics(ProcessesToUpdate::All, true, refresh);
         let Some(process) = system.process(pid) else {
             return;
         };

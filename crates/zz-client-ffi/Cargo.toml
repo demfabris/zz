@@ -18,8 +18,7 @@ zz-config = { path = "../zz-config" }
 async-channel = { workspace = true, optional = true }
 rustix.workspace = true
 serde.workspace = true
-agent-client-protocol-schema = "1.5.0"
-base64.workspace = true
+agent-client-protocol-schema = "1.7.0"
 serde_json.workspace = true
 zeroize.workspace = true
 zz-client = { path = "../zz-client" }

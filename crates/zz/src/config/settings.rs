@@ -2870,13 +2870,7 @@ mod tests {
             SettingsView::new(mux, window, cx)
         });
         let settings = captured.borrow().clone().expect("captured settings view");
-        let family = cx.update(|_, cx| {
-            cx.text_system()
-                .all_font_names()
-                .into_iter()
-                .find(|family| !family.starts_with('.'))
-                .expect("an available UI font")
-        });
+        let family = "Test UI font".to_owned();
         let mut config = AppConfig::default();
         config.status_alignment.value = StatusBarAlignment::Center;
         config.status_clock.value = StatusBarClock::Off;
@@ -2890,6 +2884,17 @@ mod tests {
                 },
             }));
             settings.update(cx, |settings, cx| {
+                settings.ui_font_family.update(cx, |select, cx| {
+                    *select = SelectState::new(
+                        vec![
+                            SettingsSelectItem::new("System default", ""),
+                            SettingsSelectItem::new(family.clone(), family.clone()),
+                        ],
+                        Some(IndexPath::new(0)),
+                        window,
+                        cx,
+                    );
+                });
                 settings.synchronize_numeric_inputs(window, cx);
                 settings.synchronize_ui_font(window, cx);
             });

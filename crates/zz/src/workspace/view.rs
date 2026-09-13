@@ -5439,7 +5439,7 @@ mod tests {
         }
 
         activate(PaneId(0), cx);
-        cx.update(|window, _| window.blur());
+        cx.update(gpui::Window::blur);
         let mut same_pane_again = two_pane_snapshot(PaneId(0));
         same_pane_again.generation = 99;
         publish(same_pane_again, cx);

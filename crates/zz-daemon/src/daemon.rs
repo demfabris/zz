@@ -425,7 +425,8 @@ fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
     let mut system = System::new();
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[process_id]),
-        ProcessRefreshKind::new().with_cwd(sysinfo::UpdateKind::Always),
+        true,
+        ProcessRefreshKind::nothing().with_cwd(sysinfo::UpdateKind::Always),
     );
     system
         .process(process_id)
@@ -449,7 +450,8 @@ fn terminal_current_command(terminal: &TerminalSession) -> String {
     let mut system = System::new();
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[process_id]),
-        ProcessRefreshKind::new(),
+        true,
+        ProcessRefreshKind::nothing(),
     );
     system
         .process(process_id)
@@ -19317,9 +19319,14 @@ impl Shared {
                         continue;
                     };
                     context.set_invoking_key(Some(key));
-                    if let Err(error) =
-                        self.execute_key_commands(*owner, kind, &mut context, pane, &commands, false)
-                    {
+                    if let Err(error) = self.execute_key_commands(
+                        *owner,
+                        kind,
+                        &mut context,
+                        pane,
+                        &commands,
+                        false,
+                    ) {
                         log::warn!(
                             target: "zz_daemon::diagnostics::input",
                             "send-keys into copy mode failed client={owner} pane={pane} error={error}"
@@ -75327,7 +75334,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 .latest_viewport_for(TerminalViewId(client.0))
                 .expect("viewport"),
         );
-        assert!(!text.contains('Z'), "a key sent into copy mode reached the pane: {text:?}");
+        assert!(
+            !text.contains('Z'),
+            "a key sent into copy mode reached the pane: {text:?}"
+        );
     }
 
     #[cfg(unix)]
@@ -80447,9 +80457,8 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.inner.lock().client_sizes.insert(client, (80, 3));
 
         let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
-        let extent = || {
-            interactive_client_window_extent(&shared.inner.lock(), client, session, window)
-        };
+        let extent =
+            || interactive_client_window_extent(&shared.inner.lock(), client, session, window);
         let set = |value: &str, context: &mut ExecutionContext| {
             shared
                 .execute(

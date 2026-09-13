@@ -14,7 +14,7 @@ the one-time global CEF Alloy initialization, the **single-binary multi-process
 model** (one executable acts as the browser process and every Chromium
 subprocess), and the **external message pump** that steps CEF from GPUI's
 foreground executor instead of a CEF-owned loop. CEF is pinned to Rust package
-`151.2.0+151.3.14`, backed by **Chromium `151.0.7922.72`**; upgrading is an
+`152.2.0+152.0.6`, backed by **Chromium `152.0.7977.83`**; upgrading is an
 explicit dependency bump requiring all platform bundle smoke tests
 (see [updating CEF](/playbooks/updating-cef.md)).
 

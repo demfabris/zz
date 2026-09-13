@@ -85,7 +85,7 @@ iPad against a live macOS daemon.
 
 # External pins
 
-- CEF pinned to Rust packages `151.2.0+151.3.14`, Chromium `151.0.7922.72` . see
+- CEF pinned to Rust packages `152.2.0+152.0.6`, Chromium `152.0.7977.83` . see
   [CEF artifacts](/references/cef-artifacts.md).
 - GPUI + `gpui_platform` come from a fixed Zed revision . see [GPUI revision](/references/gpui-revision.md).
 - tmux behavior checked against a pinned commit . see [tmux upstream](/references/tmux-upstream.md).

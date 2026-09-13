@@ -42,7 +42,7 @@ similar = "2.7.0"
 smallvec.workspace = true
 # Cross-platform monotonic clock for the scrollbar's fade timing; zero-cost on
 # native, backed by web APIs under WASM.
-instant = { version = "0.1", features = ["wasm-bindgen"] }
+web-time = "1.1.0"
 # Markdown parsing for the agent transcript. Only the AST is used: `widget/text`
 # owns the rendering, and re-exports this crate's `mdast` as `markdown_ast`.
 markdown = { version = "1.0", features = ["serde"] }
@@ -59,7 +59,7 @@ zz-client = { path = "../zz-client" }
 zz-terminal = { path = "../zz-terminal", default-features = false }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-tree-sitter = { version = "0.26.12", optional = true }
+tree-sitter = { version = "0.26.13", optional = true }
 tree-sitter-json = { version = "0.24.8", optional = true }
 tree-sitter-md = { version = "0.5.3", optional = true }
 tree-sitter-rust = { version = "0.24.2", optional = true }

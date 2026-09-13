@@ -19,8 +19,8 @@ the build consumes (see [build/verify a CEF bundle](/playbooks/build-cef-bundle.
 # Steps
 
 1. **Choose the new CEF release.** Find the target `cef`/`cef-dll-sys` Rust package version (format
-   `<rust-pkg-version>+<cef-version>`, e.g. current `151.2.0+151.3.14` mapping to CEF
-   `151.3.14+g5d67476+chromium-151.0.7922.72`).
+   `<rust-pkg-version>+<cef-version>`, e.g. current `152.2.0+152.0.6` mapping to CEF
+   `152.0.6+g708dc14+chromium-152.0.7977.83`).
 2. **Check which wgpu major the release wants.** `accelerated_osr` hands GPUI's own
    `wgpu::Device` to `cef::osr_texture_import`, so the `cef` crate's `wgpu` dependency must be the
    *same* major as [GPUI's](/references/gpui-revision.md) . two majors in the graph is a type
@@ -28,7 +28,7 @@ the build consumes (see [build/verify a CEF bundle](/playbooks/build-cef-bundle.
    was still on 29, which is why the 151 bump also carried a gpui patch (fork commit
    `gpui: build the wgpu renderer against wgpu 30`) and a `wgpu = "=30.0.0"` workspace bump. Check
    the crate's changelog for a `update wgpu to vN` entry before assuming a bump is dependency-only.
-3. **Bump the workspace dependency.** Update `cef = "=151.2.0"` in the root `Cargo.toml` if the
+3. **Bump the workspace dependency.** Update `cef = "=152.2.0"` in the root `Cargo.toml` if the
    Rust package's major/minor version changed, then regenerate the lock:
    ```sh
    cargo update -p cef -p cef-dll-sys
@@ -54,9 +54,9 @@ the build consumes (see [build/verify a CEF bundle](/playbooks/build-cef-bundle.
    cargo xtask bundle-cef --release --output target/cef-bundle
    ```
    See [build/verify a CEF bundle](/playbooks/build-cef-bundle.md) for what this exercises locally.
-7. **Bump the CI cache key.** `.github/workflows/ci.yml` and `.github/workflows/release.yml` cache
-   the downloaded distribution under `cef-151.3.14-${{ runner.os }}-${{ runner.arch }}`; update the
-   version segment in both so a stale cache entry isn't reused for the new pin.
+7. **Bump the CI cache key.** `.github/workflows/ci.yml`, `.github/workflows/release.yml`, and
+   `.github/workflows/nightly-corpus.yml` cache the downloaded distribution under
+   `cef-152.0.6-${{ runner.os }}-${{ runner.arch }}`; update all five keys for the new pin.
 8. **Commit everything together.** `Cargo.lock`, `Cargo.toml` (if changed), `ARTIFACTS.md`, and the
    CI cache-key bump belong in one change, verified against all three platforms before merge.
 
@@ -64,10 +64,10 @@ the build consumes (see [build/verify a CEF bundle](/playbooks/build-cef-bundle.
 
 | File | Role |
 | --- | --- |
-| `Cargo.toml` | `cef = "=151.2.0"` workspace version constraint, and the `wgpu` pin that must match it |
+| `Cargo.toml` | `cef = "=152.2.0"` workspace version constraint, and the `wgpu` pin that must match it |
 | `Cargo.lock` | Exact resolved `cef`/`cef-dll-sys` version (`<rust-pkg>+<cef-version>`) |
 | `third_party/cef/ARTIFACTS.md` | Reviewable mirror of the official per-target archive name + SHA-1 table |
-| `.github/workflows/ci.yml`, `release.yml` | `CEF_PATH` cache keyed on the CEF version, matrix across all three OSes |
+| `.github/workflows/ci.yml`, `release.yml`, `nightly-corpus.yml` | `CEF_PATH` cache keyed on the CEF version, matrix across all three OSes |
 | `crates/zz-xtask/src/main.rs` | Where the download/verify/build/bundle flow is invoked from |
 
 # Related

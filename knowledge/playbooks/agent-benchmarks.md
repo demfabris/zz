@@ -1,7 +1,7 @@
 ---
 type: Playbook
 title: Agent benchmarks
-description: Measure zz as an agent target: browser-pane capability parity over CDP against standalone browser tools, and whether the zz-workspace skill helps weak agents; harness layout, prerequisites, results, and traps.
+description: "Measure zz as an agent target: browser-pane capability parity over CDP against standalone browser tools, and whether the zz-workspace skill helps weak agents; harness layout, prerequisites, results, and traps."
 resource: bench/agents/browser/matrix.sh
 tags: [agents, browser, cdp, benchmark, skill, agent-browser, playwright-mcp, chrome-devtools-mcp]
 timestamp: 2026-09-10T00:00:00Z

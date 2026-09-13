@@ -359,7 +359,7 @@ fn request_termination(process: &Process) -> bool {
 fn wait_for_process_exit(system: &mut System, pid: Pid, start_time: u64) -> bool {
     let deadline = Instant::now() + TERMINATION_TIMEOUT;
     loop {
-        system.refresh_processes(ProcessesToUpdate::All);
+        system.refresh_processes(ProcessesToUpdate::All, true);
         if system
             .process(pid)
             .is_none_or(|process| process.start_time() != start_time)
@@ -576,6 +576,29 @@ fn ensure_named_pipe_stopped(path: &Path, pid: u32) -> Result<(), DaemonRecovery
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn process_exit_wait_removes_exited_process_from_cached_snapshot() {
+        use std::process::{Command, Stdio};
+
+        let mut child = Command::new("sh")
+            .args(["-c", "read -r line"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = Pid::from_u32(child.id());
+        let mut system = System::new_all();
+        let start_time = system.process(pid).unwrap().start_time();
+
+        drop(child.stdin.take());
+        child.wait().unwrap();
+
+        assert!(wait_for_process_exit(&mut system, pid, start_time));
+        assert!(system.process(pid).is_none());
+    }
 
     #[test]
     fn v1_and_v2_identities_round_trip_strictly() {

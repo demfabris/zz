@@ -489,44 +489,81 @@ fn line_ranges(
     window: &mut Window,
 ) -> Vec<Range<usize>> {
     let total_len = items.iter().map(MeasureItem::len).sum::<usize>();
+    let mut hard_lines = Vec::new();
+    let mut line_start = 0;
+    let mut item_start = 0;
+
+    for item in items {
+        if let MeasureItem::Text { text, .. } = item {
+            for (newline, _) in text.match_indices('\n') {
+                let newline = item_start + newline;
+                hard_lines.push(line_start..newline);
+                line_start = newline + 1;
+            }
+        }
+        item_start += item.len();
+    }
+    hard_lines.push(line_start..total_len);
+
     let Some(wrap_width) = wrap_width else {
-        return std::iter::once(0..total_len).collect();
+        return hard_lines;
     };
     let rem_size = window.rem_size();
-
-    let wrap_fragments = items
-        .iter()
-        .enumerate()
-        .map(|(ix, item)| match item {
-            MeasureItem::Text { text, .. } => WrapLineFragment::text(text),
-            MeasureItem::Image { .. } => WrapLineFragment::element(
-                image_sizes[ix]
-                    .expect("image size should be measured before wrapping")
-                    .width,
-                IMAGE_LEN,
-            ),
-        })
-        .collect::<Vec<_>>();
     let font_size = text_style.font_size.to_pixels(rem_size);
     let mut wrapper = window
         .text_system()
         .line_wrapper(text_style.font(), font_size);
-    let boundaries = wrapper
-        .wrap_line(&wrap_fragments, wrap_width)
-        .map(|boundary| boundary.ix.min(total_len))
-        .collect::<Vec<_>>();
-    let mut ranges = Vec::with_capacity(boundaries.len() + 1);
-    let mut start = 0;
+    let mut ranges = Vec::new();
 
-    for end in boundaries {
-        if start < end {
-            ranges.push(start..end);
+    for hard_line in hard_lines {
+        let mut item_start = 0;
+        let wrap_fragments = items
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, item)| {
+                let item_end = item_start + item.len();
+                let fragment = if item_end <= hard_line.start || item_start >= hard_line.end {
+                    None
+                } else {
+                    match item {
+                        MeasureItem::Text { text, .. } => {
+                            let start = hard_line.start.max(item_start) - item_start;
+                            let end = hard_line.end.min(item_end) - item_start;
+                            (start < end).then(|| WrapLineFragment::text(&text[start..end]))
+                        }
+                        MeasureItem::Image { .. } => (hard_line.start <= item_start
+                            && item_end <= hard_line.end)
+                            .then(|| {
+                                WrapLineFragment::element(
+                                    image_sizes[ix]
+                                        .expect("image size should be measured before wrapping")
+                                        .width,
+                                    IMAGE_LEN,
+                                )
+                            }),
+                    }
+                };
+                item_start = item_end;
+                fragment
+            })
+            .collect::<Vec<_>>();
+
+        let boundaries = wrapper
+            .wrap_line(&wrap_fragments, wrap_width)
+            .map(|boundary| hard_line.start + boundary.ix.min(hard_line.len()))
+            .collect::<Vec<_>>();
+        let mut start = hard_line.start;
+
+        for end in boundaries {
+            if start < end {
+                ranges.push(start..end);
+            }
+            start = end;
         }
-        start = end;
-    }
 
-    if start < total_len {
-        ranges.push(start..total_len);
+        if start < hard_line.end || hard_line.is_empty() {
+            ranges.push(start..hard_line.end);
+        }
     }
 
     ranges
@@ -683,6 +720,45 @@ fn slice_ranges<T, U>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn hard_lines_keep_empty_lines_and_exclude_newline_bytes(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.update(|window, _| {
+            let items = vec![
+                MeasureItem::Text {
+                    text: "é\n\n".into(),
+                    links: vec![],
+                    highlights: vec![],
+                },
+                MeasureItem::Image {
+                    url: "https://example.com/image.svg".into(),
+                    width: None,
+                    height: None,
+                },
+                MeasureItem::Text {
+                    text: "\nend\n".into(),
+                    links: vec![],
+                    highlights: vec![],
+                },
+            ];
+            let image_sizes = [None, Some(size(px(20.), px(10.))), None];
+            let text_style = window.text_style();
+
+            for wrap_width in [None, Some(px(400.))] {
+                assert_eq!(
+                    line_ranges(&items, &image_sizes, &text_style, wrap_width, window),
+                    vec![0..2, 3..3, 4..5, 6..9, 10..10],
+                );
+                let layout = layout_flow(&items, &image_sizes, &text_style, wrap_width, window);
+                let PositionedFragment::Image { origin, .. } = layout.fragments[1] else {
+                    panic!("expected inline image");
+                };
+                assert!(origin.y >= window.line_height() * 2.);
+                assert_eq!(layout.size.height, window.line_height() * 5.);
+            }
+        });
+    }
 
     #[test]
     fn inline_image_without_explicit_size_scales_intrinsic_ratio_to_line_height() {

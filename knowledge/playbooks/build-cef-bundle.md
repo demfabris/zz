@@ -180,7 +180,7 @@ Artifact retention follows the repository's GitHub Actions retention setting.
 What `bundle-cef` does, in order:
 
 1. **`download-cef`** . the `cef` crate's `build_util` resolves the Rust package pin
-   (`cef = "=151.2.0"` / `cef-dll-sys` in `Cargo.lock`, currently `151.2.0+151.3.14`) to a CEF
+   (`cef = "=152.2.0"` / `cef-dll-sys` in `Cargo.lock`, currently `152.2.0+152.0.6`) to a CEF
    release, then downloads the per-target minimal distribution archive.
 2. **SHA-1 verification** . the downloaded archive's SHA-1 is checked against the hash fetched from
    CEF's own `index.json` (`https://cef-builds.spotifycdn.com/index.json`) before anything is
@@ -268,7 +268,7 @@ What `bundle-cef` does, in order:
 | `scripts/profile-macos.sh` | Runs the symbolized profiling bundle on an isolated socket and captures CPU, System Trace, or Metal Instruments data |
 | `third_party/cef/ARTIFACTS.md` | Reviewable mirror of the archive name + SHA-1 fetched from CEF's index per Rust target |
 | `third_party/cef/LICENSE.txt` | Installed into every bundle as `CEF_LICENSE.txt` |
-| `Cargo.toml` | `cef = "=151.2.0"` workspace pin that `download-cef` resolves |
+| `Cargo.toml` | `cef = "=152.2.0"` workspace pin that `download-cef` resolves |
 | `crates/zz/src/bin/zz_cli.rs` | The macOS and Linux `PATH` launcher; maps bare launch to `new-session -A` and reserves `zz app` for the GUI |
 | `.github/workflows/ci.yml` | Exercises `bundle-cef` on `ubuntu-24.04`, `macos-15`, `windows-2025` |
 | `.github/workflows/release.yml` | Tag-driven macOS, Linux, and Windows publication; prerelease channel gating |

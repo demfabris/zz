@@ -18,7 +18,7 @@ async-signal.workspace = true
 base64.workspace = true
 futures-lite.workspace = true
 log.workspace = true
-miniz_oxide = "0.8.9"
+miniz_oxide = "0.9.1"
 rustix.workspace = true
 unicode-width = "0.2.2"
 zz-daemon = { path = "../zz-daemon", default-features = false }

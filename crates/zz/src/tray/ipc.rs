@@ -236,7 +236,8 @@ fn same_user(stream: &Stream) -> bool {
     let mut system = System::new();
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[own, peer]),
-        ProcessRefreshKind::new().with_user(UpdateKind::Always),
+        true,
+        ProcessRefreshKind::nothing().with_user(UpdateKind::Always),
     );
     let own = system.process(own).and_then(|process| process.user_id());
     let peer = system.process(peer).and_then(|process| process.user_id());

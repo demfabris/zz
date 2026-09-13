@@ -15,7 +15,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 async-channel = "2.5.0"
-base64 = "0.22"
+base64 = "0.23.1"
 image = { version = "=0.25.10", default-features = false }
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false }
@@ -32,7 +32,7 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", default-feature
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys = "0.3"
 rust-embed = { version = "8.12.0", features = ["debug-embed"] }
-wasm-bindgen = "=0.2.126"
+wasm-bindgen = "=0.2.128"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["BinaryType", "Blob", "Clipboard", "CloseEvent", "Document", "Element", "ErrorEvent", "Event", "File", "FileList", "HtmlElement", "HtmlInputElement", "Location", "MessageEvent", "Navigator", "Node", "Storage", "WebSocket", "Window"] }
 
@@ -57,8 +57,8 @@ type_complexity = "allow"
 unused_self = "allow"
 
 [patch."https://github.com/zed-industries/zed"]
-gpui = { git = "https://github.com/demfabris/zed", rev = "c8135f5b6b4c79d534b005aa150d17bd52e9c4de", version = "=0.2.2" }
-gpui_platform = { git = "https://github.com/demfabris/zed", rev = "c8135f5b6b4c79d534b005aa150d17bd52e9c4de" }
+gpui = { git = "https://github.com/demfabris/zed", rev = "0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/demfabris/zed", rev = "0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0" }
 
 [profile.dev]
 debug = 1

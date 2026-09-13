@@ -1,5 +1,5 @@
-use instant::{Duration, Instant};
 use std::fmt::Debug;
+use web_time::{Duration, Instant};
 
 pub trait HistoryItem: Clone + PartialEq {
     fn version(&self) -> usize;

@@ -667,12 +667,16 @@ impl PopupMenu {
 
         cx.emit(DismissEvent);
 
-        if let Some(handle) = self
-            .previous_focus_handle
-            .as_ref()
-            .or(self.action_context.as_ref())
-        {
-            window.focus(handle, cx);
+        let focus_moved_away =
+            window.focused(cx).is_some() && !self.focus_handle.contains_focused(window, cx);
+        if !focus_moved_away {
+            if let Some(handle) = self
+                .previous_focus_handle
+                .as_ref()
+                .or(self.action_context.as_ref())
+            {
+                window.focus(handle, cx);
+            }
         }
 
         let Some(parent_menu) = self.parent_menu.clone() else {
@@ -1060,6 +1064,44 @@ impl Render for PopupMenu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn dismissal_preserves_focus_moved_by_menu_handler(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+
+        for moves_focus in [false, true] {
+            let previous_focus = cx.update(|cx| cx.focus_handle());
+            let target_focus = cx.update(|cx| cx.focus_handle());
+            let (menu, cx) = cx.add_window_view(|window, cx| {
+                let target_focus = target_focus.clone();
+                let mut menu = PopupMenu::new(cx).item(PopupMenuItem::new("Open").on_click(
+                    move |_, window, cx| {
+                        if moves_focus {
+                            target_focus.focus(window, cx);
+                        }
+                    },
+                ));
+                menu.previous_focus_handle = Some(previous_focus.clone());
+                menu.focus_handle.focus(window, cx);
+                menu
+            });
+
+            cx.update(|window, cx| {
+                menu.update(cx, |menu, cx| {
+                    menu.selected_index = Some(0);
+                    menu.confirm(&Confirm { secondary: false }, window, cx);
+                });
+                assert_eq!(
+                    window.focused(cx),
+                    Some(if moves_focus {
+                        target_focus
+                    } else {
+                        previous_focus
+                    })
+                );
+            });
+        }
+    }
 
     #[gpui::test]
     fn popup_menu_item_a11y_label_uses_visible_label(cx: &mut gpui::TestAppContext) {

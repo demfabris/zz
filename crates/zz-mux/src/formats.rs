@@ -4965,9 +4965,18 @@ mod tests {
         assert_eq!(trim("###[fg=red]AB", 1), "###[fg=red]");
         assert_eq!(trim("###[fg=red]AB", -1), "#[fg=red]B");
 
-        assert_eq!(trim("#[fg=red]\u{65e5}\u{672c}\u{8a9e}", 2), "#[fg=red]\u{65e5}");
-        assert_eq!(trim("#[fg=red]\u{65e5}\u{672c}\u{8a9e}", 3), "#[fg=red]\u{65e5}");
-        assert_eq!(trim("#[fg=red]\u{65e5}\u{672c}\u{8a9e}", -2), "#[fg=red]\u{8a9e}");
+        assert_eq!(
+            trim("#[fg=red]\u{65e5}\u{672c}\u{8a9e}", 2),
+            "#[fg=red]\u{65e5}"
+        );
+        assert_eq!(
+            trim("#[fg=red]\u{65e5}\u{672c}\u{8a9e}", 3),
+            "#[fg=red]\u{65e5}"
+        );
+        assert_eq!(
+            trim("#[fg=red]\u{65e5}\u{672c}\u{8a9e}", -2),
+            "#[fg=red]\u{8a9e}"
+        );
 
         assert_eq!(trim("#[fg=red", 2), "");
         assert_eq!(trim("#[fg=red", -2), "#[fg=red");

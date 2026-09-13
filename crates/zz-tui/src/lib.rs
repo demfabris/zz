@@ -585,8 +585,7 @@ fn spawn_and_connect_daemon(
 
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        match InteractiveClient::connect_terminal_surface_without_theme(path, client_has_terminal)
-        {
+        match InteractiveClient::connect_terminal_surface_without_theme(path, client_has_terminal) {
             Ok(client) => return Ok(client),
             Err(error) if Instant::now() >= deadline => return Err(error),
             Err(_) => thread::sleep(Duration::from_millis(20)),

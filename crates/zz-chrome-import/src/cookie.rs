@@ -7,7 +7,7 @@ use std::{
 #[cfg(not(target_os = "windows"))]
 use aes::Aes128;
 #[cfg(not(target_os = "windows"))]
-use cbc::cipher::{BlockDecryptMut as _, KeyIvInit as _, block_padding::Pkcs7};
+use cbc::cipher::{BlockModeDecrypt as _, KeyIvInit as _, block_padding::Pkcs7};
 #[cfg(not(target_os = "windows"))]
 use pbkdf2::pbkdf2_hmac;
 use rusqlite::{Connection, OpenFlags};
@@ -570,8 +570,8 @@ fn decrypt_cookie_value(
     };
     for key in candidates {
         let mut buffer = ciphertext.to_vec();
-        let Ok(plaintext) = Aes128CbcDecryptor::new(key.into(), &IV.into())
-            .decrypt_padded_mut::<Pkcs7>(&mut buffer)
+        let Ok(plaintext) =
+            Aes128CbcDecryptor::new(key.into(), &IV.into()).decrypt_padded::<Pkcs7>(&mut buffer)
         else {
             continue;
         };
@@ -782,7 +782,7 @@ fn load_chromium_keys() -> Result<ChromiumKeys, ChromeCookieImportError> {
 #[cfg(test)]
 mod tests {
     #[cfg(not(target_os = "windows"))]
-    use cbc::cipher::{BlockEncryptMut as _, block_padding::Pkcs7};
+    use cbc::cipher::{BlockModeEncrypt as _, block_padding::Pkcs7};
     use rusqlite::params;
     use tempfile::tempdir;
     use zz_browser::MAX_COOKIE_IMPORT_COUNT;
@@ -797,10 +797,26 @@ mod tests {
     fn decrypts_chromium_values_with_the_host_digest() {
         let host = ".example.com";
         let key = derive_key(b"test password", 1003);
+        assert_eq!(
+            key,
+            [
+                0x24, 0x53, 0xfa, 0x64, 0x51, 0xa5, 0x91, 0xb0, 0x79, 0xc2, 0xa0, 0x35, 0x4c, 0xaa,
+                0x2e, 0xfe,
+            ]
+        );
         let mut plaintext = Sha256::digest(host.as_bytes()).to_vec();
         plaintext.extend_from_slice(b"session-value");
         let ciphertext = Aes128CbcEncryptor::new(&key.into(), &IV.into())
-            .encrypt_padded_vec_mut::<Pkcs7>(&plaintext);
+            .encrypt_padded_vec::<Pkcs7>(&plaintext);
+        assert_eq!(
+            ciphertext,
+            [
+                0x4d, 0xbb, 0x0a, 0xd6, 0x13, 0xb1, 0x04, 0xfa, 0xf0, 0x4a, 0x2c, 0x03, 0x69, 0x55,
+                0x4f, 0x92, 0x9c, 0x4b, 0xc8, 0x9d, 0x92, 0x46, 0x13, 0x29, 0x79, 0x50, 0xea, 0x3b,
+                0x48, 0x83, 0x02, 0xd5, 0x1d, 0x32, 0xc6, 0xd9, 0x9d, 0xa7, 0x6b, 0x8b, 0x7a, 0x35,
+                0x9f, 0x85, 0x96, 0xbd, 0x86, 0xd9,
+            ]
+        );
         let mut encrypted = b"v10".to_vec();
         encrypted.extend(ciphertext);
         let keys = ChromiumKeys {
@@ -817,6 +833,46 @@ mod tests {
             decrypt_cookie_value(&encrypted, "other.example", true, &keys),
             None
         );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn derives_linux_chromium_key() {
+        assert_eq!(
+            derive_key(b"peanuts", 1),
+            [
+                0xfd, 0x62, 0x1f, 0xe5, 0xa2, 0xb4, 0x02, 0x53, 0x9d, 0xfa, 0x14, 0x7c, 0xa9, 0x27,
+                0x27, 0x78,
+            ]
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn decrypts_aes_gcm_nist_vector_and_rejects_invalid_tag() {
+        let key = [
+            0x31, 0xbd, 0xad, 0xd9, 0x66, 0x98, 0xc2, 0x04, 0xaa, 0x9c, 0xe1, 0x44, 0x8e, 0xa9,
+            0x4a, 0xe1, 0xfb, 0x4a, 0x9a, 0x0b, 0x3c, 0x9d, 0x77, 0x3b, 0x51, 0xbb, 0x18, 0x22,
+            0x66, 0x6b, 0x8f, 0x22,
+        ];
+        let mut sealed = [
+            0x0d, 0x18, 0xe0, 0x6c, 0x7c, 0x72, 0x5a, 0xc9, 0xe3, 0x62, 0xe1, 0xce, 0xfa, 0x43,
+            0x62, 0x18, 0x96, 0x61, 0xd1, 0x63, 0xfc, 0xd6, 0xa5, 0x6d, 0x8b, 0xf0, 0x40, 0x5a,
+            0xd6, 0x36, 0xac, 0x1b, 0xbe, 0xdd, 0x5c, 0xc3, 0xee, 0x72, 0x7d, 0xc2, 0xab, 0x4a,
+            0x94, 0x89,
+        ];
+        let plaintext = [
+            0x2d, 0xb5, 0x16, 0x8e, 0x93, 0x25, 0x56, 0xf8, 0x08, 0x9a, 0x06, 0x22, 0x98, 0x1d,
+            0x01, 0x7d,
+        ];
+
+        assert_eq!(
+            decrypt_aes_gcm(&sealed, &key).as_deref().map(Vec::as_slice),
+            Some(plaintext.as_slice())
+        );
+        sealed[43] ^= 1;
+        assert!(decrypt_aes_gcm(&sealed, &key).is_none());
+        assert!(decrypt_aes_gcm(&sealed[..AES_GCM_NONCE_BYTES], &key).is_none());
     }
 
     #[test]

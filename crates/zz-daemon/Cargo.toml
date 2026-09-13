@@ -25,7 +25,6 @@ daemon = [
     "dep:chrono",
     "dep:crossbeam-channel",
     "dep:futures-lite",
-    "dep:smallvec",
     "dep:zz-mux",
     "zz-terminal/session",
 ]
@@ -49,7 +48,6 @@ libc.workspace = true
 log.workspace = true
 parking_lot.workspace = true
 regex.workspace = true
-smallvec = { workspace = true, optional = true }
 sysinfo.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
@@ -59,9 +57,9 @@ zz-protocol = { path = "../zz-protocol" }
 zz-terminal = { path = "../zz-terminal", default-features = false }
 
 [target.'cfg(target_os = "ios")'.dependencies]
-russh = { version = "0.54", default-features = false, features = ["ring", "flate2"] }
+russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync"] }
-rand_core = { version = "0.6", features = ["getrandom"] }
+getrandom = { workspace = true, features = ["sys_rng"] }
 core-foundation.workspace = true
 security-framework-sys = "2.17"
 

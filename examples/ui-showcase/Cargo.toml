@@ -34,7 +34,7 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", default-feature
 zz-ui = { path = "../../crates/zz-ui", features = ["agent", "editor", "tree-sitter"] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-wasm-bindgen = "=0.2.126"
+wasm-bindgen = "=0.2.128"
 web-sys = { version = "0.3", features = ["Window", "Storage"] }
 
 [lints.rust]
@@ -50,8 +50,8 @@ too_many_lines = "allow"
 # story can show a patched behavior (the squircle corner shape) instead of
 # faking it. Keep this rev in step with the desktop workspace's patch section.
 [patch."https://github.com/zed-industries/zed"]
-gpui = { git = "https://github.com/demfabris/zed", rev = "c8135f5b6b4c79d534b005aa150d17bd52e9c4de", version = "=0.2.2" }
-gpui_platform = { git = "https://github.com/demfabris/zed", rev = "c8135f5b6b4c79d534b005aa150d17bd52e9c4de" }
+gpui = { git = "https://github.com/demfabris/zed", rev = "0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/demfabris/zed", rev = "0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0" }
 
 [profile.dev]
 debug = 1

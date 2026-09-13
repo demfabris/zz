@@ -24,7 +24,6 @@ session = [
     "dep:portable-pty",
     "dep:regex",
     "dep:rustix",
-    "dep:url",
 ]
 
 [dependencies]
@@ -43,7 +42,6 @@ rustix = { workspace = true, optional = true }
 serde.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
-url = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

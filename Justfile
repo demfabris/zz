@@ -247,7 +247,7 @@ showcase-setup:
     rustup toolchain install nightly --profile minimal --component rustfmt --component clippy
     rustup target add --toolchain nightly wasm32-unknown-unknown
     command -v cargo-watch >/dev/null 2>&1 || cargo install cargo-watch --locked
-    cargo install wasm-bindgen-cli --version 0.2.126 --locked
+    cargo install wasm-bindgen-cli --version 0.2.128 --locked
     npm --prefix examples/ui-showcase/web install
     python3 scripts/prepare-showcase-fonts.py
 

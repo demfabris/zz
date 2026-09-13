@@ -549,10 +549,7 @@ impl InteractiveClient {
         path: &Path,
         client_has_terminal: bool,
     ) -> Result<Self, DaemonError> {
-        Self::connect_endpoint_without_theme(
-            &Endpoint::Local(path.to_owned()),
-            client_has_terminal,
-        )
+        Self::connect_endpoint_without_theme(&Endpoint::Local(path.to_owned()), client_has_terminal)
     }
 
     fn connect_endpoint_with_prompts_and_terminal(
@@ -1216,9 +1213,7 @@ pub fn client_terminal_colour_count() -> u32 {
     crate::terminal_features::terminal_colour_count(
         &std::env::var("TERM").unwrap_or_default(),
         &std::env::var("COLORTERM").unwrap_or_default(),
-        crate::terminal_features::terminal_feature_mask(
-            flags.features.iter().map(String::as_str),
-        ),
+        crate::terminal_features::terminal_feature_mask(flags.features.iter().map(String::as_str)),
     )
 }
 

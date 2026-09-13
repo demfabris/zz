@@ -301,13 +301,8 @@ mod tests {
     }
 
     impl InlineImageTextViewTestRoot {
-        fn new(cx: &mut Context<Self>) -> Self {
-            let text_view = cx.new(|cx| {
-                TextViewState::markdown(
-                    "Build Status ![inline image](https://example.com/image.svg) after",
-                    cx,
-                )
-            });
+        fn new(text: &str, cx: &mut Context<Self>) -> Self {
+            let text_view = cx.new(|cx| TextViewState::markdown(text, cx));
             Self { text_view }
         }
     }
@@ -324,7 +319,12 @@ mod tests {
     fn inline_image_keeps_surrounding_text_on_same_line(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|window, cx| {
-            let content = cx.new(|cx| InlineImageTextViewTestRoot::new(cx));
+            let content = cx.new(|cx| {
+                InlineImageTextViewTestRoot::new(
+                    "Build Status ![inline image](https://example.com/image.svg) after",
+                    cx,
+                )
+            });
             crate::Root::new(content, window, cx)
         });
         let cx: &mut VisualTestContext = cx;
@@ -357,6 +357,37 @@ mod tests {
             inline_bounds[1].left() - inline_bounds[0].right() < px(40.),
             "unloaded inline image fallback should stay generic and compact"
         );
+    }
+
+    #[gpui::test]
+    fn inline_image_after_hard_break_starts_the_next_line(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let content = cx.new(|cx| {
+                InlineImageTextViewTestRoot::new(
+                    "Hi  \n![inline image](https://example.com/image.svg) after",
+                    cx,
+                )
+            });
+            crate::Root::new(content, window, cx)
+        });
+
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let inline_bounds = cx.update(|window, cx| {
+            crate::Root::read(window, cx)
+                .text_selection
+                .inline_bounds()
+                .next()
+                .cloned()
+                .unwrap_or_default()
+        });
+
+        assert_eq!(inline_bounds.len(), 2);
+        assert!(inline_bounds[1].top() >= inline_bounds[0].bottom());
+        assert!(inline_bounds[1].left() > inline_bounds[0].left());
     }
 
     #[gpui::test]

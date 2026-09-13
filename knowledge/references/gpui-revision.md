@@ -4,7 +4,7 @@ title: GPUI revision pin
 description: Where the patched Zed revision zz builds against is defined, how to read it, and what the carried GPUI patches do. gpui-component is not a dependency.
 resource: Cargo.toml
 tags: [gpui, zed, pin, reference, git-dependency]
-timestamp: 2026-09-09T00:00:00Z
+timestamp: 2026-09-12T00:00:00Z
 ---
 
 # Overview
@@ -91,7 +91,8 @@ Each is upstream-able as a small Zed PR; if Zed merges an equivalent, drop it. I
 18. CSS-correct drop shadows: spread dilates the shadow's corner radii along with its bounds.
 19. Superellipse corner smoothing for quads: `PaintQuad::corner_smoothing` plus a window-wide
     default (`Window::set_default_corner_smoothing`; 2 = circular, 4 = squircle), which zz pins
-    to 4 in `theme::CORNER_SMOOTHING`. Sprites and the window corner mask stay circular.
+    to 4 in `theme::CORNER_SMOOTHING`. Later carried patches apply the window's curve to
+    sprite, surface, and window masks, and styled radii to external textures.
 20. Two corrections to that smoothing: a quad whose radius reaches half its shorter side is a
     circle or a pill, so it keeps true arcs (this is also what `rounded_full` clamps to);
     and `Shadow` carries the smoothing of the element it traces, honored on the unblurred
@@ -166,6 +167,30 @@ just forks   # confirm LOCK is "in sync" before appending a commit
 
 Bumping upstream means rebasing `zz-patches`, then moving the `rev` in `Cargo.toml`,
 `examples/ui-showcase/Cargo.toml`, and `clients/web/Cargo.toml` before regenerating their lockfiles.
+
+# Rebase checks from 2026-09-12
+
+We replayed all 46 zz commits from `c8135f5b6b4c79d534b005aa150d17bd52e9c4de`
+onto upstream `7960b2a7c9568e90fbe0727332149e5b2a5fd57a`, covering 416 upstream
+commits since the previous base. Two follow-up commits adapt the merged code and
+tests to upstream APIs. The scene structs and Metal, WGSL, WebGL, and HLSL
+shaders retain the previous fork's contents.
+
+The conflicts required preserving glyph effects in the new line-paint API,
+zoom across touch predictions, direct gestures, viewport bounds and system
+insets, and Wayland blur updates alongside upstream's new frame scheduling.
+Upstream still uses wgpu 29, so zz retains the wgpu 30 patch and shared CEF device.
+
+Include `gpui/profiler` in validation: upstream's new debug overlay constructs a
+`Quad` and needs zz's `corner_smoothing` and padding fields. Also inspect new
+platform-gated test initializers; a Windows color-emoji test still used the
+removed `dilation` field. WGPU layout tests must expect 42 words for `Quad`,
+26 for `PolychromeSprite`, and 14 for Linux `SurfaceParams`.
+
+The fork passed 332 GPUI tests, six Apple tests including Metal pixel comparisons,
+and 32 WGPU tests. The profiler suite passed 386 tests with one spring timing
+failure that passed alone; all six debug-overlay tests passed. These checks ran
+on macOS with Rust 1.97.1. Native Linux and Windows validation needs those hosts.
 
 # Related
 

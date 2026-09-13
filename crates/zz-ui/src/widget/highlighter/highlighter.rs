@@ -5,7 +5,6 @@ use super::{HighlightTheme, LanguageRegistry};
 use anyhow::{Context, Result, anyhow};
 use gpui::{HighlightStyle, SharedString};
 
-use instant::{Duration, Instant};
 use ropey::{ChunkCursor, Rope};
 use std::sync::Arc;
 use std::{
@@ -16,6 +15,7 @@ use std::{
 use tree_sitter::{
     InputEdit, ParseOptions, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
 };
+use web_time::{Duration, Instant};
 
 const LARGE_NODE_THRESHOLD: usize = 8 * 1024;
 const MAX_INJECTION_RANGES: usize = 4096;

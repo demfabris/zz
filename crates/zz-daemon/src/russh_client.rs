@@ -18,7 +18,7 @@ use russh::{
     client::{self, AuthResult, KeyboardInteractiveAuthResponse},
     keys::{
         Algorithm, Error as KeyError, HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKey,
-        check_known_hosts_path, decode_secret_key,
+        PublicKeyOrCertificate, check_known_hosts_path, decode_secret_key,
         known_hosts::{known_host_keys_path, learn_known_hosts_path},
         ssh_key::LineEnding,
     },
@@ -594,8 +594,15 @@ impl client::Handler for TofuHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        let PublicKeyOrCertificate::PublicKey {
+            key: server_public_key,
+            ..
+        } = server_public_key
+        else {
+            return Ok(self.reject("SSH host certificates are not configured".to_owned()));
+        };
         match check_known_hosts_path(&self.host, self.port, server_public_key, &self.known_hosts) {
             Ok(true) => Ok(true),
             Ok(false) => Ok(self.confirm_host_key(server_public_key, None)),
@@ -846,8 +853,11 @@ fn decode_identity(encoded: &str) -> io::Result<PrivateKey> {
 }
 
 fn generate_identity() -> io::Result<(PrivateKey, Zeroizing<String>)> {
-    let key = PrivateKey::random(&mut rand_core::OsRng, Algorithm::Ed25519)
-        .map_err(|error| io::Error::other(format!("generating the zz identity: {error}")))?;
+    let key = PrivateKey::random(
+        &mut getrandom::rand_core::UnwrapErr(getrandom::SysRng),
+        Algorithm::Ed25519,
+    )
+    .map_err(|error| io::Error::other(format!("generating the zz identity: {error}")))?;
     let encoded = key
         .to_openssh(LineEnding::default())
         .map_err(|error| io::Error::other(format!("encoding the zz identity: {error}")))?;
@@ -865,4 +875,95 @@ fn write_public_half(path: &Path, key: &PrivateKey) -> io::Result<()> {
         return Ok(());
     }
     std::fs::write(&path, line)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_identity_round_trips_through_openssh() {
+        let (key, encoded) = generate_identity().unwrap();
+        let decoded = decode_identity(&encoded).unwrap();
+
+        assert_eq!(key.algorithm(), Algorithm::Ed25519);
+        assert_eq!(decoded.public_key(), key.public_key());
+        assert_eq!(decoded.to_openssh(LineEnding::default()).unwrap(), encoded);
+    }
+
+    #[test]
+    fn host_key_handler_accepts_saved_key_and_rejects_unconfigured_certificate() {
+        use russh::{client::Handler as _, keys::ssh_key::certificate};
+
+        let directory = tempfile::tempdir().unwrap();
+        let known_hosts = directory.path().join("known_hosts");
+        let (key, _) = generate_identity().unwrap();
+        save_host_key("host.example", 22, key.public_key(), &known_hosts, None).unwrap();
+        let mut handler = TofuHandler {
+            host: "host.example".to_owned(),
+            port: 22,
+            known_hosts,
+            prompts: None,
+            failure: Arc::new(Mutex::new(None)),
+        };
+        let mut builder =
+            certificate::Builder::new(vec![0; 32], key.public_key(), 0, u64::MAX).unwrap();
+        builder.cert_type(certificate::CertType::Host).unwrap();
+        builder.valid_principal("host.example").unwrap();
+        let certificate = builder.sign(&key).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            assert!(
+                handler
+                    .check_server_key(&key.public_key().clone().into())
+                    .await
+                    .unwrap()
+            );
+            assert!(handler.failure.lock().is_none());
+            assert!(!handler.check_server_key(&certificate.into()).await.unwrap());
+            assert!(handler.failure.lock().is_some());
+        });
+    }
+
+    #[test]
+    fn replacing_host_key_preserves_other_hosts() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("known_hosts");
+        let (old_key, _) = generate_identity().unwrap();
+        let (new_key, _) = generate_identity().unwrap();
+        let (other_key, _) = generate_identity().unwrap();
+
+        save_host_key("changed.example", 2222, old_key.public_key(), &path, None).unwrap();
+        save_host_key("other.example", 22, other_key.public_key(), &path, None).unwrap();
+        let Err(KeyError::KeyChanged { line }) =
+            check_known_hosts_path("changed.example", 2222, new_key.public_key(), &path)
+        else {
+            panic!("changed host key was not detected");
+        };
+
+        save_host_key(
+            "changed.example",
+            2222,
+            new_key.public_key(),
+            &path,
+            Some(line),
+        )
+        .unwrap();
+
+        assert!(
+            check_known_hosts_path("changed.example", 2222, new_key.public_key(), &path).unwrap()
+        );
+        assert!(
+            check_known_hosts_path("other.example", 22, other_key.public_key(), &path).unwrap()
+        );
+        assert_eq!(
+            known_host_keys_path("changed.example", 2222, &path)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
 }

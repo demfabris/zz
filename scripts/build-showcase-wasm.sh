@@ -27,13 +27,13 @@ if ! rustup target list --installed --toolchain "$TOOLCHAIN" | grep -qx 'wasm32-
 fi
 
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
-    echo "missing wasm-bindgen 0.2.126; run: just showcase-setup" >&2
+    echo "missing wasm-bindgen 0.2.128; run: just showcase-setup" >&2
     exit 2
 fi
 
 WASM_BINDGEN_VERSION="$(wasm-bindgen --version | awk '{print $2}')"
-if [[ "$WASM_BINDGEN_VERSION" != "0.2.126" ]]; then
-    echo "wasm-bindgen 0.2.126 is required, found $WASM_BINDGEN_VERSION; run: just showcase-setup" >&2
+if [[ "$WASM_BINDGEN_VERSION" != "0.2.128" ]]; then
+    echo "wasm-bindgen 0.2.128 is required, found $WASM_BINDGEN_VERSION; run: just showcase-setup" >&2
     exit 2
 fi
 

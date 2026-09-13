@@ -13,7 +13,7 @@ commits on top of a pinned upstream rev. The manifest of all such forks is
 Current forks and why:
 
 - **zed** (`demfabris/zed`, branch `zz-patches`): carried commits (authoritative
-  list: `git log` on the branch; forty-three as of 2026-08-25), each upstream-able
+  list: `git log` on the branch), each upstream-able
   as a small Zed PR; if Zed merges equivalents, drop them and eventually the fork
   branch. The core five:
   1. `RenderImage::into_frames()` — retired browser frames return their pixel
@@ -81,10 +81,10 @@ Current forks and why:
     loaders hard-code word strides and read sequences — every carried patch
     that widens a scene struct (Quad, Shadow, PolychromeSprite, SurfaceParams)
     must also touch those loaders, and auto-merges won't do it.
-  - Cargo.lock auto-merges across the rebase produce silently stale entries
-    (a wgpu 29/30 chimera, missing new gpui deps). Diff the lock against
-    upstream's when done; the only legitimate drift is gpui gaining `wgpu` as
-    a dependency from the device-context patch.
+  - Cargo.lock auto-merges across the rebase can leave stale entries
+    (mixed wgpu 29/30 records, missing new gpui deps). Regenerate the lock and
+    inspect dependency drift against upstream, accounting for the carried wgpu
+    version and device-context dependency. Check the resolved graph used by zz.
   - The showcase's excluded lock needs its own `Cargo.toml` rev bump plus a
     `cargo metadata` re-resolve, and can need a second re-resolve to pick up
     brand-new transitive deps (hdrhistogram, crossbeam-channel from the
@@ -124,6 +124,41 @@ base, and whether `Cargo.lock` matches the fork branch tip. Run this whenever
 touching gpui/zed versions, and mention drift to the user if BEHIND is large.
 
 ## Rebase onto newer upstream
+
+For a rebase that must preserve zz behavior, prepare and validate before
+publishing. `scripts/fork-sync.sh rebase` pushes before running checks and
+resets its cached local branch to `origin`; do not use that shortcut with
+uncommitted work or unpublished fork commits.
+
+1. Check the cache clone's status and worktrees. Fetch both remotes, record the
+   full remote patch tip and upstream target, and compare the patch tip with
+   all three zz pins. Preserve any local-only commits.
+2. Create a backup branch at the old tip and a separate `codex/` branch in an
+   isolated worktree. Rebase there. Keep zz's behavior when resolving conflicts;
+   only drop a patch after proving upstream supplies its full behavior.
+3. Compare old and new patch series with `git range-diff`, inspect changed
+   patches and GPU layouts, and run the carried regressions.
+4. Publish a separate candidate branch, then update all three zz manifests and
+   regenerate their lockfiles against that exact GitHub commit. Keep
+   `zz-patches` at the old tip until validation finishes. Local Git URL
+   overrides can work with a complete clone, but a blobless clone can fail
+   because upload-pack disables lazy fetching of missing historical objects.
+5. Run the workspace gates below, `just showcase-build`, `just web-build`, and
+   an isolated native app run. Record any platform checks that need another host.
+6. Publish the tested tip to `zz-patches` with an explicit
+   `--force-with-lease=refs/heads/zz-patches:<recorded-old-tip>`. A changed remote
+   tip requires reconciliation. Keep the backup and verify `just forks` and
+   all three manifest/lock pairs after publication.
+
+The 2026-09-12 rebase also needed explicit `gpui/profiler` validation: upstream's
+new debug-overlay `Quad` initializer omitted zz's smoothing and padding fields.
+Audit new platform-gated struct initializers too; the Windows color-emoji test
+still used the old glyph `dilation` field. Upstream touch predictions, direct
+gestures, visual viewports, and keyboard/safe-area insets must pass through zz's
+content-zoom conversion. See `knowledge/references/gpui-revision.md` for the
+dated checks and shader layout sizes.
+
+The older combined command remains available:
 
 ```
 just fork-rebase zed          # onto upstream main tip

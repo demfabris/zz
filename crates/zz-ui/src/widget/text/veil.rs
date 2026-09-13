@@ -5,7 +5,7 @@ use std::{
 };
 
 use gpui::{App, EntityId, TextRun};
-use instant::Instant;
+use web_time::Instant;
 
 use crate::pulse::pulse_lease;
 
@@ -262,7 +262,7 @@ fn apply_veil(runs: Vec<TextRun>, spans: &[(Range<usize>, f32)]) -> Vec<TextRun>
 mod tests {
     use super::*;
     use gpui::{TextRun, font};
-    use instant::Duration;
+    use web_time::Duration;
 
     fn at(base: Instant, millis: u64) -> Instant {
         base + Duration::from_millis(millis)

@@ -25,7 +25,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
 
       # The DMG carries the numeric core as CFBundleShortVersionString while the
       # cask carries the full SemVer tag. A mismatch would leave brew convinced
@@ -74,7 +74,7 @@ jobs:
       ZZ_MACOS_BUILD_VERSION: ${{ github.run_number }}
 
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
 
       - name: Resolve the release artifact names
         shell: bash
@@ -88,10 +88,10 @@ jobs:
           version: 0.16.0
 
       - name: Cache matching CEF distribution
-        uses: actions/cache@v5
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ github.workspace }}/.cef-cache
-          key: cef-151.3.14-${{ runner.os }}-${{ runner.arch }}
+          key: cef-152.0.6-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install just
         env:
@@ -188,7 +188,7 @@ jobs:
       CEF_PATH: ${{ github.workspace }}/.cef-cache
 
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
 
       - name: Resolve the release artifact names
         shell: bash
@@ -211,10 +211,10 @@ jobs:
           version: 0.16.0
 
       - name: Cache matching CEF distribution
-        uses: actions/cache@v5
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ github.workspace }}/.cef-cache
-          key: cef-151.3.14-${{ runner.os }}-${{ runner.arch }}
+          key: cef-152.0.6-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build the CEF bundle
         run: cargo xtask bundle-cef --release --output dist/zz
@@ -271,7 +271,7 @@ jobs:
       WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
 
       - name: Resolve the release artifact names
         shell: bash
@@ -290,10 +290,10 @@ jobs:
           version: 0.16.0
 
       - name: Cache matching CEF distribution
-        uses: actions/cache@v5
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ github.workspace }}/.cef-cache
-          key: cef-151.3.14-${{ runner.os }}-${{ runner.arch }}
+          key: cef-152.0.6-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build the CEF bundle
         run: cargo xtask bundle-cef --release --output dist/zz
@@ -386,7 +386,7 @@ jobs:
       TAP_REPOSITORY: demfabris/homebrew-zz
 
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
 
       - name: Render and push the casks
         env:
@@ -449,7 +449,7 @@ jobs:
       AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
 
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
 
       - name: Render and push the AUR packages
         if: ${{ env.AUR_SSH_PRIVATE_KEY != '' }}

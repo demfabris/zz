@@ -3037,7 +3037,11 @@ fn colour_256to16(index: u8) -> u8 {
 /// whichever is closer, as a 256-colour index.
 fn colour_find_rgb(colour: Color) -> u8 {
     const Q2C: [i32; 6] = [0x00, 0x5f, 0x87, 0xaf, 0xd7, 0xff];
-    let (r, g, b) = (i32::from(colour.r), i32::from(colour.g), i32::from(colour.b));
+    let (r, g, b) = (
+        i32::from(colour.r),
+        i32::from(colour.g),
+        i32::from(colour.b),
+    );
     let (qr, qg, qb) = (colour_to_6cube(r), colour_to_6cube(g), colour_to_6cube(b));
     let (cr, cg, cb) = (Q2C[qr as usize], Q2C[qg as usize], Q2C[qb as usize]);
     let cube = 16 + (36 * qr) + (6 * qg) + qb;

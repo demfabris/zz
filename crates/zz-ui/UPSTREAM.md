@@ -5,8 +5,8 @@
 until the dependency could be deleted outright. **`gpui-component` is no longer
 a dependency of this workspace**; nothing outside `gpui` itself is left.
 
-- Forked from: <https://github.com/longbridge/gpui-component>
-- At revision: `b004e595cf5de98a73b6b561394a559a94ae1e2a`
+- Forked from: `longbridge/gpui-component`, now [longbridge/gpui-kit][upstream]
+- Original source revision: `b004e595cf5de98a73b6b561394a559a94ae1e2a`
 - Upstream license: Apache-2.0, retained here as `LICENSE-APACHE`
   (© 2024–2025 Longbridge). Bundled icon artwork in `assets/icons` is
   [Tabler Icons][tabler] outline, MIT, retained as `assets/icons/LICENSE-TABLER`
@@ -126,12 +126,22 @@ The fork revision above is *not* moved by these: each is an individual upstream
 fix re-applied by hand on top of zz's local delta, so the next wholesale
 re-sync knows what it already has. Every one carries a regression test.
 
+On 2026-09-12, we checked upstream through
+[`84f57fdfcb4910623fb0bb7f795b077e249f9271`][checked-2026-09-12] and selected the
+menu, scrollbar, and Markdown fixes listed below. We retained zz's widget APIs,
+theme rules, text selection, and editor changes. This records selective ports;
+the original source revision above remains the base for future comparisons.
+
 | Upstream | What it fixes here |
 | --- | --- |
 | [`3de68cd1`][u1] | `Language::Plain` carried the **JSON** grammar, and `SyntaxHighlighter::new` falls back to `"text"` for anything unregistered . so every ` ```bash ` / ` ```python ` fence in an agent transcript built a JSON parser and parsed the whole block to produce no styles. `LanguageConfig::language` is now `Option`, plain text is grammarless, and `SyntaxHighlighter::build_inert` never parses. |
 | [`66cadafb`][u2] + [`98af8912`][u3] | `ContextMenuExt::context_menu` derived its fallback element ID from a **stack address**, so a redraw from the event-dispatch path silently dropped the open menu without a `DismissEvent` and stranded focus on it. Now `#[track_caller]` + `ElementId::CodeLocation`, plus `PopupMenu::previous_focus_handle` so dismiss restores focus without moving action dispatch. |
 | [`1a667218`][u4] | `render_list_item` matched only `Paragraph` and `List` and dropped everything else on the floor . a fenced code block, table, blockquote or heading nested in a list item rendered as **nothing**, which is most of what an LLM puts in a numbered list. |
 | [`be3c8413`][u5] | `CodeBlock` captured the `HighlightTheme` at *parse* time and memoized styles against it, so markdown code blocks kept the palette that was active when they were parsed across a light/dark switch. The theme is now read at render and travels with the memo. |
+| [`5a2a96e6`][u6] | Menu dismissal preserves focus that an item handler moved to another control. Dismissal still restores the previous focus when the menu owns it. |
+| [`d8376ad5`][u7] | Clicking a scrollbar track requests a repaint after changing the offset, including when a custom handle drives content through notifications. |
+| [`c3937a36`][u8] + [`b0a1836b`][u9] | Markdown hard breaks render as newlines. Soft LF, CRLF, and CR breaks reflow as spaces inside text nodes, with mark ranges measured after normalization. |
+| [`26cc9366`][u10] | Mixed text and image paragraphs split at hard newlines before wrapping. The text shaper receives one line at a time, and inline images after a hard break appear on the next line. |
 
 Checked against this fork and deliberately **not** taken:
 
@@ -147,8 +157,14 @@ Checked against this fork and deliberately **not** taken:
 [u3]: https://github.com/longbridge/gpui-component/commit/98af8912ab0b3fe08df519dff7acd96a77b19586
 [u4]: https://github.com/longbridge/gpui-component/commit/1a66721833a75d796b949e59370a3374baba793d
 [u5]: https://github.com/longbridge/gpui-component/commit/be3c8413766cafc736a0c1c80306ff0f293e04f3
+[u6]: https://github.com/longbridge/gpui-kit/commit/5a2a96e63e22d8d3f3b9131cf6215623a45f2ebf
+[u7]: https://github.com/longbridge/gpui-kit/commit/d8376ad5635b963b2e751fbd4e328f9195d565a5
+[u8]: https://github.com/longbridge/gpui-kit/commit/c3937a36dbe97347fd84f453761fc19784374ae2
+[u9]: https://github.com/longbridge/gpui-kit/commit/b0a1836b1e2e3053b8998517f1816ab47e4474ae
+[u10]: https://github.com/longbridge/gpui-kit/commit/26cc9366abb27ccedce386ac99a615a8fa7018da
+[checked-2026-09-12]: https://github.com/longbridge/gpui-kit/commit/84f57fdfcb4910623fb0bb7f795b077e249f9271
 
-[upstream]: https://github.com/longbridge/gpui-component
+[upstream]: https://github.com/longbridge/gpui-kit
 [tabler]: https://tabler.io/icons
 [simple-icons]: https://simpleicons.org
 

@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws"] }
-futures-util = { version = "0.3.32", features = ["sink"] }
+futures-util = { version = "0.3.34", features = ["sink"] }
 interprocess = { workspace = true, features = ["tokio"] }
 percent-encoding = "2.3.2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }

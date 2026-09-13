@@ -4,7 +4,7 @@ title: In-page element picker
 description: A token-guarded, single-use overlay that lets the user pick a DOM element in the page and returns a bounded, sanitized source-context string plus an optional screenshot of the picked area.
 resource: crates/zz-browser/src/element_picker.rs
 tags: [browser, element-picker, devtools, message-router]
-timestamp: 2026-07-27T00:00:00Z
+timestamp: 2026-09-12T00:00:00Z
 ---
 
 # Overview
@@ -140,7 +140,7 @@ assert_eq!(state.consume(&msg), Err(ElementPickMessageError::NoActivePick)); // 
 | --- | --- |
 | `src/element_picker.rs` | `ElementPickState` token guard, wire-message parsing/validation, outcomes/errors, and the typed appearance/start-call serializer. |
 | `picker/src/index.ts` | Source for the theme-aware highlighter, measured DOM preview, and result reporter. |
-| `assets/element-picker.js` | Generated injected renderer bundle (~49 KB); rebuild it from `picker/`. |
+| `assets/element-picker.js` | Generated injected renderer bundle (~64 KB); rebuild it from `picker/`. |
 | `src/cef_runtime.rs` | Message-router setup, script injection, `ElementPickerQueryHandler`, start/cancel + auto-cancel. |
 | `../zz/src/browser/view.rs` | Resolves the active zz-ui theme into `ElementPickerAppearance` at activation time. |
 

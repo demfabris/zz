@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 
 use gpui::{App, EntityId, Global};
-use instant::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 /// Tick interval of the shared clock, ~30fps.
 const TICK: Duration = Duration::from_millis(33);

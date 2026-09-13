@@ -16,7 +16,7 @@ jobs:
     name: iPhone
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
       - name: Install iPhone build tools
         run: |
           rustup target add aarch64-apple-ios-sim
@@ -37,7 +37,7 @@ jobs:
     steps:
       # Full history: the compat summary check verifies that the commit its
       # attached-client PASS was stamped at is an ancestor of HEAD.
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
@@ -62,14 +62,14 @@ jobs:
           version: 0.16.0
 
       - name: Cache matching CEF distribution
-        uses: actions/cache@v5
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ github.workspace }}/.cef-cache
-          key: cef-151.3.14-${{ runner.os }}-${{ runner.arch }}
+          key: cef-152.0.6-${{ runner.os }}-${{ runner.arch }}
 
       - name: Cache pinned tmux build
         if: runner.os == 'Linux'
-        uses: actions/cache@v5
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ github.workspace }}/compat/.cache
           key: tmux-${{ hashFiles('compat/tmux-oracle.json', 'compat/fetch-tmux.sh', 'compat/fetch-corpus.sh') }}-${{ runner.os }}-${{ runner.arch }}

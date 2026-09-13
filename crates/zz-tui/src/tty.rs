@@ -126,13 +126,7 @@ pub(crate) fn note_extended_device_attributes(name: &str) {
 
 fn extended_device_attributes_colours(name: &str) -> Option<u32> {
     const NAMED: [&str; 7] = [
-        "iTerm2 ",
-        "tmux ",
-        "XTerm(",
-        "mintty ",
-        "foot(",
-        "WezTerm ",
-        "ghostty ",
+        "iTerm2 ", "tmux ", "XTerm(", "mintty ", "foot(", "WezTerm ", "ghostty ",
     ];
     NAMED
         .iter()
@@ -202,10 +196,7 @@ impl TerminalGuard {
             file_probe: Some(file_probe),
             original,
         };
-        TERMINAL_COLOURS.store(
-            zz_daemon::client_terminal_colour_count(),
-            Ordering::Relaxed,
-        );
+        TERMINAL_COLOURS.store(zz_daemon::client_terminal_colour_count(), Ordering::Relaxed);
         let mut output = io::stdout().lock();
         output.write_all(b"\x1b[?1049h\x1b[?25l\x1b[?1004h")?;
         output.write_all(KEYPAD_TRANSMIT)?;

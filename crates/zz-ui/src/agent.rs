@@ -12,7 +12,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use instant::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use crate::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _, StyledExt as _,

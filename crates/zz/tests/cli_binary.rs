@@ -2394,11 +2394,8 @@ mod daemon_autostart {
             );
         }
 
-        let (rendered, captured, early_status) = capture_tui_until_wide(
-            &fixture,
-            &["attach-session", "-t", "toppos"],
-            &[b"TOPMARK"],
-        );
+        let (rendered, captured, early_status) =
+            capture_tui_until_wide(&fixture, &["attach-session", "-t", "toppos"], &[b"TOPMARK"]);
         assert!(
             rendered,
             "child exited early={early_status:?}; pty output={}",

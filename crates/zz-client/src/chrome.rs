@@ -664,7 +664,10 @@ mod tests {
         for key in ['\\', 's', 'S'] {
             let control = key == '\\';
             assert_eq!(
-                keymap.resolve("ui", &chord(KeyCode::Character(key), control, !control, None)),
+                keymap.resolve(
+                    "ui",
+                    &chord(KeyCode::Character(key), control, !control, None)
+                ),
                 None,
                 "the raw TUI must leave {key} to the daemon's key tables"
             );

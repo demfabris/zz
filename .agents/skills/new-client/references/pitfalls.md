@@ -123,7 +123,7 @@ libghostty-vt-sys = { path = "<repo>/third_party/rust/libghostty-vt-sys" }
 With that line plus `CARGO_TARGET_DIR` pointed at the repo's `target/`, an
 external client crate resolves identically to the workspace and builds against
 the warm cache in seconds. (Both independent eval builds of an external client
-hit this wall; the gpui/proc-macro-error2 patches are UI-only and not needed.)
+hit this wall; the gpui patches are UI-only and not needed.)
 
 ## 12. A daemon can stay empty until its first default attach
 

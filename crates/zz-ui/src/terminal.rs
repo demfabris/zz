@@ -702,7 +702,7 @@ impl RowRenderCache {
         cx: &mut App,
     ) -> PaintState {
         let started = log::log_enabled!(target: DIAGNOSTIC_TARGET, log::Level::Trace)
-            .then(instant::Instant::now);
+            .then(web_time::Instant::now);
         let viewport = input.viewport;
         let row_revisions = input.row_revisions;
         let row_revision_epoch = input.revision_epoch;
@@ -1154,7 +1154,7 @@ impl RowRenderCache {
         cx: &mut App,
     ) {
         let started = log::log_enabled!(target: DIAGNOSTIC_TARGET, log::Level::Trace)
-            .then(instant::Instant::now);
+            .then(web_time::Instant::now);
         let kitty_below_bg_count = paint.buffers.kitty_below_bg.len();
         let kitty_below_text_count = paint.buffers.kitty_below_text.len();
         let kitty_above_text_count = paint.buffers.kitty_above_text.len();

@@ -174,10 +174,7 @@ pub(crate) fn over_underlay(
     cells_of(front, width, &mut drawn);
     let written =
         |(text, _): &(String, TmuxStyle)| !text.is_empty() && (!filled_row || text != " ");
-    let front_width = drawn
-        .iter()
-        .rposition(written)
-        .map_or(0, |last| last + 1);
+    let front_width = drawn.iter().rposition(written).map_or(0, |last| last + 1);
     for (column, cell) in drawn.into_iter().enumerate().take(front_width) {
         cells[column] = cell;
     }

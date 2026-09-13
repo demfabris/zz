@@ -1,0 +1,34 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m building zz
+   Compiling zz v0.8.0 (/home/demfabris/dev/zz-tui-input/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.11s
+[1;36m==>[0m running smoke/hooks-pane-focus
+smoke/hooks-pane-focus: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running honest-knobs-c1-defaults
+honest-knobs-c1-defaults: 18 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running honest-knobs-c1-readback
+honest-knobs-c1-readback: 21 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running honest-knobs-c1-errors
+honest-knobs-c1-errors: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/hooks-pane-focus | 3 | yes | 0 | yes | yes | yes |
+| honest-knobs-c1-defaults | 18 | yes | 0 | yes | yes | yes |
+| honest-knobs-c1-readback | 21 | yes | 0 | yes | yes | yes |
+| honest-knobs-c1-errors | 17 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged

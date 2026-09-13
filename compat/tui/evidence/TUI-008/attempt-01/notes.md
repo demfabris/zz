@@ -23,12 +23,21 @@ the pane received off its own decoded screen, or the whole decoded screen.
 - `tui-screen-diff.txt`, `tui-screen-diff-self-check.txt`
 - `tui-stock-keys.txt`, `tui-indicators.txt`, `tui-pane-geometry.txt`
 - `tui-copy-mode.txt`, `tui-overlays.txt`
-- `tui-choosers.txt` — one red case, `filter-cleared`, on `#{pane_current_command}`
-  reading `sh` on the pin and `bash` on zz for the same `/bin/sh` pane, which is
-  bash on this box; `tui-choosers-rerun.txt` is the same fixture green on the
-  next run. Nothing in this lane's diff can reach that format.
+- `tui-choosers.txt` — green. An earlier run of it during this attempt took one
+  red case, `filter-cleared`, on `#{pane_current_command}` reading `sh` on the
+  pin and `bash` on zz for the same `/bin/sh` pane, which is bash on this box;
+  it was green on the next run and green again at the final tip. Nothing in this
+  lane's diff can reach that format.
+- `corpus-known-terminal-runtime.txt` — the one corpus row that reads the mouse
+  flags this lane changed (`known/known-terminal-runtime`), green: those are the
+  PANE's flags, not the client's arming.
+- `corpus-focus-rows.txt` — every corpus row naming `focus-events`
+  (`smoke/hooks-pane-focus` and the three `honest-knobs-c1-*` rows), green.
 - `status-row.txt` — under `LC_ALL=C LC_TIME=C`, the box's own locale being the
   known `%b` divergence.
+- `cargo-checks.txt` — `cargo test` and `cargo clippy` for the four touched
+  crates, and `cargo fmt --all -- --check`, whose one complaint is
+  `crates/zz-tui/src/mode_view.rs`, a file this branch does not touch.
 
 ## What landed
 

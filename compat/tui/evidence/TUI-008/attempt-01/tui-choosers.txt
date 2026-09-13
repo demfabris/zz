@@ -18,13 +18,7 @@ ok    window-tree-closed
 ok    filter-prompt
 ok    filter-typed
 ok    filter-applied
-      case filter-cleared
-      1 of 24 rows differ, first differing row 12
-        12 tmux: ^[[38;2;179;179;179m(M-c) M-bM-^TM-^B   M-bM-^TM-^TM-bM-^TM-^@> ^[[39m0^[[38;2;179;179;179m: ^[[39msh^[[38;2;179;179;179m*: "ptitle"^[[39m
-        12 zz:   ^[[38;2;179;179;179m(M-c) M-bM-^TM-^B   M-bM-^TM-^TM-bM-^TM-^@> ^[[39m0^[[38;2;179;179;179m: ^[[39mbash^[[38;2;179;179;179m*: "ptitle"^[[39m
-      cursor tmux: 0,3 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
-      cursor zz:   0,3 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
-DIFF  filter-cleared
+ok    filter-cleared
 ok    filter-closed
 ok    tree-scrolled-bottom
 ok    tree-scrolled-top
@@ -80,7 +74,7 @@ ok    zoom-manual-released
 note  the client tree on the zz screen: the zz screen changed and then held still for 2 seconds without it
       case client-tree-open
       24 of 24 rows differ, first differing row 0
-         0 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) /dev/pts/41: 03:48: session cho^[[39m
+         0 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) /dev/pts/43: 04:41: session cho^[[39m
          0 zz:   $ printf 'MARK-%s\n' baseline           ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m$ printf 'ZOOM-SCENE\n'
          1 tmux: 
          1 zz:   MARK-baseline                           ^[[38;2;154;205;50mM-bM-^TM-^B^[[39mZOOM-SCENE
@@ -102,7 +96,7 @@ note  the client tree on the zz screen: the zz screen changed and then held stil
          9 zz:   MARK-scroll                             ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
         10 tmux: 
         10 zz:   $ printf 'MARK-%s\n' buffers            ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
-        11 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/pts/41 (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        11 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/pts/43 (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
         11 zz:   MARK-buffers                            ^[[38;2;154;205;50mM-bM-^TM-^B^[[39m
         12 tmux: M-bM-^TM-^B^[[39m^[[49m $ printf 'MARK-%s\n' output                                                  ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
         12 zz:   $ printf 'MARK-%s\n' bufferfilter       ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m
@@ -138,4 +132,4 @@ ok    tall-buffer-tree-open
 ok    tall-buffer-tree-help
 ok    tall-buffer-tree-help-closed
 ok    tall-closed
-1 of 53 asserted comparisons differ, 4 recorded (0 for a sibling lane)
+all 53 asserted comparisons identical, 4 recorded not asserted (0 for a sibling lane)

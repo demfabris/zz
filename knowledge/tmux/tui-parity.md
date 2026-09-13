@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **7/12 verified**. Added scope: **0/6 verified**.
 
-Status counts: unmeasured: 7, different: 0, active: 3, review: 1, blocked: 0, verified: 7.
+Status counts: unmeasured: 6, different: 0, active: 3, review: 2, blocked: 0, verified: 7.
 
 Dependency-ready obligations, by priority: TUI-006, TUI-008, TUI-009, TUI-013, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018.
 
@@ -49,7 +49,7 @@ Dependency-ready obligations, by priority: TUI-006, TUI-008, TUI-009, TUI-013, T
 | TUI-009: Outer-terminal capabilities and fidelity | active | 9 | TUI-002, TUI-003 |
 | TUI-010: Slow output, recovery and client lifecycle | verified | 10 | TUI-001, TUI-002 |
 | TUI-011: Remaining stock client command inventory | review | 11 | TUI-003, TUI-006, TUI-007, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018 |
-| TUI-012: Superset commands beside tmux behavior | unmeasured | 12 | TUI-003, TUI-004, TUI-008, TUI-009, TUI-010 |
+| TUI-012: Superset commands beside tmux behavior | review | 12 | TUI-003, TUI-004, TUI-008, TUI-009, TUI-010 |
 | TUI-014: Client mode tools in the raw TUI | unmeasured | 14 | TUI-003 |
 | TUI-015: A lock surface a client can draw | unmeasured | 15 | none |
 | TUI-016: Server log and terminal introspection | unmeasured | 16 | none |
@@ -561,7 +561,7 @@ Next action: TUI-011 cannot verify before its children do: TUI-014 (the client m
 
 ### TUI-012: Superset commands beside tmux behavior
 
-Status: unmeasured.
+Status: review.
 
 Acceptance:
 
@@ -571,18 +571,22 @@ Acceptance:
 
 Sources:
 
+- `compat/tui-superset.sh`
+- `crates/zz-protocol/src/catalog.rs`
 - `crates/zz-tui/src/sidebar.rs`
 - `crates/zz-tui/src/picker.rs`
 - `crates/zz-tui/src/browser.rs`
-- `crates/zz-tui/src/input.rs`
 - `crates/zz-tui/src/render.rs`
-- `crates/zz-protocol/src/key.rs`
+- `crates/zz-client/src/chrome.rs`
+- `compat/tui/evidence/TUI-012/attempt-01/notes.md`
 
 Tmux gap references: `commands.native-superset`, `keys.native-defaults`, `pane.floating-model`.
 
-Sidebar and picker work today; browser frames require Kitty support and a provider. Agent/editor show cards. These surfaces have no tmux visual counterpart; proof concerns their declared commands and surrounding terminal behavior.
+ASSERTS at attempt-01 (2026-09-13): compat/tui-superset.sh, 147 asserted cases, zero recorded, three consecutive green runs plus --self-check. Clause 1: all 25 names in NATIVE_COMMAND_NAMES resolve from a raw TUI with no compatibility profile and no activation flag, and every verb a raw TUI can run is driven both from the CLI and through an ordinary bind-key -n binding, each with its exact drawn surface or its exact refusal - 'focus-sidebar requires an interactive client', 'browser screenshots require the zz app', 'agent commands require the zz app', 'editor panes are experimental; enable experimental-editor-pane in Settings > Advanced first', 'pane %N is not awaiting a type selection', 'no tmux configuration found', 'terminal search is unsupported here' and the shell-integration and argument-validation messages. Clause 2: create, select, split, resize, detach and reattach run identically on both sides around the sidebar, the picker, a browser pane, an Agent pane and the command-output overlay; the pin's own pane arithmetic holds while each surface is up, and once it is gone the whole decoded screen and the cursor are the pin's. Input ownership: a sidebar-table key never reaches the pane while the sidebar is focused, and the pane owns the keyboard again the moment the sidebar is unfocused or withdrawn. Clause 3: with a second client the sidebar stays client-local - the second client's whole screen is the pin's before, during and after - and a browser pane, which is session state, draws its card on both clients while no Kitty frame ever reaches a pane inside the pinned tmux.
+MEASURED AND NOT THIS OBLIGATION'S: a client WIDER than its window draws a blank band where the pin draws a border and middle dots. Reproduced 2026-09-13 with two PLAIN clients, 120 and 91 columns, and no zz verb anywhere: the pin's 120-column client draws '|' at column 91 and '.' across 92..119 on every window row, the raw TUI draws spaces. It is the ordinary multi-client canvas, not a superset command, so clause 3 sizes every client to the window and asserts every cell instead of waiving a band; the finding belongs to the client-inventory obligation.
+DECLARED, NOT A DIVERGENCE: focus-sidebar makes the client report 28+1 fewer columns, so the shared window shrinks for the session exactly as an ordinary narrower tmux client would make it shrink; unfocusing the sidebar changes no cell at all, so the only observable for it is the next key reaching the pane; the command-output overlay withdraws by itself on the first command that moves the layout; and the picker offers an Editor choice the daemon refuses behind the product's experimental setting, which is not a parity profile - the other three kinds need no flag.
 
-Next action: Freeze existing superset command behavior and add composition cases after ordinary terminal and input contracts have passing proof.
+Next action: Review compat/tui-superset.sh at this revision. TUI-012 depends on TUI-008 and TUI-009, which land ahead of it in the same cycle, so verification waits on those.
 
 ### TUI-013: Recorded macOS geometry-report timeout
 

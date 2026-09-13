@@ -1,0 +1,25 @@
+TUI-012 attempt-01 environment
+
+date: 2026-09-13T05:10:24-03:00
+host: alienware
+kernel: Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+os: NAME="CachyOS Linux" PRETTY_NAME="CachyOS" 
+cpus: 16, memory: 15Gi plus 15Gi zram
+bash: 5.3.15(1)-release
+worktree: /home/demfabris/dev/zz-tui-superset
+base: origin/main 53d206dc5167ab009f41b6bbd1a15af6ecea6c18
+head: 53d206dc5167ab009f41b6bbd1a15af6ecea6c18
+zz binary: target/debug/zz built from the worktree revision above, cargo build -p zz through the
+  shared two-slot memory-capped wrapper (MemoryMax=5G, --jobs 4); a debug build is not
+  bit-reproducible here, so the revision plus a clean worktree attests it
+  sha256: 0309172250adcb5597893f9b0bdfbf35867342ffd7f10b4d398863f4528da843
+pinned tmux: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+  tmux next-3.8
+  oracle commit: d77c9dc6aa021e4bc61f0da128c591af695e6466
+protocol version: 102 (crates/zz-protocol/src/message.rs), unchanged by this landing
+locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8
+  status-row.sh is run under LC_ALL=C LC_TIME=C, which is its control on this box
+every fixture here is run with:
+  ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+  TMUX_BIN=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+  ZZ_BIN=/home/demfabris/dev/zz-tui-superset/target/debug/zz

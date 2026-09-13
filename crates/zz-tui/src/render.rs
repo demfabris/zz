@@ -999,15 +999,7 @@ impl Renderer {
                 terminal_column = column.saturating_add(1);
                 continue;
             }
-            match viewport.glyph(cell) {
-                Glyph::Empty => self.output.push(b' '),
-                Glyph::Scalar(character) => {
-                    let mut bytes = [0; 4];
-                    self.output
-                        .extend_from_slice(character.encode_utf8(&mut bytes).as_bytes());
-                }
-                Glyph::Grapheme(grapheme) => self.output.extend_from_slice(grapheme.as_bytes()),
-            }
+            write_glyph(&mut self.output, viewport.glyph(cell), advance);
             terminal_column = column.saturating_add(advance);
         }
         if let Some(start) = clear_from {
@@ -2974,6 +2966,27 @@ fn write_default_ground(output: &mut Vec<u8>, ground: Ground) {
         Ground::Foreground => b"\x1b[39m",
         Ground::Background => b"\x1b[49m",
     });
+}
+
+/// `tty_check_codeset`: a cell below `0x7f` is always fine, and so is any cell
+/// for a client whose terminal takes UTF-8. For a client without `CLIENT_UTF8`
+/// the pin sends `data.width` underscores instead of the codepoint, so a wide
+/// cell leaves as two and a combining sequence as one.
+fn write_glyph(output: &mut Vec<u8>, glyph: Glyph<'_>, width: u16) {
+    match glyph {
+        Glyph::Empty => output.push(b' '),
+        Glyph::Scalar(character) if u32::from(character) < 0x7f => {
+            output.push(character as u8);
+        }
+        _ if !crate::tty::terminal_takes_utf8() => {
+            output.extend(std::iter::repeat_n(b'_', usize::from(width)));
+        }
+        Glyph::Scalar(character) => {
+            let mut bytes = [0; 4];
+            output.extend_from_slice(character.encode_utf8(&mut bytes).as_bytes());
+        }
+        Glyph::Grapheme(grapheme) => output.extend_from_slice(grapheme.as_bytes()),
+    }
 }
 
 fn write_cell_ground(

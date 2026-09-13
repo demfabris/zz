@@ -2,7 +2,10 @@ use std::{
     fs,
     io::{self, Write as _},
     path::PathBuf,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -10,7 +13,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(unix)]
 use rustix::termios::{OptionalActions, Termios};
 
-use zz_daemon::{CommandClient, Endpoint};
+use zz_daemon::{CommandClient, Endpoint, terminal_default_features, terminal_feature_mask};
 use zz_protocol::CommandInvocation;
 
 use crate::kitty::{FILE_PROBE_IMAGE_ID, PROBE_IMAGE_ID, cleanup_frame_slot_files};
@@ -63,7 +66,6 @@ fn pixel_cell_extent(pixels: u16, cells: u16, fallback: u32) -> u32 {
 pub(crate) struct TerminalGuard {
     pixel_mouse: bool,
     kitty_keyboard: bool,
-    extended_keys: bool,
     kitty_graphics: bool,
     file_probe: Option<PathBuf>,
     #[cfg(unix)]
@@ -71,8 +73,6 @@ pub(crate) struct TerminalGuard {
 }
 
 const MOUSE_CLEAR_SEQUENCE: &[u8] = b"\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l";
-
-const RGB_COLOURS: u32 = 16_777_216;
 
 /// `tty_send_requests`: the primary device attributes the kitty probe already
 /// fences on, then the secondary and the extended ones, whose replies name the
@@ -98,40 +98,90 @@ fn raise_terminal_colours(colours: u32) {
     TERMINAL_COLOURS.fetch_max(colours, Ordering::Relaxed);
 }
 
-/// `tty_keys_device_attributes2` reads the first parameter of a secondary DA
-/// as a letter and hands `tty_default_features` the terminal it names. Only
-/// the colours those entries carry reach the cell writer here.
-pub(crate) fn note_secondary_device_attributes(kind: u8) {
-    if let Some(colours) = secondary_device_attributes_colours(kind) {
-        raise_terminal_colours(colours);
-    }
+/// `CLIENT_UTF8`, the flag `tty_check_codeset` reads before it writes a cell.
+/// `tmux.c` decides it in the client process from `-u` and the locale and
+/// never revisits it, so this reads it once too.
+pub(crate) fn terminal_takes_utf8() -> bool {
+    static TAKES_UTF8: OnceLock<bool> = OnceLock::new();
+    *TAKES_UTF8.get_or_init(zz_daemon::client_takes_utf8_terminal)
 }
 
-fn secondary_device_attributes_colours(kind: u8) -> Option<u32> {
+/// `tty_keys_device_attributes2` reads the first parameter of a secondary DA
+/// as a letter and hands `tty_default_features` the terminal it names.
+pub(crate) fn note_secondary_device_attributes(kind: u8) {
+    learn_terminal_features(terminal_default_features(secondary_device_attributes_name(
+        kind,
+    )));
+}
+
+fn secondary_device_attributes_name(kind: u8) -> &'static str {
     match kind {
-        b'T' | b'M' => Some(RGB_COLOURS),
-        b'U' => Some(256),
-        _ => None,
+        b'M' => "mintty",
+        b'T' => "tmux",
+        b'U' => "rxvt-unicode",
+        _ => "",
     }
 }
 
 /// `tty_keys_extended_device_attributes`: an XTVERSION reply names the
-/// terminal outright, and every entry it can name carries
-/// `TTY_FEATURES_BASE_MODERN_XTERM`, which is 256 and RGB.
+/// terminal outright, and `tty_default_features` decides what that name
+/// carries.
 pub(crate) fn note_extended_device_attributes(name: &str) {
-    if let Some(colours) = extended_device_attributes_colours(name) {
-        raise_terminal_colours(colours);
-    }
+    learn_terminal_features(terminal_default_features(extended_device_attributes_name(
+        name,
+    )));
 }
 
-fn extended_device_attributes_colours(name: &str) -> Option<u32> {
-    const NAMED: [&str; 7] = [
-        "iTerm2 ", "tmux ", "XTerm(", "mintty ", "foot(", "WezTerm ", "ghostty ",
+fn extended_device_attributes_name(reply: &str) -> &'static str {
+    const NAMED: [(&str, &str); 7] = [
+        ("iTerm2 ", "iTerm2"),
+        ("tmux ", "tmux"),
+        ("XTerm(", "XTerm"),
+        ("mintty ", "mintty"),
+        ("foot(", "foot"),
+        ("WezTerm ", "WezTerm"),
+        ("ghostty ", "ghostty"),
     ];
     NAMED
         .iter()
-        .any(|prefix| name.starts_with(prefix))
-        .then_some(RGB_COLOURS)
+        .find(|(prefix, _)| reply.starts_with(prefix))
+        .map_or("", |(_, name)| *name)
+}
+
+/// `tty_update_features`: the reply reaches this client's own feature set,
+/// which decides the colours the cell writer may send, the roster its daemon
+/// publishes and whether the extended-key request goes out at all.
+fn learn_terminal_features(features: &str) {
+    if features.is_empty() {
+        return;
+    }
+    zz_daemon::learn_client_terminal_features(features);
+    raise_terminal_colours(zz_daemon::client_terminal_colour_count());
+    arm_extended_keys();
+}
+
+static EXTENDED_KEYS_OPTION: AtomicBool = AtomicBool::new(false);
+static EXTENDED_KEYS_ARMED: AtomicBool = AtomicBool::new(false);
+
+/// `tty_update_features` writes `Eneks` while `extended-keys` is on, and
+/// `tty_term_string` answers empty unless the terminal carries the `extkeys`
+/// feature, so a terminal that has not named itself never sees the request.
+/// `tty_start_tty` writes it never: the pin's own first chance is the reply,
+/// or the query timeout firing with none.
+fn arm_extended_keys() {
+    if !EXTENDED_KEYS_OPTION.load(Ordering::Relaxed) || !terminal_carries_extended_keys() {
+        return;
+    }
+    if EXTENDED_KEYS_ARMED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let mut output = io::stdout().lock();
+    let _ = output.write_all(EXTENDED_KEYS_ENABLE);
+    let _ = output.flush();
+}
+
+fn terminal_carries_extended_keys() -> bool {
+    terminal_feature_mask(["extkeys"]) & zz_daemon::client_terminal_feature_mask() != 0
 }
 /// `smkx` and `rmkx` on every vt100-like terminal: `tty_start_tty` puts the
 /// keypad and the cursor keys into application mode for the whole attach and
@@ -227,11 +277,11 @@ impl TerminalGuard {
         let guard = Self {
             pixel_mouse: supports_pixel_mouse(),
             kitty_keyboard: supports_kitty_keyboard(),
-            extended_keys,
             kitty_graphics: false,
             file_probe: Some(file_probe),
             original,
         };
+        EXTENDED_KEYS_OPTION.store(extended_keys, Ordering::Relaxed);
         TERMINAL_COLOURS.store(zz_daemon::client_terminal_colour_count(), Ordering::Relaxed);
         let mut output = io::stdout().lock();
         output.write_all(b"\x1b[?1049h\x1b[?25l")?;
@@ -246,9 +296,6 @@ impl TerminalGuard {
         if guard.kitty_keyboard {
             output.write_all(b"\x1b[>3u")?;
         }
-        if guard.extended_keys {
-            output.write_all(EXTENDED_KEYS_ENABLE)?;
-        }
         write!(
             output,
             "\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi={FILE_PROBE_IMAGE_ID},s=1,v=1,a=q,t=f,f=32;{encoded_probe_path}\x1b\\"
@@ -257,6 +304,8 @@ impl TerminalGuard {
         output.write_all(THEME_SUBSCRIBE)?;
         output.write_all(b"\x1b[16t\x1b[2J")?;
         output.flush()?;
+        drop(output);
+        arm_extended_keys();
         Ok(guard)
     }
 
@@ -303,7 +352,7 @@ impl Drop for TerminalGuard {
         if self.kitty_keyboard {
             let _ = output.write_all(b"\x1b[<1u");
         }
-        if self.extended_keys {
+        if EXTENDED_KEYS_ARMED.swap(false, Ordering::Relaxed) {
             let _ = output.write_all(EXTENDED_KEYS_DISABLE);
         }
         let _ = output.write_all(THEME_UNSUBSCRIBE);
@@ -389,21 +438,19 @@ mod tests {
     }
 
     #[test]
-    fn only_the_terminals_the_pin_names_carry_colours() {
-        assert_eq!(secondary_device_attributes_colours(b'T'), Some(RGB_COLOURS));
-        assert_eq!(secondary_device_attributes_colours(b'M'), Some(RGB_COLOURS));
-        assert_eq!(secondary_device_attributes_colours(b'U'), Some(256));
-        assert_eq!(secondary_device_attributes_colours(b'V'), None);
-        assert_eq!(
-            extended_device_attributes_colours("ghostty 1.2.3"),
-            Some(RGB_COLOURS)
-        );
-        assert_eq!(
-            extended_device_attributes_colours("XTerm(400)"),
-            Some(RGB_COLOURS)
-        );
-        assert_eq!(extended_device_attributes_colours("Konsole 2.0"), None);
-        assert_eq!(extended_device_attributes_colours("tmux"), None);
+    fn only_the_terminals_the_pin_names_carry_features() {
+        assert_eq!(secondary_device_attributes_name(b'T'), "tmux");
+        assert_eq!(secondary_device_attributes_name(b'M'), "mintty");
+        assert_eq!(secondary_device_attributes_name(b'U'), "rxvt-unicode");
+        assert_eq!(secondary_device_attributes_name(b'V'), "");
+        assert_eq!(extended_device_attributes_name("ghostty 1.2.3"), "ghostty");
+        assert_eq!(extended_device_attributes_name("XTerm(400)"), "XTerm");
+        assert_eq!(extended_device_attributes_name("tmux 3.8"), "tmux");
+        assert_eq!(extended_device_attributes_name("Konsole 2.0"), "");
+        assert_eq!(extended_device_attributes_name("tmux"), "");
+        assert!(terminal_default_features("tmux").contains("RGB"));
+        assert!(terminal_default_features("rxvt-unicode").contains("256"));
+        assert_eq!(terminal_default_features(""), "");
     }
 
     #[test]

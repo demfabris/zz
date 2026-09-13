@@ -2072,6 +2072,17 @@ pub enum InputMessage {
         focused: bool,
     },
     DismissClientMessage,
+    /// `server_client_check_mouse` resolved on the client: a decoded pointer
+    /// event that carries one of the pin's mouse key names, with the pane and
+    /// window it landed on and its cell in the client's own screen. The daemon
+    /// runs that key's binding with this record as its target.
+    MouseKey {
+        key: String,
+        pane: Option<PaneId>,
+        window: Option<WindowId>,
+        column: u16,
+        row: u16,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

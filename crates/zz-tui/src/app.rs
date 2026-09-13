@@ -812,6 +812,7 @@ pub(crate) fn run(
                     CoreEvent::MuxOptionsChanged
                         | CoreEvent::HelloReceived
                         | CoreEvent::Attached { .. }
+                        | CoreEvent::KeyTablesChanged
                 ) {
                     refresh_terminal_options(&mut model, &core, &escape_time);
                 }
@@ -1095,6 +1096,41 @@ fn refresh_terminal_options(model: &mut Model, core: &Mutex<ClientCore>, escape_
     escape_time.store(escape_timeout_ms(options), Ordering::Relaxed);
     model.mouse_option = mouse_option_enabled(options);
     model.focus_follows_mouse = focus_follows_mouse_enabled(options);
+    model.mouse_bindings = mouse_binding_names(core.key_tables());
+}
+
+/// Every mouse key name the ROOT table carries a binding for. The raw TUI only
+/// has to know WHETHER a gesture's name is bound before it hands the event to
+/// the daemon, which then walks the table stack itself the way
+/// `key_bindings_get` does. Root alone, because a gesture whose name the
+/// daemon then fails to find would have been swallowed here for nothing, and
+/// root is the one table a pointer event always reaches: a binding in a copy
+/// table or a custom `-T` table stays unreachable from the pointer and is
+/// recorded on compat/tui-mouse.sh.
+pub(crate) fn mouse_binding_names(
+    tables: &[zz_protocol::KeyTableSnapshot],
+) -> std::collections::HashSet<String> {
+    tables
+        .iter()
+        .filter(|table| table.name == "root")
+        .flat_map(|table| table.bindings.iter())
+        .filter(|binding| is_mouse_key_name(&binding.key))
+        .map(|binding| binding.key.clone())
+        .collect()
+}
+
+fn is_mouse_key_name(key: &str) -> bool {
+    let base = key
+        .rsplit_once('-')
+        .map_or(key, |(_, base)| base);
+    base.starts_with("MouseDown")
+        || base.starts_with("MouseUp")
+        || base.starts_with("MouseDrag")
+        || base.starts_with("WheelUp")
+        || base.starts_with("WheelDown")
+        || base.starts_with("SecondClick")
+        || base.starts_with("DoubleClick")
+        || base.starts_with("TripleClick")
 }
 
 /// `server_client_reset_state`: the mode starts as the overlay's screen mode
@@ -2614,5 +2650,38 @@ mod tests {
             set_browser_tabs_command(PaneId(3), &current, vec!["https://two".to_owned()], 1)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn only_the_root_tables_mouse_names_are_collected() {
+        let binding = |key: &str| zz_protocol::KeyBindingSnapshot {
+            key: key.to_owned(),
+            commands: Vec::new(),
+            repeat: false,
+            note: None,
+        };
+        let tables = vec![
+            zz_protocol::KeyTableSnapshot {
+                name: "root".to_owned(),
+                bindings: vec![
+                    binding("MouseDown1Pane"),
+                    binding("M-MouseDrag1Border"),
+                    binding("WheelUpStatus"),
+                    binding("C-b"),
+                    binding("F9"),
+                ],
+            },
+            zz_protocol::KeyTableSnapshot {
+                name: "copy-mode".to_owned(),
+                bindings: vec![binding("MouseDrag1Pane")],
+            },
+        ];
+        let names = mouse_binding_names(&tables);
+        assert!(names.contains("MouseDown1Pane"));
+        assert!(names.contains("M-MouseDrag1Border"));
+        assert!(names.contains("WheelUpStatus"));
+        assert!(!names.contains("C-b"));
+        assert!(!names.contains("F9"));
+        assert!(!names.contains("MouseDrag1Pane"));
     }
 }

@@ -1162,6 +1162,12 @@ fn handle_mouse(
         }
         MouseRouteOwner::Workspace => {}
     }
+    if let Some(bound) = bound_mouse_key(model, event, global_column, global_row) {
+        client
+            .send_input(bound)
+            .map_err(|error| error.to_string())?;
+        return Ok(InputOutcome::None);
+    }
     let sidebar_focus_changed =
         model.sidebar.focused && matches!(event.kind, MouseEventKind::Down(MouseButton::Left));
     if sidebar_focus_changed {
@@ -1258,6 +1264,111 @@ fn handle_mouse(
     } else {
         InputOutcome::None
     })
+}
+
+/// `server_client_check_mouse` and `key_bindings_get`: the pin turns a decoded
+/// pointer event into a key name carrying its event, its button and where on
+/// the client's screen it landed, and runs that key's binding. Every raw TUI
+/// gesture is a pointer event with the same three facts, so the name is built
+/// here and the daemon is asked to run the binding only when one exists; a
+/// name nothing is bound to leaves the client's own pointer handling alone,
+/// which is what the pin does with an unbound mouse key too.
+fn bound_mouse_key(
+    model: &Model,
+    event: MouseEvent,
+    global_column: u16,
+    global_row: u16,
+) -> Option<InputMessage> {
+    let (location, pane, window) = mouse_key_location(model, global_column, global_row)?;
+    let key = mouse_key_name(event, &location)?;
+    if !model.mouse_bindings.contains(&key) {
+        return None;
+    }
+    Some(InputMessage::MouseKey {
+        key,
+        pane,
+        window,
+        column: global_column,
+        row: global_row,
+    })
+}
+
+/// The `KEYC_MOUSE_LOCATION_*` half of the name, and the pane and window the
+/// pin's `mouse_event` would carry with it.
+fn mouse_key_location(
+    model: &Model,
+    global_column: u16,
+    global_row: u16,
+) -> Option<(String, Option<zz_protocol::PaneId>, Option<zz_protocol::WindowId>)> {
+    if let Some(index) = model.status_row_at(global_row) {
+        let (status_x, _) = model.status_area();
+        let target = global_column
+            .checked_sub(status_x)
+            .and_then(|column| model.status_hit_target(index, column));
+        let location = match &target {
+            None | Some(zz_protocol::TmuxRange::None) => "StatusDefault".to_owned(),
+            Some(zz_protocol::TmuxRange::Left) => "StatusLeft".to_owned(),
+            Some(zz_protocol::TmuxRange::Right) => "StatusRight".to_owned(),
+            Some(zz_protocol::TmuxRange::Control(control)) => format!("Control{control}"),
+            Some(
+                zz_protocol::TmuxRange::Pane(_)
+                | zz_protocol::TmuxRange::Window(_)
+                | zz_protocol::TmuxRange::Session(_)
+                | zz_protocol::TmuxRange::User(_)
+                | zz_protocol::TmuxRange::Other { .. },
+            ) => "Status".to_owned(),
+        };
+        let window = match target {
+            Some(zz_protocol::TmuxRange::Window(window)) => model.window_id_at_index(window),
+            _ => None,
+        };
+        return Some((location, None, window));
+    }
+    let entry = model.pane_at(global_column, global_row)?;
+    let location = if entry.content().contains(global_column, global_row) {
+        "Pane"
+    } else {
+        "Border"
+    };
+    Some((
+        location.to_owned(),
+        Some(entry.pane),
+        model.window().map(|window| window.id),
+    ))
+}
+
+/// The event and button half of the name, in the pin's own spelling.
+fn mouse_key_name(event: MouseEvent, location: &str) -> Option<String> {
+    let base = match event.kind {
+        MouseEventKind::Down(button) => format!("MouseDown{}{location}", mouse_button_index(button)),
+        MouseEventKind::Up(button) => format!("MouseUp{}{location}", mouse_button_index(button)),
+        MouseEventKind::Drag(button) => format!("MouseDrag{}{location}", mouse_button_index(button)),
+        MouseEventKind::ScrollUp => format!("WheelUp{location}"),
+        MouseEventKind::ScrollDown => format!("WheelDown{location}"),
+        MouseEventKind::Moved | MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
+            return None;
+        }
+    };
+    let mut key = String::new();
+    if event.modifiers.contains(KeyModifiers::CONTROL) {
+        key.push_str("C-");
+    }
+    if event.modifiers.contains(KeyModifiers::ALT) {
+        key.push_str("M-");
+    }
+    if event.modifiers.contains(KeyModifiers::SHIFT) {
+        key.push_str("S-");
+    }
+    key.push_str(&base);
+    Some(key)
+}
+
+const fn mouse_button_index(button: MouseButton) -> u8 {
+    match button {
+        MouseButton::Left => 1,
+        MouseButton::Middle => 2,
+        MouseButton::Right => 3,
+    }
 }
 
 /// `server_client_check_mouse`: a `MOUSEMOVE` resolved inside a pane that is
@@ -3269,5 +3380,53 @@ mod tests {
         assert!(input.modifiers.alt());
         assert!(!input.modifiers.shift());
         assert_eq!(input.button, None);
+    }
+
+    #[test]
+    fn a_pointer_event_names_the_pins_mouse_key_for_where_it_landed() {
+        let event = |kind, modifiers| crate::terminal_event::MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers,
+        };
+        assert_eq!(
+            mouse_key_name(
+                event(MouseEventKind::Down(MouseButton::Left), KeyModifiers::NONE),
+                "Pane"
+            )
+            .as_deref(),
+            Some("MouseDown1Pane")
+        );
+        assert_eq!(
+            mouse_key_name(
+                event(MouseEventKind::Drag(MouseButton::Left), KeyModifiers::ALT),
+                "Border"
+            )
+            .as_deref(),
+            Some("M-MouseDrag1Border")
+        );
+        assert_eq!(
+            mouse_key_name(
+                event(MouseEventKind::Up(MouseButton::Right), KeyModifiers::CONTROL),
+                "StatusLeft"
+            )
+            .as_deref(),
+            Some("C-MouseUp3StatusLeft")
+        );
+        assert_eq!(
+            mouse_key_name(event(MouseEventKind::ScrollUp, KeyModifiers::NONE), "Status")
+                .as_deref(),
+            Some("WheelUpStatus")
+        );
+        assert_eq!(
+            mouse_key_name(event(MouseEventKind::ScrollDown, KeyModifiers::SHIFT), "Pane")
+                .as_deref(),
+            Some("S-WheelDownPane")
+        );
+        assert_eq!(
+            mouse_key_name(event(MouseEventKind::Moved, KeyModifiers::NONE), "Pane"),
+            None
+        );
     }
 }

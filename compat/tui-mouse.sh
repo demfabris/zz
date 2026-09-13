@@ -637,13 +637,18 @@ case_click_selects_pane() {
 case_click_user_binding() {
   CASE_LABEL=click-user-binding
   run_on_both set-option -gu @mousekey
-  run_on_both bind-key -n MouseDown1Pane set-option -g @mousekey fired
+  local side
+  for side in zz tmux; do
+    side_command "$side" bind-key -n MouseDown1Pane set-option -g @mousekey \
+      "$(binding_value_for "$side")" >/dev/null || die "$side refused bind-key"
+  done
   mark_both userbind
   local left top
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
   click_both 0 "$((left + 4))" "$((top + 2))"
-  wait_for 'the pin ran its own mouse binding' option_is tmux @mousekey fired
+  wait_for 'the pin ran its own mouse binding' option_is tmux @mousekey \
+    "$(binding_value_for tmux)"
   settle_both MARK-userbind 'the user binding click'
   check_value USER_BINDING click-user-binding/option \
     "$(option_value zz @mousekey)" "$(option_value tmux @mousekey)"
@@ -666,10 +671,18 @@ case_click_user_binding_target() {
   click_both 0 "$((left + 7))" "$((top + 5))"
   wait_for 'the pin published the mouse context' pin_option_set @mousectx
   settle_both MARK-userctx 'the mouse context click'
-  check_value USER_BINDING click-user-binding-target/context \
+  check_value MOUSE_CONTEXT click-user-binding-target/context \
     "$(option_value zz @mousectx)" "$(option_value tmux @mousectx)"
   run_on_both unbind-key -n MouseDown1Pane
   run_on_both set-option -gu @mousectx
+}
+# What the root mouse binding sets. Both sides set the same word in every
+# driven case; the self-check gives one side another.
+BINDING_VALUE_ZZ=""
+BINDING_VALUE_TMUX=""
+binding_value_for() {
+  local override="BINDING_VALUE_${1^^}"
+  printf '%s' "${!override:-fired}"
 }
 pin_option_set() {
   [ -n "$(option_value tmux "$1")" ]
@@ -1053,8 +1066,10 @@ case_focus() {
 # Each mode below is `same` where the two binaries are measured to agree and
 # `record` where they do not, fixed here and never discovered at runtime, so a
 # sabotage can drive a recorded channel in a case where it asserts.
-USER_BINDING_MODE=record
-USER_BINDING_REASON="a decoded pointer event never reaches a key table: input.rs mouse_route_owner hands the gesture to the popup, the menu, the sidebar, a status window range or the pane, and the daemon never sees a mouse key, so an accepted bind -n MouseDown1Pane cannot fire (keys.root-native-mouse, mouse.bound-context, formats.mouse-context)"
+USER_BINDING_MODE=same
+USER_BINDING_REASON=""
+MOUSE_CONTEXT_MODE=record
+MOUSE_CONTEXT_REASON="the invoking event now travels with the command, but no format reads it: the eight mouse_* names are unimplemented in crates/zz-mux/src/formats.rs, which this batch's zones do not open (formats.mouse-context)"
 WHEEL_MODE=record
 WHEEL_REASON="WheelUpPane is a root binding running copy-mode -e on the pin; the raw TUI scrolls its own viewport instead (keys.root-native-mouse)"
 DRAG_MODE=record
@@ -1129,6 +1144,14 @@ self_check_case() {
     "$name" "$differed" "$expectation"
 }
 
+# The same root mouse binding set to a different value on one side. Both
+# binaries run their own binding now, so click-user-binding/option carries the
+# difference and nothing else can.
+sc_one_sided_binding_value() {
+  BINDING_VALUE_ZZ=other
+  case_click_user_binding
+  BINDING_VALUE_ZZ=""
+}
 # zz's click aimed at the pane it is already in while the pin's lands in the
 # other one. click-selects-pane/active-pane is the only asserted check in that
 # case and has to carry the difference.
@@ -1185,6 +1208,8 @@ run_self_check() {
   self_check_case 'a status-left only zz carries' catches sc_one_sided_status_left
   self_check_case "zz's click aimed at the pane it already sits in" catches \
     sc_one_sided_click_target
+  self_check_case 'the same root mouse binding set differently on zz' catches \
+    sc_one_sided_binding_value
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check cases did not behave as required\n' "$SELF_CHECK_FAILURES"

@@ -125,6 +125,10 @@ pub(crate) struct Model {
     pub last_sent_geometry: HashMap<PaneId, (u16, u16, u32, u32)>,
     pub last_sent_command_output_geometry: Option<(u16, u16, u32, u32)>,
     pub mouse_option: bool,
+    /// Every mouse key name the server's tables carry a binding for, in the
+    /// pin's own spelling. A pointer gesture whose name is in here runs that
+    /// binding instead of the client's own pointer handling.
+    pub mouse_bindings: std::collections::HashSet<String>,
     pub focus_follows_mouse: bool,
     pub mouse_arming: crate::tty::MouseArming,
     client_focus: ClientFocusState,
@@ -192,6 +196,7 @@ impl Model {
             last_sent_geometry: HashMap::new(),
             last_sent_command_output_geometry: None,
             mouse_option: crate::app::mouse_option_enabled(core.mux_options()),
+            mouse_bindings: crate::app::mouse_binding_names(core.key_tables()),
             focus_follows_mouse: crate::app::focus_follows_mouse_enabled(core.mux_options()),
             mouse_arming: if crate::app::mouse_option_enabled(core.mux_options()) {
                 crate::tty::MouseArming::Button
@@ -720,6 +725,17 @@ impl Model {
         let session = self.session()?;
         let focused = self.snapshot.focused_window_for(session);
         session.windows.iter().find(|window| window.id == focused)
+    }
+
+    pub fn window_id_at_index(&self, index: u64) -> Option<zz_protocol::WindowId> {
+        let session = self.session()?;
+        u32::try_from(index).ok().and_then(|index| {
+            session
+                .windows
+                .iter()
+                .find(|window| window.index == index)
+                .map(|window| window.id)
+        })
     }
 
     pub fn active_pane(&self) -> Option<PaneId> {

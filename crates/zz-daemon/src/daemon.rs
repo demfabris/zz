@@ -16694,6 +16694,15 @@ impl Shared {
                 InputMessage::ClientFocus { focused } => {
                     self.input_client_focus(client, kind, context, focused)?;
                 }
+                InputMessage::MouseKey {
+                    key,
+                    pane,
+                    window,
+                    column: _,
+                    row: _,
+                } => {
+                    self.input_mouse_key(client, kind, context, &key, pane, window)?;
+                }
                 InputMessage::DismissClientMessage => {}
                 InputMessage::ResizeCommandOutput {
                     columns,
@@ -18227,6 +18236,69 @@ impl Shared {
                 dispatched
             }
         };
+        self.sync_prefix_armed(client);
+        result
+    }
+
+    /// `server_client_key_callback`'s mouse half. A decoded pointer event the
+    /// client already resolved into one of the pin's mouse key names is looked
+    /// up in the table the client is in and then in the session's root table,
+    /// exactly as the pin looks a mouse key up, and its binding runs against
+    /// the pane and window the event landed on. A name with no binding does
+    /// nothing here: the pin forwards it to the pane and the client, which
+    /// still owns the pointer, has already decided what else the gesture does.
+    fn input_mouse_key(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        key: &str,
+        pane: Option<PaneId>,
+        window: Option<WindowId>,
+    ) -> Result<(), DaemonError> {
+        let Some((commands, repeat_binding, session, window, pane)) = ({
+            let inner = self.inner.lock();
+            let Some(session) = client_attached_session(&inner, client) else {
+                return Ok(());
+            };
+            let root_table = inner.engine.key_table_for_session(session);
+            let active_table = inner
+                .key_engines
+                .get(&client)
+                .and_then(KeyEngine::active_table)
+                .map(str::to_owned);
+            let binding = active_table
+                .as_deref()
+                .filter(|table| *table != root_table)
+                .and_then(|table| inner.engine.keys.get(table, key))
+                .or_else(|| inner.engine.keys.get(&root_table, key));
+            binding.map(|binding| {
+                let window = window.or_else(|| client_focused_window_for_attachment(&inner, client));
+                let pane = pane.or_else(|| {
+                    window
+                        .and_then(|window| inner.engine.state.windows.get(&window))
+                        .map(|window| window.active_pane)
+                });
+                (
+                    binding.commands.clone(),
+                    binding.repeat,
+                    session,
+                    window,
+                    pane,
+                )
+            })
+        }) else {
+            return Ok(());
+        };
+        let Some(pane) = pane else {
+            return Ok(());
+        };
+        context.retarget(&ExecutionContext::new(Some(session), window, Some(pane)));
+        let previous = context.invoking_key().map(str::to_owned);
+        context.set_invoking_key(Some(key.to_owned()));
+        let result =
+            self.execute_key_commands(client, kind, context, pane, &commands, repeat_binding);
+        context.set_invoking_key(previous);
         self.sync_prefix_armed(client);
         result
     }
@@ -35911,6 +35983,7 @@ fn read_only_blocks_input(input: &InputMessage) -> bool {
         | InputMessage::Popup { .. }
         | InputMessage::Menu { .. }
         | InputMessage::Confirm { .. }
+        | InputMessage::MouseKey { .. }
         | InputMessage::DismissClientMessage => true,
         InputMessage::TerminalView { action, .. } => {
             !terminal_view_action_is_read_only_safe(action)

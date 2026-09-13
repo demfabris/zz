@@ -11,7 +11,8 @@ reasons this batch owns, and the two generated reports. No crate, no wire field,
 and no zz-only string, prompt, label or format was removed or changed, so no corpus scenario
 depends on this landing; `rg` over `compat/scenarios` for every message the fixture asserts finds
 none of them, and the only row that names a superset verb at all,
-`compat/scenarios/command-item-format.txt`, names `select-pane-kind` in a comment.
+`compat/scenarios/command-item-format.txt`, names `select-pane-kind` in a comment. That row was
+run anyway and passes: `corpus-command-item-format.txt`.
 
 ## Files here
 
@@ -26,6 +27,8 @@ none of them, and the only row that names a superset verb at all,
 - `cargo-test-zz-mux.txt`, `cargo-test-zz.txt`, `clippy-zz-mux.txt` - the crate checks. No crate
   source changed; `compat/tmux-gaps.json` is read by `zz-mux`'s manifest tests and by a `zz-daemon`
   test, so those are the ones that could notice the gap-reason edit.
+- `corpus-command-item-format.txt` - `compat/run.sh command-item-format`, the only corpus row that
+  names a superset verb at all, exit 0.
 - `tracker-checks.txt` - both trackers, valid and current.
 
 ## The three clauses

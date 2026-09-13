@@ -27,6 +27,12 @@ pub const CLIENT_TTY_CAPABILITY_PREFIX: &str = "client-tty-v1:";
 /// Value-token prefix naming the caller's terminal size, `client-size-v1:80x24`.
 pub const CLIENT_SIZE_CAPABILITY_PREFIX: &str = "client-size-v1:";
 pub const CLIENT_FEATURES_CAPABILITY_PREFIX: &str = "client-features-v1:";
+/// Most feature names one [`ProtocolMessage::ClientTerminalFeatures`] may carry:
+/// the pin's own table holds twenty-one and a client reports the union of what
+/// its replies named.
+pub const MAX_CLIENT_TERMINAL_FEATURES: usize = 64;
+/// Longest single feature name in that message.
+pub const MAX_CLIENT_TERMINAL_FEATURE_BYTES: usize = 64;
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
 pub const MAX_CHOOSE_TREE_QUERY_BYTES: usize = 4 * 1024;
@@ -3605,6 +3611,39 @@ pub enum ProtocolMessage {
         #[serde(deserialize_with = "deserialize_environment_values")]
         values: Vec<Option<String>>,
     },
+    /// The terminal features a client learned from its own terminal after the
+    /// hello, the way `tty_keys_device_attributes`, `tty_keys_device_attributes2`
+    /// and `tty_keys_extended_device_attributes` reach `c->term_features` once
+    /// the replies arrive. The daemon folds them into the client's feature bits
+    /// for `#{client_termfeatures}` and `#{client_colours}`, stopping at the
+    /// first name it does not know. Appended in v102.
+    ClientTerminalFeatures {
+        #[serde(deserialize_with = "deserialize_client_terminal_features")]
+        features: Vec<String>,
+    },
+}
+
+fn deserialize_client_terminal_features<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let features = Vec::<String>::deserialize(deserializer)?;
+    if features.len() > MAX_CLIENT_TERMINAL_FEATURES {
+        return Err(D::Error::invalid_length(
+            features.len(),
+            &"a terminal feature batch within the wire entry limit",
+        ));
+    }
+    if let Some(feature) = features
+        .iter()
+        .find(|feature| feature.len() > MAX_CLIENT_TERMINAL_FEATURE_BYTES)
+    {
+        return Err(D::Error::invalid_length(
+            feature.len(),
+            &"a terminal feature name within the wire byte limit",
+        ));
+    }
+    Ok(features)
 }
 
 fn deserialize_environment_names<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>

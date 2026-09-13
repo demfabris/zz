@@ -642,7 +642,11 @@ end of those enums, and `PreviewCycle` at the end of each of the two before them
 `ChooserPreviewSize` and `ChooserPreviewTile` the daemon fills from the mode tree. v102 also
 appends `InputMessage::MouseKey { key, pane, window, column, row }` after `DismissClientMessage`,
 the pin's own mouse key name a client resolved from a decoded pointer event together with the pane
-and window that event landed on and its cell in the client's screen.
+and window that event landed on and its cell in the client's screen. v102 also appends
+`ProtocolMessage::ClientTerminalFeatures { features: Vec<String> }` at the tail of the message
+enum, the terminal features a client learned from its own terminal after the hello; `features` is
+capped at `MAX_CLIENT_TERMINAL_FEATURES` (64) entries of `MAX_CLIENT_TERMINAL_FEATURE_BYTES` (64)
+bytes each, rejected during deserialization.
 
 # Versioning & compatibility
 
@@ -690,6 +694,17 @@ and window that event landed on and its cell in the client's screen.
   binding for, so a gesture nothing is bound to costs no round trip and keeps the client's own
   pointer handling. Pure append with its consumer half in the same push; GUI clients send it never
   and are unchanged.
+- v102 also carries what a client learned from its own terminal after the hello.
+  `ProtocolMessage` appends `ClientTerminalFeatures { features: Vec<String> }` at the tail. The pin
+  has no wire here: its client and its server share one process, so `tty_keys_device_attributes`,
+  `tty_keys_device_attributes2` and `tty_keys_extended_device_attributes` write straight into
+  `c->term_features` and `tty_update_features` picks the change up. A zz client sends its device
+  attributes requests when it enters the terminal, which is after the hello, so the answer needs a
+  message of its own; the daemon folds the names into that client's feature bits (unknown names are
+  dropped) and recomposes the status, because the stock theme colours read `#{client_colours}`.
+  The client also keeps the learned set for its next hello, where it rides as one more
+  `client-features-v1:` token, so a reconnect does not wait for the terminal to answer again. Pure
+  append with its consumer half in the same push; GUI clients send it never and are unchanged.
 - v102 also carries the chooser presentation itself. `EventPayload` appends `ChooserPresentation
   { presentation: Option<Box<ChooserPresentation>> }` at tail tag 52, the mode screen the daemon
   composes after every chooser state or delta. `ChooserPresentation` carries `selected`, `rows`,

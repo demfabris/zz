@@ -409,6 +409,7 @@ const STANDARD_BOOLEAN_CAPABILITIES: [&str; 2] = ["am", "bce"];
 pub struct TtyTerm {
     codes: BTreeMap<&'static str, CodeValue>,
     features: BTreeSet<String>,
+    requested: BTreeSet<String>,
     flags: u32,
 }
 
@@ -509,7 +510,17 @@ impl TtyTerm {
             .filter(|name| term.feature_present(name, &requested))
             .map(str::to_owned)
             .collect();
+        term.requested = requested;
         term
+    }
+
+    /// The pin's own `feat` for this client: what `tty_term_create` added from
+    /// the `terminal-features` array, `COLORTERM`, the VT100-like check and an
+    /// RGB-capable entry, which is the half of `c->term_features` a terminfo
+    /// entry decides and the whole of what `#{client_termfeatures}` lists for a
+    /// terminal that has answered nothing.
+    pub fn requested_features(&self) -> impl Iterator<Item = &str> {
+        self.requested.iter().map(String::as_str)
     }
 
     /// `tty_term_has_name`.

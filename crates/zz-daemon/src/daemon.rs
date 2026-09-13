@@ -96,9 +96,7 @@ use crate::{
         client_environment_rows, client_terminal_facts, host_names, status_context,
         warm_terminfo_entries,
     },
-    terminal_features::{
-        terminal_colour_count, terminal_feature_bit, terminal_feature_mask, terminal_features_list,
-    },
+    terminal_features::{terminal_colour_count, terminal_feature_mask, terminal_features_list},
     transport::{LocalTransport, Transport, TransportListener, TransportStream},
 };
 
@@ -22830,6 +22828,38 @@ impl Shared {
         }
     }
 
+    /// `tty_update_features`: the features a client learned from its own
+    /// terminal after the hello join its roster and never leave it, and the
+    /// status line is recomposed because the theme colours read
+    /// `#{client_colours}`.
+    fn add_client_terminal_features(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        features: &[String],
+    ) {
+        if kind != ClientKind::Interactive {
+            return;
+        }
+        let learned = terminal_feature_mask(features.iter().map(String::as_str));
+        if learned == 0 {
+            return;
+        }
+        let changed = {
+            let mut inner = self.inner.lock();
+            if !inner.client_terminals.contains(&client) {
+                return;
+            }
+            let carried = inner.client_features.entry(client).or_insert(0);
+            let before = *carried;
+            *carried |= learned;
+            *carried != before
+        };
+        if changed {
+            self.refresh_status(true);
+        }
+    }
+
     fn set_terminal_preview(&self, client: ClientId, kind: ClientKind, enabled: bool) {
         if kind != ClientKind::Interactive {
             return;
@@ -32263,11 +32293,23 @@ fn client_uses_utf8(inner: &ServerState, client: ClientId) -> bool {
 }
 
 fn client_colour_count(inner: &ServerState, client: ClientId) -> Option<u32> {
-    client_colour_count_with(
-        inner,
-        client,
-        inner.client_features.get(&client).copied().unwrap_or(0),
-    )
+    client_colour_count_with(inner, client, client_feature_mask(inner, client))
+}
+
+/// `c->term_features`: what the client's flags asked for and what its terminal
+/// has since answered, folded with the set `tty_term_create` derives from the
+/// terminfo entry, the `terminal-features` array and `COLORTERM`.
+fn client_feature_mask(inner: &ServerState, client: ClientId) -> u32 {
+    let mut features = inner.client_features.get(&client).copied().unwrap_or(0);
+    if let Some(term) = client_terminal_facts(
+        client_environment_value(inner, client, "TERM").unwrap_or_default(),
+        client_environment_value(inner, client, "COLORTERM"),
+        &inner.engine.terminal_features_option(),
+        &inner.engine.terminal_overrides_option(),
+    ) {
+        features |= terminal_feature_mask(term.requested_features());
+    }
+    features
 }
 
 fn client_colour_count_with(inner: &ServerState, client: ClientId, requested: u32) -> Option<u32> {
@@ -32281,36 +32323,15 @@ fn client_colour_count_with(inner: &ServerState, client: ClientId, requested: u3
     Some(terminal_colour_count(term, colour_term, requested))
 }
 
+/// `tty_get_features(c->term_features)`: the bits the client's own roster
+/// carries and nothing else. A terminal that takes 256 colours because its
+/// terminfo entry says so carries no `256` feature, which is why this reads the
+/// mask rather than the colour count.
 fn client_term_features(inner: &ServerState, client: ClientId) -> String {
-    let Some(colours) = client_colour_count_with(inner, client, 0) else {
+    if client_colour_count(inner, client).is_none() {
         return String::new();
-    };
-    let mut features = inner.client_features.get(&client).copied().unwrap_or(0);
-    for name in [
-        "bpaste",
-        "ccolour",
-        "clipboard",
-        "hyperlinks",
-        "cstyle",
-        "extkeys",
-        "focus",
-        "mouse",
-        "osc7",
-        "overline",
-        "strikethrough",
-        "sync",
-        "title",
-        "usstyle",
-    ] {
-        features |= terminal_feature_bit(name).unwrap_or(0);
     }
-    if colours >= 256 {
-        features |= terminal_feature_bit("256").unwrap_or(0);
-    }
-    if colours == 16_777_216 {
-        features |= terminal_feature_bit("RGB").unwrap_or(0);
-    }
-    terminal_features_list(features)
+    terminal_features_list(client_feature_mask(inner, client))
 }
 
 fn client_format_geometry(
@@ -39637,6 +39658,9 @@ fn handle_connection<S: TransportStream>(
             }
             ProtocolMessage::SetTerminalPreview { enabled } => {
                 shared.set_terminal_preview(client, hello.kind, enabled);
+            }
+            ProtocolMessage::ClientTerminalFeatures { features } => {
+                shared.add_client_terminal_features(client, hello.kind, &features);
             }
             ProtocolMessage::Input(input) => {
                 if let Some(context) = context.as_mut() {
@@ -85472,6 +85496,62 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(!has(&roster, "256") && !has(&roster, "RGB"), "{roster}");
     }
 
+    /// `tty_update_features`: a reply reaches the client's own roster after the
+    /// hello, and `tty_term_create` had already given it the base its TERM
+    /// carries. The stock `terminal-features` array names `xterm*` five
+    /// features and the VT100-like check adds `bpaste`, so a client on
+    /// `TERM=xterm` that has answered nothing lists those six and counts eight
+    /// colours; the same client after a `tmux` secondary DA lists what
+    /// `tty_default_features` gives that name and counts sixteen million.
+    #[test]
+    fn a_reply_after_the_hello_joins_the_roster_the_terminfo_entry_started() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, _, _) = switch_test_session(&shared, "learned-features");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("tui".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, session).expect("attach client");
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_terminals.insert(client);
+            inner.client_environments.insert(
+                client,
+                Arc::new(BTreeMap::from([("TERM".into(), "xterm".into())])),
+            );
+        }
+        let facts = || {
+            let inner = shared.inner.lock();
+            (
+                client_colour_count(&inner, client),
+                client_term_features(&inner, client),
+            )
+        };
+        let base = facts();
+        if base.1.is_empty() {
+            return;
+        }
+        assert_eq!(base.0, Some(8));
+        assert_eq!(base.1, "bpaste,ccolour,clipboard,cstyle,focus,title");
+
+        let learned = crate::terminal_features::terminal_default_features("tmux")
+            .split(',')
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        shared.add_client_terminal_features(client, ClientKind::Interactive, &learned);
+        let after = facts();
+        assert_eq!(after.0, Some(16_777_216));
+        assert_eq!(
+            after.1,
+            "256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle"
+        );
+
+        shared.add_client_terminal_features(client, ClientKind::Command, &["sixel".to_owned()]);
+        assert_eq!(facts().1, after.1);
+    }
+
     #[test]
     fn client_context_formats_share_retained_facts_across_surfaces() {
         let shared = Arc::new(Shared::new(1));
@@ -85554,7 +85634,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "1",
                 "1",
                 "format-client",
-                "256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,RGB,strikethrough,sync,title,usstyle",
+                "bpaste,ccolour,clipboard,cstyle,focus,RGB,title",
                 "xterm-256color",
                 "",
                 "light",

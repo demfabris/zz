@@ -555,9 +555,11 @@ Sources:
 
 - `compat/tui-superset.sh`
 - `crates/zz-protocol/src/catalog.rs`
+- `crates/zz-protocol/src/key.rs`
 - `crates/zz-tui/src/sidebar.rs`
 - `crates/zz-tui/src/picker.rs`
 - `crates/zz-tui/src/browser.rs`
+- `crates/zz-tui/src/input.rs`
 - `crates/zz-tui/src/render.rs`
 - `crates/zz-client/src/chrome.rs`
 - `compat/tui/evidence/TUI-012/attempt-01/notes.md`

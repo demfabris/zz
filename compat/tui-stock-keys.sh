@@ -299,9 +299,22 @@ client_attached() {
 client_gone() {
   [ -z "$(side_command "$1" list-clients -F '#{client_session}' 2>/dev/null)" ]
 }
+# THE ONE UNFIXABLE VALUE ON THIS SCREEN. The two detach cases compare the
+# outer pane's screen after the inner client has exited, and `remain-on-exit`
+# makes the OUTER pinned tmux paint `remain-on-exit-format` over it, whose
+# default ends in `#{t:pane_dead_time}` - the wall-clock second that side's
+# client died on. The two clients exit one after the other, zz always the
+# later, so the two sides straddle a second whenever the run crosses one:
+# cycle 7's gate got one green in four runs on that alone. Nothing in any
+# binary can make two processes exit inside the same second, so the second is
+# normalised out and everything else on the line - the words, the exit status
+# or signal, the styling around them, and every other cell of every row - is
+# still compared. `status 0` staying in the pattern is deliberate: a pane that
+# died with a different status, or with a signal instead, still differs here.
 capture_screen() {
   tmux_outer_command capture-pane -p -e -S 0 -E "$((ROWS_UNDER_TEST - 1))" \
-    -t "=$OUTER_SESSION:$1"
+    -t "=$OUTER_SESSION:$1" |
+    LC_ALL=C sed -E 's/(Pane is dead \([^)]*, )[^)]*\)/\1DEAD-TIME)/g'
 }
 capture_plain() {
   tmux_outer_command capture-pane -p -S 0 -E "$((ROWS_UNDER_TEST - 1))" \
@@ -325,6 +338,17 @@ write_attach() {
     printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL -u XDG_STATE_HOME HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -t %q 2> >(tee -a %q >&2)\n' \
       "$TMUX_HOME" "$TMUX_HOME/config" "$TMUX_BIN" "$INNER_SOCKET_NAME" "=$SESSION_NAME" "$TMUX_CLIENT_STDERR" >>"$destination"
   fi
+  chmod +x "$destination"
+}
+
+# The self-check's one-sided sabotage for the dead-pane message: the same
+# attach, run without `exec` so the wrapper outlives the client and can hand
+# the outer pane a different exit status to paint.
+write_attach_exiting() {
+  local side="$1" status="$2" destination="$3"
+  write_attach "$side" "$destination"
+  sed -i -e 's/^exec //' "$destination"
+  printf 'exit %s\n' "$status" >>"$destination"
   chmod +x "$destination"
 }
 
@@ -814,6 +838,33 @@ run_self_check() {
   await_observable tmux format '#{window_name}=spellcheck' || true
   self_check_compare binding-spelling
   self_check_case 'equivalence: -n and -T root name the same table' none
+
+  # none: both sides detach and both outer panes carry the dead-pane message.
+  # This is the control for the ONE normalised value on this screen. The two
+  # clients exit one after the other, so `#{t:pane_dead_time}` straddles a
+  # wall-clock second whenever the run crosses one; with the second normalised
+  # the two farewells are the same screen, and this case says so on every run
+  # rather than one in four.
+  SIZE_LABEL='80x24-detach-time'
+  attach_both_at 80 24
+  type_prefix_both d
+  await_observable zz gone '' || true
+  await_observable tmux gone '' || true
+  self_check_compare detach-time
+  self_check_case 'equivalence: the second two clients exit on' none
+
+  # rows: the same two farewells with one side's client exiting non-zero. The
+  # normalisation blanks the time and nothing else, so the exit STATUS the
+  # dead-pane message carries is still a difference the fixture reports.
+  SIZE_LABEL='80x24-detach-status'
+  write_attach_exiting zz 3 "$SCRATCH_DIR/attach-zz.sh"
+  attach_both_at 80 24
+  type_prefix_both d
+  await_observable zz gone '' || true
+  await_observable tmux gone '' || true
+  self_check_compare detach-status
+  self_check_case 'rows: one side'"'"'s client exits with a different status' rows
+  write_attach zz "$SCRATCH_DIR/attach-zz.sh"
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"

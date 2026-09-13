@@ -110,6 +110,34 @@ pushes main when its branch is green, so a later lane rebases onto what the earl
 Cycle 5 showed why: one gate agent carrying five branches stopped partway and left nothing on
 main.
 
+A dependent obligation whose own proof is complete does not wait for another cycle. When every
+clause of an obligation asserts but a dependency is not yet verified, its gate writes the evidence
+and fills the proof block, leaves the status at `review` with an `evidence_note` that leads
+`proof complete at <sha>; held on <ids>`, and the gate that later verifies the dependency re-runs
+that obligation's fixture at its own tip, appends those commands to the proof and sets `verified`.
+The tracker accepts a proof block on a `review` item, so nothing is lost between the two landings.
+Cycle 6 carried TUI-007 this way behind TUI-004.
+
+Since cycle 7 an earlier gate runs the delta corpus only for the commands its own lane touched, and
+the last gate in the order runs the keys and status scenario sets and the backpressure row once for
+the whole cycle. Running the same rows at every gate cost hours per cycle and caught nothing a
+single run at the end would miss.
+
+Do not resume a killed cycle with `resumeFromRunId` when the runner schedules its lanes through a
+concurrency pool. The cache replays the longest unchanged prefix of `agent()` calls in start order,
+and a pool starts them in whichever order lanes happen to finish, so the prefix breaks and finished
+lanes run again. Cycle 6 lost about eighteen hours of agent time this way. Instead read the run's
+`journal.jsonl`, embed the finished workers and reviews in a fresh script so their lanes go straight
+to their gates, and launch it as a new run; `compat/tui/run-6b.js` is the template.
+
+A lane that removes or changes a zz-only screen string, prompt, label, format or option name greps
+`compat/scenarios` for it and runs the rows it finds, and its reviewer runs the delta corpus for the
+lane's touched commands. Cycle 6 twice landed a presentation change that a corpus row two directories
+away still asserted, and both times the gate was the first place the two met, which is the most
+expensive place to find it. Every batch
+prompt already tells its agent to inspect its worktree and continue from the state it is in, so a
+relaunch costs only the killed agent's own progress.
+
 # Machine notes
 
 - macOS: `/bin/bash` is 3.2; prefix `PATH=/opt/homebrew/bin:$PATH` on every `compat/` invocation.

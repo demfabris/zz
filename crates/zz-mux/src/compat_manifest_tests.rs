@@ -110,8 +110,12 @@ struct OracleKey {
     command: String,
 }
 
-const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] =
-    &[("copy-mode", 61), ("copy-mode-vi", 72), ("prefix", 56), ("root", 5)];
+const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] = &[
+    ("copy-mode", 61),
+    ("copy-mode-vi", 72),
+    ("prefix", 56),
+    ("root", 5),
+];
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")

@@ -502,10 +502,8 @@ fn brace_command_lists_bind_as_a_single_command_sequence() {
         .unwrap()
         .output;
     assert!(
-        listed
-            .lines()
-            .any(|line| line
-                == "bind-key  -T root F2                 send-keys \"a ; b\" \\; new-window"),
+        listed.lines().any(|line| line
+            == "bind-key  -T root F2                 send-keys \"a ; b\" \\; new-window"),
         "{listed}"
     );
 }

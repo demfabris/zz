@@ -1352,11 +1352,7 @@ fn resolved_mouse_latch(
 /// The axis of the divider a cell belongs to, which is the axis
 /// `resize_pane_mouse_update` resizes along once the drag it starts is under
 /// way.
-fn divider_axis(
-    model: &Model,
-    global_column: u16,
-    global_row: u16,
-) -> Option<zz_protocol::Axis> {
+fn divider_axis(model: &Model, global_column: u16, global_row: u16) -> Option<zz_protocol::Axis> {
     model
         .layout
         .dividers

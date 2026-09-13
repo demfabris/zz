@@ -27,12 +27,11 @@ use zz_mux::{
     CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
     FormatClient, FormatMonitorScope, FormatMonitorTarget, KeyDecision, KeyEngine, KeyTables,
     MouseEventTarget, MuxEffect, MuxEngine, PaneKind, PaneRuntimeFacts, ParsedConfig,
-    ParsedConfigBytes,
-    RetainedJobEnvironment, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
-    canonical_command, command_block_body, copy_mode_action_is_read_only_safe, expand_format_bytes,
-    expand_format_values, expand_status, format_command, format_true, hook_format_variables,
-    if_shell_truthy, parse_tmux_colour, sanitize_client_output, send_keys_is_read_only_safe,
-    send_keys_target_client, validate_static_command_chain,
+    ParsedConfigBytes, RetainedJobEnvironment, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder,
+    WindowSize, canonical_command, command_block_body, copy_mode_action_is_read_only_safe,
+    expand_format_bytes, expand_format_values, expand_status, format_command, format_true,
+    hook_format_variables, if_shell_truthy, parse_tmux_colour, sanitize_client_output,
+    send_keys_is_read_only_safe, send_keys_target_client, validate_static_command_chain,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
@@ -16708,7 +16707,7 @@ impl Shared {
                         kind,
                         context,
                         &key,
-                        MouseEventTarget {
+                        &MouseEventTarget {
                             pane,
                             window,
                             column,
@@ -18267,7 +18266,7 @@ impl Shared {
         kind: ClientKind,
         context: &mut ExecutionContext,
         key: &str,
-        mouse: MouseEventTarget,
+        mouse: &MouseEventTarget,
     ) -> Result<(), DaemonError> {
         let (pane, window) = (mouse.pane, mouse.window);
         let Some((commands, repeat_binding, session, window, pane)) = ({
@@ -18315,7 +18314,7 @@ impl Shared {
         let mouse = MouseEventTarget {
             pane: Some(pane),
             window,
-            ..mouse
+            ..mouse.clone()
         };
         context
             .format_variables
@@ -32686,10 +32685,7 @@ fn mouse_format_variables(
         .engine
         .format_status_context(Some(session), Some(window), Some(pane));
     if let (Some(left), Some(top)) = (geometry.pane_left, geometry.pane_top)
-        && let (Some(x), Some(y)) = (
-            mouse.column.checked_sub(left),
-            mouse.row.checked_sub(top),
-        )
+        && let (Some(x), Some(y)) = (mouse.column.checked_sub(left), mouse.row.checked_sub(top))
     {
         variables.insert("mouse_x".to_owned(), x.to_string());
         variables.insert("mouse_y".to_owned(), y.to_string());

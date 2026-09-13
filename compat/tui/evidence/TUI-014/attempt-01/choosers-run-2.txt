@@ -1,0 +1,108 @@
+chooser and command-output differential at 80x24 (pin tmux)
+ok    baseline
+ok    session-tree-open
+ok    session-tree-next
+ok    session-tree-expanded
+ok    session-tree-closed
+ok    window-tree-open
+ok    window-tree-tagged
+ok    window-tree-untagged
+ok    window-tree-sorted
+ok    window-tree-sort-wrapped
+ok    window-tree-unfit-help-then-search
+ok    window-tree-searched
+ok    window-tree-preview-off
+ok    window-tree-preview-big
+ok    window-tree-preview-normal
+ok    window-tree-closed
+ok    filter-prompt
+ok    filter-typed
+ok    filter-applied
+      case filter-cleared
+      1 of 24 rows differ, first differing row 12
+        12 tmux: ^[[38;2;179;179;179m(M-c) M-bM-^TM-^B   M-bM-^TM-^TM-bM-^TM-^@> ^[[39m0^[[38;2;179;179;179m: ^[[39msh^[[38;2;179;179;179m*: "ptitle"^[[39m
+        12 zz:   ^[[38;2;179;179;179m(M-c) M-bM-^TM-^B   M-bM-^TM-^TM-bM-^TM-^@> ^[[39m0^[[38;2;179;179;179m: ^[[39mbash^[[38;2;179;179;179m*: "ptitle"^[[39m
+      cursor tmux: 0,3 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   0,3 flag=0 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+DIFF  filter-cleared
+ok    filter-closed
+ok    tree-scrolled-bottom
+ok    tree-scrolled-top
+ok    tree-scroll-closed
+ok    buffer-tree-open
+ok    buffer-tree-next
+ok    buffer-tree-tagged
+ok    buffer-tree-closed
+ok    buffer-filter-prompt
+ok    buffer-filter-typed
+ok    buffer-filter-applied
+ok    buffer-filter-cleared
+ok    buffer-filter-closed
+ok    find-window-prompt
+ok    find-window-typed
+ok    find-window-tree
+ok    find-window-closed
+ok    output-shown
+      case output-search-prompt
+      2 of 24 rows differ, first differing row 22
+        22 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(search down) ^[[39m^[[49m
+        22 zz:   23
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;13;13;13m^[[48;2;184;134;11m(search down)^[[39m
+      cursor tmux: 14,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   14,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  output-search-prompt recorded, not asserted: the pin draws the stock search prompt over the pane with command-prompt -P (window_pane_set_prompt, screen-redraw.c:1524) and zz draws the same prompt on the status row; measured 2026-09-12, pin row 22 `(search down) ` with the status row kept, zz row 23
+      case output-search-typed
+      2 of 24 rows differ, first differing row 22
+        22 tmux: ^[[38;2;13;13;13m^[[48;2;184;134;11m(search down) 77^[[39m^[[49m
+        22 zz:   81
+        23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        23 zz:   ^[[38;2;13;13;13m^[[48;2;184;134;11m(search down) 77^[[39m
+      cursor tmux: 16,22 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   16,23 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  output-search-typed recorded, not asserted: the pin draws the stock search prompt over the pane with command-prompt -P (window_pane_set_prompt, screen-redraw.c:1524) and zz draws the same prompt on the status row; measured 2026-09-12, pin row 22 `(search down) ` with the status row kept, zz row 23
+ok    output-searched
+      case output-selected
+      1 of 24 rows differ, first differing row 18
+        18 tmux: 77^[[38;2;13;13;13m^[[48;2;184;134;11m
+        18 zz:   ^[[38;2;13;13;13m^[[48;2;147;112;219m77^[[48;2;184;134;11m
+      cursor tmux: 1,19 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+      cursor zz:   1,19 flag=1 pane=80x24 shape=default blinking=0 very_visible=0 colour=none
+note  output-selected recorded, not asserted: the pin clears the search marks on any non-search copy-mode command (window-copy.c:3767) so the selection alone is painted; zz keeps the current-match cell under the selection in the retained command output; measured 2026-09-12, row 18 `77` plain on the pin and in the current-match style on zz
+ok    output-closed
+note  output-copied: the copied selection is the same text on both sides
+ok    client-tree-open
+ok    client-sort-size
+ok    client-sort-creation
+ok    client-sort-activity
+ok    client-sort-name
+ok    client-sort-reversed
+ok    client-sort-forward
+ok    client-tagged
+ok    client-untagged
+ok    client-tag-all
+ok    client-tag-all-cleared
+ok    client-filter-prompt
+ok    client-filter-cancelled
+ok    client-tree-closed
+ok    client-run-open
+ok    client-run-chosen
+ok    client-run-dismissed
+ok    zoom-tree-open
+ok    zoom-tree-closed
+ok    zoom-manual
+ok    zoom-prezoomed-open
+ok    zoom-prezoomed-closed
+ok    zoom-manual-released
+ok    tall-window-tree-open
+ok    tall-window-tree-help
+ok    tall-window-tree-help-closed
+ok    tall-buffer-tree-open
+ok    tall-buffer-tree-help
+ok    tall-buffer-tree-help-closed
+ok    tall-client-tree-open
+ok    tall-client-tree-help
+ok    tall-client-tree-help-closed
+ok    tall-closed
+1 of 73 asserted comparisons differ, 3 recorded (0 for a sibling lane)
+exit=1

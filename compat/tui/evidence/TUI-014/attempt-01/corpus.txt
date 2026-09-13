@@ -1,0 +1,140 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m building zz
+   Compiling zz-protocol v0.8.0 (/home/demfabris/dev/zz-tui-commands/crates/zz-protocol)
+   Compiling zz-client v0.8.0 (/home/demfabris/dev/zz-tui-commands/crates/zz-client)
+   Compiling zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-commands/crates/zz-mux)
+   Compiling zz-browser v0.8.0 (/home/demfabris/dev/zz-tui-commands/crates/zz-browser)
+   Compiling zz-ui v0.8.0 (/home/demfabris/dev/zz-tui-commands/crates/zz-ui)
+   Compiling zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-commands/crates/zz-daemon)
+   Compiling zz-chrome-import v0.8.0 (/home/demfabris/dev/zz-tui-commands/crates/zz-chrome-import)
+   Compiling zz-tui v0.8.0 (/home/demfabris/dev/zz-tui-commands/crates/zz-tui)
+   Compiling zz-config v0.8.0 (/home/demfabris/dev/zz-tui-commands/crates/zz-config)
+   Compiling zz v0.8.0 (/home/demfabris/dev/zz-tui-commands/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 18.83s
+[1;36m==>[0m running list-keys-padding
+list-keys-padding: 46 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running prefix2
+prefix2: 15 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running strict-key-validation
+strict-key-validation: 40 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running command-alias
+command-alias: 16 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running census-hooks
+census-hooks: 152 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running formats-values
+formats-values: 45 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running capture-pane
+capture-pane: 23 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/keys-prefix-stock
+smoke/keys-prefix-stock: 40 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/positional-maximums
+smoke/positional-maximums: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/positional-minimums
+smoke/positional-minimums: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/chooser-row-flags
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m building zz
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.76s
+[1;36m==>[0m running smoke/chooser-row-flags
+smoke/chooser-row-flags: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/chooser-kill-keys
+smoke/chooser-kill-keys: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/chooser-kill-on-exit
+smoke/chooser-kill-on-exit: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/chooser-buffer-confirm-flag
+smoke/chooser-buffer-confirm-flag: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/chooser-row-flags | 3 | yes | 0 | yes | yes | yes |
+| smoke/chooser-kill-keys | 3 | yes | 0 | yes | yes | yes |
+| smoke/chooser-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
+| smoke/chooser-buffer-confirm-flag | 3 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m building zz
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42s
+[1;36m==>[0m running smoke/command-flag-errors
+smoke/command-flag-errors: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m checking pinned plugin corpus
+[1;36m==>[0m building zz
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.64s
+[1;36m==>[0m running smoke/config-discovery
+smoke/config-discovery: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-discovery-explicit
+smoke/config-discovery-explicit: 13 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-discovery-launcher
+smoke/config-discovery-launcher: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-oh-my-tmux
+smoke/plugin-runtime-oh-my-tmux: 4 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-fpp
+smoke/plugin-runtime-fpp: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-vim-tmux-navigator
+smoke/plugin-runtime-vim-tmux-navigator: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-tpm-install
+smoke/plugin-runtime-tpm-install: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running honest-knobs-c1-readback
+honest-knobs-c1-readback: 21 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/config-discovery | 12 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery-explicit | 13 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery-launcher | 12 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-oh-my-tmux | 4 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-fpp | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-vim-tmux-navigator | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-tpm-install | 2 | yes | 0 | yes | yes | yes |
+| honest-knobs-c1-readback | 21 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged

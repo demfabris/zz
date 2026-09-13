@@ -63,7 +63,13 @@
 #   `client_row_mask`: each side's own client name, read from that side's
 #   `list-clients`, becomes one fixed token, and on the rows that carried it the
 #   run of box fill that follows collapses, because a name of a different width
-#   moves the fill by a column. Every other cell of those screens - the row's
+#   moves the fill by a column, and the `HH:MM` of
+#   `#{t/p:client_activity}` becomes `NN:NN`. That clock is each client's own
+#   last activity time, stamped by its own server from its own key press: this
+#   driver types into zz and then into the pin, so a minute boundary between the
+#   two sends leaves the two rows a minute apart, and no option can pin it the
+#   way `make_buffers` pins the buffer clock. Its position and the text around
+#   it are still asserted. Every other cell of those screens - the row's
 #   key column, its text, the whole preview box, the copied status row, the
 #   selection colours and the cursor - is asserted whole.
 # Nothing else is masked. Anything not in those lists is compared.
@@ -519,6 +525,7 @@ name = re.escape(os.environ["ZZ_MASK_NAME"])
 for line in sys.stdin.read().split("\n"):
     if re.search(name, line):
         line = re.sub(name, "/dev/CLIENT", line)
+        line = re.sub(r"\d\d:\d\d", "NN:NN", line)
         line = re.sub("\u2500{2,}", "\u2500", line)
     sys.stdout.write(line + "\n")
 '

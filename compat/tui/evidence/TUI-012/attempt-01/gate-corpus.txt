@@ -1,0 +1,63 @@
+TUI-012 attempt-01 - the cycle 6 superset gate's corpus sweep
+
+SCOPE. Cycle 7's corpus rule gives the LAST gate in the order the widest sweep: its own delta,
+plus every keys and status scenario, plus smoke/tui-client-input-backpressure. Superset is last.
+
+  compat/run.sh --strict-geometry --delta origin/main..HEAD --commands <the lane's 43
+    touched_commands> --list   ->  237 scenarios
+  the one keys/status scenario the delta does NOT select  ->  copy-mode-bindings
+  smoke/tui-client-input-backpressure  ->  already inside the 237
+
+  TOTAL SCOPE: 238 scenarios.  RAN: 238.  Coverage was verified by set difference against the
+  scope list, not by arithmetic: `comm` between the scope and the rows that printed a result
+  line is empty in both directions.
+
+Every chunk ran in the foreground with ZZ_COMPAT_ZZ pointing at the gate's prebuilt binary, so
+run.sh invoked cargo zero times and never built outside the box's memory cap:
+
+  PATH=/opt/homebrew/bin:$PATH \
+  ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux \
+  ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins \
+  ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-gate-target/debug/zz \
+  compat/run.sh --strict-geometry <explicit scenario names>
+
+RESULT. 229 of 238 rows are clean on all five channels. The other nine are named below and not
+one of them is this lane's - the lane changes no crate source, so every row runs exactly the
+binary origin/main runs.
+
+FOUR known/ ROWS carry their designed recorded divergence and run.sh exits 0 on them:
+  known/known-main-preset-two-panes: 2 step(s), 0 TOPO divergence(s), 1 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+  known/known-pane-scrollbar-columns: 4 step(s), 0 TOPO divergence(s), 2 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)
+  known/known-spread-mixed: 6 step(s), 0 TOPO divergence(s), 1 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+  known/known-terminal-runtime: 28 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 6 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+FIVE ENVIRONMENTAL ROWS went red on the first pass. All five are documented on this box: four
+are the box note's own list (micro-flags, show-options-hooks, lane2-store,
+smoke/plugin-runtime-resurrect-restore) and the fifth, smoke/status-background-jobs, was
+established by the cycle 6 overlays gate and measured in depth by the cycle 7 roster gate
+(red 6/6 at its tip and 4/5 at BASE, on a scenario that touches none of that lane's code).
+This gate is the third independent confirmation of the fifth row.
+
+  red once, then GREEN on run.sh's own solo retry:
+    lane2-store
+    micro-flags
+  red twice (in-corpus and again alone), so run.sh exits 1 on their chunk:
+    show-options-hooks
+    smoke/plugin-runtime-resurrect-restore
+    smoke/status-background-jobs
+
+  their divergence lines:
+  lane2-store: 193 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 2 OUT divergence(s), 0 WARN divergence(s)
+  micro-flags: 17 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 0 WARN divergence(s)
+  show-options-hooks: 34 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 7 OUT divergence(s), 0 WARN divergence(s)
+  smoke/plugin-runtime-resurrect-restore: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 1 WARN divergence(s)
+  smoke/status-background-jobs: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 1 OUT divergence(s), 1 WARN divergence(s)
+
+THE FOUR ROWS THAT NAME A SUPERSET VERB were all run and all are clean; see
+corpus-command-item-format.txt and corpus-config-discovery.txt.
+
+WHAT THE SWEEP IS WORTH HERE. The 237 are selected because the lane's touched_commands name 43
+ordinary tmux verbs, not because any code changed - the diff has no crate file in it. The sweep
+still earns its cost as the cycle's integration check: this gate tip is the FIRST tree that
+carries both the input lane's and the roster lane's crate changes at once, and neither earlier
+gate ran a corpus row with the other lane merged in.

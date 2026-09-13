@@ -1,0 +1,44 @@
+TUI-012 attempt-01 - every TUI fixture at the cycle 6 superset gate tip
+
+Gate tip d002ba966176777b97f7722256f7957f926303ab against the pin
+d77c9dc6aa021e4bc61f0da128c591af695e6466. Each fixture run one at a time, nothing else of the
+gate's running beside it. EVERY ONE PASSED ON ITS FIRST RUN - no fixture needed a solo rerun and
+no known flake fired.
+
+fixture                                exit  last line
+tui-superset                           0     all 189 asserted cases hold, 0 recorded not asserted
+tui-superset.r2                        0     all 189 asserted cases hold, 0 recorded not asserted
+tui-superset.r3                        0     all 189 asserted cases hold, 0 recorded not asserted
+tui-superset.self-check                0     self-check complete: every fault was reported by the channel that owns it
+tui-screen-diff                        0     all 147 asserted checkpoints identical, 6 recorded not asserted
+tui-screen-diff.self-check             0     self-check complete: every sabotage was caught in its own channel and every equivalence passed
+tui-pane-geometry                      0     all 6 asserted measurements identical
+tui-stock-keys                         0     all 50 cases agree on every channel they assert, 9 recorded a difference elsewhere
+tui-stock-keys.self-check              0     self-check complete: every sabotage was caught in its own channel and every equivalence passed
+status-row                             0     all 14 comparisons identical, none recorded
+tui-indicators                         0     all 23 asserted comparisons identical, 0 recorded not asserted
+tui-indicators.self-check              0     self-check complete: every sabotage was caught and the equivalence passed
+tui-copy-mode                          0     147 of those cases assert at least one channel; 0 assert none and are recorded in full
+tui-copy-mode.self-check               0     self-check complete: every sabotage was caught in its own channel and every equivalence passed
+tui-caps                               0     all 351 asserted rows identical
+tui-caps.self-check                    0     self-check: every sabotage caught in its own channel
+tui-overlays                           0     all 48 asserted comparisons identical, 0 recorded not asserted
+tui-overlays.self-check                0     self-check complete: every sabotage was caught and the equivalence passed
+tui-choosers                           0     all 53 asserted comparisons identical, 4 recorded not asserted (0 for a sibling lane)
+tui-choosers.self-check                0     self-check complete: every sabotage was caught and both equivalences passed
+attached-client                        0     attached-client compatibility: PASS
+
+NOTES.
+- tui-superset: three consecutive runs, all three md5 281802bcf8f5ff222c9396738d145b83, which is
+  also the md5 of all three run files the lane recorded. The merged input and roster changes move
+  nothing in this fixture.
+- tui-stock-keys: GREEN ON THE FIRST RUN, 98s. The detach-timestamp flake the input gate hit 3
+  times in 4 (the remain-on-exit "Pane is dead (status 0, <date>)" line straddling a wall-clock
+  second) did not fire here. Its recorded count reads 9; the roster gate read 8. That is the
+  documented wobble, with no case moving from asserted to failing.
+- tui-caps: 351 asserted / 15 recorded, exactly the counts the input gate left after its must-fix
+  added four driven menu cases and three self-check cases. The input landing is intact.
+- tui-choosers: 4 recorded, 0 for a sibling lane - the same four the roster gate left, including
+  client-tree-open, which is TUI-014's now that choose-client did not land.
+- status-row is the only fixture given LC_ALL=C LC_TIME=C; that is its control on this box and
+  forcing it on the others breaks the pin's CLIENT_UTF8.

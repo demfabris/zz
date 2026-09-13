@@ -10,9 +10,14 @@ real run of the file it names, at the revision `environment.txt` records, agains
 reasons this batch owns, and the two generated reports. No crate, no wire field, no option name
 and no zz-only string, prompt, label or format was removed or changed, so no corpus scenario
 depends on this landing; `rg` over `compat/scenarios` for every message the fixture asserts finds
-none of them, and the only row that names a superset verb at all,
-`compat/scenarios/command-item-format.txt`, names `select-pane-kind` in a comment. That row was
-run anyway and passes: `corpus-command-item-format.txt`.
+none of them. FOUR corpus rows name a superset verb, not one - the lane's first note said one and
+was wrong, corrected at the gate: `compat/scenarios/command-item-format.txt:103` names
+`select-pane-kind` in a comment, and `smoke/config-discovery.txt:17`,
+`smoke/config-discovery-explicit.txt:19` and `smoke/config-discovery-launcher.txt:18` each carry
+`zz-only: reload-config`, with `smoke/fixtures/config-discovery-import.sh` running
+`import-tmux-config` at lines 9 and 18 for all three. All four were run at the gate tip and all
+four are clean: `corpus-command-item-format.txt` (125 steps) and `corpus-config-discovery.txt`
+(12, 13 and 12 steps), every channel zero.
 
 ## Files here
 
@@ -24,11 +29,20 @@ run anyway and passes: `corpus-command-item-format.txt`.
   unchanged and still green, exit 0.
 - `tui-pane-geometry.txt`, `status-row.C-locale.txt`, `attached-client.txt` - the surfaces every
   lane runs, exit 0. `status-row.sh` is run under `LC_ALL=C LC_TIME=C`, its control on this box.
-- `cargo-test-zz-mux.txt`, `cargo-test-zz.txt`, `clippy-zz-mux.txt` - the crate checks. No crate
-  source changed; `compat/tmux-gaps.json` is read by `zz-mux`'s manifest tests and by a `zz-daemon`
-  test, so those are the ones that could notice the gap-reason edit.
-- `corpus-command-item-format.txt` - `compat/run.sh command-item-format`, the only corpus row that
-  names a superset verb at all, exit 0.
+- `cargo-test-zz-mux.txt`, `cargo-test-zz.txt`, `cargo-test-zz-daemon-hook-partition.txt` - the
+  crate checks. No crate source changed; `compat/tmux-gaps.json` is read by `zz-mux`'s manifest
+  tests and by a `zz-daemon` test, so those are the ones that could notice the gap-reason edit.
+  (The lane's first note listed a `clippy-zz-mux.txt` that was never written and omitted the
+  `zz-daemon` file that was; corrected at the gate, where workspace clippy is recorded in
+  `gate-cargo.txt` instead.)
+- `corpus-command-item-format.txt`, `corpus-config-discovery.txt` - the four corpus rows that name
+  a superset verb, exit 0.
+- `gate-cargo.txt` - the gate's own workspace checks at the merged tip: `zz-mux`, `zz-daemon`
+  (lib and integration), `zz`, workspace clippy and `cargo fmt --check`, each with its exit code.
+- `gate-corpus.txt` - the last-gate corpus sweep, all 238 rows of the delta plus every keys and
+  status scenario, with the five environmental rows named.
+- `gate-fixtures.txt` - every TUI fixture at the gate tip with its exit code and last line.
+- `review.md` - the reviewer's verdict verbatim, plus what the gate did about it.
 - `tracker-checks.txt` - both trackers, valid and current.
 
 ## The three clauses

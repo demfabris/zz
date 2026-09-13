@@ -1,25 +1,54 @@
 TUI-012 attempt-01 environment
 
-date: 2026-09-13T05:10:24-03:00
+Re-stamped at the cycle 6 superset gate. The first revision of this file attested
+53d206dc, which is origin/main and carries no compat/tui-superset.sh at all, so it could
+not attest the runs recorded beside it. Every FIXTURE run in this directory is now the gate's
+own, taken at the revision below. The three cargo files the lane recorded at its own tip are
+kept as the lane's; the gate's own workspace checks are in gate-cargo.txt, its corpus sweep in
+gate-corpus.txt and its fixture table in gate-fixtures.txt.
+
+date: 2026-09-13T15:53:32-03:00
 host: alienware
 kernel: Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
-os: NAME="CachyOS Linux" PRETTY_NAME="CachyOS" 
+os: NAME="CachyOS Linux" PRETTY_NAME="CachyOS"
 cpus: 16, memory: 15Gi plus 15Gi zram
 bash: 5.3.15(1)-release
-worktree: /home/demfabris/dev/zz-tui-superset
-base: origin/main 53d206dc5167ab009f41b6bbd1a15af6ecea6c18
-head: 53d206dc5167ab009f41b6bbd1a15af6ecea6c18
-zz binary: target/debug/zz built from the worktree revision above, cargo build -p zz through the
-  shared two-slot memory-capped wrapper (MemoryMax=5G, --jobs 4); a debug build is not
-  bit-reproducible here, so the revision plus a clean worktree attests it
-  sha256: 0309172250adcb5597893f9b0bdfbf35867342ffd7f10b4d398863f4528da843
+worktree: /home/demfabris/dev/zz-gate-tui7 (gate worktree)
+base: origin/main 46a02abed06fff13755e32ec14fb4c88b14c08a7 (cycle 6 input and roster already in)
+head: d002ba966176777b97f7722256f7957f926303ab
+  campaign/tui-superset rebased onto that base; every run recorded here was taken at this
+  revision with `git status --short` empty.
+worktree state at every run: clean, 0 lines from `git status --short`.
+
+ATTESTATION. A cargo debug build of zz is not bit-reproducible on this box, so the sha256
+below identifies the artifact and cannot attest it. The attestation is the revision above
+plus a clean worktree. The two commits this gate adds on top of d002ba96 touch only files
+under compat/tui/evidence/, compat/tui/campaign.json and the two generated reports - no
+crate source, no fixture - so every run recorded here stands at the gate's final tip.
+
+zz binary: /home/demfabris/dev/zz-gate-target/debug/zz
+  cargo build -p zz --jobs 6 through the shared two-slot lock with MemoryMax=7G
+  sha256: 2b4d9394ad0d62400c23f00b0de1c04077226a788bb446f2057e9cf45ea343a2
 pinned tmux: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
   tmux next-3.8
   oracle commit: d77c9dc6aa021e4bc61f0da128c591af695e6466
-protocol version: 102 (crates/zz-protocol/src/message.rs), unchanged by this landing
-locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8
-  status-row.sh is run under LC_ALL=C LC_TIME=C, which is its control on this box
+  sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+protocol version: 102 (crates/zz-protocol/src/message.rs:21), unchanged by this landing
+locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8 TERM=xterm-ghostty
+  status-row.sh is run under LC_ALL=C LC_TIME=C, which is its control on this box. No other
+  fixture is given that locale: forcing LC_ALL=C on the rest takes CLIENT_UTF8 off the pin's
+  client and turns its dividers into ACS.
+
 every fixture here is run with:
   ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
   TMUX_BIN=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
-  ZZ_BIN=/home/demfabris/dev/zz-tui-superset/target/debug/zz
+  ZZ_BIN=/home/demfabris/dev/zz-gate-target/debug/zz
+  ZZ_COMPAT_ZZ=/home/demfabris/dev/zz-gate-target/debug/zz
+
+REPRODUCTION. compat/tui-superset.sh at this revision is byte-identical in output to the
+three runs the lane recorded: md5 281802bcf8f5ff222c9396738d145b83 for the gate's three runs
+and for all three of the lane's recorded run files.
+
+Every server started here was a throwaway on a short /tmp socket or inside the fixtures' own
+scrubbed HOME and XDG_CONFIG_HOME. The box's real ~/.tmux.conf and ~/.config/zz/mux.conf were
+never read.

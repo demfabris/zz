@@ -1,0 +1,6 @@
+compat/run.sh --strict-geometry smoke/config-discovery smoke/config-discovery-explicit smoke/config-discovery-launcher
+at gate tip d002ba966176777b97f7722256f7957f926303ab, exit 0 for all three
+
+smoke/config-discovery: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+smoke/config-discovery-explicit: 13 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+smoke/config-discovery-launcher: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)

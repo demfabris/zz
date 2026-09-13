@@ -1,0 +1,89 @@
+TUI-012 attempt-01 - the cycle 6 superset gate's workspace checks
+Gate tip d002ba966176777b97f7722256f7957f926303ab, campaign/tui-superset rebased onto
+origin/main 46a02abe (cycle 6 input and roster already in). Clean worktree.
+
+Every command below ran through the box's shared two-slot lock with a per-command memory cap:
+  S=$((RANDOM % 2)); systemd-run --user --scope -q -p MemoryMax=7G -p MemorySwapMax=2G \
+    flock -w 540 /tmp/zz-cargo-slot-$S.lock cargo <args>
+with CARGO_TARGET_DIR=/home/demfabris/dev/zz-gate-target. One at a time, never two at once.
+
+This landing changes no crate source at all: `git diff origin/main..HEAD -- crates/` is empty.
+These runs therefore measure the MERGED product - input's and roster's crate changes together -
+which no earlier gate had in one tree.
+
+== cargo build -p zz --jobs 6 -> exit 0 (11.28s) ==
+   Compiling zz v0.8.0 (/home/demfabris/dev/zz-gate-tui7/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.28s
+
+== cargo test -p zz-mux --jobs 6 -- --test-threads=4 -> exit 0 ==
+running 525 tests
+test result: ok. 525 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.27s
+running 3 tests
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+running 9 tests
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+running 1 test
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.04s
+running 1 test
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+running 7 tests
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 5 tests
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+running 7 tests
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 3 tests
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 5 tests
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+running 4 tests
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+running 60 tests
+test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== cargo test -p zz-daemon --lib --jobs 6 -- --test-threads=4 -> exit 0 ==
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 892 filtered out; finished in 0.74s
+test result: ok. 893 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 102.94s
+
+== cargo test -p zz-daemon --tests --jobs 6 -- --test-threads=4 -> exit 0 ==
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 892 filtered out; finished in 0.77s
+test result: ok. 893 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 103.84s
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.38s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.11s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.57s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.14s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.16s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.64s
+
+== cargo test -p zz --jobs 6 -- --test-threads=4 -> exit 0 ==
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 637 filtered out; finished in 0.00s
+test result: ok. 638 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.77s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.88s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.95s
+test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 81.91s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== cargo clippy --workspace --all-targets --all-features --jobs 6 -- -D warnings -> exit 0 ==
+    Checking zz v0.8.0 (/home/demfabris/dev/zz-gate-tui7/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.01s
+
+== cargo fmt --all -- --check -> exit 0 ==
+(no output; green on main again since the roster gate's commit 4efa820a)
+
+NOTE ON cli_binary. The reviewer saw three control-mode tests red
+(refresh_client_b_reports_initial_change_and_exact_removal,
+refresh_client_c_sizes_a_control_target_for_menu_gating,
+control_return_and_explicit_detach_follow_the_full_retval_matrix) while two tui-superset runs and
+another lane's corpus were in flight beside them. At this gate, with nothing else running, the
+whole cli_binary target passes: 125 passed in 81.91s, first attempt, no retry. That confirms the
+reviewer's reading - those three are load, not the lane.

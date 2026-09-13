@@ -813,6 +813,9 @@ impl Renderer {
     pub(super) fn paint_mode_tree(&mut self, model: &Model) -> ModeTreePaint {
         let Some(presentation) = model.chooser_presentation.as_ref() else {
             self.mode_tree.open = false;
+            if model.choose_tree.is_some() || model.choose_buffer.is_some() {
+                return ModeTreePaint::Pending;
+            }
             return ModeTreePaint::Unavailable;
         };
         let selected = model

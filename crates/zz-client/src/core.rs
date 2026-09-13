@@ -662,6 +662,7 @@ impl ClientCore {
             } => self.apply_command_output(pane, output_id, viewport),
             EventPayload::ChooseTree { state } => {
                 self.choose_tree = state;
+                self.chooser_presentation = None;
                 self.events.push_back(CoreEvent::ChooseTreeChanged);
             }
             EventPayload::ChooseTreeUpdate { search, selected } => {
@@ -669,6 +670,7 @@ impl ClientCore {
             }
             EventPayload::ChooseBuffer { state } => {
                 self.choose_buffer = state;
+                self.chooser_presentation = None;
                 self.events.push_back(CoreEvent::ChooseBufferChanged);
             }
             EventPayload::ChooseBufferUpdate { search, selected } => {
@@ -1554,6 +1556,61 @@ mod tests {
         core.handle_message(command_output_frame(pane, 1, 2));
         assert_eq!(drain(&mut core), vec![CoreEvent::CommandOutputChanged]);
         assert_eq!(core.command_output_id(), Some(1));
+    }
+
+    #[test]
+    fn a_new_chooser_state_drops_the_presentation_the_last_one_left() {
+        let tree_state = || ChooseTreeState {
+            items: Vec::new(),
+            search: None,
+            selected: 0,
+            kind: zz_protocol::ChooseTreeKind::Windows,
+            filter_no_matches: false,
+            prompt: String::new(),
+            help: false,
+        };
+        let presentation = |rows: &str| ChooserPresentation {
+            selected: 0,
+            rows: vec![zz_protocol::ChooserRow {
+                name: String::new(),
+                text: rows.to_owned(),
+                align: false,
+            }],
+            sort: "index".to_owned(),
+            view: "preview".to_owned(),
+            filter: false,
+            selection_style: String::new(),
+            border_style: String::new(),
+            prompt_style: String::new(),
+            preview_size: zz_protocol::ChooserPreviewSize::Normal,
+            preview: None,
+        };
+
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::ChooseTree {
+            state: Some(tree_state()),
+        }));
+        core.handle_message(event(EventPayload::ChooserPresentation {
+            presentation: Some(Box::new(presentation("ZZTREE<%1>"))),
+        }));
+        assert!(core.chooser_presentation().is_some());
+
+        core.handle_message(event(EventPayload::ChooseTree { state: None }));
+        assert!(core.chooser_presentation().is_none());
+
+        core.handle_message(event(EventPayload::ChooseTree {
+            state: Some(tree_state()),
+        }));
+        assert!(core.chooser_presentation().is_none());
+
+        core.handle_message(event(EventPayload::ChooserPresentation {
+            presentation: Some(Box::new(presentation("bash"))),
+        }));
+        assert_eq!(
+            core.chooser_presentation()
+                .map(|presentation| presentation.rows[0].text.as_str()),
+            Some("bash")
+        );
     }
 
     #[test]

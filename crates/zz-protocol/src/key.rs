@@ -90,6 +90,7 @@ impl Default for KeyTables {
             ("e", "send-last-output"),
             ("s", "choose-tree -Zs"),
             ("w", "choose-tree -Zw"),
+            ("D", "choose-client -Z"),
             ("q", "display-panes"),
             ("r", "reload-config"),
             ("z", "resize-pane -Z"),

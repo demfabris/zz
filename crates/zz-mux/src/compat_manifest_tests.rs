@@ -113,7 +113,7 @@ struct OracleKey {
 const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] = &[
     ("copy-mode", 61),
     ("copy-mode-vi", 72),
-    ("prefix", 56),
+    ("prefix", 57),
     ("root", 5),
 ];
 
@@ -969,7 +969,7 @@ fn command_flag_fixture_matches_the_pin() {
         rows += 1;
     }
 
-    assert_eq!((rows, aliases, required), (83, 74, 79));
+    assert_eq!((rows, aliases, required), (84, 74, 80));
     assert_eq!(
         fs::read_to_string(root().join("compat/scenarios/smoke/fixtures/command-flag-errors.tsv"))
             .expect("command flag fixture corpus"),
@@ -1020,8 +1020,8 @@ fn positional_maximum_runtime_inventory_matches_the_pin() {
         }
     }
 
-    assert_eq!(implemented.len(), 72);
-    assert_eq!(unimplemented.len(), 8);
+    assert_eq!(implemented.len(), 73);
+    assert_eq!(unimplemented.len(), 7);
     assert_eq!(implemented.len() + unimplemented.len(), 80);
 }
 
@@ -1378,15 +1378,15 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         303,
         "pinned binding count changed"
     );
-    assert_eq!(zz_keys.len(), 322, "zz default binding count changed");
+    assert_eq!(zz_keys.len(), 323, "zz default binding count changed");
     assert_eq!(
         shared_keys.len(),
-        231,
+        232,
         "shared default binding count changed"
     );
     assert_eq!(
         missing_keys.len(),
-        72,
+        71,
         "missing default binding count changed"
     );
     assert_eq!(
@@ -1401,7 +1401,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         structurally_matching_bindings.len(),
-        194,
+        195,
         "structurally matching shared binding count changed"
     );
     assert_eq!(

@@ -20,6 +20,53 @@ const WINDOW_TREE_DEFAULT_FORMAT: &str = concat!(
     "}"
 );
 const WINDOW_BUFFER_DEFAULT_FORMAT: &str = "#{t/p:buffer_created}: #{buffer_sample}";
+/// `WINDOW_CLIENT_DEFAULT_FORMAT`.
+const WINDOW_CLIENT_DEFAULT_FORMAT: &str =
+    "#[fg=themelightgrey]#{t/p:client_activity}: session #[default]#{session_name}";
+/// `window_client_info_lines`, the `i` view, verbatim.
+const WINDOW_CLIENT_INFO_LINES: &[&str] = &[
+    concat!(
+        "#[fg=themelightgrey]Client Name   #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{client_name} #[fg=themelightgrey]#[fg=themelightgrey](PID #{client_pid})#[default]"
+    ),
+    concat!(
+        "#[fg=themelightgrey]Session       #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{session_name}"
+    ),
+    concat!(
+        "#[fg=themelightgrey]Attach Time   #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{t:client_created} #[fg=themelightgrey](#{t/r:client_created})#[default]"
+    ),
+    concat!(
+        "#[fg=themelightgrey]Activity Time #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{t:client_activity} #[fg=themelightgrey](#{t/r:client_activity})#[default]"
+    ),
+    concat!(
+        "#[fg=themelightgrey]Terminal Type #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{?client_termtype,#{client_termtype},Unknown}"
+    ),
+    concat!(
+        "#[fg=themelightgrey]TERM          #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{client_termname}"
+    ),
+    concat!(
+        "#[fg=themelightgrey]Size          #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{client_width}x#{client_height} ",
+        "#[fg=themelightgrey](cell #{client_cell_width}x#{client_cell_height})#[default]"
+    ),
+    concat!(
+        "#[fg=themelightgrey]Bytes Written #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{client_written} #[fg=themelightgrey](#{client_discarded} discarded)#[default]"
+    ),
+    concat!(
+        "#[fg=themelightgrey]prefix        #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{prefix}"
+    ),
+    concat!(
+        "#[fg=themelightgrey]escape-time   #[#{E:tree-mode-border-style},acs]x#[default] ",
+        "#{escape-time} ms"
+    ),
+];
 const TREE_MODE_BORDER_STYLE: &str = "bg=themedarkgrey,fg=themelightgrey";
 const TREE_MODE_SELECTION_STYLE: &str = "#{E:mode-style}";
 const TREE_MODE_PREVIEW_FORMAT: &str =
@@ -62,6 +109,113 @@ fn expand_row(
     )
 }
 
+/// `window_client_build`: one row per attached client, with its shortcut key
+/// column, its name and the row text expanded in that client's own format
+/// tree, which is the only place the client formats resolve.
+pub(super) fn client_chooser_rows(
+    inner: &ServerState,
+    format: Option<&str>,
+    filter: Option<&str>,
+) -> Vec<ClientChooserRow> {
+    let format = format.unwrap_or(WINDOW_CLIENT_DEFAULT_FORMAT);
+    let mut clients = inner
+        .attached
+        .iter()
+        .flat_map(|(session, clients)| {
+            clients
+                .iter()
+                .copied()
+                .map(|client| (client, *session))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    clients.sort_by_key(|(client, _)| client.0);
+    let base = format_hook_facts(inner);
+    let mut rows = Vec::with_capacity(clients.len());
+    for (line, (client, session_id)) in clients.into_iter().enumerate() {
+        let Some(session) = inner.engine.state.sessions.get(&session_id) else {
+            continue;
+        };
+        let focused = client_focused_window(inner, client, session);
+        let mut context = inner.engine.format_status_context_for_client(
+            Some(session_id),
+            Some(focused),
+            None,
+            session_id,
+        );
+        context.config_files.clone_from(&inner.config_files);
+        let mut client_facts = client_format_facts(inner, client, session_id);
+        client_facts.line = line;
+        let name = client_facts.name.clone();
+        let width = client_facts.width.parse::<u16>().unwrap_or_default();
+        let height = client_facts.height.parse::<u16>().unwrap_or_default();
+        let facts = FormatHookFacts {
+            client: Some(client_facts),
+            ..base.clone()
+        };
+        let mut hooks = DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
+        let text = expand_format_values(format, &context, &mut hooks);
+        let matches = filter.is_none_or(|filter| {
+            let mut hooks = DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
+            format_true(&expand_format_values(filter, &context, &mut hooks))
+        });
+        rows.push(ClientChooserRow {
+            client,
+            name,
+            text,
+            activity: inner
+                .client_activity
+                .get(&client)
+                .copied()
+                .unwrap_or_default(),
+            created: inner
+                .client_created_times
+                .get(&client)
+                .copied()
+                .unwrap_or_default(),
+            width,
+            height,
+            matches,
+            pane: inner
+                .engine
+                .state
+                .windows
+                .get(&focused)
+                .map(|window| window.active_pane),
+        });
+    }
+    rows
+}
+
+/// `window_client_draw_info`, expanded in the chosen client's format tree.
+fn client_info_lines(inner: &ServerState, client: ClientId) -> Vec<String> {
+    let Some(session_id) = client_attached_session(inner, client) else {
+        return Vec::new();
+    };
+    let Some(session) = inner.engine.state.sessions.get(&session_id) else {
+        return Vec::new();
+    };
+    let focused = client_focused_window(inner, client, session);
+    let mut context = inner.engine.format_status_context_for_client(
+        Some(session_id),
+        Some(focused),
+        None,
+        session_id,
+    );
+    context.config_files.clone_from(&inner.config_files);
+    let facts = FormatHookFacts {
+        client: Some(client_format_facts(inner, client, session_id)),
+        ..format_hook_facts(inner)
+    };
+    WINDOW_CLIENT_INFO_LINES
+        .iter()
+        .map(|line| {
+            let mut hooks = DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
+            expand_format_values(line, &context, &mut hooks)
+        })
+        .collect()
+}
+
 pub(super) fn tree_rows(
     engine: &MuxEngine,
     items: &[ChooseTreeItem],
@@ -73,6 +227,13 @@ pub(super) fn tree_rows(
     items
         .iter()
         .map(|item| {
+            if matches!(item.target, ChooseTreeTarget::Client(_)) {
+                return ChooserRow {
+                    name: item.label.clone(),
+                    text: item.text.clone(),
+                    align: false,
+                };
+            }
             let (name, context, variables, align) = match item.target {
                 ChooseTreeTarget::Session(session) => (
                     state
@@ -103,6 +264,7 @@ pub(super) fn tree_rows(
                     scope_variables(false, false, true),
                     true,
                 ),
+                ChooseTreeTarget::Client(_) => unreachable!("client rows return early"),
             };
             let text = if formatted {
                 item.text.clone()
@@ -289,7 +451,7 @@ pub(super) fn chooser_presentation(
             .rendered
             .items
             .get(selected)
-            .and_then(|item| tree_preview(&styles, item.target));
+            .and_then(|item| tree_preview(&styles, chooser, item.target));
         return Some(ChooserPresentation {
             selected: chooser.rendered.selected,
             rows: chooser.presentation_rows.clone(),
@@ -336,9 +498,38 @@ pub(super) fn chooser_presentation(
     })
 }
 
-fn tree_preview(styles: &Styles<'_>, target: ChooseTreeTarget) -> Option<ChooserPreview> {
+fn tree_preview(
+    styles: &Styles<'_>,
+    chooser: &ChooseTreeSession,
+    target: ChooseTreeTarget,
+) -> Option<ChooserPreview> {
     let state = &styles.inner.engine.state;
     match target {
+        // `window_client_draw`: the chosen client's current pane, a rule, and
+        // that client's own status rows underneath it.
+        ChooseTreeTarget::Client(id) => {
+            let inner = styles.inner;
+            if chooser.info_preview {
+                return Some(ChooserPreview::Markup {
+                    lines: client_info_lines(inner, id),
+                });
+            }
+            let row = chooser.clients.iter().find(|row| row.client == id)?;
+            let pane = row
+                .pane
+                .filter(|pane| !(chooser.hide_source && *pane == chooser.source_pane));
+            let (status, status_style) = inner
+                .client_status_rows
+                .get(&id)
+                .cloned()
+                .unwrap_or_default();
+            Some(ChooserPreview::Client {
+                viewport: pane.and_then(|pane| pane_viewport(inner, pane)),
+                status,
+                status_style,
+                status_width: u32::from(row.width),
+            })
+        }
         ChooseTreeTarget::Session(session_id) => {
             let session = state.sessions.get(&session_id)?;
             let mut windows = session

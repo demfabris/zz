@@ -1095,6 +1095,9 @@ pub enum MuxEffect {
     ChooseTree {
         pane: PaneId,
         kind: ChooseTreeKind,
+        /// `choose-client -i`: the client mode opens on `window_client_draw_info`
+        /// rather than on the preview.
+        info_preview: bool,
         sessions_only: bool,
         filter: Option<String>,
         format: Option<String>,
@@ -4539,6 +4542,7 @@ impl MuxEngine {
             "command-prompt" => self.command_prompt(context, command)?,
             "focus-sidebar" => self.focus_sidebar(context, &command.args)?,
             "choose-tree" => self.choose_tree(context, command)?,
+            "choose-client" => self.choose_client(context, command)?,
             "choose-buffer" => self.choose_buffer(context, command)?,
             "display-message" => self.display_message(context, &command.args, hooks)?,
             "display-panes" => self.display_panes(context, command)?,
@@ -8253,7 +8257,46 @@ impl MuxEngine {
             } else {
                 ChooseTreeKind::Panes
             },
+            info_preview: false,
             sessions_only: options.has("-s"),
+            filter: options.value("-f").map(str::to_owned),
+            format: options.value("-F").map(str::to_owned),
+            hide_source: options.has("-h"),
+            kill_source: options.has("-k"),
+            prompt_accept: options.has("-y"),
+            sort,
+            key_format: options.value("-K").map(str::to_owned),
+            template: chooser_command_template(invocation, positional_start, &positional),
+            zoom: options.has("-Z"),
+        }))
+    }
+
+    /// `cmd_choose_tree_exec` for `cmd_choose_client_entry`: the same mode
+    /// tree over `window_client_mode`, whose sort sequence starts at name and
+    /// whose `-i` opens on the info view.
+    fn choose_client(
+        &self,
+        context: &ExecutionContext,
+        invocation: &CommandInvocation,
+    ) -> Result<Execution, ServerError> {
+        let args = &invocation.args;
+        let spec = command_spec("choose-client").expect("executable command has catalog metadata");
+        let parsed_options = parse_tmux_command_options(spec, invocation)?;
+        let positional_start = args.len().saturating_sub(parsed_options.positionals.len());
+        let (options, positional) = parse_command_options("choose-client", args)?;
+        spec.validate_positional_maximum(positional.len())?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        reject_large_preview("choose-client", &options)?;
+        let sort = TmuxSort::parse(
+            options.value("-O"),
+            options.has("-r"),
+            Some(TmuxSortOrder::Name),
+        )?;
+        Ok(Execution::effect(MuxEffect::ChooseTree {
+            pane,
+            kind: ChooseTreeKind::Clients,
+            info_preview: options.has("-i"),
+            sessions_only: false,
             filter: options.value("-f").map(str::to_owned),
             format: options.value("-F").map(str::to_owned),
             hide_source: options.has("-h"),
@@ -39354,6 +39397,7 @@ mod tests {
             vec![MuxEffect::ChooseTree {
                 pane,
                 kind: ChooseTreeKind::Windows,
+                info_preview: false,
                 sessions_only: true,
                 filter: None,
                 format: None,
@@ -39380,6 +39424,7 @@ mod tests {
             vec![MuxEffect::ChooseTree {
                 pane,
                 kind: ChooseTreeKind::Windows,
+                info_preview: false,
                 sessions_only: false,
                 filter: Some("#{pane_active}".to_owned()),
                 format: None,
@@ -39408,6 +39453,7 @@ mod tests {
             vec![MuxEffect::ChooseTree {
                 pane,
                 kind: ChooseTreeKind::Panes,
+                info_preview: false,
                 sessions_only: false,
                 filter: None,
                 format: None,
@@ -39429,6 +39475,7 @@ mod tests {
             vec![MuxEffect::ChooseTree {
                 pane,
                 kind: ChooseTreeKind::Windows,
+                info_preview: false,
                 sessions_only: true,
                 filter: None,
                 format: None,
@@ -39507,6 +39554,7 @@ mod tests {
             vec![MuxEffect::ChooseTree {
                 pane,
                 kind: ChooseTreeKind::Panes,
+                info_preview: false,
                 sessions_only: false,
                 filter: None,
                 format: Some("<#{pane_id}>".to_owned()),

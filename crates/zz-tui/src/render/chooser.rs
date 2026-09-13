@@ -60,7 +60,27 @@ const HELP_BUFFER: &[(&str, &str)] = &[
     ("          e", "Open %1 in editor"),
     ("          f", "Enter a filter"),
 ];
+/// `window_client_help_lines`.
+const HELP_CLIENT: &[(&str, &str)] = &[
+    ("          i", "Toggle info view"),
+    ("      Enter", "Choose selected %1"),
+    ("          d", "Detach selected %1"),
+    ("          D", "Detach tagged %1s"),
+    ("          x", "Detach selected %1"),
+    ("          X", "Detach tagged %1s"),
+    ("          z", "Suspend selected %1"),
+    ("          Z", "Suspend tagged %1s"),
+    ("          f", "Enter a filter"),
+];
+const HELP_CLIENT_WIDTH: u16 = 39;
 const HELP_END: &[(&str, &str)] = &[("  q, Escape", "Exit mode")];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HelpKind {
+    Tree,
+    Client,
+    Buffer,
+}
 const HELP_DEFAULT_WIDTH: u16 = 39;
 const HELP_TREE_WIDTH: u16 = 51;
 
@@ -271,6 +291,12 @@ impl Grid {
             );
         }
         used
+    }
+
+    fn hline(&mut self, x: u16, y: u16, count: u16, paint: &Paint) {
+        for column in 0..count {
+            self.set(x.saturating_add(column), y, "─", 1, paint);
+        }
     }
 
     fn vline(&mut self, x: u16, y: u16, count: u16, paint: &Paint) {
@@ -763,11 +789,11 @@ fn label(
     grid.markup(px + ox, py + oy, width, text, style, false);
 }
 
-fn help(grid: &mut Grid, tree: bool, border: &TmuxStyle, colours: &Colours) {
-    let (width, item, lines) = if tree {
-        (HELP_TREE_WIDTH, "item", HELP_TREE)
-    } else {
-        (HELP_DEFAULT_WIDTH, "buffer", HELP_BUFFER)
+fn help(grid: &mut Grid, kind: HelpKind, border: &TmuxStyle, colours: &Colours) {
+    let (width, item, lines) = match kind {
+        HelpKind::Tree => (HELP_TREE_WIDTH, "item", HELP_TREE),
+        HelpKind::Client => (HELP_CLIENT_WIDTH, "client", HELP_CLIENT),
+        HelpKind::Buffer => (HELP_DEFAULT_WIDTH, "buffer", HELP_BUFFER),
     };
     let count = narrow(HELP_START.len() + lines.len() + HELP_END.len());
     let (box_width, box_height) = (width + 2, count + 2);
@@ -855,7 +881,7 @@ impl Renderer {
 
     fn draw_mode_tree(&mut self, model: &Model) -> Option<(u16, u16, bool)> {
         let presentation = model.chooser_presentation.as_ref()?;
-        let (mut lines, selected, show_help, prompt, no_matches, tree) =
+        let (mut lines, selected, show_help, prompt, no_matches, help_kind) =
             if let Some(state) = model.choose_tree.as_ref() {
                 let prompt = if state.prompt.is_empty() {
                     state
@@ -871,7 +897,11 @@ impl Renderer {
                     state.help,
                     prompt,
                     state.filter_no_matches,
-                    true,
+                    if state.kind == zz_protocol::ChooseTreeKind::Clients {
+                        HelpKind::Client
+                    } else {
+                        HelpKind::Tree
+                    },
                 )
             } else {
                 let state = model.choose_buffer.as_ref()?;
@@ -888,7 +918,7 @@ impl Renderer {
                         Some(state.prompt.clone())
                     },
                     state.filter_no_matches,
-                    false,
+                    HelpKind::Buffer,
                 )
             };
         let status_rows = model.status_block_rows();
@@ -1026,6 +1056,59 @@ impl Renderer {
                     Some(ChooserPreview::Screen { viewport }) => {
                         grid.preview(2, box_top + 1, box_x, box_y, viewport);
                     }
+                    // `window_client_draw`: the client's current pane over a
+                    // rule and a copy of that client's own status rows.
+                    Some(ChooserPreview::Client {
+                        viewport,
+                        status,
+                        status_style,
+                        status_width,
+                    }) => {
+                        let rows = narrow(status.len()).min(box_y);
+                        let body = box_y.saturating_sub(2 + rows);
+                        if let (Some(viewport), true) = (viewport.as_ref(), body != 0) {
+                            grid.preview(2, box_top + 1, box_x, body, viewport);
+                        }
+                        if box_y > rows {
+                            grid.hline(
+                                2,
+                                box_top + box_y - rows,
+                                box_x,
+                                &Paint::Style(border.clone()),
+                            );
+                        }
+                        let compose = u16::try_from(*status_width).unwrap_or(box_x).max(box_x);
+                        for (index, line) in status.iter().enumerate() {
+                            let y = box_top + 1 + box_y - rows + narrow(index);
+                            let composed =
+                                zz_client::compose_status_row(line, compose, status_style);
+                            let mut used = 0;
+                            for segment in &composed.segments {
+                                if used >= box_x {
+                                    break;
+                                }
+                                used += grid.text(
+                                    2 + used,
+                                    y,
+                                    &segment.text,
+                                    &Paint::Style(segment.style.clone()),
+                                    box_x - used,
+                                );
+                            }
+                        }
+                    }
+                    Some(ChooserPreview::Markup { lines }) => {
+                        for (index, line) in lines.iter().take(usize::from(box_y)).enumerate() {
+                            grid.markup(
+                                2,
+                                box_top + 1 + narrow(index),
+                                box_x,
+                                line,
+                                &plain(),
+                                false,
+                            );
+                        }
+                    }
                     Some(ChooserPreview::Text { lines }) => {
                         for (index, line) in lines.iter().take(usize::from(box_y)).enumerate() {
                             if !line.is_empty() {
@@ -1044,7 +1127,7 @@ impl Renderer {
             }
         }
         if show_help {
-            help(&mut grid, tree, &border, &colours);
+            help(&mut grid, help_kind, &border, &colours);
         }
         let cursor = if let Some(prompt) = prompt {
             let row = if model.status_top() { 0 } else { sy - 1 };

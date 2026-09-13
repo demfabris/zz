@@ -647,7 +647,13 @@ axis of the divider a `Border` gesture grabbed. v102 also appends
 `ProtocolMessage::ClientTerminalFeatures { features: Vec<String> }` at the tail of the message
 enum, the terminal features a client learned from its own terminal after the hello; `features` is
 capped at `MAX_CLIENT_TERMINAL_FEATURES` (64) entries of `MAX_CLIENT_TERMINAL_FEATURE_BYTES` (64)
-bytes each, rejected during deserialization.
+bytes each, rejected during deserialization. v102 also carries the client mode `choose-client`
+opens: `ChooseTreeKind` gains a trailing `Clients`, `ChooseTreeTarget` a trailing
+`Client(ClientId)`, `ChooserPreview` the trailing `Client { viewport, status, status_style,
+status_width }` and `Markup { lines }` that `window_client_draw` and `window_client_draw_info`
+fill, and `ChooseTreeAction` the trailing `ClientDetach`, `ClientDetachTagged` and `ClientInfo`
+the daemon resolves `d`, `D` and `i` to inside that mode. All five are pure end-appends with both
+halves in the same push.
 
 # Versioning & compatibility
 

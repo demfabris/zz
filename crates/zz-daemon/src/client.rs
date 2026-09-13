@@ -5,8 +5,8 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{
-        OnceLock,
-        atomic::{AtomicU64, Ordering},
+        Arc, OnceLock, Weak,
+        atomic::{AtomicU32, AtomicU64, Ordering},
     },
 };
 
@@ -370,7 +370,7 @@ impl CommandClient {
 
 pub struct InteractiveClient {
     reader: Mutex<ProtocolReceiver<ClientStream>>,
-    writer: Mutex<ProtocolSender<ClientStream>>,
+    writer: Arc<Mutex<ProtocolSender<ClientStream>>>,
     hello: ServerHello,
     #[cfg(all(any(unix, windows), not(target_os = "ios")))]
     ssh_forward: Option<SshForward>,
@@ -631,9 +631,11 @@ impl InteractiveClient {
     }
 
     fn from_connected((reader, writer, hello): Connected<ClientStream>) -> Self {
+        let writer = Arc::new(Mutex::new(writer));
+        register_interactive_writer(&writer);
         Self {
             reader: Mutex::new(reader),
-            writer: Mutex::new(writer),
+            writer,
             hello,
             #[cfg(all(any(unix, windows), not(target_os = "ios")))]
             ssh_forward: None,
@@ -1205,26 +1207,102 @@ fn client_terminal_flags() -> &'static ClientTerminalFlags {
 
 /// What `tty_check_fg` and `tty_check_bg` ask before they write a cell: how
 /// many colours the terminal this client runs in takes, from its own `TERM`
-/// and `COLORTERM` and the features `-2` and `-T` requested. The reply-driven
-/// half of the pin's answer is not here; a client that learns more from its
-/// terminal raises this itself.
+/// and `COLORTERM` and the features `-2` and `-T` requested, folded with what
+/// its terminal has answered since (`tty_update_features`, which raises the
+/// pin's count the same way and never lowers it).
 pub fn client_terminal_colour_count() -> u32 {
     let flags = client_terminal_flags();
     crate::terminal_features::terminal_colour_count(
         &std::env::var("TERM").unwrap_or_default(),
         &std::env::var("COLORTERM").unwrap_or_default(),
-        crate::terminal_features::terminal_feature_mask(flags.features.iter().map(String::as_str)),
+        crate::terminal_features::terminal_feature_mask(flags.features.iter().map(String::as_str))
+            | LEARNED_TERMINAL_FEATURES.load(Ordering::Relaxed),
     )
 }
 
+/// Whether this client's terminal takes UTF-8, the `CLIENT_UTF8` flag
+/// `tty_check_codeset` reads before it writes a cell: `-u` raises it and
+/// otherwise the locale decides. A writer with no terminal behind it never
+/// asks.
+#[must_use]
+pub fn client_takes_utf8_terminal() -> bool {
+    client_terminal_flags().utf8 || client_takes_utf8(|name| std::env::var_os(name))
+}
+
 fn client_utf8_capability(capabilities: &mut Vec<String>) {
-    if client_terminal_flags().utf8 || client_takes_utf8(|name| std::env::var_os(name)) {
+    if client_takes_utf8_terminal() {
         capabilities.push(ClientHello::CLIENT_UTF8_CAPABILITY.to_owned());
     }
 }
 
+/// What this client's terminal answered after the hello. `tty_update_features`
+/// folds a reply straight into the pin's own `c->term_features` because the
+/// client and the server share one process there; here the client learns it,
+/// keeps it for the next hello and reports it over the connection it already
+/// holds.
+static LEARNED_TERMINAL_FEATURES: AtomicU32 = AtomicU32::new(0);
+
+static INTERACTIVE_WRITER: Mutex<Option<Weak<Mutex<ProtocolSender<ClientStream>>>>> =
+    Mutex::new(None);
+
+fn register_interactive_writer(writer: &Arc<Mutex<ProtocolSender<ClientStream>>>) {
+    *INTERACTIVE_WRITER.lock() = Some(Arc::downgrade(writer));
+    report_learned_terminal_features(LEARNED_TERMINAL_FEATURES.load(Ordering::Relaxed));
+}
+
+/// Record one `tty_default_features` list, or one feature name a device
+/// attributes reply named, and report the union to the daemon.
+pub fn learn_client_terminal_features(features: &str) {
+    let mask = crate::terminal_features::terminal_feature_mask([features]);
+    if mask == 0 {
+        return;
+    }
+    let learned = LEARNED_TERMINAL_FEATURES.fetch_or(mask, Ordering::Relaxed) | mask;
+    report_learned_terminal_features(learned);
+}
+
+/// `c->term_features` as the client process itself knows it: what `-2` and
+/// `-T` asked for, plus everything its terminal has answered with since.
+#[must_use]
+pub fn client_terminal_feature_mask() -> u32 {
+    crate::terminal_features::terminal_feature_mask(
+        client_terminal_flags().features.iter().map(String::as_str),
+    ) | LEARNED_TERMINAL_FEATURES.load(Ordering::Relaxed)
+}
+
+fn report_learned_terminal_features(learned: u32) {
+    if learned == 0 {
+        return;
+    }
+    let Some(writer) = INTERACTIVE_WRITER.lock().as_ref().and_then(Weak::upgrade) else {
+        return;
+    };
+    let features = crate::terminal_features::terminal_features_list(learned)
+        .split(',')
+        .map(str::to_owned)
+        .collect();
+    let _ = writer
+        .lock()
+        .send(&ProtocolMessage::ClientTerminalFeatures { features });
+}
+
 const MAX_CLIENT_FEATURE_SPECS: usize = 16;
 const MAX_CLIENT_FEATURE_SPEC_BYTES: usize = 200;
+
+/// A reconnecting client already knows what its terminal answered, so the
+/// learned set rides the hello as one more spec rather than waiting for the
+/// terminal to answer the same questions again.
+fn client_learned_features_capability(capabilities: &mut Vec<String>) {
+    let learned = LEARNED_TERMINAL_FEATURES.load(Ordering::Relaxed);
+    if learned == 0 {
+        return;
+    }
+    capabilities.push(format!(
+        "{}{}",
+        ClientHello::CLIENT_FEATURES_CAPABILITY_PREFIX,
+        crate::terminal_features::terminal_features_list(learned)
+    ));
+}
 
 fn client_features_capabilities(features: &[String], capabilities: &mut Vec<String>) {
     capabilities.extend(
@@ -1448,6 +1526,7 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
     startup_config_owner_capability(kind, startup_config_owner, &mut capabilities);
     client_utf8_capability(&mut capabilities);
     client_features_capabilities(&client_terminal_flags().features, &mut capabilities);
+    client_learned_features_capability(&mut capabilities);
     if kind == ClientKind::Interactive && client_has_terminal {
         capabilities.push(ClientHello::CLIENT_TERMINAL_CAPABILITY.to_owned());
     }

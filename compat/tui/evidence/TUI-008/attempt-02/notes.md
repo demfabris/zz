@@ -23,8 +23,11 @@ three controls, each caught in its own channel.
 - `attached-client.txt` - PASS.
 - `tui-copy-mode.txt` - 147 cases, none recorded.
 - `tui-screen-diff.txt`, `tui-screen-diff-self-check.txt`
-- `corpus-delta.txt` - the delta corpus rows that ran, with why the whole
-  223-row selection did not.
+- `corpus-delta.txt` - all 223 delta corpus rows, run in fifteen calls.
+- `tui-caps.txt`, `tui-indicators.txt`, `tui-pane-geometry.txt`,
+  `tui-overlays.txt`, `tui-choosers.txt`, `status-row.txt` - the TUI fixtures
+  this batch does not name, run because the landing changes focus delivery,
+  paste routing and the root key table.
 - `cargo-test-protocol-mux.txt`, `cargo-test-daemon.txt`,
   `cargo-test-tui-client.txt`, `cargo-test-zz.txt`
 - `cargo-clippy-and-fmt.txt` - clippy over the six touched crates with
@@ -147,6 +150,25 @@ attach wrapper exits 3 instead of 0, and the fixture reports
 - `drag-selects/pane-in-mode` and `drag-selects/selection` already AGREE on both
   sides and are counted as recorded only because they share the drag case's
   disposition with `drag-selects/buffer`, which does not. They flip with it.
+
+## The corpus
+
+All 223 rows of `--delta origin/main..HEAD` over `list-keys`, `next-window`,
+`previous-window`, `resize-pane`, `list-commands`, `display-message`,
+`set-option`, `select-window`, `send-keys` and `copy-mode` ran; 217 clean.
+Three `known/` rows carry their exact documented divergences. Three of this
+box's four documented environmental rows came up red and the fourth ran clean.
+`smoke/status-background-jobs` went red once under load and green on each of
+three solo re-runs; its assertion samples a `#(date +%s%N)` status job at one,
+three, five and seven wall-clock seconds and the three-second sample read
+`DATE[]` with the job's output empty, which nothing in this diff can reach.
+
+Every zz-only string this landing could have taken away was grepped for first:
+`list-keys -T root` is asserted by `list-keys-padding`, which clears the root
+table before it reads it and is clean; the `unsupported command: resize-pane -M`
+text nothing asserts; and the `list-commands` usage line the flag change moves
+is asserted by `command-item-format` and `daemon-command-item-format`, both
+clean.
 
 ## Gap items closed, each with its measurement
 

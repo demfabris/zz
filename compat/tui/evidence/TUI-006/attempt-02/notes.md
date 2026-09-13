@@ -34,6 +34,10 @@ the pin, the toolchain and the hash of the `zz` binary under test, written befor
 | `zz-daemon-unit-tests.txt` | `cargo test -p zz-daemon` | exit 0 |
 | `zz-integration-tests.txt` | `cargo test -p zz` | exit 0 |
 | `clippy.txt` | `cargo clippy -p <crate> --all-targets --all-features -- -D warnings`, one block per touched crate | exit 0 each |
+| `review.md` | the reviewer's verdict, checks and notes verbatim, then the gate's actions | approve-with-fixes |
+| `gate-choosers.txt` | `compat/tui-choosers.sh` at the gate tip, rebased onto the dependency refresh | exit 0, 53 asserted identical, 4 recorded |
+| `gate-choosers-self-check.txt` | `compat/tui-choosers.sh --self-check` there | exit 0, six sabotages caught |
+| `gate-keys-prefix-remainder.txt` | `compat/run.sh --strict-geometry smoke/keys-prefix-remainder` after the gate's fixture fix | exit 0, clean on every channel |
 
 Every cargo command ran through the box's two-slot lock under `MemoryMax=5G`, `--jobs 4` and
 `--test-threads=3`.

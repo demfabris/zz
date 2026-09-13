@@ -751,6 +751,7 @@ message_hook_cases() {
   case_run hooks-show-before same '' -- show-hooks -B
   case_run hooks-show-one same '' -- show-hooks -g after-lock-server
   case_run hooks-show-missing same '' -- show-hooks -g no-such-hook
+  case_run hooks-show-target same '' -- show-hooks -t PANE
   case_run messages-log record "$LOG_IDENTITY" -- show-messages
   case_run messages-jobs record "$MESSAGES_CHILD" -- show-messages -J
   case_run messages-terminals record "$MESSAGES_CHILD" -- show-messages -T

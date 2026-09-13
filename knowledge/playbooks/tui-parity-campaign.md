@@ -88,6 +88,14 @@ a detached differential can observe. A detached query never proves what an attac
    `review.md`, `verified`), pushes main, ledgers the lock front on the board, posts residuals
    under TRIAGE, and reports.
 
+Before launching a cycle, run `python3 compat/tui/lint-runner.py compat/tui/run-N.js`. It holds one
+rule per lesson an earlier cycle paid for, each with the cycle that earned it, and it exits non-zero
+until the new runner carries them. Add a rule the moment a cycle teaches one. Every lesson this
+campaign wrote down in prose alone was forgotten at least once: three cycles running shipped a lane
+whose remaining fix sat in a crate the lane did not hold, and cycle 4's "a lane is judged on
+recorded cases flipped to asserted" had to be relearned twice. A rule in the lint cannot be
+forgotten, and a rule that only lives in a page will be.
+
 `compat/tui/README.md` carries the launch recipe (preflight, mint the lock front, the `Workflow`
 call, verification) and the current state. The orchestrator writes the next runner from a fresh
 `ready` listing after each gate, the way `compat/orchestration/HANDOFF.md` does.

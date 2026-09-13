@@ -168,6 +168,16 @@ A case that a sibling lane's landing fixes is recorded as `SIBLING:<lane>`, and 
 after that lane merges. Every wire append folds into one PROTOCOL_VERSION 101. After cycle 5,
 TUI-008 and TUI-011 unlock, then TUI-012.
 
+## Before launching any cycle
+
+```sh
+python3 compat/tui/lint-runner.py compat/tui/run-N.js
+```
+
+One rule per lesson an earlier cycle paid for, each carrying the cycle that earned it. It exits
+non-zero until the runner carries them all. When a cycle teaches a new lesson, add the rule in the
+same close-out commit that records the cycle; prose alone has been forgotten every time.
+
 ## Launching the deferred macOS run (macbook)
 
 Whenever fabrico is next on the macbook: this closes `TUI-013` with one attested run of the

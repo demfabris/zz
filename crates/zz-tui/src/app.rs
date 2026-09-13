@@ -1122,9 +1122,7 @@ pub(crate) fn mouse_binding_names(
 }
 
 fn is_mouse_key_name(key: &str) -> bool {
-    let base = key
-        .rsplit_once('-')
-        .map_or(key, |(_, base)| base);
+    let base = key.rsplit_once('-').map_or(key, |(_, base)| base);
     base.starts_with("MouseDown")
         || base.starts_with("MouseUp")
         || base.starts_with("MouseDrag")

@@ -1,0 +1,19 @@
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+
+date: 2026-09-13T03:23:28-03:00
+repo: /home/demfabris/dev/zz-tui-input (worktree of /home/demfabris/dev/zz)
+tip: c005fb7e51ca15a63c119874328881bd51208ae1 Remeasure the four mouse gaps against the raw TUI's new key path
+base: origin/main 53d206dc5167ab009f41b6bbd1a15af6ecea6c18
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+tmux next-3.8
+zz: target/debug/zz
+tmux 3.8-zz
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+
+locale: LANG=en_US.UTF-8 LC_ALL=unset LC_TIME=pt_BR.UTF-8
+cores: 16
+               total        used        free      shared  buff/cache   available
+Mem:              15           3           2           0          10          11

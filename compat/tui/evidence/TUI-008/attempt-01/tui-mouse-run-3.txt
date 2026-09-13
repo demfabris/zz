@@ -1,0 +1,102 @@
+ok    click-selects-pane/active-pane: both 1
+ok    click-user-binding/option: both fired
+note  click-user-binding-target/context recorded, not asserted: the invoking event now travels with the command, but no format reads it: the eight mouse_* names are unimplemented in crates/zz-mux/src/formats.rs, which this batch's zones do not open (formats.mouse-context)
+        tmux: 6,4,%0,
+        zz:   ,,,
+note  wheel-up-pane/pane-in-mode recorded, not asserted: WheelUpPane is a root binding running copy-mode -e on the pin; the raw TUI scrolls its own viewport instead (keys.root-native-mouse)
+        tmux: 1
+        zz:   0
+note  wheel-up-pane/pane-mode recorded, not asserted: WheelUpPane is a root binding running copy-mode -e on the pin; the raw TUI scrolls its own viewport instead (keys.root-native-mouse)
+        tmux: copy-mode
+        zz:   
+note  drag-selects/buffer recorded, not asserted: MouseDrag1Pane is a root binding running copy-mode -M on the pin; the raw TUI drives zz-terminal's own selection, which does not put the pane in a mode (keys.root-native-mouse)
+        tmux: DRAGLIN
+        zz:   
+ok    drag-selects/pane-in-mode: both 0
+ok    drag-selects/selection: both 
+note  multi-click/double-buffer recorded, not asserted: input.rs sets click_count to 0 or 1 only, so no gesture ever becomes DoubleClick1Pane or TripleClick1Pane and zz-terminal's own multi-click path is unreachable from the raw TUI (keys.root-native-mouse)
+        tmux: alpha
+        zz:   
+note  multi-click/triple-buffer recorded, not asserted: input.rs sets click_count to 0 or 1 only, so no gesture ever becomes DoubleClick1Pane or TripleClick1Pane and zz-terminal's own multi-click path is unreachable from the raw TUI (keys.root-native-mouse)
+        tmux: MULTI alpha beta gamma
+        zz:   
+note  right-click-pane/screen recorded, not asserted: MouseDown3Pane raises the pin's pane menu through a root binding; the raw TUI has no pointer menu (keys.root-native-mouse)
+        row 3 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@0 (%0)M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m
+        row 3 zz:   
+        row 4 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Float            (f) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 4 zz:   
+        row 5 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Horizontal Split (h) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 5 zz:   
+        row 6 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Vertical Split   (v) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 6 zz:   
+        row 7 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 7 zz:   
+        row 8 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m ^[[2mSwap Marked^[[0m^[[38;2;229;229;229m^[[48;2;38;38;38m          ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 8 zz:   
+        row 9 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 9 zz:   
+        row 10 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Kill             (X) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 10 zz:   
+        row 11 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Respawn          (R) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 11 zz:   
+        row 12 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Mark             (m) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 12 zz:   
+        row 13 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m ^[[2mZoom^[[0m^[[38;2;229;229;229m^[[48;2;38;38;38m                 ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 13 zz:   
+        row 14 tmux: ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m
+        row 14 zz:   
+note  border-drag/pane-width recorded, not asserted: the raw TUI has no border hit test, so MouseDrag1Border and its resize-pane -M cannot exist (keys.root-native-mouse, mouse.bound-context flag:resize-pane:-M)
+        tmux: 32
+        zz:   40
+ok    status-clicks/row: both L0:win* 1:second
+ok    status-clicks/window-after-name-click: both 1
+note  status-clicks/window-after-wheel-down recorded, not asserted: the raw TUI answers a status click only on TmuxRange::Window and only with select-window; MouseDown1Status, WheelUpStatus, WheelDownStatus and MouseDown3Status are root bindings it never runs (keys.root-native-mouse)
+        tmux: 1
+        zz:   0
+ok    status-clicks/window-after-wheel-up: both 0
+note  status-clicks/right-click-screen recorded, not asserted: the raw TUI answers a status click only on TmuxRange::Window and only with select-window; MouseDown1Status, WheelUpStatus, WheelDownStatus and MouseDown3Status are root bindings it never runs (keys.root-native-mouse)
+        row 10 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@1:secondM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m
+        row 10 zz:   
+        row 11 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Swap Left  (l) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 11 zz:   
+        row 12 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Swap Right (r) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 12 zz:   
+        row 13 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m ^[[2mSwap Marked^[[0m^[[38;2;229;229;229m^[[48;2;38;38;38m    ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 13 zz:   
+        row 14 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 14 zz:   
+        row 15 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Kill       (X) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 15 zz:   
+        row 16 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Respawn    (R) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 16 zz:   
+        row 17 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Mark       (m) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 17 zz:   
+        row 18 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Rename     (n) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 18 zz:   
+        row 19 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 19 zz:   
+        row 20 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m New After  (w) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 20 zz:   
+        row 21 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m New At End (W) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 21 zz:   
+        row 22 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m
+        row 22 zz:   
+ok    app-mouse-mouse-on/report: both ^[[<0;5;3M^[[<0;5;3m|L0:win*|
+ok    app-mouse-mouse-off/report: both ^[[<0;5;3M^[[<0;5;3m|L0:win*|
+ok    paste-into-pane/received: both ^[[200~pasted-text^[[201~|L0:win*|
+ok    paste-into-copy-mode/pane-in-mode: both 1
+ok    paste-into-copy-mode/screen: all 24 rows identical
+note  paste-into-copy-mode/after-cancel-screen recorded, not asserted: a bracketed paste under copy mode is a direct write to the pane in the raw TUI (input.rs handle_paste), so the text lands in the program behind the mode and appears the moment copy mode is left; the pin's window-mode consumes the paste key and the pane never sees it
+        row 1 tmux: $
+        row 1 zz:   $ ^[[38;2;16;19;24m^[[48;2;216;222;233mpasted-text^[[39m^[[49m
+ok    paste-into-prompt/row: both PASTEPROMPT  pasted-text
+note  paste-under-menu/screen recorded, not asserted: the same direct write: under a menu the pin's overlay key handler consumes the paste-start key and the characters behind it, and the pane sees only what the menu did not eat, while the raw TUI hands the whole bracketed paste to the pane (input.rs handle_paste); the menu ITEM the paste's characters select is identical on both
+        row 1 tmux: $ sted-text~
+        row 1 zz:   $ ^[[38;2;16;19;24m^[[48;2;216;222;233msted-text^[[39m^[[49m
+ok    paste-under-menu/option: both alpha
+ok    focus-events-on/received: both ^[[O^[[I|L0:win*|
+note  focus-events-off/received recorded, not asserted: focus-events on the pin decides only whether tty_start_tty arms Enfcs at its own terminal; a report that arrives anyway is still handed to a pane that asked for it. tty.rs now reads that same server option once and arms \e[?1004h only when it is on, so a real terminal sends the raw TUI nothing here either, but the daemon still gates the DELIVERY of a report on the option, which is what this case injects past. That gate is the GUI's too - crates/zz/src/terminal/view.rs sends the same Focus action from window focus and has no arming of its own - so moving it into each client is a change these zones do not open
+        tmux: ^[[O^[[I|L0:win*|
+        zz:   L0:win*|
+11 asserted checks, 17 recorded checks
+all 11 asserted checks identical

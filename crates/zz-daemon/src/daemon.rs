@@ -18273,7 +18273,8 @@ impl Shared {
                 .and_then(|table| inner.engine.keys.get(table, key))
                 .or_else(|| inner.engine.keys.get(&root_table, key));
             binding.map(|binding| {
-                let window = window.or_else(|| client_focused_window_for_attachment(&inner, client));
+                let window =
+                    window.or_else(|| client_focused_window_for_attachment(&inner, client));
                 let pane = pane.or_else(|| {
                     window
                         .and_then(|window| inner.engine.state.windows.get(&window))

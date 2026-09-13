@@ -3609,10 +3609,14 @@ mod daemon_autostart {
             String::from_utf8_lossy(&captured)
         );
         assert!(
-            captured
-                .windows(b"\x1b[?1003h".len())
-                .any(|window| window == b"\x1b[?1003h"),
-            "the pinned default keeps mouse on: {}",
+            contains(&captured, b"\x1b[?1000h\x1b[?1002h"),
+            "the pinned default keeps mouse on, in button-event tracking: {}",
+            String::from_utf8_lossy(&captured)
+        );
+        assert!(
+            !contains(&captured, b"\x1b[?1003h"),
+            "any-event tracking is for a menu, focus-follows-mouse or a pane \
+             that asked for it: {}",
             String::from_utf8_lossy(&captured)
         );
 
@@ -3628,13 +3632,23 @@ mod daemon_autostart {
             "child exited early={early_status:?}; pty output={}",
             String::from_utf8_lossy(&captured)
         );
-        assert!(
-            !captured
-                .windows(b"[?1003".len())
-                .any(|window| window == b"[?1003"),
-            "mouse off with no app-requested tracking must emit no outer mouse mode: {}",
-            String::from_utf8_lossy(&captured)
-        );
+        for armed in [
+            b"\x1b[?1000h".as_slice(),
+            b"\x1b[?1002h".as_slice(),
+            b"\x1b[?1003h".as_slice(),
+        ] {
+            assert!(
+                !contains(&captured, armed),
+                "mouse off with no app-requested tracking must arm no outer mouse mode: {}",
+                String::from_utf8_lossy(&captured)
+            );
+        }
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
     }
 
     #[test]

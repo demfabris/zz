@@ -212,11 +212,7 @@ pub(crate) fn mouse_mode_sequence(arming: MouseArming, pixel_mouse: bool) -> Vec
 
 impl TerminalGuard {
     #[cfg(unix)]
-    pub fn enter(
-        mouse: MouseArming,
-        extended_keys: bool,
-        focus_events: bool,
-    ) -> io::Result<Self> {
+    pub fn enter(mouse: MouseArming, extended_keys: bool, focus_events: bool) -> io::Result<Self> {
         let original = rustix::termios::tcgetattr(io::stdin())?;
         let file_probe = probe_file_path();
         remove_file_if_present(&file_probe)?;

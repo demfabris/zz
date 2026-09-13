@@ -1,0 +1,66 @@
+self-check: one deliberate one-sided difference per channel
+ok    click-selects-pane/active-pane: both 1
+ok    self-check control, a click with nothing sabotaged: no difference reported
+ok    paste-into-pane/received: both ^[[200~pasted-text^[[201~|L0:win*|
+ok    self-check control, the same paste on both sides: no difference reported
+ok    focus-sc-control/received: both ^[[O^[[I|L0:win*|
+ok    self-check control, the same focus reports on both sides: no difference reported
+DIFF  paste-into-pane/received
+        tmux: ^[[200~pasted-text^[[201~|L0:win*|
+        zz:   ^[[200~other-text^[[201~|L0:win*|
+ok    self-check a one-sided paste: caught
+DIFF  app-mouse-sc-encoding/report
+        tmux: ^[[<0;5;3M^[[<0;5;3m|L0:win*|
+        zz:   ^[[M %#^[[M#%#|L0:win*|
+ok    self-check the SGR mouse extension dropped on zz only: caught
+DIFF  focus-sc-focus/received
+        tmux: ^[[O^[[I|L0:win*|
+        zz:   ^[[O|L0:win*|
+ok    self-check only the focus-out report sent to zz: caught
+DIFF  status-clicks/row
+        tmux: L0:win* 1:second
+        zz:   LL0:win* 1:second
+ok    status-clicks/window-after-name-click: both 1
+note  status-clicks/window-after-wheel-down recorded, not asserted: the raw TUI answers a status click only on TmuxRange::Window and only with select-window; MouseDown1Status, WheelUpStatus, WheelDownStatus and MouseDown3Status are root bindings it never runs (keys.root-native-mouse)
+        tmux: 1
+        zz:   0
+ok    status-clicks/window-after-wheel-up: both 0
+note  status-clicks/right-click-screen recorded, not asserted: the raw TUI answers a status click only on TmuxRange::Window and only with select-window; MouseDown1Status, WheelUpStatus, WheelDownStatus and MouseDown3Status are root bindings it never runs (keys.root-native-mouse)
+        row 10 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^LM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@1:secondM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P^[[39m^[[49m
+        row 10 zz:   
+        row 11 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Swap Left  (l) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 11 zz:   
+        row 12 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Swap Right (r) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 12 zz:   
+        row 13 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m ^[[2mSwap Marked^[[0m^[[38;2;229;229;229m^[[48;2;38;38;38m    ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 13 zz:   
+        row 14 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 14 zz:   
+        row 15 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Kill       (X) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 15 zz:   
+        row 16 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Respawn    (R) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 16 zz:   
+        row 17 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Mark       (m) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 17 zz:   
+        row 18 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m Rename     (n) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 18 zz:   
+        row 19 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^\M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-$^[[39m^[[49m
+        row 19 zz:   
+        row 20 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m New After  (w) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 20 zz:   
+        row 21 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B^[[38;2;229;229;229m New At End (W) ^[[38;2;179;179;179mM-bM-^TM-^B^[[39m^[[49m
+        row 21 zz:   
+        row 22 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m
+        row 22 zz:   
+        row 23 tmux: ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:second-
+        row 23 zz:   ^[[38;2;13;13;13m^[[48;2;154;205;50mLL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:second-
+ok    self-check a status-left only zz carries: caught
+DIFF  click-selects-pane/active-pane
+        tmux: 1
+        zz:   0
+ok    self-check zz's click aimed at the pane it already sits in: caught
+DIFF  click-user-binding/option
+        tmux: fired
+        zz:   other
+ok    self-check the same root mouse binding set differently on zz: caught
+self-check: every sabotage caught in its own channel

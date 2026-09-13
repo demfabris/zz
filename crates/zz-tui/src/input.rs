@@ -1299,7 +1299,11 @@ fn mouse_key_location(
     model: &Model,
     global_column: u16,
     global_row: u16,
-) -> Option<(String, Option<zz_protocol::PaneId>, Option<zz_protocol::WindowId>)> {
+) -> Option<(
+    String,
+    Option<zz_protocol::PaneId>,
+    Option<zz_protocol::WindowId>,
+)> {
     if let Some(index) = model.status_row_at(global_row) {
         let (status_x, _) = model.status_area();
         let target = global_column
@@ -1340,9 +1344,13 @@ fn mouse_key_location(
 /// The event and button half of the name, in the pin's own spelling.
 fn mouse_key_name(event: MouseEvent, location: &str) -> Option<String> {
     let base = match event.kind {
-        MouseEventKind::Down(button) => format!("MouseDown{}{location}", mouse_button_index(button)),
+        MouseEventKind::Down(button) => {
+            format!("MouseDown{}{location}", mouse_button_index(button))
+        }
         MouseEventKind::Up(button) => format!("MouseUp{}{location}", mouse_button_index(button)),
-        MouseEventKind::Drag(button) => format!("MouseDrag{}{location}", mouse_button_index(button)),
+        MouseEventKind::Drag(button) => {
+            format!("MouseDrag{}{location}", mouse_button_index(button))
+        }
         MouseEventKind::ScrollUp => format!("WheelUp{location}"),
         MouseEventKind::ScrollDown => format!("WheelDown{location}"),
         MouseEventKind::Moved | MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
@@ -3408,20 +3416,29 @@ mod tests {
         );
         assert_eq!(
             mouse_key_name(
-                event(MouseEventKind::Up(MouseButton::Right), KeyModifiers::CONTROL),
+                event(
+                    MouseEventKind::Up(MouseButton::Right),
+                    KeyModifiers::CONTROL
+                ),
                 "StatusLeft"
             )
             .as_deref(),
             Some("C-MouseUp3StatusLeft")
         );
         assert_eq!(
-            mouse_key_name(event(MouseEventKind::ScrollUp, KeyModifiers::NONE), "Status")
-                .as_deref(),
+            mouse_key_name(
+                event(MouseEventKind::ScrollUp, KeyModifiers::NONE),
+                "Status"
+            )
+            .as_deref(),
             Some("WheelUpStatus")
         );
         assert_eq!(
-            mouse_key_name(event(MouseEventKind::ScrollDown, KeyModifiers::SHIFT), "Pane")
-                .as_deref(),
+            mouse_key_name(
+                event(MouseEventKind::ScrollDown, KeyModifiers::SHIFT),
+                "Pane"
+            )
+            .as_deref(),
             Some("S-WheelDownPane")
         );
         assert_eq!(

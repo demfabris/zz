@@ -31981,6 +31981,14 @@ fn resolve_client_target(
     {
         return Ok(invoking_client);
     }
+    current_client(inner, invoking_client)
+        .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))
+}
+
+/// `cmd_find_current_client`, cmd-find.c:1274: with no `-t` the pin answers the
+/// best client of the session the invocation came from, and otherwise the best
+/// client of the best session. A clientless CLI is not the end of the search.
+fn current_client(inner: &ServerState, invoking_client: ClientId) -> Option<ClientId> {
     if let Some(session) = inner
         .client_origins
         .get(&invoking_client)
@@ -31989,11 +31997,9 @@ fn resolve_client_target(
         .map(|window| window.session)
         && let Some(client) = best_client_on_session(inner, session)
     {
-        return Ok(client);
+        return Some(client);
     }
-    best_attached_session(inner)
-        .and_then(|session| best_client_on_session(inner, session))
-        .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))
+    best_attached_session(inner).and_then(|session| best_client_on_session(inner, session))
 }
 
 fn normalized_client_target(target: &str) -> &str {
@@ -33239,9 +33245,10 @@ fn resolve_attached_client(
         return find_attached_client_with_aliases(inner, target, true)
             .ok_or_else(|| client_target_error(target));
     }
-    attached
-        .contains(&invoking_client)
-        .then_some(invoking_client)
+    if attached.contains(&invoking_client) {
+        return Ok(invoking_client);
+    }
+    current_client(inner, invoking_client)
         .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))
 }
 

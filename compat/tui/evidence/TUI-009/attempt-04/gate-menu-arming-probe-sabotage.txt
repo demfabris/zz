@@ -1,0 +1,7 @@
+ok    baseline (mouse on, no overlay): both 0 1
+DIFF  menu without -M (MENU_NOMOUSE): pin 0 1, zz 1 0
+ok    menu with -M: both 1 0
+ok    after (mouse on, no overlay): both 0 1
+ok    mouse off, no overlay: both 0 0
+DIFF  mouse off, menu without -M: pin 0 0, zz 1 0
+ok    mouse off, menu with -M: both 1 0

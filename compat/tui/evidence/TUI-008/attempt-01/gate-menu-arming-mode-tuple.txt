@@ -1,0 +1,7 @@
+ok    baseline (mouse on, no overlay): both 1|1|1|default|1|0|1|1|1|0|0|0|0|1|1|VT10x
+ok    menu without -M (MENU_NOMOUSE): both 1|1|0|default|1|0|1|1|1|0|0|0|0|1|1|VT10x
+ok    menu with -M: both 1|1|0|default|1|1|1|0|1|0|0|0|0|1|1|VT10x
+ok    after (mouse on, no overlay): both 1|1|1|default|1|0|1|1|1|0|0|0|0|1|1|VT10x
+ok    mouse off, no overlay: both 1|1|1|default|1|0|0|0|0|0|0|0|0|1|1|VT10x
+ok    mouse off, menu without -M: both 1|1|0|default|1|0|0|0|0|0|0|0|0|1|1|VT10x
+ok    mouse off, menu with -M: both 1|1|0|default|1|1|1|0|1|0|0|0|0|1|1|VT10x

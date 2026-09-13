@@ -1924,7 +1924,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "resize-pane",
         aliases: &["resizep"],
         description: "Resize or zoom a pane",
-        usage: "[-Z] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]",
+        usage: "[-MZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-x", FreeForm, "width in cells or percent"),

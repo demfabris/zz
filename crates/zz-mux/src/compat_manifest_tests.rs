@@ -111,7 +111,7 @@ struct OracleKey {
 }
 
 const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] =
-    &[("copy-mode", 61), ("copy-mode-vi", 72), ("prefix", 56)];
+    &[("copy-mode", 61), ("copy-mode-vi", 72), ("prefix", 56), ("root", 5)];
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -1202,11 +1202,11 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     let direct_formats = direct_format_variable_names().collect::<BTreeSet<_>>();
     let delegated_formats = delegated_format_variable_names().collect::<BTreeSet<_>>();
     assert_eq!(formats.len(), 198, "pinned global format count changed");
-    assert_eq!(constant_formats.len(), 50, "tracked format count changed");
+    assert_eq!(constant_formats.len(), 47, "tracked format count changed");
     assert_eq!(direct_formats.len(), 99, "direct format count changed");
     assert_eq!(
         delegated_formats.len(),
-        49,
+        52,
         "delegated format count changed"
     );
     assert!(
@@ -1227,7 +1227,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         nonconstant_formats.len(),
-        148,
+        151,
         "nonconstant format registration count changed"
     );
     let tracked_formats = items
@@ -1374,15 +1374,15 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         303,
         "pinned binding count changed"
     );
-    assert_eq!(zz_keys.len(), 317, "zz default binding count changed");
+    assert_eq!(zz_keys.len(), 322, "zz default binding count changed");
     assert_eq!(
         shared_keys.len(),
-        226,
+        231,
         "shared default binding count changed"
     );
     assert_eq!(
         missing_keys.len(),
-        77,
+        72,
         "missing default binding count changed"
     );
     assert_eq!(
@@ -1397,7 +1397,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         structurally_matching_bindings.len(),
-        189,
+        194,
         "structurally matching shared binding count changed"
     );
     assert_eq!(

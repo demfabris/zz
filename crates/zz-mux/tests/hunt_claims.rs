@@ -504,7 +504,8 @@ fn brace_command_lists_bind_as_a_single_command_sequence() {
     assert!(
         listed
             .lines()
-            .any(|line| line == "bind-key  -T root F2 send-keys \"a ; b\" \\; new-window"),
+            .any(|line| line
+                == "bind-key  -T root F2                 send-keys \"a ; b\" \\; new-window"),
         "{listed}"
     );
 }
@@ -2194,11 +2195,11 @@ fn resize_pane_takes_attached_adjustments_and_rejects_unknown_flags() {
     assert_eq!(pane_size(&engine, left), (20, 24));
     assert_eq!(pane_size(&engine, right), (59, 24));
 
-    let error = engine
+    engine
         .execute(&mut context, &command("resize-pane", &["-M"]))
-        .unwrap_err();
-    assert!(matches!(&error, ServerError::UnsupportedCommand(message)
-        if message == "resize-pane -M"));
+        .unwrap();
+    assert_eq!(pane_size(&engine, left), (20, 24));
+    assert_eq!(pane_size(&engine, right), (59, 24));
     let error = engine
         .execute(&mut context, &command("resize-pane", &["-R", "10.5"]))
         .unwrap_err();

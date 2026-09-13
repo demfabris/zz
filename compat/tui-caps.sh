@@ -43,7 +43,9 @@
 #   legacy keys                    pane_key_mode with extended-keys off  driven
 #   extended keys                  pane_key_mode with extended-keys on   driven
 #   client terminal name           client_termname                       driven
-#   client feature negotiation     client_termfeatures, client_colours   driven
+#   client feature negotiation     client_termfeatures, client_colours,   driven
+#                                  on the outer decoder and on a terminal
+#                                  that answers nothing
 #   client UTF-8 from a locale     client_utf8, client_flags under a     driven
 #                                  UTF-8 LANG and LC_ALL
 #   client UTF-8 from the flag     client_utf8, client_flags under -u    driven
@@ -54,7 +56,9 @@
 #     terminal                     where neither baseline carries 256
 #                                  or RGB (see write_silent_terminal)
 #   extended keys, silent          pane_key_mode with extended-keys on,  driven
-#     terminal                     recorded below
+#     terminal                     where the terminal names no extkeys
+#   extended keys named by a       pane_key_mode on a silent terminal     driven
+#     flag                         handed -T extkeys
 #   the -2 screen effect, silent   the colour sample with and without    driven
 #     terminal                     -2 under TERM=xterm, including the two
 #                                  aixterm cells `38;5;12` and `38;5;9` that
@@ -110,7 +114,26 @@
 #   Unicode widths                 the outer cursor column and the       driven
 #                                  decoded line after a wide CJK pair, a
 #                                  combining sequence and an emoji, with
-#                                  UTF-8 clients on both sides
+#                                  UTF-8 clients on both sides, with
+#                                  neither, and with one
+#   ACS for a client that takes    tty.c tty_check_codeset maps a cell to     named
+#     no UTF-8                     an ACS key before it falls back to
+#                                  underscores (tty-acs.c
+#                                  tty_acs_reverse_get) and writes it under
+#                                  GRID_ATTR_CHARSET; the raw TUI has no
+#                                  charset attribute on its cell writer and
+#                                  writes the underscores. Nothing this
+#                                  fixture draws is in that table, and the
+#                                  chrome that is is compared by
+#                                  compat/tui-screen-diff.sh under UTF-8
+#                                  clients only. Not driven.
+#   extkeys named by the           tty_term_create adds a feature the        named
+#     terminal-features array      `terminal-features` array names for the
+#                                  client's TERM, and the raw TUI knows only
+#                                  what its flags asked for and what its
+#                                  terminal answered, so an array entry
+#                                  granting extkeys arms the pin and not zz.
+#                                  The stock array grants none. Not driven.
 #   secondary and extended DA      the same colour sample on a terminal  driven
 #     replies                      that answers them and on one that
 #                                  answers nothing: the reply names the
@@ -123,32 +146,16 @@
 #                                  reply itself is measured by
 #                                  compat/scenarios/smoke/fixtures/format-listing.sh
 #
-# RECORDED DIVERGENCES. These rows print their two measured values and do not
-# fail the run. A row's disposition is per case and fixed in the driver below,
-# never discovered at runtime: a row that this list explains is recorded in the
-# case that measures the divergence, and asserts everywhere else. That is what
-# lets --self-check sabotage the same row in a case where it asserts. Every one
-# of them is written down in TUI-009's evidence with the source line that
-# produces it.
-#   client_termfeatures    the pin's list is negotiated from the terminal's
-#   client_colours         replies; the daemon derives a client's roster from
-#                          its TERM, its COLORTERM and its flags alone, so
-#                          wherever the terminal answered, the two rosters
-#                          count different colours. The raw TUI's own cell
-#                          writer does read those replies, which is what the
-#                          colour rows compare; on a silent terminal, where
-#                          there is no reply to learn from, client_colours
-#                          asserts.
-#   widths/non-utf8 line   under LANG=C with no -u the pin draws each non-ASCII
-#                          cell as underscores (tty.c tty_check_codeset); the
-#                          raw TUI writes the UTF-8 glyph.
-#   pane_key_mode          on a silent terminal only (silent/extended): the pin
-#                          writes Eneks only when its terminal carries extkeys
-#                          (tty.c tty_update_features over tty-features.c
-#                          tty_feature_extkeys), which it learns from a reply,
-#                          -T or terminal-features, whose default gives xterm*
-#                          none; tty.rs arms \e[>4;2m whenever extended-keys is
-#                          not off. Under the outer tmux both arm and it asserts.
+# RECORDED DIVERGENCES. A recorded row prints its two measured values and does
+# not fail the run; its disposition is per case and fixed in the driver below,
+# never discovered at runtime. NOTHING IS RECORDED HERE SINCE 2026-09-13: the
+# last three causes closed together with the v102 capability wire (a client
+# reports what its terminal answered after the hello and the daemon folds it
+# with the terminfo-derived base set for the TERM), the client's own UTF-8 flag
+# reaching the raw TUI's cell writer as tty_check_codeset reads it, and the
+# extended-key request waiting for a terminal that carries extkeys. What this
+# fixture does NOT drive is named in the matrix above with its reason, which is
+# not the same thing as a recorded difference.
 #
 # CONTROLLED DYNAMIC VALUES, set on both sides and never left to chance:
 #   the inner shell     ENV= PS1='$ ' exec /bin/sh, handed to new-session as
@@ -193,14 +200,18 @@
 #
 # --self-check drives deliberate one-sided differences and requires the
 # comparison to report each in the channel that was sabotaged: one-sided client
-# flags (-u, -T sixel and -2 on the pin only), a named cell spelled as the RGB
+# flags (-u and -T sixel on the pin only, and -2 on the pin only over a
+# terminal that answers nothing, which is the only terminal where -2 adds
+# anything), a client whose terminal answers nothing against one whose
+# terminal does, a named cell spelled as the RGB
 # colour it resolves to on one side, a one-sided palette entry, an OSC 4 on an
 # indexed entry sent to one side, an OSC 104 sent to one side, pane-colours set
 # on one side, a pane-colours entry the other stage leaves untouched named on
 # one side, the legacy-terminal case and an extended key driven with extended
-# keys on one side, a one-sided unknown CLI option, and a one-sided wide
-# codepoint. One more case is a CONTROL that sabotages nothing and must stay
-# quiet. A fixture that only passes has proved nothing.
+# keys on one side, -T extkeys on one side of a silent terminal, a one-sided
+# unknown CLI option, a one-sided -u under a C locale, and a one-sided wide
+# codepoint. Several more cases are CONTROLS that sabotage nothing and must
+# stay quiet. A fixture that only passes has proved nothing.
 #
 # ZZ_CAPS_DIAGNOSTICS_DIR names the directory a bounded wait that runs out
 # copies its evidence into; without it a fresh /tmp directory is made and named
@@ -278,8 +289,11 @@ CASE_LOCALE=C
 ZZ_PANE=""
 TMUX_PANE_ID=""
 # 1 while a case attaches both clients to a silent terminal (see
-# write_silent_terminal); 0 for the outer pinned tmux itself.
+# write_silent_terminal); 0 for the outer pinned tmux itself. SILENT_SIDE names
+# the one side that gets the relay when only one is meant to, which is the
+# sabotage for the reply-driven half of a client's feature roster.
 SILENT_TERMINAL=0
+SILENT_SIDE=""
 WIDTH_RUN=0
 PYTHON="$(command -v python3)"
 mkdir -p "$ZZ_HOME/config" "$TMUX_HOME/config" "$OUTER_HOME/config" "$ZZ_LOG_DIR" "$RUNTIME_DIR"
@@ -310,10 +324,6 @@ modes_except() {
 
 FACT_NAMES=(client_termname client_utf8 client_flags client_colours client_termfeatures client_theme)
 FACT_FORMAT='#{client_termname}|#{client_utf8}|#{client_flags}|#{client_colours}|#{client_termfeatures}|#{client_theme}'
-FACT_RECORDED="client_colours client_termfeatures"
-# On a silent terminal neither side learns anything from a reply, so the two
-# rosters count the same colours and client_colours asserts there.
-FACT_RECORDED_SILENT="client_termfeatures"
 # Each global flag adds its own rows: what the flag CHANGED on its own side,
 # against that side's own unflagged baseline. That delta is the flag's
 # disposition, and it is what makes an ignored flag visible instead of hidden
@@ -663,8 +673,13 @@ open_case() {
   done
   write_attach zz "$SCRATCH_DIR/attach-zz.sh" "$term" $zz_flags
   write_attach tmux "$SCRATCH_DIR/attach-tmux.sh" "$term" $tmux_flags
+  local silent
   for side in zz tmux; do
-    if [ "$SILENT_TERMINAL" = 1 ]; then
+    silent="$SILENT_TERMINAL"
+    if [ -n "$SILENT_SIDE" ]; then
+      if [ "$SILENT_SIDE" = "$side" ]; then silent=1; else silent=0; fi
+    fi
+    if [ "$silent" = 1 ]; then
       tmux_outer_command new-window -d -n "w-$side" \
         "$PYTHON $SCRATCH_DIR/silent-terminal.py $SCRATCH_DIR/attach-$side.sh"
     else
@@ -776,7 +791,7 @@ tuple_field() {
 }
 
 case_facts() {
-  local name="$1" term="$2" zz_flags="$3" tmux_flags="$4" recorded="${5:-$FACT_RECORDED}"
+  local name="$1" term="$2" zz_flags="$3" tmux_flags="$4" recorded="${5:-}"
   local baseline="${6:-}" named="${7:-}"
   open_case "$name" "$term" "$zz_flags" "$tmux_flags"
   checkpoint "${name//[^a-zA-Z0-9]/}"
@@ -971,7 +986,7 @@ case_one_sided_theme_reply() {
   tmux_outer_command set-option -w -t "$(outer_window tmux)" window-style bg=colour4 \
     >/dev/null
   wait_for 'the pin learned a theme from its outer window' pin_theme_known
-  compare_tuple 'sc/one-sided-theme' "$FACT_RECORDED" \
+  compare_tuple 'sc/one-sided-theme' '' \
     "$(read_facts zz)" "$(read_facts tmux)" "${FACT_NAMES[@]}"
   tmux_outer_command set-option -w -t "$(outer_window tmux)" -u window-style \
     >/dev/null 2>&1 || true
@@ -998,12 +1013,12 @@ case_silent_colours() {
 
 case_silent() {
   SILENT_TERMINAL=1
-  case_facts 'silent/bare' xterm '' '' "$FACT_RECORDED_SILENT" baseline
-  case_facts 'silent/-T' xterm '-T RGB' '-T RGB' "$FACT_RECORDED_SILENT" '' RGB
-  case_facts 'silent/-2' xterm -2 -2 "$FACT_RECORDED_SILENT" '' 256
+  case_facts 'silent/bare' xterm '' '' '' baseline
+  case_facts 'silent/-T' xterm '-T RGB' '-T RGB' '' '' RGB
+  case_facts 'silent/-2' xterm -2 -2 '' '' 256
   side_command zz set-option -s extended-keys on >/dev/null
   side_command tmux set-option -s extended-keys on >/dev/null
-  case_modes 'silent/extended' xterm-256color '' '' pane_key_mode
+  case_modes 'silent/extended' xterm-256color '' ''
   side_command zz set-option -s extended-keys off >/dev/null
   side_command tmux set-option -s extended-keys off >/dev/null
   case_silent_colours 'silent/colours' silent '' ''
@@ -1208,10 +1223,10 @@ if [ "$SELF_CHECK" -eq 0 ]; then
   case_menu_arming 'menu/mouse-keys' -M -M
   case_menu_arming_mouse_off 'menu/nomouse-mouse-off' '' ''
   case_menu_arming_mouse_off 'menu/mouse-keys-mouse-off' -M -M
-  case_facts 'facts/bare' xterm '' '' "$FACT_RECORDED" baseline
-  case_facts 'facts/-2' xterm -2 -2 "$FACT_RECORDED" '' 256
+  case_facts 'facts/bare' xterm '' '' '' baseline
+  case_facts 'facts/-2' xterm -2 -2 '' '' 256
   case_facts 'facts/-u' xterm -u -u
-  case_facts 'facts/-T' xterm '-T sixel' '-T sixel' "$FACT_RECORDED" '' sixel
+  case_facts 'facts/-T' xterm '-T sixel' '-T sixel' '' '' sixel
   # A UTF-8 locale, where zz's fallback and the pin's are the same fallback:
   # both clients have to come up UTF-8 without any flag at all. It is the other
   # half of the -u measurement, and it says the gap is the flag and not the
@@ -1220,7 +1235,7 @@ if [ "$SELF_CHECK" -eq 0 ]; then
   case_facts 'facts/utf8-locale' xterm '' ''
   case_widths
   CASE_LOCALE=C
-  case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/non-utf8 '' '' line
+  case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/non-utf8
   case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/-u -u -u
   case_colours
   case_silent
@@ -1266,7 +1281,7 @@ printf 'self-check: one deliberate one-sided difference per channel\n'
 # The control: the same case with nothing sabotaged has to be quiet, or a
 # sabotage that "catches" would prove nothing.
 self_check_case 'control, facts with no sabotage' quiet \
-  case_facts 'sc/control' xterm '' '' "$FACT_RECORDED" baseline
+  case_facts 'sc/control' xterm '' '' '' baseline
 
 # A one-sided flag. -u is the flag whose own-side effect the pin publishes as a
 # client fact, so giving it to the pin alone has to show up in client_utf8,
@@ -1276,12 +1291,7 @@ self_check_case 'a one-sided flag, -u on the pin only' catches \
 
 # -T on one side: delta-client_termfeatures and flag-features have to catch it.
 self_check_case 'a one-sided -T sixel on the pin only' catches \
-  case_facts 'sc/one-sided-T' xterm '' '-T sixel' "$FACT_RECORDED" '' sixel
-
-# -2 on one side: zz's TERM=xterm roster has no 256 of its own, so without the
-# flag flag-features has to report 256:no against the pin's 256:yes.
-self_check_case 'a one-sided -2 on the pin only' catches \
-  case_facts 'sc/one-sided-2' xterm '' -2 "$FACT_RECORDED" '' 256
+  case_facts 'sc/one-sided-T' xterm '' '-T sixel' '' '' sixel
 
 # The default grounds on one side: an OSC 10 sent to zz alone has to turn zz's
 # uncoloured cells red while the pin's stay default, and window-style set on
@@ -1296,9 +1306,45 @@ self_check_case 'window-style set on zz only' catches case_colours window-style
 # in delta-client_termfeatures, which the silent baseline leaves free of both.
 SILENT_TERMINAL=1
 self_check_case 'control, a silent terminal with no sabotage' quiet \
-  case_facts 'sc/silent-control' xterm '' '' "$FACT_RECORDED_SILENT" baseline
+  case_facts 'sc/silent-control' xterm '' '' '' baseline
 self_check_case 'a one-sided 256 beside -T RGB on the pin, silent terminal' catches \
-  case_facts 'sc/silent-T' xterm '-T RGB' '-T 256,RGB' "$FACT_RECORDED_SILENT" '' RGB
+  case_facts 'sc/silent-T' xterm '-T RGB' '-T 256,RGB' '' '' RGB
+
+# -2 belongs on the silent terminal too, and only there: on the outer decoder
+# both rosters already carry 256 and RGB out of the tmux reply, so -2 adds
+# nothing on either side and the pin's own flag is the no-op. With no reply to
+# learn from, -2 on the pin alone has to report through client_colours,
+# client_termfeatures, delta-client_termfeatures and flag-features.
+self_check_case 'a one-sided -2 on the pin only, silent terminal' catches \
+  case_facts 'sc/silent-2' xterm '' -2 '' '' 256
+
+# THE CAPABILITY WIRE ITSELF. A client's roster is half what its TERM and its
+# flags give it and half what its terminal answered after the hello, so the
+# sabotage is a terminal that answers on one side and not on the other: zz
+# behind the relay against the pin on the outer decoder has to leave zz with
+# the bare xterm base while the pin takes tmux's own tty_default_features, and
+# client_termfeatures and client_colours are the rows that carry it. With the
+# relay on neither side and on both the same case is a control.
+SILENT_SIDE=zz
+self_check_case 'a terminal that answers for the pin alone' catches \
+  case_facts 'sc/one-sided-replies' xterm '' ''
+SILENT_SIDE=""
+SILENT_TERMINAL=0
+
+# THE EXTENDED-KEY REQUEST'S OWN CONDITION. tty_update_features writes Eneks
+# only while the terminal carries extkeys, which a silent TERM=xterm-256color
+# does not, so naming it for zz alone with -T has to arm zz's mode 2 against
+# the pin's VT10x and report through pane_key_mode and no other row.
+SILENT_TERMINAL=1
+side_command zz set-option -s extended-keys on >/dev/null
+side_command tmux set-option -s extended-keys on >/dev/null
+self_check_case 'control, extended keys on both over a terminal naming none' quiet \
+  case_modes 'sc/silent-extended-control' xterm-256color '' ''
+self_check_case '-T extkeys named for zz alone on a silent terminal' catches \
+  case_modes 'sc/silent-extkeys' xterm-256color '-T extkeys' '' \
+  "$(modes_except pane_key_mode)"
+side_command zz set-option -s extended-keys off >/dev/null
+side_command tmux set-option -s extended-keys off >/dev/null
 SILENT_TERMINAL=0
 
 # The silent terminal's colour downgrade, in both directions. -2 is what raises
@@ -1413,6 +1459,14 @@ CASE_LOCALE=C.UTF-8
 self_check_case 'a one-sided wide codepoint' catches \
   case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX\344\270\226"
 CASE_LOCALE=C
+
+# THE CODESET. Under a C locale neither client takes UTF-8 and both draw each
+# non-ASCII cell as data.width underscores, which is the driven
+# widths/non-utf8 case; -u handed to zz alone has to put the codepoints back on
+# zz's line and leave the pin's underscores, and the cursor column is the same
+# either way because the underscores fill the cells the glyph would.
+self_check_case 'a one-sided -u under a C locale' catches \
+  case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" sc/one-sided-codeset -u ''
 
 ASSERT_MODE=count
 if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then

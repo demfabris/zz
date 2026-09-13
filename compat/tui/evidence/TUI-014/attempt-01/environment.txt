@@ -1,0 +1,20 @@
+# environment
+
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+
+revision: 6cc5e0b82c2a9ee39512bed2337ec409d7dbfe7b
+worktree: 1 modified paths
+base: origin/main b17232ace3704980919dc4bb787c84d9051f7db7
+
+zz:   /home/demfabris/dev/zz-tui-commands/target/debug/zz
+-rwxr-xr-x 2 demfabris demfabris 791252176 set 13 17:47 target/debug/zz
+sha256: b53ffe15636325ab7db18d7195ae30f9c61201f0411bb4062c922d4cbc189e89
+
+pin:  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+tmux next-3.8
+pin commit: d77c9dc6aa021e4bc61f0da128c591af695e6466 (next-3.8)
+
+locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8
+date: 2026-09-13T18:42:48-03:00

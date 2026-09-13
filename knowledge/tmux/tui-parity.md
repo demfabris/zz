@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **7/12 verified**. Added scope: **0/6 verified**.
 
-Status counts: unmeasured: 6, different: 0, active: 3, review: 2, blocked: 0, verified: 7.
+Status counts: unmeasured: 5, different: 0, active: 4, review: 2, blocked: 0, verified: 7.
 
 Dependency-ready obligations, by priority: TUI-006, TUI-008, TUI-009, TUI-013, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018.
 
@@ -50,7 +50,7 @@ Dependency-ready obligations, by priority: TUI-006, TUI-008, TUI-009, TUI-013, T
 | TUI-010: Slow output, recovery and client lifecycle | verified | 10 | TUI-001, TUI-002 |
 | TUI-011: Remaining stock client command inventory | review | 11 | TUI-003, TUI-006, TUI-007, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018 |
 | TUI-012: Superset commands beside tmux behavior | review | 12 | TUI-003, TUI-004, TUI-008, TUI-009, TUI-010 |
-| TUI-014: Client mode tools in the raw TUI | unmeasured | 14 | TUI-003 |
+| TUI-014: Client mode tools in the raw TUI | active | 14 | TUI-003 |
 | TUI-015: A lock surface a client can draw | unmeasured | 15 | none |
 | TUI-016: Server log and terminal introspection | unmeasured | 16 | none |
 | TUI-017: Rich capture transports and the snapshot residues | unmeasured | 17 | none |
@@ -643,7 +643,7 @@ Next action: Whenever fabrico is next on the macbook: follow compat/tui/README.m
 
 ### TUI-014: Client mode tools in the raw TUI
 
-Status: unmeasured.
+Status: active.
 
 Acceptance:
 
@@ -653,20 +653,23 @@ Acceptance:
 
 Sources:
 
-- `compat/tui-client-commands.sh`
+- `compat/tmux-gaps.json`
 - `compat/tui-choosers.sh`
-- `crates/zz-protocol/src/catalog.rs`
-- `crates/zz-protocol/src/message.rs`
-- `crates/zz-mux/src/command.rs`
+- `compat/tui-client-commands.sh`
 - `crates/zz-daemon/src/daemon.rs`
 - `crates/zz-daemon/src/daemon/chooser_presentation.rs`
+- `crates/zz-daemon/src/keys.rs`
+- `crates/zz-mux/src/command.rs`
+- `crates/zz-mux/src/sort.rs`
+- `crates/zz-protocol/src/catalog.rs`
+- `crates/zz-protocol/src/message.rs`
 - `crates/zz-tui/src/render/chooser.rs`
 
 Tmux gap references: `commands.native-client-tools`, `clients.interactive-refresh`.
 
-SPLIT FROM TUI-011 on 2026-09-13, one child per accepted gap. THE MEASUREMENT: catalog.rs's UNIMPLEMENTED_TMUX_COMMANDS hard-rejects choose-client, clock-mode, customize-mode, switch-mode, suspend-client and server-access, so the CLI prints `unsupported command: <name>` with exit 1 and the attached screen never moves. The pin opens a mode on the target pane for the first four and exits 0. Measured on the pin at 80x24 on 2026-09-13 with one attached client: choose-client -t %0 draws row 0 `(0) /dev/pts/N: HH:MM: session cli` in the message style, rows 1-11 empty, the preview box header `┌ /dev/pts/N (sort: name) (view: preview)` on row 12 and the client's current pane inside the box to row 23; q gives the pane back cell for cell, which compat/tui-client-commands.sh asserts today as client-tools-restored. suspend-client sends SIGTSTP to the client process (cmd-detach-client.c) and really does stop an attached raw client, so its case is the last in that fixture. THE BLOCKER THAT KEPT IT OUT OF CYCLE 7's roster lane: the client tree needs an appended ChooseTreeKind and a ChooseTreeTarget for a client, and the appended kind needs one match arm in paint_chooser in crates/zz-tui/src/render.rs, a file the roster lane's zones exclude; ChooseTreeSession then needs a client row source beside its session, window and pane targets, and a client format context for the row text. commands.native-client-tools stays accepted for the GUI: the product decision recorded in TUI-011 covers only the raw TUI.
+ATTEMPT-01, cycle 8. CLAUSE 1 ASSERTS: choose-client is implemented and the raw TUI draws the pin's client mode. compat/tui-choosers.sh now asserts 17 client-mode checkpoints whole-screen plus the cursor at 80x24 and 100x40 - client-tree-open, the four sort orders the pin's window_client_order_seq steps through (name, size, creation, activity), r and back, t, T and C-t, the (filter) prompt and its cancel, the help box with window_client_help_lines, client-tree-closed, and client-run-open/chosen/dismissed, which binds prefix Y to `choose-client -Z "display-message -d 0 CHOSE-%%"` and proves Enter runs the row's command with %% substituted by the client's own name. All three runs of the fixture at the tip carry them green; run-2's only red row is filter-cleared, a pre-existing window-tree row where `#{pane_current_command}` answers bash on zz and sh on the pin - zz resolves it from the pty's foreground pgid through sysinfo in crates/zz-daemon/src/daemon.rs, a path this landing does not touch, and it is green in runs 1 and 3. TWO VALUES ARE MASKED in the client case, documented in the fixture header: the client name, which server_client_dispatch_identify takes from the ttyname and two ptys cannot share, and the HH:MM of #{t/p:client_activity}, which each server stamps from its own send and so straddles a minute boundary. HOW IT IS BUILT: an appended ChooseTreeKind::Clients and ChooseTreeTarget::Client(ClientId) put the client list on the mode tree that already draws choose-tree; the daemon builds one ClientChooserRow per attached client with the pin's WINDOW_CLIENT_DEFAULT_FORMAT expanded in that client's own format tree; the preview is an appended ChooserPreview::Client the raw TUI draws as window_client_draw does - the chosen client's current pane, a rule, and a copy of that client's own status rows composed at its own width; i swaps in ChooserPreview::Markup over the pin's info lines. prefix D carries the pin's stock `choose-client -Z`. CLAUSE 2 IS UNTOUCHED: clock-mode, customize-mode, switch-mode, suspend-client and server-access are still in UNIMPLEMENTED_TMUX_COMMANDS and still answer `unsupported command: <name>`; the budget went to clause 1. CLAUSE 3 IS PART DONE: compat/tui-client-commands.sh asserts choose-client's exact stdout, stderr and exit status for an unknown flag, an invalid -O and too many positionals, and its client-tree-open case is recorded under clients.interactive-refresh, not under commands.native-client-tools: a chooser is per client in zz, so a clientless CLI answers `choose-client requires an interactive client` at exit 1 the way choose-tree and choose-buffer already do, which that gap accepts in writing. command:choose-client is closed in commands.native-client-tools and key:prefix:D in keys.default-prefix, both with the dated measurement.
 
-Next action: Take choose-client first: it is the one case compat/tui-choosers.sh still records, so TUI-006 verifies as soon as it lands. Build the rows in the daemon and publish them through chooser_presentation.rs, which already carries rows, sort label, filter flag, styles and preview to the raw TUI.
+Next action: Clause 2 next: clock-mode is the smallest of the four modes and needs no new chooser surface, then switch-mode over the same mode tree. suspend-client is a signal to the client process the daemon already knows the pid of. Clause 3 then closes the rest of commands.native-client-tools item by item.
 
 ### TUI-015: A lock surface a client can draw
 
@@ -707,7 +710,7 @@ Sources:
 
 Tmux gap references: `clients.interactive-refresh`.
 
-SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT, 2026-09-13: show-messages itself is the same shape on both - `HH:MM: <client> command: <text>` and `HH:MM: <client> message: <text>`, newest first - but no run can match byte for byte, because every row names the invoking client, client-<pid> on the pin and device-<n> on zz, and the pin reprints each command through args_print, so `capture-pane -pa` comes back as `capture-pane -ap`. show-messages -J and -T are refused with `unsupported command: show-messages -J` and `-T` against a pin that prints the running jobs and, for -T, 234 lines of terminal capabilities per attached terminal; -t is refused against a pin that accepts it and prints the same log.
+SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT, 2026-09-13: show-messages itself is the same shape on both - `HH:MM: <client> command: <text>` and `HH:MM: <client> message: <text>`, newest first - but no run can match byte for byte, because every row names the invoking client, client-<pid> on the pin and device-<n> on zz, and the pin reprints each command through args_print, so `capture-pane -pa` comes back as `capture-pane -ap`. show-messages -J and -T are refused with `unsupported command: show-messages -J` and `-T` against a pin that prints the running jobs and, for -T, 234 lines of terminal capabilities per attached terminal; -t is refused against a pin that accepts it and prints the same log. CYCLE 8 DID NOT REACH THIS: the commands lane's budget went to TUI-014's first clause, which held TUI-006 open, and the punch list puts the rest of TUI-014 ahead of this record. The measurement above is unchanged and still the starting point.
 
 Next action: Start with -T: the daemon already knows each client's terminal features, so the missing half is the pin's print shape. -J needs the format job table. The client naming question is a decision to record before either is written.
 
@@ -729,7 +732,7 @@ Sources:
 
 Tmux gap references: `capture.rich-transports`.
 
-SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT, 2026-09-13 at 80x24 on a pane holding three written rows: `capture-pane -p` prints 24 rows on the pin and 3 on zz; `-p -N -S 0 -E 0` prints the row padded with trailing spaces on the pin and trimmed at the last written cell on zz; `-p -M` prints the pane on the pin and answers `pane is not in a native mode` on zz; `-p -a` says `no alternate screen` on the pin and `alternate screen is not active` on zz; `-p -e -S 0 -E 2` differs in one trailing cell on the prompt row, because the -e transform runs through the vendored formatter in crates/zz-terminal/src/session.rs whose Vt format keeps a cell the pin trims. Every explicit-range form without -e is identical, and so are -J, -T, reversed bounds, a history start, -q on a missing target, the loud missing target and -b into a named buffer. The six rich flags are refused with `unsupported command: capture-pane -X`. The residues are terminal-owned: the capture path is CaptureOptions in crates/zz-terminal/src/session.rs, which is why the roster lane recorded them.
+SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT, 2026-09-13 at 80x24 on a pane holding three written rows: `capture-pane -p` prints 24 rows on the pin and 3 on zz; `-p -N -S 0 -E 0` prints the row padded with trailing spaces on the pin and trimmed at the last written cell on zz; `-p -M` prints the pane on the pin and answers `pane is not in a native mode` on zz; `-p -a` says `no alternate screen` on the pin and `alternate screen is not active` on zz; `-p -e -S 0 -E 2` differs in one trailing cell on the prompt row, because the -e transform runs through the vendored formatter in crates/zz-terminal/src/session.rs whose Vt format keeps a cell the pin trims. Every explicit-range form without -e is identical, and so are -J, -T, reversed bounds, a history start, -q on a missing target, the loud missing target and -b into a named buffer. The six rich flags are refused with `unsupported command: capture-pane -X`. The residues are terminal-owned: the capture path is CaptureOptions in crates/zz-terminal/src/session.rs, which is why the roster lane recorded them. CYCLE 8 DID NOT REACH THIS. One thing is re-measured at the cycle-8 tip: compat/scenarios/capture-pane.txt is green under --strict-geometry with 23 steps and no divergence, so the explicit-range floor the residues sit on has not moved.
 
 Next action: The three residues are worth more than the six rich flags and are a smaller change: they live in the terminal worker's capture, not in a new transport. Take them first and keep compat/scenarios/capture-pane.txt green, since its explicit ranges already pass on both.
 

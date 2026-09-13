@@ -1,0 +1,652 @@
+stock client-command roster at 80x24 (pin tmux)
+ok    baseline
+ok    refresh-bare
+ok    refresh-status
+ok    refresh-target
+ok    refresh-missing-target
+ok    refresh-flag-set
+ok    refresh-flag-clear
+ok    refresh-flag-restore
+ok    refresh-control-pane
+ok    refresh-control-subscribe
+ok    refresh-control-size
+ok    refresh-missing-argument
+      case refresh-pan-up
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-up recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-down
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-down recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-left
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-left recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-right
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-right recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-pan-cursor
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-pan-cursor recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-clipboard
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-clipboard recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+      case refresh-adjustment
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: refresh-client interactive behavior
+note  refresh-adjustment recorded, not asserted: clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported
+ok    refresh-restored
+ok    capture-range
+      case capture-escape
+      stdout differs
+        3c3
+        < $
+        ---
+        > $ 
+note  capture-escape recorded, not asserted: capture.rich-transports, owner terminal: the -e transform runs through the vendored formatter in crates/zz-terminal/src/session.rs, whose Vt format keeps one trailing cell the pin trims, and that file is outside this lane
+ok    capture-join
+ok    capture-trailing
+ok    capture-reversed
+ok    capture-history
+ok    capture-quiet-missing
+ok    capture-loud-missing
+ok    capture-buffer
+ok    capture-buffer-shown
+ok    capture-buffer-deleted
+      case capture-default-range
+      stdout differs
+        4,23d3
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+        < 
+note  capture-default-range recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-preserve-trailing
+      stdout differs
+        1c1
+        < $ printf 'SCENE-%s\n' %0                
+        ---
+        > $ printf 'SCENE-%s\n' %0
+note  capture-preserve-trailing recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-mode-screen
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,3d0
+        < $ printf 'SCENE-%s\n' %0
+        < SCENE-%0
+        < $
+      stderr differs
+        0a1
+        > pane is not in a native mode
+note  capture-mode-screen recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-alternate
+      stderr differs
+        1c1
+        < no alternate screen
+        ---
+        > alternate screen is not active
+note  capture-alternate recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-control
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,3d0
+        < $ printf 'SCENE-%s\\n' %0
+        < SCENE-%0
+        < $
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -C
+note  capture-control recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-flags
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,3d0
+        < - $ printf 'SCENE-%s\n' %0
+        < - SCENE-%0
+        < - $
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -F
+note  capture-flags recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-hyperlinks
+      exit tmux: 0  zz: 1
+      stdout differs
+        1d0
+        < 
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -H
+note  capture-hyperlinks recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-line-numbers
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,3d0
+        < 0 $ printf 'SCENE-%s\n' %0
+        < 1 SCENE-%0
+        < 2 $
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -L
+note  capture-line-numbers recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-pending
+      exit tmux: 0  zz: 1
+      stdout differs
+        1d0
+        < 
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -P
+note  capture-pending recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+      case capture-grid
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,1864d0
+        < G 80x23 (0/2000)
+        < 	L 0 (0) flags=NONE[0] 24/40
+        < 		C 0,0 data=(1,1,$) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,1 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,2 data=(1,1,p) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,3 data=(1,1,r) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,4 data=(1,1,i) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,5 data=(1,1,n) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,6 data=(1,1,t) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,7 data=(1,1,f) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,9 data=(1,1,') flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,10 data=(1,1,S) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,11 data=(1,1,C) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,12 data=(1,1,E) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,13 data=(1,1,N) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,14 data=(1,1,E) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,15 data=(1,1,-) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,16 data=(1,1,%) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,17 data=(1,1,s) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,18 data=(1,1,\\) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,19 data=(1,1,n) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,20 data=(1,1,') flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,21 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,22 data=(1,1,%) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,23 data=(1,1,0) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,24 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,25 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,26 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,27 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,28 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,29 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,30 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,31 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,32 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,33 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,34 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,35 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+        < 		C 0,36 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE
+      stderr differs
+        0a1
+        > unsupported command: capture-pane -R
+note  capture-grid recorded, not asserted: capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser
+ok    capture-restored
+ok    buffer-load-stdin
+ok    buffer-show-named
+ok    buffer-save-stdout
+ok    buffer-save-append
+ok    buffer-show-missing
+ok    buffer-delete
+ok    buffer-show-empty
+      case stream-source-file
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > source-file from standard input is not supported
+note  stream-source-file recorded, not asserted: protocol.binary-streams, accepted: typed UTF-8 arguments are the contract and the remaining - forms stay loudly refused rather than pretending the daemon process is the caller
+      case stream-source-file-effect
+      stdout differs
+        1d0
+        < one
+note  stream-source-file-effect recorded, not asserted: protocol.binary-streams, accepted: typed UTF-8 arguments are the contract and the remaining - forms stay loudly refused rather than pretending the daemon process is the caller
+      case stream-display-message
+      stderr differs
+        1c1
+        < pane is not empty
+        ---
+        > unsupported command: display-message -I
+note  stream-display-message recorded, not asserted: protocol.binary-streams, accepted: typed UTF-8 arguments are the contract and the remaining - forms stay loudly refused rather than pretending the daemon process is the caller
+      case stream-split-window
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: split-window -I
+      screen differs
+        12,13c12,13
+        < ^[[38;2;179;179;179mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[38;2;154;205;50mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@
+        < ^[[39mtyped-into-the-pane
+        ---
+        > 
+        > 
+        cursor tmux: 19,12 flag=0 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        2c2
+        < W cli:0 win * 2
+        ---
+        > W cli:0 win * 1
+        4,5c4
+        < P cli:0.0 mode=0/ 80x11 ptitle
+        < P cli:0.1 mode=0/ 80x11 alienware
+        ---
+        > P cli:0.0 mode=0/ 80x23 ptitle
+note  stream-split-window recorded, not asserted: protocol.binary-streams, accepted: typed UTF-8 arguments are the contract and the remaining - forms stay loudly refused rather than pretending the daemon process is the caller
+ok    stream-split-window-restored
+ok    hooks-show
+ok    hooks-show-global
+ok    hooks-show-window
+ok    hooks-show-pane
+ok    hooks-show-before
+ok    hooks-show-one
+ok    hooks-show-missing
+ok    hooks-show-target
+      case messages-log
+      stdout differs
+        1,530c1,540
+        < 19:16: client-3752129 command: show-messages
+        < 19:16: client-3752128 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 19:16: client-3752124 command: list-clients -F "#{client_name}"
+        < 19:16: client-3752056 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 19:16: client-3752055 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 19:16: client-3752054 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 19:16: client-3752053 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 19:16: client-3752052 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 19:16: client-3751966 command: show-hooks -t "%0"
+        < 19:16: client-3751965 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 19:16: client-3751961 command: list-clients -F "#{client_name}"
+        < 19:16: client-3751901 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 19:16: client-3751900 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 19:16: client-3751899 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 19:16: client-3751898 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 19:16: client-3751897 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 19:16: client-3751818 message: invalid option: no-such-hook
+        < 19:16: client-3751818 command: show-hooks -g no-such-hook
+        < 19:16: client-3751817 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 19:16: client-3751813 command: list-clients -F "#{client_name}"
+        < 19:16: client-3751744 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 19:16: client-3751743 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 19:16: client-3751742 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 19:16: client-3751741 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 19:16: client-3751740 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 19:16: client-3751671 command: show-hooks -g after-lock-server
+        < 19:16: client-3751670 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 19:16: client-3751666 command: list-clients -F "#{client_name}"
+        < 19:16: client-3751605 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 19:16: client-3751604 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 19:16: client-3751603 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 19:16: client-3751602 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 19:16: client-3751601 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 19:16: client-3751514 command: show-hooks -B
+        < 19:16: client-3751513 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 19:16: client-3751509 command: list-clients -F "#{client_name}"
+        < 19:16: client-3751459 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 19:16: client-3751458 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 19:16: client-3751457 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+note  messages-log recorded, not asserted: the server log names the client that ran each command - client-<pid> on the pin, device-<n> on zz - and the pin reprints the command through its own argument printer
+      case messages-jobs
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: show-messages -J
+note  messages-jobs recorded, not asserted: TUI-016: show-messages -J lists the running format jobs and -T the known terminals, neither of which zz publishes yet
+      case messages-terminals
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,234d0
+        < Terminal 0: tmux-256color for /dev/pts/8, flags=0x31:
+        <    0: acsc: (string) ++,,--..00``aaffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~
+        <    1: am: (flag) true
+        <    2: AX: (flag) true
+        <    3: bce: (flag) false
+        <    4: bel: (string) \a
+        <    5: Bidi: [missing]
+        <    6: blink: (string) \033[5m
+        <    7: bold: (string) \033[1m
+        <    8: civis: (string) \033[?25l
+        <    9: clear: (string) \033[H\033[J
+        <   10: Clmg: [missing]
+        <   11: Cmg: [missing]
+        <   12: cnorm: (string) \033[34h\033[?25h
+        <   13: colors: (number) 256
+        <   14: Cr: (string) \033]112\a
+        <   15: Cs: (string) \033]12;%p1%s\a
+        <   16: csr: (string) \033[%i%p1%d;%p2%dr
+        <   17: cub: (string) \033[%p1%dD
+        <   18: cub1: (string) \b
+        <   19: cud: (string) \033[%p1%dB
+        <   20: cud1: (string) \n
+        <   21: cuf: (string) \033[%p1%dC
+        <   22: cuf1: (string) \033[C
+        <   23: cup: (string) \033[%i%p1%d;%p2%dH
+        <   24: cuu: (string) \033[%p1%dA
+        <   25: cuu1: (string) \033M
+        <   26: cvvis: (string) \033[34l
+        <   27: dch: (string) \033[%p1%dP
+        <   28: dch1: (string) \033[P
+        <   29: dim: (string) \033[2m
+        <   30: dl: (string) \033[%p1%dM
+        <   31: dl1: (string) \033[M
+        <   32: Dsbp: (string) \033[?2004l
+        <   33: Dseks: (string) \033[>4m
+        <   34: Dsfcs: (string) \033[?1004l
+        <   35: Dsmg: [missing]
+        <   36: E3: (string) \033[3J
+        <   37: ech: [missing]
+      stderr differs
+        0a1
+        > unsupported command: show-messages -T
+note  messages-terminals recorded, not asserted: TUI-016: show-messages -J lists the running format jobs and -T the known terminals, neither of which zz publishes yet
+      case messages-target
+      exit tmux: 0  zz: 1
+      stdout differs
+        1,554d0
+        < 19:16: client-3752716 command: show-messages -t /dev/pts/8
+        < 19:16: client-3752715 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 19:16: client-3752711 command: list-clients -F "#{client_name}"
+        < 19:16: client-3752633 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 19:16: client-3752632 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 19:16: client-3752631 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 19:16: client-3752630 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 19:16: client-3752629 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 19:16: client-3752529 command: show-messages -T
+        < 19:16: client-3752528 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 19:16: client-3752522 command: list-clients -F "#{client_name}"
+        < 19:16: client-3752448 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 19:16: client-3752447 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 19:16: client-3752446 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 19:16: client-3752445 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 19:16: client-3752444 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 19:16: client-3752346 command: show-messages -J
+        < 19:16: client-3752345 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 19:16: client-3752341 command: list-clients -F "#{client_name}"
+        < 19:16: client-3752261 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 19:16: client-3752260 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 19:16: client-3752259 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 19:16: client-3752258 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 19:16: client-3752257 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 19:16: client-3752129 command: show-messages
+        < 19:16: client-3752128 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 19:16: client-3752124 command: list-clients -F "#{client_name}"
+        < 19:16: client-3752056 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 19:16: client-3752055 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 19:16: client-3752054 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 19:16: client-3752053 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+        < 19:16: client-3752052 command: list-sessions -F "S #{session_name} #{session_windows} #{session_attached}"
+        < 19:16: client-3751966 command: show-hooks -t "%0"
+        < 19:16: client-3751965 command: list-panes -F "#{pane_active} #{pane_id}" -t =cli
+        < 19:16: client-3751961 command: list-clients -F "#{client_name}"
+        < 19:16: client-3751901 command: list-clients -F "C #{client_session} #{client_width}x#{client_height} #{client_prefix}"
+        < 19:16: client-3751900 command: list-buffers -F "B #{buffer_name} #{buffer_size}"
+        < 19:16: client-3751899 command: list-panes -a -F "P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}"
+        < 19:16: client-3751898 command: list-windows -a -F "W #{session_name}:#{window_index} #{window_name} #{window_flags} #{window_panes}"
+      stderr differs
+        0a1
+        > unsupported command: show-messages -t
+note  messages-target recorded, not asserted: TUI-016: show-messages -J lists the running format jobs and -T the known terminals, neither of which zz publishes yet
+ok    lock-server: exit, stdout and stderr identical
+note  lock-server: screen and state identical too, the record can close
+ok    lock-server-restored
+ok    lock-server-hook
+ok    lock-session: exit, stdout and stderr identical
+note  lock-session: screen and state identical too, the record can close
+ok    lock-session-restored
+ok    lock-session-missing
+ok    lock-client: exit, stdout and stderr identical
+note  lock-client: screen and state identical too, the record can close
+ok    lock-client-restored
+ok    lock-client-current: exit, stdout and stderr identical
+note  lock-client-current: screen and state identical too, the record can close
+ok    lock-client-current-restored
+ok    lock-client-missing
+ok    lock-after-time-store
+ok    lock-command-store
+      case client-tree-open
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > choose-client requires an interactive client
+      screen differs
+        1c1,13
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) /dev/pts/8: 19:16: session cli^[[39m
+        ---
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        12,23d23
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L /dev/pts/8 (sort: name) (view: preview) M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m $ printf 'SCENE-%s\n' %0                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m SCENE-%0                                                                     ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m $ ^[[7m ^[[0m                                                                          ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two                                                               ^[[39m^[[49m ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=1/client-mode 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x23 ptitle
+note  client-tree-open recorded, not asserted: clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin sets a mode on the pane whether or not the caller is a client. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open
+ok    client-tree-closed
+ok    client-tree-unknown-flag
+ok    client-tree-bad-sort
+ok    client-tree-usage
+      case clock-mode-open
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: clock-mode
+      screen differs
+        0a1,5
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        > 
+        > 
+        9,13d13
+        <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
+        <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
+        <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m     ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m       ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m   ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m
+        <                              ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m           ^[[38;2;108;166;205m^[[48;2;108;166;205m#^[[39m^[[49m ^[[38;2;108;166;205m^[[48;2;108;166;205m#####^[[39m^[[49m
+        cursor tmux: 54,12 flag=0 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=1/clock-mode 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x23 ptitle
+note  clock-mode-open recorded, not asserted: commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014
+ok    clock-mode-closed
+      case customize-mode-open
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: customize-mode
+      screen differs
+        1,8c1,20
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11m(0) + Server Options^[[39m
+        < ^[[38;2;179;179;179m^[[49m(1) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mSession Options
+        < ^[[38;2;179;179;179m(2) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mWindow & Pane Options
+        < ^[[38;2;179;179;179m(3) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode
+        < ^[[38;2;179;179;179m(4) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - copy-mode-vi
+        < ^[[38;2;179;179;179m(5) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - move
+        < ^[[38;2;179;179;179m(6) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - prefix
+        < ^[[38;2;179;179;179m(7) ^[[38;2;154;205;50m+^[[38;2;179;179;179m ^[[39mKey Table - root
+        ---
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        12,23d23
+        < ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^L Server Options M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^P
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        < M-bM-^TM-^B^[[39m^[[49m                                                                              ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^B
+        cursor tmux: 0,0 flag=0 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=1/options-mode 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x23 ptitle
+note  customize-mode-open recorded, not asserted: commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014
+ok    customize-mode-closed
+      case switch-mode
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: switch-mode
+      screen differs
+        1c1,3
+        < ^[[38;2;13;13;13m^[[48;2;184;134;11mcli ^[[2m2 windows^[[0m^[[38;2;13;13;13m^[[48;2;184;134;11m attached ^[[2mwin^[[0m^[[48;2;184;134;11m
+        ---
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        22,23d23
+        < 
+        < ^[[38;2;13;13;13m(search) ^[[39m^[[49m
+        cursor tmux: 9,22 flag=1 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        4c4
+        < P cli:0.0 mode=1/switch-mode 80x23 ptitle
+        ---
+        > P cli:0.0 mode=0/ 80x23 ptitle
+note  switch-mode recorded, not asserted: commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014
+ok    switch-mode-closed
+      case server-access-bare
+      stderr differs
+        1c1
+        < missing user or group argument
+        ---
+        > unsupported command: server-access
+note  server-access-bare recorded, not asserted: zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape
+      case server-access-user
+      stderr differs
+        1c1
+        < unknown user: zzcc-nobody
+        ---
+        > unsupported command: server-access
+note  server-access-user recorded, not asserted: zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape
+ok    client-tools-restored
+note  suspend-client: the tmux screen never settled within 6 seconds
+      case suspend-client
+      exit tmux: 0  zz: 1
+      stderr differs
+        0a1
+        > unsupported command: suspend-client
+      screen differs
+        0a1,3
+        > $ printf 'SCENE-%s\n' %0
+        > SCENE-%0
+        > $
+        1a5,24
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > 
+        > ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        cursor tmux: 0,0 flag=1 pane=80x24 shape=default
+        cursor zz:   2,2 flag=1 pane=80x24 shape=default
+      state differs
+        1c1
+        < S cli 2 0
+        ---
+        > S cli 2 1
+        5a6
+        > C cli 80x24 0
+note  suspend-client recorded, not asserted: commands.native-client-tools, accepted: the pin paints client chrome inside the target pane and zz answers each intent with a native surface. The raw TUI half is TUI-014
+all 61 asserted comparisons identical, 37 recorded not asserted (0 for a sibling lane)
+run-2 exit=0

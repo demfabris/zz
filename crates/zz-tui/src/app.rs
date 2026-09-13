@@ -497,6 +497,7 @@ pub(crate) fn run(
     let size = TerminalSize::detect().map_err(|error| error.to_string())?;
     let mut core = seeded_core(initial.server_hello().clone());
     let extended_keys = crate::tty::extended_keys_option(&endpoint);
+    let focus_events = crate::tty::focus_events_option(&endpoint);
     let mut client = Arc::new(initial);
     if let Some(detach_others) = attach_request {
         client
@@ -519,6 +520,7 @@ pub(crate) fn run(
             MouseArming::Off
         },
         extended_keys,
+        focus_events,
     )
     .map_err(|error| error.to_string())?;
     let pixel_mouse = terminal.pixel_mouse();

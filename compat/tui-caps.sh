@@ -92,13 +92,14 @@
 #   focus reporting                the pin publishes no pane format for      named
 #                                  focus mode, so this decoder cannot see
 #                                  either side arm it. Read from source
-#                                  instead, and NOT equal: tty.c
-#                                  tty_start_tty arms Enfcs only when
+#                                  instead, and equal since 2026-09-13:
+#                                  tty.c tty_start_tty arms Enfcs only when
 #                                  `focus-events` is on and its default is
-#                                  0 (options-table.c), while tty.rs
-#                                  TerminalGuard::enter writes `\e[?1004h`
-#                                  on every attach. Driving it needs an
-#                                  observable this decoder does not have.
+#                                  0 (options-table.c), and tty.rs
+#                                  TerminalGuard::enter now reads the same
+#                                  server option the same once. What each
+#                                  side then DOES with a focus report is
+#                                  driven by compat/tui-mouse.sh.
 #   user keys (User0..User9)       an option-store channel with no client named
 #                                  terminal behind it on zz; recorded on
 #                                  options.client-terminal-negotiation

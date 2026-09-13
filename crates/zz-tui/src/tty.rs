@@ -145,6 +145,7 @@ const KEYPAD_LOCAL: &[u8] = b"\x1b[?1l\x1b>";
 /// with `\e[?997;1n` for dark and `\e[?997;2n` for light.
 const THEME_SUBSCRIBE: &[u8] = b"\x1b[?2031h\x1b[?996n";
 const THEME_UNSUBSCRIBE: &[u8] = b"\x1b[?2031l";
+const FOCUS_EVENTS_ENABLE: &[u8] = b"\x1b[?1004h";
 const EXTENDED_KEYS_ENABLE: &[u8] = b"\x1b[>4;2m";
 const EXTENDED_KEYS_DISABLE: &[u8] = b"\x1b[>4m";
 
@@ -164,6 +165,23 @@ pub(crate) fn extended_keys_option(endpoint: &Endpoint) -> bool {
 
 fn extended_keys_armed(value: &str) -> bool {
     !matches!(value.trim(), "" | "off")
+}
+
+/// `tty_start_tty` writes `Enfcs` only while the server option is on, and its
+/// default is off (options-table.c). The option is read once, where the pin
+/// reads it, because the pin arms once too.
+pub(crate) fn focus_events_option(endpoint: &Endpoint) -> bool {
+    let Endpoint::Local(path) = endpoint else {
+        return false;
+    };
+    CommandClient::connect(path)
+        .and_then(|mut client| {
+            client.execute(CommandInvocation::new(
+                "show-options",
+                ["-sv", "focus-events"],
+            ))
+        })
+        .is_ok_and(|value| value.trim() == "on")
 }
 
 /// `tty_update_mode`: which of the pin's three mouse trackings the outer
@@ -194,7 +212,11 @@ pub(crate) fn mouse_mode_sequence(arming: MouseArming, pixel_mouse: bool) -> Vec
 
 impl TerminalGuard {
     #[cfg(unix)]
-    pub fn enter(mouse: MouseArming, extended_keys: bool) -> io::Result<Self> {
+    pub fn enter(
+        mouse: MouseArming,
+        extended_keys: bool,
+        focus_events: bool,
+    ) -> io::Result<Self> {
         let original = rustix::termios::tcgetattr(io::stdin())?;
         let file_probe = probe_file_path();
         remove_file_if_present(&file_probe)?;
@@ -216,7 +238,10 @@ impl TerminalGuard {
         };
         TERMINAL_COLOURS.store(zz_daemon::client_terminal_colour_count(), Ordering::Relaxed);
         let mut output = io::stdout().lock();
-        output.write_all(b"\x1b[?1049h\x1b[?25l\x1b[?1004h")?;
+        output.write_all(b"\x1b[?1049h\x1b[?25l")?;
+        if focus_events {
+            output.write_all(FOCUS_EVENTS_ENABLE)?;
+        }
         output.write_all(KEYPAD_TRANSMIT)?;
         if mouse != MouseArming::Off {
             output.write_all(&mouse_mode_sequence(mouse, guard.pixel_mouse))?;
@@ -240,7 +265,11 @@ impl TerminalGuard {
     }
 
     #[cfg(not(unix))]
-    pub fn enter(_mouse: MouseArming, _extended_keys: bool) -> io::Result<Self> {
+    pub fn enter(
+        _mouse: MouseArming,
+        _extended_keys: bool,
+        _focus_events: bool,
+    ) -> io::Result<Self> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "zz-tui currently requires a Unix terminal",

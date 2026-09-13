@@ -1,85 +1,45 @@
 cargo checks at the final tip, through the box's slot-and-cap wrapper (MemoryMax=5G, --jobs 4, --test-threads=3)
 
-=== final-test-a ===
-     Running unittests src/lib.rs (target/debug/deps/zz_protocol-e014ef579a7f2e72)
-test result: ok. 222 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
-     Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-1b582351ea88600d)
+=== cargo test (fin-a) ===
+test result: ok. 222 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-     Running tests/hunt_claims.rs (target/debug/deps/hunt_claims-b80ed00d4999a918)
 test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-     Running unittests src/lib.rs (target/debug/deps/zz_tui-3aa45f2367092764)
 test result: ok. 206 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
-     Running unittests src/main.rs (target/debug/deps/zz_tui-1699ce52e37490d3)
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-   Doc-tests zz_protocol
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-   Doc-tests zz_tui
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-=== final-test-b ===
-     Running unittests src/lib.rs (target/debug/deps/zz_daemon-25b6c34994675b2c)
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 892 filtered out; finished in 0.74s
-test result: ok. 893 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 129.05s
-     Running tests/agent_soak.rs (target/debug/deps/agent_soak-e9471454b924362b)
-test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.09s
-     Running tests/display_menu_cell_layout.rs (target/debug/deps/display_menu_cell_layout-090c13876f77317c)
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s
-     Running tests/display_menu_resize_lifecycle.rs (target/debug/deps/display_menu_resize_lifecycle-11f2e0540a79e615)
+=== cargo test (fin-b) ===
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 892 filtered out; finished in 0.81s
+test result: ok. 893 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 138.33s
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.28s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s
-     Running tests/display_menu_shortcut_grammar.rs (target/debug/deps/display_menu_shortcut_grammar-d5e14ebdbbf0298d)
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
-     Running tests/display_popup_resize_lifecycle.rs (target/debug/deps/display_popup_resize_lifecycle-d99901d4c1c722e9)
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.08s
-     Running tests/format_client_loop_context.rs (target/debug/deps/format_client_loop_context-4e703dad132fcbff)
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.78s
-     Running tests/format_environment_loop_context.rs (target/debug/deps/format_environment_loop_context-8006ddd193925b3c)
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s
-     Running tests/format_modifier_client_loop.rs (target/debug/deps/format_modifier_client_loop-3538dc30c55407c6)
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.53s
-     Running tests/format_modifier_environment_loop.rs (target/debug/deps/format_modifier_environment_loop-728a74b96e0ac708)
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.91s
-   Doc-tests zz_daemon
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.87s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.09s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.84s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.23s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.60s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.80s
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-=== final-test-c ===
-     Running unittests src/lib.rs (target/debug/deps/zz-1ce6c8f5eb9597d9)
+=== cargo test (fin-c) ===
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 637 filtered out; finished in 0.00s
-test result: ok. 638 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.91s
-     Running unittests src/main.rs (target/debug/deps/zz-d7beb3e66b610370)
+test result: ok. 638 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.25s
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-     Running unittests src/bin/zz_browser_fixture.rs (target/debug/deps/zz_browser_fixture-391910b51965ebb7)
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-     Running unittests src/bin/zz_cli.rs (target/debug/deps/zz_cli-10b79e635e3ac490)
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-     Running unittests src/bin/zz_external_texture_fixture.rs (target/debug/deps/zz_external_texture_fixture-e8a9ddad8cccbb50)
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-     Running unittests src/bin/zz_helper.rs (target/debug/deps/zz_helper-0d0fa9aa053eb876)
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-     Running tests/buffer_client_file_load.rs (target/debug/deps/buffer_client_file_load-9af7bfdaab5fea56)
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
-     Running tests/buffer_client_file_save.rs (target/debug/deps/buffer_client_file_save-37c73ca8cb89e634)
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s
-     Running tests/cli_binary.rs (target/debug/deps/cli_binary-1803822e71f859fb)
-test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 87.30s
-   Doc-tests zz
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.15s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 104.40s
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 === cargo clippy -p zz-protocol -p zz-tui -p zz-daemon -p zz --all-targets --all-features -- -D warnings ===
-    Checking zz-chrome-import v0.8.0 (/home/demfabris/dev/zz-tui-input/crates/zz-chrome-import)
     Checking zz v0.8.0 (/home/demfabris/dev/zz-tui-input/crates/zz)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 14.98s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.71s
 
 === cargo fmt --all -- --check ===
 exit 1, and the only file it names is crates/zz-tui/src/mode_view.rs, which this branch does not touch: git diff origin/main -- crates/zz-tui/src/mode_view.rs is empty, so the drift is main's.
 Diff in /home/demfabris/dev/zz-tui-input/crates/zz-tui/src/mode_view.rs:174:
-     cells_of(front, width, &mut drawn);
-     let written =
-         |(text, _): &(String, TmuxStyle)| !text.is_empty() && (!filled_row || text != " ");
-[31m-    let front_width = drawn
-(B[m[31m-        .iter()
-(B[m[31m-        .rposition(written)
-(B[m[31m-        .map_or(0, |last| last + 1);
-(B[m[32m+    let front_width = drawn.iter().rposition(written).map_or(0, |last| last + 1);
-(B[m     for (column, cell) in drawn.into_iter().enumerate().take(front_width) {
-         cells[column] = cell;
-     }

@@ -62,7 +62,7 @@ the pane received off its own decoded screen, or the whole decoded screen.
 
 ## The cases that still record, each with its cause
 
-`tui-mouse.sh` asserts 11 checks and records 17, identical across three runs.
+`tui-mouse.sh` asserts 13 checks and records 17, identical across three runs.
 
 - `click-user-binding-target/context` — the invoking event travels with the
   command now, but no format reads it: the eight `mouse_*` names are
@@ -98,7 +98,7 @@ the pane received off its own decoded screen, or the whole decoded screen.
 
 ## Sabotages
 
-`--self-check` drives five one-sided differences and three controls:
+`--self-check` drives seven one-sided differences and three controls:
 a one-sided paste; the SGR mouse extension dropped from one side's program; only
 the focus-out report sent to one side; a `status-left` only one side carries; a
 click aimed at the pane zz already sits in; and the same root mouse binding set

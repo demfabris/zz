@@ -81,6 +81,8 @@ note  status-clicks/right-click-screen recorded, not asserted: the raw TUI answe
         row 21 zz:   
         row 22 tmux:         ^[[38;2;179;179;179m^[[48;2;38;38;38mM-bM-^TM-^TM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^X^[[39m^[[49m
         row 22 zz:   
+ok    border-user-binding/option: both fired
+ok    status-user-binding/option: both fired
 ok    app-mouse-mouse-on/report: both ^[[<0;5;3M^[[<0;5;3m|L0:win*|
 ok    app-mouse-mouse-off/report: both ^[[<0;5;3M^[[<0;5;3m|L0:win*|
 ok    paste-into-pane/received: both ^[[200~pasted-text^[[201~|L0:win*|
@@ -98,5 +100,5 @@ ok    focus-events-on/received: both ^[[O^[[I|L0:win*|
 note  focus-events-off/received recorded, not asserted: focus-events on the pin decides only whether tty_start_tty arms Enfcs at its own terminal; a report that arrives anyway is still handed to a pane that asked for it. tty.rs now reads that same server option once and arms \e[?1004h only when it is on, so a real terminal sends the raw TUI nothing here either, but the daemon still gates the DELIVERY of a report on the option, which is what this case injects past. That gate is the GUI's too - crates/zz/src/terminal/view.rs sends the same Focus action from window focus and has no arming of its own - so moving it into each client is a change these zones do not open
         tmux: ^[[O^[[I|L0:win*|
         zz:   L0:win*|
-11 asserted checks, 17 recorded checks
-all 11 asserted checks identical
+13 asserted checks, 17 recorded checks
+all 13 asserted checks identical

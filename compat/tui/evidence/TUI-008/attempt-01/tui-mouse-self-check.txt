@@ -63,4 +63,8 @@ DIFF  click-user-binding/option
         tmux: fired
         zz:   other
 ok    self-check the same root mouse binding set differently on zz: caught
+DIFF  border-user-binding/option
+        tmux: fired
+        zz:   other
+ok    self-check the border mouse binding set differently on zz: caught
 self-check: every sabotage caught in its own channel

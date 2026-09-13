@@ -1138,13 +1138,18 @@ fn is_mouse_key_name(key: &str) -> bool {
 /// `mouse` option speak. With the option on and no overlay the pin clears all
 /// three trackings and raises `MODE_MOUSE_ALL` for a pane that asked for it;
 /// `focus-follows-mouse` raises it too, and anything short of it settles on
-/// `MODE_MOUSE_BUTTON`. A menu is the overlay that carries `MODE_MOUSE_ALL`
-/// of its own (`menu.c` `menu_prepare`), so it keeps any-event tracking up
-/// while it is on screen. With the option off nothing is added and the pane's
-/// own request is what the outer terminal sees.
+/// `MODE_MOUSE_BUTTON`. A menu carries `MODE_MOUSE_ALL` of its own only when
+/// it is not `MENU_NOMOUSE` (`menu.c` `menu_prepare` raises the two mouse
+/// modes on the overlay screen behind `~md->flags & MENU_NOMOUSE`, and
+/// `cmd-display-menu.c` sets that flag for a menu raised with neither `-M`
+/// nor an invoking mouse event, which is every menu a key binding raises).
+/// `MenuState::mouse_keys` is that flag inverted, so a `MENU_NOMOUSE` menu
+/// asks for no tracking of its own and the option decides alone. With the
+/// option off nothing is added and the overlay's or the pane's own request is
+/// what the outer terminal sees.
 pub(crate) fn desired_mouse_arming(model: &Model) -> MouseArming {
-    let overlay_any = if model.menu.is_some() {
-        Some(true)
+    let overlay_any = if let Some(menu) = model.menu.as_ref() {
+        Some(menu.mouse_keys)
     } else {
         model.popup.as_ref().map(|popup| {
             model
@@ -2068,7 +2073,7 @@ fn command_output_resize_message(model: &Model) -> Option<((u16, u16, u32, u32),
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zz_protocol::{PopupBorderLines, PopupState};
+    use zz_protocol::{MenuItem, MenuState, PopupBorderLines, PopupState};
     use zz_terminal::SearchDirection;
 
     fn paned_model() -> (Model, zz_protocol::PaneId) {
@@ -2299,6 +2304,33 @@ mod tests {
         viewport
     }
 
+    fn menu_state(mouse_keys: bool) -> MenuState {
+        MenuState {
+            left: 4,
+            top: 3,
+            width: 20,
+            height: 3,
+            client_columns: 80,
+            client_rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 16,
+            title: "Menu".to_owned(),
+            style: "default".to_owned(),
+            selected_style: "reverse".to_owned(),
+            border_style: "default".to_owned(),
+            border_lines: PopupBorderLines::Single,
+            items: vec![Some(MenuItem {
+                name: "First".to_owned(),
+                key: Some("f".to_owned()),
+                annotation: Some("f".to_owned()),
+                enabled: true,
+            })],
+            selected: None,
+            stay_open: false,
+            mouse_keys,
+        }
+    }
+
     fn popup_state(pane: PaneId) -> PopupState {
         PopupState {
             pane,
@@ -2349,6 +2381,34 @@ mod tests {
             sync_mouse_modes(&mut model, true).as_deref(),
             Some(crate::tty::mouse_mode_sequence(MouseArming::Button, true).as_slice())
         );
+    }
+
+    /// `menu.c` `menu_prepare` raises `MODE_MOUSE_ALL|MODE_MOUSE_BUTTON` on the
+    /// menu's own screen only when the menu is not `MENU_NOMOUSE`, which
+    /// `cmd-display-menu.c` sets for every menu raised without `-M` and
+    /// without an invoking mouse event. So the common menu leaves the arming
+    /// to the `mouse` option and only `-M` pins any-event tracking up.
+    #[test]
+    fn a_nomouse_menu_leaves_the_arming_to_the_mouse_option() {
+        let (mut model, pane) = paned_model();
+        model.viewports.insert(pane, tracking_viewport(false));
+
+        model.mouse_option = true;
+        model.menu = Some(menu_state(false));
+        assert_eq!(desired_mouse_arming(&model), MouseArming::Button);
+        model.menu = Some(menu_state(true));
+        assert_eq!(desired_mouse_arming(&model), MouseArming::Any);
+
+        model.mouse_option = false;
+        model.menu = Some(menu_state(false));
+        assert_eq!(desired_mouse_arming(&model), MouseArming::Off);
+        model.menu = Some(menu_state(true));
+        assert_eq!(desired_mouse_arming(&model), MouseArming::Any);
+
+        model.mouse_option = true;
+        model.focus_follows_mouse = true;
+        model.menu = Some(menu_state(false));
+        assert_eq!(desired_mouse_arming(&model), MouseArming::Any);
     }
 
     #[test]

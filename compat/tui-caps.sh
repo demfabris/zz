@@ -36,6 +36,10 @@
 #   mouse arming                   the five mouse flags, mouse on, and    driven
 #                                  the any-event arming
 #                                  `focus-follows-mouse` forces
+#   mouse arming under a menu      the whole mode tuple while a menu      driven
+#                                  raised from a key binding is up, with
+#                                  and without `-M` and with `mouse` on
+#                                  and off
 #   legacy keys                    pane_key_mode with extended-keys off  driven
 #   extended keys                  pane_key_mode with extended-keys on   driven
 #   client terminal name           client_termname                       driven
@@ -893,6 +897,60 @@ pin_theme_known() {
   [ -n "$(tuple_field "$(read_facts tmux)" 5)" ]
 }
 
+# The arming a MENU leaves up. `menu.c` `menu_prepare` raises
+# `MODE_MOUSE_ALL|MODE_MOUSE_BUTTON` on the menu's own overlay screen only
+# behind `~md->flags & MENU_NOMOUSE`, and `cmd-display-menu.c` sets that flag
+# for a menu raised with neither `-M` nor an invoking mouse event, which is
+# every menu a key binding raises. `server_client_reset_state` then takes the
+# overlay's mode as the client's, so the common menu leaves the client on
+# button tracking and only `-M` pins any-event tracking up; with `mouse` off
+# the plain menu asks for nothing at all and `-M` still arms. The menu is
+# raised with a REAL prefix key driven onto the client's own stdin through the
+# outer decoder, never through a command, so what is read back is the arming a
+# user would be left with. Every row asserts.
+case_menu_arming() {
+  local name="$1" zz_flag="$2" pin_flag="$3" recorded="${4:-$MODE_RECORDED}" side
+  side_command zz bind-key -T prefix E display-menu -x 4 -y 8 -T CAPSMENU $zz_flag \
+    'Alpha item' a 'set-option -g @capsmenu alpha' >/dev/null
+  side_command tmux bind-key -T prefix E display-menu -x 4 -y 8 -T CAPSMENU $pin_flag \
+    'Alpha item' a 'set-option -g @capsmenu alpha' >/dev/null
+  open_case "$name" xterm-256color '' ''
+  checkpoint "${name//[^a-zA-Z0-9]/}"
+  for side in zz tmux; do
+    tmux_outer_command send-keys -t "$(outer_window "$side")" C-b E
+  done
+  for side in zz tmux; do
+    wait_for "$side raised the menu for $name" menu_on_screen "$side"
+    wait_settled "$side" CAPSMENU
+  done
+  compare_tuple "$name" "$recorded" "$(read_modes zz)" "$(read_modes tmux)" \
+    "${MODE_NAMES[@]}"
+  for side in zz tmux; do
+    tmux_outer_command send-keys -t "$(outer_window "$side")" Escape
+  done
+  for side in zz tmux; do
+    wait_for "$side dropped the menu for $name" menu_gone "$side"
+    side_command "$side" unbind-key -T prefix E >/dev/null 2>&1 || true
+  done
+}
+menu_on_screen() {
+  [[ "$(outer_screen "$1")" == *CAPSMENU* ]]
+}
+menu_gone() {
+  [[ "$(outer_screen "$1")" != *CAPSMENU* ]]
+}
+# `mouse off` for the two menu cases that name it, and back on after them.
+case_menu_arming_mouse_off() {
+  local name="$1" zz_flag="$2" pin_flag="$3" recorded="${4:-$MODE_RECORDED}" side
+  for side in zz tmux; do
+    side_command "$side" set-option -g mouse off >/dev/null
+  done
+  case_menu_arming "$name" "$zz_flag" "$pin_flag" "$recorded"
+  for side in zz tmux; do
+    side_command "$side" set-option -gu mouse >/dev/null 2>&1 || true
+  done
+}
+
 # `focus-follows-mouse` on one side or both, read back through the mode tuple.
 # The option lives in the inner session's options, so it outlives the attach
 # the case opens and both clients pick it up on their first redraw.
@@ -1146,6 +1204,10 @@ if [ "$SELF_CHECK" -eq 0 ]; then
   case_extended_key 'keys/always'
   side_command zz set-option -s extended-keys off >/dev/null
   side_command tmux set-option -s extended-keys off >/dev/null
+  case_menu_arming 'menu/nomouse' '' ''
+  case_menu_arming 'menu/mouse-keys' -M -M
+  case_menu_arming_mouse_off 'menu/nomouse-mouse-off' '' ''
+  case_menu_arming_mouse_off 'menu/mouse-keys-mouse-off' -M -M
   case_facts 'facts/bare' xterm '' '' "$FACT_RECORDED" baseline
   case_facts 'facts/-2' xterm -2 -2 "$FACT_RECORDED" '' 256
   case_facts 'facts/-u' xterm -u -u
@@ -1269,6 +1331,21 @@ self_check_case 'control, focus-follows-mouse on both sides' quiet \
   case_one_sided_focus_follows_mouse both ''
 self_check_case 'focus-follows-mouse on the pin only' catches \
   case_one_sided_focus_follows_mouse tmux "$(modes_except mouse_all_flag mouse_button_flag)"
+
+# A MENU's own arming. `-M` is the whole difference between a menu that pins
+# any-event tracking and one that leaves the option to decide, so raising the
+# `-M` menu on zz alone against the pin's plain one has to report through
+# mouse_all_flag and mouse_button_flag and through no other row. This is the
+# channel the 2026-09-13 gate fix moved: the raw TUI read every menu as
+# any-event before it, where the pin reads MENU_NOMOUSE.
+self_check_case 'control, the plain menu on both sides' quiet \
+  case_menu_arming 'sc/menu-nomouse-both' '' ''
+self_check_case 'the -M menu on zz only' catches \
+  case_menu_arming 'sc/menu-one-sided-M' -M '' \
+  "$(modes_except mouse_all_flag mouse_button_flag)"
+self_check_case 'the -M menu on zz only, mouse off' catches \
+  case_menu_arming_mouse_off 'sc/menu-one-sided-M-mouse-off' -M '' \
+  "$(modes_except mouse_all_flag mouse_any_flag mouse_button_flag mouse_sgr_flag)"
 
 # The keypad rows are 1 only while a client that armed smkx is attached, so
 # detaching zz alone has to drop keypad_flag and keypad_cursor_flag there

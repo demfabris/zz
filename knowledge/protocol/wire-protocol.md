@@ -640,9 +640,10 @@ end of those enums, and `PreviewCycle` at the end of each of the two before them
 `EventPayload::ChooserPresentation { presentation: Option<Box<ChooserPresentation>> }` at tail tag
 52, with the payload types `ChooserPresentation`, `ChooserRow`, `ChooserPreview`,
 `ChooserPreviewSize` and `ChooserPreviewTile` the daemon fills from the mode tree. v102 also
-appends `InputMessage::MouseKey { key, pane, window, column, row }` after `DismissClientMessage`,
-the pin's own mouse key name a client resolved from a decoded pointer event together with the pane
-and window that event landed on and its cell in the client's screen.
+appends `InputMessage::MouseKey { key, pane, window, column, row, border }` after
+`DismissClientMessage`, the pin's own mouse key name a client resolved from a decoded pointer event
+together with the pane and window that event landed on, its cell in the client's screen and the
+axis of the divider a `Border` gesture grabbed.
 
 # Versioning & compatibility
 
@@ -682,14 +683,18 @@ and window that event landed on and its cell in the client's screen.
   appends into one entry.
 - v102 also carries a decoded pointer event that resolved to one of the pin's mouse key names.
   `InputMessage` appends `MouseKey { key: String, pane: Option<PaneId>, window: Option<WindowId>,
-  column: u16, row: u16 }` after `DismissClientMessage`. The client owns the pointer and names the
+  column: u16, row: u16, border: Option<Axis> }` after `DismissClientMessage`. The client owns
+  the pointer and names the
   key the way `server_client_check_mouse` does, from the gesture, its button and where on the
   client's screen it landed; the daemon looks that name up in the table the client is in and then
   in the session's root table, the way `key_bindings_get` walks them, and runs the binding with the
   event's pane and window as its target. A client sends it only for a name the root table has a
   binding for, so a gesture nothing is bound to costs no round trip and keeps the client's own
-  pointer handling. Pure append with its consumer half in the same push; GUI clients send it never
-  and are unchanged.
+  pointer handling. `border` is the trailing field, appended within 102 by the cycle-8 keys lane:
+  a press latches the location it resolved to for the drag and the release that follow it, the way
+  `c->tty.mouse_drag_flag` latches them, and `resize-pane -M` reads the latched axis to know which
+  edge of the pane the drag is moving. Pure appends with their consumer halves in the same push;
+  GUI clients send the message never and are unchanged.
 - v102 also carries the chooser presentation itself. `EventPayload` appends `ChooserPresentation
   { presentation: Option<Box<ChooserPresentation>> }` at tail tag 52, the mode screen the daemon
   composes after every chooser state or delta. `ChooserPresentation` carries `selected`, `rows`,

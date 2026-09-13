@@ -1,0 +1,431 @@
+    Checking serde_core v1.0.229
+   Compiling phf_shared v0.13.1
+    Checking uncased v0.9.10
+    Checking libm v0.2.16
+   Compiling phf_generator v0.13.1
+   Compiling phf_macros v0.13.1
+    Checking num-traits v0.2.19
+    Checking thiserror v2.0.20
+    Checking zmij v1.0.23
+    Checking serde v1.0.229
+    Checking cobs v0.3.0
+    Checking serde_json v1.0.151
+    Checking smallvec v1.16.1
+    Checking postcard v1.1.3
+    Checking libc v0.2.189
+    Checking bitflags v2.13.2
+    Checking chrono v0.4.45
+    Checking parking_lot_core v0.9.12
+    Checking nix v0.31.3
+    Checking parking_lot v0.12.5
+    Checking phf v0.13.1
+    Checking csscolorparser v0.8.4
+    Checking zz-terminal v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-terminal)
+    Checking zz-protocol v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-protocol)
+    Checking zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-mux)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.09s
+---
+    Checking zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-daemon)
+    Checking zz-tui v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-tui)
+    Checking zz-client v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-client)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.56s
+---
+   Compiling proc-macro2 v1.0.107
+    Checking serde_core v1.0.229
+    Checking typeid v1.0.3
+    Checking num-traits v0.2.19
+   Compiling quote v1.0.47
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+    Checking erased-serde v0.4.10
+    Checking serde_fmt v1.1.0
+    Checking value-bag-serde1 v1.14.1
+    Checking value-bag v1.14.1
+    Checking log v0.4.34
+   Compiling indexmap v2.14.2
+    Checking crossbeam-utils v0.8.23
+    Checking rustix v1.1.4
+    Checking concurrent-queue v2.5.0
+   Compiling phf_shared v0.13.1
+    Checking async-channel v2.5.0
+   Compiling synstructure v0.13.2
+   Compiling phf_generator v0.13.1
+    Checking num-integer v0.1.47
+    Checking crossbeam-epoch v0.9.21
+    Checking num-bigint v0.4.8
+    Checking uuid v1.26.1
+    Checking serde_json v1.0.151
+    Checking num-rational v0.4.2
+    Checking crossbeam-deque v0.8.8
+   Compiling toml_edit v0.25.15+spec-1.1.0
+   Compiling zmij v1.0.23
+   Compiling proc-macro-crate v3.5.0
+   Compiling zerocopy-derive v0.8.57
+   Compiling tracing-attributes v0.1.31
+   Compiling serde_derive v1.0.229
+   Compiling bytemuck_derive v1.12.1
+   Compiling thiserror-impl v2.0.20
+    Checking serde v1.0.229
+    Checking smallvec v1.16.1
+    Checking zerocopy v0.8.57
+    Checking tracing v0.1.44
+   Compiling zerofrom-derive v0.1.7
+    Checking bytemuck v1.25.2
+   Compiling yoke-derive v0.8.2
+    Checking thiserror v2.0.20
+   Compiling zerovec-derive v0.11.6
+   Compiling enumflags2_derive v0.7.12
+    Checking num-complex v0.4.6
+    Checking half v2.7.1
+   Compiling zvariant_utils v4.2.0
+    Checking zerofrom v0.1.8
+    Checking yoke v0.8.3
+    Checking zerovec v0.11.8
+   Compiling displaydoc v0.2.7
+    Checking polling v3.11.0
+    Checking parking_lot_core v0.9.12
+   Compiling profiling-procmacros v1.0.18
+   Compiling phf_macros v0.13.1
+    Checking rayon-core v1.13.0
+    Checking profiling v1.0.18
+    Checking parking_lot v0.12.5
+   Compiling equator-macro v0.4.2
+   Compiling zvariant_derive v5.15.0
+    Checking phf v0.13.1
+    Checking wayland-sys v0.31.11
+    Checking async-io v2.6.0
+    Checking rayon v1.12.0
+    Checking equator v0.4.2
+    Checking tinystr v0.8.4
+    Checking icu_locale_core v2.3.0
+   Compiling derive_more-impl v2.1.1
+    Checking aligned-vec v0.6.4
+    Checking blocking v1.7.0
+    Checking zerotrie v0.2.5
+    Checking potential_utf v0.1.6
+   Compiling futures-macro v0.3.34
+    Checking icu_collections v2.3.0
+    Checking icu_provider v2.3.1
+    Checking v_frame v0.3.9
+    Checking async-signal v0.2.14
+   Compiling enumflags2 v0.7.12
+   Compiling zcheapstr v1.1.0
+   Compiling zvariant v5.15.0
+    Checking async-process v2.5.0
+    Checking futures-util v0.3.34
+   Compiling thiserror-impl v1.0.69
+   Compiling arg_enum_proc_macro v0.3.4
+    Checking av-scenechange v0.14.1
+    Checking av1-grain v0.2.5
+    Checking icu_properties v2.3.0
+    Checking icu_normalizer v2.3.0
+    Checking generic-array v0.14.7
+   Compiling zbus_names v4.3.4
+    Checking maybe-rayon v0.1.1
+    Checking rgb v0.8.53
+    Checking ppv-lite86 v0.2.21
+   Compiling ref-cast-impl v1.0.27
+    Checking thiserror v1.0.69
+   Compiling num-derive v0.4.2
+   Compiling zeroize_derive v1.5.0
+    Checking derive_more v2.1.1
+    Checking async-executor v1.14.0
+   Compiling getrandom v0.2.17
+   Compiling serde_derive_internals v0.30.0
+   Compiling simd_helpers v0.1.0
+    Checking serde_bytes v0.11.19
+    Checking chrono v0.4.45
+    Checking pulp v0.22.3
+    Checking rav1e v0.8.1
+    Checking zeroize v1.9.0
+    Checking ref-cast v1.0.27
+    Checking idna_adapter v1.2.2
+    Checking moxcms v0.8.1
+    Checking naga-types v30.0.1
+    Checking tiff v0.11.3
+    Checking exr v1.74.2
+    Checking ravif v0.13.0
+    Checking idna v1.1.0
+    Checking qoi v0.4.1
+   Compiling anyhow v1.0.104
+    Checking euclid v0.22.14
+    Checking url v2.5.8
+    Checking image v0.25.10
+    Checking getrandom v0.3.4
+   Compiling strum_macros v0.28.0
+    Checking core_maths v0.1.1
+   Compiling darling_core v0.24.1
+   Compiling schemars_derive v1.2.2
+    Checking strum v0.28.0
+    Checking wgpu-types v30.0.1
+    Checking schemars v1.2.2
+    Checking naga v30.0.1
+    Checking rand_core v0.9.5
+    Checking ash v0.38.0+1.3.281
+    Checking filedescriptor v0.8.3
+   Compiling zbus_macros v5.19.0
+    Checking crypto-common v0.1.7
+    Checking futures-executor v0.3.34
+   Compiling async-trait v0.1.92
+   Compiling serde_repr v0.1.21
+   Compiling async-recursion v1.1.1
+    Checking gpu-allocator v0.28.0
+   Compiling darling_macro v0.24.1
+    Checking futures v0.3.34
+    Checking wgpu-naga-bridge v30.0.1
+   Compiling proc-macro2-diagnostics v0.10.1
+    Checking khronos-egl v6.0.0
+   Compiling pin-project-internal v1.1.13
+    Checking ordered-float v5.5.0
+    Checking wayland-backend v0.3.17
+    Checking wgpu-hal v30.0.1
+   Compiling wayland-scanner v0.31.11
+    Checking zbus v5.19.0
+    Checking kurbo v0.13.1
+   Compiling int-enum v1.2.0
+   Compiling darling v0.24.1
+    Checking rand_chacha v0.9.0
+   Compiling multiversion-macros v0.9.0
+    Checking pin-project v1.1.13
+   Compiling phf_codegen v0.13.1
+    Checking tempfile v3.27.0
+   Compiling ring v0.17.14
+    Checking libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+    Checking portable-pty v0.9.0
+    Checking rand v0.9.5
+   Compiling serde_with_macros v3.23.0
+    Checking svgtypes v0.16.1
+    Checking wayland-client v0.31.15
+    Checking slotmap v1.1.1
+    Checking wgpu-core-deps-windows-linux-android v30.0.1
+    Checking ttf-parser v0.25.1
+    Checking block-buffer v0.10.4
+    Checking csscolorparser v0.8.4
+    Checking cobs v0.3.0
+    Checking crossbeam-channel v0.5.17
+    Checking memmap2 v0.9.11
+    Checking futures-concurrency v7.7.1
+    Checking multiversion v0.9.0
+    Checking encoding_rs v0.8.41
+    Checking zz-terminal v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-terminal)
+   Compiling dirs-next v2.0.0
+    Checking postcard v1.1.3
+    Checking digest v0.10.7
+    Checking wgpu-core v30.0.1
+    Checking serde_with v3.23.0
+   Compiling crc32fast v1.5.2
+   Compiling rustls-webpki v0.103.15
+   Compiling httparse v1.10.1
+    Checking lyon_geom v1.0.19
+   Compiling zbus_xml v5.2.1
+   Compiling clap_derive v4.6.4
+   Compiling enumn v0.1.14
+    Checking gpui_util v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling rustls v0.23.44
+    Checking accesskit v0.24.1
+   Compiling ureq-proto v0.6.2
+   Compiling console v0.16.6
+   Compiling toml v1.1.6+spec-1.1.0
+    Checking tiny-skia-path v0.11.4
+   Compiling socks v0.3.4
+    Checking collections v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling zbus-lockstep v0.5.2
+    Checking lyon_path v1.0.19
+    Checking wgpu v30.0.1
+    Checking zz-protocol v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-protocol)
+   Compiling flate2 v1.1.10
+    Checking agent-client-protocol-schema v1.7.0
+   Compiling term v0.7.0
+    Checking fontdb v0.23.0
+   Compiling xattr v1.6.1
+    Checking block-padding v0.3.3
+    Checking async-fs v2.2.0
+    Checking tracing-log v0.2.0
+   Compiling filetime v0.2.29
+   Compiling ureq v3.4.1
+   Compiling tar v0.4.46
+   Compiling string_cache v0.8.9
+    Checking rustybuzz v0.20.1
+    Checking png v0.17.16
+    Checking compression-codecs v0.4.41
+   Compiling indicatif v0.18.6
+    Checking tracing-subscriber v0.3.23
+   Compiling petgraph v0.6.5
+    Checking inout v0.1.4
+   Compiling ascii-canvas v3.0.0
+   Compiling clap v4.6.6
+   Compiling zbus-lockstep-macros v0.5.2
+    Checking zlog v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking object v0.37.3
+   Compiling embed-resource v3.0.11
+    Checking wayland-protocols v0.32.13
+   Compiling selectors v0.37.0
+    Checking tree-sitter-language v0.1.8
+    Checking async-net v2.0.0
+    Checking font-types v0.11.3
+    Checking safe_arch v0.7.4
+    Checking font-types v0.12.5
+   Compiling cssparser-macros v0.6.1
+   Compiling ena v0.14.4
+    Checking simplecss v0.2.2
+    Checking wait-timeout v0.2.1
+    Checking rusty-fork v0.3.1
+    Checking ztracing v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking usvg v0.46.0
+   Compiling logos-codegen v0.14.4
+   Compiling lalrpop v0.20.2
+    Checking cssparser v0.36.0
+   Compiling download-cef v3.0.0
+    Checking backtrace v0.3.76
+    Checking lyon_tessellation v1.0.22
+   Compiling htmlize v1.1.0
+   Compiling proptest-macro v0.5.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+    Checking read-fonts v0.41.0
+    Checking wide v0.7.33
+    Checking read-fonts v0.37.0
+    Checking smol v2.0.2
+   Compiling gpui v0.2.2 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking heapless v0.9.3
+   Compiling pest_generator v2.9.1
+    Checking atspi-common v0.13.0
+    Checking cipher v0.4.4
+   Compiling perf v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking async-compression v0.4.46
+    Checking tiny-skia v0.11.4
+    Checking lyon_algorithms v1.0.21
+    Checking hmac v0.12.1
+    Checking serde_urlencoded v0.7.1
+    Checking rand_core v0.6.4
+    Checking rand_xorshift v0.4.0
+   Compiling derive_refineable v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking num-iter v0.1.46
+    Checking crossbeam-queue v0.3.14
+    Checking approx v0.5.1
+    Checking scheduler v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking dirs-sys v0.5.0
+    Checking matrixmultiply v0.3.11
+   Compiling palette_derive v0.7.7
+    Checking refineable v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking etagere v0.2.15
+    Checking proptest v1.10.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+    Checking postage v0.5.0
+   Compiling cef-dll-sys v152.2.0+152.0.6
+    Checking simba v0.9.1
+    Checking resvg v0.46.0
+    Checking rand_chacha v0.3.1
+    Checking http_client v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking lyon v1.0.19
+   Compiling pest_derive v2.9.1
+   Compiling util_macros v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking sum_tree v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking pathfinder_simd v0.5.6
+    Checking skrifa v0.44.0
+   Compiling logos-derive v0.14.4
+    Checking gpui_shared_string v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking zz-client v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-client)
+    Checking hdrhistogram v7.6.0
+    Checking taffy v0.13.0
+   Compiling const-random-macro v0.1.16
+    Checking rustls-pki-types v1.15.1
+   Compiling gpui_macros v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking gethostname v1.1.0
+    Checking semver v1.0.28
+    Checking num_cpus v1.17.0
+    Checking lol_html v2.9.0
+   Compiling merman-core v0.6.2
+    Checking serde_yaml v0.9.34+deprecated
+    Checking palette v0.7.7
+    Checking swash v0.2.10
+    Checking x11rb v0.13.2
+    Checking globset v0.4.20
+    Checking const-random v0.1.18
+    Checking logos v0.14.4
+    Checking pathfinder_geometry v0.5.1
+    Checking nalgebra v0.34.2
+    Checking json5 v0.4.1
+    Checking rand v0.8.8
+    Checking num-bigint-dig v0.9.1
+    Checking camino v1.2.5
+    Checking dirs v6.0.0
+    Checking aes v0.8.4
+    Checking sha2 v0.10.9
+    Checking num v0.4.3
+    Checking pbkdf2 v0.12.2
+    Checking hkdf v0.12.4
+    Checking cbc v0.1.2
+    Checking atspi-proxies v0.13.0
+    Checking harfrust v0.5.2
+    Checking skrifa v0.40.0
+    Checking freetype-sys v0.20.1
+    Checking yeslogic-fontconfig-sys v6.0.1
+    Checking ashpd v0.13.13
+    Checking accesskit_consumer v0.38.0
+    Checking md-5 v0.10.6
+   Compiling agent-client-protocol-derive v2.1.0
+    Checking cargo-platform v0.3.3
+    Checking zed-font-kit v0.14.1-zed (https://github.com/zed-industries/font-kit?rev=94b0f28166665e8fd2f53ff6d268a14955c82269#94b0f281)
+    Checking cosmic-text v0.19.0
+    Checking zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-mux)
+    Checking agent-client-protocol v2.1.0
+   Compiling mime_guess v2.0.5
+    Checking pulldown-cmark v0.12.2
+    Checking cargo_metadata v0.23.1
+    Checking oo7 v0.6.0
+    Checking dugong v0.6.2
+    Checking accesskit_atspi_common v0.19.1
+    Checking atspi v0.29.0
+    Checking manatee v0.6.2
+    Checking roughr-merman v0.12.3
+    Checking ahash v0.8.12
+   Compiling rust-embed-utils v8.12.0
+    Checking xim-parser v0.2.1 (https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c)
+    Checking xim-ctext v0.3.0 (https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c)
+    Checking calloop v0.14.4
+   Compiling tree-sitter v0.26.13
+    Checking xkbcommon v0.8.0
+    Checking zed-xim v0.4.0-zed (https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c)
+    Checking zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-daemon)
+    Checking calloop-wayland-source v0.4.1
+   Compiling rust-embed-impl v8.12.0
+    Checking libsqlite3-sys v0.38.2
+    Checking merman-render v0.6.2
+    Checking cef v152.2.0+152.0.6
+    Checking gpui_wgpu v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking accesskit_unix v0.22.1
+    Checking open v5.4.4
+    Checking inotify-sys v0.1.8
+    Checking x11-clipboard v0.9.3
+    Checking webpki-roots v1.0.9
+    Checking wayland-cursor v0.31.14
+    Checking wayland-protocols-plasma v0.3.12
+    Checking wayland-protocols-wlr v0.3.12
+    Checking notify-rust v4.18.0
+    Checking markdown v1.0.0
+    Checking gpui_linux v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking merman v0.6.2
+    Checking zed-sum-tree v0.2.0
+    Checking rusqlite v0.40.2
+    Checking zz-browser v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-browser)
+    Checking rust-embed v8.12.0
+    Checking inotify v0.11.5
+    Checking tree-sitter-md v0.5.3
+    Checking tree-sitter-toml-ng v0.7.0
+    Checking tree-sitter-rust v0.24.2
+    Checking tree-sitter-json v0.24.8
+    Checking tree-sitter-tmux v0.1.4
+    Checking libmimalloc-sys v0.1.49
+    Checking env_filter v2.0.0
+    Checking mio v1.2.3
+   Compiling zz v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz)
+    Checking zz-ui v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-ui)
+    Checking notify v8.2.0
+    Checking ksni v0.3.6
+    Checking zz-chrome-import v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-chrome-import)
+    Checking env_logger v0.11.11
+    Checking mimalloc v0.1.52
+    Checking gpui_platform v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+    Checking zz-config v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-config)
+    Checking zz-tui v0.8.0 (/home/demfabris/dev/zz-tui-keys-8/crates/zz-tui)
+    Checking ignore v0.4.33
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4m 45s
+--- cargo fmt --all -- --check

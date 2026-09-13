@@ -1,0 +1,25 @@
+# TUI-008 attempt-02 environment
+
+date: 2026-09-13T17:54:50-03:00
+host: alienware
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+
+repo: /home/demfabris/dev/zz-tui-keys-8 (worktree of /home/demfabris/dev/zz)
+branch: campaign/tui-keys
+tip: a69775ad812a0836f3e03ca7e8440d25b697e6f3
+base: origin/main b17232ace3704980919dc4bb787c84d9051f7db7
+worktree: 1 uncommitted paths
+
+zz: /home/demfabris/dev/zz-tui-keys-8/target/debug/zz
+tmux 3.8-zz
+sha256: ec589f2c1ca06807bac7b3de301b158157604ec8034961713f95749d46840392
+
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+tmux next-3.8
+pin commit: d77c9dc6 (next-3.8)
+
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8

@@ -14,7 +14,7 @@ use zz_terminal::{
     TerminalDictionary, TerminalViewAction, TerminalViewport, TerminalViewportPatch,
 };
 
-use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId, WindowId};
+use crate::{Axis, ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId, WindowId};
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
@@ -2082,6 +2082,10 @@ pub enum InputMessage {
         window: Option<WindowId>,
         column: u16,
         row: u16,
+        /// The axis of the divider a `Border` gesture grabbed, latched from
+        /// the button-down for the rest of the drag the way
+        /// `c->tty.mouse_drag_flag` latches it. `resize-pane -M` reads it.
+        border: Option<Axis>,
     },
 }
 

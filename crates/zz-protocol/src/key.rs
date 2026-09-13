@@ -240,6 +240,23 @@ impl Default for KeyTables {
                 },
             );
         }
+        for (key, name, args) in [
+            ("MouseDown1Border", "select-pane", ["-M"].as_slice()),
+            ("MouseDown1Control8", "resize-pane", ["-Z"].as_slice()),
+            ("MouseDrag1Border", "resize-pane", ["-M"].as_slice()),
+            ("WheelDownStatus", "next-window", [].as_slice()),
+            ("WheelUpStatus", "previous-window", [].as_slice()),
+        ] {
+            tables.bind(
+                "root",
+                key,
+                Binding {
+                    commands: vec![CommandInvocation::new(name, args.iter().copied())],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
         for (table, key, action) in [
             ("copy-mode-vi", "h", "cursor-left"),
             ("copy-mode-vi", "Left", "cursor-left"),

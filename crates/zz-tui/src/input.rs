@@ -1274,23 +1274,95 @@ fn handle_mouse(
 /// name nothing is bound to leaves the client's own pointer handling alone,
 /// which is what the pin does with an unbound mouse key too.
 fn bound_mouse_key(
-    model: &Model,
+    model: &mut Model,
     event: MouseEvent,
     global_column: u16,
     global_row: u16,
 ) -> Option<InputMessage> {
-    let (location, pane, window) = mouse_key_location(model, global_column, global_row)?;
-    let key = mouse_key_name(event, &location)?;
+    let latch = latched_mouse_location(model, event, global_column, global_row)?;
+    let key = mouse_key_name(event, &latch.location)?;
     if !model.mouse_bindings.contains(&key) {
         return None;
     }
     Some(InputMessage::MouseKey {
         key,
-        pane,
-        window,
+        pane: latch.pane,
+        window: latch.window,
         column: global_column,
         row: global_row,
+        border: latch.border,
     })
+}
+
+/// `server_client_check_mouse` resolves a location once, on the press, and
+/// `c->tty.mouse_drag_flag` keeps the drag that follows on the same pane and
+/// the same location until the release clears it. A press resolves and stores;
+/// a drag and a release read the store and leave the pointer's own cell to the
+/// event; anything else resolves fresh.
+fn latched_mouse_location(
+    model: &mut Model,
+    event: MouseEvent,
+    global_column: u16,
+    global_row: u16,
+) -> Option<crate::state::MouseDragLatch> {
+    match event.kind {
+        MouseEventKind::Down(button) => {
+            let (location, pane, window) = mouse_key_location(model, global_column, global_row)?;
+            let latch = crate::state::MouseDragLatch {
+                button,
+                location,
+                pane,
+                window,
+                border: divider_axis(model, global_column, global_row),
+            };
+            model.mouse_drag = Some(latch.clone());
+            Some(latch)
+        }
+        MouseEventKind::Drag(button) => match model.mouse_drag.as_ref() {
+            Some(latch) if latch.button == button => Some(latch.clone()),
+            _ => resolved_mouse_latch(model, global_column, global_row),
+        },
+        MouseEventKind::Up(button) => {
+            let latch = match model.mouse_drag.as_ref() {
+                Some(latch) if latch.button == button => Some(latch.clone()),
+                _ => resolved_mouse_latch(model, global_column, global_row),
+            };
+            model.mouse_drag = None;
+            latch
+        }
+        _ => resolved_mouse_latch(model, global_column, global_row),
+    }
+}
+
+fn resolved_mouse_latch(
+    model: &Model,
+    global_column: u16,
+    global_row: u16,
+) -> Option<crate::state::MouseDragLatch> {
+    let (location, pane, window) = mouse_key_location(model, global_column, global_row)?;
+    Some(crate::state::MouseDragLatch {
+        button: MouseButton::Left,
+        location,
+        pane,
+        window,
+        border: divider_axis(model, global_column, global_row),
+    })
+}
+
+/// The axis of the divider a cell belongs to, which is the axis
+/// `resize_pane_mouse_update` resizes along once the drag it starts is under
+/// way.
+fn divider_axis(
+    model: &Model,
+    global_column: u16,
+    global_row: u16,
+) -> Option<zz_protocol::Axis> {
+    model
+        .layout
+        .dividers
+        .iter()
+        .find(|divider| divider.rect.contains(global_column, global_row))
+        .map(|divider| divider.axis)
 }
 
 /// The `KEYC_MOUSE_LOCATION_*` half of the name, and the pane and window the

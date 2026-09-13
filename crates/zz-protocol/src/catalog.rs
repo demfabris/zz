@@ -1934,7 +1934,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::optional_value("-R", "resize right by an optional amount"),
             CommandOptionSpec::optional_value("-U", "resize upward by an optional amount"),
             CommandOptionSpec::flag("-Z", "toggle zoom"),
-            CommandOptionSpec::unsupported_flag("-M"),
+            CommandOptionSpec::flag("-M", "resize from the invoking mouse event"),
             CommandOptionSpec::unsupported_flag("-T"),
         ],
         positionals: &[FreeForm],
@@ -2882,7 +2882,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (471, 32));
+        assert_eq!((supported, unsupported), (472, 31));
         assert_eq!(usage_overrides.len(), 20);
         assert_eq!(
             usage_overrides,

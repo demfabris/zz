@@ -129,12 +129,27 @@ pub(crate) struct Model {
     /// pin's own spelling. A pointer gesture whose name is in here runs that
     /// binding instead of the client's own pointer handling.
     pub mouse_bindings: std::collections::HashSet<String>,
+    /// `c->tty.mouse_drag_flag` and `mouse_last_pane`: once a button goes down
+    /// the location that press resolved to owns every drag and the release
+    /// that follow it, however far the pointer travels. Without the latch a
+    /// drag off a divider resolves inside the pane it lands in and the border
+    /// gesture the press started is lost.
+    pub mouse_drag: Option<MouseDragLatch>,
     pub focus_follows_mouse: bool,
     pub mouse_arming: crate::tty::MouseArming,
     client_focus: ClientFocusState,
     local_host_label: String,
     local_endpoint: Endpoint,
     fleet_hosts: Vec<HostEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MouseDragLatch {
+    pub button: crate::terminal_event::MouseButton,
+    pub location: String,
+    pub pane: Option<PaneId>,
+    pub window: Option<zz_protocol::WindowId>,
+    pub border: Option<zz_protocol::Axis>,
 }
 
 impl Model {
@@ -197,6 +212,7 @@ impl Model {
             last_sent_command_output_geometry: None,
             mouse_option: crate::app::mouse_option_enabled(core.mux_options()),
             mouse_bindings: crate::app::mouse_binding_names(core.key_tables()),
+            mouse_drag: None,
             focus_follows_mouse: crate::app::focus_follows_mouse_enabled(core.mux_options()),
             mouse_arming: if crate::app::mouse_option_enabled(core.mux_options()) {
                 crate::tty::MouseArming::Button

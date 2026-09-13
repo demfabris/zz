@@ -26,7 +26,8 @@ use zz_mux::{
     CellLayout, CommandAliasResolution, CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic,
     CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
     FormatClient, FormatMonitorScope, FormatMonitorTarget, KeyDecision, KeyEngine, KeyTables,
-    MuxEffect, MuxEngine, PaneKind, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes,
+    MouseEventTarget, MuxEffect, MuxEngine, PaneKind, PaneRuntimeFacts, ParsedConfig,
+    ParsedConfigBytes,
     RetainedJobEnvironment, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
     canonical_command, command_block_body, copy_mode_action_is_read_only_safe, expand_format_bytes,
     expand_format_values, expand_status, format_command, format_true, hook_format_variables,
@@ -16641,7 +16642,13 @@ impl Shared {
                             || inner.choose_buffers.contains_key(&client)
                             || inner.display_panes.contains_key(&client)
                     };
-                    if !modal_active {
+                    let mode_owns_paste = self
+                        .inner
+                        .lock()
+                        .copy_sessions
+                        .get(&client)
+                        .is_some_and(|session| session.pane == pane);
+                    if !modal_active && !mode_owns_paste {
                         self.note_terminal_input(client, pane);
                         self.input_paste(client, pane, &text)?;
                     }
@@ -16659,19 +16666,13 @@ impl Shared {
                             if !client_is_attached_to_pane(&inner, client, pane) {
                                 return Err(ServerError::PaneNotAttached(pane).into());
                             }
-                            if matches!(action, zz_terminal::TerminalViewAction::Focus(_))
-                                && !inner.engine.focus_events()
-                            {
-                                None
-                            } else {
-                                Some(
-                                    inner
-                                        .terminals
-                                        .get(&pane)
-                                        .cloned()
-                                        .ok_or(ServerError::PaneExited(pane))?,
-                                )
-                            }
+                            Some(
+                                inner
+                                    .terminals
+                                    .get(&pane)
+                                    .cloned()
+                                    .ok_or(ServerError::PaneExited(pane))?,
+                            )
                         }
                     };
                     if let Some(terminal) = terminal {
@@ -16698,10 +16699,23 @@ impl Shared {
                     key,
                     pane,
                     window,
-                    column: _,
-                    row: _,
+                    column,
+                    row,
+                    border,
                 } => {
-                    self.input_mouse_key(client, kind, context, &key, pane, window)?;
+                    self.input_mouse_key(
+                        client,
+                        kind,
+                        context,
+                        &key,
+                        MouseEventTarget {
+                            pane,
+                            window,
+                            column,
+                            row,
+                            border,
+                        },
+                    )?;
                 }
                 InputMessage::DismissClientMessage => {}
                 InputMessage::ResizeCommandOutput {
@@ -18253,9 +18267,9 @@ impl Shared {
         kind: ClientKind,
         context: &mut ExecutionContext,
         key: &str,
-        pane: Option<PaneId>,
-        window: Option<WindowId>,
+        mouse: MouseEventTarget,
     ) -> Result<(), DaemonError> {
+        let (pane, window) = (mouse.pane, mouse.window);
         let Some((commands, repeat_binding, session, window, pane)) = ({
             let inner = self.inner.lock();
             let Some(session) = client_attached_session(&inner, client) else {
@@ -18296,10 +18310,23 @@ impl Shared {
         };
         context.retarget(&ExecutionContext::new(Some(session), window, Some(pane)));
         let previous = context.invoking_key().map(str::to_owned);
+        let previous_mouse = context.invoking_mouse().cloned();
+        let previous_variables = context.format_variables.clone();
+        let mouse = MouseEventTarget {
+            pane: Some(pane),
+            window,
+            ..mouse
+        };
+        context
+            .format_variables
+            .extend(mouse_format_variables(&self.inner.lock(), &mouse));
         context.set_invoking_key(Some(key.to_owned()));
+        context.set_invoking_mouse(Some(mouse));
         let result =
             self.execute_key_commands(client, kind, context, pane, &commands, repeat_binding);
         context.set_invoking_key(previous);
+        context.set_invoking_mouse(previous_mouse);
+        context.format_variables = previous_variables;
         self.sync_prefix_armed(client);
         result
     }
@@ -32637,6 +32664,39 @@ fn client_format_facts(
 /// `tty_window_offset1` reads `c->session->curw->window` and
 /// `server_client_get_pane(c)`, so the comparison is the client's own current
 /// window and the pane that window is showing, never the format's window.
+/// The `mouse_*` formats the pin fills from `ft->m`. `format_cb_mouse_x` and
+/// `format_cb_mouse_y` answer the event's cell inside the pane it landed on,
+/// `format_cb_mouse_pane` the pane id, and each of them answers NULL, which
+/// expands empty, when the event has no pane. The five that read the screen
+/// under the pointer or the status range it landed in stay unanswered.
+fn mouse_format_variables(
+    inner: &ServerState,
+    mouse: &MouseEventTarget,
+) -> BTreeMap<String, String> {
+    let mut variables = BTreeMap::new();
+    let Some(pane) = mouse.pane else {
+        return variables;
+    };
+    variables.insert("mouse_pane".to_owned(), pane.to_string());
+    let Some(window) = inner.engine.state.window_for_pane(pane) else {
+        return variables;
+    };
+    let session = inner.engine.state.windows[&window].session;
+    let geometry = inner
+        .engine
+        .format_status_context(Some(session), Some(window), Some(pane));
+    if let (Some(left), Some(top)) = (geometry.pane_left, geometry.pane_top)
+        && let (Some(x), Some(y)) = (
+            mouse.column.checked_sub(left),
+            mouse.row.checked_sub(top),
+        )
+    {
+        variables.insert("mouse_x".to_owned(), x.to_string());
+        variables.insert("mouse_y".to_owned(), y.to_string());
+    }
+    variables
+}
+
 fn client_viewport_facts(
     inner: &ServerState,
     client: ClientId,

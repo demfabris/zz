@@ -617,11 +617,61 @@ pub struct ExecutionContext {
     target_format_client_override: Option<FormatClient>,
     repeat_binding: bool,
     invoking_key: Option<String>,
+    invoking_mouse: Option<MouseEventTarget>,
     replay_client: Option<ClientId>,
     control_command_target: Option<(ClientId, u8)>,
     refuse_new_session_attach: bool,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
+}
+
+/// `struct mouse_event` as much of it as a bound mouse key carries: the pane
+/// and window `cmd_mouse_pane` would answer, the cell the event landed on and
+/// the divider axis a `Border` gesture grabbed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MouseEventTarget {
+    pub pane: Option<PaneId>,
+    pub window: Option<WindowId>,
+    pub column: u16,
+    pub row: u16,
+    pub border: Option<Axis>,
+}
+
+impl MouseEventTarget {
+    /// The id spelling `=` and `{mouse}` resolve to. A pane id answers every
+    /// target kind, because a pane names its window and its session; a status
+    /// gesture has no pane and answers with its window instead.
+    #[must_use]
+    pub fn target_spelling(&self) -> Option<String> {
+        self.pane
+            .map(|pane| pane.to_string())
+            .or_else(|| self.window.map(|window| window.to_string()))
+    }
+}
+
+/// `cmd_find_target`: a bare `=` or `{mouse}` in a target slot names the pane,
+/// window and session the invoking mouse event landed on. The daemon has
+/// already retargeted the context to that event, so the id the event carries
+/// is what the spelling stands for, and every resolver reads it. A `=` that is
+/// not a target's value is left alone, and with no mouse event in the tree the
+/// spelling stays the quiet miss both binaries answer with.
+fn resolve_mouse_targets(command: &CommandInvocation, target: &str) -> Option<CommandInvocation> {
+    let is_mouse_slot = |command: &CommandInvocation, index: usize| {
+        index > 0
+            && matches!(command.args[index - 1].as_str(), "-t" | "-s")
+            && !command.argument_is_command_block(index)
+            && matches!(command.args[index].as_str(), "=" | "{mouse}")
+    };
+    if !(0..command.args.len()).any(|index| is_mouse_slot(command, index)) {
+        return None;
+    }
+    let mut resolved = command.clone();
+    for index in 0..resolved.args.len() {
+        if is_mouse_slot(&resolved, index) {
+            resolved.args[index] = RawText::from(target);
+        }
+    }
+    Some(resolved)
 }
 
 impl fmt::Debug for ExecutionContext {
@@ -649,6 +699,7 @@ impl fmt::Debug for ExecutionContext {
             )
             .field("repeat_binding", &self.repeat_binding)
             .field("invoking_key", &self.invoking_key)
+            .field("invoking_mouse", &self.invoking_mouse)
             .field("replay_client", &self.replay_client)
             .field("control_command_target", &self.control_command_target)
             .field("refuse_new_session_attach", &self.refuse_new_session_attach)
@@ -681,6 +732,7 @@ impl Default for ExecutionContext {
             target_format_client_override: None,
             repeat_binding: false,
             invoking_key: None,
+            invoking_mouse: None,
             replay_client: None,
             control_command_target: None,
             refuse_new_session_attach: false,
@@ -842,6 +894,19 @@ impl ExecutionContext {
 
     pub fn set_invoking_key(&mut self, key: Option<String>) {
         self.invoking_key = key;
+    }
+
+    /// `cmdq_get_event(item)->m`: the mouse event a bound mouse key was
+    /// invoked from. `cmd_find_target` resolves `=` and `{mouse}` from it and
+    /// `resize-pane -M` reads its cell; without one both stay what they are
+    /// with no mouse in the tree.
+    #[must_use]
+    pub fn invoking_mouse(&self) -> Option<&MouseEventTarget> {
+        self.invoking_mouse.as_ref()
+    }
+
+    pub fn set_invoking_mouse(&mut self, mouse: Option<MouseEventTarget>) {
+        self.invoking_mouse = mouse;
     }
 
     #[must_use]
@@ -4393,6 +4458,11 @@ impl MuxEngine {
             }
             return Ok(combined);
         }
+        let mouse_resolved = context
+            .invoking_mouse()
+            .and_then(MouseEventTarget::target_spelling)
+            .and_then(|target| resolve_mouse_targets(command, &target));
+        let command = mouse_resolved.as_ref().unwrap_or(command);
         let generation = self.state.generation();
         let name = canonical_command(&command.name);
         let mut item_hooks = CommandItemHooks {
@@ -5535,10 +5605,7 @@ impl MuxEngine {
         if len == 0 {
             return Err(ServerError::MissingTarget(session.to_string()));
         }
-        let current = context
-            .window
-            .filter(|window| state.windows.contains(window))
-            .unwrap_or(state.active_window);
+        let current = state.active_window;
         let current_index = isize::try_from(
             state
                 .windows
@@ -7048,6 +7115,9 @@ impl MuxEngine {
             ));
         }
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        if options.has("-M") {
+            return self.resize_pane_from_mouse(context, pane);
+        }
         if options.has("-Z") {
             self.state.toggle_zoom(pane)?;
             let window = self
@@ -7119,6 +7189,41 @@ impl MuxEngine {
         for (axis, cells) in relative {
             self.state.resize_pane(pane, axis, cells)?;
         }
+        Ok(Execution::default())
+    }
+
+    /// `resize_pane_mouse_update`: the border the drag grabbed follows the
+    /// pointer, so the pane it belongs to ends at the cell the event landed on.
+    /// The pin registers a drag callback and reads every later motion through
+    /// it; the raw TUI latches the border on the button-down instead and sends
+    /// `MouseDrag1Border` for each motion, so each one lands here with the
+    /// axis the divider had and the cell it is now over.
+    fn resize_pane_from_mouse(
+        &mut self,
+        context: &ExecutionContext,
+        pane: PaneId,
+    ) -> Result<Execution, ServerError> {
+        let Some(mouse) = context.invoking_mouse() else {
+            return Ok(Execution::default());
+        };
+        let Some(axis) = mouse.border else {
+            return Ok(Execution::default());
+        };
+        let window = self
+            .state
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::PaneNotFound(pane.to_string()))?;
+        let Some(geometry) = self.state.windows[&window].layout.pane_geometry(pane) else {
+            return Ok(Execution::default());
+        };
+        let cells = match axis {
+            Axis::Horizontal => mouse.column.checked_sub(geometry.xoff),
+            Axis::Vertical => mouse.row.checked_sub(geometry.yoff),
+        };
+        let Some(cells) = cells.filter(|cells| *cells > 0) else {
+            return Ok(Execution::default());
+        };
+        self.state.resize_pane_to(pane, axis, cells)?;
         Ok(Execution::default())
     }
 

@@ -123,7 +123,7 @@ try:
         screen.clear()
         os.write(master, b"KEYS_FIND_SENTINEL\r")
         if "--socket" in prefix:
-            wait_for(lambda: b"Choose pane" in text(), "native filtered chooser")
+            wait_for(lambda: b"filter: active" in text(), "native filtered chooser")
         else:
             wait_for(lambda: cli("display-message", "-p", "-c", client, "#{pane_in_mode}") == "1", "pin filtered chooser")
         assert cli("display-message", "-p", "-c", client, "#{window_index}") == "0"

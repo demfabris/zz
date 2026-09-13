@@ -8,9 +8,12 @@ PRETTY_NAME="CachyOS"
 
 repo: /home/demfabris/dev/zz-tui-keys-8 (worktree of /home/demfabris/dev/zz)
 branch: campaign/tui-keys
-tip: a69775ad812a0836f3e03ca7e8440d25b697e6f3
-base: origin/main b17232ace3704980919dc4bb787c84d9051f7db7
-worktree: 1 uncommitted paths
+tip: f1013040fbec19dad7e3a1123c73116ede139883, the parent of the one commit that updates this file after the
+     rebase onto origin/main 289c8a7c; every run below is byte-identical at both,
+     and compat/tui-mouse.sh was re-run after the rebase to say so
+base: origin/main 289c8a7c02adc0328174c1d89dfb4fc7da95bcf4 (rebased from b17232ac, which origin/main moved past
+      mid-cycle with compat/tui/lint-runner.py and no crate code)
+worktree: clean
 
 zz: /home/demfabris/dev/zz-tui-keys-8/target/debug/zz
 tmux 3.8-zz

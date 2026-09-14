@@ -52,7 +52,8 @@
 #   double-click-word           the paste buffer the gesture leaves
 #   triple-click-line           the paste buffer the gesture leaves
 #   right-click-pane            the decoded screen (a menu, or nothing)
-#   border-click                the active pane index
+#   border-click                `#{pane_marked_set}` and the active pane
+#                               index
 #   border-drag-resize          `#{pane_width}` of the pane left of the border
 #   status-click-window         the current window index
 #   status-wheel-up/down        the current window index
@@ -937,6 +938,37 @@ pin_pane_width_changed() {
   [ "$(pane_field tmux "=$INNER_SESSION:0.0" 5)" != "$1" ]
 }
 
+# `bind -n MouseDown1Border { select-pane -M }`, and cmd-select-pane.c:137-149
+# makes `-M` on the already-marked pane `server_clear_marked` and never a
+# change of the active pane. Channel: `#{pane_marked_set}` and the active pane
+# index, with pane 1 marked and pane 0 active before the click.
+case_border_click() {
+  CASE_LABEL=border-click
+  split_both
+  run_on_both select-pane -m -t "=$INNER_SESSION:0.1"
+  wait_for 'the pin marked pane 1' pin_marked_set_is 1
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  wait_for 'the pin back on pane 0' active_pane_index_is tmux 0
+  mark_both borderclick
+  local right top
+  right="$(pane_field tmux "=$INNER_SESSION:0.0" 3)"
+  top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  click_both 0 "$((right + 2))" "$((top + 4))"
+  wait_for 'the pin cleared its mark on a border click' pin_marked_set_is 0
+  settle_both MARK-borderclick 'the border click'
+  assert_value border-click/marked-set "$(marked_set zz)" "$(marked_set tmux)"
+  assert_value border-click/active-pane \
+    "$(active_pane_index zz)" "$(active_pane_index tmux)"
+  unsplit_both
+}
+marked_set() {
+  side_command "$1" display-message -p -t "=$INNER_SESSION:0.0" \
+    '#{pane_marked_set}' 2>/dev/null
+}
+pin_marked_set_is() {
+  [ "$(marked_set tmux)" = "$1" ]
+}
+
 # The status line's own ranges. `bind -n MouseDown1Status { switch-client -t= }`
 # resolves the window under the pointer from the range the status line
 # published, so every gesture here is aimed at a WINDOW range: the pin's
@@ -1215,6 +1247,7 @@ run_cases() {
   case_multi_click
   case_right_click_pane
   case_border_drag
+  case_border_click
   case_status_clicks
   case_border_user_binding
   case_status_user_binding
@@ -1349,6 +1382,16 @@ sc_one_sided_status_wheel() {
   case_status_clicks
   side_command zz bind-key -T root WheelDownStatus next-window >/dev/null 2>&1
 }
+# The pin's own `MouseDown1Border` unbound on zz only, so zz's border click
+# runs nothing and the pane it had marked stays marked. This has to run before
+# the border-binding sabotage: that one's case rebinds `MouseDown1Border` and
+# unbinds it again, which takes the pin's stock binding away for the rest of
+# the run.
+sc_one_sided_border_click() {
+  side_command zz unbind-key -T root MouseDown1Border >/dev/null 2>&1
+  case_border_click
+  side_command zz bind-key -T root MouseDown1Border select-pane -M >/dev/null 2>&1
+}
 # zz out of copy mode before the paste, so its pane takes the text the mode
 # would have eaten. paste-into-copy-mode/after-cancel-screen is where the two
 # screens part.
@@ -1386,6 +1429,8 @@ run_self_check() {
     sc_one_sided_click_target
   self_check_case 'the same root mouse binding set differently on zz' catches \
     sc_one_sided_binding_value
+  self_check_case 'MouseDown1Border unbound on zz only' catches \
+    sc_one_sided_border_click
   self_check_case 'the border mouse binding set differently on zz' catches \
     sc_one_sided_border_binding
   self_check_case "zz's context click aimed one cell further along" catches \

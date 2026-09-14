@@ -32,6 +32,7 @@ pub(super) enum HostEvent {
     Connected(u64, DesktopPeer),
     Disconnected(u64),
     Focused(u64),
+    Inactive(u64),
     LaunchFinished,
     QuitFailed,
     #[cfg(target_os = "macos")]
@@ -229,6 +230,8 @@ fn run(socket: PathBuf, server_id: u64, observe: bool) -> io::Result<()> {
         available: false,
         desktops: Vec::new(),
         opening: false,
+        pending: None,
+        active: Arc::new(AtomicBool::new(false)),
         quitting: false,
     };
     #[cfg(target_os = "macos")]
@@ -271,6 +274,8 @@ pub(super) struct Host {
     available: bool,
     desktops: Vec<(u64, DesktopPeer)>,
     opening: bool,
+    pending: Option<DesktopEvent>,
+    active: Arc<AtomicBool>,
     quitting: bool,
 }
 
@@ -282,7 +287,14 @@ impl Host {
                 self.settings.refresh();
                 if self.settings.enabled() {
                     if self.tray.is_none() {
-                        self.tray = super::spawn(self.actions.clone());
+                        self.tray = super::spawn(
+                            self.actions.clone(),
+                            super::facts::Source {
+                                socket: self.socket.clone(),
+                                server_id: self.server_id,
+                                active: self.active.clone(),
+                            },
+                        );
                         self.set_available(self.tray.is_some());
                     }
                 } else {
@@ -296,15 +308,31 @@ impl Host {
                     .try_send(DesktopEvent::Available(self.available))
                     .is_ok()
                 {
+                    if let Some(event) = self.pending.take()
+                        && let Err(error) = peer.sender.try_send(event)
+                    {
+                        self.pending = Some(error.into_inner());
+                    }
                     self.desktops.push((id, peer));
                     self.opening = false;
                 }
             }
-            HostEvent::Disconnected(id) => self.desktops.retain(|(other, _)| *other != id),
+            HostEvent::Disconnected(id) => {
+                if self.desktops.last().is_some_and(|(other, _)| *other == id) {
+                    self.active.store(false, Ordering::Release);
+                }
+                self.desktops.retain(|(other, _)| *other != id);
+            }
+            HostEvent::Inactive(id) => {
+                if self.desktops.last().is_some_and(|(other, _)| *other == id) {
+                    self.active.store(false, Ordering::Release);
+                }
+            }
             HostEvent::Focused(id) => {
                 if let Some(index) = self.desktops.iter().position(|(other, _)| *other == id) {
                     let desktop = self.desktops.remove(index);
                     self.desktops.push(desktop);
+                    self.active.store(true, Ordering::Release);
                 }
             }
             HostEvent::LaunchFinished => self.opening = false,
@@ -322,6 +350,23 @@ impl Host {
             HostEvent::Action(TrayEvent::Available(available)) => {
                 self.set_available(available && self.tray.is_some());
             }
+            HostEvent::Action(TrayEvent::Attention(count)) => {
+                if let Some(tray) = &self.tray {
+                    tray.set_attention(count);
+                }
+            }
+            HostEvent::Action(action) if !self.quitting => {
+                let event = match action {
+                    TrayEvent::NewSession => DesktopEvent::NewSession,
+                    TrayEvent::SwitchSession(name) => DesktopEvent::SwitchSession(name),
+                    TrayEvent::FocusPane(pane) => DesktopEvent::FocusPane(pane),
+                    TrayEvent::OpenSettings => DesktopEvent::OpenSettings,
+                    TrayEvent::OpenLogs => DesktopEvent::OpenLogs,
+                    TrayEvent::RestartDaemon => DesktopEvent::RestartDaemon,
+                    _ => return true,
+                };
+                self.open(event);
+            }
             HostEvent::Action(_) => {}
         }
         true
@@ -330,28 +375,35 @@ impl Host {
     fn set_available(&mut self, available: bool) {
         if self.available != available {
             self.available = available;
-            self.broadcast(DesktopEvent::Available(available));
+            self.broadcast(&DesktopEvent::Available(available));
         }
     }
 
-    fn broadcast(&mut self, event: DesktopEvent) {
+    fn broadcast(&mut self, event: &DesktopEvent) {
         self.desktops
-            .retain(|(_, peer)| peer.sender.try_send(event).is_ok());
+            .retain(|(_, peer)| peer.sender.try_send(event.clone()).is_ok());
     }
 
     fn open(&mut self, event: DesktopEvent) {
         while let Some((_, desktop)) = self.desktops.last() {
-            if desktop.sender.try_send(event).is_ok() {
+            if desktop.sender.try_send(event.clone()).is_ok() {
                 return;
             }
             self.desktops.pop();
         }
+        let event = if event == DesktopEvent::Toggle {
+            DesktopEvent::Show
+        } else {
+            event
+        };
         if self.opening {
+            self.pending = Some(event);
             return;
         }
         match launch_app(&self.socket) {
             Ok(mut child) => {
                 self.opening = true;
+                self.pending = Some(event);
                 let events = self.events.clone();
                 let _ = thread::Builder::new()
                     .name("zz-tray-launch".into())
@@ -419,6 +471,44 @@ fn launch_app(socket: &Path) -> io::Result<Child> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn launched_desktop_receives_the_latest_pending_intent() {
+        let (events, _) = async_channel::unbounded();
+        let (actions, _) = async_channel::unbounded();
+        let mut host = Host {
+            socket: PathBuf::from("/tmp/unused-tray-test.sock"),
+            server_id: 1,
+            settings: Settings::new(events.clone()).expect("settings"),
+            events,
+            actions,
+            tray: None,
+            available: false,
+            desktops: Vec::new(),
+            opening: true,
+            pending: None,
+            active: Arc::new(AtomicBool::new(false)),
+            quitting: false,
+        };
+        host.open(DesktopEvent::SwitchSession("work".into()));
+        host.open(DesktopEvent::FocusPane("%7".into()));
+        let (sender, receiver) = async_channel::bounded(16);
+        let (_, acknowledged) = crossbeam_channel::bounded(1);
+        host.handle(HostEvent::Connected(
+            7,
+            DesktopPeer {
+                sender,
+                acknowledged,
+            },
+        ));
+        assert_eq!(receiver.try_recv().unwrap(), DesktopEvent::Available(false));
+        assert_eq!(
+            receiver.try_recv().unwrap(),
+            DesktopEvent::FocusPane("%7".into())
+        );
+        assert!(host.pending.is_none());
+        assert!(!host.opening);
+    }
+
     #[cfg(unix)]
     #[test]
     fn tray_quit_notifies_desktops_and_stops_all_sessions() {
@@ -465,6 +555,8 @@ mod tests {
                 },
             )],
             opening: false,
+            pending: None,
+            active: Arc::new(AtomicBool::new(false)),
             quitting: false,
         };
         #[cfg(target_os = "macos")]

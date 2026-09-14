@@ -17,6 +17,7 @@ mod fleet;
 mod keymap;
 #[cfg(target_os = "macos")]
 mod macos_app;
+mod menus;
 mod mux;
 mod pane;
 mod profile;
@@ -2464,10 +2465,12 @@ fn run_app(
             config::settings::init(cx);
             browser::view::init(cx);
             editor::init(cx);
-            #[cfg(target_os = "macos")]
-            macos_app::init(cx);
             terminal::view::init(cx);
             workspace::init(cx);
+            #[cfg(target_os = "macos")]
+            macos_app::init(cx);
+            #[cfg(not(target_os = "macos"))]
+            menus::install(cx);
             let controller = cx.new(|cx| BrowserController::new(runtime, cx));
             let agent_config = config::agent_config(cx);
             let preferences = AgentPreferences::load_persistent();
@@ -2635,6 +2638,8 @@ fn run_app(
                         cx.observe_window_activation(window, |_, window, cx| {
                             if window.is_window_active() {
                                 tray::focused(cx);
+                            } else {
+                                tray::inactive(cx);
                             }
                         }).detach();
                         window::state::observe(observed_window_state, window, cx);
@@ -2657,11 +2662,15 @@ fn toggle_from_tray(main_window: gpui::AnyWindowHandle, cx: &mut App) {
         .unwrap_or((true, false));
     match tray::toggle_action(visible, active) {
         #[cfg(target_os = "macos")]
-        tray::ToggleAction::Hide => cx.hide(),
+        tray::ToggleAction::Hide => {
+            tray::inactive(cx);
+            cx.hide();
+        }
         #[cfg(target_os = "macos")]
         tray::ToggleAction::Raise | tray::ToggleAction::Show => cx.activate(true),
         #[cfg(not(target_os = "macos"))]
         tray::ToggleAction::Hide => {
+            tray::inactive(cx);
             let _ = main_window.update(cx, |_, window, _| window.set_window_visible(false));
         }
         #[cfg(not(target_os = "macos"))]

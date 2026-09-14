@@ -1,6 +1,9 @@
 //! `Shell_NotifyIcon` on a real window: `TaskbarCreated` skips message-only windows.
 
-use std::sync::mpsc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    mpsc,
+};
 use std::thread::{self, JoinHandle};
 
 use async_channel::Sender;
@@ -8,20 +11,24 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::CreateBitmap;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
+    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+    Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CW_USEDEFAULT, CreateIconIndirect, CreatePopupMenu, CreateWindowExW,
     DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos,
-    GetMessageW, GetWindowLongPtrW, HICON, ICONINFO, MF_SEPARATOR, MF_STRING, MSG, PostMessageW,
-    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
+    GetMessageW, GetWindowLongPtrW, HICON, ICONINFO, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG,
+    PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
     SetWindowLongPtrW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
     TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_DESTROY, WM_LBUTTONUP, WM_NCCREATE,
     WM_NCDESTROY, WM_RBUTTONUP, WNDCLASSW, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
-use super::TrayEvent;
+use super::{
+    TrayEvent,
+    facts::{MenuEntry, Source},
+};
 
 const TRAY_ICON_ICO: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -30,8 +37,8 @@ const TRAY_ICON_ICO: &[u8] = include_bytes!(concat!(
 
 // `WM_APP`, not `WM_USER`: that range is private to controls.
 const WM_TRAY: u32 = WM_APP + 1;
-const MENU_TOGGLE: usize = 1;
-const MENU_QUIT: usize = 2;
+const WM_ATTENTION: u32 = WM_APP + 2;
+const MENU_ACTION_BASE: usize = 1;
 const TRAY_ICON_ID: u32 = 1;
 
 /// A live notification icon. Dropping it removes the icon and ends the tray
@@ -48,6 +55,21 @@ pub(super) struct NotifyIcon {
     reason = "a Send assertion for a raw handle has no safe form"
 )]
 unsafe impl Send for NotifyIcon {}
+
+impl NotifyIcon {
+    #[allow(unsafe_code, reason = "posting an icon update to the owning thread")]
+    pub(super) fn set_attention(&self, count: usize) {
+        // SAFETY: the window lives until Drop and PostMessageW supports other threads.
+        unsafe {
+            let _ = PostMessageW(
+                Some(HWND(self.hwnd as _)),
+                WM_ATTENTION,
+                WPARAM(count),
+                LPARAM(0),
+            );
+        }
+    }
+}
 
 impl Drop for NotifyIcon {
     fn drop(&mut self) {
@@ -70,6 +92,9 @@ struct TrayState {
     sender: Sender<TrayEvent>,
     taskbar_created: u32,
     icon: HICON,
+    attention_icon: HICON,
+    attention: AtomicUsize,
+    source: Source,
 }
 
 impl TrayState {
@@ -86,19 +111,30 @@ impl TrayState {
             uID: TRAY_ICON_ID,
             uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
             uCallbackMessage: WM_TRAY,
-            hIcon: self.icon,
+            hIcon: if self.attention.load(Ordering::Relaxed) > 0 {
+                self.attention_icon
+            } else {
+                self.icon
+            },
             ..Default::default()
         };
-        data.szTip[..3].copy_from_slice(&[b'z' as u16, b'z' as u16, 0]);
+        let title = if self.attention.load(Ordering::Relaxed) == 0 {
+            "zz".to_owned()
+        } else {
+            format!("zz · {} waiting", self.attention.load(Ordering::Relaxed))
+        };
+        for (slot, value) in data.szTip.iter_mut().take(127).zip(title.encode_utf16()) {
+            *slot = value;
+        }
         data
     }
 }
 
-pub(super) fn spawn(sender: Sender<TrayEvent>) -> Option<NotifyIcon> {
+pub(super) fn spawn(sender: Sender<TrayEvent>, source: Source) -> Option<NotifyIcon> {
     let (ready_sender, ready) = mpsc::channel();
     let thread = thread::Builder::new()
         .name("zz-tray".into())
-        .spawn(move || pump(sender, ready_sender))
+        .spawn(move || pump(sender, source, ready_sender))
         .ok()?;
     match ready.recv() {
         Ok(Some(hwnd)) => Some(NotifyIcon {
@@ -116,7 +152,7 @@ pub(super) fn spawn(sender: Sender<TrayEvent>) -> Option<NotifyIcon> {
     unsafe_code,
     reason = "win32 window and shell-icon calls have no safe binding"
 )]
-fn pump(sender: Sender<TrayEvent>, ready: mpsc::Sender<Option<isize>>) {
+fn pump(sender: Sender<TrayEvent>, source: Source, ready: mpsc::Sender<Option<isize>>) {
     // SAFETY: plain win32 setup on this thread's own windows; the state Box
     // handed to `WM_NCCREATE` is reclaimed in `WM_NCDESTROY` below.
     let created = unsafe {
@@ -140,7 +176,10 @@ fn pump(sender: Sender<TrayEvent>, ready: mpsc::Sender<Option<isize>>) {
         let state = Box::new(TrayState {
             sender,
             taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")),
-            icon: tray_icon(),
+            icon: tray_icon(false),
+            attention_icon: tray_icon(true),
+            attention: AtomicUsize::new(0),
+            source,
         });
         CreateWindowExW(
             WINDOW_EX_STYLE(0),
@@ -222,8 +261,16 @@ unsafe extern "system" fn window_procedure(
             if !state.icon.is_invalid() {
                 let _ = DestroyIcon(state.icon);
             }
+            if !state.attention_icon.is_invalid() {
+                let _ = DestroyIcon(state.attention_icon);
+            }
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             return DefWindowProcW(hwnd, message, wparam, lparam);
+        }
+        if message == WM_ATTENTION {
+            (*state).attention.store(wparam.0, Ordering::Relaxed);
+            let _ = Shell_NotifyIconW(NIM_MODIFY, &(*state).notify_icon_data(hwnd));
+            return LRESULT(0);
         }
         let state = &*state;
 
@@ -262,9 +309,35 @@ fn show_menu(hwnd: HWND, state: &TrayState) {
         let Ok(menu) = CreatePopupMenu() else {
             return;
         };
-        let _ = AppendMenuW(menu, MF_STRING, MENU_TOGGLE, w!("Show/Hide"));
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        let _ = AppendMenuW(menu, MF_STRING, MENU_QUIT, w!("Quit zz"));
+        let entries = state.source.menu();
+        let mut actions = Vec::new();
+        for entry in entries {
+            let label: Vec<u16> = entry
+                .label()
+                .replace('&', "&&")
+                .encode_utf16()
+                .chain(Some(0))
+                .collect();
+            match entry {
+                MenuEntry::Separator => {
+                    let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+                }
+                MenuEntry::Item { action, .. } => {
+                    let flags = if action.is_some() {
+                        MF_STRING
+                    } else {
+                        MF_STRING | MF_GRAYED
+                    };
+                    let _ = AppendMenuW(
+                        menu,
+                        flags,
+                        MENU_ACTION_BASE + actions.len(),
+                        PCWSTR(label.as_ptr()),
+                    );
+                    actions.push(action);
+                }
+            }
+        }
 
         let mut cursor = Default::default();
         let _ = GetCursorPos(&mut cursor);
@@ -281,24 +354,35 @@ fn show_menu(hwnd: HWND, state: &TrayState) {
             None,
         );
         let _ = DestroyMenu(menu);
-        match picked.0 as usize {
-            MENU_TOGGLE => state.send(TrayEvent::Toggle),
-            MENU_QUIT => state.send(TrayEvent::Quit),
-            _ => {}
+        if let Some(index) = (picked.0 as usize).checked_sub(MENU_ACTION_BASE)
+            && let Some(Some(action)) = actions.get(index)
+        {
+            state.send(action.clone());
         }
     }
 }
 
 // `CreateIconIndirect` requires a mask bitmap but ignores it at 32bpp.
 #[allow(unsafe_code, reason = "GDI bitmaps have no safe binding")]
-fn tray_icon() -> HICON {
+fn tray_icon(attention: bool) -> HICON {
     let Ok(decoded) = image::load_from_memory_with_format(TRAY_ICON_ICO, image::ImageFormat::Ico)
     else {
         log::warn!(target: "zz::tray", "could not decode the tray icon");
         return HICON::default();
     };
-    let rgba = decoded.into_rgba8();
+    let mut rgba = decoded.into_rgba8();
     let (width, height) = rgba.dimensions();
+    if attention {
+        let radius = (width.min(height) / 6).max(1) as i64;
+        let center_x = i64::from(width) - radius - 1;
+        let center_y = radius;
+        for (x, y, pixel) in rgba.enumerate_pixels_mut() {
+            if (i64::from(x) - center_x).pow(2) + (i64::from(y) - center_y).pow(2) <= radius.pow(2)
+            {
+                *pixel = image::Rgba([255, 90, 60, 255]);
+            }
+        }
+    }
     let bgra: Vec<u8> = rgba
         .pixels()
         .flat_map(|pixel| {

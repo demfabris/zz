@@ -2392,6 +2392,13 @@ impl MuxClient {
         cx.notify();
     }
 
+    #[cfg(not(target_os = "ios"))]
+    pub(crate) fn restart_daemon_for_update(&mut self, cx: &mut Context<Self>) {
+        self.stale_daemon
+            .get_or_insert(StaleDaemonInfo { daemon: None });
+        self.restart_stale_daemon(false, cx);
+    }
+
     pub(crate) fn restart_stale_daemon(&mut self, automatic: bool, cx: &mut Context<Self>) {
         let Some(stale) = self.stale_daemon.take() else {
             return;

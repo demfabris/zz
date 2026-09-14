@@ -7,19 +7,27 @@ mod windows;
 
 use async_channel::Sender;
 
-pub(crate) use desktop::{DesktopTray, focused, init_desktop};
+pub(crate) use desktop::{DesktopTray, focused, inactive, init_desktop};
 pub(crate) use host::{run_if_requested, start_daemon_helper};
 
 /// What a tray interaction asks of the app.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum TrayEvent {
     Toggle,
     Quit,
     Available(bool),
+    NewSession,
+    SwitchSession(String),
+    FocusPane(String),
+    OpenSettings,
+    OpenLogs,
+    RestartDaemon,
+    Attention(usize),
 }
 
 /// A live tray icon. Dropping it removes the icon.
 pub(crate) struct Tray {
+    _stop: std::sync::mpsc::Sender<()>,
     #[cfg(target_os = "linux")]
     _backend: linux::Service,
     #[cfg(target_os = "macos")]
@@ -28,27 +36,53 @@ pub(crate) struct Tray {
     _backend: windows::NotifyIcon,
 }
 
-/// Puts the icon up. Call from the main thread: `AppKit` requires it for a
-/// status item, and the handle's drop lands there too.
-#[cfg(target_os = "macos")]
-pub(crate) fn spawn(sender: Sender<TrayEvent>) -> Option<Tray> {
-    macos::spawn(sender).map(|backend| Tray { _backend: backend })
+fn spawn(sender: Sender<TrayEvent>, source: facts::Source) -> Option<Tray> {
+    #[cfg(target_os = "macos")]
+    let backend = macos::spawn(sender.clone(), source.clone())?;
+    #[cfg(target_os = "linux")]
+    let backend = linux::spawn(sender.clone(), source.clone())?;
+    #[cfg(target_os = "windows")]
+    let backend = windows::spawn(sender.clone(), source.clone())?;
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    return None;
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+    {
+        let (stop, stopped) = std::sync::mpsc::channel();
+        let _ = std::thread::Builder::new()
+            .name("zz-tray-attention".into())
+            .spawn(move || {
+                loop {
+                    let count = facts::attention_count(
+                        &source.socket,
+                        source.server_id,
+                        std::time::Duration::from_millis(300),
+                    );
+                    let delay = if count.is_ok() { 5 } else { 15 };
+                    if let Ok(count) = count
+                        && sender.try_send(TrayEvent::Attention(count)).is_err()
+                    {
+                        break;
+                    }
+                    if !matches!(
+                        stopped.recv_timeout(std::time::Duration::from_secs(delay)),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                    ) {
+                        break;
+                    }
+                }
+            });
+        Some(Tray {
+            _backend: backend,
+            _stop: stop,
+        })
+    }
 }
 
-#[cfg(target_os = "linux")]
-pub(crate) fn spawn(sender: Sender<TrayEvent>) -> Option<Tray> {
-    linux::spawn(sender).map(|backend| Tray { _backend: backend })
-}
-
-#[cfg(target_os = "windows")]
-pub(crate) fn spawn(sender: Sender<TrayEvent>) -> Option<Tray> {
-    windows::spawn(sender).map(|backend| Tray { _backend: backend })
-}
-
-/// No tray on this platform.
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-pub(crate) fn spawn(_sender: Sender<TrayEvent>) -> Option<Tray> {
-    None
+impl Tray {
+    fn set_attention(&self, count: usize) {
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+        self._backend.set_attention(count);
+    }
 }
 
 /// What clicking the tray icon should do.
@@ -89,6 +123,7 @@ mod tests {
     }
 }
 mod desktop;
+mod facts;
 mod host;
 mod ipc;
 mod settings;

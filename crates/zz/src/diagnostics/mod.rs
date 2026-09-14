@@ -775,6 +775,20 @@ fn open_log_file(requested: Option<&Path>) -> io::Result<(PathBuf, File)> {
     Ok((path, file))
 }
 
+pub(crate) fn open_logs(cx: &App) {
+    let path = VERBOSE_LOG
+        .get()
+        .and_then(Clone::clone)
+        .unwrap_or_else(|| platform_log_dir().join("zz.app.log"));
+    if path.exists() {
+        cx.reveal_path(&path);
+    } else if let Some(directory) = path.parent()
+        && let Ok(url) = url::Url::from_directory_path(directory)
+    {
+        cx.open_url(url.as_str());
+    }
+}
+
 fn default_log_path() -> PathBuf {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)

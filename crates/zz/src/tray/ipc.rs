@@ -14,34 +14,78 @@ use sha2::{Digest as _, Sha256};
 
 use super::host::HostEvent;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum DesktopEvent {
     Available(bool),
     Toggle,
     Quit,
     Show,
+    NewSession,
+    SwitchSession(String),
+    FocusPane(String),
+    OpenSettings,
+    OpenLogs,
+    RestartDaemon,
 }
 
 impl DesktopEvent {
-    fn encode(self) -> u8 {
-        match self {
-            Self::Available(false) => 0,
-            Self::Available(true) => 1,
-            Self::Toggle => 2,
-            Self::Quit => 3,
-            Self::Show => 4,
+    fn write(&self, writer: &mut impl io::Write) -> io::Result<()> {
+        let (tag, payload) = match self {
+            Self::Available(false) => (0, None),
+            Self::Available(true) => (1, None),
+            Self::Toggle => (2, None),
+            Self::Quit => (3, None),
+            Self::Show => (4, None),
+            Self::NewSession => (5, None),
+            Self::SwitchSession(name) => (6, Some(name)),
+            Self::FocusPane(pane) => (7, Some(pane)),
+            Self::OpenSettings => (8, None),
+            Self::OpenLogs => (9, None),
+            Self::RestartDaemon => (10, None),
+        };
+        writer.write_all(&[tag])?;
+        if let Some(payload) = payload {
+            let length = u32::try_from(payload.len())
+                .ok()
+                .filter(|length| *length <= 65536)
+                .ok_or_else(|| io::Error::other("tray event too long"))?;
+            writer.write_all(&length.to_le_bytes())?;
+            writer.write_all(payload.as_bytes())?;
         }
+        Ok(())
     }
 
-    fn decode(value: u8) -> io::Result<Self> {
-        match value {
-            0 => Ok(Self::Available(false)),
-            1 => Ok(Self::Available(true)),
-            2 => Ok(Self::Toggle),
-            3 => Ok(Self::Quit),
-            4 => Ok(Self::Show),
-            _ => Err(io::Error::other("invalid tray event")),
-        }
+    fn read(reader: &mut impl io::Read) -> io::Result<Self> {
+        let mut tag = [0];
+        reader.read_exact(&mut tag)?;
+        Ok(match tag[0] {
+            0 => Self::Available(false),
+            1 => Self::Available(true),
+            2 => Self::Toggle,
+            3 => Self::Quit,
+            4 => Self::Show,
+            5 => Self::NewSession,
+            6 | 7 => {
+                let mut length = [0; 4];
+                reader.read_exact(&mut length)?;
+                let length = u32::from_le_bytes(length) as usize;
+                if length > 65536 {
+                    return Err(io::Error::other("tray event too long"));
+                }
+                let mut payload = vec![0; length];
+                reader.read_exact(&mut payload)?;
+                let payload = String::from_utf8(payload).map_err(io::Error::other)?;
+                if tag[0] == 6 {
+                    Self::SwitchSession(payload)
+                } else {
+                    Self::FocusPane(payload)
+                }
+            }
+            8 => Self::OpenSettings,
+            9 => Self::OpenLogs,
+            10 => Self::RestartDaemon,
+            _ => return Err(io::Error::other("invalid tray event")),
+        })
     }
 }
 
@@ -171,7 +215,7 @@ fn serve(mut stream: Stream, id: u64, events: &Sender<HostEvent>) {
         .name("zz-tray-events".into())
         .spawn(move || {
             while let Ok(event) = receiver.recv_blocking() {
-                if writer.write_all(&[event.encode()]).is_err() {
+                if event.write(&mut writer).is_err() {
                     break;
                 }
             }
@@ -197,6 +241,11 @@ fn serve(mut stream: Stream, id: u64, events: &Sender<HostEvent>) {
         match message[0] {
             b'A' => {
                 if events.try_send(HostEvent::Focused(id)).is_err() {
+                    break;
+                }
+            }
+            b'H' => {
+                if events.try_send(HostEvent::Inactive(id)).is_err() {
                     break;
                 }
             }
@@ -262,6 +311,10 @@ pub(super) fn focus(stream: &mut Stream) -> io::Result<()> {
     stream.write_all(b"A")
 }
 
+pub(super) fn inactive(stream: &mut Stream) -> io::Result<()> {
+    stream.write_all(b"H")
+}
+
 pub(super) fn acknowledge_quit(stream: &mut Stream) -> io::Result<()> {
     stream.write_all(b"Q")
 }
@@ -271,14 +324,42 @@ pub(super) fn disconnect(stream: &mut Stream) -> io::Result<()> {
 }
 
 pub(super) fn receive(stream: &mut Stream) -> io::Result<DesktopEvent> {
-    let mut message = [0];
-    stream.read_exact(&mut message)?;
-    DesktopEvent::decode(message[0])
+    DesktopEvent::read(stream)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frames_preserve_old_tags_and_round_trip_payloads() {
+        let events = [
+            DesktopEvent::Available(false),
+            DesktopEvent::Available(true),
+            DesktopEvent::Toggle,
+            DesktopEvent::Quit,
+            DesktopEvent::Show,
+            DesktopEvent::NewSession,
+            DesktopEvent::SwitchSession("work 🦀".into()),
+            DesktopEvent::FocusPane("%42".into()),
+            DesktopEvent::OpenSettings,
+            DesktopEvent::OpenLogs,
+            DesktopEvent::RestartDaemon,
+        ];
+        let mut bytes = Vec::new();
+        for event in &events {
+            event.write(&mut bytes).unwrap();
+        }
+        assert_eq!(&bytes[..5], &[0, 1, 2, 3, 4]);
+        let mut reader = bytes.as_slice();
+        for event in events {
+            assert_eq!(DesktopEvent::read(&mut reader).unwrap(), event);
+        }
+        assert!(reader.is_empty());
+        assert!(DesktopEvent::read(&mut &[6, 255, 255, 255, 255][..]).is_err());
+        assert!(DesktopEvent::read(&mut &[6, 1, 0, 0, 0, 255][..]).is_err());
+        assert!(DesktopEvent::read(&mut &[7, 3, 0, 0, 0, b'%'][..]).is_err());
+    }
 
     #[test]
     fn endpoint_separates_daemon_instances_and_sockets() {

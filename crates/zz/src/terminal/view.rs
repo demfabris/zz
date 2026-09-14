@@ -134,20 +134,27 @@ fn raw_key_bindings() -> [KeyBinding; 2] {
     ]
 }
 
-/// A terminal pane resolves its own chrome on the raw key path, so the only
-/// gpui bindings it needs are the ones that keep the font chords away from the
-/// application zoom bound at the root.
 fn terminal_key_bindings(chords: &[ChromeChord]) -> Vec<KeyBinding> {
     let context = Some(TERMINAL_KEY_CONTEXT);
+    let mut chords = chords.iter().collect::<Vec<_>>();
+    chords.sort_by_key(|chord| !chord.key().starts_with("D-"));
     chords
-        .iter()
-        .filter(|chord| {
-            matches!(
-                chord.action(),
-                ChromeAction::TerminalFontIncrease | ChromeAction::TerminalFontDecrease
-            )
+        .into_iter()
+        .filter_map(|chord| {
+            Some(match chord.action() {
+                ChromeAction::TerminalFontIncrease | ChromeAction::TerminalFontDecrease => {
+                    chord.binding(NoAction, context)
+                }
+                ChromeAction::TerminalCopy => chord.binding(crate::menus::Copy, context),
+                ChromeAction::TerminalPaste => chord.binding(crate::menus::Paste, context),
+                ChromeAction::TerminalSelectAll => chord.binding(crate::menus::SelectAll, context),
+                ChromeAction::TerminalSearch => chord.binding(crate::menus::Find, context),
+                ChromeAction::TerminalClearHistory => {
+                    chord.binding(crate::menus::ClearScrollback, context)
+                }
+                _ => return None,
+            })
         })
-        .map(|chord| chord.binding(NoAction, context))
         .collect()
 }
 
@@ -2007,6 +2014,29 @@ impl TerminalView {
         );
     }
 
+    fn paste_clipboard(&mut self, cx: &mut Context<Self>) {
+        let item = cx.read_from_clipboard();
+        if let Some(text) = item.as_ref().and_then(ClipboardItem::text) {
+            self.request_paste(text, cx);
+        } else if let Some(item) = item {
+            if self.pane_is_remote(cx) {
+                self.upload_clipboard_image(item, cx);
+            } else if self.snapshot_clipboard_image(item, cx) {
+                self.mux.read(cx).send_input(InputMessage::Key {
+                    pane: self.pane,
+                    input: KeyInput {
+                        action: KeyAction::Press,
+                        key: KeyCode::Character('v'),
+                        modifiers: Modifiers::new(false, true, false, false),
+                        text: None,
+                        unshifted_codepoint: Some('v'),
+                    },
+                    text_follows: false,
+                });
+            }
+        }
+    }
+
     fn request_paste(&mut self, text: String, cx: &mut Context<Self>) {
         if self.command_output || text.is_empty() {
             return;
@@ -2192,26 +2222,7 @@ impl TerminalView {
             return;
         }
         if chrome == Some(ChromeAction::TerminalPaste) {
-            let item = cx.read_from_clipboard();
-            if let Some(text) = item.as_ref().and_then(ClipboardItem::text) {
-                self.request_paste(text, cx);
-            } else if let Some(item) = item {
-                if self.pane_is_remote(cx) {
-                    self.upload_clipboard_image(item, cx);
-                } else if self.snapshot_clipboard_image(item, cx) {
-                    self.mux.read(cx).send_input(InputMessage::Key {
-                        pane: self.pane,
-                        input: KeyInput {
-                            action: KeyAction::Press,
-                            key: KeyCode::Character('v'),
-                            modifiers: Modifiers::new(false, true, false, false),
-                            text: None,
-                            unshifted_codepoint: Some('v'),
-                        },
-                        text_follows: false,
-                    });
-                }
-            }
+            self.paste_clipboard(cx);
             cx.stop_propagation();
             return;
         }
@@ -2442,6 +2453,41 @@ impl Render for TerminalView {
                 .line_height(line_height)
                 .key_context(TERMINAL_KEY_CONTEXT)
                 .track_focus(&self.focus_handle)
+                .on_action(cx.listener(|view, _: &crate::menus::Copy, _, cx| {
+                    view.copy_selection(cx, ClipboardTarget::Clipboard);
+                }))
+                .on_action(cx.listener(|view, _: &crate::menus::SelectAll, _, cx| {
+                    view.send_view_action(cx, TerminalViewAction::SelectAll);
+                }))
+                .on_action(cx.listener(|view, _: &crate::menus::Find, window, cx| {
+                    view.begin_search(
+                        SearchDirection::Forward,
+                        SearchPromptBehavior::Navigate,
+                        window,
+                        cx,
+                    );
+                }))
+                .when(!self.command_output, |terminal| {
+                    terminal
+                        .on_action(cx.listener(|view, _: &crate::menus::Paste, _, cx| {
+                            view.paste_clipboard(cx);
+                        }))
+                        .on_action(
+                            cx.listener(|view, _: &crate::menus::ClearScrollback, _, cx| {
+                                view.send_view_action(cx, TerminalViewAction::ClearHistory);
+                            }),
+                        )
+                        .when(!self.popup, |terminal| {
+                            terminal.on_action(cx.listener(
+                                |view, _: &crate::menus::CopyMode, _, cx| {
+                                    view.mux.read(cx).execute(CommandInvocation::new(
+                                        "copy-mode",
+                                        ["-t", &view.pane.to_string()],
+                                    ));
+                                },
+                            ))
+                        })
+                })
                 .on_key_down(cx.listener(Self::on_key_down))
                 .on_key_up(cx.listener(Self::on_key_up))
                 .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))

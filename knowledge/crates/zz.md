@@ -333,18 +333,22 @@ borderless terminal/browser pane content (including Chromium images). These fram
 internal presentation geometry; only pane corner radius and margin remain configurable. Tiled
 edges remain square at every layer.
 
-On macOS, `macos_app.rs` registers application actions and a native menu before any pane receives
-keyboard input. Global bindings cover `Cmd+Q` (quit), `Cmd+H` / `Option+Cmd+H` (hide), `Cmd+M`
-(minimize), and `Cmd+W` (close the active window); Settings remains `Cmd+,`. Full screen is left to
-macOS: the Window menu's own `Enter Full Screen` item, which AppKit adds the first time that menu is
-opened. The focused terminal or browser only receives a command-modified key when no application or
-window action claims it. Keys a browser page does not consume stop at zz's CEF keyboard handler
-(`crates/zz-browser/src/cef_runtime.rs`), because CEF would otherwise offer them to the main menu
-through `performKeyEquivalent:`, and AppKit matches that fn+F item against a bare `f`. Quit still runs the existing app-quit barrier, and closing the main window
-   still runs both browser and agent shutdown, so both routes detach from the persistent daemon
-   without stopping its PTYs. `AgentController::shutdown` is a formality now . it flips a flag and
-   returns ready, because the adapters are the daemon's children and a running turn is meant to
-   outlive the window.
+`menus.rs` declares one menu tree: zz, File, Edit, View, Window (macOS), and Help.
+macOS displays it through GPUI's native menu API; Linux and Windows retain it for a future menu bar.
+`menus::install` rebuilds on chrome-keymap replacement after config reload and on changes to the
+`BTreeSet<String>` of live session names. Other mux notifications leave the menu tree alone. The
+Show FPS checkmark follows the configuration, and GPUI uses the focused surface's action handlers
+to decide which commands are available.
+
+The macOS chrome defaults assign `Cmd+N` to New Session, `Cmd+Shift+N` to New Window, `Cmd+D` to
+Split Right, and `Cmd+Shift+D` to Split Down. `macos_app.rs` retains the application actions and
+bindings for quit, hide, minimize, close pane (`Cmd+W`), and close window (`Cmd+Shift+W`); Settings
+remains `Cmd+,`. The Window menu ends with a separator so AppKit can append its window list, tiling,
+and Enter Full Screen items. Prefix chords have no native menu shortcut. Browser keys that no page
+consumes stop at zz's CEF keyboard handler (`crates/zz-browser/src/cef_runtime.rs`) to keep AppKit
+from matching a bare `f` to its full-screen item. Quit runs the app-quit barrier; closing the main
+window shuts down the browser and agent controllers and detaches from the persistent daemon while
+its PTYs and running agent turns continue.
 
 # Layout reconciliation and pane identity (`workspace/view.rs`)
 

@@ -8,18 +8,27 @@ use std::{
     time::Duration,
 };
 
-use gpui::{AnyWindowHandle, App, Entity, Global, Task};
+use gpui::{AnyWindowHandle, App, Entity, Global, Task, WeakEntity};
 use interprocess::TryClone as _;
 use interprocess::local_socket::Stream;
 use parking_lot::Mutex;
 
-use crate::mux::client::MuxClient;
+use crate::{
+    mux::{
+        client::MuxClient,
+        hosts::{HostId, HostState},
+        nav::{TreeTarget, activate_nav, activation_for_target},
+    },
+    workspace::{AppView, sidebar::WorkspaceSidebar},
+};
 
 use super::ipc::{self, DesktopEvent};
 
 #[derive(Default)]
 pub(crate) struct DesktopTray {
     server_id: Option<u64>,
+    pub(crate) sidebar: Option<WeakEntity<WorkspaceSidebar>>,
+    pending: Option<DesktopEvent>,
     available: bool,
     pub(crate) stopping_daemon: bool,
     cancel: Option<Arc<AtomicBool>>,
@@ -54,19 +63,24 @@ pub(crate) fn init_desktop(
     window: AnyWindowHandle,
     cx: &mut App,
 ) {
-    reconnect(mux.read(cx).local_server_id(), socket.clone(), window, cx);
+    reconnect(mux.clone(), socket.clone(), window, cx);
     cx.observe(mux, move |mux, cx| {
-        reconnect(mux.read(cx).local_server_id(), socket.clone(), window, cx);
+        reconnect(mux.clone(), socket.clone(), window, cx);
+        drain_pending(&mux, window, cx);
     })
     .detach();
 }
 
-fn reconnect(server_id: Option<u64>, socket: PathBuf, window: AnyWindowHandle, cx: &mut App) {
+fn reconnect(mux: Entity<MuxClient>, socket: PathBuf, window: AnyWindowHandle, cx: &mut App) {
+    let server_id = mux.read(cx).local_server_id();
     if cx.global::<DesktopTray>().server_id == server_id {
         return;
     }
     let was_available = cx.global::<DesktopTray>().available;
     let tray = cx.global_mut::<DesktopTray>();
+    if tray.server_id.is_some() {
+        tray.pending = None;
+    }
     if let Some(cancel) = tray.cancel.take() {
         cancel.store(true, Ordering::Release);
     }
@@ -140,7 +154,13 @@ fn reconnect(server_id: Option<u64>, socket: PathBuf, window: AnyWindowHandle, c
             cx.update(|cx| match event {
                 ConnectionEvent::Writer(writer) => {
                     cx.global_mut::<DesktopTray>().writer = Some(Arc::new(Mutex::new(writer)));
-                    focused(cx);
+                    let _ = window.update(cx, |_, window, cx| {
+                        if window.is_window_active() {
+                            focused(cx);
+                        } else {
+                            inactive(cx);
+                        }
+                    });
                 }
                 ConnectionEvent::Event(DesktopEvent::Available(available)) => {
                     let was_available = cx.global::<DesktopTray>().available;
@@ -150,13 +170,6 @@ fn reconnect(server_id: Option<u64>, socket: PathBuf, window: AnyWindowHandle, c
                     }
                 }
                 ConnectionEvent::Event(DesktopEvent::Toggle) => crate::toggle_from_tray(window, cx),
-                ConnectionEvent::Event(DesktopEvent::Show) => {
-                    let _ = window.update(cx, |_, window, cx| {
-                        window.set_window_visible(true);
-                        window.activate_window();
-                        cx.activate(true);
-                    });
-                }
                 ConnectionEvent::Event(DesktopEvent::Quit) => {
                     cx.global_mut::<DesktopTray>().stopping_daemon = true;
                     if let Some(writer) = cx.global::<DesktopTray>().writer.clone() {
@@ -168,12 +181,147 @@ fn reconnect(server_id: Option<u64>, socket: PathBuf, window: AnyWindowHandle, c
                     }
                     cx.quit();
                 }
+                ConnectionEvent::Event(event) => {
+                    if matches!(
+                        event,
+                        DesktopEvent::NewSession
+                            | DesktopEvent::SwitchSession(_)
+                            | DesktopEvent::FocusPane(_)
+                    ) {
+                        cx.global_mut::<DesktopTray>().pending = Some(event);
+                        drain_pending(&mux, window, cx);
+                    } else {
+                        handle_intent(event, &mux, window, cx);
+                    }
+                }
             });
         }
     });
     let tray = cx.global_mut::<DesktopTray>();
     tray.cancel = Some(cancel);
     tray._task = Some(task);
+}
+
+fn drain_pending(mux: &Entity<MuxClient>, window: AnyWindowHandle, cx: &mut App) {
+    let ready = mux
+        .read(cx)
+        .fleet_hosts()
+        .any(|(host, _, state, snapshot)| {
+            host == HostId::LOCAL
+                && *state == HostState::Connected
+                && snapshot.is_some_and(|snapshot| snapshot.generation > 0)
+        });
+    if ready && let Some(event) = cx.global_mut::<DesktopTray>().pending.take() {
+        handle_intent(event, mux, window, cx);
+    }
+}
+
+fn handle_intent(
+    event: DesktopEvent,
+    mux: &Entity<MuxClient>,
+    handle: AnyWindowHandle,
+    cx: &mut App,
+) {
+    let _ = handle.update(cx, |_, window, cx| {
+        window.set_window_visible(true);
+        window.activate_window();
+        cx.activate(true);
+        let sidebar = cx
+            .global::<DesktopTray>()
+            .sidebar
+            .as_ref()
+            .and_then(WeakEntity::upgrade);
+        match event {
+            DesktopEvent::NewSession => {
+                if let Some(sidebar) = sidebar {
+                    sidebar.update(cx, |sidebar, cx| sidebar.close_settings(window, cx));
+                }
+                mux.update(cx, |mux, cx| {
+                    if mux.attach_to_host_default(HostId::LOCAL, cx) {
+                        mux.new_session(HostId::LOCAL);
+                    }
+                });
+            }
+            DesktopEvent::SwitchSession(name) => {
+                let session = mux
+                    .read(cx)
+                    .fleet_hosts()
+                    .find_map(|(host, _, _, snapshot)| {
+                        (host == HostId::LOCAL)
+                            .then_some(snapshot)
+                            .flatten()?
+                            .sessions
+                            .iter()
+                            .find(|session| session.name == name)
+                            .map(|session| session.id)
+                    });
+                if let Some(session) = session {
+                    if let Some(sidebar) = sidebar {
+                        sidebar.update(cx, |sidebar, cx| sidebar.close_settings(window, cx));
+                    }
+                    mux.update(cx, |mux, cx| {
+                        mux.attach_to_host(HostId::LOCAL, session, cx);
+                    });
+                }
+            }
+            DesktopEvent::FocusPane(pane) => {
+                let pane = pane
+                    .strip_prefix('%')
+                    .and_then(|pane| pane.parse().ok())
+                    .map(zz_protocol::PaneId);
+                if let Some(pane) = pane {
+                    let client = mux.read(cx);
+                    let owner = client.fleet_hosts().find_map(|(host, _, _, snapshot)| {
+                        if host != HostId::LOCAL {
+                            return None;
+                        }
+                        snapshot?.sessions.iter().find_map(|session| {
+                            session
+                                .windows
+                                .iter()
+                                .find(|window| window.panes.contains_key(&pane))
+                                .map(|window| (session.id, window.id))
+                        })
+                    });
+                    let activation = owner.and_then(|(session, window)| {
+                        activation_for_target(
+                            HostId::LOCAL,
+                            TreeTarget::Pane(pane),
+                            Some(session),
+                            Some(window),
+                            client.attached_host(),
+                            client.attached_session(),
+                            true,
+                        )
+                    });
+                    if let Some(activation) = activation {
+                        if let Some(sidebar) = sidebar {
+                            sidebar.update(cx, |sidebar, cx| sidebar.close_settings(window, cx));
+                        }
+                        activate_nav(mux, activation, cx);
+                    }
+                }
+            }
+            DesktopEvent::OpenSettings => {
+                if let Some(sidebar) = sidebar {
+                    sidebar.update(cx, |sidebar, cx| sidebar.open_settings(window, cx));
+                }
+            }
+            DesktopEvent::OpenLogs => crate::diagnostics::open_logs(cx),
+            DesktopEvent::RestartDaemon => AppView::prompt_daemon_update(mux, window, cx),
+            _ => {}
+        }
+    });
+}
+
+pub(crate) fn inactive(cx: &App) {
+    if let Some(writer) = cx.global::<DesktopTray>().writer.clone() {
+        cx.background_executor()
+            .spawn(async move {
+                let _ = ipc::inactive(&mut writer.lock());
+            })
+            .detach();
+    }
 }
 
 pub(crate) fn focused(cx: &App) {

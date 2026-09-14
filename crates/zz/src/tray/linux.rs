@@ -1,7 +1,10 @@
 use async_channel::Sender;
 use ksni::blocking::TrayMethods as _;
 
-use super::TrayEvent;
+use super::{
+    TrayEvent,
+    facts::{MenuEntry, Source},
+};
 
 const TRAY_ICON_PNG: &[u8] = if zz_protocol::app_identity::DEVELOPMENT {
     include_bytes!(concat!(
@@ -21,16 +24,24 @@ pub(super) struct Service {
     handle: ksni::blocking::Handle<SniTray>,
 }
 
+impl Service {
+    pub(super) fn set_attention(&self, count: usize) {
+        let _ = self.handle.update(move |tray| tray.attention = count);
+    }
+}
+
 impl Drop for Service {
     fn drop(&mut self) {
         drop(self.handle.shutdown());
     }
 }
 
-pub(super) fn spawn(sender: Sender<TrayEvent>) -> Option<Service> {
+pub(super) fn spawn(sender: Sender<TrayEvent>, source: Source) -> Option<Service> {
     let tray = SniTray {
         sender,
         icon: tray_icon(),
+        source,
+        attention: 0,
     };
     match tray.assume_sni_available(true).spawn() {
         Ok(handle) => Some(Service { handle }),
@@ -44,6 +55,8 @@ pub(super) fn spawn(sender: Sender<TrayEvent>) -> Option<Service> {
 struct SniTray {
     sender: Sender<TrayEvent>,
     icon: Vec<ksni::Icon>,
+    source: Source,
+    attention: usize,
 }
 
 impl SniTray {
@@ -69,7 +82,19 @@ impl ksni::Tray for SniTray {
     }
 
     fn title(&self) -> String {
-        zz_protocol::app_identity::DISPLAY_NAME.into()
+        if self.attention == 0 {
+            zz_protocol::app_identity::DISPLAY_NAME.into()
+        } else {
+            format!("zz · {} waiting", self.attention)
+        }
+    }
+
+    fn status(&self) -> ksni::Status {
+        if self.attention > 0 {
+            ksni::Status::NeedsAttention
+        } else {
+            ksni::Status::Active
+        }
     }
 
     fn icon_name(&self) -> String {
@@ -91,21 +116,27 @@ impl ksni::Tray for SniTray {
     }
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        vec![
-            ksni::menu::StandardItem {
-                label: "Show/Hide".into(),
-                activate: Box::new(|tray: &mut Self| tray.send(TrayEvent::Toggle)),
-                ..Default::default()
-            }
-            .into(),
-            ksni::MenuItem::Separator,
-            ksni::menu::StandardItem {
-                label: "Quit zz".into(),
-                activate: Box::new(|tray: &mut Self| tray.send(TrayEvent::Quit)),
-                ..Default::default()
-            }
-            .into(),
-        ]
+        self.source
+            .menu()
+            .into_iter()
+            .map(|entry| {
+                let label = entry.label();
+                match entry {
+                    MenuEntry::Separator => ksni::MenuItem::Separator,
+                    MenuEntry::Item { action, .. } => ksni::menu::StandardItem {
+                        label,
+                        enabled: action.is_some(),
+                        activate: Box::new(move |tray: &mut Self| {
+                            if let Some(action) = &action {
+                                tray.send(action.clone());
+                            }
+                        }),
+                        ..Default::default()
+                    }
+                    .into(),
+                }
+            })
+            .collect()
     }
 }
 

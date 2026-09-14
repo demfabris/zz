@@ -101,28 +101,45 @@ pub(crate) fn maybe_prompt_stale_daemon(
     window: &mut Window,
     cx: &mut App,
 ) -> bool {
-    let Some(stale) = mux.read(cx).stale_daemon() else {
+    prompt_stale_daemon(mux, false, window, cx)
+}
+
+fn prompt_stale_daemon(
+    mux: &Entity<MuxClient>,
+    explicit: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let stale = mux.read(cx).stale_daemon();
+    if stale.is_none() && !explicit {
         return false;
-    };
-    if config::auto_restart_stale_daemon(cx) {
+    }
+    if !explicit && config::auto_restart_stale_daemon(cx) {
         mux.update(cx, |mux, cx| mux.restart_stale_daemon(true, cx));
         return true;
     }
+    let daemon = stale.and_then(|stale| stale.daemon);
 
-    let description = stale.daemon.map_or_else(
-        || {
-            format!(
-                "The running daemon is from an older build (its protocol version is unknown; \
+    let description = if explicit && stale.is_none() {
+        "zz was updated, but the daemon is still running the previous build. Restarting it will \
+         end all running sessions."
+            .to_owned()
+    } else {
+        daemon.map_or_else(
+            || {
+                format!(
+                    "The running daemon is from an older build (its protocol version is unknown; \
                  this zz speaks v{PROTOCOL_VERSION}). Restarting it will end all running sessions."
-            )
-        },
-        |daemon| {
-            format!(
-                "The running daemon is from an older build (daemon protocol v{daemon}; this zz \
+                )
+            },
+            |daemon| {
+                format!(
+                    "The running daemon is from an older build (daemon protocol v{daemon}; this zz \
                  speaks v{PROTOCOL_VERSION}). Restarting it will end all running sessions."
-            )
-        },
-    );
+                )
+            },
+        )
+    };
     let restart_mux = mux.clone();
     let dismiss_mux = mux.clone();
     window.open_alert_dialog(cx, move |alert, _, _| {
@@ -138,14 +155,23 @@ pub(crate) fn maybe_prompt_stale_daemon(
                     .show_cancel(true),
             )
             .on_ok(move |_, _, cx| {
-                restart_mux.update(cx, |mux, cx| mux.restart_stale_daemon(false, cx));
+                restart_mux.update(cx, |mux, cx| {
+                    #[cfg(not(target_os = "ios"))]
+                    if explicit {
+                        mux.restart_daemon_for_update(cx);
+                        return;
+                    }
+                    mux.restart_stale_daemon(false, cx);
+                });
                 true
             })
             .on_cancel(move |_, _, cx| {
-                dismiss_mux.update(
-                    cx,
-                    super::super::mux::client::MuxClient::dismiss_stale_daemon,
-                );
+                if stale.is_some() {
+                    dismiss_mux.update(
+                        cx,
+                        super::super::mux::client::MuxClient::dismiss_stale_daemon,
+                    );
+                }
                 true
             })
     });
@@ -721,6 +747,10 @@ impl AppView {
         )
         .detach();
         let sidebar = cx.new(|cx| WorkspaceSidebar::new(mux.clone(), &agent_controller, cx));
+        #[cfg(not(target_os = "ios"))]
+        if cx.try_global::<crate::tray::DesktopTray>().is_some() {
+            cx.global_mut::<crate::tray::DesktopTray>().sidebar = Some(sidebar.downgrade());
+        }
         cx.subscribe_in(
             &sidebar,
             window,
@@ -932,6 +962,11 @@ impl AppView {
             .read(cx)
             .execute(kill_target_command(TreeTarget::Pane(pane)));
         true
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    pub(crate) fn prompt_daemon_update(mux: &Entity<MuxClient>, window: &mut Window, cx: &mut App) {
+        prompt_stale_daemon(mux, true, window, cx);
     }
 
     pub fn sidebar(&self) -> Entity<WorkspaceSidebar> {

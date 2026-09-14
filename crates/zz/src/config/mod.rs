@@ -690,7 +690,7 @@ pub(crate) fn import_tmux_config(path: &Path) -> Result<String, String> {
     local_command_client()?
         .execute(CommandInvocation::new(
             "import-tmux-config",
-            [path.display().to_string()],
+            ["--".to_owned(), path.display().to_string()],
         ))
         .map_err(|error| error.to_string())
 }

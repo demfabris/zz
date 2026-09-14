@@ -1,6 +1,5 @@
-use gpui::{App, KeyBinding, Menu, MenuItem, SystemMenuType};
+use gpui::{App, KeyBinding};
 
-use crate::config::settings::OpenSettings;
 use crate::workspace::ClosePane;
 
 gpui::actions!(
@@ -14,7 +13,7 @@ pub(crate) fn init(cx: &mut App) {
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
     cx.bind_keys(key_bindings());
-    cx.set_menus(app_menus());
+    crate::menus::install(cx);
 }
 
 pub(crate) fn key_bindings() -> [KeyBinding; 6] {
@@ -25,28 +24,6 @@ pub(crate) fn key_bindings() -> [KeyBinding; 6] {
         KeyBinding::new("cmd-m", Minimize, None),
         KeyBinding::new("cmd-w", ClosePane, None),
         KeyBinding::new("cmd-shift-w", CloseWindow, None),
-    ]
-}
-
-fn app_menus() -> [Menu; 2] {
-    [
-        Menu::new(zz_protocol::app_identity::DISPLAY_NAME).items([
-            MenuItem::action("Settings…", OpenSettings),
-            MenuItem::separator(),
-            MenuItem::os_submenu("Services", SystemMenuType::Services),
-            MenuItem::separator(),
-            MenuItem::action("Hide zz", Hide),
-            MenuItem::action("Hide Others", HideOthers),
-            MenuItem::action("Show All", ShowAll),
-            MenuItem::separator(),
-            MenuItem::action("Quit zz", Quit),
-        ]),
-        Menu::new("Window").items([
-            MenuItem::action("Minimize", Minimize),
-            MenuItem::action("Zoom", Zoom),
-            MenuItem::separator(),
-            MenuItem::action("Close Window", CloseWindow),
-        ]),
     ]
 }
 

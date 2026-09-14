@@ -205,17 +205,15 @@ fn browser_chrome_bindings(chords: &[ChromeChord]) -> Vec<KeyBinding> {
                     },
                     context,
                 ),
-                ChromeAction::BrowserUndo => chord.binding(edit(EditCommand::Undo), context),
-                ChromeAction::BrowserRedo => chord.binding(edit(EditCommand::Redo), context),
-                ChromeAction::BrowserCut => chord.binding(edit(EditCommand::Cut), context),
-                ChromeAction::BrowserCopy => chord.binding(edit(EditCommand::Copy), context),
-                ChromeAction::BrowserPaste => chord.binding(edit(EditCommand::Paste), context),
+                ChromeAction::BrowserUndo => chord.binding(crate::menus::Undo, context),
+                ChromeAction::BrowserRedo => chord.binding(crate::menus::Redo, context),
+                ChromeAction::BrowserCut => chord.binding(crate::menus::Cut, context),
+                ChromeAction::BrowserCopy => chord.binding(crate::menus::Copy, context),
+                ChromeAction::BrowserPaste => chord.binding(crate::menus::Paste, context),
                 ChromeAction::BrowserPasteAndMatchStyle => {
                     chord.binding(edit(EditCommand::PasteAndMatchStyle), context)
                 }
-                ChromeAction::BrowserSelectAll => {
-                    chord.binding(edit(EditCommand::SelectAll), context)
-                }
+                ChromeAction::BrowserSelectAll => chord.binding(crate::menus::SelectAll, context),
                 ChromeAction::ClosePane => chord.binding(ClosePane, context),
                 _ => return None,
             })
@@ -3672,6 +3670,24 @@ impl Render for BrowserView {
             .overflow_hidden()
             .cursor(self.cursor)
             .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|view, _: &crate::menus::Undo, _, cx| {
+                view.edit(EditCommand::Undo, cx);
+            }))
+            .on_action(cx.listener(|view, _: &crate::menus::Redo, _, cx| {
+                view.edit(EditCommand::Redo, cx);
+            }))
+            .on_action(cx.listener(|view, _: &crate::menus::Cut, _, cx| {
+                view.edit(EditCommand::Cut, cx);
+            }))
+            .on_action(cx.listener(|view, _: &crate::menus::Copy, _, cx| {
+                view.edit(EditCommand::Copy, cx);
+            }))
+            .on_action(cx.listener(|view, _: &crate::menus::Paste, _, cx| {
+                view.edit(EditCommand::Paste, cx);
+            }))
+            .on_action(cx.listener(|view, _: &crate::menus::SelectAll, _, cx| {
+                view.edit(EditCommand::SelectAll, cx);
+            }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_page_mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::on_page_mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_page_mouse_down))
@@ -4195,10 +4211,47 @@ mod tests {
         bindings
     }
 
+    fn edit_action_command(action: &dyn gpui::Action) -> Option<EditCommand> {
+        if let Some(action) = action.as_any().downcast_ref::<BrowserEdit>() {
+            return Some(action.command);
+        }
+        if action.as_any().is::<crate::menus::Undo>() {
+            return Some(EditCommand::Undo);
+        }
+        if action.as_any().is::<crate::menus::Redo>() {
+            return Some(EditCommand::Redo);
+        }
+        if action.as_any().is::<crate::menus::Cut>() {
+            return Some(EditCommand::Cut);
+        }
+        if action.as_any().is::<crate::menus::Copy>() {
+            return Some(EditCommand::Copy);
+        }
+        if action.as_any().is::<crate::menus::Paste>() {
+            return Some(EditCommand::Paste);
+        }
+        if action.as_any().is::<crate::menus::SelectAll>() {
+            return Some(EditCommand::SelectAll);
+        }
+        None
+    }
+
+    fn edit_action_type(command: EditCommand) -> TypeId {
+        match command {
+            EditCommand::Undo => TypeId::of::<crate::menus::Undo>(),
+            EditCommand::Redo => TypeId::of::<crate::menus::Redo>(),
+            EditCommand::Cut => TypeId::of::<crate::menus::Cut>(),
+            EditCommand::Copy => TypeId::of::<crate::menus::Copy>(),
+            EditCommand::Paste => TypeId::of::<crate::menus::Paste>(),
+            EditCommand::SelectAll => TypeId::of::<crate::menus::SelectAll>(),
+            EditCommand::PasteAndMatchStyle => TypeId::of::<BrowserEdit>(),
+        }
+    }
+
     fn browser_binding_identity(binding: &KeyBinding) -> String {
         let action = binding.action();
-        if let Some(action) = action.as_any().downcast_ref::<BrowserEdit>() {
-            return format!("edit:{:?}", action.command);
+        if let Some(command) = edit_action_command(action) {
+            return format!("edit:{command:?}");
         }
         if let Some(action) = action.as_any().downcast_ref::<SelectTab>() {
             return format!("tab:{}", action.index);
@@ -4415,7 +4468,7 @@ mod tests {
 
         assert_action_types(
             &bindings,
-            &[TypeId::of::<BrowserEdit>(), TypeId::of::<RootCopy>()],
+            &[TypeId::of::<crate::menus::Copy>(), TypeId::of::<RootCopy>()],
         );
     }
 
@@ -4472,21 +4525,14 @@ mod tests {
             let expected = if command == EditCommand::Copy {
                 vec![
                     TypeId::of::<InputEdit>(),
-                    TypeId::of::<BrowserEdit>(),
+                    edit_action_type(command),
                     TypeId::of::<RootCopy>(),
                 ]
             } else {
-                vec![TypeId::of::<InputEdit>(), TypeId::of::<BrowserEdit>()]
+                vec![TypeId::of::<InputEdit>(), edit_action_type(command)]
             };
             assert_action_types(&resolved, &expected);
-            assert_eq!(
-                resolved[1]
-                    .action()
-                    .as_any()
-                    .downcast_ref::<BrowserEdit>()
-                    .map(|action| action.command),
-                Some(command)
-            );
+            assert_eq!(edit_action_command(resolved[1].action()), Some(command));
         }
     }
 

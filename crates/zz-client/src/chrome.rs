@@ -31,6 +31,10 @@ const SELECT_TAB_NAMES: [&str; 8] = [
 /// chords themselves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChromeAction {
+    NewSession,
+    NewWindow,
+    SplitRight,
+    SplitDown,
     Detach,
     ToggleSidebar,
     ClosePane,
@@ -84,6 +88,10 @@ impl ChromeAction {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
+            Self::NewSession => "new-session",
+            Self::NewWindow => "new-window",
+            Self::SplitRight => "split-right",
+            Self::SplitDown => "split-down",
             Self::Detach => "detach",
             Self::ToggleSidebar => "toggle-sidebar",
             Self::ClosePane => "close-pane",
@@ -142,6 +150,10 @@ impl ChromeAction {
                 .then(|| Self::BrowserSelectTab(position - 1));
         }
         Some(match name {
+            "new-session" => Self::NewSession,
+            "new-window" => Self::NewWindow,
+            "split-right" => Self::SplitRight,
+            "split-down" => Self::SplitDown,
             "detach" => Self::Detach,
             "toggle-sidebar" => Self::ToggleSidebar,
             "close-pane" => Self::ClosePane,
@@ -377,6 +389,10 @@ const DESKTOP_DEFAULTS: &[ChromeDefault] = &[
 /// Desktop chrome on Apple platforms, where the browser conventions are
 /// Safari's.
 const DESKTOP_COMMAND_DEFAULTS: &[ChromeDefault] = &[
+    (UI_TABLE, "D-n", ChromeAction::NewSession),
+    (UI_TABLE, "D-S-n", ChromeAction::NewWindow),
+    (UI_TABLE, "D-d", ChromeAction::SplitRight),
+    (UI_TABLE, "D-S-d", ChromeAction::SplitDown),
     (UI_TABLE, "D-=", ChromeAction::UiZoomIn),
     (UI_TABLE, "D-+", ChromeAction::UiZoomIn),
     (UI_TABLE, "D--", ChromeAction::UiZoomOut),
@@ -807,6 +823,22 @@ mod tests {
         let control = Modifiers::new(false, true, false, false);
         let apple = ChromeKeymap::for_profile(ChromeProfile::DesktopApple);
         let other = ChromeKeymap::for_profile(ChromeProfile::Desktop);
+
+        for (key, action) in [
+            ("D-n", ChromeAction::NewSession),
+            ("D-S-n", ChromeAction::NewWindow),
+            ("D-d", ChromeAction::SplitRight),
+            ("D-S-d", ChromeAction::SplitDown),
+        ] {
+            assert_eq!(apple.action_for(UI_TABLE, key), Some(action));
+            assert_eq!(other.action_for(UI_TABLE, key), None);
+            assert!(
+                !other
+                    .table_bindings(UI_TABLE)
+                    .iter()
+                    .any(|(_, bound)| *bound == action)
+            );
+        }
 
         for (character, action) in [
             ('t', ChromeAction::BrowserNewTab),

@@ -28,6 +28,71 @@ fn mark_prompted() {
     }
 }
 
+pub(crate) fn choose_tmux_config(window: &mut Window, cx: &mut App) {
+    let selected = cx.prompt_for_paths(gpui::PathPromptOptions {
+        files: true,
+        directories: false,
+        multiple: false,
+        prompt: Some("Choose configuration".into()),
+    });
+    window
+        .spawn(cx, async move |window| {
+            let path = selected.await.ok()?.ok()??.into_iter().next()?;
+            window
+                .update(|window, cx| {
+                    let Some(target) = zz_daemon::mux_config_write_path() else {
+                        crate::window::toast::push(
+                            zz_ui::notification::Notification::error(
+                                "Could not resolve the zz multiplexer configuration path",
+                            ),
+                            cx,
+                        );
+                        return;
+                    };
+                    window.open_alert_dialog(cx, move |alert, _, _| {
+                        let path = path.clone();
+                        import_configuration_file_alert(
+                            alert,
+                            "Import from tmux?",
+                            format!(
+                                "Import {} into {}? You can choose other paths in Settings.",
+                                path.display(),
+                                target.display(),
+                            ),
+                        )
+                        .on_ok(move |_, window, cx| {
+                            run_tmux_import(path.clone(), window, cx);
+                            true
+                        })
+                    });
+                })
+                .ok()
+        })
+        .detach();
+}
+
+fn run_tmux_import(path: PathBuf, window: &mut Window, cx: &mut App) {
+    let task = cx
+        .background_executor()
+        .spawn(async move { config::import_tmux_config(&path) });
+    window
+        .spawn(cx, async move |window| {
+            let result = task.await;
+            let _ = window.update(|window, cx| match result {
+                Ok(output) => crate::window::toast::push(
+                    zz_ui::notification::Notification::success(output),
+                    cx,
+                ),
+                Err(error) => {
+                    crate::window::toast::push(zz_ui::notification::Notification::info(error), cx);
+                    cx.set_global(config::settings::PendingMuxImport(true));
+                    window.dispatch_action(Box::new(config::settings::OpenSettings), cx);
+                }
+            });
+        })
+        .detach();
+}
+
 pub(crate) fn maybe_prompt(window: &mut Window, cx: &mut App) {
     if marker_path().as_deref().is_some_and(Path::exists) {
         return;
@@ -64,31 +129,7 @@ pub(crate) fn maybe_prompt(window: &mut Window, cx: &mut App) {
         .on_ok(move |_, window, cx| {
             if has_ghostty { crate::config::settings::run_import(cx); }
             if let Some(path) = tmux.clone() {
-                let task = cx
-                    .background_executor()
-                    .spawn(async move { config::import_tmux_config(&path) });
-                window
-                    .spawn(cx, async move |window| {
-                        let result = task.await;
-                        let _ = window.update(|window, cx| match result {
-                            Ok(output) => crate::window::toast::push(
-                                zz_ui::notification::Notification::success(output),
-                                cx,
-                            ),
-                            Err(error) => {
-                                crate::window::toast::push(
-                                    zz_ui::notification::Notification::info(error),
-                                    cx,
-                                );
-                                cx.set_global(config::settings::PendingMuxImport(true));
-                                window.dispatch_action(
-                                    Box::new(config::settings::OpenSettings),
-                                    cx,
-                                );
-                            }
-                        });
-                    })
-                    .detach();
+                run_tmux_import(path, window, cx);
             }
             mark_prompted();
             true

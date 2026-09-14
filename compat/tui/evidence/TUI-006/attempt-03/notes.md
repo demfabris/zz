@@ -57,10 +57,30 @@ three are `same` now and the fixture records nothing.
 
 `filter-cleared` failed in two of the six choosers runs taken at this tip, always on the
 same cell: the window tree's pane row reads `#{pane_current_command}` and zz answered
-`bash` where the pin answered `sh` for the scene's `exec /bin/sh`. It is intermittent, it
-is the same row and the same reading the cycle 6 commands gate recorded at its own tip
-before any of this landing existed, and it comes from `terminal_current_command`'s sysinfo
-read of the pane's foreground pgid, which nothing here touches. The pin reads
-`/proc/<pgid>/cmdline` and takes the first argument through `parse_window_name`; zz reads
-the process name. Left alone rather than changed under this obligation: it would move a
-format every corpus row reads.
+`bash` where the pin answered `sh` for the scene's `ENV= PS1='$ ' exec /bin/sh`. It is
+intermittent, and it is the same row and the same reading the cycle 6 commands gate
+recorded at its own tip before any of this landing existed.
+
+The cause, measured here: `format_cb_current_command` runs `osdep_get_name` on every
+expansion - `/proc/<pgid>/cmdline`'s first argument through `parse_window_name` - and falls
+back to `cmd_stringify_argv(wp->argc, wp->argv)` and then to `wp->shell` when that read
+comes back empty (format.c:941-949). zz's `terminal_current_command` reads the process name
+once per change of the pane's foreground pid, and `execve` does not change a pid, so a read
+that landed before the pane's own `exec /bin/sh` keeps answering with the login shell's
+name for that pane's whole life.
+
+The naive fix was written, measured and reverted the same day. Reading
+`/proc/<pgid>/cmdline` per publish and dropping the per-pid cache makes this fixture green
+twice in a row, and it makes three zz-daemon tests fail under parallel load
+(`daemon_native_split_resize_commits_exactly_and_rejects_stale_contexts`,
+`scoped_status_format_writes_refresh_only_that_sessions_clients` and one rotating third)
+on `pane runtime facts did not settle`, reproducibly, while each passes exact-solo: a
+foreground pgid that is a child already gone reads back empty and publishes an empty
+command where the cached value used to stand. The pin's fallback chain is the missing half
+and the pane's own argv is not on the daemon's runtime facts, so it is more than this
+obligation's remaining budget. The revert is complete: the binary this evidence attests
+(sha256 fb19f6b0...) is the one without it, rebuilt and re-hashed after the revert.
+
+The cell is left asserted rather than recorded, because it agrees on most runs and a
+recorded case would understate the parity that is there. compat/tui-choosers.sh's own
+header carries the same measurement so a red run explains itself.

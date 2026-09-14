@@ -31,11 +31,38 @@ def rule_wire(text):
         return False, "could not read PROTOCOL_VERSION from crates/zz-protocol/src/message.rs"
     if f"PROTOCOL_VERSION is {version}" not in text:
         return False, f"the wire rule must name the tree's current version, {version}"
-    stale = {m for m in re.findall(r"\bv(\d{3})\b", text)} - {version}
-    forward = {v for v in stale if int(v) > int(version)}
+
+    root = Path(__file__).resolve().parent.parent.parent
+    tags = subprocess.run(
+        ["git", "-C", str(root), "tag", "--list", "v*", "--sort=-v:refname"],
+        capture_output=True, text=True).stdout.split()
+    released = None
+    if tags:
+        at_tag = subprocess.run(
+            ["git", "-C", str(root), "show", f"{tags[0]}:crates/zz-protocol/src/message.rs"],
+            capture_output=True, text=True).stdout
+        found = re.search(r"pub const PROTOCOL_VERSION: u16 = (\d+);", at_tag)
+        if found:
+            released = found.group(1)
+
+    shipped = released == version
+    nxt = str(int(version) + 1)
+    allowed = {version, nxt} if shipped else {version}
+    forward = {v for v in re.findall(r"\bv(\d{3})\b", text)
+               if int(v) > int(version) and v not in allowed}
     if forward:
         return False, f"names a version above the tree's {version}: {sorted(forward)}"
-    return True, f"wire rule pinned at {version}"
+
+    if shipped:
+        if re.search(r"STAYS " + version, text):
+            return False, (f"the runner says the wire STAYS {version}, but {tags[0]} shipped "
+                           f"{version}: a released version cannot take appends, so this cycle "
+                           f"opens {nxt}")
+        if nxt not in text:
+            return False, (f"{tags[0]} shipped {version}, so the first wire append of this cycle "
+                           f"opens {nxt}; the runner never says so")
+        return True, f"wire rule opens {nxt} because {tags[0]} shipped {version}"
+    return True, f"wire rule pinned at {version}, unreleased"
 
 
 def rule_parses(text):

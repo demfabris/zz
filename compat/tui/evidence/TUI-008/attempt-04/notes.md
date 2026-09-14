@@ -37,6 +37,16 @@ carry the history and nothing here restates it.
   lines dropped. `17-verify-claims.txt` — compat/tui/verify-claims.py:
   "every verified obligation holds up".
 
+## The rebase onto the fix pass's newest tip
+
+Files `18` to `23` are the proofs re-taken AFTER the last rebase, at the sha
+this lane pushed: compat/tui-mouse.sh three times, byte-identical at the same
+md5 `ff98b647` and each `39 asserted checks, 0 recorded checks`, its
+`--self-check`, and compat/attached-client.sh. `23` is that fixture's first run
+at this tip, which timed out waiting for its reattach marker under load; `22`
+is the rerun, `attached-client compatibility: PASS`, which is this box's
+documented load-flake shape.
+
 ## One thing this lane touched outside the repo
 
 compat/check.sh's first run rebuilt the pinned tmux in the SHARED checkout's

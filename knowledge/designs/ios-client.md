@@ -189,10 +189,10 @@ copy-mode key style, history limits, and window/pane defaults use the same setti
 desktop. The file belongs to this device; commands with daemon or session scope affect shared state
 and other attached clients. This is not a per-client key-table profile or a remote file editor.
 
-`third_party/rootshell-reference` provides local reference material for the grouped settings,
-bundled fonts, and pane controls. Its split-view implementation commits terminal-cell resize
-requests to tmux. zz keeps that division of responsibility through its existing daemon commands
-and the `zz-client` rectangle solver.
+`third_party/rootshell-reference/UPSTREAM.md` records what rootshell settled for the grouped
+settings, bundled fonts, and pane controls, and where to clone it. Its split-view implementation
+commits terminal-cell resize requests to tmux. zz keeps that division of responsibility through
+its existing daemon commands and the `zz-client` rectangle solver.
 
 ### Panorama
 

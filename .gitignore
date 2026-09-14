@@ -24,6 +24,9 @@
 /bench/fixtures/
 /bench/results/
 
+# Reference checkouts read but never built; the UPSTREAM.md records are the tracked part.
+/third_party/.cache/
+
 # tmux differential compatibility harness scratch and captured results.
 /compat/.cache/
 /compat/results/*

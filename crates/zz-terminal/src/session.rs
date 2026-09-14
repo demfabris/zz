@@ -1027,9 +1027,6 @@ pub struct CaptureOptions {
     pub mode: bool,
     pub join_wrapped: bool,
     pub preserve_trailing: bool,
-    /// `capture-pane -T`: `cmd_capture_pane_history` leaves
-    /// `GRID_STRING_EMPTY_CELLS` off, so a line stops at the cells it used
-    /// instead of running to the cells its grid row has allocated.
     pub trim_positions: bool,
     pub escape_sequences: bool,
 }
@@ -8368,9 +8365,6 @@ fn capture_terminal(
     ))
 }
 
-/// The rows of a selection up to and including the last one holding content,
-/// which is where the formatter stops. A joined or escaped capture cannot be
-/// counted off its own output, so it is counted off a plain one.
 fn measure_written_rows(
     terminal: &Terminal<'_, '_>,
     selection: &Selection<'_>,
@@ -8394,10 +8388,6 @@ fn measure_written_rows(
     Ok(buffer[..written].split(|byte| *byte == b'\n').count())
 }
 
-/// `grid_expand_line`: a grid row's cell array grows to a quarter, then a half,
-/// then the whole width of the screen, and `grid_string_cells` walks to that
-/// allocated size under `GRID_STRING_EMPTY_CELLS`. A row nothing ever wrote is
-/// still zero cells wide.
 fn allocated_row_width(used: usize, columns: usize) -> usize {
     if used == 0 {
         return 0;
@@ -8413,13 +8403,6 @@ fn allocated_row_width(used: usize, columns: usize) -> usize {
     }
 }
 
-/// `cmd_capture_pane_history` prints one line per grid row of the range,
-/// whatever the row holds, and `grid_string_cells` decides that line's width:
-/// it walks to the row's allocated cells unless `-T` or `-J` turns
-/// `GRID_STRING_EMPTY_CELLS` off, then drops trailing spaces unless `-N` or
-/// `-J` turns `GRID_STRING_TRIM_SPACES` off. The formatter answers the used
-/// cells of the rows up to the last one written, so the rows after it and the
-/// cells after the ones used come back here.
 fn pad_capture_rows(
     output: &str,
     trailing_rows: usize,

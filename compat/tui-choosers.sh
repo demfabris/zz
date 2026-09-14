@@ -561,8 +561,11 @@ for line in sys.stdin.read().split("\n"):
 # relative `#{t:client_created}` and `#{t:client_activity}` of two clients
 # attached one after the other, and `#{client_written}`, which counts the bytes
 # each binary's own renderer has sent. Each becomes a fixed token, and the run
-# of box fill that follows a substituted value collapses, because a token of a
-# different width moves the box's right edge by a column. The relative half is
+# of box fill that immediately follows one of those tokens collapses, because a
+# token of a different width moves the box's right edge by a column. Only that
+# run: the label column every value is aligned against is compared as it
+# stands, so a view whose columns sit a few cells off is a difference, not a
+# fill. The relative half is
 # masked whole rather than digit by digit: the driver attaches one client and
 # then the other, so the two ages differ by the second between the attaches
 # (measured 2026-09-14: `Mon Sep 14 07:51:48 2026 (13s)` against
@@ -580,6 +583,9 @@ import os, re, sys
 
 name = re.escape(os.environ["ZZ_MASK_NAME"])
 stamp = r"[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9]?[0-9] \d\d:\d\d:\d\d \d{4}"
+TOKEN_FILL = (
+    r"(/dev/CLIENT|\(PID NNNN\)|\(NN discarded\)|\(REL\)|TIMESTAMP|NN:NN|NNNN)( {2,})"
+)
 for line in sys.stdin.read().split("\n"):
     masked = re.sub(name, "/dev/CLIENT", line)
     masked = re.sub(r"\(PID \d+\)", "(PID NNNN)", masked)
@@ -589,7 +595,7 @@ for line in sys.stdin.read().split("\n"):
     masked = re.sub(r"\(\d+ discarded\)", "(NN discarded)", masked)
     masked = re.sub(r"\d\d:\d\d", "NN:NN", masked)
     if masked != line:
-        masked = re.sub(r"  +", " ", masked)
+        masked = re.sub(TOKEN_FILL, r"\g<1> ", masked)
         masked = re.sub("\u2500{2,}", "\u2500", masked)
     sys.stdout.write(masked + "\n")
 '
@@ -1231,7 +1237,10 @@ run_self_check() {
   # The same sabotage the other way round, which is the one that catches a
   # wrong zz info view: the pin stays on `window_client_draw` and zz alone
   # swaps in `window_client_draw_info`, so every info row it draws is a row the
-  # pin does not have.
+  # pin does not have. This half runs through `client_info_mask`, the mask the
+  # client-info-view checkpoints actually assert under, so what it proves is
+  # that mask and not its neighbour.
+  ROW_MASK=client_info_mask
   before="$(styled_screen_of zz)"
   type_on_side zz i
   wait_screen zz hard 'the one-sided info view on zz' "$before" 'Client Name'
@@ -1239,6 +1248,7 @@ run_self_check() {
   self_check_case 'client info, the zz client tree on its info view alone' rows
   type_on_side zz i
   wait_screen zz hard 'the one-sided info view on zz withdrawn' '' 'session cho'
+  ROW_MASK=client_row_mask
   step 'MARK-clientinfo' q
   ROW_MASK=
 

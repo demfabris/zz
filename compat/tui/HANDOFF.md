@@ -1,14 +1,26 @@
 # TUI parity handoff: cycle 9 stopped before its gates (2026-09-14, alienware)
 
-Cycle 9 ran its three lanes and their reviews on the alienware box and was stopped deliberately
-before any gate, so fabrico could move machines. Nothing is merged. Every lane's work is pushed to
-a campaign branch, and the resume point is a well defined one: run the gates.
+Cycle 9 ran its three lanes on the alienware box and was stopped deliberately before any gate, so
+fabrico could move machines. Nothing is merged and every lane's work is pushed to a campaign branch.
+
+The resume point is not simply "run the gates". Two of the three reviews finished and one of them
+rejected its branch, so the order is:
+
+1. **Fix `campaign/tui-mouse`.** Its review found two regressions that the lane's own fixture cannot
+   see, plus the wire bump. One fallthrough fixes both regressions. Then re-review it.
+2. **Review `campaign/tui-choosers-3`.** Its reviewer never finished. TUI-006 is a baseline id
+   sitting at `review` on the worker's own account, unchecked.
+3. **Then gate**, in the order mouse, choosers, introspection, and treat
+   `campaign/tui-mouse-menus` as scratch to read rather than work to merge.
+
+`run-9.js`'s own reject path is the shape to reuse: a fresh agent takes the branch, fixes every
+blocker on it, pushes, and a re-review verifies each blocker at the new tip.
 
 | Fact | Value |
 | --- | --- |
 | `origin/main` | the wire guard and this handoff, under fabrico's `v0.9.1` release at `416c0b4d` |
 | Ledger | 8/12 baseline verified (TUI-001 to 005, 007, 009, 010); added scope 0/6 |
-| Merged this cycle | nothing; no gate ran |
+| Merged this cycle | nothing; no gate ran. One review rejected, one approved with fixes, one never finished |
 | `PROTOCOL_VERSION` | 102, and **102 is released**: zz 0.9.0 and 0.9.1 both shipped it. The first wire change to land opens 103 |
 | Board | `F-TUI-CYCLE-9-LANES` claimed by `alienware/orchestrator`; MAIN and TRIAGE free |
 | Runners | `run-9.js` (this cycle), `run-9b.js` (its second half), `run-10.js` (ready, and the last cycle) |
@@ -18,10 +30,48 @@ a campaign branch, and the resume point is a well defined one: run the gates.
 
 | Branch | Tip | What it carries |
 | --- | --- | --- |
-| `campaign/tui-mouse` | `142139fd` | TUI-008 at `active`. Both unlocks landed (`send-keys -M` re-encoding the invoking event, and `#{mouse_any_flag}` answering the pane's own tracking) plus the pin's multi-click sequence. Three checks still recorded: the two pointer menus and the paste under a menu |
+| `campaign/tui-mouse` | `142139fd` | **REJECTED by its review. Do not gate as it stands.** TUI-008 at `active`. Both unlocks landed (`send-keys -M` re-encoding the invoking event, and `#{mouse_any_flag}` answering the pane's own tracking) plus the pin's multi-click sequence, but the landing regresses two channels. See below |
 | `campaign/tui-choosers-3` | `5f06595b` | TUI-006 at `review` with **all three clauses proved**, which is a baseline id ready to verify. TUI-014 at `active`: clause 1 done including the info preview, clauses 2 and 3 untouched |
 | `campaign/tui-introspection` | `8d6944cf` | TUI-016 at `review`, TUI-017 clause 2 closed and clause 1 open by design |
-| `campaign/tui-mouse-menus` | see below | The mouse lane's second half: the two pointer menus, the paste under a menu, and the three `mouse_*` formats they read |
+| `campaign/tui-mouse-menus` | `b29fddd3` | **Unfinished, unverified, and built on the rejected branch.** The second-half lane stopped 30 minutes into a 240 minute budget when the session ended. 201 insertions across 9 files, part way through the window menu. Nothing was built or run against it and the ledger is untouched |
+
+## What the three reviews said
+
+**introspection: approve-with-fixes.** One blocker (`show-messages -J` prints two rows to the pin's
+one as soon as a format job is live, so the `-J` half of TUI-016 clause 1 has asserted evidence only
+for the empty table), one must-fix (the recorded client-naming decision describes the server log
+wrongly: the pin names any tty-bearing client by its tty, zz names none and spells one row by
+hostname), two nits (two `notes.md` files cite a commit reachable from no ref; the diff adds 60
+comment lines against this repo's rule against comments in code).
+
+**mouse: REJECT.** Three blockers. Its fix pass had just started when the session stopped, so the
+branch still carries all three.
+
+1. *The wire.* Appends to `InputMessage::MouseKey` while `PROTOCOL_VERSION` stays at a released 102.
+   The reviewer found this by running `compat/wire-version.py` itself.
+2. *A drag loses its release under button-event tracking.* With a pane running `\033[?1002h` and
+   `\033[?1006h`, press `\e[<0;2;3M`, motion `\e[<32;8;3M`, release `\e[<0;8;3m`: the pin's pane
+   prints all three, the tip's prints the first two and drops the release. Three runs of three, and
+   green against a zz built at `origin/main`, so it is a regression this landing introduced.
+3. *A double click reports out of order under application tracking.* Pin gives press, release,
+   press, release; the tip gives press, release, release, press. Two runs of two, green at base.
+
+   Blockers 2 and 3 have **one** fix: give a mouse key that matched no binding the pin's own
+   fallthrough, handing it to the pane the event landed on the way `server_client_handle_key` does
+   for `KEYC_IS_MOUSE` with no binding, rather than consuming it. Then add the two `tui-mouse.sh`
+   cases that drive these gestures with tracking armed, each with a one-sided sabotage.
+
+   There is also a must-fix on honesty: the worker's `evidence_note` says of clause 1 that "every
+   channel it names asserts now except the right click", and two channels it names are divergent.
+   `compat/tui-mouse.sh` cannot see either, because `case_app_mouse` drives a single click only and
+   `case_drag_selects` and `case_multi_click` both run with no application mouse armed. The status
+   at `active` is right; the sentence overstates.
+
+**choosers: no verdict.** Its reviewer was 25 minutes in when the session stopped. TUI-006 sits at
+`review` with all three clauses proved on the worker's own account, and nobody has checked that.
+Re-review `campaign/tui-choosers-3` before gating it: this campaign has had two lanes claim a clause
+their own fixture contradicted, and the mouse review above is the third time an independent reader
+found something the lane did not.
 
 ## What each gate must know
 

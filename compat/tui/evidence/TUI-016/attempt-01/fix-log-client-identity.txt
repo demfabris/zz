@@ -1,0 +1,32 @@
+=== the four commands, run clientless from outside, on both sides
+
+=== zz attached client tty:  /dev/pts/8 tty=/dev/pts/8
+=== pin attached client tty: /dev/pts/9 tty=/dev/pts/9
+
+=== zz show-messages (newest first, whole log)
+17:06: device-12 command: show-messages
+17:06: device-11 command: list-clients -F #{client_name} tty=#{client_tty}
+17:06: device-10 message: can't find pane: =cli
+17:06: device-10 command: capture-pane -pa -t =cli
+17:06: device-9 command: list-clients -F #{client_session}
+17:06: device-8 command: show-options -sv focus-events
+17:06: device-7 command: list-clients -F #{client_session}
+17:06: /dev/pts/8 command: show-options -sv focus-events
+17:06: device-5 command: list-clients -F #{client_session}
+17:06: /dev/pts/8 command: show-options -sv extended-keys
+17:06: /dev/pts/8 command: has-session -t =probe
+17:06: device-1 command: list-clients -F #{client_session}
+17:06: device-0 command: new-session -d -s probe -x 80 -y 24 env ENV= PS1='$ ' /bin/sh
+
+=== pin show-messages (newest first, whole log)
+17:06: client-1429157 command: show-messages
+17:06: client-1429110 command: list-clients -F "#{client_name} tty=#{client_tty}"
+17:06: client-1429098 message: can't find pane: =cli
+17:06: client-1429098 command: capture-pane -ap -t =cli
+17:06: client-1429057 command: list-clients -F "#{client_session}"
+17:06: client-1428974 command: show-options -sv focus-events
+17:06: client-1428905 command: list-clients -F "#{client_session}"
+17:06: client-1428857 command: list-clients -F "#{client_session}"
+17:06: client-1428816 command: list-clients -F "#{client_session}"
+17:06: /dev/pts/9 command: attach-session -t =probe
+17:06: client-1428749 command: new-session -d -s probe -x 80 -y 24 "env ENV= PS1='$ ' /bin/sh"

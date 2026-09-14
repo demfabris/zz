@@ -1226,15 +1226,15 @@ BORDER_REASON=""
 STATUS_MODE=same
 STATUS_REASON=""
 STATUS_MENU_MODE=record
-STATUS_MENU_REASON="MouseDown3Status raises the pin's window menu through a root binding whose command is a display-menu of eleven items over swap-window, kill-window, respawn-window, select-pane -m and a command-prompt rename; the raw TUI has no pointer menu (keys.root-native-mouse key:root:MouseDown3Status)"
+STATUS_MENU_REASON="MouseDown3Status raises the pin's window menu through a root binding whose command is a display-menu of eleven items over swap-window, kill-window, respawn-window, select-pane -m and a command-prompt rename, positioned with -x W -y W, which answers the status range the pointer landed in and not the screen centre the raw TUI answers today; the row is not installed (keys.root-native-mouse key:root:MouseDown3Status)"
 PASTE_MENU_MODE=record
-PASTE_MENU_REASON="the same direct write: under a menu the pin's overlay key handler consumes the paste-start key and the characters behind it, and the pane sees only what the menu did not eat, while the raw TUI hands the whole bracketed paste to the pane (input.rs handle_paste); the menu ITEM the paste's characters select is identical on both"
+PASTE_MENU_REASON="the same direct write: under a menu the pin's overlay key handler consumes the paste-start key and the characters behind it, the pane sees the tail as ordinary keys and the unmatched paste-end sequence leaves a trailing ~ on its row, while the raw TUI hands the tail over as a fresh bracketed paste (input.rs handle_paste, zz-client menu.rs resolve_menu_paste); the menu ITEM the paste's characters select is identical on both, and the only row that differs is the pane's own"
 FOCUS_OFF_MODE=same
 FOCUS_OFF_REASON=""
 PASTE_COPY_MODE=same
 PASTE_COPY_REASON=""
 RIGHT_CLICK_MODE=record
-RIGHT_CLICK_REASON="MouseDown3Pane raises the pin's pane menu through a root binding; the raw TUI has no pointer menu (keys.root-native-mouse)"
+RIGHT_CLICK_REASON="MouseDown3Pane raises the pin's pane menu through a root binding over DEFAULT_PANE_MENU's twenty-eight items, positioned with -x M -y M, over #{m/r:}, #{=/9/...:}, buffer_sample, mouse_word, mouse_line, mouse_hyperlink, pane_floating_flag and a nested display-menu; the three screen-reading mouse formats are still unanswered (formats.mouse-context) and the row is not installed (keys.root-native-mouse)"
 
 run_cases() {
   start_both

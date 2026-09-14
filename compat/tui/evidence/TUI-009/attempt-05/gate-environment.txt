@@ -1,0 +1,35 @@
+GATE ENVIRONMENT, cycle 6 caps lane, 2026-09-14
+
+host          alienware, CachyOS Linux, Linux 7.2.3-1-cachyos-deckify x86_64,
+              16 cores, 15 GB RAM plus 15 GB zram swap, btrfs
+shell         bash 5.3.15(1)-release
+terminal      TERM=xterm-ghostty, LANG=en_US.UTF-8, LC_TIME=pt_BR.UTF-8
+              compat/status-row.sh ran under LC_ALL=C LC_TIME=C, the control this
+              box needs because the box locale changes %b
+worktree      /home/demfabris/dev/zz-gate-tui7, branch gate-caps, clean
+revision      63459a0985b51bb1f5585ab0192d4243dd1fdf50, the caps lane
+              (campaign/tui-caps-3 tip 1d7f6d0e) rebased onto origin/main
+              c8086f0688d836fb6280e30a1388bf42cf716c67 plus one gate commit
+target dir    CARGO_TARGET_DIR=/home/demfabris/dev/zz-gate-target
+zz            /home/demfabris/dev/zz-gate-target/debug/zz
+              sha256 bd32adc87a2fcec5560d678da4e86f75bb1e117628c8722994ed4294dd8b72fe
+              built 2026-09-14 01:26:22 -0300, before the first fixture run at 02:32
+pin           /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux, next-3.8,
+              d77c9dc6aa021e4bc61f0da128c591af695e6466
+              sha256 df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+corpus cache  ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
+
+A cargo debug build of zz is not bit-reproducible on this box, so the sha256
+identifies the artifact and cannot attest it. The attestation is the revision
+above plus a clean worktree, and the provenance is reproduction: this gate re-ran
+every fixture, the whole delta corpus and every cargo command itself on the
+accumulated main rather than trusting the lane's or the reviewer's numbers.
+
+Every cargo command went through the box's two-slot lock with MemoryMax=7G and
+MemorySwapMax=2G. Every fixture, corpus chunk and probe ran alone; nothing heavy
+of this gate's ever overlapped anything else of this gate's.
+
+The box has a real ~/.tmux.conf and a real ~/.config/zz/mux.conf. This gate never
+read or edited either: every fixture scrubs HOME and XDG_CONFIG_HOME itself and
+starts its servers with -f /dev/null on a throwaway socket, and this gate started
+no tmux or zz server of its own.

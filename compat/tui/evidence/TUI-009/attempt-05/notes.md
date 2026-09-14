@@ -150,3 +150,41 @@ zz-daemon and zz-tui, and `cargo test -p zz` clean.
 The GUI is unchanged: it never sends the new message, it reads
 `client_termfeatures` through the same daemon path, and nothing in
 `crates/zz/src` moved.
+
+## GATE ADDENDUM, 2026-09-14, cycle 6 caps
+
+The lane tip `1d7f6d0e` was rebased onto `origin/main` `c8086f06` (which already
+carries the cycle 6 keys lane and the orchestrator's `verify-claims.py` landing)
+and pushed. Two conflicts, both resolved by union and neither inside a file this
+lane owns alone: `knowledge/protocol/wire-protocol.md`, where the keys lane's
+`border` field on `InputMessage::MouseKey` and this lane's
+`ProtocolMessage::ClientTerminalFeatures` both append to the v102 entry and both
+sentences are kept; and `knowledge/tmux/gaps.md`, which is generated and was
+regenerated from the merged `compat/tmux-gaps.json` with
+`python3 compat/tmux-tracker.py write-report`. `PROTOCOL_VERSION` is still 102.
+
+One commit was added on top of the lane's five before the records commit:
+`63459a09`, the reviewer's nit 1, a doc sentence in
+`crates/zz-protocol/src/message.rs` that contradicted both `wire-protocol.md` and
+the code. Everything the gate ran is in `review.md` and in these files:
+
+- `gate-tui-caps.txt`, `gate-tui-caps-self-check.txt` -- the gate's own runs, md5
+  `cb21624a8b09057727430af0edb69cb3` and `b65555c16e1ea4abe8c81c5a891c2f22`,
+  byte-identical to the lane's evidence
+- `gate-tui-screen-diff.txt`, `gate-tui-screen-diff-self-check.txt`
+- `gate-tui-pane-geometry.txt`, `gate-status-row-c-locale.txt`
+- `gate-tui-indicators.txt`, `gate-tui-indicators-self-check.txt`
+- `gate-tui-overlays.txt`, `gate-tui-overlays-self-check.txt`
+- `gate-tui-choosers.txt`, `gate-tui-choosers-self-check.txt`
+- `gate-tui-stock-keys.txt`, `gate-tui-stock-keys-self-check.txt`
+- `gate-tui-copy-mode.txt`, `gate-tui-copy-mode-self-check.txt`
+- `gate-attached-client.txt`
+- `gate-corpus.txt` -- all 144 delta rows, not a sample
+- `gate-cargo.txt`, `gate-environment.txt`, `review.md`
+
+The gate read `git diff --stat origin/main...HEAD` at the rebased tip: the crates
+half is exactly `zz-daemon` (client.rs, daemon.rs, lib.rs, terminal_features.rs),
+`zz-mux` (command.rs, compat_manifest_tests.rs, terminfo.rs), `zz-protocol`
+(lib.rs, message.rs) and `zz-tui` (render.rs, tty.rs). That is the lane's four
+declared excursions and nothing else; no `crates/zz/` file is touched, so no GUI
+presentation moved.

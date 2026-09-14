@@ -25,3 +25,10 @@ pin:  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
 locale of the shell that ran the fixtures: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8
 every fixture case names its own TERM, LANG and LC_ALL, and status-row.sh ran under
 LC_ALL=C LC_TIME=C, which is the control this box needs (its LC_TIME is pt_BR.UTF-8).
+
+GATE ADDENDUM, 2026-09-14, cycle 6 caps
+
+The gate re-ran everything on its own box and its own tip rather than trusting the
+runs above. Its environment, its binaries and their hashes are in
+gate-environment.txt beside this file; the lane's numbers above are left as the
+lane recorded them.

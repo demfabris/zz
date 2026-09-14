@@ -643,6 +643,9 @@ pub struct MouseEventTarget {
     /// The press this gesture was latched from, the pin's `m->lx`/`m->ly`.
     /// `copy-mode -M` anchors its selection there.
     pub press_action: Option<TerminalViewAction>,
+    /// `sr->start` for the status range the gesture landed in, which is where
+    /// `display-menu -x W` puts the window menu.
+    pub status_range_start: Option<u16>,
 }
 
 impl MouseEventTarget {
@@ -655,6 +658,18 @@ impl MouseEventTarget {
             .map(|pane| pane.to_string())
             .or_else(|| self.window.map(|window| window.to_string()))
     }
+}
+
+/// The same resolution for a command the daemon owns: `cmd_find_target` runs
+/// before every command, not only the ones the mux engine keeps.
+#[must_use]
+pub fn resolve_invoking_mouse_targets(
+    command: &CommandInvocation,
+    mouse: &MouseEventTarget,
+) -> Option<CommandInvocation> {
+    mouse
+        .target_spelling()
+        .and_then(|target| resolve_mouse_targets(command, &target))
 }
 
 /// `cmd_find_target`: a bare `=` or `{mouse}` in a target slot names the pane,

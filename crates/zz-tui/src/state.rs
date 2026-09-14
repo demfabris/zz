@@ -608,6 +608,18 @@ impl Model {
             .then(|| usize::from(row - origin))
     }
 
+    /// `sr->start` for the status range a column lands in, in the composed
+    /// row's own columns. `display-menu -x W` puts the window menu on it.
+    pub fn status_hit_range_start(&self, index: usize, column: u16) -> Option<u16> {
+        let (_, width) = self.status_area();
+        let row = self.status.rows.get(index)?;
+        zz_client::compose_status_row(row, width, &self.status.base_style)
+            .ranges
+            .iter()
+            .find(|range| range.columns.contains(&column))
+            .map(|range| range.columns.start)
+    }
+
     pub fn status_hit_target(&self, index: usize, column: u16) -> Option<TmuxRange> {
         let (_, width) = self.status_area();
         let row = self.status.rows.get(index)?;

@@ -2103,6 +2103,14 @@ pub enum InputMessage {
         /// anchors its selection there (`cmd_mouse_at(wp, m, &x, &y, 1)`)
         /// before the current cell extends it.
         press_action: Option<TerminalViewAction>,
+        /// The first column of the status range this gesture landed in, in the
+        /// client's own screen columns, absent for a gesture that landed
+        /// anywhere else. `display-menu -x W` positions on it, which is
+        /// `sr->start` off the target client's status entries in
+        /// `cmd_display_menu_get_position`; the client owns the composed row
+        /// and its ranges, so the start travels with the event.
+        #[serde(default)]
+        status_range_start: Option<u16>,
     },
 }
 

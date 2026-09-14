@@ -1312,6 +1312,7 @@ fn bound_mouse_key(
         key,
         (global_column, global_row, global_x, global_y),
     );
+    log::warn!(target: "zz::diagnostics::input", "ZZDEBUG key={key} bound={} loc={} col={global_column} row={global_row}", model.mouse_bindings.contains(&key), latch.location);
     if !model.mouse_bindings.contains(&key) && !copy_mouse_key_is_reachable(model, &latch, &key) {
         return if is_click_sequence_name(&key) {
             MouseKeyRoute::Consume
@@ -1331,6 +1332,7 @@ fn bound_mouse_key(
         column: global_column,
         row: global_row,
         border: latch.border,
+        status_range_start: mouse_status_range_start(model, global_column, global_row),
         view_action: latch.pane.and_then(|pane| {
             bound_mouse_view_action(
                 model,
@@ -1457,6 +1459,7 @@ pub(crate) fn expire_click_sequence(
             border: None,
             view_action: action.clone(),
             press_action: action,
+            status_range_start: mouse_status_range_start(model, column, row),
         })
         .map_err(|error| error.to_string())
 }
@@ -1590,6 +1593,18 @@ fn divider_axis(model: &Model, global_column: u16, global_row: u16) -> Option<zz
         .iter()
         .find(|divider| divider.rect.contains(global_column, global_row))
         .map(|divider| divider.axis)
+}
+
+/// The first column of the status range a gesture landed in, in the client's
+/// own screen columns, which `cmd_display_menu_get_position` reads off the
+/// target client's status entries for `-x W`.
+fn mouse_status_range_start(model: &Model, global_column: u16, global_row: u16) -> Option<u16> {
+    let index = model.status_row_at(global_row)?;
+    let (status_x, _) = model.status_area();
+    let column = global_column.checked_sub(status_x)?;
+    model
+        .status_hit_range_start(index, column)
+        .map(|start| status_x.saturating_add(start))
 }
 
 /// The `KEYC_MOUSE_LOCATION_*` half of the name, and the pane and window the

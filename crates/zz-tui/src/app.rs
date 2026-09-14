@@ -1616,7 +1616,9 @@ fn handle_core_event(
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::MenuChanged => {
-            model.set_menu(lock_core(core).menu().cloned());
+            let next = lock_core(core).menu().cloned();
+            log::warn!(target: "zz::diagnostics::input", "ZZDEBUG tui menu={:?} size={:?}", next.as_ref().map(|s| (s.left, s.top, s.width, s.height, s.client_columns, s.client_rows)), (model.size.columns, model.size.rows));
+            model.set_menu(next);
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::ConfirmChanged => {

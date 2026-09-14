@@ -348,6 +348,15 @@ impl Default for KeyTables {
                 note: None,
             },
         );
+        tables.bind(
+            "root",
+            "MouseDown3Status",
+            Binding {
+                commands: vec![window_menu_command()],
+                repeat: false,
+                note: None,
+            },
+        );
         for table in ["copy-mode", "copy-mode-vi"] {
             tables.bind(
                 table,
@@ -699,6 +708,66 @@ impl Default for KeyTables {
         tables.bind("prefix", &prefix, Binding::send_prefix());
         tables
     }
+}
+
+/// `key-bindings.c`'s `DEFAULT_WINDOW_MENU`, the eleven-item menu
+/// `MouseDown3Status` raises over the window range the pointer landed in.
+/// Every item is stored in the text `cmd_print` gives it back, so `list-keys`
+/// prints the row the way the pin prints its own.
+fn window_menu_command() -> CommandInvocation {
+    let mut args = vec![
+        "-t".to_owned(),
+        "=".to_owned(),
+        "-x".to_owned(),
+        "W".to_owned(),
+        "-y".to_owned(),
+        "W".to_owned(),
+        "-T".to_owned(),
+        "#[align=centre]#{window_index}:#{window_name}".to_owned(),
+    ];
+    let mut blocks = Vec::new();
+    for (name, key, command) in [
+        (
+            "#{?#{>:#{session_windows},1},,-}Swap Left",
+            "l",
+            Some("{ swap-window -t :-1 }"),
+        ),
+        (
+            "#{?#{>:#{session_windows},1},,-}Swap Right",
+            "r",
+            Some("{ swap-window -t :+1 }"),
+        ),
+        (
+            "#{?pane_marked_set,,-}Swap Marked",
+            "s",
+            Some("{ swap-window }"),
+        ),
+        ("", "", None),
+        ("Kill", "X", Some("{ kill-window }")),
+        ("Respawn", "R", Some("{ respawn-window -k }")),
+        (
+            "#{?pane_marked,Unmark,Mark}",
+            "m",
+            Some("{ select-pane -m }"),
+        ),
+        (
+            "Rename",
+            "n",
+            Some("{ command-prompt -F -I \"#W\" { rename-window -t \"#{window_id}\" \"%%\" } }"),
+        ),
+        ("", "", None),
+        ("New After", "w", Some("{ new-window -a }")),
+        ("New At End", "W", Some("{ new-window }")),
+    ] {
+        args.push(name.to_owned());
+        let Some(command) = command else {
+            continue;
+        };
+        args.push(key.to_owned());
+        blocks.push(args.len());
+        args.push(command.to_owned());
+    }
+    CommandInvocation::new("display-menu", args).with_command_blocks(blocks)
 }
 
 impl KeyTables {

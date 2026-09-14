@@ -509,10 +509,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     ),
     ("copy-mode", "[-dekHMqSu] [-s src-pane] [-t target-pane]"),
     (
-        "display-message",
-        "[-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
-    ),
-    (
         "join-pane",
         "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]",
     ),
@@ -1622,7 +1618,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "split-window",
         aliases: &["splitw"],
         description: "Split a pane with a terminal",
-        usage: "[-bdEfhkPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
+        usage: "[-bdEfhIkPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
@@ -1637,7 +1633,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-v", "vertical split"),
             CommandOptionSpec::value("-e", FreeForm, "pane environment"),
             CommandOptionSpec::flag("-E", "create an empty pane"),
-            CommandOptionSpec::unsupported_flag("-I"),
+            CommandOptionSpec::flag(
+                "-I",
+                "write the caller's standard input into the new empty pane",
+            ),
             CommandOptionSpec::flag("-k", "retain the new pane until a key is pressed"),
             CommandOptionSpec::value("-m", FreeForm, "retained pane message"),
             CommandOptionSpec::value("-R", FreeForm, "inactive pane border style"),
@@ -2214,7 +2213,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-message",
         aliases: &["display"],
         description: "Display or print a formatted message",
-        usage: "[-aClNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
+        usage: "[-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
         options: &[
             CommandOptionSpec::flag("-p", "print the message"),
             CommandOptionSpec::flag("-C", "keep terminal updates flowing while it shows"),
@@ -2226,7 +2225,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-a", "list every format variable this target answers"),
             CommandOptionSpec::flag("-v", "trace the format expansion"),
-            CommandOptionSpec::unsupported_flag("-I"),
+            CommandOptionSpec::flag(
+                "-I",
+                "write the caller's standard input into the target empty pane",
+            ),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -2899,8 +2901,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 287), ("optional", 8), ("required", 220)])
         );
-        assert_eq!((supported, unsupported), (488, 27));
-        assert_eq!(usage_overrides.len(), 19);
+        assert_eq!((supported, unsupported), (490, 25));
+        assert_eq!(usage_overrides.len(), 18);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

@@ -1210,6 +1210,15 @@ pub enum MuxEffect {
         parse_only: bool,
         verbose: bool,
         context: ExecutionContext,
+        /// The caller's standard input when `path` is `-`, so the daemon parses
+        /// the stream instead of reading a file.
+        stdin: Option<RawText>,
+    },
+    /// Write the caller's standard input into a pane that holds no process, the
+    /// way `display-message -I` and `split-window -I` do on the pin.
+    PaneStreamInput {
+        pane: PaneId,
+        bytes: RawText,
     },
     RunHook {
         name: String,
@@ -4455,7 +4464,13 @@ impl MuxEngine {
         if let Some(commands) = parse_command_alias_group(command)? {
             validate_static_command_chain(&commands)?;
             let mut combined = Execution::default();
-            for command in commands {
+            // A group carries the caller's stream for whichever member has a
+            // sink for it; a member without one never looks at it.
+            let stream = command.stdin();
+            for mut command in commands {
+                if let Some(stream) = stream {
+                    command.set_stdin(stream.clone());
+                }
                 let execution = self.execute_without_alias_expansion(
                     context,
                     &command,
@@ -4519,7 +4534,9 @@ impl MuxEngine {
             "swap-window" => self.swap_window(context, &command.args)?,
             "find-window" => self.find_window(context, &command.args)?,
             "split-picker" => self.split_picker(context, &command.args, hooks)?,
-            "split-window" => self.split_window(context, &command.args, None, hooks)?,
+            "split-window" => {
+                self.split_window(context, &command.args, None, command.stdin(), hooks)?
+            }
             "split-browser" => self.split_browser(context, &command.args, hooks)?,
             "split-agent" => self.split_agent(context, &command.args, hooks)?,
             "select-pane-kind" => self.select_pane_kind(context, &command.args)?,
@@ -4554,7 +4571,9 @@ impl MuxEngine {
             "choose-tree" => self.choose_tree(context, command)?,
             "choose-client" => self.choose_client(context, command)?,
             "choose-buffer" => self.choose_buffer(context, command)?,
-            "display-message" => self.display_message(context, &command.args, hooks)?,
+            "display-message" => {
+                self.display_message(context, &command.args, command.stdin(), hooks)?
+            }
             "display-panes" => self.display_panes(context, command)?,
             "clear-history" => self.clear_history(context, &command.args)?,
             "bind-key" => self.bind_key(command)?,
@@ -4585,7 +4604,7 @@ impl MuxEngine {
             )?,
             "set-environment" => self.set_environment(context, &command.args, hooks)?,
             "show-environment" => self.show_environment(context, &command.args)?,
-            "source-file" => self.source_file(context, &command.args, hooks)?,
+            "source-file" => self.source_file(context, &command.args, command.stdin(), hooks)?,
             "reload-config" => {
                 parse_command_options("reload-config", &command.args)?;
                 if command.args.is_empty() {
@@ -5968,11 +5987,12 @@ impl MuxEngine {
         context: &mut ExecutionContext,
         args: &[RawText],
         kind: Option<PaneKind>,
+        stdin: Option<&RawText>,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-window", args)?;
         let command = shell_command_positional(&positional);
-        self.split_window_with_options(
+        let mut execution = self.split_window_with_options(
             context,
             &options,
             kind.unwrap_or(PaneKind::Terminal),
@@ -5980,7 +6000,20 @@ impl MuxEngine {
             split_size(&options),
             true,
             hooks,
-        )
+        )?;
+        if options.has("-I")
+            && let Some(bytes) = stdin
+            && let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+        {
+            execution.effects.push(MuxEffect::PaneStreamInput {
+                pane,
+                bytes: bytes.clone(),
+            });
+        }
+        Ok(execution)
     }
 
     fn split_picker(
@@ -8458,11 +8491,21 @@ impl MuxEngine {
         &self,
         context: &ExecutionContext,
         args: &[RawText],
+        stdin: Option<&RawText>,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("display-message", args)?;
         let target = self.resolve_display_message_context(context, &options)?;
         let pane = target.as_ref().and_then(|target| target.pane);
+        if options.has("-I") {
+            // `cmd_display_message_exec` takes this branch before it looks at
+            // `-F` or the message, and a target it could not find leaves the
+            // command with nothing to write to rather than an error.
+            let Some(pane) = pane else {
+                return Ok(Execution::default());
+            };
+            return self.pane_stream_input(pane, stdin);
+        }
         let format_context = target.map_or_else(FormatContext::default, |target| FormatContext {
             session: target.session,
             window: target.window,
@@ -8549,6 +8592,24 @@ impl MuxEngine {
                 ignore_keys: options.has("-N"),
             }))
         }
+    }
+
+    /// `window_pane_start_input`: a pane with a process of its own refuses the
+    /// stream, and a caller that brought no stream leaves the pane alone.
+    fn pane_stream_input(
+        &self,
+        pane: PaneId,
+        stdin: Option<&RawText>,
+    ) -> Result<Execution, ServerError> {
+        if !self.state.pane(pane).is_some_and(|state| state.empty) {
+            return Err(ServerError::InvalidCommand("pane is not empty".to_owned()));
+        }
+        Ok(stdin.map_or_else(Execution::default, |bytes| {
+            Execution::effect(MuxEffect::PaneStreamInput {
+                pane,
+                bytes: bytes.clone(),
+            })
+        }))
     }
 
     pub fn display_message_format_target(
@@ -13426,6 +13487,7 @@ impl MuxEngine {
         &self,
         context: &ExecutionContext,
         args: &[RawText],
+        stdin: Option<&RawText>,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("source-file", args)?;
@@ -13449,12 +13511,13 @@ impl MuxEngine {
                 Err(_) => source_context.retarget(&ExecutionContext::new(None, None, None)),
             }
         }
+        let mut stream = stdin.cloned();
         Ok(Execution {
             output: RawText::default(),
             effects: positional
                 .into_iter()
-                .map(|path| MuxEffect::SourceFile {
-                    path: if expand_paths {
+                .map(|path| {
+                    let path = if expand_paths {
                         self.expand_pane_format_bytes(
                             &path,
                             &source_context,
@@ -13464,11 +13527,16 @@ impl MuxEngine {
                         )
                     } else {
                         path.clone()
-                    },
-                    quiet,
-                    parse_only,
-                    verbose,
-                    context: source_context.clone(),
+                    };
+                    let stdin = (path == "-").then(|| stream.take()).flatten();
+                    MuxEffect::SourceFile {
+                        path,
+                        quiet,
+                        parse_only,
+                        verbose,
+                        context: source_context.clone(),
+                        stdin,
+                    }
                 })
                 .collect(),
         })
@@ -15363,12 +15431,13 @@ fn apply_client_environment_update(
 
 fn pane_spawn_empty(options: &Options, command: Option<&[String]>) -> Result<bool, ServerError> {
     let empty_command = matches!(command, Some([value]) if value.is_empty());
-    if options.has("-E") && command.is_some() && !empty_command {
+    let empty_flag = options.has("-E") || options.has("-I");
+    if empty_flag && command.is_some() && !empty_command {
         return Err(ServerError::InvalidCommand(
             "command cannot be given for empty pane".to_owned(),
         ));
     }
-    Ok(options.has("-E") || empty_command)
+    Ok(empty_flag || empty_command)
 }
 
 fn key_table(options: &Options) -> &str {

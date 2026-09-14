@@ -1730,6 +1730,11 @@ pub struct CommandInvocation {
     pub source: Option<SourceSpan>,
     command_blocks: Vec<u32>,
     expanded_alias_group: bool,
+    /// The caller's standard input, appended in v103. A command with a stream
+    /// sink carries the bytes here instead of in `args`, because for those
+    /// commands the payload is not an argument; `format_command` never prints
+    /// it. See `knowledge/designs/command-stream-channel.md`.
+    stdin: Option<RawText>,
 }
 
 impl CommandInvocation {
@@ -1744,7 +1749,18 @@ impl CommandInvocation {
             source: None,
             command_blocks: Vec::new(),
             expanded_alias_group: false,
+            stdin: None,
         }
+    }
+
+    /// Attach the caller's standard input to this invocation.
+    pub fn set_stdin(&mut self, stdin: impl Into<RawText>) {
+        self.stdin = Some(stdin.into());
+    }
+
+    #[must_use]
+    pub const fn stdin(&self) -> Option<&RawText> {
+        self.stdin.as_ref()
     }
 
     #[must_use]

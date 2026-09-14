@@ -16671,6 +16671,19 @@ fn prepare_expanded_callback_invocation(
         return validate_static_command_chain(&commands);
     }
     if canonical_command(&command.name) == "display-menu" {
+        for index in 0..command.args.len() {
+            if !command.argument_is_command_block(index) {
+                continue;
+            }
+            let value = &command.args[index];
+            let body = crate::parser::command_block_body(value).unwrap_or(value);
+            let parsed =
+                crate::parser::parse_config_without_variable_expansion("<menu-item>", body);
+            if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
+                return Err(ServerError::CommandParse(diagnostic.message));
+            }
+            validate_menu_item_command_names(&parsed.commands)?;
+        }
         return validate_bound_command(command, owner);
     }
     for index in 0..command.args.len() {
@@ -16940,9 +16953,6 @@ fn validate_static_command(command: &CommandInvocation) -> Result<(), ServerErro
     let parsed = parse_tmux_command_options(spec, command)?;
     spec.validate_positional_minimum(parsed.positionals.len())?;
     spec.validate_positional_maximum(parsed.positionals.len())?;
-    if name == "display-menu" {
-        return Ok(());
-    }
     for index in 0..command.args.len() {
         if !command.argument_is_command_block(index) {
             continue;
@@ -16954,7 +16964,53 @@ fn validate_static_command(command: &CommandInvocation) -> Result<(), ServerErro
         if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
             return Err(ServerError::CommandParse(diagnostic.message));
         }
-        validate_static_command_chain(&parsed.commands)?;
+        if name == "display-menu" {
+            validate_menu_item_command_names(&parsed.commands)?;
+        } else {
+            validate_static_command_chain(&parsed.commands)?;
+        }
+    }
+    Ok(())
+}
+
+/// `cmd_display_menu_get_type` types a menu item's command slot as
+/// `ARGS_PARSE_COMMANDS_OR_STRING`, so the pin's parser resolves the name of
+/// every command inside it and stops on one it does not know. It goes no
+/// further than that: the string is kept as written and `menu_key_cb` is the
+/// first thing that parses its flags, when the item is chosen. That is why the
+/// pin's own `DEFAULT_PANE_MENU` can carry `move-pane -P` on a build whose
+/// floating panes are somebody else's decision.
+fn validate_menu_item_command_names(commands: &[CommandInvocation]) -> Result<(), ServerError> {
+    for command in commands {
+        if let Some(commands) = parse_command_alias_group(command)? {
+            validate_menu_item_command_names(&commands)?;
+            continue;
+        }
+        match resolve_command(&command.name) {
+            CommandResolution::Ambiguous(message) => {
+                return Err(ServerError::CommandParse(message));
+            }
+            CommandResolution::Unknown => {
+                return Err(ServerError::CommandParse(format!(
+                    "unknown command: {}",
+                    command.name
+                )));
+            }
+            CommandResolution::Canonical(_) | CommandResolution::Unimplemented(_) => {}
+        }
+        for index in 0..command.args.len() {
+            if !command.argument_is_command_block(index) {
+                continue;
+            }
+            let argument = &command.args[index];
+            let body = crate::parser::command_block_body(argument).unwrap_or(argument);
+            let parsed =
+                crate::parser::parse_config_without_variable_expansion("<menu-item>", body);
+            if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
+                return Err(ServerError::CommandParse(diagnostic.message));
+            }
+            validate_menu_item_command_names(&parsed.commands)?;
+        }
     }
     Ok(())
 }

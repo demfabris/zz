@@ -64,7 +64,13 @@
 #   `list-clients`, becomes one fixed token, and on the rows that carried it the
 #   run of box fill that follows collapses, because a name of a different width
 #   moves the fill by a column, and the `HH:MM` of
-#   `#{t/p:client_activity}` becomes `NN:NN`. That clock is each client's own
+#   `#{t/p:client_activity}` becomes `NN:NN`. On a row where another box is
+#   drawn over the one that carries the name - at 100x40 the help box covers
+#   the middle of the tree's title row - the text between the name and that
+#   box's edge becomes one token too: the title is cut at a fixed column, so
+#   two ttys whose numbers differ in digit count leave a different number of
+#   title characters standing. The title itself is asserted whole on every
+#   checkpoint where no box covers it. That clock is each client's own
 #   last activity time, stamped by its own server from its own key press: this
 #   driver types into zz and then into the pin, so a minute boundary between the
 #   two sends leaves the two rows a minute apart, and no option can pin it the
@@ -525,6 +531,7 @@ name = re.escape(os.environ["ZZ_MASK_NAME"])
 for line in sys.stdin.read().split("\n"):
     if re.search(name, line):
         line = re.sub(name, "/dev/CLIENT", line)
+        line = re.sub(r"(/dev/CLIENT).*?(?=\u2502)", r"\1 (CUT) ", line, count=1)
         line = re.sub(r"\d\d:\d\d", "NN:NN", line)
         line = re.sub("\u2500{2,}", "\u2500", line)
     sys.stdout.write(line + "\n")

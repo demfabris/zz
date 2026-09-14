@@ -3829,6 +3829,7 @@ mod tests {
             prompt_type: zz_protocol::CommandPromptType::Command,
             mode: zz_protocol::CommandPromptMode::Text,
             no_freeze: false,
+            pane: None,
         }
     }
 

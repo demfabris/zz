@@ -548,6 +548,7 @@ mod tests {
             prompt_type: CommandPromptType::Command,
             mode: CommandPromptMode::Text,
             no_freeze: false,
+            pane: None,
         };
         let stale = initial.clone();
         let (_, cx) = cx.add_window_view(move |window, cx| {
@@ -606,6 +607,7 @@ mod tests {
             prompt_type: CommandPromptType::Command,
             mode: CommandPromptMode::Text,
             no_freeze: false,
+            pane: None,
         };
         cx.update(|window, cx| {
             palette.update(cx, |palette, cx| {
@@ -655,6 +657,7 @@ mod tests {
             prompt_type: CommandPromptType::Command,
             mode: CommandPromptMode::Text,
             no_freeze: false,
+            pane: None,
         };
         let (_, cx) = cx.add_window_view(move |window, cx| {
             let mux = cx.new(|cx| {
@@ -695,6 +698,7 @@ mod tests {
                 prompt_type: CommandPromptType::Command,
                 mode,
                 no_freeze: false,
+                pane: None,
             };
             cx.update(|window, cx| {
                 palette.update(cx, |palette, cx| {
@@ -730,6 +734,7 @@ mod tests {
             prompt_type: CommandPromptType::Command,
             mode: CommandPromptMode::Text,
             no_freeze: false,
+            pane: None,
         };
         let (_, cx) = cx.add_window_view(move |window, cx| {
             let mux = cx.new(|cx| {

@@ -335,9 +335,12 @@ edges remain square at every layer.
 
 On macOS, `macos_app.rs` registers application actions and a native menu before any pane receives
 keyboard input. Global bindings cover `Cmd+Q` (quit), `Cmd+H` / `Option+Cmd+H` (hide), `Cmd+M`
-(minimize), `Cmd+W` (close the active window), and `Control+Cmd+F` (full screen); Settings remains
-`Cmd+,`. The focused terminal or browser only receives a command-modified key when no application or
-window action claims it. Quit still runs the existing app-quit barrier, and closing the main window
+(minimize), and `Cmd+W` (close the active window); Settings remains `Cmd+,`. Full screen is left to
+macOS: the Window menu's own `Enter Full Screen` item, which AppKit adds the first time that menu is
+opened. The focused terminal or browser only receives a command-modified key when no application or
+window action claims it. Keys a browser page does not consume stop at zz's CEF keyboard handler
+(`crates/zz-browser/src/cef_runtime.rs`), because CEF would otherwise offer them to the main menu
+through `performKeyEquivalent:`, and AppKit matches that fn+F item against a bare `f`. Quit still runs the existing app-quit barrier, and closing the main window
    still runs both browser and agent shutdown, so both routes detach from the persistent daemon
    without stopping its PTYs. `AgentController::shutdown` is a formality now . it flips a flag and
    returns ready, because the adapters are the daemon's children and a running turn is meant to

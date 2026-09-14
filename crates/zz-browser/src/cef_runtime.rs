@@ -1339,6 +1339,7 @@ impl PreparedSession {
         let dialog_handler = DeniedDialogHandler::new();
         let download_handler = DeniedDownloadHandler::new();
         let permission_handler = DeniedPermissionHandler::new();
+        let keyboard_handler = ConsumedKeyboardHandler::new();
         BrowserClient::new(
             render_handler,
             display_handler,
@@ -1349,6 +1350,7 @@ impl PreparedSession {
             dialog_handler,
             download_handler,
             permission_handler,
+            keyboard_handler,
             message_router,
         )
     }
@@ -4651,6 +4653,21 @@ cef::wrap_download_handler! {
     }
 }
 
+cef::wrap_keyboard_handler! {
+    struct ConsumedKeyboardHandler;
+
+    impl KeyboardHandler {
+        fn on_key_event(
+            &self,
+            _browser: Option<&mut Browser>,
+            _event: Option<&KeyEvent>,
+            _os_event: *mut u8,
+        ) -> i32 {
+            1
+        }
+    }
+}
+
 cef::wrap_permission_handler! {
     struct DeniedPermissionHandler;
 
@@ -4696,6 +4713,7 @@ cef::wrap_client! {
         dialog_handler: DialogHandler,
         download_handler: DownloadHandler,
         permission_handler: PermissionHandler,
+        keyboard_handler: KeyboardHandler,
         message_router: Arc<BrowserSideRouter>,
     }
 
@@ -4734,6 +4752,10 @@ cef::wrap_client! {
 
         fn permission_handler(&self) -> Option<PermissionHandler> {
             Some(self.permission_handler.clone())
+        }
+
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            Some(self.keyboard_handler.clone())
         }
 
         fn on_process_message_received(
@@ -4824,6 +4846,12 @@ fn ensure_no_active_data_operations(active_operations: &AtomicU64) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keys_the_page_ignores_are_reported_handled() {
+        let handler = ConsumedKeyboardHandler::new();
+        assert_eq!(handler.on_key_event(None, None, std::ptr::null_mut()), 1);
+    }
 
     #[test]
     fn remote_debugging_port_defaults_and_environment_precedence() {

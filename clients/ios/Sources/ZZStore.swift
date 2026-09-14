@@ -34,10 +34,17 @@ final class ZZStore: ObservableObject {
     @Published private(set) var agentStates: [UInt64: ZZAgentState] = [:]
     @Published private(set) var prefixArmed = false
     @Published private(set) var prefixBindings: [ZZPrefixBinding] = []
+    @Published var tmuxState = ZZTmuxState()
+    @Published var tmuxKeyTables: [ZZTmuxKeyTable] = []
+    @Published var tmuxSearchPane: UInt64?
+    @Published var tmuxSearchReverse = false
+    weak var settings: ZZClientSettings?
 
-    private var client: OpaquePointer?
+    var client: OpaquePointer?
     private var eventSource: DispatchSourceRead?
     private var frameSlots: [UInt64: TerminalFrameSlot] = [:]
+    private var browserRuntimes: [UInt64: ZZBrowserPaneRuntime] = [:]
+    private var browserProfiles: [String: ZZBrowserProfile] = [:]
     private var terminalGeometries: [UInt64: TerminalGeometryState] = [:]
     private var pendingSessionIDs: Set<UInt64>?
     private var attachedSessionID: UInt64?
@@ -392,6 +399,7 @@ final class ZZStore: ObservableObject {
         commandRequests = ZZCommandRequests()
         eventSource?.cancel()
         eventSource = nil
+        browserRuntimes.values.forEach { $0.suspend() }
         if let client {
             zz_client_free(client)
         }
@@ -401,6 +409,8 @@ final class ZZStore: ObservableObject {
         } else {
             sessions = []
             clearFrameSlots()
+            browserRuntimes = [:]
+            browserProfiles = [:]
             agentStates = [:]
             agentDrafts = ZZAgentDrafts()
             agentThreadSlots = [:]
@@ -413,6 +423,10 @@ final class ZZStore: ObservableObject {
         terminalModifierState.reset()
         prefixArmed = false
         prefixBindings = []
+        tmuxState = ZZTmuxState()
+        tmuxKeyTables = []
+        tmuxSearchPane = nil
+        tmuxSearchReverse = false
         connectionState = .idle
     }
 
@@ -844,23 +858,18 @@ final class ZZStore: ObservableObject {
         function: UInt8 = 0,
         action: UInt32 = UInt32(ZZ_KEY_PRESS.rawValue),
         modifiers: UInt8 = 0,
-        textFollows: Bool = false
+        textFollows: Bool = false,
+        text: String? = nil
     ) {
         guard let client else {
             return
         }
         let combinedModifiers = modifiers | terminalModifierState.active
-        _ = zz_client_send_key(
-            client,
-            pane,
-            code,
-            codepoint,
-            function,
-            action,
-            combinedModifiers,
-            nil,
-            textFollows
-        )
+        let send: (UnsafePointer<CChar>?) -> Bool = { text in
+            zz_client_send_key(client, pane, code, codepoint, function, action,
+                combinedModifiers, text, textFollows)
+        }
+        if let text { _ = text.withCString(send) } else { _ = send(nil) }
         if action != UInt32(ZZ_KEY_RELEASE.rawValue) {
             terminalModifierState.consumeOneShot()
         }
@@ -984,13 +993,6 @@ final class ZZStore: ObservableObject {
         commandRequests.register(request, as: .lastOutput(pane: pane))
     }
 
-    /// Any command this client runs that prints something opens a daemon-side
-    /// output view, which switches the client to the pane's copy-mode table and
-    /// swallows its terminal input until the view is dismissed. This client
-    /// never renders that view, so a pane would go silently deaf. The view is
-    /// per client rather than per pane, and cancelling it is a semantic action
-    /// because Escape resolves to clear-selection under `mode-keys vi`, which
-    /// leaves copy mode running. Sending this with no view open is a no-op.
     private func dismissCommandOutputView() {
         guard let client else {
             return
@@ -1367,7 +1369,19 @@ final class ZZStore: ObservableObject {
                     "split-picker -t %\(target) ; select-pane-kind agent",
                 ]
             )
-        case .picker, .browser, .editor:
+        case .picker:
+            guard let target = session.activeWindow?.activePane ?? session.panes.first?.id else {
+                actionError = "Create a terminal before adding a pane."
+                return
+            }
+            created = execute("split-picker", args: ["-t", "%\(target)"])
+        case .browser:
+            if let target = session.activeWindow?.activePane {
+                created = execute("split-browser", args: ["-t", "%\(target)", "about:blank"])
+            } else {
+                created = execute("new-browser", args: ["about:blank"])
+            }
+        case .editor:
             actionError = "That pane type isn’t available in the iPad app yet."
             return
         }
@@ -1379,6 +1393,76 @@ final class ZZStore: ObservableObject {
     func closePane(_ pane: UInt64) {
         if !execute("kill-pane", args: ["-t", "%\(pane)"]) {
             actionError = "zz couldn’t close that pane."
+        }
+    }
+
+    private var browserRoute: ZZBrowserRoute {
+        guard isConnected, let client else { return .unavailable }
+        if connectionEndpoint?.hasPrefix("ssh://") == true {
+            let port = zz_client_socks_port(client)
+            return port == 0 ? .unavailable : .ssh(port)
+        }
+        return .local
+    }
+
+    func browserRuntime(for pane: ZZPane) -> ZZBrowserPaneRuntime {
+        if let runtime = browserRuntimes[pane.id] { return runtime }
+        let descriptor = pane.browser ?? .blank
+        let host = connectionEndpoint ?? "local"
+        let key = ZZBrowserAddress.profileID(host: host, profile: descriptor.profile).uuidString
+        let profile = browserProfiles[key] ?? ZZBrowserProfile(host: host, profile: descriptor.profile)
+        browserProfiles[key] = profile
+        profile.forwardLoopback = { [weak self] port in
+            guard let self, self.isConnected, let client = self.client else {
+                return "Waiting for the host connection…"
+            }
+            var error = [CChar](repeating: 0, count: 512)
+            let ready = error.withUnsafeMutableBufferPointer {
+                zz_client_forward_loopback(client, port, $0.baseAddress, $0.count)
+            }
+            return ready ? nil : "Couldn’t forward localhost:\(port): \(String(cString: error))"
+        }
+        profile.apply(browserRoute)
+        let runtime = ZZBrowserPaneRuntime(descriptor: descriptor, profile: profile)
+        runtime.onDescriptorChange = { [weak self] descriptor in
+            guard let self, self.isConnected else { return }
+            _ = self.execute("set-browser-tabs", args: [
+                "-t", "%\(pane.id)", "-a", String(descriptor.activeTab), "--"
+            ] + descriptor.tabs)
+        }
+        runtime.apply(descriptor, route: browserRoute)
+        browserRuntimes[pane.id] = runtime
+        return runtime
+    }
+
+    private func browserDescriptor(snapshot: OpaquePointer, pane: UInt64) -> ZZBrowserDescriptor? {
+        guard let value = zz_snapshot_pane_descriptor(snapshot, pane) else { return nil }
+        defer { zz_json_free(value) }
+        let bytes = zz_json_bytes(value)
+        guard let pointer = bytes.ptr else { return nil }
+        return (try? JSONDecoder().decode(
+            [String: ZZBrowserDescriptor].self, from: Data(bytes: pointer, count: bytes.len)
+        ))?["browser"]
+    }
+
+    func handleBrowserCommand(pane id: UInt64, command: Any) {
+        guard let pane = sessions.flatMap(\.allPanes).first(where: { $0.id == id && $0.kind == .browser }) else { return }
+        let runtime = browserRuntime(for: pane)
+        if let verb = command as? String {
+            switch verb {
+            case "Back": runtime.selected.webView.goBack()
+            case "Forward": runtime.selected.webView.goForward()
+            case "Reload": runtime.navigate(runtime.selected.url)
+            default: break
+            }
+        } else if let values = command as? [String: Any] {
+            if let url = values["Navigate"] as? String { runtime.navigate(url) }
+            if let screenshot = values["Screenshot"] as? [String: Any],
+               let request = screenshot["request_id"] as? UInt64, let client {
+                _ = "Browser screenshots to host paths are unavailable on iOS.".withCString {
+                    zz_client_gui_response(client, request, false, $0)
+                }
+            }
         }
     }
 
@@ -1411,7 +1495,7 @@ final class ZZStore: ObservableObject {
         return true
     }
 
-    private func execute(_ name: String, args: [String]) -> Bool {
+    func execute(_ name: String, args: [String]) -> Bool {
         executeRequest(name, args: args) != 0
     }
 
@@ -1456,8 +1540,11 @@ final class ZZStore: ObservableObject {
             switch event.kind {
             case ZZ_EVENT_HELLO:
                 connectionState = .connected
+                refreshTmuxKeyTables()
             case ZZ_EVENT_ATTACHED:
                 _ = zz_client_set_focused(client, sceneIsActive)
+                applyMuxPreferences()
+                refreshTmuxKeyTables()
                 if terminalPreviewRequested {
                     _ = zz_client_set_terminal_preview(client, true)
                 }
@@ -1482,6 +1569,7 @@ final class ZZStore: ObservableObject {
                 refreshFrame(pane: event.pane, damage: damage)
             case ZZ_EVENT_PANE_REMOVED:
                 removeFrameSlot(for: event.pane)
+                browserRuntimes.removeValue(forKey: event.pane)?.close()
                 terminalGeometries.removeValue(forKey: event.pane)
                 terminalFontSizeSteps.removeValue(forKey: event.pane)
                 agentStates.removeValue(forKey: event.pane)
@@ -1516,6 +1604,14 @@ final class ZZStore: ObservableObject {
                  ZZ_EVENT_CHOOSE_BUFFER_CHANGED,
                  ZZ_EVENT_DISPLAY_PANES_CHANGED:
                 refreshPrefixState()
+                if event.kind == ZZ_EVENT_KEY_TABLES_CHANGED {
+                    refreshTmuxKeyTables()
+                    settings?.shared?.refresh(client: client)
+                }
+            case ZZ_EVENT_APPEARANCE_CHANGED:
+                refreshTerminalPreferences()
+            case ZZ_EVENT_OTHER:
+                settings?.shared?.refresh(client: client)
             case ZZ_EVENT_SERVER_STOPPING, ZZ_EVENT_DISCONNECTED:
                 disconnected = true
             default:
@@ -1528,6 +1624,23 @@ final class ZZStore: ObservableObject {
         }
         if refreshMux {
             refreshSnapshot(replacingInputFor: replacingInputPane)
+        }
+        drainTmuxCommands()
+        refreshTmuxState()
+    }
+
+    func applyMuxPreferences() {
+        guard let client, let shared = settings?.shared else { return }
+        if !zz_settings_model_mobile_apply(shared.handle, client) {
+            shared.refresh(client: client)
+            actionError = shared.error ?? "Could not apply multiplexer preferences."
+        }
+        shared.refresh(client: client)
+    }
+
+    func refreshTerminalPreferences() {
+        for pane in Array(frameSlots.keys) {
+            refreshFrame(pane: pane, damage: TerminalDamage(all: true, firstRow: 0, lastRow: 0))
         }
     }
 
@@ -1601,7 +1714,10 @@ final class ZZStore: ObservableObject {
                                 windowIndex,
                                 paneIndex
                             ),
-                            layout: layout
+                            layout: layout,
+                            browser: rawKind == ZZ_PANE_BROWSER ? browserDescriptor(snapshot: snapshot, pane: zz_snapshot_session_window_pane_id(
+                                snapshot, sessionIndex, windowIndex, paneIndex
+                            )) : nil
                         )
                     )
                 }
@@ -1657,6 +1773,20 @@ final class ZZStore: ObservableObject {
         attachedSessionID = attached?.id
         if attached != nil {
             hasEstablishedAttachment = true
+        }
+        let browserPanes = nextSessions.flatMap(\.allPanes).filter { $0.kind == .browser }
+        let browserIDs = Set(browserPanes.map(\.id))
+        for id in Array(browserRuntimes.keys) where !browserIDs.contains(id) {
+            browserRuntimes.removeValue(forKey: id)?.close()
+        }
+        for pane in browserPanes {
+            if let runtime = browserRuntimes[pane.id], let descriptor = pane.browser {
+                if runtime.profileName != descriptor.profile {
+                    browserRuntimes.removeValue(forKey: pane.id)?.close()
+                } else {
+                    runtime.apply(descriptor, route: browserRoute)
+                }
+            }
         }
         if let pendingAttachmentSessionID {
             if attached?.id == pendingAttachmentSessionID {
@@ -1864,9 +1994,8 @@ final class ZZStore: ObservableObject {
     /// the untracked replies are discarded. The reply's bytes belong to the
     /// handle, so they are copied into Swift strings before it is released.
     private func drainCommandReplies(_ client: OpaquePointer) {
-        var replied = false
+        var copiedOutput = false
         while let reply = zz_client_command_reply_next(client) {
-            replied = true
             let requestID = zz_command_reply_request_id(reply)
             let ok = zz_command_reply_ok(reply)
             let output = string(zz_command_reply_output(reply))
@@ -1879,10 +2008,12 @@ final class ZZStore: ObservableObject {
                 continue
             }
             guard let purpose = commandRequests.take(requestID) else {
+                if !ok { actionError = error }
                 continue
             }
             switch purpose {
             case .lastOutput:
+                copiedOutput = true
                 switch ZZLastOutput.result(ok: ok, output: output, error: error) {
                 case let .copy(text):
                     UIPasteboard.general.string = text
@@ -1892,7 +2023,7 @@ final class ZZStore: ObservableObject {
                 }
             }
         }
-        if replied {
+        if copiedOutput {
             dismissCommandOutputView()
         }
     }
@@ -1984,7 +2115,7 @@ final class ZZStore: ObservableObject {
     }
 
     private func refreshFrame(pane: UInt64, damage: TerminalDamage) {
-        guard let client, let frame = TerminalFrame(client: client, pane: pane, damage: damage) else {
+        guard let client, let frame = TerminalFrame(client: client, pane: pane, damage: damage, settings: settings?.shared) else {
             return
         }
         frameSlot(for: pane).update(frame)
@@ -2020,7 +2151,7 @@ final class ZZStore: ObservableObject {
         }
     }
 
-    private func releaseTerminalInput() {
+    func releaseTerminalInput() {
         guard let pane = terminalInput.owner.pane else {
             return
         }

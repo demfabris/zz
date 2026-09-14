@@ -28,6 +28,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         LSApplicationCategoryType: public.app-category.developer-tools
         NSLocalNetworkUsageDescription: zz connects to your computer on the local network.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsInWebContent: true
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -38,10 +40,26 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        UIAppFonts:
+          - FiraCode-Regular.ttf
+          - FiraCode-Bold.ttf
+          - GeistMono-Regular.otf
+          - GeistMono-Bold.otf
+          - 0xProto-Regular.ttf
+          - 0xProto-Bold.ttf
+          - 0xProto-Italic.ttf
         UILaunchScreen: {}
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
     sources:
       - Sources
+      - path: Resources/Fonts
+        buildPhase: resources
+      - path: Resources/themes
+        type: folder
+        buildPhase: resources
+      - path: Resources/Licenses
+        type: folder
+        buildPhase: resources
       - path: ../../assets/zz.icon
         buildPhase: resources
     dependencies:
@@ -73,6 +91,7 @@ targets:
     scheme:
       testTargets:
         - ZZMobileTests
+        - ZZMobileUITests
   ZZMobileTests:
     type: bundle.unit-test
     platform: iOS
@@ -88,3 +107,19 @@ targets:
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/ZZ.app/ZZ
         BUNDLE_LOADER: $(TEST_HOST)
         HEADER_SEARCH_PATHS: $(inherited) $(SRCROOT)/../../crates/zz-client-ffi/include
+
+  ZZMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - Tests/UI
+    dependencies:
+      - target: ZZMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.zz.ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: ZZMobile
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ARCHS: arm64

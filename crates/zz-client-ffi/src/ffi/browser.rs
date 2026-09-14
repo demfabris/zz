@@ -111,6 +111,10 @@ impl ZzBrowserRuntime {
                             .record_title(&session.profile, &session.url, &title);
                         (json!({"kind":"title", "title":title.as_ref()}), None)
                     }
+                    BrowserEvent::FaviconChanged { url, png, .. } => {
+                        self.history.record_favicon(&session.profile, &url, png);
+                        continue;
+                    }
                     BrowserEvent::LoadingChanged {
                         loading,
                         can_go_back,

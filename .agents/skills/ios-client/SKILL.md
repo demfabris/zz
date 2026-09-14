@@ -59,7 +59,15 @@ no Apple-client behavior belongs to `new-client` and needs no iOS simulator or d
   daemon boot, not for the daemon's whole lifetime.
 - Keep terminal colors, cursor appearance, cell semantics, selection, and clipboard extraction owned
   by the viewport/core. Do not add a Swift VT parser or reconstruct selection text from drawn cells.
-- Keep Browser and Editor panes explicit placeholders until the native viewport contract exists.
+- Browser panes use retained local WebKit views and the existing browser descriptor/command ABI.
+  Remote requests use mobile SSH SOCKS. The SSH connection discovers host TCP listeners before
+  browser readiness and refreshes them every five seconds, so separate localhost auth, API, and
+  WebSocket ports work without extra tabs. Localhost navigation also calls
+  `zz_client_forward_loopback` to bind both device loopback addresses at the original port.
+  Preserve the real URL and origin; do not rewrite localhost to an alias. Forwarding belongs to
+  the SSH connection and closes on disconnect. Keep cookies scoped to host/profile and Panorama
+  previews passive. Editor panes remain explicit placeholders. Keep localhost HTTP/WebSocket
+  coverage on physical hardware; simulator proxy behavior differs from iPadOS.
   Agent panes render the daemon's journal transcript through `zz_client_agent_updates_next`; reduce
   it with the published cursor rules instead of inventing client-side history.
 - Keep the current one-host mobile model unless the user asks for fleet aggregation. Saved host
@@ -82,8 +90,8 @@ cargo test -p zz-client-ffi
 
 Choose the checks that cover the changed layer. SSH/probe changes also need the focused
 `zz-daemon` tests. Layout, keyboard, safe-area, focus, terminal drawing, and Panorama changes need a
-simulator or physical-device interaction pass because the Swift suite currently tests policy rather
-than rendered UI behavior.
+simulator or physical-device interaction pass. The Swift unit suite tests policy; the opt-in
+`ZZMobileUITests` suite exercises selected iPad flows against an isolated daemon.
 
 If source and `knowledge/designs/ios-client.md` disagree after the change, update the design and its
 managed index in the same work. Client-only changes do not require a protocol-version bump.

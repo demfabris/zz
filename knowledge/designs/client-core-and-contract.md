@@ -2,7 +2,7 @@
 type: Design Plan
 title: Client core & contract - one brain, every face
 description: Decision record for the shared client contract - protocol-owned commands and keys, sans-IO reduction, typed Agent attention, and a native-shell C ABI.
-status: Contract consolidation, live key tables, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native Apple ABI gained mux and styled terminal surfaces on 2026-08-15, endpoint connection and its iOS SSH identity on 2026-08-25, interactive SSH trust and authentication, Agent supervision, semantic selection, and clipboard delivery on 2026-08-26, full window trees and normalized visible pane geometry on 2026-08-30, then passive attached-session terminal preview control on 2026-08-31, and the Agent transcript stream, agent session lists, and the published prefix table on 2026-09-02. Native macOS Agent presentation, settings, chrome-keymap resolution, and optional CEF runtime/frame APIs shipped 2026-09-08. Terminal history, Kitty, multi-host selection, and Editor viewports remain open. GPUI cross-surface rebinding still needs a restart
+status: Contract consolidation, live key tables, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native Apple ABI gained mux and styled terminal surfaces on 2026-08-15, endpoint connection and its iOS SSH identity on 2026-08-25, interactive SSH trust and authentication, Agent supervision, semantic selection, and clipboard delivery on 2026-08-26, full window trees and normalized visible pane geometry on 2026-08-30, then passive attached-session terminal preview control on 2026-08-31, and the Agent transcript stream, agent session lists, and the published prefix table on 2026-09-02. Native macOS Agent presentation, settings, chrome-keymap resolution, and optional CEF runtime/frame APIs shipped 2026-09-08. Full key-table and tmux overlay JSON accessors passed workspace Rust tests and clippy, mobile daemon integration, native iPad UI acceptance, and the iPhone simulator suite on 2026-09-12. Terminal history, Kitty, multi-host selection, and Editor viewports remain open. GPUI cross-surface rebinding still needs a restart
 tags:
 - client
 - ffi
@@ -10,7 +10,7 @@ tags:
 - protocol
 - architecture
 - multi-client
-timestamp: 2026-08-31T00:00:00-03:00
+timestamp: 2026-09-12T00:00:00-03:00
 ---
 
 # Overview
@@ -35,9 +35,20 @@ retained Agent summaries, attention edges, permission responses, and cancellatio
 transcript stream, its lag and replay path, agent session lists, and the published prefix table
 joined the header on 2026-09-02. On 2026-09-08, `zz_chrome_keymap_resolve` added chrome
 action resolution, and the optional `native-browser` feature added CEF sessions and retained
-frames to `crates/zz-client-ffi/include/zz-client.h`. The command catalog and the other live
-key tables, history, Kitty images, multi-host presentation, and Editor viewports remain outside
-the ABI.
+frames to `crates/zz-client-ffi/include/zz-client.h`. The 2026-09-12 implementation adds
+`zz_client_key_tables_json` for the full published tables and `zz_client_tmux_state_json` for
+prompts, tree and buffer choosers, pane indicators, menus, copy/search state, and text-projected
+command output. `zz_client_tmux_action_json` forwards typed overlay actions to the daemon.
+`crates/zz-client-ffi/src/ffi/tmux.rs` owns these projections; native iOS consumes them in
+`clients/ios/Sources/TmuxControls.swift`. JSON bytes belong to their handles and require
+`zz_json_free` after decoding. The command catalog, history, Kitty images, multi-host presentation,
+and Editor viewports remain outside the ABI.
+
+The 2026-09-12 verification passed 3,736 workspace Rust tests with four ignored and no failures,
+workspace clippy, and the mobile daemon integration test including prefix reconnect and reset.
+The iPad acceptance run exercised native settings, picker conversion, pane resize, copy/search, and
+live key tables; the fresh-FFI iPhone simulator run passed 75 unit tests and skipped its iPad-only
+UI case. See [native Apple client](/designs/ios-client.md) for the tested flows and device limits.
 
 The sections below retain the original proposal and its acceptance criteria. The rung ladder marks
 the parts that shipped and the parts that remain design intent.
@@ -192,7 +203,10 @@ failure, creates sessions and panes, renders styled content, types through the r
 the selection, clipboard, and Agent symbols, reports client focus and blur, kills the attached
 session, reattaches a survivor and recovers its viewport, then frees and reconnects in one process.
 Native clients can resolve ChromeKeymap actions and use shared settings and Agent
-presentation models through the ABI. The optional `native-browser` feature also
+presentation models through the ABI. The tmux JSON accessors also provide the full key tables,
+chooser and prompt state, copy/search positions, and plain-text command output. Native clients
+drain `zz_client_gui_command_next` for effects such as terminal search requests; they keep key-table
+resolution and overlay command semantics in Rust. The optional `native-browser` feature also
 exposes CEF sessions, retained frames, input, history, Chrome import, and SSH egress.
 The command catalog, terminal history, Kitty images, and Editor viewports remain
 outside the ABI.

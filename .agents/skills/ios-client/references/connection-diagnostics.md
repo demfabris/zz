@@ -96,6 +96,14 @@ a no-write request unless the user approves that local artifact.
 Verify `zz.saved-host` contains the intended `ssh://user@host`. Resolve that exact host from the Mac
 and compare it with the Mac's current LAN address.
 
+If desktop and iPad show different sessions, compare their actual Unix sockets. Local default paths
+depend on `XDG_RUNTIME_DIR` or `TMPDIR`; an SSH login and desktop launch can therefore select different
+daemons on the same Mac. On 2026-09-13 the desktop used `/private/tmp/zz-demfabris/default.sock`, while
+SSH chose the macOS user temporary directory. An explicit endpoint such as
+`ssh://user@host/private/tmp/zz-user/default.sock` selects the existing desktop socket and disables
+remote daemon auto-start. Find the live desktop socket before choosing it; do not kill other daemons
+or assume an environment-derived default identifies the user's workspace.
+
 ### 3. SSH reachability and authentication
 
 Confirm port 22 on the exact target:
@@ -204,6 +212,20 @@ error while the next attempt runs.
 | SSH accepts on every backoff, app keeps reconnecting | Remote probe, `zz` path, daemon socket, proxy, stale physical archive |
 | App connects but shows no panes | Attachment event, selected session, authoritative snapshot, visible-pane scope |
 | New code appears absent after install | Reused device archive or long-lived old daemon |
+
+## Browser page loads but login or API requests fail
+
+A frontend port does not identify its auth, API, or realtime ports. On 2026-09-13 Clairvo loaded
+from port 3000 while login failed because Cognito used 9229; its API, runtime, and LiveKit signaling
+used 8080, 8084, and 7880. Verify the frontend's configured destinations before changing CORS or
+credentials. Loading the login page alone does not prove authentication works.
+
+The mobile SSH connection now discovers wildcard and loopback TCP listeners with macOS `lsof` or
+Linux `ss` (falling back to `lsof`). It prepares forwards before reporting ready and refreshes every
+five seconds. Check that the host inventory includes the failing destination and that the device
+port is available. Inventory failure preserves existing forwards and leaves terminal transport
+connected; explicit localhost navigation still attempts its own port and reports bind failures.
+Newly started services may need the next refresh. UDP/WebRTC media is outside this transport.
 
 End diagnosis with one plain verdict: which layers are proven healthy, which exact layer failed, and
 what evidence proves the connected state after the fix.

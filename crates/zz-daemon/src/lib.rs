@@ -41,6 +41,8 @@ mod lifecycle;
 mod paths;
 #[cfg(target_os = "ios")]
 mod russh_client;
+#[cfg(any(target_os = "ios", test))]
+mod russh_socks;
 #[cfg(feature = "daemon")]
 mod status;
 #[cfg_attr(target_os = "ios", allow(dead_code))]

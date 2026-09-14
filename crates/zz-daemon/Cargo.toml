@@ -67,5 +67,9 @@ security-framework-sys = "2.17"
 async-signal = { workspace = true, optional = true }
 rustix = { workspace = true, features = ["fs"] }
 
+[dev-dependencies]
+russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync", "macros"] }
+
 [lints]
 workspace = true

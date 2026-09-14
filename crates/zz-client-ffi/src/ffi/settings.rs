@@ -7,7 +7,10 @@ use std::{
 use zz_config::settings::{SettingsAction, SettingsModel};
 use zz_protocol::{CommandInvocation, PROTOCOL_VERSION};
 
-pub struct ZzSettingsModel(SettingsModel, u64);
+mod mobile;
+pub use mobile::*;
+
+pub struct ZzSettingsModel(SettingsModel, u64, std::sync::Mutex<mobile::MobileCache>);
 
 unsafe fn string<'a>(value: *const c_char) -> Option<&'a str> {
     if value.is_null() {
@@ -36,6 +39,7 @@ pub unsafe extern "C" fn zz_settings_model_new(
     Box::into_raw(Box::new(ZzSettingsModel(
         SettingsModel::new(system_font, config, mux),
         0,
+        Default::default(),
     )))
 }
 
@@ -62,7 +66,31 @@ pub unsafe extern "C" fn zz_settings_model_snapshot(
     let bindings = unsafe { client.as_ref() }
         .map(|client| lock(&client.core).prefix_bindings().to_vec())
         .unwrap_or_default();
-    Box::into_raw(Box::new(ZzJson::new(model.0.snapshot(&bindings))))
+    let mut snapshot = model.0.snapshot(&bindings);
+    if let Some(client) = unsafe { client.as_ref() } {
+        let core = lock(&client.core);
+        if let Some(rows) = snapshot["settings"].as_array_mut() {
+            for row in rows {
+                if row["section"] == "multiplexer" && row["overridden"] == false {
+                    let effective = row["key"]
+                        .as_str()
+                        .and_then(zz_protocol::MuxOptionKey::from_config_key)
+                        .and_then(|key| core.mux_options().get(key));
+                    if let Some(value) = effective {
+                        row["value"] = if row["control"] == "number" {
+                            value
+                                .value
+                                .parse::<f64>()
+                                .map_or_else(|_| json!(value.value), |number| json!(number))
+                        } else {
+                            json!(value.value)
+                        };
+                    }
+                }
+            }
+        }
+    }
+    Box::into_raw(Box::new(ZzJson::new(snapshot)))
 }
 
 fn apply(model: &SettingsModel, client: &ZzClient, endpoint: &str) -> Result<(), String> {

@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: Native Apple client
-description: Adaptive SwiftUI and UIKit iPhone and iPad client over zz-client-ffi, with SSH attach, Agent supervision and prompting, mobile navigation, a native session tree, and live split terminal panes.
-status: Native phone slice, adaptive iPad workspace, native session menu with segmented window picker, Agent creation and composer, all-session Panorama with attached-session live previews, and persisted client settings implemented; native Browser and Editor panes remain future work
+description: Adaptive native iPhone and iPad client over zz-client-ffi, with device-owned settings, pane controls, Agent conversations, and WebKit browser panes through SSH with automatic localhost service forwarding.
+status: Native settings and tmux controls verified 2026-09-12; WebKit browser panes with original localhost origins verified on physical iPad 2026-09-13; Editor panes remain future work
 tags:
 - ios
 - iphone
@@ -12,7 +12,7 @@ tags:
 - uikit
 - client
 - ffi
-timestamp: 2026-09-06T00:00:00-03:00
+timestamp: 2026-09-13T00:00:00-03:00
 ---
 
 # Overview
@@ -72,9 +72,10 @@ This slice deliberately selects one host at a time. It does not reproduce the de
 or aggregate sessions from several daemons. `ZZ_SOCKET` remains the simulator override and bypasses
 saved-host setup for the local development loop.
 
-The native iOS client offers no tmux config import UI. Since 2026-09-11 the daemon loads only
-`zz/mux.conf` or explicit `-f` files. `import-tmux-config [path]` copies a donor into `zz/mux.conf`
-and reloads. Desktop Settings and the CLI expose that verb.
+Since 2026-09-11 the daemon loads `zz/mux.conf` or explicit `-f` files. The iPad keeps its own
+`mux.conf` in Application Support and applies its parsed preferences through the connected daemon.
+Editing that file does not copy it to the host's filesystem. Desktop Settings and the CLI also
+expose `import-tmux-config [path]` to copy a donor into the host's `zz/mux.conf` and reload it.
 
 ## Pane overview
 
@@ -82,8 +83,8 @@ and reloads. Desktop Settings and the CLI expose that verb.
 - Its panes appear as a two-column card grid; desktop split ratios do not constrain the phone.
 - Terminal cards contain live frame previews drawn with a smaller font over the terminal's stable
   fullscreen grid.
-- Agent cards show structured status and approval attention. Browser, Editor, and picker panes remain
-  explicit placeholders.
+- Agent cards show structured status and approval attention. Browser cards show the shared URL and
+  tab count; Editor cards identify desktop-only content. Picker cards offer Terminal, Browser, and Agent.
 - A compact attention strip orders blocked, failed, unseen-complete, and working Agents and opens the
   exact pane when tapped.
 - Closing a pane requires native destructive confirmation because it stops the pane's process.
@@ -133,35 +134,65 @@ active pane, the next snapshot transfers that existing selection and input owner
 empty selection remains unchanged. Removing the selected pane transfers input to the replacement
 active pane chosen by the daemon.
 Standard toolbars provide New Session, New Pane, reconnect, and host actions. The iPad New Pane menu
-offers Terminal and Agent. Agent creation sends one daemon command list that splits a pending picker
-and materializes it while that picker remains the active command target. The connected daemon must
-already have `experimental-agent-pane` enabled. The detail column omits a duplicate workspace title
-and lets pane content fill each tile directly; pane identity and selection remain in the sidebar, so
-per-pane chrome does not consume terminal bounds.
+offers Terminal, Agent, and Choose Pane Type. `PaneKindPicker` materializes an existing picker with
+`select-pane-kind -t %pane terminal|agent`; the daemon preserves the pane ID and inherited working
+directory. Agent creation requires `experimental-agent-pane` on the host. Browser panes use native
+WebKit; Editor panes retain desktop-only placeholders.
 
-The system-sized principal toolbar item uses a native session menu and a flexible segmented window
-picker centered around the active window. Panorama, New Pane, and More stay in the trailing native
-action group, with Settings inside More. Window labels surface the structured bell, Agent, and zoom
-state available in the client snapshot. The controls use the normal attachment and exact-pane
-navigation paths. The current C ABI does not expose the daemon-expanded `StatusLine` payload, so
-Swift does not duplicate custom `status-left`, `status-right`, justification, or clock text.
+Each live iPad tile has a title button and a 44-point actions menu. The menu sends `split-picker -h`
+or `-v`, `resize-pane -Z`, the five standard `select-layout` presets, and directional `resize-pane`
+adjustments. The resize sheet lets the user choose a 1 through 50 cell step and watch the workspace
+change beneath it. Swift forwards intent and renders the next normalized layout; Rust owns split
+geometry. Close Pane requires confirmation. Terminal actions also expose Prefix, the daemon's key
+bindings, Copy Mode, and Paste Buffer. These controls live in
+`clients/ios/Sources/PaneControls.swift` (`PaneActionsMenu`, `PaneResizeSheet`).
+
+The principal toolbar item uses a native session menu and a segmented window picker around the
+active window. Device preferences control session visibility, bell and Agent indicators, alignment,
+the host label, an Agent pane menu, and a 12-hour, 24-hour, or date-and-time clock. Swift derives pane
+and window state from snapshots and the host from the current connection. It does not expand custom
+`status-left` or `status-right` formats. Navigation uses the attachment and exact-pane paths.
 
 ### Client settings
 
-The native Settings sheet owns presentation choices that belong to this device: system, dark, or
-light app appearance; System Mono, Menlo, or Courier New terminal text; a 9 through 23 point terminal
-base size; whether a cursor that requests blinking should animate; and whether pane content may draw
-through the iPad's bottom home-indicator inset. The app keeps the system accent instead of persisting
-a zz-specific tint. These values persist in `UserDefaults`, update the mounted SwiftUI and UIKit
-views immediately, and can be restored to the dark, System Mono, 13-point defaults in one action.
-Per-pane pinch zoom remains an in-memory offset from the persisted base size.
+`ClientSettingsView` presents Appearance, Terminal, Panes, Status Bar, and Multiplexer sections. On
+regular-width iPad, a sidebar selects the page inside the settings sheet; compact widths use a
+navigation list. The sheet stays outside the workspace size-class branch. A regular-width host
+requests a fitted 900 by 700 point sheet so the settings sidebar has room to remain visible.
 
-Settings uses the same modal sheet at compact and regular widths. Opening it therefore leaves the
-live iPad detail column at its current width and does not send a terminal resize merely because the
-settings UI appeared. App appearance affects native chrome only. Terminal cell colors, cursor color,
-shape, and visibility continue to come from the daemon-provided viewport frame. Turning off cursor
-blinking makes the cursor steady without disabling ANSI blinking text. In a live split, only the
-selected pane animates its cursor; other panes remain live and may still animate ANSI blinking text.
+`ZZClientSettings` retains native appearance, terminal font and base size, cursor blinking, and the
+home-indicator option in `UserDefaults`. `ZZSharedSettings` uses the shared Rust settings model with
+Application Support `zz/config` and `zz/mux.conf`. The device has the same bundled terminal theme
+catalog as desktop, separate light and dark theme choices, chrome presets and custom colors, an
+interface font, terminal palette and cursor controls, padding, and font weight. Chrome contrast
+uses native SwiftUI contrast on chrome groups without filtering terminal cells. Widget corner radius
+and shadow strength affect picker cards, pane action buttons, and custom shortcut controls; native
+system menus keep their platform treatment. Font choices include
+System Mono, Menlo, Courier New, and bundled Fira Code, Geist Mono, and 0xProto. Per-pane pinch zoom
+remains an in-memory offset from the base font size.
+
+The pane settings control gaps, margins, corner radius, border width, background opacity, and inactive
+pane dimming. Status settings control the native toolbar presentation described above. The animation
+preference disables workspace animations and uses Panorama's reduced-motion path. Platform-only
+settings such as desktop update indicators do not appear in the mobile pages.
+
+Terminal color choices belong to this client. The Rust FFI applies the local terminal appearance to
+an acquired viewport before UIKit draws its render-ready cells. It preserves terminal semantics,
+selection, and explicit cell colors without a Swift VT parser or a daemon-wide palette override.
+Cursor blink preferences preserve ANSI blinking text. In a live split, the selected pane animates
+its cursor while other panes may still animate blinking text.
+
+Mux preferences have different scope. `ZZStore.applyMuxPreferences` asks
+`zz_settings_model_mobile_apply` to parse and execute the device's `mux.conf` through the connected
+daemon, and repeats the application after attachment. Prefix and key bindings, mouse behavior,
+copy-mode key style, history limits, and window/pane defaults use the same settings metadata as
+desktop. The file belongs to this device; commands with daemon or session scope affect shared state
+and other attached clients. This is not a per-client key-table profile or a remote file editor.
+
+`third_party/rootshell-reference` provides local reference material for the grouped settings,
+bundled fonts, and pane controls. Its split-view implementation commits terminal-cell resize
+requests to tmux. zz keeps that division of responsibility through its existing daemon commands
+and the `zz-client` rectangle solver.
 
 ### Panorama
 
@@ -272,6 +303,19 @@ A two-finger pinch changes the current pane's terminal font in one-point steps f
 points. Each crossed step emits selection haptics and reports the resulting cell geometry to the
 daemon; the chosen step remains local to that pane for the lifetime of the client connection.
 
+## tmux controls
+
+`TmuxOverlay` renders command prompts, confirmation prompts, tree and buffer choosers, pane
+indicators, menus, and command output from `zz_client_tmux_state_json`. Swift sends typed actions
+through `zz_client_tmux_action_json`; Rust retains chooser selection, prompt editing, and command
+execution. The overlay prevents underlying terminal input from consuming its gestures.
+
+`TmuxCopyBar` appears for panes in the daemon's copy-mode state. It exposes selection, clipboard
+copy, search, match navigation, page movement, and exit. Hardware keys continue through the raw-key
+path so the daemon's vi/emacs tables remain authoritative. `TmuxBindingsView` lists and searches the
+published key tables, including custom tables, with command notes and repeat behavior. Prefix arms
+the daemon's prefix table instead of sending a literal prefix byte to the PTY.
+
 ## Agent supervision
 
 The app consumes the daemon's retained `AgentPaneWire` state through typed FFI accessors. It does not
@@ -363,6 +407,61 @@ The selected rail item is desired presentation state, while the reduced core's a
 authoritative transport state. The store tracks an attachment request until the matching snapshot
 lands. If an attached session disappears, it issues a real attach for the surviving selected session
 or the first live fallback; changing the rail alone cannot enable viewport fanout.
+
+## Browser panes
+
+`clients/ios/Sources/BrowserPane.swift` owns retained `WKWebView` tabs, the address bar, back/forward,
+reload, and tab creation/selection/closing. `ZZStore.browserRuntime` retains one runtime per pane;
+unmounting a live surface for Panorama or switching tabs preserves the document and form contents.
+Previews show the URL and tab count without mounting or resizing an interactive web view.
+
+`zz_snapshot_pane_descriptor` supplies tab URLs, active index, and profile. Native navigation publishes
+`set-browser-tabs`; incoming descriptors reconcile with pending local changes without replaying an
+acknowledged navigation. Basic daemon Browser commands use `zz_client_gui_command_next`. Screenshot
+requests targeting host paths receive an explicit unsupported response. Chromium CDP automation,
+remote browser key injection, downloads management, and live Chromium document transfer are outside
+this implementation.
+
+`ZZBrowserProfile` uses persistent WebKit data stores derived from the connection endpoint and browser
+profile. Cookies and site storage belong to this device. They do not copy Chromium's login, DOM, or
+JavaScript state. HTTP development pages use `NSAllowsArbitraryLoadsInWebContent`; URLSession retains
+its normal transport policy.
+
+`crates/zz-daemon/src/russh_socks.rs` provides a loopback SOCKS5 CONNECT listener on the existing iOS
+SSH session. Each request opens a direct TCP channel, passing DNS names to the host. It supports IPv4,
+IPv6, simultaneous requests, and TCP half-close. Listener lifetime follows the SSH connection, and
+`zz_client_socks_port` returns zero when unavailable. Browser bytes do not enter the zz wire protocol.
+Remote views configure WebKit's public `proxyConfigurations` before loading and disable direct
+failover. Localhost addresses are explicitly excluded because physical iPadOS bypasses their proxy
+configuration, unlike the simulator. Before allowing localhost navigation, `ZZBrowserProfile.prepare`
+calls `zz_client_forward_loopback`. The C API synchronously binds `127.0.0.1:port` and `[::1]:port` on
+the device, then forwards accepted connections through the existing SSH session to remote
+`localhost:port`. Remote DNS selects the host's IPv4 or IPv6 listener. A bind conflict returns an
+error before the page loads; partial binds are discarded.
+
+The page URL, origin, Host header, cookies, and WebSocket URLs remain unchanged. No hostname alias or
+HTTP rewriting is involved. Localhost, `127.0.0.1`, and `[::1]` navigation prepare the same port;
+other numeric loopback addresses remain unsupported. HTTPS uses the original hostname and normal
+certificate validation. The session shares up to 64 forwarded ports across panes, with 128 active
+loopback connections.
+
+Before reporting browser readiness, the SSH connection discovers the host's wildcard and loopback
+TCP listeners using macOS `lsof` or Linux `ss`, with `lsof` as the Linux fallback. It binds matching
+ports on the device so separate auth, API, and WebSocket services work without navigation to those
+ports. Discovery runs over an extra channel on the existing authenticated connection and refreshes
+every five seconds. Each inventory has time and output limits. Failed inventories preserve the
+previous forwards and leave terminal transport connected; unrelated occupied device ports do not
+block the remaining services. Navigation still requests its explicit port and surfaces bind errors.
+
+Successful inventories retire automatic listeners when the corresponding host service stops,
+while allowing established streams to finish. Explicitly visited ports remain until disconnect.
+A service started between inventories may need the next refresh before its first request succeeds.
+
+Disconnection blocks new navigation, installs an unusable SOCKS port, and closes the SSH listeners
+and active forwarded connections. Reconnection restores previously used ports and resumes deferred
+navigation while retaining loaded documents. Port forwards stay available until disconnect, so
+closing a tab does not break another page's API connection. This browser transport is not a device
+VPN or a guarantee about WebRTC/UDP traffic.
 
 # Architecture
 
@@ -469,7 +568,7 @@ repository.
   Xcode 26.6 and the iOS 26.5 SDK to verify the outline, split workspace, and Panorama on iPadOS 27.
 - Decide whether zoomed Panorama cards should expose hidden sibling panes; the current snapshot only
   gives the zoomed pane a rectangle.
-- Decide native representations for Browser, Editor, and picker panes.
+- Decide a native representation for Editor panes.
 - Export the daemon-expanded status payload through the C ABI before reproducing custom tmux status
   formats. The C ABI now exports Agent journal batches (`zz_client_agent_updates_next`,
   `zz_client_agent_lagged_next`, `zz_client_agent_replay`), session replies
@@ -480,21 +579,75 @@ repository.
   (`zz_client_execute_request` returns the request id a `zz_command_reply_*` handle carries back),
   which is what lets the client copy a pane's last command output; the `zz_bytes` a reply lends are
   borrowed from its handle and must be copied before release.
-- Export the daemon's chooser and command-output viewports so the client can render them, or keep
-  refusing to offer controls that open them. Choose-buffer and display-panes were removed from the
-  shortcut bar for exactly this reason: the C ABI maps `CommandOutputChanged` to the generic event
-  and exports no viewport accessor, and `display-panes -d 0` never expires, so an unrendered overlay
-  swallowed the user's keys with no way back.
+- Continue physical-device checks for keyboard focus and touch behavior. The 2026-09-12 iPad
+  acceptance run covers the settings, picker, resize, copy/search, and binding flows listed below;
+  the phone suite covers policies rather than that complete interface flow.
 - Add a push-capable background Agent inbox only if the product needs notifications while the app is
   suspended or terminated; the current local-notification path deliberately makes no such claim.
-- Add one daemon-backed UI automation smoke for software-keyboard frame behavior once the fixture can
-  launch deterministically in Xcode's test host.
+- Extend the daemon-backed iPad UI acceptance test with software-keyboard frame assertions and a
+  compact-width phone flow.
 
-The C ABI smoke test checks typed endpoint failure, creates and attaches a session, creates a second
+The C ABI integration test checks typed endpoint failure, creates and attaches a session, creates a second
 terminal pane, renders styled content, types through the raw-key path, exercises semantic selection,
 clipboard, and Agent symbols, kills the attached session, reattaches a survivor and recovers its
 viewport, then frees and reconnects against a real daemon. Rust unit tests cover Agent attention
 edges and SSH prompt and failure classification.
+
+Verification completed on 2026-09-12:
+
+- `cargo test --workspace --all-features`: 3,736 passed, no failures, four ignored.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`: passed.
+- `crates/zz-client-ffi/tests/mobile.rs` (`mobile_settings_and_tmux_interaction_share_daemon_contracts`):
+  passed with prefix application, reconnect reapplication, and reset to the host value, alongside
+  shared terminal and tmux behavior.
+- `IPadAcceptanceTests` and nine client-settings tests passed in the final iPad invocation against
+  an isolated daemon. The UI run verified the regular two-column
+  Settings sheet, six font choices and Fira Code selection, bundled theme selection, picker
+  materialization, a measured change in pane size, copy toolbar and search, and live key tables.
+- `env -u ZZ_IOS_REUSE_CLIENT_CORE just ios-test`: rebuilt the FFI archive and passed 75 unit tests
+  on iPhone, with no failures. That includes nine client-settings tests, 63 terminal-interaction
+  tests, and three tmux-control tests. The one iPad-only UI case skipped on iPhone as intended.
+
+These September 12 checks establish the tested simulator flows and shared daemon contracts. They do
+not establish physical-device keyboard behavior, browser rendering, Editor rendering, or a complete
+phone UI flow. Browser verification follows below.
+
+Browser verification completed on 2026-09-13:
+
+- Workspace Clippy with warnings denied and `cargo fmt --all -- --check`: passed.
+- Full-workspace test attempts stopped at existing terminal-control and copy-mode tests:
+  `wait_exit_holds_the_control_process_until_a_second_blank_line`,
+  `control_disconnect_cancels_background_inserted_side_effects`, and
+  `pane_search_string_outlives_the_copy_session_and_seeds_the_next_entry`. Each passed individually.
+  These attempts do not establish a clean full-workspace run for the localhost forwarding change.
+- A fresh `just ipad-test` rebuilt the Rust archive and passed all 84 unit tests. Browser coverage
+  includes unchanged localhost URLs and origins, hardcoded localhost fetch and WebSocket requests,
+  absolute navigation, occupied-port errors and retry, remote DNS through SOCKS, unavailable-route
+  blocking, reconnect, profile separation, and retained page state. A separate-port regression
+  verifies native CORS preflights, an auth POST body, an API bearer header, and a WebSocket without
+  navigating away from the frontend port.
+- `IPadBrowserTests` passed against an isolated daemon and HTTP fixture, exercising browser pane
+  creation, navigation, back, tab creation and selection, and retained form contents across Panorama.
+  Screenshots verify the live pane and passive Panorama card.
+- `just ios-device ipad` built and installed the signed app on an iPad Pro 13-inch (M4).
+  All nine WebKit browser tests passed on the physical iPad with same-port localhost forwarding.
+  The physical device's proxy bypass had not appeared in the simulator, so simulator results alone
+  do not establish this behavior.
+- Twelve focused Rust transport tests passed, covering real SSH traffic over both local address
+  families, an IPv6-only remote server, unchanged ports and HTTP Host headers, listener conflicts,
+  disconnect cleanup, reconnect, rebinding after HTTP connections enter TIME_WAIT, listener
+  discovery, separate frontend/API ports, inventory bounds, and automatic listener retirement. The real C
+  integration client verifies the forwarding symbol and bounded error reporting.
+- The saved SSH endpoint explicitly selects the desktop daemon's socket. Desktop and SSH `TMPDIR`
+  values can differ and otherwise select separate daemons.
+- The installed build loaded the Mac's Clairvo login page at `http://localhost:3000/login` on the
+  physical iPad. Its SSH server process held a live forwarded connection to the IPv6-only
+  `::1:3000` service, and the iPad shared the desktop daemon's sessions.
+- The production discovery command found all five Clairvo frontend/auth/API/realtime TCP ports
+  among 40 eligible listeners on the Mac. The previous navigation-only forwarding omitted its
+  Cognito login service; that gap motivated automatic discovery.
+- After installing the discovery build, the user confirmed that Clairvo's local development login
+  worked on the physical iPad on 2026-09-13.
 
 The Swift suite covers host endpoint normalization, live and keyboard-sized grid calculation, stable
 reconnect selection, bounded backoff, deduplicated layout updates, exclusive input ownership,
@@ -513,14 +666,23 @@ global font size plus per-pane zoom, and cursor blink policy.
 | `clients/ios/Sources/Models.swift` | Host, reconnect, SSH prompt, Agent, modifier, deep-link, input, and terminal geometry policies. |
 | `clients/ios/Sources/ZZStore.swift` | Connection recovery, event drain, exact routing, snapshots, actions, and published models. |
 | `clients/ios/Sources/TerminalSurface.swift` | UIKit terminal drawing, selection, and keyboard input. |
+| `clients/ios/Sources/BrowserPane.swift` | Retained WebKit tabs, per-host profiles, SSH routing and localhost preflight, native browser controls, and passive previews. |
 | `clients/ios/Sources/TerminalFrame.swift` | Caller-owned viewport planes exposed to the renderer. |
 | `clients/ios/Sources/SSHPromptBroker.swift` | Synchronous C callback bridge to native trust and secret prompts. |
 | `clients/ios/Sources/AgentNotifications.swift` | Local Agent attention notifications and exact-pane routing. |
 | `clients/ios/Sources/AppIntents.swift` | Open, reconnect, and Agent-attention App Shortcuts. |
 | `clients/ios/Sources/ClientSettings.swift` | Persisted appearance, terminal, and iPad layout settings. |
-| `clients/ios/Sources/ClientSettingsView.swift` | Native settings form and live terminal preview. |
+| `clients/ios/Sources/ClientSettingsView.swift` | Adaptive section navigation, native settings controls, themes, and config editors. |
+| `clients/ios/Sources/SharedSettings.swift` | Rust settings model, local config paths, terminal appearance, and theme catalog. |
+| `clients/ios/Sources/PaneControls.swift` | Pane picker, command actions, and cell-based resize controls. |
+| `clients/ios/Sources/TmuxControls.swift` | Copy-mode controls, terminal search, key tables, and daemon overlays. |
 | `clients/ios/Sources/AgentPromptEditor.swift` | UIKit prompt field carrying the desktop key contract. |
 | `clients/ios/Tests/Unit/TerminalInteractionTests.swift` | Simulator policy regressions. |
+| `clients/ios/Tests/UI/IPadAcceptanceTests.swift` | Isolated-daemon iPad interface acceptance and screenshot attachments. |
+| `clients/ios/Tests/Unit/BrowserPaneTests.swift` | Real WebKit proxy, reconnect, storage, and retained-page regressions. |
+| `clients/ios/Tests/UI/IPadBrowserTests.swift` | Isolated-daemon browser interaction and Panorama acceptance. |
+| `crates/zz-daemon/src/russh_socks.rs` | SOCKS5 and same-port localhost listeners over authenticated SSH direct-tcpip channels. |
+| `crates/zz-client-ffi/tests/mobile.rs` | Daemon-backed local settings, prefix reset, and tmux interaction checks. |
 | `crates/zz-client-ffi/include/zz-client.h` | Stable C boundary consumed by Swift. |
 | `scripts/ios-sim.sh` | Simulator build, install, socket injection, and launch. |
 | `scripts/ios-testflight.sh` | Release archive and internal-only TestFlight upload. |

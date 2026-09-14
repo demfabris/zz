@@ -36,10 +36,17 @@ territory. The knowledge bundle is the map; source is ground truth.
    `crates/zz-client-ffi/tests/smoke.c` is its working reference. Main-loop
    integration is fd-based by design: poll `zz_client_event_fd`, then drain
    `zz_client_next_event` until false — plugs into GSource, QSocketNotifier,
-   or DispatchSource with no cross-thread callbacks. The command catalog and
-   live key tables other than the prefix table,
-   terminal history, Kitty images, and Editor viewport models remain outside
-   the ABI. ChromeKeymap resolution, shared config/settings, Agent transcript
+   or DispatchSource with no cross-thread callbacks. `zz_client_key_tables_json`
+   exposes the full published tables. `zz_client_tmux_state_json` exposes prompts,
+   tree and buffer choosers, pane indicators, menus, copy/search state, and a
+   text projection of command output; send their typed actions through
+   `zz_client_tmux_action_json`. Release JSON handles with `zz_json_free` after
+   copying or decoding their borrowed bytes. See `src/ffi/tmux.rs` and the
+   iOS `TmuxControls.swift` consumer. Drain `zz_client_gui_command_next` for
+   GUI commands such as starting terminal search; retaining state alone does
+   not handle those effects. The command catalog, terminal history, Kitty
+   images, and Editor viewport models remain outside the ABI.
+   ChromeKeymap resolution, shared config/settings, Agent transcript
    reduction/replay, session controls, preferences, and completion are exposed.
    The optional `native-browser` feature exposes CEF runtime/session/frame/input,
    history, Chrome import, and egress APIs used by `clients/macos`. Keep CEF calls

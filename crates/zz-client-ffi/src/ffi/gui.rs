@@ -161,6 +161,35 @@ pub unsafe extern "C" fn zz_client_socks_port(client: *const ZzClient) -> u16 {
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_forward_loopback(
+    client: *mut ZzClient,
+    port: u16,
+    error: *mut c_char,
+    error_cap: usize,
+) -> bool {
+    unsafe {
+        write_c_string("", error, error_cap);
+    }
+    let result = unsafe { client.as_ref() }
+        .ok_or_else(|| "A client is required.".to_owned())
+        .and_then(|client| {
+            client
+                .client
+                .forward_loopback(port)
+                .map_err(|error| error.to_string())
+        });
+    match result {
+        Ok(()) => true,
+        Err(message) => {
+            unsafe {
+                write_c_string(&message, error, error_cap);
+            }
+            false
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn zz_client_claims_prefix_key(
     client: *const ZzClient,
     code: u32,

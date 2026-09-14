@@ -25,13 +25,22 @@ marketing_version="${workspace_version%%[-+]*}"
 
 simulator_udid() {
     local udid
-    udid="$(xcrun simctl list devices booted | grep "$simulator_family" | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1 || true)"
-    if [[ -z "$udid" ]]; then
-        udid="$(xcrun simctl list devices available \
-            | grep "$simulator_family" \
-            | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' \
-            | head -1)"
-    fi
+    udid="$(xcrun simctl list devices available --json | python3 -c '
+import json, sys
+family = sys.argv[1]
+prefix = "com.apple.CoreSimulator.SimRuntime.iOS-"
+runtimes = [
+    (tuple(map(int, runtime.removeprefix(prefix).split("-"))), devices)
+    for runtime, devices in json.load(sys.stdin)["devices"].items()
+    if runtime.startswith(prefix)
+]
+for _, devices in sorted(runtimes, key=lambda item: item[0], reverse=True):
+    candidates = [device for device in devices if device["name"].startswith(family)]
+    if candidates:
+        selected = next((device for device in candidates if device["state"] == "Booted"), candidates[0])
+        print(selected["udid"])
+        break
+' "$simulator_family")"
     [[ -n "$udid" ]] || die "no $simulator_family simulator is available"
     echo "$udid"
 }
@@ -65,8 +74,14 @@ xcodebuild \
 [[ "$mode" == "run" ]] || exit 0
 
 udid="$(simulator_udid)"
-xcrun simctl boot "$udid" 2>/dev/null || true
-open -a Simulator
+xcrun simctl bootstatus "$udid" -b
+developer_dir="${DEVELOPER_DIR:-$(xcode-select -p)}"
+device_hub="$developer_dir/../Applications/DeviceHub.app"
+if [[ -d "$device_hub" ]]; then
+    open "$device_hub"
+else
+    open -a Simulator
+fi
 
 socket="${ZZ_SOCKET:-}"
 if [[ -z "$socket" ]]; then

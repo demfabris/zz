@@ -43,6 +43,7 @@ struct ZZPane: Identifiable, Equatable, Sendable {
     let isActive: Bool
     let hasBell: Bool
     let layout: ZZPaneLayout?
+    var browser: ZZBrowserDescriptor? = nil
 }
 
 struct ZZPaneLayout: Equatable, Sendable {

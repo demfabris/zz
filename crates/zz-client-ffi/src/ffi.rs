@@ -1,5 +1,7 @@
 #![allow(clippy::missing_safety_doc)]
 
+mod tmux;
+pub use tmux::*;
 mod agent;
 pub use agent::*;
 mod chrome;
@@ -95,6 +97,7 @@ pub enum ZzEventKind {
     /// `zz_client_execute_request` returned.
     CommandReply = 21,
     GuiCommand = 22,
+    TmuxChanged = 23,
 }
 
 /// One drained event; `pane` is zero when the kind carries no pane.
@@ -635,6 +638,17 @@ fn queue_event(queues: &EventQueues, event: &CoreEvent) {
             })));
             (ZzEventKind::GuiCommand, 0, pane.0, 0, 0)
         }
+        CoreEvent::TerminalUiCommand { pane, command } => {
+            lock(gui_commands).push_back(ZzJson::new(serde_json::json!({
+                "kind": "terminal", "pane": pane.0, "command": command
+            })));
+            (ZzEventKind::GuiCommand, 0, pane.0, 0, 0)
+        }
+        CoreEvent::ChooseTreeChanged
+        | CoreEvent::ConfirmChanged
+        | CoreEvent::CommandOutputChanged
+        | CoreEvent::MenuChanged
+        | CoreEvent::PopupChanged => (ZzEventKind::TmuxChanged, 0, 0, 0, 0),
         CoreEvent::PrefixArmed { armed } => (ZzEventKind::PrefixArmed, u32::from(*armed), 0, 0, 0),
         CoreEvent::KeyTablesChanged => (ZzEventKind::KeyTablesChanged, 0, 0, 0, 0),
         CoreEvent::CommandPromptChanged => (ZzEventKind::CommandPromptChanged, 0, 0, 0, 0),
@@ -3238,6 +3252,9 @@ mod tests {
             CoreEvent::CommandPromptChanged,
             CoreEvent::ChooseBufferChanged,
             CoreEvent::DisplayPanesChanged,
+            CoreEvent::ChooseTreeChanged,
+            CoreEvent::ConfirmChanged,
+            CoreEvent::CommandOutputChanged,
         ] {
             queue_event(&queues, &event);
         }
@@ -3255,6 +3272,9 @@ mod tests {
                 (ZzEventKind::CommandPromptChanged, 0),
                 (ZzEventKind::ChooseBufferChanged, 0),
                 (ZzEventKind::DisplayPanesChanged, 0),
+                (ZzEventKind::TmuxChanged, 0),
+                (ZzEventKind::TmuxChanged, 0),
+                (ZzEventKind::TmuxChanged, 0),
             ]
         );
     }

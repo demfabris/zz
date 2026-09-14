@@ -159,6 +159,24 @@ int main(int argc, char **argv) {
         fprintf(stderr, "smoke: connect failed: %s\n", connect_error);
         return 1;
     }
+    char forward_error[128] = "stale";
+    if (zz_client_forward_loopback(NULL, 3000, forward_error, sizeof forward_error) ||
+        forward_error[0] == '\0' ||
+        zz_client_forward_loopback(NULL, 3000, NULL, 0)) {
+        fprintf(stderr, "loopback forwarding accepted a null client\n");
+        return 1;
+    }
+    forward_error[0] = 'x';
+    if (zz_client_forward_loopback(client, 0, forward_error, 1) ||
+        forward_error[0] != '\0') {
+        fprintf(stderr, "loopback forwarding accepted port zero or failed to terminate the error\n");
+        return 1;
+    }
+    if (zz_client_forward_loopback(client, 3000, forward_error, sizeof forward_error) ||
+        strstr(forward_error, "embedded SSH") == NULL) {
+        fprintf(stderr, "local connection did not reject embedded SSH forwarding\n");
+        return 1;
+    }
     struct pollfd initial_wake = {
         .fd = zz_client_event_fd(client),
         .events = POLLIN,

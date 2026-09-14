@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU16, AtomicU64, Ordering},
         mpsc as std_mpsc,
     },
     thread,
@@ -37,6 +37,7 @@ use crate::{
         remote_daemon_start_script, remote_proxy_script, shell_quote,
     },
     ios_keychain::{self, KeychainError},
+    russh_socks::{LoopbackForward, SocksForward, discover_loopback_ports},
     transport::TransportStream,
 };
 
@@ -109,6 +110,12 @@ impl TransportStream for RusshStream {
 pub(crate) struct RusshForward {
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
     thread: Mutex<Option<thread::JoinHandle<()>>>,
+    browser: Arc<BrowserForwarding>,
+}
+
+struct BrowserForwarding {
+    socks_port: Arc<AtomicU16>,
+    loopback: Mutex<Option<LoopbackForward<TofuHandler>>>,
 }
 
 impl RusshForward {
@@ -122,6 +129,11 @@ impl RusshForward {
         let (from_remote_tx, from_remote_rx) = std_mpsc::channel();
         let (ready_tx, ready_rx) = std_mpsc::channel();
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let browser = Arc::new(BrowserForwarding {
+            socks_port: Arc::new(AtomicU16::new(0)),
+            loopback: Mutex::new(None),
+        });
+        let worker_browser = Arc::clone(&browser);
 
         let stream = RusshStream {
             to_remote: to_remote_tx,
@@ -156,6 +168,7 @@ impl RusshForward {
                     from_remote_tx,
                     ready_tx,
                     shutdown_rx,
+                    worker_browser,
                 ));
             })
             .map_err(|error| EndpointError::SshFailed {
@@ -168,6 +181,7 @@ impl RusshForward {
                 Self {
                     shutdown: Mutex::new(Some(shutdown_tx)),
                     thread: Mutex::new(Some(thread)),
+                    browser,
                 },
                 stream,
             )),
@@ -186,10 +200,27 @@ impl RusshForward {
     }
 
     pub(crate) fn socks_port(&self) -> Option<u16> {
-        None
+        let port = self.browser.socks_port.load(Ordering::Acquire);
+        (port != 0).then_some(port)
+    }
+
+    pub(crate) fn forward_loopback(&self, port: u16) -> io::Result<()> {
+        self.browser
+            .loopback
+            .lock()
+            .as_mut()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "The SSH connection is unavailable.",
+                )
+            })?
+            .ensure(port)
     }
 
     pub(crate) fn shutdown(&self) {
+        self.browser.loopback.lock().take();
+        self.browser.socks_port.store(0, Ordering::Release);
         if let Some(shutdown) = self.shutdown.lock().take() {
             let _ = shutdown.send(());
         }
@@ -212,6 +243,7 @@ async fn run_tunnel(
     from_remote_tx: std_mpsc::Sender<Vec<u8>>,
     ready_tx: std_mpsc::Sender<Result<(), EndpointError>>,
     mut shutdown_rx: oneshot::Receiver<()>,
+    browser: Arc<BrowserForwarding>,
 ) {
     let target = endpoint.to_string();
     let established = tokio::time::timeout(
@@ -233,7 +265,29 @@ async fn run_tunnel(
             return;
         }
     };
+    let session = Arc::new(session);
+    let mut loopback = LoopbackForward::new(Arc::clone(&session));
+    match discover_loopback_ports(&session).await {
+        Ok(ports) => loopback.reconcile(&ports),
+        Err(error) => log::debug!("Cannot discover host localhost ports: {error}"),
+    }
+    let socks =
+        match SocksForward::start(Arc::clone(&session), Arc::clone(&browser.socks_port)).await {
+            Ok(socks) => socks,
+            Err(error) => {
+                let _ = ready_tx.send(Err(EndpointError::SshFailed {
+                    target,
+                    reason: format!("starting the browser proxy: {error}"),
+                }));
+                let _ = session
+                    .disconnect(Disconnect::ByApplication, "browser proxy failed", "")
+                    .await;
+                return;
+            }
+        };
+    *browser.loopback.lock() = Some(loopback);
     if ready_tx.send(Ok(())).is_err() {
+        browser.loopback.lock().take();
         let _ = session
             .disconnect(Disconnect::ByApplication, "zz client gone", "")
             .await;
@@ -242,28 +296,50 @@ async fn run_tunnel(
 
     let (mut read_half, mut write_half) = tokio::io::split(channel.into_stream());
     let mut chunk = vec![0u8; READ_CHUNK];
-    loop {
-        tokio::select! {
-            biased;
-            _ = &mut shutdown_rx => break,
-            outbound = to_remote_rx.recv() => match outbound {
-                Some(bytes) => {
-                    if write_half.write_all(&bytes).await.is_err() {
-                        break;
+    let pump = async {
+        loop {
+            tokio::select! {
+                biased;
+                outbound = to_remote_rx.recv() => match outbound {
+                    Some(bytes) => {
+                        if write_half.write_all(&bytes).await.is_err() {
+                            break;
+                        }
                     }
-                }
-                None => break,
-            },
-            incoming = read_half.read(&mut chunk) => match incoming {
-                Ok(0) | Err(_) => break,
-                Ok(count) => {
-                    if from_remote_tx.send(chunk[..count].to_vec()).is_err() {
-                        break;
+                    None => break,
+                },
+                incoming = read_half.read(&mut chunk) => match incoming {
+                    Ok(0) | Err(_) => break,
+                    Ok(count) => {
+                        if from_remote_tx.send(chunk[..count].to_vec()).is_err() {
+                            break;
+                        }
                     }
-                }
-            },
+                },
+            }
         }
+    };
+    let inventory = async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            match discover_loopback_ports(&session).await {
+                Ok(ports) => {
+                    if let Some(loopback) = browser.loopback.lock().as_mut() {
+                        loopback.reconcile(&ports);
+                    }
+                }
+                Err(error) => log::debug!("Cannot refresh host localhost ports: {error}"),
+            }
+        }
+    };
+    tokio::select! {
+        biased;
+        _ = &mut shutdown_rx => {},
+        () = pump => {},
+        () = inventory => {},
     }
+    browser.loopback.lock().take();
+    drop(socks);
     let _ = session
         .disconnect(Disconnect::ByApplication, "zz detaching", "")
         .await;

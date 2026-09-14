@@ -32,11 +32,22 @@ final class TerminalFrame {
     let graphemeOffsets: UnsafeBufferPointer<UInt32>
     let graphemeBytes: UnsafeBufferPointer<UInt8>
     let cursor: zz_cursor?
+    let overlays: UnsafeBufferPointer<zz_overlay>
+    let overlayColors: [UInt32]
 
     private let handle: OpaquePointer
 
-    init?(client: OpaquePointer, pane: UInt64, damage: TerminalDamage) {
-        guard let handle = zz_client_viewport_acquire(client, pane) else {
+    @MainActor
+    init?(client: OpaquePointer, pane: UInt64, damage: TerminalDamage, settings: ZZSharedSettings? = nil) {
+        let acquired: OpaquePointer?
+        if let settings {
+            acquired = settings.themeDirectory.withCString {
+                zz_settings_model_viewport_acquire(settings.handle, client, pane, $0, settings.dark)
+            }
+        } else {
+            acquired = zz_client_viewport_acquire(client, pane)
+        }
+        guard let handle = acquired else {
             return nil
         }
         let columns = Int(zz_viewport_columns(handle))
@@ -79,6 +90,16 @@ final class TerminalFrame {
             count: byteCount
         )
         self.cursor = cursor
+        self.overlays = UnsafeBufferPointer(start: zz_viewport_overlays(handle), count: zz_viewport_overlay_count(handle))
+        var colors = (0...5).map { zz_client_overlay_color(client, UInt8($0)) }
+        if let local = settings?.mobileAppearance, !(settings?.text("theme").isEmpty ?? true) {
+            colors[0] = local.selection_background ?? colors[0]
+            colors[1] = local.search_match_color ?? colors[1]
+            colors[2] = local.search_current_color ?? colors[2]
+            colors[4] = local.copy_cursor_color ?? colors[4]
+            colors[5] = local.selection_foreground ?? colors[5]
+        }
+        self.overlayColors = colors
     }
 
     deinit {

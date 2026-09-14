@@ -4,6 +4,7 @@ import UIKit
 struct ContentView: View {
     @EnvironmentObject private var store: ZZStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(ZZClientSettings.self) private var settings
     @Namespace private var paneTransition
     @State private var showsSettings = false
 
@@ -34,7 +35,7 @@ struct ContentView: View {
                 }
             }
         }
-        .background(Color.zzCanvas.ignoresSafeArea())
+        .background(settings.chromeBackground.ignoresSafeArea())
         .overlay(alignment: .top) { noticeOverlay }
         .animation(.snappy(duration: 0.24), value: store.actionNotice)
         .alert(
@@ -94,8 +95,23 @@ struct ContentView: View {
                 PaneOverview(namespace: paneTransition, showSettings: showSettings)
             }
         }
+        .overlay {
+            TmuxOverlay(store: store)
+        }
+        .transaction { transaction in
+            if settings.shared?.bool("animations", fallback: true) == false {
+                transaction.disablesAnimations = true
+                transaction.animation = nil
+            }
+        }
         .sheet(isPresented: $showsSettings) {
-            ClientSettingsView()
+            if horizontalSizeClass == .regular {
+                ClientSettingsView()
+                    .frame(idealWidth: 900, idealHeight: 700)
+                    .presentationSizing(.fitted)
+            } else {
+                ClientSettingsView()
+            }
         }
     }
 
@@ -478,6 +494,7 @@ private struct ConnectionFailure: View {
 }
 
 private struct IPadWorkspace: View {
+    @Environment(ZZClientSettings.self) private var settings
     let showSettings: () -> Void
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
@@ -492,12 +509,14 @@ private struct IPadWorkspace: View {
             )
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbarBackground(settings.chromeBackground, for: .navigationBar)
         .coordinateSpace(name: IPadPanoramaCoordinateSpace.name)
     }
 }
 
 private struct IPadSessionSidebar: View {
     @EnvironmentObject private var store: ZZStore
+    @Environment(ZZClientSettings.self) private var settings
     @State private var expandedSessions: Set<UInt64> = []
     @State private var expandedWindows: Set<IPadSidebarWindowKey> = []
     @State private var paneToClose: ZZPane?
@@ -524,6 +543,10 @@ private struct IPadSessionSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(settings.chromeBackground)
+        .foregroundStyle(settings.chromeForeground)
+        .contrast(settings.chromeContrast)
         .environment(\.defaultMinListRowHeight, 1)
         .navigationTitle("Sessions")
         .toolbar {
@@ -893,7 +916,7 @@ private enum IPadPanoramaCoordinateSpace {
 }
 
 private struct IPadPaneWorkspace: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(ZZClientSettings.self) private var settings
     @EnvironmentObject private var store: ZZStore
     let showsHeader: Bool
@@ -914,6 +937,15 @@ private struct IPadPaneWorkspace: View {
     @State private var panoramaTransitionFrames: [UInt64: TerminalFrame] = [:]
     @State private var panoramaTransitionAgentStates: [UInt64: ZZAgentState] = [:]
     @State private var panoramaEntranceArmed = false
+
+    private var reduceMotion: Bool {
+        systemReduceMotion || settings.shared?.bool("animations", fallback: true) == false
+    }
+
+    private var paneSpacing: CGFloat {
+        settings.shared?.bool("pane-gaps", fallback: true) == false
+            ? 0 : CGFloat(settings.shared?.number("pane-margin", fallback: 5) ?? 5)
+    }
 
     fileprivate static let entranceDuration = 0.30
     fileprivate static let exitDuration = 0.28
@@ -983,7 +1015,7 @@ private struct IPadPaneWorkspace: View {
             } else if let session = store.selectedSession,
                let window = session.activeWindow,
                !window.visiblePanes.isEmpty {
-                IPadPaneSplitLayout(spacing: 5) {
+                IPadPaneSplitLayout(spacing: paneSpacing) {
                     ForEach(window.visiblePanes) { pane in
                         IPadPaneTile(pane: pane, session: session)
                             .layoutValue(
@@ -992,7 +1024,6 @@ private struct IPadPaneWorkspace: View {
                             )
                     }
                 }
-                .padding(5)
             } else if store.sessions.isEmpty {
                 ContentUnavailableView {
                     Label("No Sessions", systemImage: "rectangle.stack")
@@ -1010,7 +1041,7 @@ private struct IPadPaneWorkspace: View {
                 )
             }
         }
-        .background(.black.opacity(0.92))
+        .background(settings.chromeBackground)
         .ignoresSafeArea(
             .container,
             edges: settings.extendPanesUnderHomeIndicator ? .bottom : []
@@ -1027,6 +1058,14 @@ private struct IPadPaneWorkspace: View {
                 .accessibilityIdentifier("ipad-panorama-toggle")
 
                 Menu {
+                    Button("Choose Pane Type", systemImage: ZZPaneKind.picker.symbol) {
+                        store.newPane(kind: .picker)
+                    }
+
+                    Button("Browser", systemImage: "globe") {
+                        store.newPane(kind: .browser)
+                    }
+
                     Button {
                         store.newPane(kind: .terminal)
                     } label: {
@@ -1425,11 +1464,16 @@ private struct IPadPaneWorkspace: View {
 
 private struct IPadStatusBar: View {
     @EnvironmentObject private var store: ZZStore
+    @Environment(ZZClientSettings.self) private var settings
+
+    private var showsBadges: Bool { settings.shared?.bool("status-badges", fallback: true) ?? true }
 
     var body: some View {
         if let session = store.selectedSession, !session.windows.isEmpty {
             HStack(spacing: 8) {
-                sessionMenu(session)
+                if settings.shared?.bool("status-show-session", fallback: true) != false {
+                    sessionMenu(session)
+                }
 
                 Picker("Window", selection: windowSelection(in: session)) {
                     ForEach(visibleWindows(in: session)) { window in
@@ -1463,10 +1507,34 @@ private struct IPadStatusBar: View {
                     }
                     .accessibilityLabel("More windows")
                 }
+
+                if settings.shared?.bool("status-agents", fallback: true) != false {
+                    let agents = session.allPanes.filter { $0.kind == .agent }
+                    if !agents.isEmpty {
+                        Menu {
+                            ForEach(agents) { pane in
+                                Button(pane.title.isEmpty ? "Agent" : pane.title) {
+                                    store.open(ZZNavigationTarget(session: session.id, pane: pane.id))
+                                }
+                            }
+                        } label: {
+                            Label("\(agents.count)", systemImage: "sparkles")
+                        }
+                        .accessibilityLabel("\(agents.count) Agent panes")
+                    }
+                }
+                if settings.shared?.bool("status-host", fallback: false) == true {
+                    Text(URLComponents(string: store.hostEndpoint)?.host ?? "Local")
+                        .font(.caption)
+                        .lineLimit(1)
+                        .accessibilityLabel("Host")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("tmux status, session \(session.name)")
+            .foregroundStyle(settings.chromeForeground)
+            .contrast(settings.chromeContrast)
         }
     }
 
@@ -1542,10 +1610,11 @@ private struct IPadStatusBar: View {
     }
 
     private func windowMenuSymbol(_ window: ZZWindow) -> String {
-        if window.panes.contains(where: \.hasBell) {
+        if showsBadges, window.panes.contains(where: \.hasBell) {
             return "bell.fill"
         }
-        if window.panes.contains(where: { $0.kind == .agent }) {
+        if showsBadges, settings.shared?.bool("status-agents", fallback: true) != false,
+           window.panes.contains(where: { $0.kind == .agent }) {
             return "sparkles"
         }
         if window.zoomedPane != nil {
@@ -1581,25 +1650,60 @@ private struct IPadStatusBar: View {
 
 private struct IPadPaneTile: View {
     @EnvironmentObject private var store: ZZStore
+    @Environment(ZZClientSettings.self) private var settings
     let pane: ZZPane
     let session: ZZSession
 
+    private var selected: Bool {
+        pane.id == store.selectedPaneID || (store.selectedPaneID == nil && pane.isActive)
+    }
+    private var gaps: Bool { settings.shared?.bool("pane-gaps", fallback: true) ?? true }
+    private var cornerRadius: CGFloat {
+        gaps ? CGFloat(settings.shared?.number("pane-corner-radius", fallback: 16) ?? 16) : 0
+    }
+    private var borderWidth: CGFloat {
+        gaps ? CGFloat(settings.shared?.number("pane-border-width", fallback: 1) ?? 1) : 0
+    }
+
     var body: some View {
-        paneContent
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button {
+                    store.selectPane(pane, in: session)
+                } label: {
+                    Label(paneLabel, systemImage: pane.kind.symbol)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                PaneActionsMenu(pane: pane)
+            }
+            .padding(.leading, 12)
+            .foregroundStyle(settings.chromeForeground)
+            .background(settings.chromeSurface.opacity(settings.shared?.number("pane-background-opacity", fallback: 1) ?? 1))
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(settings.chromeBorder).frame(height: 1)
+            }
+            .contrast(settings.chromeContrast)
+            paneContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.zzCard)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(settings.chromeBackground.opacity(settings.shared?.number("pane-background-opacity", fallback: 1) ?? 1))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(
-                        pane.id == store.selectedPaneID
-                            ? Color.accentColor.opacity(0.9)
-                            : Color.white.opacity(0.12),
-                        lineWidth: pane.id == store.selectedPaneID ? 2 : 1
+                        selected ? Color.accentColor.opacity(0.9) : Color.primary.opacity(0.12),
+                        lineWidth: borderWidth
                     )
             }
+            .opacity(selected ? 1 : settings.shared?.number("pane-inactive-opacity", fallback: 1) ?? 1)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Pane \(paneLabel)")
+            .accessibilityIdentifier("ipad-pane-tile-\(pane.id)")
             .accessibilityValue(pane.id == store.selectedPaneID ? "Selected" : "")
             .accessibilityAction(named: "Select Pane") {
                 store.selectPane(pane, in: session)
@@ -1613,12 +1717,20 @@ private struct IPadPaneTile: View {
     @ViewBuilder
     private var paneContent: some View {
         if pane.kind == .terminal {
-            LiveTerminalSurface(
-                store: store,
-                pane: pane.id,
-                interactive: store.isConnected,
-                preview: false
-            )
+            VStack(spacing: 0) {
+                TmuxCopyBar(store: store, pane: pane.id)
+                LiveTerminalSurface(
+                    store: store,
+                    pane: pane.id,
+                    interactive: store.isConnected,
+                    preview: false
+                )
+            }
+        } else if pane.kind == .browser {
+            BrowserPaneView(pane: pane, runtime: store.browserRuntime(for: pane))
+                .simultaneousGesture(TapGesture().onEnded {
+                    store.selectPane(pane, in: session)
+                })
         } else if pane.kind == .agent {
             AgentPaneView(pane: pane)
                 // A terminal tile selects through its UIKit surface and a
@@ -1630,6 +1742,8 @@ private struct IPadPaneTile: View {
                         store.selectPane(pane, in: session)
                     }
                 )
+        } else if pane.kind == .picker {
+            PaneKindPicker(pane: pane)
         } else {
             PanePlaceholder(pane: pane)
                 .onTapGesture {
@@ -2138,6 +2252,8 @@ private struct IPadPanoramaPaneContent: View {
             IPadPanoramaLiveTerminalContent(store: store, pane: pane.id)
         } else if pane.kind == .agent, store.agentState(for: pane.id) != nil {
             AgentPaneSummary(pane: pane)
+        } else if pane.kind == .browser {
+            BrowserPanePreview(descriptor: pane.browser ?? .blank)
         } else {
             IPadPanoramaPanePlaceholder(
                 symbol: pane.kind.symbol,
@@ -2207,6 +2323,8 @@ private struct IPadPanoramaFrozenPaneContent: View {
             )
         } else if pane.kind == .agent, let agentState {
             AgentPaneSummaryContent(pane: pane, state: agentState)
+        } else if pane.kind == .browser {
+            BrowserPanePreview(descriptor: pane.browser ?? .blank)
         } else {
             IPadPanoramaPanePlaceholder(
                 symbol: pane.kind.symbol,
@@ -2420,6 +2538,8 @@ private struct PaneCard: View {
                             )
                         } else if pane.kind == .agent {
                             AgentPaneSummary(pane: pane)
+                        } else if pane.kind == .browser {
+                            BrowserPanePreview(descriptor: pane.browser ?? .blank)
                         } else {
                             PanePlaceholder(pane: pane)
                         }
@@ -3900,6 +4020,10 @@ private struct SessionRail: View {
             }
 
             Menu {
+                Button("New Browser", systemImage: "globe") {
+                    store.newPane(kind: .browser)
+                }
+                .disabled(store.selectedSession == nil)
                 Button {
                     store.newPane()
                 } label: {
@@ -3999,14 +4123,24 @@ private struct FullscreenPane: View {
         ZStack(alignment: .bottom) {
             Group {
                 if pane.kind == .terminal {
-                    LiveTerminalSurface(
-                        store: store,
-                        pane: pane.id,
-                        interactive: store.isConnected,
-                        preview: false
-                    )
+                    VStack(spacing: 0) {
+                        TmuxCopyBar(store: store, pane: pane.id)
+                        LiveTerminalSurface(
+                            store: store,
+                            pane: pane.id,
+                            interactive: store.isConnected,
+                            preview: false
+                        )
+                    }
                 } else if pane.kind == .agent {
                     AgentPaneView(pane: pane, bottomAccessoryInset: 72)
+                        .background(Color.zzCard)
+                } else if pane.kind == .browser {
+                    BrowserPaneView(pane: pane, runtime: store.browserRuntime(for: pane))
+                        .padding(.bottom, 72)
+                } else if pane.kind == .picker {
+                    PaneKindPicker(pane: pane)
+                        .padding(.bottom, 72)
                         .background(Color.zzCard)
                 } else {
                     PanePlaceholder(pane: pane)
@@ -4309,6 +4443,7 @@ private struct LiveTerminalBackground: View {
 }
 
 private struct TerminalShortcutButton: View {
+    @Environment(ZZClientSettings.self) private var settings
     let title: String
     let selected: Bool
     let locked: Bool
@@ -4338,11 +4473,17 @@ private struct TerminalShortcutButton: View {
             .font(.subheadline.weight(.medium))
             .padding(.horizontal, 14)
             .frame(height: 36)
-            .foregroundStyle(selected ? Color.white : Color.primary)
+            .foregroundStyle(selected ? Color.white : settings.chromeForeground)
             .background {
-                Capsule()
-                    .fill(selected ? Color.accentColor.opacity(0.82) : Color.white.opacity(0.09))
+                RoundedRectangle(cornerRadius: settings.widgetCornerRadius)
+                    .fill(selected ? settings.chromeTint : settings.chromeSurface)
             }
+            .overlay {
+                RoundedRectangle(cornerRadius: settings.widgetCornerRadius)
+                    .stroke(settings.chromeBorder, lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(settings.shadowOpacity), radius: 3, y: 1)
+            .contrast(settings.chromeContrast)
         }
         .buttonStyle(.plain)
         .accessibilityValue(locked ? "Locked" : selected ? "Once" : "Off")
@@ -4353,6 +4494,7 @@ private struct TerminalShortcutButton: View {
 /// Minimal command prompt: one line naming a daemon command plus arguments,
 /// sent through the existing `zz_client_execute` path without daemon changes.
 private struct CommandPromptSheet: View {
+    @Environment(ZZClientSettings.self) private var settings
     let submit: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focused: Bool
@@ -4371,7 +4513,12 @@ private struct CommandPromptSheet: View {
                     .focused($focused)
                     .onSubmit(run)
                     .padding(16)
-                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+                    .background(settings.chromeSurface, in: RoundedRectangle(cornerRadius: settings.widgetCornerRadius))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: settings.widgetCornerRadius)
+                            .stroke(settings.chromeBorder, lineWidth: 1)
+                    }
+                    .contrast(settings.chromeContrast)
                     .accessibilityIdentifier("command-prompt-field")
                 Spacer()
             }

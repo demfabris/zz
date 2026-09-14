@@ -236,7 +236,7 @@ final class TerminalGridView: UIView, UIKeyInput {
     }
     var onText: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
-    var onKey: ((UInt32, UInt32, UInt8, UInt8, UInt8) -> Void)?
+    var onKey: ((UInt32, UInt32, UInt8, UInt8, UInt8, String?) -> Void)?
     var onResize: ((TerminalLayout, Bool) -> Void)?
     var onScroll: ((Int) -> Void)?
     var onFontSizeStep: ((Int) -> Void)?
@@ -244,6 +244,7 @@ final class TerminalGridView: UIView, UIKeyInput {
     var onSelection: ((UInt32, UInt16, UInt16, Bool) -> Void)?
 
     private var viewport: TerminalFrame?
+    private var presentation = ZZTerminalPresentation.default
     private var interactive = false
     private var preview = false
     private var fontSize: CGFloat = 0
@@ -333,8 +334,21 @@ final class TerminalGridView: UIView, UIKeyInput {
             0,
             0,
             0,
-            UInt8(ZZ_KEY_PRESS.rawValue)
+            UInt8(ZZ_KEY_PRESS.rawValue),
+            nil
         )
+    }
+
+    func applyPresentation(_ value: ZZTerminalPresentation) {
+        guard presentation != value else { return }
+        let intervalChanged = presentation.blinkInterval != value.blinkInterval
+        presentation = value
+        isOpaque = value.backgroundOpacity >= 1
+        if intervalChanged {
+            blinkTimer?.invalidate()
+            blinkTimer = nil
+        }
+        setNeedsDisplay()
     }
 
     func configure(
@@ -350,7 +364,7 @@ final class TerminalGridView: UIView, UIKeyInput {
         sceneActive: Bool,
         inputActivation: UInt64
     ) {
-        let generationChanged = viewport?.generation != frame?.generation ||
+        let generationChanged = viewport !== frame || viewport?.generation != frame?.generation ||
             viewport?.viewGeneration != frame?.viewGeneration
         let inputChanged = self.interactive != interactive ||
             self.inputRequested != inputRequested ||
@@ -409,7 +423,7 @@ final class TerminalGridView: UIView, UIKeyInput {
             reconcileInput()
         }
         if let frame {
-            backgroundColor = color(frame.background)
+            backgroundColor = color(frame.background).withAlphaComponent(presentation.backgroundOpacity)
         }
         updateMetrics()
         updateBlinkTimer()
@@ -464,7 +478,8 @@ final class TerminalGridView: UIView, UIKeyInput {
         else {
             return
         }
-        context.setFillColor(color(viewport.background).cgColor)
+        context.clear(rect)
+        context.setFillColor(color(viewport.background).withAlphaComponent(presentation.backgroundOpacity).cgColor)
         context.fill(rect)
 
         let firstRow = max(0, Int(floor(rect.minY / measuredCell.height)))
@@ -516,7 +531,7 @@ final class TerminalGridView: UIView, UIKeyInput {
                 continue
             }
             forwarded = true
-            onKey?(mapped.code, mapped.scalar, mapped.function, modifierBits(key.modifierFlags), action)
+            onKey?(mapped.code, mapped.scalar, mapped.function, modifierBits(key.modifierFlags), action, key.characters.isEmpty ? nil : key.characters)
         }
         return forwarded
     }
@@ -765,7 +780,7 @@ final class TerminalGridView: UIView, UIKeyInput {
             return
         }
         blinkTimer = Timer.scheduledTimer(
-            timeInterval: 0.5,
+            timeInterval: max(0.1, presentation.blinkInterval),
             target: self,
             selector: #selector(blinkCursor),
             userInfo: nil,
@@ -812,6 +827,7 @@ final class TerminalGridView: UIView, UIKeyInput {
     }
 
     private func draw(row: Int, viewport: TerminalFrame, context: CGContext) {
+        let overlays = viewport.overlays.lazy.filter { Int($0.row) == row }
         for column in 0..<viewport.columns {
             let index = row * viewport.columns + column
             guard viewport.cells.indices.contains(index) else {
@@ -826,8 +842,22 @@ final class TerminalGridView: UIView, UIKeyInput {
                 width: measuredCell.width,
                 height: measuredCell.height
             )
-            context.setFillColor(color(style?.background ?? viewport.background).cgColor)
-            context.fill(cellRect)
+            let cellBackground = style?.background ?? viewport.background
+            if cellBackground != viewport.background {
+                context.setFillColor(color(cellBackground).cgColor)
+                context.fill(cellRect)
+            }
+            for overlay in overlays where Int(overlay.start) <= column && column < Int(overlay.end) {
+                let kind = Int(overlay.kind_and_flags & 0xff)
+                guard viewport.overlayColors.indices.contains(kind) else { continue }
+                let packed = viewport.overlayColors[kind]
+                context.setFillColor(color(packed).withAlphaComponent(CGFloat(packed >> 24) / 255).cgColor)
+                if kind == 3 {
+                    context.fill(CGRect(x: cellRect.minX, y: cellRect.maxY - 1, width: cellRect.width, height: 1))
+                } else {
+                    context.fill(cellRect)
+                }
+            }
 
             let width = cell.flags & UInt16(ZZ_CELL_WIDTH_MASK)
             guard
@@ -842,7 +872,8 @@ final class TerminalGridView: UIView, UIKeyInput {
                 continue
             }
             let font = font(attributes)
-            let foreground = color(style?.foreground ?? viewport.foreground)
+            let selected = overlays.contains { $0.kind_and_flags & 0xff == 0 && Int($0.start) <= column && column < Int($0.end) }
+            let foreground = color(selected ? viewport.overlayColors[5] : style?.foreground ?? viewport.foreground)
                 .withAlphaComponent(attributes & UInt16(ZZ_ATTR_FAINT) != 0 ? 0.55 : 1)
             let glyphRect = CGRect(
                 x: cellRect.minX,
@@ -852,7 +883,11 @@ final class TerminalGridView: UIView, UIKeyInput {
             )
             (glyph as NSString).draw(
                 in: glyphRect,
-                withAttributes: [.font: font, .foregroundColor: foreground]
+                withAttributes: ZZTerminalFont.drawingAttributes(
+                    font: font,
+                    foreground: foreground,
+                    italic: attributes & UInt16(ZZ_ATTR_ITALIC) != 0
+                )
             )
             let decorationRect = CGRect(
                 x: cellRect.minX,
@@ -1061,6 +1096,7 @@ final class TerminalGridView: UIView, UIKeyInput {
 }
 
 struct LiveTerminalSurface: View {
+    @Environment(\.zzTerminalPresentation) private var terminalPresentation
     @ObservedObject private var frameSlot: TerminalFrameSlot
     private let store: ZZStore
     private let pane: UInt64
@@ -1088,6 +1124,16 @@ struct LiveTerminalSurface: View {
             interactive: interactive,
             preview: preview
         )
+        .padding(.horizontal, preview ? 0 : terminalPresentation.paddingX)
+        .padding(.vertical, preview ? 0 : terminalPresentation.paddingY)
+        .background {
+            if let frame = frameSlot.frame {
+                Color(red: Double(frame.background >> 16 & 255) / 255,
+                      green: Double(frame.background >> 8 & 255) / 255,
+                      blue: Double(frame.background & 255) / 255)
+                    .opacity(terminalPresentation.backgroundOpacity)
+            }
+        }
     }
 }
 
@@ -1114,17 +1160,19 @@ struct TerminalSurface: UIViewRepresentable {
     }
 
     private func configure(_ view: TerminalGridView) {
+        view.applyPresentation(terminalPresentation)
         view.pane = pane
         view.onText = { text in store.sendText(text, to: pane) }
         view.onPaste = { text in store.paste(text, to: pane) }
-        view.onKey = { code, scalar, function, modifiers, action in
+        view.onKey = { code, scalar, function, modifiers, action, text in
             store.sendKey(
                 code,
                 to: pane,
                 codepoint: scalar,
                 function: function,
                 action: UInt32(action),
-                modifiers: modifiers
+                modifiers: modifiers,
+                text: text
             )
         }
         view.onResize = { layout, stable in

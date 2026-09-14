@@ -20,6 +20,18 @@ typedef struct zz_agent_state zz_agent_state;
 typedef struct zz_clipboard zz_clipboard;
 typedef struct zz_chrome_keymap zz_chrome_keymap;
 typedef struct zz_json zz_json;
+zz_json *zz_client_tmux_state_json(const zz_client *client);
+zz_json *zz_client_key_tables_json(const zz_client *client);
+bool zz_client_tmux_action_json(zz_client *client, const char *json);
+typedef struct zz_overlay {
+    uint16_t row;
+    uint16_t start;
+    uint16_t end;
+    uint16_t kind_and_flags;
+} zz_overlay;
+const zz_overlay *zz_viewport_overlays(const zz_viewport *viewport);
+size_t zz_viewport_overlay_count(const zz_viewport *viewport);
+uint32_t zz_client_overlay_color(const zz_client *client, uint8_t kind);
 
 #define ZZ_GRAPHEME_TABLE_BIT (1u << 31)
 #define ZZ_NO_COLOR UINT32_MAX
@@ -70,6 +82,7 @@ bool zz_client_send_browser_key(zz_client *client, uint64_t pane, uint32_t code,
     uint32_t codepoint, uint8_t function, uint32_t action, uint8_t modifiers,
     const char *text, bool text_follows);
 uint16_t zz_client_socks_port(const zz_client *client);
+bool zz_client_forward_loopback(zz_client *client, uint16_t port, char *error, size_t error_cap);
 
 zz_chrome_keymap *zz_chrome_keymap_new(void);
 void zz_chrome_keymap_free(zz_chrome_keymap *keymap);
@@ -253,6 +266,7 @@ typedef enum zz_event_kind {
     ZZ_EVENT_AGENT_SESSIONS = 20,
     ZZ_EVENT_COMMAND_REPLY = 21,
     ZZ_EVENT_GUI_COMMAND = 22,
+    ZZ_EVENT_TMUX_CHANGED = 23,
 } zz_event_kind;
 
 typedef struct zz_client_event {
@@ -563,6 +577,11 @@ size_t zz_viewport_row_text(const zz_viewport *viewport, uint16_t row,
                             char *buf, size_t capacity);
 
 typedef struct zz_settings_model zz_settings_model;
+zz_json *zz_settings_model_themes_json(const zz_settings_model *model, const char *directory, bool dark);
+zz_json *zz_settings_model_terminal_appearance_json(const zz_settings_model *model, const char *directory, bool dark);
+bool zz_settings_model_mobile_apply(zz_settings_model *model, const zz_client *client);
+bool zz_settings_model_mobile_action(zz_settings_model *model, const zz_client *client, const char *action);
+zz_viewport *zz_settings_model_viewport_acquire(const zz_settings_model *model, const zz_client *client, uint64_t pane, const char *directory, bool dark);
 zz_settings_model *zz_settings_model_new(const char *system_font, const char *config_path, const char *mux_path);
 void zz_settings_model_free(zz_settings_model *model);
 uint64_t zz_settings_model_take_reload_request(zz_settings_model *model);

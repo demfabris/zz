@@ -7,17 +7,22 @@ Agent panes, settings, reconnect presentation, or accessibility.
 
 - `ContentView.workspace` selects the shell by horizontal size class. One app can move between
   compact and regular width while running, so device-name branches are wrong.
-- `ZZMobileApp` owns `ZZStore` and `ZZClientSettings`. Appearance changes native chrome; terminal
-  colors continue to come from the daemon viewport.
+- `ZZMobileApp` owns `ZZStore` and `ZZClientSettings`. The device owns its presentation config.
+  The Rust FFI applies the local terminal theme to acquired viewport cells before UIKit draws them;
+  it does not change other clients' terminal palettes.
 - Keep the Settings sheet outside the size-class branch. Presenting it must not replace or resize the
-  iPad detail hierarchy.
+  iPad detail hierarchy. The regular-width host requests fitted presentation with a 900 by 700 point
+  ideal size so the sheet can show its native section sidebar; compact hosts keep native sizing.
 
 ## Compact phone shell
 
 - `PaneOverview` represents the attached session's active window as a two-column card grid.
   `ZZSession.panes` means active-window panes; `allPanes` spans the full session.
 - A terminal card uses a passive retained preview. An Agent card uses retained typed Agent state.
-  Browser, Editor, and picker cards remain honest placeholders until a native representation exists.
+  Browser panes render locally with WebKit through SSH, using SOCKS for remote addresses and
+  same-port local forwards for localhost; Editor keeps its
+  desktop-only placeholder. Picker previews stay passive; opening a
+  picker shows `PaneKindPicker` with Terminal and Agent choices.
 - Keep pane opening and pane closing as separate buttons. Closing requires destructive confirmation
   because `kill-pane` stops the process. Interactive targets remain at least 44 points.
 - `SessionRail` has three independent pieces: create session, paged session selector, and actions.
@@ -29,7 +34,9 @@ Agent panes, settings, reconnect presentation, or accessibility.
   or shortcut strip, and keyboard-strip toggle as separate controls.
 - Compose uses a native multiline editor and sends the completed Unicode string. This preserves IME,
   paste, and dictation.
-- The compact New Pane action creates a terminal. The regular iPad menu may offer Terminal and Agent.
+- The compact New Pane action creates a terminal. The regular iPad menu offers Terminal, Agent,
+  and Choose Pane Type. Picker conversion targets the existing pane with `select-pane-kind -t`.
+  Agent creation requires the host to enable `experimental-agent-pane`.
 
 ## Regular iPad workspace
 
@@ -49,8 +56,14 @@ Agent panes, settings, reconnect presentation, or accessibility.
 - Every visible terminal tile in the regular split workspace may stay live. `ZZStore.terminalInput`
   still owns at most one pane, and tapping a tile transfers both UIKit first responder and daemon
   pane focus through the store.
-- `IPadStatusBar` is snapshot-backed and bounded around the active window. Do not imitate custom
-  daemon-expanded status text until the FFI exports that payload.
+- `IPadStatusBar` uses snapshot state around the active window, plus the connected host and device
+  clock. Local status preferences control session, badges, agents, host, clock, and alignment.
+  Do not imitate daemon-expanded custom status text until the FFI exports that payload.
+- `PaneActionsMenu` sends daemon commands for picker splits, zoom, named layouts, and directional
+  cell-based resizing. Keep the actions reachable when pane gaps are disabled. Closing requires
+  confirmation; a successful write still needs snapshot convergence.
+- Apply the device's pane gaps, margin, radius, border, opacity, and dimming preferences to native
+  tiles. Chrome presets and custom foreground/background colors affect native shell surfaces.
 - Show the detail header only while the sidebar is retracted. Keep the sidebar's native visibility
   control available and preserve Panorama's hidden header.
 
@@ -83,6 +96,7 @@ Agent panes, settings, reconnect presentation, or accessibility.
   and mount the live workspace only after it completes. Changing that order recreates the visible
   navigation-bar jump.
 - Preserve Reduce Motion with target alignment and a short crossfade without scale or blur movement.
+  The device's disabled-animation preference uses the same path and disables workspace animations.
 
 ## Terminal rendering and input
 
@@ -90,13 +104,20 @@ Agent panes, settings, reconnect presentation, or accessibility.
   are valid only while that handle lives.
 - `TerminalGridView` draws the render-ready plane. Preserve grapheme lookup, wide-cell spacer
   suppression, row damage, decorations, faint and invisible text, ANSI blinking text, and daemon
-  cursor shape and color.
+  cursor shape and color. The local Rust appearance conversion may restyle defaults and indexed
+  colors; Swift must not rebuild terminal colors or selection from glyphs.
 - A preview scales an immutable viewport to fit. An interactive surface uses the selected logical
   font and reports geometry from its actual UIKit bounds.
 - Direct text uses `UIKeyInput`; hardware keys use raw press, repeat, and release events. Do not fold
   either path into hardcoded Swift shortcuts.
 - The Prefix control uses `switch-client -T prefix` to enter the daemon's key table. `send-prefix`
   writes a prefix character into the PTY and is for nested multiplexers.
+- `TmuxCopyBar` renders daemon copy-mode state and sends semantic selection/search actions and
+  `send-keys -X` movement. Preserve raw hardware input for daemon vi/emacs tables.
+- `TmuxOverlay` renders daemon prompts, confirmations, tree and buffer choosers, pane indicators,
+  menus, and command output through the JSON FFI. Send typed actions back to Rust and prevent
+  underlying terminals from consuming overlay interaction.
+- `TmuxBindingsView` lists the daemon-published tables, including custom bindings and repeat flags.
 - Previous and next pane controls use daemon-backed pane selection, just like sidebar navigation.
 - Shift, Control, and Alt are one-shot after one tap, lock after a double tap, and clear when the
   locked control is tapped again. Current reset points are scene transitions, session or pane
@@ -161,9 +182,15 @@ Agent panes, settings, reconnect presentation, or accessibility.
 - Agent creation requires the connected daemon to enable `experimental-agent-pane`.
 - Preserve the known URL routes and App Shortcuts through the shared exact-pane navigation path.
   Reject unknown routes instead of interpreting arbitrary URLs or commands.
-- Persist native appearance, terminal font family, 9 through 23 point base size, cursor blinking, and
-  the iPad home-indicator extension. Per-pane zoom stays in memory, survives automatic reconnect,
-  and is not persisted to `UserDefaults`.
+- Persist native appearance, terminal font family, 9 through 23 point base size, cursor blinking,
+  and the home-indicator extension in `UserDefaults`. Per-pane zoom stays in memory and survives
+  automatic reconnect.
+- `ZZSharedSettings` owns Application Support `zz/config` and `zz/mux.conf` through the shared Rust
+  settings model. Use desktop metadata and the bundled theme catalog for supported knobs.
+- Local terminal and chrome settings affect this device. Apply parsed mux preferences through
+  `zz_settings_model_mobile_apply` after attachment and edits; this does not upload the local file.
+  Daemon/session-scoped mux commands affect other attached clients, so do not describe them as
+  independent per-client bindings. Keep parsing and key-table semantics in Rust.
 - With no retained sessions, reconnect uses a full page. With retained sessions, keep the frozen
   workspace and show the banner. Both surfaces display the last transport error through the next
   automatic attempt.
@@ -177,5 +204,8 @@ Agent panes, settings, reconnect presentation, or accessibility.
   modifiers, Agent drafts, settings, and deep links. They do not cover size-class switching, sidebar
   hierarchy, normalized placement, Panorama transforms, first-responder timing, keyboard frames, or
   terminal drawing.
+- `Tests/UI/IPadAcceptanceTests.swift` uses `ZZ_IOS_UI_TEST_SOCKET` to exercise the connected iPad
+  settings, picker, resizing, copy/search controls, and key tables. It skips without the isolated
+  socket or on iPhone. Read its assertions before treating a pass as coverage for another behavior.
 - Verify affected interface behavior on the relevant simulator. Use a physical iPhone or iPad for
   keyboard, safe-area, focus, networking, and interaction claims that depend on real hardware.

@@ -73,6 +73,11 @@ startup. Rebuilding a simulator does not rule it out.
 `dev.zz.ios`, and launches it with `SIMCTL_CHILD_ZZ_SOCKET`. `ZZStore.start` sees `ZZ_SOCKET` and
 bypasses host setup and SSH.
 
+The recipe selects the newest installed iOS runtime with a device in the requested family,
+preferring a booted device within that runtime. It waits for boot completion before installing.
+Xcode 27 uses `Contents/Applications/DeviceHub.app` instead of Simulator; the script opens Device
+Hub from the selected Xcode installation and uses Simulator on older Xcode versions.
+
 A missing local socket can still produce an installed and launched app with no daemon connection.
 Read the script warning and verify a real session, window, pane, and terminal frame.
 
@@ -144,9 +149,34 @@ succeeded. Unlock it, launch again, and verify the UI before reporting runtime s
 | SSH prompt, probe, daemon start, or proxy | focused `zz-daemon` tests, FFI tests, then a fresh physical build |
 | Keyboard, focus, safe area, rendering, Panorama | simulator and physical-device visual interaction |
 
-The Swift target currently has policy-level unit tests, not deterministic daemon-backed UI
-automation. A green unit suite cannot prove rendered geometry, keyboard behavior, focus transfer, or
-matched transitions.
+`ZZMobileTests` covers Swift policies. `ZZMobileUITests` also runs
+`Tests/UI/IPadAcceptanceTests.swift` against an isolated daemon. The UI test opens settings sections,
+chooses a bundled font and theme, materializes a picker, checks pane resizing, opens copy/search
+controls, and inspects published key tables. It captures screenshots and the accessibility tree.
+It skips on iPhone and when `ZZ_IOS_UI_TEST_SOCKET` is absent.
+
+Start a dedicated daemon with an initial terminal pane on a short `/tmp` socket. Boot the selected
+iPad simulator, then put the socket variable in the simulator's launch environment so the test
+runner can read it. The test forwards that value to the app as `ZZ_SOCKET`:
+
+```sh
+xcrun simctl spawn <iPad-UDID> launchctl setenv ZZ_IOS_UI_TEST_SOCKET /tmp/zz-ipadqa.sock
+xcodegen generate --spec clients/ios/project.yml --project clients/ios
+env -u ZZ_IOS_REUSE_CLIENT_CORE xcodebuild \
+  -project clients/ios/ZZMobile.xcodeproj \
+  -scheme ZZMobile \
+  -destination 'platform=iOS Simulator,id=<iPad-UDID>' \
+  -derivedDataPath target/ios-sim \
+  -only-testing:ZZMobileUITests \
+  -resultBundlePath /tmp/zz-ipad-ui-result.xcresult \
+  CODE_SIGNING_ALLOWED=NO test
+xcrun simctl spawn <iPad-UDID> launchctl unsetenv ZZ_IOS_UI_TEST_SOCKET
+```
+
+Choose a new result-bundle path for each run. Clear the simulator variable after the run, including a
+failed run, and stop only the dedicated test daemon. Archive reuse follows the fresh-archive rule
+above. A green unit suite does not prove rendered geometry, keyboard behavior, or focus transfer;
+the UI suite proves only its asserted flows and does not replace physical-device checks.
 
 The zz daemon outlives desktop app replacement. When a protocol or daemon change appears missing,
 identify the running daemon binary and version before restarting it. Ask before disrupting a live

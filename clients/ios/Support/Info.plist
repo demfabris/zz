@@ -33,8 +33,23 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>zz connects to your computer on the local network.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>FiraCode-Regular.ttf</string>
+		<string>FiraCode-Bold.ttf</string>
+		<string>GeistMono-Regular.otf</string>
+		<string>GeistMono-Bold.otf</string>
+		<string>0xProto-Regular.ttf</string>
+		<string>0xProto-Bold.ttf</string>
+		<string>0xProto-Italic.ttf</string>
+	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>

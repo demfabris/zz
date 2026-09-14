@@ -71,6 +71,16 @@ Reconnects attach to the remembered session and replay focus and Agent transcrip
 Agent replay includes submitted prompts when the provider emits `user_message_chunk` updates;
 the daemon does not journal a separate copy of submitted prompt text. Browser image transfers
 are assembled in a bounded cache and retired textures are released from GPUI.
+Hovering a terminal `[Image #N]` marker fetches its preview from the daemon and shows it after
+250 ms in the desktop-style popover. The browser limits pasted-image transfers and cached encoded
+bytes to 64 MiB and 512 entries, drops them on reconnect or session attachment, and releases
+retired image assets from GPUI. Missing previews do not trigger repeated fetches while cached.
+Clipboard paste accepts PNG, JPEG, GIF, and WebP images up to 6 MiB through GPUI's browser paste
+callback. The browser uploads their original bytes in ordered chunks; the daemon writes the image
+on its host and pastes its path into the terminal. The browser does not resize or transcode clipboard
+images. Popup terminals, command output, and search retain text paste behavior.
+Page blur and local dialogs cancel the daemon prefix; ordinary keys wait for the cancellation
+acknowledgement after the dialog closes or the page regains focus.
 
 Session and window selection, terminal splits and divider dragging, pane zoom, daemon command
 prompts, choosers, menus, confirmations, popups, command output, and Agent prompt/permission
@@ -111,7 +121,10 @@ Unsupported controls stay visible and disabled. Native window behavior, OS fonts
 native file dialogs, desktop notifications, local file editing, Chromium execution inside a pane, and
 direct SSH host setup require capabilities outside the browser client. Browser panes retain their
 toolbar and offer an external tab for their URL. The browser client does not enable the shared
-code editor.
+code editor. File paths in `save-buffer`, `load-buffer`, and `source-file` resolve on the daemon host;
+the daemon only asks command-line clients for their files. Browser
+screenshot commands return an error because the page has no Chromium pane runtime. Daemon
+`OpenUri` requests open HTTP, HTTPS, and mailto links; other schemes show a client error toast.
 
 # Checks
 
@@ -135,7 +148,7 @@ reject foreign origins, invalid frames, and asset paths outside the served direc
 - `clients/web/src/lib.rs`: GPUI initialization, portable fonts, and browser entrypoint.
 - `clients/web/src/connection.rs`: protocol reduction, bounded receive queue, reconnect, and replay.
 - `clients/web/src/terminal.rs`: browser terminal input, selection, search, and shared-renderer adapter.
-- `clients/web/src/terminal_images.rs`: bounded image transfer assembly and GPU texture retirement.
+- `clients/web/src/terminal_images.rs`: bounded Kitty and pasted-image transfer assembly and image retirement.
 - `crates/zz-ui/src/terminal.rs`: shared terminal painting, metrics, scrollbars, cursor, and image placement.
 - `clients/web/src/app.rs`: workspace, navigation, and daemon overlays.
 - `clients/web/src/command_palette.rs`: command prompt input and completion interaction over the shared palette.

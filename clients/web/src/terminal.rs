@@ -1,10 +1,11 @@
-use std::{collections::HashSet, ops::Range, time::Duration};
+use std::{collections::HashSet, ops::Range, sync::Arc, time::Duration};
 
 use gpui::{
-    AnyElement, App, Bounds, Context, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
-    Focusable, KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render,
-    ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, canvas, div, prelude::*, px,
+    Anchor, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, ElementInputHandler,
+    Entity, EntityInputHandler, FocusHandle, Focusable, ImageSource, KeyDownEvent, KeyUpEvent,
+    Keystroke, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
+    MouseUpEvent, ObjectFit, Pixels, Point, Render, ScrollWheelEvent, Subscription, Task,
+    UTF16Selection, Window, anchored, canvas, deferred, div, img, prelude::*, px,
 };
 use zz_client::{
     ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, TERMINAL_TABLE,
@@ -65,6 +66,10 @@ pub struct TerminalPane {
     scrollbar_dragging: bool,
     pressed_buttons: HashSet<MouseButton>,
     pointer: Option<Point<Pixels>>,
+    hovered_image_uri: Option<Arc<str>>,
+    image_hover_ready: bool,
+    image_hover_task: Option<Task<()>>,
+    link_hover_bounds: Option<Bounds<Pixels>>,
     selection_pointer: Option<PointerCellEvent>,
     selection_autoscroll_lines: i32,
     selection_autoscroll_task: Option<Task<()>>,
@@ -110,7 +115,16 @@ impl TerminalPane {
                 {
                     cx.notify();
                 }
+                CoreEvent::Message(message)
+                    if matches!(message.as_ref(),
+                    zz_protocol::ProtocolMessage::PastedImageChunk { pane: changed, .. }
+                    | zz_protocol::ProtocolMessage::PastedImageUnavailable { pane: changed, .. }
+                    if *changed == pane) =>
+                {
+                    cx.notify();
+                }
                 CoreEvent::Attached { .. } | CoreEvent::AppearanceChanged => {
+                    this.observe_image_hover(None, cx);
                     this.all_dirty = true;
                     this.geometry = None;
                     this.cursor_blink_visible = true;
@@ -171,6 +185,10 @@ impl TerminalPane {
             scrollbar_dragging: false,
             pressed_buttons: HashSet::new(),
             pointer: None,
+            hovered_image_uri: None,
+            image_hover_ready: false,
+            image_hover_task: None,
+            link_hover_bounds: None,
             selection_pointer: None,
             selection_autoscroll_lines: 0,
             selection_autoscroll_task: None,
@@ -203,6 +221,74 @@ impl TerminalPane {
         let mut this = Self::new(pane, connection, cx);
         this.surface = TerminalSurface::CommandOutput;
         this
+    }
+
+    fn observe_image_hover(&mut self, uri: Option<Arc<str>>, cx: &mut Context<Self>) {
+        let uri = uri.filter(|uri| pasted_image_number(uri).is_some());
+        if self.hovered_image_uri == uri {
+            return;
+        }
+        self.hovered_image_uri.clone_from(&uri);
+        self.image_hover_ready = false;
+        self.image_hover_task = None;
+        if let Some(uri) = uri {
+            let number = pasted_image_number(&uri).unwrap();
+            self.connection.update(cx, |connection, cx| {
+                connection.fetch_pasted_image(self.pane, number, cx);
+            });
+            self.image_hover_task = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(250))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.hovered_image_uri.as_deref() == Some(uri.as_ref()) {
+                        this.image_hover_ready = true;
+                        cx.notify();
+                    }
+                });
+            }));
+        }
+        cx.notify();
+    }
+
+    fn image_hover_popover(&self, cx: &App) -> Option<AnyElement> {
+        if !self.image_hover_ready {
+            return None;
+        }
+        let bounds = self.link_hover_bounds?;
+        let number = pasted_image_number(self.hovered_image_uri.as_deref()?)?;
+        let image = self.connection.read(cx).pasted_image(self.pane, number)?;
+        let (anchor, position) = if bounds.origin.y >= px(308.0) {
+            (Anchor::BottomLeft, bounds.origin)
+        } else {
+            (Anchor::TopLeft, bounds.bottom_left())
+        };
+        Some(
+            deferred(
+                anchored()
+                    .anchor(anchor)
+                    .position(position)
+                    .snap_to_window_with_margin(px(8.0))
+                    .child(
+                        div()
+                            .size(px(300.0))
+                            .p_1()
+                            .bg(cx.theme().background.raised(1).opaque())
+                            .text_color(cx.theme().foreground)
+                            .border_1()
+                            .border_color(cx.theme().border())
+                            .rounded(cx.theme().radius)
+                            .shadow_md()
+                            .child(
+                                img(ImageSource::Image(image))
+                                    .size_full()
+                                    .object_fit(ObjectFit::ScaleDown),
+                            ),
+                    ),
+            )
+            .with_priority(1)
+            .into_any_element(),
+        )
     }
 
     fn viewport<'a>(&self, core: &'a zz_client::ClientCore) -> Option<&'a TerminalViewport> {
@@ -546,6 +632,7 @@ impl TerminalPane {
 
     fn on_mouse_exit(&mut self, _: &MouseExitEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.pointer = None;
+        self.observe_image_hover(None, cx);
         self.view(TerminalViewAction::ClearLinkHover, cx);
     }
 
@@ -728,6 +815,7 @@ impl TerminalPane {
             Some((paint, connection.core.attached_session().is_some()))
         })?;
         let geometry = paint.geometry;
+        self.link_hover_bounds = geometry.link_hover_bounds;
         self.bounds = geometry.grid_bounds;
         self.surface_bounds = geometry.surface_bounds;
         self.cell_width = geometry.cell_width;
@@ -792,6 +880,7 @@ impl TerminalPane {
             self.focused = focused;
             self.view(TerminalViewAction::Focus(focused), cx);
             if !focused {
+                self.observe_image_hover(None, cx);
                 self.end_drag();
                 self.pressed_buttons.clear();
                 self.forwarded.clear();
@@ -914,7 +1003,9 @@ impl Render for TerminalPane {
             );
             hovered_uri.clone_from(&viewport.presentation.hovered_uri);
             search_status = viewport.search;
-            if let Some(uri) = &hovered_uri {
+            if let Some(uri) = &hovered_uri
+                && pasted_image_number(uri).is_none()
+            {
                 bottom_right.push(terminal_link_popup(uri.to_string(), cx).into_any_element());
             }
             if self.surface != TerminalSurface::Popup {
@@ -924,6 +1015,14 @@ impl Render for TerminalPane {
                 }
             }
         }
+        self.observe_image_hover(
+            if self.pointer.is_some() && self.surface == TerminalSurface::Pane {
+                hovered_uri.clone()
+            } else {
+                None
+            },
+            cx,
+        );
         if let Some(query) = &self.search {
             let prompt = search_prompt_text(
                 query,
@@ -1009,6 +1108,9 @@ impl Render for TerminalPane {
                     .top(px(8.0)),
             );
         }
+        if let Some(popover) = self.image_hover_popover(cx) {
+            root = root.child(popover);
+        }
         if !bottom_right.is_empty() {
             root = root.child(pane_overlay_stack(
                 PaneOverlayCorner::BottomRight,
@@ -1020,6 +1122,24 @@ impl Render for TerminalPane {
 }
 
 impl EntityInputHandler for TerminalPane {
+    fn paste(&mut self, item: ClipboardItem, window: &mut Window, cx: &mut Context<Self>) {
+        if self.surface == TerminalSurface::Pane
+            && self.search.is_none()
+            && let Some(image) = item.entries().iter().find_map(|entry| match entry {
+                ClipboardEntry::Image(image) => Some(image),
+                _ => None,
+            })
+        {
+            self.connection.update(cx, |connection, cx| {
+                connection.upload_image(self.pane, image, cx);
+            });
+            return;
+        }
+        if let Some(text) = item.text() {
+            self.replace_text_in_range(None, &text, window, cx);
+        }
+    }
+
     fn text_for_range(
         &mut self,
         _: Range<usize>,
@@ -1110,6 +1230,13 @@ impl EntityInputHandler for TerminalPane {
     ) -> Option<usize> {
         Some(0)
     }
+}
+
+fn pasted_image_number(uri: &str) -> Option<u32> {
+    uri.strip_prefix(zz_terminal::IMAGE_PLACEHOLDER_SCHEME)?
+        .strip_prefix("://")?
+        .parse()
+        .ok()
 }
 
 fn search_key_action(query: &mut SearchQuery, input: &KeyInput) -> Option<TerminalViewAction> {

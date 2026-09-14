@@ -170,6 +170,10 @@ pub struct Connection {
     pub agent_events: HashMap<PaneId, Vec<(u64, Vec<u8>)>>,
     agent_cursors: HashMap<PaneId, AgentCursor>,
     terminal_images: crate::terminal_images::TerminalImages,
+    pasted_images: crate::terminal_images::PastedImages,
+    prefix_cancel_pending: Option<u64>,
+    epoch: u64,
+    dialog_active: bool,
     request_id: u64,
     remembered_session: Option<SessionId>,
     attaching: bool,
@@ -195,6 +199,10 @@ impl Connection {
             agent_events: HashMap::new(),
             agent_cursors: HashMap::new(),
             terminal_images: crate::terminal_images::TerminalImages::default(),
+            pasted_images: crate::terminal_images::PastedImages::default(),
+            prefix_cancel_pending: None,
+            epoch: 0,
+            dialog_active: false,
             request_id: 1,
             remembered_session: None,
             attaching: false,
@@ -242,6 +250,121 @@ impl Connection {
         self.terminal_images.take_retired()
     }
 
+    pub fn pasted_image(&self, pane: PaneId, number: u32) -> Option<Arc<gpui::Image>> {
+        self.pasted_images.image(pane, number)
+    }
+
+    pub fn fetch_pasted_image(&mut self, pane: PaneId, number: u32, cx: &mut Context<Self>) {
+        if self.connected && self.pasted_images.request(pane, number) {
+            self.pasted_images.release_retired(cx);
+            self.send(ProtocolMessage::FetchPastedImage { pane, number }, cx);
+        }
+    }
+
+    pub fn notify_error(&mut self, text: String, cx: &mut Context<Self>) {
+        self.status.clone_from(&text);
+        cx.emit(CoreEvent::ClientMessage {
+            pane: None,
+            kind: zz_protocol::ClientMessageKind::Error,
+            text,
+            duration_ms: None,
+            message_id: None,
+        });
+        cx.notify();
+    }
+
+    pub fn upload_image(&mut self, pane: PaneId, image: &gpui::Image, cx: &mut Context<Self>) {
+        let extension = image.format.extension();
+        if zz_protocol::PastedImageFormat::from_extension(extension).is_none()
+            || image.bytes.is_empty()
+            || image.bytes.len() > zz_protocol::MAX_PASTE_UPLOAD_BYTES as usize
+        {
+            self.notify_error(
+                "Paste a PNG, JPEG, GIF, or WebP image of 6 MiB or less.".into(),
+                cx,
+            );
+            return;
+        }
+        let upload_id = self.next_request_id();
+        self.send(
+            ProtocolMessage::PasteUploadBegin {
+                upload_id,
+                pane,
+                purpose: zz_protocol::PasteUploadPurpose::PastePath,
+                extension: extension.into(),
+                total_bytes: image.bytes.len() as u32,
+            },
+            cx,
+        );
+        let bytes = image.bytes.clone();
+        let epoch = self.epoch;
+        cx.spawn(async move |this, cx| {
+            let mut offset = 0;
+            loop {
+                let keep_running = this
+                    .update(cx, |this, cx| {
+                        if !this.connected || this.epoch != epoch || offset == bytes.len() {
+                            return false;
+                        }
+                        #[cfg(target_family = "wasm")]
+                        if this
+                            .socket
+                            .as_ref()
+                            .is_some_and(|socket| socket.buffered_amount() > 2 * 1024 * 1024)
+                        {
+                            return true;
+                        }
+                        let end =
+                            (offset + zz_protocol::MAX_PASTE_UPLOAD_CHUNK_BYTES).min(bytes.len());
+                        this.send(
+                            ProtocolMessage::PasteUploadChunk {
+                                upload_id,
+                                bytes: bytes[offset..end].to_vec(),
+                            },
+                            cx,
+                        );
+                        offset = end;
+                        offset < bytes.len()
+                    })
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(10))
+                    .await;
+            }
+        })
+        .detach();
+    }
+
+    fn next_request_id(&mut self) -> u64 {
+        let request_id = self.request_id;
+        self.request_id = self.request_id.wrapping_add(1).max(1);
+        request_id
+    }
+
+    fn cancel_prefix(&mut self, cx: &mut Context<Self>) {
+        if self.connected && self.prefix_cancel_pending.is_none() {
+            let request_id = self.next_request_id();
+            self.prefix_cancel_pending = Some(request_id);
+            self.send(
+                ProtocolMessage::Input(InputMessage::CancelPrefix { request_id }),
+                cx,
+            );
+        }
+    }
+
+    pub fn reconcile_dialog_prefix(&mut self, active: bool, cx: &mut Context<Self>) -> bool {
+        if active && !self.dialog_active {
+            self.cancel_prefix(cx);
+            self.dialog_active = self.connected;
+        } else if !active {
+            self.dialog_active = false;
+        }
+        self.prefix_cancel_pending.is_some()
+    }
+
     pub fn start(&mut self, cx: &mut Context<Self>) {
         self.reconnect(cx);
     }
@@ -260,6 +383,11 @@ impl Connection {
     pub fn reconnect(&mut self, cx: &mut Context<Self>) {
         self.color_scheme = None;
         self.connected = false;
+        self.epoch = self.epoch.wrapping_add(1);
+        self.prefix_cancel_pending = None;
+        self.dialog_active = false;
+        self.pasted_images.clear();
+        self.pasted_images.release_retired(cx);
         self.attaching = false;
         self.retry_default = false;
         self.status = "Connecting…".into();
@@ -320,8 +448,7 @@ impl Connection {
     }
 
     pub fn command(&mut self, command: &str, args: Vec<String>, cx: &mut Context<Self>) {
-        let request_id = self.request_id;
-        self.request_id = self.request_id.wrapping_add(1).max(1);
+        let request_id = self.next_request_id();
         self.send(
             ProtocolMessage::CommandRequest(CommandRequest {
                 request_id,
@@ -338,6 +465,7 @@ impl Connection {
     }
 
     fn attach_target(&mut self, session: String, cx: &mut Context<Self>) {
+        self.epoch = self.epoch.wrapping_add(1);
         self.attaching = true;
         self.send(ProtocolMessage::Attach { session }, cx);
     }
@@ -367,6 +495,9 @@ impl Connection {
     pub fn set_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
         if self.focused != focused {
             self.focused = focused;
+            if !focused {
+                self.cancel_prefix(cx);
+            }
             if self.core.attached_session().is_some() && !self.attaching {
                 self.send(
                     ProtocolMessage::Input(InputMessage::ClientFocus { focused }),
@@ -390,6 +521,7 @@ impl Connection {
                     {
                         self.retry = None;
                     }
+                    self.pasted_images.clear();
                     self.agent_events.clear();
                     self.agent_cursors.clear();
                     self.attach_target(
@@ -403,6 +535,7 @@ impl Connection {
                     self.retry_default = false;
                     self.remembered_session = Some(*session);
                     self.status = "Connected".into();
+                    self.pasted_images.clear();
                     self.agent_events.clear();
                     self.agent_cursors.clear();
                     self.send(
@@ -439,6 +572,49 @@ impl Connection {
                 {
                     cx.open_url(uri);
                 }
+                CoreEvent::OpenUri { uri, .. } => {
+                    self.notify_error(
+                        format!("Cannot open this URI in the browser client: {uri}"),
+                        cx,
+                    );
+                }
+                CoreEvent::PrefixCancelled { request_id } => {
+                    if self.prefix_cancel_pending == Some(*request_id) {
+                        self.prefix_cancel_pending = None;
+                    }
+                }
+                CoreEvent::BrowserCommand {
+                    command: zz_protocol::BrowserCommand::Screenshot { request_id, .. },
+                    ..
+                } => self.send(
+                    ProtocolMessage::GuiResponse(zz_protocol::GuiResponse::Error {
+                        request_id: *request_id,
+                        message: "Screenshots require the desktop browser runtime.".into(),
+                    }),
+                    cx,
+                ),
+                CoreEvent::Message(message) => match message.as_ref() {
+                    ProtocolMessage::PastedImageBegin {
+                        pane,
+                        number,
+                        format,
+                        total_bytes,
+                    } => {
+                        self.pasted_images
+                            .begin(*pane, *number, *format, *total_bytes);
+                    }
+                    ProtocolMessage::PastedImageChunk {
+                        pane,
+                        number,
+                        bytes,
+                    } => {
+                        self.pasted_images.chunk(*pane, *number, bytes);
+                    }
+                    ProtocolMessage::PastedImageUnavailable { pane, number } => {
+                        self.pasted_images.unavailable(*pane, *number);
+                    }
+                    _ => {}
+                },
                 CoreEvent::AgentStateChanged { pane, .. } => {
                     if !self.agent_cursors.contains_key(pane) {
                         self.request_agent_replay(*pane, cx);
@@ -476,6 +652,7 @@ impl Connection {
                     self.request_agent_replay(*pane, cx);
                 }
                 CoreEvent::PaneRemoved { pane } => {
+                    self.pasted_images.remove_pane(*pane);
                     self.agent_events.remove(pane);
                     self.agent_cursors.remove(pane);
                 }
@@ -496,6 +673,7 @@ impl Connection {
                 CoreEvent::ServerStopping => self.status = "Daemon stopped".into(),
                 _ => {}
             }
+            self.pasted_images.release_retired(cx);
             cx.emit(event);
         }
         cx.notify();
@@ -537,6 +715,11 @@ impl Connection {
     #[cfg(target_family = "wasm")]
     fn disconnected(&mut self, reason: String, cx: &mut Context<Self>) {
         self.connected = false;
+        self.epoch = self.epoch.wrapping_add(1);
+        self.prefix_cancel_pending = None;
+        self.dialog_active = false;
+        self.pasted_images.clear();
+        self.pasted_images.release_retired(cx);
         self.attaching = false;
         self.status = reason;
         self.socket = None;
@@ -787,6 +970,10 @@ mod browser {
                 .add_event_listener_with_callback("blur", socket.blur.as_ref().unchecked_ref())
                 .map_err(|_| "Cannot watch browser focus")?;
             Ok((socket, receiver))
+        }
+
+        pub fn buffered_amount(&self) -> usize {
+            self.ws.buffered_amount() as usize
         }
 
         pub fn send(&self, message: &ProtocolMessage) -> Result<(), String> {

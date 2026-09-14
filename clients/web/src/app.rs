@@ -349,6 +349,20 @@ impl WebClient {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog = window
+            .root::<Root>()
+            .flatten()
+            .is_some_and(|root| root.read(cx).has_active_dialog());
+        let pending = self.connection.update(cx, |connection, cx| {
+            connection.reconcile_dialog_prefix(dialog, cx)
+        });
+        if dialog {
+            return;
+        }
+        if pending && !event.keystroke.modifiers.platform && !event.keystroke.modifiers.function {
+            cx.stop_propagation();
+            return;
+        }
         let input = crate::terminal::key_input(event);
         let core = &self.connection.read(cx).core;
         let overlay = if core.choose_tree().is_some() {
@@ -1480,6 +1494,13 @@ impl WebClient {
 
 impl Render for WebClient {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let dialog = window
+            .root::<Root>()
+            .flatten()
+            .is_some_and(|root| root.read(cx).has_active_dialog());
+        self.connection.update(cx, |connection, cx| {
+            connection.reconcile_dialog_prefix(dialog, cx)
+        });
         let sidebar = if self.sidebar || self.settings.is_some() {
             self.sidebar(window, cx)
         } else {

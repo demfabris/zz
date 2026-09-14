@@ -67,7 +67,8 @@ actor executes both against the frozen revision. `-X` actions never reach the PT
   start, emacs may find the mark it is already on and parks one cell past it. `search-again` and
   `search-reverse` re-run the stored string with the stored or flipped direction. The stock keys are
   the pin's `command-prompt -P` bindings (`/`,`?` in vi; `C-s`,`C-r` in emacs, both incremental),
-  where `-P` is a presentation hint zz's clients own rather than a pane-cell prompt; vi `*`/`#` carry
+  where `-P` names the pane the prompt belongs to: the raw TUI draws it over that pane's last row
+  the way the pin does, and the GUI clients keep it on their own surface; vi `*`/`#` carry
   `send-keys -FX search-forward/-backward -- "#{copy_cursor_word}"`, and `-F` is the one place the
   pin expands a key argument as a format. `search_present`, `search_match`, `search_count`,
   `search_count_partial` and `search_timed_out` answer off the copy session. The native

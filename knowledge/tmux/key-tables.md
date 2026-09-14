@@ -286,9 +286,10 @@ after either extends the count in either table. Prefix-table and user-created `b
 still carry and use their repeat bit. The 16 cursor-word, search, goto-line and jump bindings that
 were the last divergent shared shapes now store the pin's exact commands. Fourteen of them (vi `/`,
 `?`, `:`, `f`, `F`, `t`, `T` and emacs `g`, `C-r`, `C-s`, `f`, `F`, `t`, `T`) render through
-`command-prompt -P`; the pin draws that prompt over the target pane's last row at redraw time, and zz
-takes the flag as a presentation hint its own client surface honours, so the stored command matches
-and only the drawing differs. The remaining two, vi `#` and `*`, carry
+`command-prompt -P`; the pin draws that prompt over the target pane's last row at redraw time, and so
+does zz's raw TUI since 2026-09-14, which reads the pane the flag resolved off `CommandPromptState`.
+The GPUI, iOS and web clients read nothing from that field and keep the prompt on their own client
+surface, so the stored command matches everywhere and only the GUI's drawing differs. The remaining two, vi `#` and `*`, carry
 `send-keys -FX search-backward -- "#{copy_cursor_word}"` and its forward twin. `#{pane_search_string}`
 in the emacs `-I` value expands to the last search on the pane, which the pane keeps after copy mode
 ends, so a fresh entry's `n` searches up for it. The incremental `C-s` and `C-r` prompt still opens

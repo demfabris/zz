@@ -2132,7 +2132,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-k", "submit the name of the first key pressed"),
             CommandOptionSpec::flag("-l", "one prompt and one input, commas kept literal"),
             CommandOptionSpec::flag("-N", "collect digits and pass the first non-digit on"),
-            CommandOptionSpec::flag("-P", "presentation hint: the prompt is the pane's"),
+            CommandOptionSpec::flag("-P", "the prompt belongs to the target pane, not the client"),
         ],
         positionals: &[FreeForm],
         variadic: None,

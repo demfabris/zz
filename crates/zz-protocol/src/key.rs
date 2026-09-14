@@ -553,9 +553,10 @@ impl KeyTables {
     }
 
     /// The pin's stock prompted copy-mode bindings. All of them are
-    /// `command-prompt -P`, which zz treats as a presentation hint the client
-    /// owns rather than as a pane-cell prompt, so the stored command is the
-    /// pin's and the surface the prompt lands on is zz's own.
+    /// `command-prompt -P`, whose resolved pane rides the wire: the raw TUI
+    /// draws the prompt over that pane's last row the way the pin does, while
+    /// the GPUI, iOS and web clients read nothing from it and keep the prompt
+    /// on their own client surface. The stored command is the pin's either way.
     fn bind_copy_mode_search_defaults(&mut self) {
         for (table, key, label, action) in [
             ("copy-mode-vi", "/", "(search down)", "search-forward"),

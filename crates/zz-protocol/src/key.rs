@@ -348,6 +348,37 @@ impl Default for KeyTables {
                 note: None,
             },
         );
+        tables.bind(
+            "root",
+            "MouseDown3Pane",
+            Binding {
+                commands: vec![
+                    CommandInvocation::new(
+                        "if-shell",
+                        [
+                            "-F",
+                            "-t",
+                            "=",
+                            "#{||:#{mouse_any_flag},#{&&:#{pane_in_mode},#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}}}",
+                            "{ select-pane -t = ; send-keys -M }",
+                            PANE_MENU_BLOCK,
+                        ],
+                    )
+                    .with_command_blocks([4, 5]),
+                ],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "root",
+            "M-MouseDown3Pane",
+            Binding {
+                commands: vec![pane_menu_command()],
+                repeat: false,
+                note: None,
+            },
+        );
         for key in ["MouseDown3Status", "M-MouseDown3Status"] {
             tables.bind(
                 "root",
@@ -771,6 +802,154 @@ fn window_menu_command() -> CommandInvocation {
     }
     CommandInvocation::new("display-menu", args).with_command_blocks(blocks)
 }
+
+/// `key-bindings.c`'s `DEFAULT_PANE_MENU`, the twenty-eight items the pin's
+/// pane menu carries, each stored in the text `cmd_print` gives it back.
+fn pane_menu_command() -> CommandInvocation {
+    let mut args = vec![
+        "-t".to_owned(),
+        "=".to_owned(),
+        "-x".to_owned(),
+        "M".to_owned(),
+        "-y".to_owned(),
+        "M".to_owned(),
+        "-T".to_owned(),
+        "#[align=centre]#{pane_index} (#{pane_id})".to_owned(),
+    ];
+    let mut blocks = Vec::new();
+    for (name, key, command) in [
+        (
+            "#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}",
+            "<",
+            Some("{ send-keys -X history-top }"),
+        ),
+        (
+            "#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}",
+            ">",
+            Some("{ send-keys -X history-bottom }"),
+        ),
+        ("", "", None),
+        (
+            "#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}",
+            "p",
+            Some("{ paste-buffer }"),
+        ),
+        ("", "", None),
+        (
+            "#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}",
+            "C-r",
+            Some("{ if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" }"),
+        ),
+        (
+            "#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}",
+            "C-y",
+            Some("{ copy-mode -q ; send-keys -l \"#{q:mouse_word}\" }"),
+        ),
+        (
+            "#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}",
+            "c",
+            Some("{ copy-mode -q ; set-buffer \"#{q:mouse_word}\" }"),
+        ),
+        (
+            "#{?mouse_line,Copy Line,}",
+            "l",
+            Some("{ copy-mode -q ; set-buffer \"#{q:mouse_line}\" }"),
+        ),
+        ("", "", None),
+        (
+            "#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}",
+            "C-h",
+            Some("{ copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" }"),
+        ),
+        (
+            "#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}",
+            "h",
+            Some("{ copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" }"),
+        ),
+        ("", "", None),
+        (
+            "#{?#{#{pane_floating_flag}},Move,}",
+            "",
+            Some("{ display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } }"),
+        ),
+        (
+            "#{?#{#{pane_floating_flag}},Move & Resize,}",
+            "",
+            Some("{ display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } }"),
+        ),
+        (
+            "#{?#{#{pane_floating_flag}},Tile,}",
+            "t",
+            Some("{ join-pane }"),
+        ),
+        (
+            "#{?#{!:#{pane_floating_flag}},Float,}",
+            "f",
+            Some("{ break-pane -W }"),
+        ),
+        (
+            "#{?#{!:#{pane_floating_flag}},Horizontal Split,}",
+            "h",
+            Some("{ split-window -h }"),
+        ),
+        (
+            "#{?#{!:#{pane_floating_flag}},Vertical Split,}",
+            "v",
+            Some("{ split-window -v }"),
+        ),
+        ("", "", None),
+        (
+            "#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}",
+            "u",
+            Some("{ swap-pane -U }"),
+        ),
+        (
+            "#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}",
+            "d",
+            Some("{ swap-pane -D }"),
+        ),
+        (
+            "#{?pane_marked_set,,-}Swap Marked",
+            "s",
+            Some("{ swap-pane }"),
+        ),
+        ("", "", None),
+        (
+            "Kill",
+            "X",
+            Some("{ kill-pane }"),
+        ),
+        (
+            "Respawn",
+            "R",
+            Some("{ respawn-pane -k }"),
+        ),
+        (
+            "#{?pane_marked,Unmark,Mark}",
+            "m",
+            Some("{ select-pane -m }"),
+        ),
+        (
+            "#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}",
+            "z",
+            Some("{ resize-pane -Z }"),
+        ),
+    ] {
+        args.push(name.to_owned());
+        let Some(command) = command else {
+            continue;
+        };
+        args.push(key.to_owned());
+        blocks.push(args.len());
+        args.push(command.to_owned());
+    }
+    CommandInvocation::new("display-menu", args).with_command_blocks(blocks)
+}
+
+/// The same menu as the block `MouseDown3Pane`'s `if-shell` runs when the pane
+/// neither tracks the mouse itself nor holds a mode of its own.
+const PANE_MENU_BLOCK: &str = "{ display-menu -T \"#[align=centre]#{pane_index} (#{pane_id})\" -t = -x M -y M \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}\" < { send-keys -X history-top } \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}\" > { send-keys -X history-bottom } '' \"#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}\" p { paste-buffer } '' \"#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}\" C-r { if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" } \"#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}\" C-y { copy-mode -q ; send-keys -l \"#{q:mouse_word}\" } \"#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}\" c { copy-mode -q ; set-buffer \"#{q:mouse_word}\" } \"#{?mouse_line,Copy Line,}\" l { copy-mode -q ; set-buffer \"#{q:mouse_line}\" } '' \"#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}\" C-h { copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" } \"#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}\" h { copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" } '' \"#{?#{#{pane_floating_flag}},Move,}\" '' { display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Move & Resize,}\" '' { display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Tile,}\" t { join-pane } \"#{?#{!:#{pane_floating_flag}},Float,}\" f { break-pane -W } \"#{?#{!:#{pane_floating_flag}},Horizontal Split,}\" h { split-window -h } \"#{?#{!:#{pane_floating_flag}},Vertical Split,}\" v { split-window -v } '' \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}\" u { swap-pane -U } \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}\" d { swap-pane -D } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-pane } '' Kill X { kill-pane } Respawn R { respawn-pane -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } \"#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}\" z { resize-pane -Z } }";
+
 
 impl KeyTables {
     /// Tables with no bindings at all, for key surfaces that seed their own

@@ -16670,6 +16670,9 @@ fn prepare_expanded_callback_invocation(
             format!("{{ {} }}", format_callback_commands_round_trip(&commands)).into();
         return validate_static_command_chain(&commands);
     }
+    if canonical_command(&command.name) == "display-menu" {
+        return validate_bound_command(command, owner);
+    }
     for index in 0..command.args.len() {
         if !command.argument_is_command_block(index) {
             continue;
@@ -16937,6 +16940,9 @@ fn validate_static_command(command: &CommandInvocation) -> Result<(), ServerErro
     let parsed = parse_tmux_command_options(spec, command)?;
     spec.validate_positional_minimum(parsed.positionals.len())?;
     spec.validate_positional_maximum(parsed.positionals.len())?;
+    if name == "display-menu" {
+        return Ok(());
+    }
     for index in 0..command.args.len() {
         if !command.argument_is_command_block(index) {
             continue;

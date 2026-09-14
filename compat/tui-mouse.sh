@@ -906,8 +906,8 @@ case_right_click_pane() {
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
   send_mouse_both 2 "$((left + 6))" "$((top + 4))" M
-  wait_for 'the pin raised its pane menu' screen_has tmux 'Kill'
-  settle_both MARK-rightclick 'the right click'
+  both_screen_has 'Kill' 'the pane menu'
+  settle_both Kill 'the right click'
   check_screen RIGHT_CLICK right-click-pane/screen
   send_bytes zz $'\033'
   send_bytes tmux $'\033'
@@ -1362,7 +1362,7 @@ FOCUS_OFF_MODE=same
 FOCUS_OFF_REASON=""
 PASTE_COPY_MODE=same
 PASTE_COPY_REASON=""
-RIGHT_CLICK_MODE=record
+RIGHT_CLICK_MODE=same
 RIGHT_CLICK_REASON="MouseDown3Pane raises the pin's pane menu through a root binding over DEFAULT_PANE_MENU's twenty-eight items, positioned with -x M -y M, over #{m/r:}, #{=/9/...:}, buffer_sample, mouse_word, mouse_line, mouse_hyperlink, pane_floating_flag and a nested display-menu; the three screen-reading mouse formats are still unanswered (formats.mouse-context) and the row is not installed (keys.root-native-mouse)"
 
 run_cases() {
@@ -1544,6 +1544,16 @@ sc_one_sided_double_click() {
     'select-pane -t= ; if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" { send-keys -M } { copy-mode -H ; send-keys -X select-word ; run-shell -d 0.3 ; send-keys -X copy-pipe-and-cancel }' \
     >/dev/null 2>&1
 }
+# zz's own pane marked and the pin's not. Both sides still raise the pin's pane
+# menu, so the case's waits are unmoved and the two rows the mark decides -
+# `#{?pane_marked_set,,-}Swap Marked` and `#{?pane_marked,Unmark,Mark}` - are
+# the whole difference. right-click-pane/screen is the only channel that can
+# carry it.
+sc_one_sided_marked_pane() {
+  side_command zz select-pane -m -t "=$INNER_SESSION:0.0" >/dev/null 2>&1
+  case_right_click_pane
+  side_command zz select-pane -M >/dev/null 2>&1
+}
 # `key-bindings.c`'s own `DEFAULT_WINDOW_MENU`, the eleven items the pin's
 # `MouseDown3Status` raises. It is spelled out once here so the position
 # sabotage below can rebind zz with the SAME menu and nothing but the position
@@ -1658,6 +1668,8 @@ run_self_check() {
     sc_one_sided_mouse_context
   self_check_case "zz's border drag released four cells short" catches \
     sc_one_sided_border_drag
+  self_check_case "zz's own pane marked and the pin's not" catches \
+    sc_one_sided_marked_pane
   self_check_case "zz's window menu centred instead of over its status range" \
     catches sc_one_sided_status_menu_position
   self_check_case 'WheelDownStatus unbound on zz only' catches \

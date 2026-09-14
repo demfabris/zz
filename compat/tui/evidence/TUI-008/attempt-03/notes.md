@@ -261,3 +261,23 @@ because every one of them is on a path a decoded POINTER opens — `input_mouse_
 runs only for `InputMessage::MouseKey`, which only a client with a pointer
 sends, and the `send-keys -M` gate needs an invoking key named `DoubleClick`,
 which only the click timer produces.
+
+## The corpus rows this pass ran, after the first push
+
+- `35-corpus-delta-smoke-matched.txt` — the 30 smoke rows of the delta
+  selection whose text names `send-keys`, `send -`, `copy-mode`, `list-keys`,
+  `bind-key`, `bind -`, `Mouse`, `Wheel`, `Click`, `select-word` or
+  `paste-buffer`. Every channel clean on every row.
+- `36-corpus-delta-slow-rows.txt` — `copy-mode-stock-action-keys` and
+  `smoke/command-prompt-editing`, the two slow rows closest to this pass, both
+  clean. `command-item-format`, the third slow row, was run by the first pass
+  and is the last result line in `10-corpus-delta.txt`.
+- `37`, `38-tui-mouse-*-at-the-ledger-tip.txt` — the fixture and its
+  self-check re-run at `c7b924d5`, the ledger commit, which touches only
+  `compat/tui/` and the generated report. The run is byte-identical to the
+  three at `8bef1252`, same md5 `76e3cc87`.
+
+53 of the selection's 167 rows ran here. Nothing in this pass's three hunks can
+reach a corpus row: `input_mouse_key` runs only for `InputMessage::MouseKey`,
+which only a client with a pointer sends, and the `send-keys -M` gate needs an
+invoking key named `DoubleClick`, which only the click timer produces.

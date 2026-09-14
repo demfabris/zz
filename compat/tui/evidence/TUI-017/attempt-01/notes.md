@@ -50,10 +50,24 @@ one trailing newline off the buffer and then prints one, while zz's writer adds 
 newline only when the text lacks one, so an empty last row was swallowed on the
 way out. That is why `-p -a -q` also differed by exactly one byte.
 
-The fixture's own summary line, three runs at c09ccbee:
+The fixture's own summary line, three runs at f0d34be7:
 
     all 78 asserted comparisons identical, 29 recorded not asserted (0 for a sibling lane)
 
 The 29 recorded include this obligation's six clause-1 cases: capture-control,
 capture-flags, capture-hyperlinks, capture-line-numbers, capture-pending and
 capture-grid, each under capture.rich-transports.
+
+## The review fix pass, 2026-09-14, on the Ubuntu box
+
+Nothing in clause 1 or clause 2 changed here; this obligation is re-proved on
+this box after the introspection lane's review fixes landed on the same branch.
+
+`fix-environment.txt` — the box, the pin, the binary and RUN_ENV.
+`fix-corpus-capture.txt` — compat/run.sh --strict-geometry capture-pane
+display-message at the tip, 0 divergences.
+`fix-attached-client.txt` — compat/attached-client.sh at the tip with the pin
+and this worktree's build: `attached-client compatibility: PASS`.
+
+The unreachable `c09ccbee` cited above is replaced by `f0d34be7`, the last code
+commit before b2260e32 added the runs it names.

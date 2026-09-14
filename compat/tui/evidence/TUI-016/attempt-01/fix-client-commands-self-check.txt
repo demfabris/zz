@@ -1,0 +1,69 @@
+self-check: one deliberate one-sided difference per channel, plus two equivalences
+ok    self-check equivalence: the same command on both sides
+      case stdout-sabotage
+      stdout differs
+        0a1
+        > zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check stdout, a buffer on one side only
+      case exit-sabotage
+      exit tmux: 1  zz: 0
+      stdout differs
+        0a1
+        > SABOTAGE
+        \ No newline at end of file
+      stderr differs
+        1d0
+        < no buffer zzcc-sabotage
+      state differs
+        5a6
+        > B zzcc-sabotage 8
+ok    self-check exit and stderr, a buffer missing on one side
+      case state-sabotage
+      state differs
+        1a2
+        > S zzcc-sab 1 0
+        3a5
+        > W zzcc-sab:0 0 * 1
+        5a8
+        > P zzcc-sab:0.0 mode=0/ 80x24 ubuntu
+ok    self-check state, a session on one side only
+      case screen-sabotage
+      screen differs
+        cursor tmux: 2,2 flag=1 pane=80x24 shape=default
+        cursor zz:   3,2 flag=1 pane=80x24 shape=default
+ok    self-check screen, one column at one prompt
+      case normalize-off
+      stdout differs
+        1c1
+        < tty /dev/pts/7
+        ---
+        > tty /dev/pts/6
+ok    self-check two pts numbers differ while nothing normalizes them
+ok    self-check the same two numbers compare equal once normalized
+      case normalize-keeps-the-line
+      stdout differs
+        1a2
+        > zzcc-norm /dev/pts/N
+      state differs
+        1a2
+        > S zzcc-norm 1 0
+        3a5
+        > W zzcc-norm:0 0 * 1
+        5a8
+        > P zzcc-norm:0.0 mode=0/ 80x24 ubuntu
+ok    self-check a one-sided line beside a normalized number is still reported
+      case live-job-sabotage
+      stdout differs
+        0a1
+        > Job 0: sleep 40; echo zzcc-job [fd=N, pid=N, status=0]
+      screen differs
+        24c24
+        < ^[[38;2;13;13;13m^[[48;2;154;205;50mL^[[4m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+        ---
+        > ^[[4m^[[38;2;13;13;13m^[[48;2;154;205;50m0:win*^[[0m^[[38;2;13;13;13m^[[48;2;154;205;50m 1:two
+ok    self-check a format job armed on one side only
+ok    self-check equivalence: every sabotage withdrawn
+self-check complete: every sabotage was caught in its own channel and both equivalences passed

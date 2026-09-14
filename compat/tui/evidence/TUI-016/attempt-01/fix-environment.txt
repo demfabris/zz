@@ -1,0 +1,15 @@
+date: 2026-09-14T17:54:22-03:00
+box: Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 26.04.1 LTS"
+NAME="Ubuntu"
+cpu: 8 cores  mem: 30G
+repo: /home/demfabris/dev/zz-tui-introspection (worktree of /home/demfabris/dev/zz)
+base merge-base: 879b68fcbba93d04a56926c4719108e553fdf910
+branch tip before the evidence commit: 260f343050e1744e53e321249d9fc70b2c4d7f53
+review tip this pass builds on: 8d6944cf
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux d77c9dc6
+zz: target/debug/zz built from this worktree at 260f3430, clean tree
+RUN_ENV: ZZ_COMPAT_TMUX=/home/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_CORPUS=/home/demfabris/dev/zz/compat/.cache/plugins
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+python: Python 3.14.4
+bash: 5.3.9(1)-release

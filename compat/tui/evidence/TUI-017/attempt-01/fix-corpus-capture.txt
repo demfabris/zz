@@ -1,0 +1,486 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m building zz
+   Compiling proc-macro2 v1.0.107
+   Compiling cfg-if v1.0.4
+   Compiling memchr v2.8.3
+   Compiling quote v1.0.47
+   Compiling libc v0.2.189
+   Compiling equivalent v1.0.2
+   Compiling bitflags v2.13.2
+   Compiling serde_core v1.0.229
+   Compiling libm v0.2.16
+   Compiling num-traits v0.2.19
+   Compiling once_cell v1.21.4
+   Compiling pin-project-lite v0.2.17
+   Compiling itoa v1.0.18
+   Compiling foldhash v0.2.0
+   Compiling futures-core v0.3.34
+   Compiling siphasher v1.0.3
+   Compiling rustix v1.1.4
+   Compiling hashbrown v0.17.1
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling regex-syntax v0.8.11
+   Compiling indexmap v2.14.2
+   Compiling zmij v1.0.23
+   Compiling parking v2.2.1
+   Compiling adler2 v2.0.1
+   Compiling scopeguard v1.2.0
+   Compiling aho-corasick v1.1.5
+   Compiling futures-io v0.3.34
+   Compiling anyhow v1.0.104
+   Compiling lock_api v0.4.14
+   Compiling event-listener v5.4.2
+   Compiling tracing-core v0.1.36
+   Compiling slab v0.4.12
+   Compiling event-listener-strategy v0.5.4
+   Compiling erased-serde v0.4.10
+   Compiling serde_fmt v1.1.0
+   Compiling regex-automata v0.4.18
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling simd-adler32 v0.3.10
+   Compiling value-bag-serde1 v1.14.1
+   Compiling phf_shared v0.13.1
+   Compiling value-bag v1.14.1
+   Compiling unicode-width v0.2.2
+   Compiling log v0.4.34
+   Compiling synstructure v0.13.2
+   Compiling async-channel v2.5.0
+   Compiling phf_generator v0.13.1
+   Compiling futures-lite v2.6.1
+   Compiling num-integer v0.1.47
+   Compiling regex v1.13.1
+   Compiling getrandom v0.4.3
+   Compiling libloading v0.8.9
+   Compiling async-task v4.7.1
+   Compiling crc32fast v1.5.2
+   Compiling num-bigint v0.4.8
+   Compiling miniz_oxide v0.9.1
+   Compiling flate2 v1.1.10
+   Compiling num-rational v0.4.2
+   Compiling serde_json v1.0.151
+   Compiling uuid v1.26.1
+   Compiling toml_edit v0.25.15+spec-1.1.0
+   Compiling rustc-hash v2.1.3
+   Compiling uncased v0.9.10
+   Compiling dlib v0.5.3
+   Compiling polling v3.11.0
+   Compiling proc-macro-crate v3.5.0
+   Compiling miniz_oxide v0.8.9
+   Compiling futures-sink v0.3.34
+   Compiling atomic-waker v1.1.2
+   Compiling downcast-rs v1.2.1
+   Compiling piper v0.2.5
+   Compiling wayland-sys v0.31.11
+   Compiling async-io v2.6.0
+   Compiling errno v0.3.14
+   Compiling signal-hook-registry v1.4.8
+   Compiling blocking v1.7.0
+   Compiling futures-channel v0.3.34
+   Compiling async-lock v3.4.2
+   Compiling hashbrown v0.16.1
+   Compiling futures-task v0.3.34
+   Compiling async-signal v0.2.14
+   Compiling fdeflate v0.3.7
+   Compiling generic-array v0.14.7
+   Compiling async-process v2.5.0
+   Compiling nom v8.0.0
+   Compiling no_std_io2 v0.9.4
+   Compiling pulp v0.22.3
+   Compiling bitstream-io v4.10.0
+   Compiling maybe-rayon v0.1.1
+   Compiling async-executor v1.14.0
+   Compiling serde_derive_internals v0.30.0
+   Compiling getrandom v0.2.17
+   Compiling simd_helpers v0.1.0
+   Compiling raw-cpuid v11.6.0
+   Compiling byteorder-lite v0.1.0
+   Compiling iana-time-zone v0.1.65
+   Compiling image-webp v0.2.4
+   Compiling zune-inflate v0.2.54
+   Compiling pxfm v0.1.30
+   Compiling dyn-clone v1.0.20
+   Compiling png v0.18.1
+   Compiling naga v30.0.1
+   Compiling euclid v0.22.14
+   Compiling codespan-reporting v0.13.1
+   Compiling moxcms v0.8.1
+   Compiling core_maths v0.1.1
+   Compiling spirv v0.4.0+sdk-1.4.341.0
+   Compiling darling_core v0.24.1
+   Compiling ash v0.38.0+1.3.281
+   Compiling zerocopy-derive v0.8.57
+   Compiling serde_derive v1.0.229
+   Compiling bytemuck_derive v1.12.1
+   Compiling thiserror-impl v2.0.20
+   Compiling tracing-attributes v0.1.31
+   Compiling bytemuck v1.25.2
+   Compiling zerofrom-derive v0.1.7
+   Compiling zerocopy v0.8.57
+   Compiling yoke-derive v0.8.2
+   Compiling thiserror v2.0.20
+   Compiling zerovec-derive v0.11.6
+   Compiling enumflags2_derive v0.7.12
+   Compiling num-complex v0.4.6
+   Compiling serde v1.0.229
+   Compiling half v2.7.1
+   Compiling smallvec v1.16.1
+   Compiling zvariant_utils v4.2.0
+   Compiling displaydoc v0.2.7
+   Compiling parking_lot_core v0.9.12
+   Compiling profiling-procmacros v1.0.18
+   Compiling tracing v0.1.44
+   Compiling phf_macros v0.13.1
+   Compiling parking_lot v0.12.5
+   Compiling equator-macro v0.4.2
+   Compiling profiling v1.0.18
+   Compiling futures-macro v0.3.34
+   Compiling derive_more-impl v2.1.1
+   Compiling phf v0.13.1
+   Compiling enumflags2 v0.7.12
+   Compiling zcheapstr v1.1.0
+   Compiling arg_enum_proc_macro v0.3.4
+   Compiling thiserror-impl v1.0.69
+   Compiling equator v0.4.2
+   Compiling aligned-vec v0.6.4
+   Compiling v_frame v0.3.9
+   Compiling av1-grain v0.2.5
+   Compiling zerofrom v0.1.8
+   Compiling yoke v0.8.3
+   Compiling zerovec v0.11.8
+   Compiling tinystr v0.8.4
+   Compiling potential_utf v0.1.6
+   Compiling icu_locale_core v2.3.0
+   Compiling zerotrie v0.2.5
+   Compiling icu_collections v2.3.0
+   Compiling futures-util v0.3.34
+   Compiling av-scenechange v0.14.1
+   Compiling icu_provider v2.3.1
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling zvariant_derive v5.15.0
+   Compiling rgb v0.8.53
+   Compiling ref-cast-impl v1.0.27
+   Compiling num-derive v0.4.2
+   Compiling zeroize_derive v1.5.0
+   Compiling idna_adapter v1.2.2
+   Compiling chrono v0.4.45
+   Compiling zvariant v5.15.0
+   Compiling ref-cast v1.0.27
+   Compiling thiserror v1.0.69
+   Compiling zbus_names v4.3.4
+   Compiling rav1e v0.8.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling schemars_derive v1.2.2
+   Compiling exr v1.74.2
+   Compiling zeroize v1.9.0
+   Compiling idna v1.1.0
+   Compiling tiff v0.11.3
+   Compiling naga-types v30.0.1
+   Compiling ravif v0.13.0
+   Compiling qoi v0.4.1
+   Compiling image v0.25.10
+   Compiling url v2.5.8
+   Compiling derive_more v2.1.1
+   Compiling strum_macros v0.28.0
+   Compiling wgpu-types v30.0.1
+   Compiling zbus_macros v5.19.0
+   Compiling filedescriptor v0.8.3
+   Compiling futures-executor v0.3.34
+   Compiling async-trait v0.1.92
+   Compiling serde_repr v0.1.21
+   Compiling schemars v1.2.2
+   Compiling async-recursion v1.1.1
+   Compiling crypto-common v0.1.7
+   Compiling wgpu-hal v30.0.1
+   Compiling async-broadcast v0.7.2
+   Compiling ordered-stream v0.2.0
+   Compiling gpu-allocator v0.28.0
+   Compiling wgpu-naga-bridge v30.0.1
+   Compiling strum v0.28.0
+   Compiling futures v0.3.34
+   Compiling darling_macro v0.24.1
+   Compiling pin-project-internal v1.1.13
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling khronos-egl v6.0.0
+   Compiling getrandom v0.3.4
+   Compiling ordered-float v5.5.0
+   Compiling quick-xml v0.41.0
+   Compiling slotmap v1.1.1
+   Compiling shell-words v1.1.1
+   Compiling wayland-backend v0.3.17
+   Compiling wayland-scanner v0.31.11
+   Compiling zbus v5.19.0
+   Compiling kurbo v0.13.1
+   Compiling int-enum v1.2.0
+   Compiling darling v0.24.1
+   Compiling rand_core v0.9.5
+   Compiling nix v0.28.0
+   Compiling pin-project v1.1.13
+   Compiling multiversion-macros v0.9.0
+   Compiling wgpu-core v30.0.1
+   Compiling phf_codegen v0.13.1
+   Compiling serial2 v0.2.38
+   Compiling base64 v0.23.1
+   Compiling portable-pty v0.9.0
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling rand_chacha v0.9.0
+   Compiling serde_with_macros v3.23.0
+   Compiling wayland-client v0.31.15
+   Compiling svgtypes v0.16.1
+   Compiling wgpu-core-deps-windows-linux-android v30.0.1
+   Compiling csscolorparser v0.8.4
+   Compiling cobs v0.3.0
+   Compiling ttf-parser v0.25.1
+   Compiling ring v0.17.14
+   Compiling block-buffer v0.10.4
+   Compiling http v1.5.0
+   Compiling wgpu v30.0.1
+   Compiling multiversion v0.9.0
+   Compiling memmap2 v0.9.11
+   Compiling fixedbitset v0.5.7
+   Compiling serde_with v3.23.0
+   Compiling futures-concurrency v7.7.1
+   Compiling encoding_rs v0.8.41
+   Compiling zz-terminal v0.8.0 (/home/demfabris/dev/zz-tui-introspection/crates/zz-terminal)
+   Compiling dirs-next v2.0.0
+   Compiling rustls-webpki v0.103.15
+   Compiling digest v0.10.7
+   Compiling postcard v1.1.3
+   Compiling rand v0.9.5
+   Compiling zbus_xml v5.2.1
+   Compiling enumn v0.1.14
+   Compiling lyon_geom v1.0.19
+   Compiling gpui_util v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling serde_spanned v1.1.1
+   Compiling fs-err v3.3.1
+   Compiling rustls v0.23.44
+   Compiling tiny-skia-path v0.11.4
+   Compiling ureq-proto v0.6.2
+   Compiling toml v1.1.6+spec-1.1.0
+   Compiling accesskit v0.24.1
+   Compiling pest v2.9.1
+   Compiling zbus-lockstep v0.5.2
+   Compiling collections v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling lyon_path v1.0.19
+   Compiling zz-protocol v0.8.0 (/home/demfabris/dev/zz-tui-introspection/crates/zz-protocol)
+   Compiling agent-client-protocol-schema v1.7.0
+   Compiling term v0.7.0
+   Compiling fontdb v0.23.0
+   Compiling xattr v1.6.1
+   Compiling clap_derive v4.6.4
+   Compiling block-padding v0.3.3
+   Compiling async-fs v2.2.0
+   Compiling console v0.16.6
+   Compiling tracing-log v0.2.0
+   Compiling filetime v0.2.29
+   Compiling phf_shared v0.11.3
+   Compiling bstr v1.13.1
+   Compiling thread_local v1.1.10
+   Compiling rustybuzz v0.20.1
+   Compiling tracing-subscriber v0.3.23
+   Compiling petgraph v0.6.5
+   Compiling indicatif v0.18.6
+   Compiling compression-codecs v0.4.41
+   Compiling png v0.17.16
+   Compiling string_cache v0.8.9
+   Compiling tar v0.4.46
+   Compiling ureq v3.4.1
+   Compiling inout v0.1.4
+   Compiling ascii-canvas v3.0.0
+   Compiling pest_meta v2.9.1
+   Compiling zlog v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling zbus-lockstep-macros v0.5.2
+   Compiling object v0.37.3
+   Compiling clap v4.6.6
+   Compiling embed-resource v3.0.11
+   Compiling wayland-protocols v0.32.13
+   Compiling selectors v0.37.0
+   Compiling font-types v0.12.5
+   Compiling safe_arch v0.7.4
+   Compiling font-types v0.11.3
+   Compiling cssparser-macros v0.6.1
+   Compiling async-net v2.0.0
+   Compiling lalrpop-util v0.20.2
+   Compiling ena v0.14.4
+   Compiling spin v0.9.9
+   Compiling roxmltree v0.21.1
+   Compiling matrixmultiply v0.3.11
+   Compiling logos-codegen v0.14.4
+   Compiling usvg v0.46.0
+   Compiling lyon_tessellation v1.0.22
+   Compiling cssparser v0.36.0
+   Compiling ztracing v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling backtrace v0.3.76
+   Compiling lalrpop v0.20.2
+   Compiling flume v0.12.0
+   Compiling htmlize v1.1.0
+   Compiling atspi-common v0.13.0
+   Compiling smol v2.0.2
+   Compiling read-fonts v0.37.0
+   Compiling wide v0.7.33
+   Compiling read-fonts v0.41.0
+   Compiling download-cef v3.0.0
+   Compiling gpui v0.2.2 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling pest_generator v2.9.1
+   Compiling cipher v0.4.4
+   Compiling perf v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling tiny-skia v0.11.4
+   Compiling async-compression v0.4.46
+   Compiling lyon_algorithms v1.0.21
+   Compiling hmac v0.12.1
+   Compiling http-body v1.1.0
+   Compiling serde_urlencoded v0.7.1
+   Compiling rand_core v0.6.4
+   Compiling derive_refineable v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling num-iter v0.1.46
+   Compiling approx v0.5.1
+   Compiling etagere v0.2.15
+   Compiling postage v0.5.0
+   Compiling palette_derive v0.7.7
+   Compiling pest_derive v2.9.1
+   Compiling dirs-sys v0.5.0
+   Compiling scheduler v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling cef-dll-sys v152.2.0+152.0.6
+   Compiling refineable v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling simba v0.9.1
+   Compiling rand_chacha v0.3.1
+   Compiling http_client v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling lyon v1.0.19
+   Compiling resvg v0.46.0
+   Compiling util_macros v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling skrifa v0.44.0
+   Compiling logos-derive v0.14.4
+   Compiling sum_tree v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling gpui_shared_string v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling zz-client v0.8.0 (/home/demfabris/dev/zz-tui-introspection/crates/zz-client)
+   Compiling taffy v0.13.0
+   Compiling rustls-pki-types v1.15.1
+   Compiling gpui_macros v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling const-random-macro v0.1.16
+   Compiling hdrhistogram v7.6.0
+   Compiling gethostname v1.1.0
+   Compiling spin v0.10.1
+   Compiling num_cpus v1.17.0
+   Compiling ahash v0.8.12
+   Compiling swash v0.2.10
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling palette v0.7.7
+   Compiling x11rb v0.13.2
+   Compiling const-random v0.1.18
+   Compiling sha2 v0.11.0
+   Compiling nalgebra v0.34.2
+   Compiling logos v0.14.4
+   Compiling rand v0.8.8
+   Compiling nix v0.31.3
+   Compiling lol_html v2.9.0
+   Compiling dirs v6.0.0
+   Compiling num-bigint-dig v0.9.1
+   Compiling json5 v0.4.1
+   Compiling aes v0.8.4
+   Compiling sha2 v0.10.9
+   Compiling merman-core v0.6.2
+   Compiling num v0.4.3
+   Compiling pbkdf2 v0.12.2
+   Compiling hkdf v0.12.4
+   Compiling cbc v0.1.2
+   Compiling skrifa v0.40.0
+   Compiling harfrust v0.5.2
+   Compiling atspi-proxies v0.13.0
+   Compiling yeslogic-fontconfig-sys v6.0.1
+   Compiling freetype-sys v0.20.1
+   Compiling ashpd v0.13.13
+   Compiling globset v0.4.20
+   Compiling accesskit_consumer v0.38.0
+   Compiling md-5 v0.10.6
+   Compiling agent-client-protocol-derive v2.1.0
+   Compiling dugong-graphlib v0.6.2
+   Compiling tempfile v3.27.0
+   Compiling getopts v0.2.24
+   Compiling is-docker v0.2.0
+   Compiling glob v0.3.4
+   Compiling cosmic-text v0.19.0
+   Compiling zed-font-kit v0.14.1-zed (https://github.com/zed-industries/font-kit?rev=94b0f28166665e8fd2f53ff6d268a14955c82269#94b0f281)
+   Compiling pulldown-cmark v0.12.2
+   Compiling interprocess v2.4.4
+   Compiling agent-client-protocol v2.1.0
+   Compiling zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-introspection/crates/zz-mux)
+   Compiling cargo_metadata v0.23.1
+   Compiling is-wsl v0.4.0
+   Compiling dugong v0.6.2
+   Compiling oo7 v0.6.0
+   Compiling accesskit_atspi_common v0.19.1
+   Compiling atspi v0.29.0
+   Compiling rust-embed-utils v8.12.0
+   Compiling manatee v0.6.2
+   Compiling roughr-merman v0.12.3
+   Compiling xim-parser v0.2.1 (https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c)
+   Compiling xim-ctext v0.3.0 (https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c)
+   Compiling calloop v0.14.4
+   Compiling tree-sitter v0.26.13
+   Compiling sysinfo v0.39.6
+   Compiling zed-xim v0.4.0-zed (https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c)
+   Compiling xkbcommon v0.8.0
+   Compiling zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-introspection/crates/zz-daemon)
+   Compiling calloop-wayland-source v0.4.1
+   Compiling cef v152.2.0+152.0.6
+   Compiling rust-embed-impl v8.12.0
+   Compiling merman-render v0.6.2
+   Compiling accesskit_unix v0.22.1
+   Compiling gpui_wgpu v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling open v5.4.4
+   Compiling inotify-sys v0.1.8
+   Compiling x11-clipboard v0.9.3
+   Compiling webpki-roots v1.0.9
+   Compiling wayland-cursor v0.31.14
+   Compiling wayland-protocols-wlr v0.3.12
+   Compiling wayland-protocols-plasma v0.3.12
+   Compiling notify-rust v4.18.0
+   Compiling rusqlite v0.40.2
+   Compiling gpui_linux v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling markdown v1.0.0
+   Compiling zz-browser v0.8.0 (/home/demfabris/dev/zz-tui-introspection/crates/zz-browser)
+   Compiling merman v0.6.2
+   Compiling rust-embed v8.12.0
+   Compiling inotify v0.11.5
+   Compiling sha1 v0.11.0
+   Compiling env_filter v2.0.0
+   Compiling mio v1.2.3
+   Compiling task-local v0.1.1
+   Compiling notify-types v2.1.0
+   Compiling zz-ui v0.8.0 (/home/demfabris/dev/zz-tui-introspection/crates/zz-ui)
+   Compiling notify v8.2.0
+   Compiling ksni v0.3.6
+   Compiling env_logger v0.11.11
+   Compiling zz-chrome-import v0.8.0 (/home/demfabris/dev/zz-tui-introspection/crates/zz-chrome-import)
+   Compiling zz-config v0.8.0 (/home/demfabris/dev/zz-tui-introspection/crates/zz-config)
+   Compiling gpui_platform v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling zz-tui v0.8.0 (/home/demfabris/dev/zz-tui-introspection/crates/zz-tui)
+   Compiling ignore v0.4.33
+   Compiling nucleo-matcher v0.3.1
+   Compiling zz v0.8.0 (/home/demfabris/dev/zz-tui-introspection/crates/zz)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4m 18s
+[1;36m==>[0m running capture-pane
+capture-pane: 23 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running display-message
+display-message: 27 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| capture-pane | 23 | yes | 0 | yes | yes | yes |
+| display-message | 27 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged

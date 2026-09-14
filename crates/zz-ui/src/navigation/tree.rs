@@ -185,7 +185,6 @@ impl IntoElement for IndentGuidesElement {
     }
 }
 
-// Adapted from Zed's project-panel indent-guide stack algorithm.
 pub(crate) fn compute_indent_guides(
     depths: &[usize],
     offset: usize,

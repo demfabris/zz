@@ -144,3 +144,6 @@ browsing local.
 ## License
 
 Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
+
+What zz forks, bundles, and read on the way here is credited in
+[THIRD_PARTY_NOTICE.md](THIRD_PARTY_NOTICE.md).

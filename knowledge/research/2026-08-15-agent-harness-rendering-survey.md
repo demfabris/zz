@@ -1,7 +1,7 @@
 ---
 type: Research Report
 title: Rendering multi-harness agent output — industry survey
-description: How comet, opencode, t3code, Zed, and other agent clients render multi-harness output, followed by zz's decision to adopt a flat ACP v1 contract.
+description: How opencode, Zed, and other agent clients render multi-harness output, followed by zz's decision to adopt a flat ACP v1 contract.
 tags:
 - agent
 - acp
@@ -37,7 +37,7 @@ features zz shipped describe the v55 implementation captured on 2026-08-15.
 
 # The three-layer contract everyone converged on
 
-At least four unrelated codebases (zz, comet, t3code, Vercel's `@ai-sdk/harness`)
+At least four unrelated codebases, zz and Vercel's `@ai-sdk/harness` among them,
 independently landed on the same shape:
 
 1. **A small normalized core** (~10–50 closed event variants: text/reasoning deltas, tool
@@ -51,14 +51,6 @@ zz implements exactly this. The differences between apps are in the *reducer dis
 
 # What each app actually does
 
-- **comet (zeronsh/comet)** — the same stack as zz: Rust + gpui fork, ACP v1, the same
-  `claude-agent-acp`/`codex-acp` adapters, the same placeholder-title denylist and
-  `rawInput._toolName` sniffing. It *migrated to* ACP, deleting ~4,300 lines of bespoke
-  stream-json adapters. Its superior Claude rendering is a layered turn-settle ladder
-  (`_session/turn_ended` extension → Claude cost-frame hint with 1s grace → 30s quiet-settle
-  gated on "fold shows nothing unresolved" → 120s/20s park-not-error watchdog → 1s resume
-  gate separating post-turn echoes from self-continued work) plus **honest flattening**: a
-  Task subagent is one flat chip resolved through the ordinary tool path. No nesting at all.
 - **opencode (anomalyco/opencode)** — wraps no CLI; runs its own agent loop against provider
   APIs with a hand-rolled provider layer. Stability comes from normalizing once at the
   protocol boundary into a closed event vocabulary, a **durable/ephemeral event split**
@@ -67,17 +59,6 @@ zz implements exactly this. The differences between apps are in the *reducer dis
   clients, and **subagents as first-class child sessions** (`parentID`, rendered as a card
   linking to a navigable sub-session). Its own ACP export flattens `task` to a `"think"`
   tool-kind — ACP cannot express a child session.
-- **t3code (pingdotgg/t3code)** — per-vendor native transports at full price: Claude via the
-  official Agent SDK (49 message subtypes in one adapter), Codex via `codex app-server`
-  JSON-RPC (types code-generated from pinned schemas), Cursor/Grok via self-generated ACP,
-  opencode via SSE. ~20k LOC of adapters normalizing into a closed 48-variant union, then a
-  wire model of closed `tone` + open `kind` + opaque payload. Anti-spinner discipline:
-  three-state tool status where neutral flips to ✓ the instant the turn settles; turn
-  completion derived from session status leaving `running`, never from a completion event;
-  synthetic stable IDs for progress rows; subagent output never enters the transcript (one
-  CTA row + a separate Agents panel; liveness reads the coordinator, not members). Their
-  issue tracker documents ripping out idle-timer ACP settling and a Grok ACP adapter
-  emitting ~1.1 MB/s of cumulative `tool_call_update`s that head-of-line blocked ingestion.
 - **Zed** — avoids dangling spinners structurally: panel liveness derives from
   `running_turn.is_some()`, generic tool calls get a static kind icon (never a spinner), and
   only subagent/terminal cards animate. It does not force-settle on clean turn end (its
@@ -147,7 +128,7 @@ Near-term (directly addresses dangling subagent spinners and empty "Done" cards)
 
 1. **Bump `claude-agent-acp` 0.63.0 → ≥0.76.0** and handle the `_session/turn_ended`
    extension — deterministic settling for autonomous/self-continued turns. Gate on
-   "no prompt outstanding" + session-ID match (comet `acp/mod.rs:2371`).
+   "no prompt outstanding" + session-ID match.
 2. **Widen the raw-SDK filter**: subscribe `tool_progress` (`tool_use_id`,
    `parent_tool_use_id`, `elapsed_time_seconds`, `subagent_type`) and `task_progress` —
    this is precisely "subagent spinner with live elapsed time and current tool" — plus
@@ -165,10 +146,10 @@ Near-term (directly addresses dangling subagent spinners and empty "Done" cards)
 5. **Adopt Zed's structural spinner rule**: derive pane busy-chrome from turn liveness, not
    tool statuses; render static kind icons for generic tools, animating only subagent and
    terminal cards. Makes any residual dangling status cosmetically invisible.
-6. **Adopt t3code's turn-settle flip**: any tool still neutral when the turn settles renders
+6. **Flip tool status on turn settle**: any tool still neutral when the turn settles renders
    ✓ (zz's force-settle already writes Completed; extend the same rule to notification rows
    and the sticky strip so submitting/settling acknowledges everything).
-7. **Add comet's stale-echo filter**: track tool IDs folded per turn segment; drop
+7. **Add a stale-echo filter**: track tool IDs folded per turn segment; drop
    post-`Done` echoes (late `tool_call_update`s within ~1s) instead of splicing phantom
    entries; treat genuinely-new output after the gate as a self-continued turn.
 
@@ -193,7 +174,7 @@ Strategic:
     and issue #1847 (tools outliving turns); propose a `_meta`-forwarding contract for
     `tool_progress`/`task_progress` in claude-agent-acp (its #56 asks for exactly this).
     The maintainers listed "subagent rendering" as next up with no owner.
-13. **Do not build per-vendor native transports** (t3code's path): it works but costs ~20k
+13. **Do not build per-vendor native transports**: the approach works but costs ~20k
     LOC of adapters and permanent churn-chasing for a fidelity delta that upstream ACP work
     is actively closing. Exception worth watching: if zz ever wants deep Codex-only features
     (turn steering, thread forking), `codex app-server` is the stable-contract door, and

@@ -1,14 +1,13 @@
 ---
 type: Research Report
 title: Agent-to-agent messaging survey
-description: How Claude Code, Codex, Gemini CLI, herdr, gastown, MCP Agent Mail, A2A, and ACP let one coding agent message another, with Claude Code's peer bus verified live on this machine, the delivery-timing taxonomy every tool converged on, and what it means for a zz message backbone.
+description: How Claude Code, Codex, Gemini CLI, herdr, A2A, and ACP let one coding agent message another, with Claude Code's peer bus verified live on this machine, the delivery-timing taxonomy every tool converged on, and what it means for a zz message backbone.
 tags:
 - agent
 - messaging
 - claude-code
 - codex
 - herdr
-- gastown
 - a2a
 - acp
 - survey
@@ -101,8 +100,6 @@ supported way for a local process to wake an idle TUI session.
 | Zed | `spawn_agent` depth 1 with follow-ups by session id; sibling threads uncontrollable | no |
 | Managed Agents | coordinator to roster threads, `send_to_agent`, one level | cloud only |
 | herdr 0.9.0 | none; `agent.prompt` types into the pane, `agent.wait`, `events.subscribe` (no replay); server-side queue is discussion #2401, unanswered | typing only |
-| gastown 1.2.1 | `gt nudge --mode wait-idle\|queue\|immediate` plus `gt mail` on Dolt beads with groups, queues (claim), channels; mail read by Claude Code hooks (`UserPromptSubmit` runs `gt mail check --inject`) | yes, through hooks and typing |
-| MCP Agent Mail | pull-only mailbox (Git markdown plus SQLite), adjective-noun identities, threads, ack, file leases | yes, if the agent polls |
 | cmux, agent-deck, NTM, uzi | type text into a pane; agent-deck adds parent notification on child state change | typing only |
 
 # Three cross-provider buses, read closely
@@ -117,20 +114,20 @@ None of the three uses Claude Code's sessions registry or inbox socket. The only
 
 # Delivery timing, the converged taxonomy
 
-- **Type into the pane.** herdr, cmux, agent-deck, uzi, NTM, gastown `immediate`. Every author who
+- **Type into the pane.** herdr, cmux, agent-deck, uzi, NTM. Every author who
   documents it also documents the failure: swallowed Enter, double submit on retry, agent-deck's
-  80 s timeout on a busy target, gastown's rule "never raw tmux send-keys".
-- **Wait for idle, then type.** gastown's default. Needs prompt detection; degrades to queue.
-- **Queue for the next turn boundary.** gastown `queue`, Codex `followup_task` and `codex queue`,
-  Claude Code's typed-while-working queue, zz's `agent-send --submit`. Gastown's 1.0.1 note is the
-  hazard: hook-time injection of all open mail on every prompt blew context to 60 to 70 percent.
+  80 s timeout on a busy target, and a standing rule against raw tmux send-keys.
+- **Wait for idle, then type.** Needs prompt detection; degrades to queue.
+- **Queue for the next turn boundary.** Codex `followup_task` and `codex queue`,
+  Claude Code's typed-while-working queue, zz's `agent-send --submit`. The known hazard:
+  hook-time injection of all open mail on every prompt blew context to 60 to 70 percent.
 - **Steer between tool calls without aborting.** Claude Code cross-session delivery, Codex v1
   `send_input`, pi-intercom. Only the process that owns the model loop can do this.
-- **Pull.** MCP Agent Mail, gastown mail without nudge. Durable and auditable, latency accepted.
+- **Pull.** A polled mailbox. Durable and auditable, latency accepted.
 
 Two rules every source agrees on: the receiver must be told the message is from another agent, not
-its user; and protocol chatter must not become durable mail (gastown moved lifecycle traffic from
-mail to ephemeral nudges and cut its commit volume by 80 percent).
+its user; and protocol chatter must not become durable mail (one project moved lifecycle traffic
+from mail to ephemeral nudges and cut its commit volume by 80 percent).
 
 # What zz has today
 
@@ -157,7 +154,8 @@ to reach a Claude Code or Codex TUI other than typing.
    a same-burst text plus Enter as a paste. Every delivery carries a `from` naming the sending
    pane, which `send-text` cannot add today.
 3. **Defer durable mail, threads, and broadcast.** Claude Code has none of the three and is doing
-   fine; gastown regretted the volume. A bounded per-pane inbox with replay in the daemon, like the
+   fine, and the projects that shipped it regretted the volume. A bounded per-pane inbox with
+   replay in the daemon, like the
    existing agent event ring, covers the "target was busy or absent" case.
 4. **Codex TUIs stay on the typing tier** until OpenAI closes #35542, unless zz hosts the thread.
    Cotal's pattern makes Codex first-class without keystrokes: the daemon runs `codex app-server`,
@@ -184,8 +182,6 @@ to reach a Claude Code or Codex TUI other than typing.
 - https://learn.chatgpt.com/docs/app-server and https://learn.chatgpt.com/docs/config-file/config-reference
 - https://github.com/openai/codex/issues/35542 and https://github.com/openai/codex/pull/17749
 - https://github.com/herdrdev/herdr/discussions/2401 and https://herdr.dev/docs/socket-api/
-- https://github.com/gastownhall/gastown (nudge.go, docs/HOOKS.md, CHANGELOG.md)
-- https://github.com/Dicklesworthstone/mcp_agent_mail
 - https://a2a-protocol.org/latest/specification/
 - https://agentclientprotocol.com/rfds/v2/overview
 - https://github.com/nicobailon/pi-intercom

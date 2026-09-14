@@ -1,0 +1,44 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-tui-introspection/target/debug/zz
+[1;36m==>[0m running capture-pane
+capture-pane: 23 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running display-message
+display-message: 27 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running pane-spawn-options
+pane-spawn-options: 25 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running new-session-environment
+new-session-environment: 18 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running native-prefix-isolation
+native-prefix-isolation: 29 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running pane-border-span-owner
+pane-border-span-owner: 10 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running send-keys-reset
+send-keys-reset: 16 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running command-alias
+command-alias: 16 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| capture-pane | 23 | yes | 0 | yes | yes | yes |
+| display-message | 27 | yes | 0 | yes | yes | yes |
+| pane-spawn-options | 25 | yes | 0 | yes | yes | yes |
+| new-session-environment | 18 | yes | 0 | yes | yes | yes |
+| native-prefix-isolation | 29 | yes | 0 | yes | yes | yes |
+| pane-border-span-owner | 10 | yes | 0 | yes | yes | yes |
+| send-keys-reset | 16 | yes | 0 | yes | yes | yes |
+| command-alias | 16 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged

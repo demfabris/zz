@@ -653,10 +653,11 @@ opens: `ChooseTreeKind` gains a trailing `Clients`, `ChooseTreeTarget` a trailin
 status_width }` and `Markup { lines }` that `window_client_draw` and `window_client_draw_info`
 fill, and `ChooseTreeAction` the trailing `ClientDetach`, `ClientDetachTagged` and `ClientInfo`
 the daemon resolves `d`, `D` and `i` to inside that mode. All five are pure end-appends with both
-halves in the same push. v103 appends `view_action: Option<TerminalViewAction>` and
-`press_action: Option<TerminalViewAction>` to `InputMessage::MouseKey` after `border`, the pane
-input the gesture carries and the one its press carried, which are the pin's own `m->x`/`m->y` and
-`m->lx`/`m->ly`.
+halves in the same push. v103 appends `view_action: Option<TerminalViewAction>`,
+`press_action: Option<TerminalViewAction>` and `status_range_start: Option<u16>` to
+`InputMessage::MouseKey` after `border`, the pane input the gesture carries, the one its press
+carried - the pin's own `m->x`/`m->y` and `m->lx`/`m->ly` - and the first column of the status
+range the gesture landed in.
 
 v103 appends `pane: Option<PaneId>` to `CommandPromptState` after `no_freeze`: `command-prompt -P`
 is `window_pane_set_prompt`, so the prompt belongs to that pane rather than to the client, and
@@ -704,7 +705,12 @@ the server log still records the command the caller typed. See
   tried, which is `server_client_handle_key`'s own `forward_key`. `copy-mode -M` anchors its
   selection on the second before the first extends it, the way `window_copy_start_drag` reads
   `cmd_mouse_at(wp, m, &x, &y, 1)`. The client encodes both because it owns the cell grid and the
-  pixel geometry the encoding needs. Pure end-appends with their consumer halves in the same push;
+  pixel geometry the encoding needs. `status_range_start: Option<u16>` follows them, the first
+  column of the status range the gesture landed in and absent anywhere else, which is `sr->start`
+  off the target client's own status entries in `cmd_display_menu_get_pos` and is what
+  `display-menu -x W` puts the pin's window menu on; the client composes its own status row and
+  owns its hit ranges, so the start travels with the event rather than being recomputed by a daemon
+  that never lays the row out. Pure end-appends with their consumer halves in the same push;
   GUI clients send the message never and are unchanged. The cycle-9 mouse lane wrote them against
   102, which shipped in zz 0.9.0 and 0.9.1 while the lane was running: a released version cannot
   take appends, because two builds would both claim it and disagree about the bytes, so the version

@@ -1357,8 +1357,8 @@ STATUS_MODE=same
 STATUS_REASON=""
 STATUS_MENU_MODE=same
 STATUS_MENU_REASON=""
-PASTE_MENU_MODE=record
-PASTE_MENU_REASON="not a measured divergence: on this box at this tip the two screens agree, all 24 rows identical on every run, the menu is raised on both sides before the paste is sent (both_screen_has PASTEMENU waits for it on each side) and paste-under-menu/option is alpha on both; the channel is held at record, and only at record, until a lane drives it one-sided with a --self-check sabotage and flips it to same, because the two binaries reach the tail of a bracketed paste by different routes - the pin takes the run key by key through the overlay where the raw TUI turns the whole run into one Paste event before any overlay sees it (input.rs handle_paste, zz-client menu.rs resolve_menu_paste) - and a different payload or a different menu could still separate them"
+PASTE_MENU_MODE=same
+PASTE_MENU_REASON=""
 FOCUS_OFF_MODE=same
 FOCUS_OFF_REASON=""
 PASTE_COPY_MODE=same
@@ -1545,6 +1545,16 @@ sc_one_sided_double_click() {
     'select-pane -t= ; if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" { send-keys -M } { copy-mode -H ; send-keys -X select-word ; run-shell -d 0.3 ; send-keys -X copy-pipe-and-cancel }' \
     >/dev/null 2>&1
 }
+# A longer paste on zz only. The menu eats the same leading characters on both
+# sides and `a` picks the same item on both, so the option is unmoved and the
+# tail the pane is left holding is the whole difference.
+# paste-under-menu/screen is the only channel that can carry it.
+sc_one_sided_menu_paste_tail() {
+  PASTE_BYTES_ZZ=$'\033[200~pasted-text-and-more\033[201~'
+  case_paste_under_menu
+  PASTE_BYTES_ZZ=""
+  respawn_shell_both
+}
 # zz's own pane marked and the pin's not. Both sides still raise the pin's pane
 # menu, so the case's waits are unmoved and the two rows the mark decides -
 # `#{?pane_marked_set,,-}Swap Marked` and `#{?pane_marked,Unmark,Mark}` - are
@@ -1669,6 +1679,8 @@ run_self_check() {
     sc_one_sided_mouse_context
   self_check_case "zz's border drag released four cells short" catches \
     sc_one_sided_border_drag
+  self_check_case 'a longer paste under the menu on zz only' catches \
+    sc_one_sided_menu_paste_tail
   self_check_case "zz's own pane marked and the pin's not" catches \
     sc_one_sided_marked_pane
   self_check_case "zz's window menu centred instead of over its status range" \

@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use gpui::{AnyElement, App, Context, Entity, IntoElement, px};
-use zz_client::{StatusBarModel, StatusBarSettings};
+use zz_client::StatusBarModel;
 use zz_ui::{
     navigation::{
         WorkspaceStatusWindowState,
@@ -26,7 +26,7 @@ pub(super) fn render(view: &WebClient, cx: &mut Context<WebClient>) -> AnyElemen
         core.snapshot(),
         core.attached_session(),
         None,
-        StatusBarSettings::default(),
+        view.preferences.status_bar_settings(),
     );
     let active = model
         .windows

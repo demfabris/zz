@@ -37,8 +37,8 @@ use zz_ui::{
         tree_chooser_row,
     },
     navigation::{
-        WORKSPACE_SIDEBAR_DEFAULT_WIDTH, workspace_chrome_controls, workspace_layout_button,
-        workspace_settings_button, workspace_sidebar_surface, workspace_sidebar_titlebar,
+        workspace_chrome_controls, workspace_layout_button, workspace_settings_button,
+        workspace_sidebar_surface, workspace_sidebar_titlebar,
     },
     pane::{PaneChrome, PaneSplitAxis, pane_border_color, pane_split_hit_target, pane_surface},
     settings::{SettingsSection, settings_navigation_button, settings_navigation_group_label},
@@ -176,6 +176,9 @@ impl WebClient {
                         }
                     }
                     zz_client::CoreEvent::HelloReceived | zz_client::CoreEvent::Attached { .. } => {
+                        if matches!(event, zz_client::CoreEvent::Attached { .. }) {
+                            connection.update(cx, Connection::set_color_scheme);
+                        }
                         this.focused_pane = None;
                         this.waiting_panes.clear();
                         this.popup_terminal = None;
@@ -258,7 +261,9 @@ impl WebClient {
         let preferences = settings::Preferences::load(cx);
         let appearance_view = cx.weak_entity();
         let appearance_observer = window.observe_window_appearance(move |window, cx| {
-            let _ = appearance_view.update(cx, |this, cx| this.preferences.apply(window, cx));
+            let _ = appearance_view.update(cx, |this, cx| {
+                this.preferences.apply(&this.connection, window, cx);
+            });
         });
         let settings_controls = settings::Controls::new(&preferences, window, cx);
         let this = Self {
@@ -295,7 +300,7 @@ impl WebClient {
             _subscriptions: vec![key_events, observer, events, appearance_observer],
         };
         this.connection.update(cx, Connection::start);
-        this.preferences.apply(window, cx);
+        this.preferences.apply(&this.connection, window, cx);
         this
     }
 
@@ -441,15 +446,17 @@ impl WebClient {
             }
             Some(ChromeAction::ToggleSidebar) => self.toggle_sidebar(cx),
             Some(ChromeAction::UiZoomIn) => {
-                self.preferences.change_zoom(0.1, window, cx);
+                self.preferences
+                    .change_zoom(0.1, &self.connection, window, cx);
                 self.sync_zoom_input(window, cx);
             }
             Some(ChromeAction::UiZoomOut) => {
-                self.preferences.change_zoom(-0.1, window, cx);
+                self.preferences
+                    .change_zoom(-0.1, &self.connection, window, cx);
                 self.sync_zoom_input(window, cx);
             }
             Some(ChromeAction::UiZoomReset) => {
-                self.preferences.reset_zoom(window, cx);
+                self.preferences.reset_zoom(&self.connection, window, cx);
                 self.sync_zoom_input(window, cx);
             }
             Some(ChromeAction::ClosePane) => {
@@ -481,6 +488,11 @@ impl WebClient {
         let layout = workspace_layout_button("web-sidebar")
             .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)));
         workspace_chrome_controls(settings, Some(layout.into_any_element())).into_any_element()
+    }
+
+    pub(super) fn sidebar_width(&self, window: &Window) -> f32 {
+        self.preferences
+            .sidebar_width(f32::from(window.viewport_size().width))
     }
 
     fn sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -545,12 +557,26 @@ impl WebClient {
         };
         workspace_sidebar_surface(
             "web-sidebar-surface",
-            WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
+            self.sidebar_width(window),
             workspace_sidebar_titlebar("web-sidebar-titlebar", self.controls(cx), cx),
             navigation,
             cx,
         )
         .track_focus(&self.sidebar_focus)
+        .child(
+            div()
+                .id("web-sidebar-resize-handle")
+                .absolute()
+                .top(px(0.0))
+                .right(px(0.0))
+                .bottom(px(0.0))
+                .w(px(8.0))
+                .cursor(gpui::CursorStyle::ResizeLeftRight)
+                .occlude()
+                .on_drag(SidebarResizeDrag, |_: &SidebarResizeDrag, _, _, cx| {
+                    cx.new(|_| SidebarResizePreview)
+                }),
+        )
         .into_any_element()
     }
 
@@ -1479,6 +1505,19 @@ impl Render for WebClient {
             overlays,
         )
         .track_focus(&self.focus)
+        .on_drag_move::<SidebarResizeDrag>(cx.listener(
+            |this, event: &DragMoveEvent<SidebarResizeDrag>, window, cx| {
+                let previous = this.preferences.sidebar_width;
+                this.preferences.sidebar_width =
+                    f32::from(event.event.position.x - event.bounds.origin.x);
+                this.preferences.sidebar_width = this.sidebar_width(window);
+                if this.preferences.sidebar_width != previous {
+                    this.preferences.save();
+                    cx.notify();
+                }
+                cx.stop_propagation();
+            },
+        ))
         .on_mouse_up(
             MouseButton::Left,
             cx.listener(|this, _, _, cx| {
@@ -1507,6 +1546,17 @@ impl Render for WebClient {
                 cx.notify();
             }),
         )
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SidebarResizeDrag;
+
+struct SidebarResizePreview;
+
+impl Render for SidebarResizePreview {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size(px(1.0)).opacity(0.0)
     }
 }
 

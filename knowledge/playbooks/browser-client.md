@@ -9,7 +9,7 @@ tags:
 - client
 - websocket
 - gpui
-timestamp: 2026-09-14T13:00:00Z
+timestamp: 2026-09-14T16:00:00Z
 ---
 
 # Overview
@@ -81,13 +81,18 @@ the desktop presentation. Reclaimed drafts and PNG, JPEG, and WebP attachments a
 The working-directory picker lists known Agent directories and accepts an absolute path on the
 daemon host; recursive filesystem discovery remains desktop-only. Appearance preferences for the
 browser live in local storage: system/light/dark mode, a desktop chrome preset per mode, the
-three editable palette roots, zoom, and corner radius. Numeric fields, color pickers, theme previews, and
-pane-picker rows use the desktop components. Panes settings use the shared Layout, Focus, and
+three editable palette roots, zoom, corner radius, animations, and shadow strength.
+The animation switch respects the platform’s reduced-motion preference. Terminal color schemes
+follow the effective light/dark mode after attachment and when that mode changes. Numeric fields,
+color pickers, theme previews, and pane-picker rows use the desktop components. Panes settings use the shared Layout, Focus, and
 Frame groups for gaps, inactive opacity, margins, pane radius, and border width. These settings are
 saved independently from widget radius. Sidebar rows share desktop labels, markers, layout and
-rename menus, add/split/close actions, and keyboard navigation. The window strip shares tabs,
-overflow, rename/close menus, session selection, agent count, and clock presentation. The browser
-client bundles Inter for chrome and Lilex for terminals, code, and command output; the font
+rename menus, add/split/close actions, and keyboard navigation. Drag the sidebar’s right edge to
+resize it; the browser saves the width and clamps it to 160–640 logical pixels and half the viewport,
+with a 160-pixel minimum. The window strip shares tabs, overflow, rename/close menus, session
+selection, and agent activity. Status bar settings control
+the session menu, window bell/activity badges, and agent activity, with the shared live preview.
+The browser omits host and update items. It bundles Inter for chrome and Lilex for terminals, code, and command output; the font
 families named by the daemon's terminal appearance are host fonts and are ignored. It ships no
 CJK or emoji fallback, so unsupported glyphs render as missing glyphs.
 

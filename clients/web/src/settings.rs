@@ -23,11 +23,18 @@ use zz_ui::{
 };
 
 use super::WebClient;
+use crate::connection::Connection;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct Preferences {
     pub sidebar: bool,
+    pub sidebar_width: f32,
+    pub status_show_session: bool,
+    pub status_badges: bool,
+    pub status_agents: bool,
+    pub animations: bool,
+    pub shadow_strength: f32,
     pub gaps: bool,
     pub dark: bool,
     pub mode: Option<String>,
@@ -49,6 +56,12 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             sidebar: true,
+            sidebar_width: zz_ui::navigation::WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
+            status_show_session: true,
+            status_badges: true,
+            status_agents: true,
+            animations: true,
+            shadow_strength: 1.0,
             gaps: false,
             dark: true,
             mode: None,
@@ -68,6 +81,10 @@ impl Default for Preferences {
     }
 }
 
+struct PlatformReduceMotion(bool);
+
+impl gpui::Global for PlatformReduceMotion {}
+
 impl Preferences {
     pub(super) fn load(_: &App) -> Self {
         #[cfg(target_family = "wasm")]
@@ -82,6 +99,13 @@ impl Preferences {
     }
 
     fn sanitized(mut self) -> Self {
+        self.sidebar_width = bounded(
+            self.sidebar_width,
+            160.0,
+            640.0,
+            zz_ui::navigation::WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
+        );
+        self.shadow_strength = bounded(self.shadow_strength, 0.0, 1.0, 1.0);
         self.zoom = bounded(self.zoom, 0.5, 3.0, 1.0);
         self.radius = bounded(self.radius, 0.0, 24.0, 6.0);
         self.contrast = bounded(self.contrast, 0.5, 2.0, 1.0);
@@ -104,7 +128,11 @@ impl Preferences {
         }
     }
 
-    pub(super) fn apply(&self, window: &mut Window, cx: &mut App) {
+    pub(super) fn apply(&self, connection: &Entity<Connection>, window: &mut Window, cx: &mut App) {
+        if !cx.has_global::<PlatformReduceMotion>() {
+            cx.set_global(PlatformReduceMotion(cx.reduce_motion()));
+        }
+        cx.set_reduce_motion(cx.global::<PlatformReduceMotion>().0 || !self.animations);
         if let Some(mode) = zz_ui::chrome_palette::pinned_theme_mode(self.theme_mode()) {
             Theme::change(mode, Some(window), cx);
         } else {
@@ -120,11 +148,28 @@ impl Preferences {
         );
         Theme::global_mut(cx).radius = px(self.radius);
         Theme::global_mut(cx).set_contrast(self.contrast);
+        Theme::global_mut(cx).shadow_strength = self.shadow_strength;
         Theme::global_mut(cx).pane_background_opacity = self.pane_background_opacity;
         Theme::global_mut(cx).pane_glow_strength = self.pane_glow_strength;
         cx.set_global(UiZoom(self.zoom));
         window.set_zoom(self.zoom);
+        connection.update(cx, Connection::set_color_scheme);
         cx.refresh_windows();
+    }
+
+    pub(super) fn status_bar_settings(&self) -> zz_client::StatusBarSettings {
+        zz_client::StatusBarSettings {
+            show_session: self.status_show_session,
+            badges: self.status_badges,
+            show_agents: self.status_agents,
+            show_host: false,
+            show_update: false,
+        }
+    }
+
+    pub(super) fn sidebar_width(&self, available_width: f32) -> f32 {
+        self.sidebar_width
+            .clamp(160.0, (available_width * 0.5).clamp(160.0, 640.0))
     }
 
     fn preset(&self, mode: ThemeMode) -> Option<ChromePresetId> {
@@ -148,16 +193,27 @@ impl Preferences {
             })
     }
 
-    pub(super) fn change_zoom(&mut self, step: f32, window: &mut Window, cx: &mut App) {
+    pub(super) fn change_zoom(
+        &mut self,
+        step: f32,
+        connection: &Entity<Connection>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         self.zoom = ((self.zoom + step) * 10.0).round().clamp(5.0, 30.0) / 10.0;
         self.save();
-        self.apply(window, cx);
+        self.apply(connection, window, cx);
     }
 
-    pub(super) fn reset_zoom(&mut self, window: &mut Window, cx: &mut App) {
+    pub(super) fn reset_zoom(
+        &mut self,
+        connection: &Entity<Connection>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         self.zoom = 1.0;
         self.save();
-        self.apply(window, cx);
+        self.apply(connection, window, cx);
     }
 }
 
@@ -165,6 +221,7 @@ pub(super) struct Controls {
     zoom: Entity<InputState>,
     radius: Entity<InputState>,
     contrast: Entity<InputState>,
+    shadow_strength: Entity<InputState>,
     panes: [Entity<InputState>; 6],
     colors: Vec<Entity<ColorPickerState>>,
     search_engine: Entity<SelectState<Vec<SettingsSelectItem>>>,
@@ -198,11 +255,19 @@ impl Controls {
                 .min(50.0)
                 .max(200.0)
         });
+        let shadow_strength = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value((preferences.shadow_strength * 100.0).to_string())
+                .step(5.0)
+                .min(0.0)
+                .max(100.0)
+        });
         let mut subscriptions = Vec::new();
         for (input, key) in [
             (&zoom, "zoom"),
             (&radius, "radius"),
             (&contrast, "contrast"),
+            (&shadow_strength, "shadow-strength"),
         ] {
             subscriptions.push(cx.subscribe_in(
                 input,
@@ -215,6 +280,7 @@ impl Controls {
                     let (min, max, previous) = match key {
                         "zoom" => (50.0, 300.0, this.preferences.zoom * 100.0),
                         "contrast" => (50.0, 200.0, this.preferences.contrast * 100.0),
+                        "shadow-strength" => (0.0, 100.0, this.preferences.shadow_strength * 100.0),
                         _ => (0.0, 24.0, this.preferences.radius),
                     };
                     let parsed = input
@@ -232,6 +298,7 @@ impl Controls {
                     match key {
                         "zoom" => this.preferences.zoom = value / 100.0,
                         "contrast" => this.preferences.contrast = value / 100.0,
+                        "shadow-strength" => this.preferences.shadow_strength = value / 100.0,
                         _ => this.preferences.radius = value,
                     }
                     if commit {
@@ -240,7 +307,7 @@ impl Controls {
                         });
                     }
                     this.preferences.save();
-                    this.preferences.apply(window, cx);
+                    this.preferences.apply(&this.connection, window, cx);
                 },
             ));
         }
@@ -321,7 +388,7 @@ impl Controls {
                         let ColorPickerEvent::Change(color) = event;
                         this.preferences.colors[index] = color.map(zz_ui::to_hex);
                         this.preferences.save();
-                        this.preferences.apply(window, cx);
+                        this.preferences.apply(&this.connection, window, cx);
                     },
                 ));
                 state
@@ -331,6 +398,7 @@ impl Controls {
             zoom,
             radius,
             contrast,
+            shadow_strength,
             panes,
             colors,
             search_engine: cx.new(|cx| SelectState::new(Vec::new(), None, window, cx)),
@@ -363,7 +431,7 @@ impl WebClient {
             color.update(cx, |color, cx| color.set_color(None, window, cx));
         }
         self.preferences.save();
-        self.preferences.apply(window, cx);
+        self.preferences.apply(&self.connection, window, cx);
     }
 
     pub(super) fn render_settings(
@@ -403,7 +471,7 @@ impl WebClient {
                             move |this, _, window, cx| {
                                 this.preferences.mode = Some(mode.as_str().into());
                                 this.preferences.save();
-                                this.preferences.apply(window, cx);
+                                this.preferences.apply(&this.connection, window, cx);
                             },
                         ))
                     }));
@@ -424,7 +492,7 @@ impl WebClient {
                             )
                             .on_click(cx.listener(
                                 |this, _, window, cx| {
-                                    this.preferences.reset_zoom(window, cx);
+                                    this.preferences.reset_zoom(&this.connection, window, cx);
                                     this.sync_zoom_input(window, cx);
                                 },
                             )),
@@ -507,7 +575,7 @@ impl WebClient {
                                 input.set_value("100", window, cx);
                             });
                             this.preferences.save();
-                            this.preferences.apply(window, cx);
+                            this.preferences.apply(&this.connection, window, cx);
                         })),
                     )
                     .control(
@@ -520,12 +588,55 @@ impl WebClient {
                 );
                 rows.push(
                     SettingEntry::new(
+                        "Animations",
+                        "Animate interface transitions, loading indicators, and image frames.",
+                    )
+                    .control(
+                        Switch::new("web-animations")
+                            .checked(self.preferences.animations)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.preferences.animations = !this.preferences.animations;
+                                this.preferences.save();
+                                this.preferences.apply(&this.connection, window, cx);
+                            })),
+                    ),
+                );
+                rows.push(
+                    SettingEntry::new(
                         "Widget corner radius",
                         "Round buttons, fields, and other interface controls.",
                     )
                     .control(
                         div().w(px(120.0)).flex_none().child(
                             NumberInput::new(&self.settings_controls.radius)
+                                .small()
+                                .bg(settings_control_fill(cx)),
+                        ),
+                    ),
+                );
+                rows.push(
+                    SettingEntry::new(
+                        "Shadow strength",
+                        "Strength of shadows around controls and gapped panes, from 0% (off) to 100%.",
+                    )
+                    .title_actions(
+                        settings_reset_button(
+                            "web-shadow-strength-reset",
+                            "Reset shadow strength to 100%",
+                            self.preferences.shadow_strength != 1.0,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.preferences.shadow_strength = 1.0;
+                            this.settings_controls.shadow_strength.update(cx, |input, cx| {
+                                input.set_value("100", window, cx);
+                            });
+                            this.preferences.save();
+                            this.preferences.apply(&this.connection, window, cx);
+                        })),
+                    )
+                    .control(
+                        div().w(px(120.0)).flex_none().child(
+                            NumberInput::new(&self.settings_controls.shadow_strength)
                                 .small()
                                 .bg(settings_control_fill(cx)),
                         ),
@@ -562,13 +673,50 @@ impl WebClient {
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
                     ),
                 );
-                rows.push(
-                    SettingEntry::new(
-                        "Window tabs",
-                        "Click a window name in the top bar to select it.",
-                    )
-                    .control("Visible"),
-                );
+                for (id, title, description, checked) in [
+                    (
+                        "session",
+                        "Session",
+                        "Show the session menu in the titlebar.",
+                        self.preferences.status_show_session,
+                    ),
+                    (
+                        "badges",
+                        "Window badges",
+                        "Show bell and activity markers on window items.",
+                        self.preferences.status_badges,
+                    ),
+                    (
+                        "agents",
+                        "Agent activity",
+                        "Show agent activity in the titlebar.",
+                        self.preferences.status_agents,
+                    ),
+                ] {
+                    rows.push(
+                        SettingEntry::new(title, description).control(
+                            Switch::new(format!("web-status-{id}"))
+                                .checked(checked)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let value = match id {
+                                        "session" => &mut this.preferences.status_show_session,
+                                        "badges" => &mut this.preferences.status_badges,
+                                        _ => &mut this.preferences.status_agents,
+                                    };
+                                    *value = !*value;
+                                    this.preferences.save();
+                                    cx.notify();
+                                })),
+                        ),
+                    );
+                }
+                return zz_ui::settings::status_bar_preview::status_bar_page(
+                    self.preferences.status_bar_settings(),
+                    self.preferences.gaps,
+                    SettingsStack::new().children(rows),
+                    cx,
+                )
+                .into_any_element();
             }
             SettingsSection::Panes => {
                 let gaps =
@@ -616,7 +764,7 @@ impl WebClient {
                                                     );
                                                 });
                                             this.preferences.save();
-                                            this.preferences.apply(window, cx);
+                                            this.preferences.apply(&this.connection, window, cx);
                                         },
                                     )),
                                 )
@@ -643,7 +791,7 @@ impl WebClient {
                                                     );
                                                 });
                                             this.preferences.save();
-                                            this.preferences.apply(window, cx);
+                                            this.preferences.apply(&this.connection, window, cx);
                                         },
                                     )),
                                 )
@@ -941,6 +1089,78 @@ fn bounded(value: f32, min: f32, max: f32, fallback: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::Preferences;
+
+    #[test]
+    fn older_preferences_gain_status_and_appearance_defaults() {
+        let defaults = serde_json::from_str::<Preferences>(r#"{"sidebar":false}"#).unwrap();
+        assert!(!defaults.sidebar);
+        assert!(defaults.animations);
+        assert_eq!(defaults.shadow_strength, 1.0);
+        assert_eq!(
+            defaults.sidebar_width,
+            zz_ui::navigation::WORKSPACE_SIDEBAR_DEFAULT_WIDTH
+        );
+        let status = defaults.status_bar_settings();
+        assert!(status.show_session && status.badges && status.show_agents);
+        assert!(!status.show_host && !status.show_update);
+        let changed = Preferences {
+            status_show_session: false,
+            status_badges: false,
+            status_agents: false,
+            animations: false,
+            shadow_strength: 0.35,
+            sidebar_width: 320.0,
+            ..defaults
+        };
+        let saved = serde_json::to_string(&changed).unwrap();
+        let restored = serde_json::from_str::<Preferences>(&saved)
+            .unwrap()
+            .sanitized();
+        assert_eq!(
+            restored.status_bar_settings(),
+            changed.status_bar_settings()
+        );
+        assert!(!restored.animations);
+        assert_eq!(restored.shadow_strength, 0.35);
+        assert_eq!(restored.sidebar_width, 320.0);
+    }
+
+    #[test]
+    fn sidebar_and_shadow_values_stay_within_supported_limits() {
+        for (width, available, expected) in [
+            (0.0, 1000.0, 160.0),
+            (300.0, 1000.0, 300.0),
+            (800.0, 1000.0, 500.0),
+            (800.0, 2000.0, 640.0),
+            (300.0, 200.0, 160.0),
+        ] {
+            let preferences = Preferences {
+                sidebar_width: width,
+                ..Preferences::default()
+            }
+            .sanitized();
+            assert_eq!(preferences.sidebar_width(available), expected);
+        }
+        let invalid = Preferences {
+            sidebar_width: f32::NAN,
+            shadow_strength: f32::INFINITY,
+            ..Preferences::default()
+        }
+        .sanitized();
+        assert_eq!(invalid.sidebar_width, Preferences::default().sidebar_width);
+        assert_eq!(invalid.shadow_strength, 1.0);
+        for (value, expected) in [(-0.1, 0.0), (1.5, 1.0), (0.4, 0.4)] {
+            assert_eq!(
+                Preferences {
+                    shadow_strength: value,
+                    ..Preferences::default()
+                }
+                .sanitized()
+                .shadow_strength,
+                expected
+            );
+        }
+    }
 
     #[test]
     fn contrast_defaults_clamps_and_round_trips_with_preferences() {

@@ -175,6 +175,7 @@ pub struct Connection {
     attaching: bool,
     retry_default: bool,
     focused: bool,
+    color_scheme: Option<zz_terminal::TerminalColorScheme>,
     #[cfg(target_family = "wasm")]
     socket: Option<browser::Socket>,
     #[cfg(target_family = "wasm")]
@@ -199,6 +200,7 @@ impl Connection {
             attaching: false,
             retry_default: false,
             focused: true,
+            color_scheme: None,
             #[cfg(target_family = "wasm")]
             socket: None,
             #[cfg(target_family = "wasm")]
@@ -256,6 +258,7 @@ impl Connection {
     }
 
     pub fn reconnect(&mut self, cx: &mut Context<Self>) {
+        self.color_scheme = None;
         self.connected = false;
         self.attaching = false;
         self.retry_default = false;
@@ -341,6 +344,24 @@ impl Connection {
 
     pub fn input(&mut self, _: PaneId, input: InputMessage, cx: &mut Context<Self>) {
         self.send(ProtocolMessage::Input(input), cx);
+    }
+
+    pub fn set_color_scheme(&mut self, cx: &mut Context<Self>) {
+        use zz_ui::ActiveTheme as _;
+
+        let color_scheme = if cx.theme().mode.is_dark() {
+            zz_terminal::TerminalColorScheme::Dark
+        } else {
+            zz_terminal::TerminalColorScheme::Light
+        };
+        if self.connected
+            && self.core.attached_session().is_some()
+            && !self.attaching
+            && self.color_scheme != Some(color_scheme)
+        {
+            self.color_scheme = Some(color_scheme);
+            self.send(ProtocolMessage::SetColorScheme(color_scheme), cx);
+        }
     }
 
     pub fn set_focused(&mut self, focused: bool, cx: &mut Context<Self>) {

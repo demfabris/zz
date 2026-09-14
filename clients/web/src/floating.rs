@@ -23,7 +23,7 @@ impl WebClient {
         size(
             (viewport.width
                 - px(if self.sidebar || self.settings.is_some() {
-                    zz_ui::navigation::WORKSPACE_SIDEBAR_DEFAULT_WIDTH
+                    self.sidebar_width(window)
                 } else {
                     0.0
                 }))

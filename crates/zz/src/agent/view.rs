@@ -276,9 +276,9 @@ enum PermissionStep {
 /// The pane's pending permission requests, one per page, in arrival order.
 ///
 /// ACP v1 permission options are a closed, typed set, so a page is answered by
-/// picking one of them: the free-text override comet's question wizard carries
-/// would only apply to kindless, question-shaped requests, which v1 cannot
-/// deliver (see `acp_v1_rejects_permission_options_with_an_unknown_kind`).
+/// picking one of them: a free-text override would only apply to kindless,
+/// question-shaped requests, which v1 cannot deliver (see
+/// `acp_v1_rejects_permission_options_with_an_unknown_kind`).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct PermissionWizard {
     page: usize,

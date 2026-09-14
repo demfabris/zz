@@ -7,6 +7,10 @@ the decoded screen: cells, styles, cursor, geometry, interaction. Escape-sequenc
 outside it. The contract is `knowledge/designs/tui-parity.md`; how a cycle runs is
 `knowledge/playbooks/tui-parity-campaign.md`.
 
+**Resuming?** `compat/tui/HANDOFF.md` is the current handoff: where the campaign stopped, which
+branches are waiting for a gate, and what a gate arriving cold has to know. Read it before the
+table below.
+
 This directory is the campaign's state, shaped like the tmux compat campaign one level up:
 
 | File | Role | tmux campaign counterpart |
@@ -15,6 +19,11 @@ This directory is the campaign's state, shaped like the tmux compat campaign one
 | `tracker.py` | Validates the ledger, generates the report, lists ready obligations | `compat/tmux-tracker.py` |
 | `tracker_test.py` | The validator's tests; `compat/check.sh` runs them | `compat/board_test.py` |
 | `run-1.js` | The cycle-1 runner: one worker lane, one adversarial reviewer, one gate | `compat/orchestration/opus-compat-run-N.js` |
+| `run-N.js` | Each cycle's runner; `lint-runner.py` must pass before one is launched | `compat/orchestration/opus-compat-run-N.js` |
+| `HANDOFF.md` | Where the campaign stopped and how to pick it up on another box | `compat/orchestration/HANDOFF.md` |
+| `agentwatch.py` | Tells a spinning agent from a slow one on a 15-minute timer | |
+| `verify-claims.py` | Re-measures a verified obligation instead of trusting a lane | |
+| `lint-runner.py` | One rule per lesson a cycle paid for; gates a runner's launch | |
 | `evidence/<ID>/<attempt>/` | Real measurements: environment, fixture output, captures, the review | scenarios and `compat/results/summary.md` |
 | `knowledge/tmux/tui-parity.md` | The generated report; never edit it by hand | `knowledge/tmux/gaps.md` |
 

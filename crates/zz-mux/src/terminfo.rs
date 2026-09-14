@@ -40,8 +40,7 @@ struct TtyFeature {
 /// tty-term.c `tty_term_codes`: the 233 capability names tmux reads for a
 /// client terminal, with the type it reads each one as. `tty_term_has_name`
 /// answers 0 for every name outside this table, whatever the terminfo entry
-/// carries. The order is `enum tty_code_code`'s, because the table is indexed
-/// by it and `tty_term_describe` prints that index.
+/// carries.
 const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("acsc", CapabilityKind::Text),
     ("am", CapabilityKind::Flag),
@@ -448,9 +447,6 @@ impl TtyTerm {
     /// `tty_term_create` for a client whose terminfo entry produced `entries`,
     /// each a `name=value` string the way `tty_term_read_list` writes them,
     /// with the global `terminal-features` and `terminal-overrides` arrays.
-    /// `negotiated` is the comma-separated `tty->term_features` the client's
-    /// own replies have already added, which `tty_update_features` applies to
-    /// the same term object after it is built.
     #[must_use]
     pub fn create(
         term_name: &str,
@@ -561,15 +557,11 @@ impl TtyTerm {
         self.features.contains(name)
     }
 
-    /// `term->flags`, which `show-messages -T` prints as `flags=0x%x` in each
-    /// terminal's header line.
     #[must_use]
     pub const fn flags(&self) -> u32 {
         self.flags
     }
 
-    /// `tty_term_describe` over every code in `tty_term_codes` order: the
-    /// lines `cmd_show_messages_terminals` prints under that header.
     #[must_use]
     pub fn describe(&self) -> Vec<String> {
         TTY_TERM_CODES
@@ -701,10 +693,6 @@ impl TtyTerm {
     }
 }
 
-/// `strnvis` under `VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL`: a graphic character
-/// and a space stand for themselves, a backslash doubles, the seven C escapes
-/// and NUL take their letter, and every other byte is octal. The pin writes
-/// into a 128-byte buffer and stops before the piece that would not fit.
 fn strnvis(value: &str) -> String {
     const LIMIT: usize = 127;
     let mut visible = String::new();
@@ -1245,10 +1233,6 @@ mod tests {
         assert_eq!(strtonum("-1"), None);
     }
 
-    /// `tty_term_describe` over the same term, which is what `show-messages -T`
-    /// prints. The index is `enum tty_code_code`'s, a code the entry omits and
-    /// no feature writes reads `[missing]`, and a string is `strnvis`'d under
-    /// `VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL`.
     #[test]
     fn the_description_is_the_line_the_pin_prints_for_each_code() {
         let term = TtyTerm::create(

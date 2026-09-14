@@ -158,3 +158,34 @@ relaunch costs only the killed agent's own progress.
   the tmux handoff.
 - Shared checkout: other sessions' uncommitted work lives in `~/dev/zz`; add worktrees from it,
   never stash, reset or clean it.
+
+## Second-half lanes
+
+A worker that returns with its obligation still `active` has not failed. Read
+what it left: if its report names the remaining items and the files that own
+them, launch a second-half lane on top of its branch straight away rather than
+carrying the obligation into the next cycle.
+
+There is capacity for it. A cycle's gates run one per branch in a fixed order,
+each pushing main before the next starts, so from the moment the last review
+returns, every agent slot but one is idle for hours. That is where a second-half
+lane goes, and it costs nothing the cycle was otherwise going to use.
+
+Shape it like `compat/tui/run-9b.js`:
+
+- its base is the first half's campaign branch, not `origin/main`, and the batch
+  says so in capitals, because `COMMON` otherwise tells a lane to start at main;
+- it quotes the first half's measurements as measurements and tells the lane to
+  re-run the fixture before trusting any of them;
+- it says exactly how the ground moves: the first half is under review and the
+  cycle's gates push main while the lane works, so commit only your own work,
+  fetch on a timer, and rebase onto `origin/main` once the first half lands
+  there;
+- it points `CARGO_TARGET_DIR` at a finished lane's warm target. A cold build of
+  this workspace costs half an hour and 150 GB;
+- its gate is the only gate of its runner, so it runs the shared corpus sets, and
+  it claims MAIN knowing a cycle gate may hold it. A claim on a held front fails
+  whoever asks, this holder included: that is a queue, not an error.
+
+`compat/tui/agentwatch.py` raises SECOND HALF when a worker finishes short, so
+the opportunity does not depend on the orchestrator noticing.

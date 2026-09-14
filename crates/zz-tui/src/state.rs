@@ -139,12 +139,36 @@ pub(crate) struct Model {
     /// drag off a divider resolves inside the pane it lands in and the border
     /// gesture the press started is lost.
     pub mouse_drag: Option<MouseDragLatch>,
+    /// `CLIENT_DOUBLECLICK`, `CLIENT_TRIPLECLICK` and `c->click_event`: the
+    /// press sequence a pointer is in the middle of, and the event the
+    /// `KEYC_CLICK_TIMEOUT` timer replays as a `DoubleClick` when it expires
+    /// with no third press behind it.
+    pub click: Option<ClickSequence>,
     pub focus_follows_mouse: bool,
     pub mouse_arming: crate::tty::MouseArming,
     client_focus: ClientFocusState,
     local_host_label: String,
     local_endpoint: Endpoint,
     fleet_hosts: Vec<HostEntry>,
+}
+
+/// The pin's click sequence, which lives on the client because the pointer
+/// does: a press is a `MouseDown`, a second press inside `KEYC_CLICK_TIMEOUT`
+/// on the same button, location and pane is a `SecondClick`, a third is a
+/// `TripleClick`, and a timer that expires after a `SecondClick` with no third
+/// press behind it replays the stored event as a `DoubleClick`.
+#[derive(Clone, Debug)]
+pub struct ClickSequence {
+    pub deadline: std::time::Instant,
+    /// `CLIENT_TRIPLECLICK`: the second press was taken, so the next one is a
+    /// `TripleClick` and an expiring timer is a `DoubleClick`.
+    pub triple: bool,
+    pub button: crate::terminal_event::MouseButton,
+    pub location: String,
+    pub pane: Option<PaneId>,
+    pub window: Option<zz_protocol::WindowId>,
+    pub event: crate::terminal_event::MouseEvent,
+    pub cell: (u16, u16, u32, u32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -231,6 +255,7 @@ impl Model {
             mouse_bindings: crate::app::mouse_binding_names(core.key_tables()),
             copy_mouse_bindings: crate::app::copy_mouse_binding_names(core.key_tables()),
             mouse_drag: None,
+            click: None,
             focus_follows_mouse: crate::app::focus_follows_mouse_enabled(core.mux_options()),
             mouse_arming: if crate::app::mouse_option_enabled(core.mux_options()) {
                 crate::tty::MouseArming::Button

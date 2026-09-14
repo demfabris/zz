@@ -7880,12 +7880,17 @@ impl MuxEngine {
                     count: repeat,
                 },
             };
-            return Ok(Execution::effect(MuxEffect::TerminalView {
+            let mut effects = Self::mouse_cursor_move(context, pane);
+            effects.push(MuxEffect::TerminalView {
                 pane,
                 action,
                 target_client,
                 require_mode: true,
-            }));
+            });
+            return Ok(Execution {
+                output: RawText::default(),
+                effects,
+            });
         }
         if options.has("-M") {
             let Some(mouse) = context.invoking_mouse() else {
@@ -7978,6 +7983,29 @@ impl MuxEngine {
             .effects
             .push(MuxEffect::SendKeys { pane, keys, repeat });
         Ok(execution)
+    }
+
+    /// `window_copy_command`: every `send -X` run from a mouse binding that is
+    /// not a wheel moves the copy cursor to the event's cell first, which is
+    /// what `window_copy_move_mouse` does. The cell travels with the event as
+    /// the pane input the client encoded, so a wheel is the one whose stored
+    /// action is a scroll and carries no cell to move to.
+    fn mouse_cursor_move(context: &ExecutionContext, pane: PaneId) -> Vec<MuxEffect> {
+        let Some(mouse) = context.invoking_mouse() else {
+            return Vec::new();
+        };
+        if mouse.pane != Some(pane) {
+            return Vec::new();
+        }
+        match mouse.view_action.as_ref() {
+            Some(TerminalViewAction::Mouse(input)) => vec![MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(CopyModeAction::MouseCursor(input.cell)),
+                target_client: None,
+                require_mode: true,
+            }],
+            _ => Vec::new(),
+        }
     }
 
     fn send_prefix(
@@ -15930,6 +15958,7 @@ pub fn copy_mode_action_is_read_only_safe(action: &CopyModeAction) -> bool {
             | CopyModeAction::PreviousPrompt { .. }
             | CopyModeAction::SetMark
             | CopyModeAction::JumpToMark
+            | CopyModeAction::MouseCursor(_)
             | CopyModeAction::Cancel
             | CopyModeAction::NextSpace
             | CopyModeAction::PreviousSpace

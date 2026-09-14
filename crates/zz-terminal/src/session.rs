@@ -9009,7 +9009,14 @@ fn apply_copy_mode_action(
             Ok(ViewActionResult::Snapshot)
         }
         CopyModeAction::SelectWord => {
-            let (anchor, focus) = mode_word_bounds(&mode.revision, mode.cursor, word_separators);
+            let (anchor, mut focus) =
+                mode_word_bounds(&mode.revision, mode.cursor, word_separators);
+            if !mode_keys_vi {
+                focus.x = focus
+                    .x
+                    .saturating_add(1)
+                    .min(mode.revision.columns.saturating_sub(1));
+            }
             mode.selection = Some(ModeSelection {
                 anchor,
                 focus,
@@ -9171,6 +9178,12 @@ fn apply_copy_mode_action(
         }
         CopyModeAction::SelectionMode(unit) => {
             mode.selection_mode = unit;
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::MouseCursor(cell) => {
+            mode.cursor = mode_pointer_point(&mode, cell);
+            reveal_copy_cursor(&mut mode);
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
@@ -19152,7 +19165,7 @@ mod tests {
             .selection
             .expect("word selection");
         assert_eq!(selection.anchor.x, 2);
-        assert_eq!(selection.focus.x, 4);
+        assert_eq!(selection.focus.x, 5);
 
         apply_copy_mode_action(
             &mut terminal,
@@ -21698,7 +21711,7 @@ preexec_functions+=(__zz_fixture_preexec)
         );
         let row = forward.cursor.y;
         let selection = forward.selection.expect("selection");
-        assert_eq!(forward.cursor.x, 10);
+        assert_eq!(forward.cursor.x, 11);
         assert_eq!(selection.anchor, PointCoordinate { x: 6, y: row });
         assert_eq!(selection.focus, PointCoordinate { x: 15, y: row });
 
@@ -21717,9 +21730,9 @@ preexec_functions+=(__zz_fixture_preexec)
         );
         let row = backward.cursor.y;
         let selection = backward.selection.expect("selection");
-        assert_eq!(backward.cursor.x, 5);
+        assert_eq!(backward.cursor.x, 6);
         assert_eq!(selection.anchor, PointCoordinate { x: 9, y: row });
-        assert_eq!(selection.focus, PointCoordinate { x: 0, y: row });
+        assert_eq!(selection.focus, PointCoordinate { x: 6, y: row });
     }
 
     #[test]
@@ -21781,7 +21794,7 @@ preexec_functions+=(__zz_fixture_preexec)
         );
         let row = swapped.cursor.y;
         let selection = swapped.selection.expect("selection");
-        assert_eq!(selection.anchor, PointCoordinate { x: 4, y: row });
+        assert_eq!(selection.anchor, PointCoordinate { x: 5, y: row });
         assert_eq!(selection.focus, PointCoordinate { x: 1, y: row });
     }
 
@@ -21796,9 +21809,9 @@ preexec_functions+=(__zz_fixture_preexec)
         );
         let row = word.cursor.y;
         let selection = word.selection.expect("selection");
-        assert_eq!(word.cursor, PointCoordinate { x: 9, y: row });
+        assert_eq!(word.cursor, PointCoordinate { x: 10, y: row });
         assert_eq!(selection.anchor, PointCoordinate { x: 6, y: row });
-        assert_eq!(selection.focus, PointCoordinate { x: 9, y: row });
+        assert_eq!(selection.focus, PointCoordinate { x: 10, y: row });
 
         let line = run_copy_actions(
             b"one\r\ntwo\r\nthree",

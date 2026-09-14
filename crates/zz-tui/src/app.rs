@@ -585,9 +585,20 @@ pub(crate) fn run(
         let event = if browser.should_pump(now) {
             None
         } else {
-            receive_main_event(&incoming, message_wait(&model, browser.wait(now), now))?
+            receive_main_event(
+                &incoming,
+                click_wait(&model, message_wait(&model, browser.wait(now), now), now),
+            )?
         };
         let Some(event) = event else {
+            let now = Instant::now();
+            if model
+                .click
+                .as_ref()
+                .is_some_and(|sequence| sequence.deadline <= now)
+            {
+                input::expire_click_sequence(&mut model, &client)?;
+            }
             if pump_browser_provider(&mut browser, &mut renderer, &model, &client, Instant::now())?
             {
                 renderer
@@ -1902,6 +1913,19 @@ fn message_wait(model: &Model, wait: BrowserWait, now: Instant) -> BrowserWait {
         return wait;
     };
     let remaining = deadline.saturating_duration_since(now);
+    match wait {
+        BrowserWait::Blocking => BrowserWait::Timeout(remaining),
+        BrowserWait::Timeout(timeout) => BrowserWait::Timeout(timeout.min(remaining)),
+    }
+}
+
+/// `evtimer_add(&c->click_timer, ...)`: the loop stops blocking long enough to
+/// notice a click sequence that has run out of time.
+fn click_wait(model: &Model, wait: BrowserWait, now: Instant) -> BrowserWait {
+    let Some(sequence) = model.click.as_ref() else {
+        return wait;
+    };
+    let remaining = sequence.deadline.saturating_duration_since(now);
     match wait {
         BrowserWait::Blocking => BrowserWait::Timeout(remaining),
         BrowserWait::Timeout(timeout) => BrowserWait::Timeout(timeout.min(remaining)),

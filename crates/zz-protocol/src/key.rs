@@ -298,6 +298,35 @@ impl Default for KeyTables {
                 },
             );
         }
+        for (key, action) in [
+            ("DoubleClick1Pane", "select-word"),
+            ("TripleClick1Pane", "select-line"),
+        ] {
+            let fallback = format!(
+                "{{ copy-mode -H ; send-keys -X {action} ; run-shell -d 0.3 ; send-keys -X copy-pipe-and-cancel }}"
+            );
+            tables.bind(
+                "root",
+                key,
+                Binding {
+                    commands: vec![
+                        CommandInvocation::new("select-pane", ["-t", "="]),
+                        CommandInvocation::new(
+                            "if-shell",
+                            [
+                                "-F",
+                                "#{||:#{pane_in_mode},#{mouse_any_flag}}",
+                                "{ send-keys -M }",
+                                fallback.as_str(),
+                            ],
+                        )
+                        .with_command_blocks([2, 3]),
+                    ],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
         tables.bind(
             "root",
             "MouseDown2Pane",
@@ -353,6 +382,25 @@ impl Default for KeyTables {
                     note: None,
                 },
             );
+            for (key, action) in [
+                ("DoubleClick1Pane", "select-word"),
+                ("TripleClick1Pane", "select-line"),
+            ] {
+                tables.bind(
+                    table,
+                    key,
+                    Binding {
+                        commands: vec![
+                            CommandInvocation::new("select-pane", [] as [&str; 0]),
+                            CommandInvocation::new("send-keys", ["-X", action]),
+                            CommandInvocation::new("run-shell", ["-d", "0.3"]),
+                            CommandInvocation::new("send-keys", ["-X", "copy-pipe-and-cancel"]),
+                        ],
+                        repeat: false,
+                        note: None,
+                    },
+                );
+            }
             for (key, action) in [
                 ("WheelUpPane", "scroll-up"),
                 ("WheelDownPane", "scroll-down"),
@@ -3552,6 +3600,9 @@ mod tests {
         .collect::<std::collections::BTreeSet<_>>();
         let actual = tables.tables["copy-mode"]
             .keys()
+            .filter(|key| {
+                !key.contains("Mouse") && !key.contains("Wheel") && !key.contains("Click")
+            })
             .map(String::as_str)
             .collect::<std::collections::BTreeSet<_>>();
 
@@ -3664,6 +3715,9 @@ mod tests {
         .collect::<std::collections::BTreeSet<_>>();
         let actual = tables.tables["copy-mode-vi"]
             .keys()
+            .filter(|key| {
+                !key.contains("Mouse") && !key.contains("Wheel") && !key.contains("Click")
+            })
             .map(String::as_str)
             .collect::<std::collections::BTreeSet<_>>();
 

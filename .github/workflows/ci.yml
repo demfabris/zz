@@ -92,6 +92,7 @@ jobs:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
         run: |
           cargo fmt --manifest-path clients/web/Cargo.toml -- --check
+          cargo clippy --manifest-path clients/web/Cargo.toml --all-targets --locked -- -D warnings
           cargo test --manifest-path clients/web/Cargo.toml --lib --locked
           rustup toolchain install nightly --profile minimal --target wasm32-unknown-unknown
           rustup run nightly cargo check --manifest-path clients/web/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked

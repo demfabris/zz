@@ -105,3 +105,72 @@ gap already covers in writing for `choose-tree` and `choose-buffer`. The `d`,
 are implemented but not asserted whole-screen: a scene with one client per side
 cannot survive its own detach, so `client-run-*` proves the Enter path and the
 `%%` substitution through a template that does not detach.
+
+## GATE ADDENDUM, 2026-09-14, cycle 6 commands
+
+### The two files the lane's listing above missed (reviewer nit 5)
+
+- `cargo-crates.txt` — the lane's `cargo test -p zz-protocol -p zz-mux -p zz-tui`,
+  exit 0.
+- `check-sh.txt` — the lane's `compat/check.sh`, exit 0.
+
+### Five more zone excursions the lane's section above did not name (reviewer nit 7)
+
+Each is forced and small; two of the five are already in TUI-014's `sources`.
+
+- `crates/zz-daemon/src/keys.rs`: the new `client_mode_key_action`. Forced
+  because the pin keeps `d`, `D` and `i` inside the client mode rather than in a
+  key table (window-client.c `window_client_key`), so the daemon has to resolve
+  them where it resolves the mode tree's own keys.
+- `crates/zz-mux/src/sort.rs`: `WINDOW_CLIENT_ORDER_SEQ`. Forced by the four
+  sort orders `O` steps through; the pin's own `window_client_order_seq` lives
+  beside its other order sequences and zz's mirror of it lives beside theirs.
+- `crates/zz-mux/src/lib.rs`: the re-export of that constant, one line, forced
+  by the daemon needing it.
+- `crates/zz-mux/tests/hunt_claims.rs`: `COMMAND_SPECS` 78 -> 79 and an
+  `info_preview` field on the chooser claim. Forced by the byte pins, which fail
+  the moment a command spec or a chooser field appears.
+- `crates/zz/src/chooser/tree.rs`: two match arms for the appended
+  `ChooseTreeKind` variant in the GUI. Forced by exhaustiveness - the crate does
+  not compile without them.
+
+### The gate's own runs
+
+All at the gate tip in /home/demfabris/dev/zz-gate-tui7 against the pin
+d77c9dc6 and the zz build whose sha256 is in `environment.txt`.
+
+- `review.md` — the reviewer's verdict verbatim, what the gate did with each
+  blocker, must-fix and nit, and what the gate measured that the review did not.
+- `gate-choosers-run-1.txt`, `-2`, `-3` — three runs at the gate tip, each exit 0
+  and `all 73 asserted comparisons identical, 3 recorded not asserted (0 for a
+  sibling lane)`. The `filter-cleared` flake the lane saw in its run 2 did not
+  appear in any of the three.
+- `gate-choosers-self-check.txt` — exit 0.
+- `gate-client-commands.txt`, `gate-client-commands-self-check.txt` — both after
+  the gate's correction to `CLIENT_TREE_CLIENTLESS`; 61 asserted identical, 37
+  recorded, and every sabotage caught in its own channel.
+- The stage-3 list, every one exit 0: `gate-tui-screen-diff.txt`,
+  `gate-tui-screen-diff-self-check.txt`, `gate-tui-pane-geometry.txt`,
+  `gate-status-row.txt` (LC_ALL=C LC_TIME=C), `gate-tui-stock-keys.txt`,
+  `gate-tui-stock-keys-self-check.txt`, `gate-tui-indicators.txt`,
+  `gate-tui-indicators-self-check.txt`, `gate-tui-copy-mode.txt`,
+  `gate-tui-copy-mode-self-check.txt`, `gate-tui-caps.txt`,
+  `gate-tui-caps-self-check.txt`, `gate-tui-overlays.txt`,
+  `gate-tui-overlays-self-check.txt`, `gate-attached-client.txt`.
+- `gate-tui-mouse.txt` — not on the stage-3 list, run because this lane edits
+  `crates/zz-protocol/src/key.rs` and that fixture is the keys lane's. Exit 0,
+  `all 26 asserted checks identical`, 10 recorded: unchanged from the keys gate,
+  so TUI-008 is still active and TUI-012 stays at review.
+- `gate-cargo.txt` — the three package test runs, clippy and fmt, with the
+  result lines and the three count assertions the rebase had to resolve by hand.
+- `gate-corpus.txt` — the 164-row selection, the coverage proof, the two
+  environmental divergences with what each actually is, and every row's summary
+  line.
+- `gate-probe-info.sh`, `gate-probe-info-1.txt`, `-2`, `-3` — the reviewer's own
+  info-view probe with ZZ_BIN pointed at the gate build, run three times. This
+  is the measurement behind the clause-1 correction, and behind the one
+  divergence of theirs that did not reproduce.
+- `gate-probe-clientless.sh`, `gate-probe-clientless.txt` — the clientless
+  `choose-client` / `choose-tree` / `choose-buffer` comparison behind the
+  `clients.interactive-refresh` widening, including the `#{pane_in_mode}`
+  readings that show the pin opens no mode for choose-client.

@@ -1,0 +1,15 @@
+### choose-client -t %0
+  zz   exit=1 out=[choose-client requires an interactive client]
+  pin  exit=0 out=[]
+  pin pane_in_mode after: 0
+  zz  pane_in_mode after: 0
+### choose-tree -t %0
+  zz   exit=1 out=[choose-tree requires an interactive client]
+  pin  exit=0 out=[]
+  pin pane_in_mode after: 1
+  zz  pane_in_mode after: 0
+### choose-buffer -t %0
+  zz   exit=1 out=[choose-buffer requires an interactive client]
+  pin  exit=0 out=[]
+  pin pane_in_mode after: 1
+  zz  pane_in_mode after: 0

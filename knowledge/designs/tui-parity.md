@@ -2,7 +2,7 @@
 type: Design Plan
 title: TUI parity campaign
 description: "The terminal-client parity contract: tmux observable behavior by default, zz additions through superset commands, and proof tied to the tested revision."
-status: "Contract agreed 2026-09-09; cycles 1, 3, 4, 5, 6 and 7 integrated (7/12 verified: TUI-001/002/003/004/005/007/010) at wire protocol 102; TUI-011 split into five children TUI-014 to TUI-018 in cycle 7 and TUI-012 holds a complete proof at review behind TUI-008 and TUI-009; cycle 8 draws lane zones around obligations rather than crates and takes TUI-008, TUI-009 and choose-client for TUI-006; the TUI portion of accepted native-presentation gaps follows this contract (triage 2026-09-10); TUI-013 (the macOS timeout) deferred as added scope"
+status: "Contract agreed 2026-09-09; cycles 1, 3, 4, 5, 6, 7 and 8 integrated (8/12 verified: TUI-001/002/003/004/005/007/009/010) at wire protocol 102; TUI-011 waits on its five children TUI-014 to TUI-018 and TUI-012 holds a complete proof at review behind TUI-008; cycle 9 takes TUI-008, TUI-006 with TUI-014, and TUI-016 with TUI-017; lane zones are drawn around obligations rather than crates, and a verified claim is re-measured by compat/tui/verify-claims.py; the TUI portion of accepted native-presentation gaps follows this contract (triage 2026-09-10); TUI-013 (the macOS timeout) deferred as added scope"
 resource: compat/tui/campaign.json
 tags:
 - tui

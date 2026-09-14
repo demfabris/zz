@@ -53,50 +53,55 @@ RGB) stays part of the cell, as `tui.status-row` in `compat/tmux-gaps.json` esta
 
 ## State
 
-The count is **7/12 baseline verified** (TUI-001 to TUI-005, TUI-007, TUI-010), added scope 0/6, at
-wire protocol 102.
+The count is **8/12 baseline verified** (TUI-001 to TUI-005, TUI-007, TUI-009, TUI-010), added scope
+0/6, at wire protocol 102.
 
-Cycle 7 (2026-09-13, alienware, three lanes, 13.7 hours, nine agents, no agent errors) verified
-nothing and was still the most productive cycle so far. It landed three branches, produced two new
-fixtures, and turned every remaining unknown into a named cause with the file that owns it. That is
-what cycle 8 spends:
+Cycle 8 (2026-09-13 to 14, alienware, three lanes, three agents at a time, 14.1 hours, nine agents,
+no agent errors) verified **TUI-009**, which had been open since cycle 4 and spent three cycles
+blocked on two daemon files no lane held. Giving one lane `client.rs` and `terminal_features.rs`
+closed it in a single 132-minute worker run: `compat/tui-caps.sh` went from 351 asserted with 15
+recorded to **366 asserted with none**, and its reviewer approved outright.
 
-- **input** (`a1b865e4`) built `compat/tui-mouse.sh` and made a bound mouse key run its binding from
-  a raw-TUI pointer event, which was the hard half of TUI-008. Mouse arming now follows the client's
-  own state, and a `MENU_NOMOUSE` menu leaves arming to the `mouse` option the way `menu_prepare`
-  does. TUI-008 keeps 17 recorded cases: eight are the pin's stock root bindings, which zz still
-  does not install (`list-keys -T root` answers 27 rows on the pin and 0 on zz), two are a paste
-  written straight through an overlay, one is focus delivery, one is the `mouse_*` formats in
-  `crates/zz-mux/src/formats.rs`. TUI-009 keeps 15 rows, all three causes blocked on accessors in
-  `crates/zz-daemon/src/client.rs` and `terminal_features.rs`.
-- **roster** (`46a02abe`) compared the whole stock client-command roster on both binaries, took
-  TUI-011 to review, and split its uncovered families into five children, **TUI-014** (client mode
-  tools, including the `choose-client` that holds TUI-006), **TUI-015** (a lock surface),
-  **TUI-016** (server log and terminal introspection), **TUI-017** (rich capture transports and
-  three smaller text residues) and **TUI-018** (caller stream forms). TUI-011 now depends on all
-  five. `choose-client` did not land, which the lane reports as its own shortfall.
-- **superset** (`b4d1c2a2`) proved TUI-012 with no source change at all and parked it at review with
-  its proof block filled, held on TUI-008 and TUI-009.
+That is the cycle's real lesson, and it is now the campaign's rule: **a lane's zones are drawn
+around its obligation, across whatever crates it needs.** Three cycles in a row an obligation stayed
+open only because its last fix sat outside the lane's zones, and each time it closed in one run once
+a lane held those files.
 
-Cycle 8 (`compat/tui/run-8.js`) is the closing cycle and changes one thing: **zones are drawn around
-obligations, not crates**. Three cycles running, an obligation stayed open because its last fix sat
-in a crate the lane did not hold, and each time it closed in one run once a lane was given those
-files. Three lanes, three agents at a time (the two cargo slots and the per-command memory caps are
-unchanged, so at most two compiles ever run at once):
+- **keys** (`9f0a7de7`) landed the pin's border, status-wheel and mouse-context bindings from a
+  pointer and closed nine gap items, and kept **TUI-008 active at ten recorded checks** where its own
+  worker had reported six. Its next_action now names the two unlocks exactly: `send-keys -M` handing
+  the invoking event to the pane, together with `#{mouse_any_flag}` answering the pane's real mode
+  instead of the constant zero it is in `crates/zz-mux/src/formats.rs`, and then a copy-table mouse
+  name reachable from a pointer. The gate also measured `smoke/status-background-jobs` nine times at
+  `origin/main` (2 green, 7 red) and established it as a fifth environmental row on this box rather
+  than paying for it again.
+- **caps** (`adc1a9d0`) verified TUI-009.
+- **commands** (`420264a2`) landed **`choose-client`**, the command zz never had, and flipped the
+  chooser fixture's `client-tree-open`. **TUI-006 still does not verify**: three command-output cases
+  remain inside its own clause 2. TUI-014 stays active on its info preview, and TUI-016 and TUI-017
+  were never reached, because the lane spent its whole budget on `choose-client`.
 
-- **keys** takes TUI-008 with every file the mouse work touches across six crates, installs the pin's
-  27 root and 14 copy-table stock bindings on the routing path cycle 7 built, and normalises the
-  detach timestamp that has cost three gates a rerun.
-- **caps** takes TUI-009 and finally holds `client.rs` and `terminal_features.rs`, so the v102
-  append carrying what a client's terminal answered after the hello can land and close thirteen
-  `client_colours` and `client_termfeatures` rows at once.
-- **commands** takes `choose-client` first and nothing else until it asserts, then the rest of
-  TUI-014, then TUI-016, then TUI-017's three text residues if budget remains. Its gate verifies
-  TUI-006.
+Two claims were caught by review rather than by a gate, which is why the campaign now re-measures
+instead of trusting: the commands lane reported TUI-014's clause 1 proved when no case ever pressed
+`i` on both sides, and stated in the ledger that the chooser fixture held no recorded case for
+TUI-006 when it held three. `compat/tui/verify-claims.py` runs an obligation's fixture and reads the
+tally the fixture prints about itself; `compat/check.sh` runs its structural half, so every gate gets
+it. `compat/tui/lint-runner.py` holds one rule per lesson an earlier cycle paid for and must pass
+before a cycle launches.
 
-The last gate of the cycle verifies TUI-012 if TUI-008 and TUI-009 both land. TUI-011 waits on all
-five children; TUI-015 and TUI-018 are not cycle 8's, and TUI-018's own record calls it a design
-item on the superset roadmap rather than parity polish.
+Cycle 9 (`compat/tui/run-9.js`) runs three lanes and can reach 11/12:
+
+- **mouse** takes TUI-008's ten remaining checks behind the two named unlocks. TUI-012's
+  verification waits on it.
+- **choosers** takes TUI-006's three command-output records first, because it closes a baseline id,
+  then TUI-014's info preview and its three mode tools. Its prompt change reaches verified TUI-005,
+  so `compat/tui-copy-mode.sh` staying at zero recorded is a gate blocker.
+- **introspection** takes TUI-016 and TUI-017's three text residues, and its gate, being last,
+  verifies TUI-012 once TUI-008 lands.
+
+After cycle 9 only **TUI-011** should remain, waiting on TUI-015 (a lock surface, which needs a
+product decision about ownership and cancellation before code) and TUI-018 (a bounded caller-stream
+channel, which its own record places on the superset roadmap rather than in parity polish).
 
 Earlier cycles:
 

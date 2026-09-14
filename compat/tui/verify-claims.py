@@ -79,11 +79,20 @@ def structural(items, problems):
                             f"so its claim cannot be re-measured; add it to FIXTURES")
 
 
-def run_fixtures(ids, items, problems):
+def run_fixtures(ids, items, problems, zz=None):
     by_id = {i["id"]: i for i in items}
     env = dict(os.environ)
     env.setdefault("ZZ_COMPAT_TMUX", str(ROOT / "compat/.cache/tmux-src/tmux"))
     env.setdefault("ZZ_COMPAT_CORPUS", str(ROOT / "compat/.cache/plugins"))
+    env.setdefault("TMUX_BIN", str(ROOT / "compat/.cache/tmux-src/tmux"))
+    binary = Path(zz) if zz else ROOT / "target/debug/zz"
+    if not binary.exists():
+        problems.append(f"no zz binary to compare: {binary} does not exist. The fixtures default "
+                        f"to REPO/target/debug/zz and ignore ZZ_COMPAT_ZZ; pass --zz with a build "
+                        f"of the revision under test.")
+        return
+    env["ZZ_BIN"] = str(binary)
+    print(f"  comparing {binary}")
     for pid in ids:
         item = by_id.get(pid)
         if item is None:
@@ -100,7 +109,8 @@ def run_fixtures(ids, items, problems):
             tail = (r.stdout or "").strip().splitlines()
             last = tail[-1] if tail else "(no output)"
             if r.returncode != 0:
-                problems.append(f"{pid}: {rel} exited {r.returncode}: {last[:160]}")
+                err = (r.stderr or "").strip().replace("\n", " ")[:200]
+                problems.append(f"{pid}: {rel} exited {r.returncode}: {last[:120]} {err}")
                 continue
             recorded = 0
             for m in TALLY.finditer(r.stdout or ""):
@@ -118,6 +128,10 @@ def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", nargs="*", metavar="ID",
                     help="also execute these obligations' fixtures and read their tally")
+    ap.add_argument("--zz", metavar="PATH",
+                    help="the zz binary to compare (the fixtures default to REPO/target/debug/zz "
+                         "and ignore ZZ_COMPAT_ZZ, so an orchestrator worktree with no target "
+                         "directory must pass this)")
     args = ap.parse_args(argv[1:])
     data = json.loads(LEDGER.read_text(encoding="utf-8"))
     items = data["items"]
@@ -128,7 +142,7 @@ def main(argv):
     if args.run is not None:
         targets = args.run or verified
         print(f"re-measuring: {', '.join(targets)}")
-        run_fixtures(targets, items, problems)
+        run_fixtures(targets, items, problems, args.zz)
     print()
     if problems:
         print(f"{len(problems)} problem(s):")

@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v102)
+title: zz wire protocol (v103)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -653,22 +653,38 @@ opens: `ChooseTreeKind` gains a trailing `Clients`, `ChooseTreeTarget` a trailin
 status_width }` and `Markup { lines }` that `window_client_draw` and `window_client_draw_info`
 fill, and `ChooseTreeAction` the trailing `ClientDetach`, `ClientDetachTagged` and `ClientInfo`
 the daemon resolves `d`, `D` and `i` to inside that mode. All five are pure end-appends with both
-halves in the same push. v102 also appends `pane: Option<PaneId>` to `CommandPromptState` after
-`no_freeze`: `command-prompt -P` is `window_pane_set_prompt`, so the prompt belongs to that pane
-rather than to the client, and `redraw_draw_pane_prompt` draws it over the pane's last row - its
-first under `status-position top` - and leaves the status row alone. `None` is the client prompt
-`status_prompt_set` raises. The raw TUI is the consumer half and it shipped in the same push.
-v102 also appends `ProtocolMessage::ClientTerminalType { term_type: String }` after
-`ClientTerminalFeatures`, the terminal's own name out of its XTVERSION reply as
-`tty_keys_extended_device_attributes` stores it in `c->term_type`; `term_type` is capped at
-`MAX_CLIENT_TERMINAL_TYPE_BYTES` (128) bytes, rejected during deserialization, and the daemon
-answers `#{client_termtype}` from it.
+halves in the same push.
+
+v103 appends `pane: Option<PaneId>` to `CommandPromptState` after `no_freeze`: `command-prompt -P`
+is `window_pane_set_prompt`, so the prompt belongs to that pane rather than to the client, and
+`redraw_draw_pane_prompt` draws it over the pane's last row - its first under `status-position
+top` - and leaves the status row alone. `None` is the client prompt `status_prompt_set` raises.
+The raw TUI is the consumer half and it shipped in the same push. v103 also appends
+`ProtocolMessage::ClientTerminalType { term_type: String }` after `ClientTerminalFeatures`, the
+terminal's own name out of its XTVERSION reply as `tty_keys_extended_device_attributes` stores it
+in `c->term_type`; `term_type` is capped at `MAX_CLIENT_TERMINAL_TYPE_BYTES` (128) bytes, rejected
+during deserialization, and the daemon answers `#{client_termtype}` from it.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 102`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 103`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v103 carries the pin's pane prompt and the terminal name a client learned after the hello.
+  `CommandPromptState` appends `pane: Option<PaneId>` after `no_freeze`: `command-prompt -P` is
+  `window_pane_set_prompt`, so the prompt hangs on the pane the command targeted rather than on the
+  client, and `redraw_draw_pane_prompt` draws it over that pane's last row - its first under
+  `status-position top` - leaving the status row alone. `None` is the client prompt
+  `status_prompt_set` raises. `ProtocolMessage` appends `ClientTerminalType { term_type: String }`
+  after `ClientTerminalFeatures`, the terminal's own name out of its XTVERSION reply as
+  `tty_keys_extended_device_attributes` stores it in `c->term_type`, capped at
+  `MAX_CLIENT_TERMINAL_TYPE_BYTES` (128) bytes and rejected during deserialization; the daemon
+  answers `#{client_termtype}` from it and `window_client_draw_info` draws it as `Terminal Type`.
+  Both are pure end-appends with their consumer halves in the same push. The raw TUI is the
+  consumer of both, and it is the only client that draws the pane-cell prompt: the GPUI, iOS and
+  web clients read neither field and keep the prompt on their own client surface. 102 shipped in
+  zz 0.9.0 and 0.9.1 while the cycle-9 lanes were still appending to it, so the version moves
+  rather than the v102 entry growing.
 - v102 carries the colour class each style's two grounds came from, and the client's own terminal
   features. Viewport and patch payloads append one `u32` class word per style, per appended style
   for a patch, after the kitty placements; the word packs the two-bit class code and the palette

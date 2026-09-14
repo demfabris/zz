@@ -901,7 +901,7 @@ find_window_case() {
 # prompt redraw_draw_pane_prompt (screen-redraw.c:1524) draws over the pane's
 # LAST row - its first under status-position top - leaving the status row
 # alone. The raw TUI carries -P and the pane it targets on the wire
-# (CommandPromptState.pane, v102) and paints that row itself, so both sides put
+# (CommandPromptState.pane, v103) and paints that row itself, so both sides put
 # `(search down) ` on row 22 in message-style over the pane's own default cells
 # and keep the status row. Closed 2026-09-14.
 #

@@ -1,0 +1,282 @@
+command-output tmux: stock-search-open
+command-output tmux: stock-search-Escape
+command-output tmux: stock-search-open
+command-output tmux: stock-search-Enter
+command-output zz: stock-search-open
+command-output zz: stock-search-Escape
+command-output zz: stock-search-open
+command-output zz: stock-search-Enter
+command-output navigation: zz
+command-output zz: native copy-mode-search-prompt editor; stock -P lifecycle measured separately
+command-output zz: idle-escape
+command-output zz: selection-escape
+command-output zz: search-escape
+command-output zz: rebound-q
+command-output navigation: tmux
+command-output tmux: idle-escape
+command-output tmux: selection-escape
+command-output tmux: search-escape
+command-output tmux: rebound-q
+error: zz screen did not show ATTACHED_REATTACH_MARKER within 10 seconds
+zz screen:
+[detached (from session attached)]
+[detached (from session attached)]
+[detached (from session attached)]
+[detached (from session attached)]
+[detached (from session attached)]
+[detached (from session attached)]
+[detached (from session attached)]
+[detached (from session attached)]
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Terminal                                                                     │
+│ bash                                                                         │
+│ waiting for frame                                                            │
+│ open in the zz app                                                           │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+[attached]0:prompted*                                     "bash" 19:54 14-Sep-26
+tmux screen:
+[detached (from session attached)]
+[detached (from session attached)]
+[detached (from session attached)]
+[detached (from session attached)]
+ATTACHED_READONLY_LIVE
+demfabris@ubuntu:/tmp/zza.9qKfa3/client [literal]*? cwd$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[attached]0:prompted*                                   "ubuntu" 19:54 14-Sep-26
+zz daemon stderr:
+    [2026-09-14T22:48:30Z INFO  zz_daemon::diagnostics::appearance] loaded appearance reason=startup root=None scheme=dark supported=0 unsupported=0 invalid=0 diagnostics_dropped=0 bytes=0 hash=9356683936999949859 appearance=TerminalAppearance { color_scheme: Dark, font_families: ["Noto Sans Mono"], font_families_bold: [], font_families_italic: [], font_families_bold_italic: [], font_size_points: 13.0, font_weight: 400, font_features: [], font_synthetic_style: FontSyntheticStyle { bold: true, italic: true, bold_italic: true }, font_thicken: false, font_thicken_strength: 255, cell_height_adjustment: None, padding_left: 10.0, padding_right: 10.0, padding_top: 10.0, padding_bottom: 10.0, foreground: Color { r: 216, g: 222, b: 233 }, background: Color { r: 16, g: 19, b: 24 }, cursor_color: Color { r: 229, g: 192, b: 123 }, cursor_style: Block, selection_foreground: Color { r: 216, g: 222, b: 233 }, selection_background: AppearanceColor { r: 80, g: 125, b: 184, a: 148 }, search_match_color: AppearanceColor { r: 224, g: 171, b: 56, a: 107 }, search_current_color: AppearanceColor { r: 250, g: 194, b: 71, a: 173 }, link_color: Color { r: 77, g: 163, b: 235 }, copy_cursor_color: AppearanceColor { r: 184, g: 199, b: 224, a: 107 }, palette_hash: 2756364480396514756, minimum_contrast: 1.0, cursor_blink_policy: Terminal, cursor_blink_interval_ms: 500, rounded_selection: true, background_opacity: 1.0, palette_classes: [], default_classes: [None, None] }
+    [2026-09-14T22:48:30Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=startup-mux-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:48:30Z INFO  zz_daemon::daemon] zz daemon listening at /tmp/zza-9qKfa3.sock
+    [2026-09-14T22:48:35Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-g table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_ROOT_OK"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:48:35Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-14T22:48:35Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-14T22:48:35Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=x table=prefix decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_PREFIX_OK"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:48:35Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-14T22:48:35Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-a table=root decision=Prefix
+    [2026-09-14T22:48:35Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-14T22:48:35Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=y table=prefix decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_PREFIX2_OK"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:48:35Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-14T22:48:36Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-14T22:48:36Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-14T22:48:36Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=[ table=prefix decision=Commands([CommandInvocation { name: "copy-mode", args: [], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:48:36Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-14T22:48:36Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=q table=copy-mode decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cancel"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:48:42Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:48:45Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:48:52Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:03Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-14T22:49:03Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-14T22:49:03Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=, table=prefix decision=Commands([CommandInvocation { name: "command-prompt", args: ["-I", "#W", "rename-window -- '%%'"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:03Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-14T22:49:45Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-14T22:49:45Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-14T22:49:45Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=t table=prefix decision=Commands([CommandInvocation { name: "choose-tree", args: ["-s", "-K", "#{line}", "-O", "index"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:45Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-14T22:49:46Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-14T22:49:46Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-14T22:49:46Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=t table=prefix decision=Commands([CommandInvocation { name: "choose-tree", args: ["-s", "-K", "#{line}", "-O", "index"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:46Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-14T22:49:46Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F5 table=root decision=Commands([CommandInvocation { name: "choose-tree", args: ["-s", "-f", "0"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:46Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F4 table=root decision=Commands([CommandInvocation { name: "choose-buffer", args: ["-f", "0"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:46Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:47Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-14T22:49:47Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-14T22:49:47Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key== table=prefix decision=Commands([CommandInvocation { name: "choose-buffer", args: ["-Z"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:47Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-14T22:49:47Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-14T22:49:47Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-14T22:49:47Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key== table=prefix decision=Commands([CommandInvocation { name: "choose-buffer", args: ["-Z"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:47Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-14T22:49:47Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:48Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F11 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf '%x\\n' 1515870810\n"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=B table=prefix decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_LIST_KEYS_BASE"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=Q table=prefix decision=Commands([CommandInvocation { name: "command-prompt", args: ["-p", "ATTACHED_LIST_KEYS_PROMPT"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-b table=root decision=Prefix
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=true
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=R table=prefix decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_LIST_KEYS_RESUMED"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:49Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c29 armed=false
+    [2026-09-14T22:49:55Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:49:59Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:07Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:11Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:16Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:21Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:26Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:31Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:36Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:40Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:45Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:50Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:54Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:50:59Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:04Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:11Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:33Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:38Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:40Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:53Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:54Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F10 table=root decision=Commands([CommandInvocation { name: "source-file", args: ["-F", "config-#{session_name}/[12]0.conf"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:54Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:51:54Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:51:54Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F9 table=root decision=Commands([CommandInvocation { name: "source-file", args: ["-F", "config-#{session_name}/20.conf", "config-#{session_name}/10.conf"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:54Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:51:54Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:51:54Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F8 table=root decision=Commands([CommandInvocation { name: "source-file", args: ["-Fq", "config-#{session_name}/missing.conf", "config-#{session_name}/20.conf"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:54Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:51:54Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F7 table=root decision=Commands([CommandInvocation { name: "source-file", args: ["-F", "config-#{session_name}/missing.conf"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:54Z WARN  zz_daemon::diagnostics::input] key_command_failed client=c29 command=source-file args=["-F", "config-#{session_name}/missing.conf"] error=command exited with status 1
+    [2026-09-14T22:51:54Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F3 table=root decision=Commands([CommandInvocation { name: "source-file", args: ["-v", "/tmp/zza.9qKfa3/o/r"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:51:55Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:51:55Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=q table=copy-mode decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cancel"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:00Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F2 table=root decision=Commands([CommandInvocation { name: "source-file", args: ["/tmp/zza.9qKfa3/o/n"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:02Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:52:02Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=g table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "history-top"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:02Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=/ table=copy-mode-vi decision=Commands([CommandInvocation { name: "command-prompt", args: ["-P", "-T", "search", "-p", "(search down)", "{ send-keys -X search-forward -- \"%%\" }"], source: None, command_blocks: [5], expanded_alias_group: false }])
+    [2026-09-14T22:52:09Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=q table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cancel"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:10Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F2 table=root decision=Commands([CommandInvocation { name: "source-file", args: ["/tmp/zza.9qKfa3/o/n"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:11Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:52:11Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=g table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "history-top"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:11Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=/ table=copy-mode-vi decision=Commands([CommandInvocation { name: "command-prompt", args: ["-P", "-T", "search", "-p", "(search down)", "{ send-keys -X search-forward -- \"%%\" }"], source: None, command_blocks: [5], expanded_alias_group: false }])
+    [2026-09-14T22:52:19Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=q table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cancel"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:20Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F2 table=root decision=Commands([CommandInvocation { name: "source-file", args: ["/tmp/zza.9qKfa3/o/n"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:21Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=g table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "history-top"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=g table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "history-top"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=C-f table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "page-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:22Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=Escape table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "clear-selection"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:26Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=  table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "begin-selection"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:26Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:26Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:26Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=Escape table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "clear-selection"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:29Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=g table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "history-top"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:29Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=/ table=copy-mode-vi decision=Commands([CommandInvocation { name: "copy-mode-search-prompt", args: [], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:33Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=/ table=copy-mode-vi decision=Commands([CommandInvocation { name: "copy-mode-search-prompt", args: [], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:33Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=n table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "search-again"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:33Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=N table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "search-reverse"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:33Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=  table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "begin-selection"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:33Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:33Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=j table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cursor-down"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:33Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=Enter table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "copy-pipe-and-cancel"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:34Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F2 table=root decision=Commands([CommandInvocation { name: "source-file", args: ["/tmp/zza.9qKfa3/o/n"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:35Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:52:36Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=G table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "history-bottom"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:36Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=q table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "page-up"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:39Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=q table=copy-mode-vi decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cancel"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:40Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F2 table=root decision=Commands([CommandInvocation { name: "source-file", args: ["/tmp/zza.9qKfa3/o/n"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:41Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:52:42Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=Escape table=copy-mode decision=Commands([CommandInvocation { name: "send-keys", args: ["-X", "cancel"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:43Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:52:48Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F6 table=root decision=Commands([CommandInvocation { name: "source-file", args: ["/tmp/zza.9qKfa3/source-depth/f1.conf"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:52:49Z WARN  zz_daemon::daemon] too many nested files
+    [2026-09-14T22:52:50Z INFO  zz_daemon::diagnostics::mux_config] applied mux configuration override set reason=source-file-replay entries=0 prefix="C-b" mode_keys="emacs"
+    [2026-09-14T22:53:10Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F1 table=root decision=Commands([CommandInvocation { name: "run-shell", args: ["-t", "=attached-job-cwd-target-zz:0.0", "pwd -P > \"/tmp/zza.9qKfa3/shell-job-cwd-zz-interactive-run-target\""], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:10Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F1 table=root decision=Commands([CommandInvocation { name: "run-shell", args: ["-t", "=attached-job-cwd-missing:0.0", "pwd -P > \"/tmp/zza.9qKfa3/shell-job-cwd-zz-interactive-run-missing\""], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:10Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F1 table=root decision=Commands([CommandInvocation { name: "run-shell", args: ["pwd -P > \"/tmp/zza.9qKfa3/shell-job-cwd-zz-interactive-run-none\""], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:10Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F1 table=root decision=Commands([CommandInvocation { name: "if-shell", args: ["-t", "=attached-job-cwd-target-zz:0.0", "pwd -P > \"$ATTACHED_SHELL_CWD_MARKER\"", "set-option -g @attached_shell_job_if_done interactive-target", "set-option -g @attached_shell_job_if_done broken"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:11Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F1 table=root decision=Commands([CommandInvocation { name: "if-shell", args: ["-t", "=attached-job-cwd-missing:0.0", "pwd -P > \"$ATTACHED_SHELL_CWD_MARKER\"", "set-option -g @attached_shell_job_if_done interactive-missing", "set-option -g @attached_shell_job_if_done broken"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:11Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F1 table=root decision=Commands([CommandInvocation { name: "if-shell", args: ["pwd -P > \"$ATTACHED_SHELL_CWD_MARKER\"", "set-option -g @attached_shell_job_if_done interactive-none", "set-option -g @attached_shell_job_if_done broken"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:24Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F12 table=root decision=Commands([CommandInvocation { name: "send-keys", args: ["-l", "printf ATTACHED_TERMINAL_READY"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:24Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F1 table=root decision=Commands([CommandInvocation { name: "attach-session", args: ["-f", "active-pane,ignore-size,no-detach-on-destroy,read-only,unknown", "-t", "=attached"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:24Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F1 table=root decision=Commands([CommandInvocation { name: "switch-client", args: ["-t", "=chooser-target"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:25Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F1 table=root decision=Commands([CommandInvocation { name: "attach-session", args: ["-t", "=attached"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:25Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F1 table=root decision=Commands([CommandInvocation { name: "attach-session", args: ["-f", "!ignore-size,!active-pane", "-t", "=z"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:25Z WARN  zz_daemon::diagnostics::input] key_command_failed client=c29 command=attach-session args=["-f", "!ignore-size,!active-pane", "-t", "=z"] error=mux command failed: can't find session: z
+    [2026-09-14T22:53:25Z INFO  zz_daemon::diagnostics::input] key_decision client=c29 key=F1 table=root decision=Commands([CommandInvocation { name: "attach-session", args: ["-f", "!active-pane", "-t", "=attached"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:27Z INFO  zz_daemon::diagnostics::input] key_decision client=c1254 key=F1 table=root decision=Commands([CommandInvocation { name: "new-session", args: ["-f", "ignore-size", "-s", "requested-flags-fresh"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:28Z INFO  zz_daemon::diagnostics::input] key_decision client=c1254 key=F1 table=root decision=Commands([CommandInvocation { name: "attach-session", args: ["-t", "=attached"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:28Z INFO  zz_daemon::diagnostics::input] key_decision client=c1254 key=F1 table=root decision=Commands([CommandInvocation { name: "new-session", args: ["-d", "-f", "active-pane", "-s", "requested-flags-detached"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:30Z INFO  zz_daemon::diagnostics::input] key_decision client=c1254 key=F1 table=root decision=Commands([CommandInvocation { name: "attach-session", args: ["-f", "!ignore-size", "-t", "=attached"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:30Z INFO  zz_daemon::diagnostics::input] key_decision client=c1254 key=F1 table=root decision=Commands([CommandInvocation { name: "attach-session", args: ["-r", "-t", "=attached"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:52Z INFO  zz_daemon::diagnostics::input] key_decision client=c1300 key=F12 table=root decision=Commands([CommandInvocation { name: "run-shell", args: ["-C", "set-option -g @attached_context '#{client_name}|#{client_pid}|#{client_tty}|#{client_session}|#{client_width}|#{client_height}|#{client_key_table}|#{client_prefix}|#{client_readonly}|#{client_control_mode}|#{client_termname}|#{client_utf8}|#{session_active}'"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:56Z INFO  zz_daemon::diagnostics::input] key_decision client=c1300 key=F12 table=root decision=Commands([CommandInvocation { name: "set-option", args: ["-agF", "@attached_event_keys", "K|#{client_tty},"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:56Z INFO  zz_daemon::diagnostics::input] key_decision client=c1380 key=F12 table=root decision=Commands([CommandInvocation { name: "set-option", args: ["-agF", "@attached_event_keys", "K|#{client_tty},"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:56Z INFO  zz_daemon::diagnostics::input] key_decision client=c1380 key=F12 table=root decision=Commands([CommandInvocation { name: "set-option", args: ["-agF", "@attached_event_keys", "K|#{client_tty},"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:56Z INFO  zz_daemon::diagnostics::input] key_decision client=c1300 key=F12 table=root decision=Commands([CommandInvocation { name: "set-option", args: ["-agF", "@attached_event_keys", "K|#{client_tty},"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:53:57Z INFO  zz_daemon::diagnostics::input] key_decision client=c1300 key=F12 table=root decision=Commands([CommandInvocation { name: "set-option", args: ["-agF", "@attached_event_keys", "K|#{client_tty},"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:54:00Z WARN  zz_daemon::daemon] copy-pipe failed: process exited unsuccessfully (exit status: 7)
+    [2026-09-14T22:54:12Z INFO  zz_daemon::diagnostics::input] key_decision client=c1475 key=F7 table=root decision=Commands([CommandInvocation { name: "run-shell", args: ["-b", "touch /tmp/zza.9qKfa3/readonly-zz.mark"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:54:12Z INFO  zz_daemon::diagnostics::input] key_decision client=c1475 key=C-b table=root decision=Prefix
+    [2026-09-14T22:54:12Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c1475 armed=true
+    [2026-09-14T22:54:12Z INFO  zz_daemon::diagnostics::input] key_decision client=c1475 key=c table=prefix decision=Commands([CommandInvocation { name: "new-window", args: [], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:54:12Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c1475 armed=false
+    [2026-09-14T22:54:12Z INFO  zz_daemon::diagnostics::input] key_decision client=c1463 key=F9 table=root decision=Commands([CommandInvocation { name: "run-shell", args: ["-b", "touch /tmp/zza.9qKfa3/readonly-witness-zz.mark"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:54:12Z INFO  zz_daemon::diagnostics::input] key_decision client=c1475 key=F8 table=root decision=Commands([CommandInvocation { name: "switch-client", args: ["-t", "=chooser-target"], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:54:16Z INFO  zz_daemon::diagnostics::input] key_decision client=c1497 key=C-b table=root decision=Prefix
+    [2026-09-14T22:54:16Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c1497 armed=true
+    [2026-09-14T22:54:16Z INFO  zz_daemon::diagnostics::input] key_decision client=c1497 key=d table=prefix decision=Commands([CommandInvocation { name: "detach-client", args: [], source: None, command_blocks: [], expanded_alias_group: false }])
+    [2026-09-14T22:54:19Z INFO  zz_daemon::diagnostics::input] key_decision client=c1524 key=C-b table=root decision=Prefix
+    [2026-09-14T22:54:19Z INFO  zz_daemon::diagnostics::input] prefix_armed_published client=c1524 armed=true
+    [2026-09-14T22:54:19Z INFO  zz_daemon::diagnostics::input] key_decision client=c1524 key=d table=prefix decision=Commands([CommandInvocation { name: "detach-client", args: [], source: None, command_blocks: [], expanded_alias_group: false }])

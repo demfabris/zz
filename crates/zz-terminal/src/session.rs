@@ -1028,6 +1028,10 @@ pub struct CaptureOptions {
     pub mode: bool,
     pub join_wrapped: bool,
     pub preserve_trailing: bool,
+    /// `capture-pane -T`: `cmd_capture_pane_history` leaves
+    /// `GRID_STRING_EMPTY_CELLS` off, so a line stops at the cells it used
+    /// instead of running to the cells its grid row has allocated.
+    pub trim_positions: bool,
     pub escape_sequences: bool,
 }
 
@@ -1040,6 +1044,7 @@ impl Default for CaptureOptions {
             mode: false,
             join_wrapped: false,
             preserve_trailing: false,
+            trim_positions: false,
             escape_sequences: false,
         }
     }
@@ -1062,7 +1067,7 @@ pub enum TerminalCaptureError {
     ActorStopped,
     #[error("terminal capture timed out")]
     TimedOut,
-    #[error("alternate screen is not active")]
+    #[error("no alternate screen")]
     AlternateUnavailable,
     #[error("pane is not in a native mode")]
     ModeUnavailable,
@@ -8278,8 +8283,9 @@ fn capture_terminal(
     mode: Option<&CopyModeState>,
     options: CaptureOptions,
 ) -> Result<String, TerminalCaptureError> {
-    if options.mode {
-        let mode = mode.ok_or(TerminalCaptureError::ModeUnavailable)?;
+    if options.mode
+        && let Some(mode) = mode
+    {
         if options.alternate && mode.revision.screen != Screen::Alternate {
             return Err(TerminalCaptureError::AlternateUnavailable);
         }
@@ -8306,6 +8312,7 @@ fn capture_terminal(
     if start > end {
         return Ok(String::new());
     }
+    let requested_rows = usize::try_from(end.saturating_sub(start).saturating_add(1)).unwrap_or(1);
 
     let columns = terminal.cols().map_err(capture_failure)?;
     let start = terminal
@@ -8348,11 +8355,110 @@ fn capture_terminal(
     output.truncate(written);
     let output = String::from_utf8(output)
         .map_err(|error| TerminalCaptureError::Failed(error.to_string()))?;
-    Ok(if options.escape_sequences {
+    let output = if options.escape_sequences {
         output.replace("\r\n", "\n")
     } else {
         output
-    })
+    };
+    let written_rows = if options.join_wrapped || options.escape_sequences {
+        measure_written_rows(terminal, &selection)?
+    } else if output.is_empty() {
+        0
+    } else {
+        output.split('\n').count()
+    };
+    Ok(pad_capture_rows(
+        &output,
+        requested_rows.saturating_sub(written_rows),
+        columns,
+        options,
+    ))
+}
+
+/// The rows of a selection up to and including the last one holding content,
+/// which is where the formatter stops. A joined or escaped capture cannot be
+/// counted off its own output, so it is counted off a plain one.
+fn measure_written_rows(
+    terminal: &Terminal<'_, '_>,
+    selection: &Selection<'_>,
+) -> Result<usize, TerminalCaptureError> {
+    let options = FormatterOptions::new()
+        .with_format(Format::Plain)
+        .with_unwrap(false)
+        .with_trim(true)
+        .with_selection(selection);
+    let mut formatter = Formatter::new(terminal, options).map_err(capture_failure)?;
+    let length = match formatter.format_len() {
+        Ok(length) => length,
+        Err(libghostty_vt::Error::InvalidValue) => return Ok(0),
+        Err(error) => return Err(capture_failure(error)),
+    };
+    if length == 0 || length > MAX_CAPTURE_BYTES {
+        return Ok(0);
+    }
+    let mut buffer = vec![0_u8; length];
+    let written = formatter.format_buf(&mut buffer).map_err(capture_failure)?;
+    Ok(buffer[..written].split(|byte| *byte == b'\n').count())
+}
+
+/// `grid_expand_line`: a grid row's cell array grows to a quarter, then a half,
+/// then the whole width of the screen, and `grid_string_cells` walks to that
+/// allocated size under `GRID_STRING_EMPTY_CELLS`. A row nothing ever wrote is
+/// still zero cells wide.
+fn allocated_row_width(used: usize, columns: usize) -> usize {
+    if used == 0 {
+        return 0;
+    }
+    if used < columns / 4 {
+        columns / 4
+    } else if used < columns / 2 {
+        columns / 2
+    } else if used < columns {
+        columns
+    } else {
+        used
+    }
+}
+
+/// `cmd_capture_pane_history` prints one line per grid row of the range,
+/// whatever the row holds, and `grid_string_cells` decides that line's width:
+/// it walks to the row's allocated cells unless `-T` or `-J` turns
+/// `GRID_STRING_EMPTY_CELLS` off, then drops trailing spaces unless `-N` or
+/// `-J` turns `GRID_STRING_TRIM_SPACES` off. The formatter answers the used
+/// cells of the rows up to the last one written, so the rows after it and the
+/// cells after the ones used come back here.
+fn pad_capture_rows(
+    output: &str,
+    trailing_rows: usize,
+    columns: u16,
+    options: CaptureOptions,
+) -> String {
+    let empty_cells = !options.join_wrapped && !options.trim_positions;
+    let trim_spaces = !options.join_wrapped && !options.preserve_trailing;
+    let mut lines = if output.is_empty() {
+        Vec::new()
+    } else {
+        output.split('\n').map(str::to_owned).collect::<Vec<_>>()
+    };
+    if empty_cells && options.preserve_trailing {
+        let columns = usize::from(columns);
+        for line in &mut lines {
+            let width = line.chars().count();
+            let allocated = allocated_row_width(width, columns);
+            for _ in width..allocated {
+                line.push(' ');
+            }
+        }
+    }
+    if trim_spaces {
+        for line in &mut lines {
+            while line.ends_with(' ') {
+                line.pop();
+            }
+        }
+    }
+    lines.resize(lines.len().saturating_add(trailing_rows), String::new());
+    lines.join("\n")
 }
 
 const PANE_RESET_PRELUDE: &[u8] = b"\x1b\\\x1b[m\x1b(B\x1b)B\x1b[r\x1b[?7h\x1b[?25h\x1b[?1l\x1b[4l\x1b[?6l\x1b[20l\x1b>\x1b[?12l\x1b[?2026l\x1b[?2031l\x1b[=0u\x1b[>4;0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l\x1b[?1004l\x1b[?2004l\x1b[3g";
@@ -8365,9 +8471,16 @@ fn used_visible_rows(terminal: &Terminal<'_, '_>) -> u16 {
     let rows = terminal.rows().unwrap_or(0);
     match capture_terminal(terminal, None, CaptureOptions::default()) {
         Ok(text) if text.is_empty() => 0,
-        Ok(text) => u16::try_from(text.split('\n').count())
-            .unwrap_or(rows)
-            .min(rows),
+        Ok(text) => text
+            .split('\n')
+            .collect::<Vec<_>>()
+            .iter()
+            .rposition(|line| !line.trim_end().is_empty())
+            .map_or(0, |index| {
+                u16::try_from(index.saturating_add(1))
+                    .unwrap_or(rows)
+                    .min(rows)
+            }),
         Err(_) => rows,
     }
 }
@@ -8409,9 +8522,6 @@ fn capture_viewport(
 ) -> Result<String, TerminalCaptureError> {
     if options.alternate {
         return Err(TerminalCaptureError::AlternateUnavailable);
-    }
-    if options.mode && matches!(viewport.mode, TerminalMode::Live) {
-        return Err(TerminalCaptureError::ModeUnavailable);
     }
     let total = u64::from(viewport.rows);
     if total == 0 {
@@ -20271,7 +20381,8 @@ mod tests {
         let visible =
             capture_terminal(&terminal, None, CaptureOptions::default()).expect("capture visible");
         assert_eq!(
-            visible, "after",
+            visible.trim_end_matches('\n'),
+            "after",
             "the pin's input_reset abandons the half-parsed sequence and returns to ground"
         );
     }
@@ -20363,7 +20474,8 @@ mod tests {
         let visible =
             capture_terminal(&terminal, None, CaptureOptions::default()).expect("capture visible");
         assert_eq!(
-            visible, "Xb",
+            visible.trim_end_matches('\n'),
+            "Xb",
             "pinned tmux answers insert_flag 1 before send-keys -R and 0 after, so X overwrites a"
         );
         terminal.vt_write(b"\x1b[3;5H\x1b8Y");

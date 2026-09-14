@@ -10353,8 +10353,15 @@ impl Shared {
             Err(error) => return Err(ServerError::InvalidCommand(error.to_string()).into()),
         };
         if parsed.print {
+            // `cmd_capture_pane_exec` drops one trailing newline off the buffer
+            // and then prints one, so what reaches the caller is the buffer
+            // itself: one newline per captured row, the last row included. The
+            // writer only adds a newline when the text lacks one, so the row
+            // terminator belongs here or an empty last row is swallowed.
+            let mut printed = output;
+            printed.push('\n');
             return Ok(Execution {
-                output: output.into(),
+                output: printed.into(),
                 effects: Vec::new(),
             });
         }
@@ -38560,6 +38567,7 @@ fn parse_capture_pane_args(args: &[RawText]) -> Result<ParsedCapturePane, Server
         join_wrapped: args.has('J'),
         mode: args.has('M'),
         preserve_trailing: args.has('J') || args.has('N'),
+        trim_positions: args.has('T'),
         ..CaptureOptions::default()
     };
     let parsed = ParsedCapturePane {
@@ -61939,7 +61947,9 @@ set-option -g @alias-mixed-next yes
             .expect("seed capture terminal");
         let pane = context.pane.expect("capture pane");
         let target = pane.to_string();
-        let expected = "zz-terminal-ready\nalpha\nbeta\ngamma";
+        // `cmd_capture_pane_exec` prints the buffer with its row terminators,
+        // so a printed capture ends with the newline of its last row.
+        let expected = "zz-terminal-ready\nalpha\nbeta\ngamma\n";
         let deadline = Instant::now() + Duration::from_secs(5);
         let forward = loop {
             let output = shared
@@ -61988,7 +61998,7 @@ set-option -g @alias-mixed-next yes
                 ),
             )
             .expect("capture middle range");
-        assert_eq!(middle.output, "alpha\nbeta");
+        assert_eq!(middle.output, "alpha\nbeta\n");
 
         let compact = shared
             .execute(
@@ -62008,7 +62018,15 @@ set-option -g @alias-mixed-next yes
                 &CommandInvocation::new("capture-pane", ["-pSbogus", "-Ebogus", "-t", &target]),
             )
             .expect("capture invalid range defaults");
-        assert_eq!(fallback.output, expected);
+        // `args_strtonum_and_expand` failing leaves the pin's own defaults, so
+        // the range is the whole visible screen: the four written rows and then
+        // one empty line per row after them.
+        let fallback = fallback.output.to_string();
+        assert!(fallback.starts_with(expected), "{fallback:?}");
+        assert!(
+            fallback[expected.len()..].chars().all(|row| row == '\n'),
+            "{fallback:?}"
+        );
 
         let expanded = shared
             .execute(
@@ -62026,7 +62044,7 @@ set-option -g @alias-mixed-next yes
                 ),
             )
             .expect("capture format-expanded range");
-        assert_eq!(expanded.output, "alpha\nbeta");
+        assert_eq!(expanded.output, "alpha\nbeta\n");
 
         let bare = shared
             .execute(
@@ -62047,7 +62065,7 @@ set-option -g @alias-mixed-next yes
                 )
                 .expect("show automatic capture")
                 .output,
-            format!("{expected}\n")
+            expected
         );
 
         shared
@@ -62122,7 +62140,7 @@ set-option -g @alias-mixed-next yes
                 )
                 .expect("show named capture")
                 .output,
-            format!("{expected}\n")
+            expected
         );
     }
 

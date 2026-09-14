@@ -47,21 +47,22 @@
         "flag:capture-pane:-L",
         "flag:capture-pane:-P",
         "flag:capture-pane:-R",
-        "semantic:capture-pane-saved-alternate",
-        "semantic:capture-pane-trailing-blank-rows"
+        "semantic:capture-pane-saved-alternate"
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/catalog.rs",
         "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/divergences.md",
-        "scenario:compat/scenarios/capture-pane.txt"
+        "scenario:compat/scenarios/capture-pane.txt",
+        "resource:crates/zz-terminal/src/session.rs",
+        "file:compat/tui-client-commands.sh"
       ],
       "acceptance": [
         "`capture-pane` keeps the pin's routing, boundary, and text semantics over the retained UTF-8 snapshot, and `-C`, `-F`, `-H`, `-L`, `-P`, and `-R` stay loudly unsupported rather than approximated.",
-        "The divergence matrix keeps the accepted text-snapshot shape visible, including the trailing blank viewport rows the pin emits and zz stops short of."
+        "The divergence matrix keeps the accepted text-snapshot shape visible: the saved alternate grid the pin keeps for -a and the six rich transports."
       ],
       "depends_on": [],
-      "reason": "Pinned tmux backs `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` with its own grid and input-parser internals: `-R` prints per-line `grid_line` flags plus every cell's colour, attribute, and hyperlink id, and `-P` drains the incomplete escape sequence still sitting in `input_pending`. zz's capture surface is the terminal worker's retained UTF-8 text snapshot, which the daemon serves for `-a`, `-e`, `-J`, `-M`, `-N`, `-p`, `-q`, `-b`, `-S`, and `-E` with the pin's routing, alongside the zz-native `show-last-output` and `capture-browser` verbs. The six rich transports stay loudly refused rather than approximated. Reopen only when a named scripted workload needs cell attributes, hyperlinks, or a saved alternate grid, which takes a terminal-owned rich snapshot rather than another text transform."
+      "reason": "Pinned tmux backs `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` with its own grid and input-parser internals: `-R` prints per-line `grid_line` flags plus every cell's colour, attribute, and hyperlink id, and `-P` drains the incomplete escape sequence still sitting in `input_pending`. zz's capture surface is the terminal worker's retained UTF-8 text snapshot, which the daemon serves for `-a`, `-e`, `-J`, `-M`, `-N`, `-p`, `-q`, `-b`, `-S`, and `-E` with the pin's routing, alongside the zz-native `show-last-output` and `capture-browser` verbs. The six rich transports stay loudly refused rather than approximated. Reopen only when a named scripted workload needs cell attributes, hyperlinks, or a saved alternate grid, which takes a terminal-owned rich snapshot rather than another text transform. semantic:capture-pane-trailing-blank-rows closed 2026-09-14: the text residues were not the transports. cmd_capture_pane_history prints one line per grid row of the range whatever the row holds, and grid_string_cells walks each row to gl->cellsize under GRID_STRING_EMPTY_CELLS and to gl->cellused otherwise, then drops trailing spaces under GRID_STRING_TRIM_SPACES; cmd_capture_pane_exec then drops one trailing newline and prints one, so an empty last row survives. The worker now adds back the rows after the last one written and the cells after the ones used, and -M falls back to the pane the way the pin's else branch does. Measured 2026-09-14 on Linux against the pin d77c9dc6 on an 80x24 pane holding three written rows: capture-pane -p, -p -e, -p -N, -p -M and -p -a -q and every explicit range from -E 0 to -E 30 are byte-identical on both sides, where -p was 3 lines against 24 and -p -N was 37 bytes against 104 before. The one grid fact this reproduces is grid_expand_line's growth to a quarter, a half or the whole screen width, read off the cells the row currently uses: a row the pin once wrote wider and later erased keeps the wider allocation there and not here. The cases are capture-default-range, capture-past-last-row, capture-preserve-trailing and its three neighbours, capture-mode-screen, capture-mode-default, capture-escape, capture-alternate and capture-alternate-quiet in compat/tui-client-commands.sh."
     },
     {
       "id": "clients.interactive-refresh",

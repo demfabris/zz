@@ -1330,6 +1330,7 @@ fn bound_mouse_key(
         column: global_column,
         row: global_row,
         border: latch.border,
+        status_range_start: mouse_status_range_start(model, global_column, global_row),
         view_action: latch.pane.and_then(|pane| {
             bound_mouse_view_action(
                 model,
@@ -1388,6 +1389,7 @@ fn advance_click_sequence(
     let carried = model.click.as_ref().filter(|sequence| {
         sequence.deadline > now
             && sequence.button == button
+            && sequence.event.modifiers == event.modifiers
             && sequence.location == latch.location
             && sequence.pane == latch.pane
     });
@@ -1454,6 +1456,7 @@ pub(crate) fn expire_click_sequence(
             column,
             row,
             border: None,
+            status_range_start: mouse_status_range_start(model, column, row),
             view_action: action.clone(),
             press_action: action,
         })
@@ -1589,6 +1592,18 @@ fn divider_axis(model: &Model, global_column: u16, global_row: u16) -> Option<zz
         .iter()
         .find(|divider| divider.rect.contains(global_column, global_row))
         .map(|divider| divider.axis)
+}
+
+/// The first column of the status range a gesture landed in, in the client's
+/// own screen columns, which `cmd_display_menu_get_pos` reads off the target
+/// client's status entries for `-x W`.
+fn mouse_status_range_start(model: &Model, global_column: u16, global_row: u16) -> Option<u16> {
+    let index = model.status_row_at(global_row)?;
+    let (status_x, _) = model.status_area();
+    let column = global_column.checked_sub(status_x)?;
+    model
+        .status_hit_range_start(index, column)
+        .map(|start| status_x.saturating_add(start))
 }
 
 /// The `KEYC_MOUSE_LOCATION_*` half of the name, and the pane and window the

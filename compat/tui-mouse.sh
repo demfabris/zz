@@ -57,7 +57,8 @@
 #   border-drag-resize          `#{pane_width}` of the pane left of the border
 #   status-click-window         the current window index
 #   status-wheel-up/down        the current window index
-#   status-right-click          the decoded screen (a window menu, or nothing)
+#   status-right-click          the decoded screen (a window menu, or nothing),
+#                               for the plain and the alt-modified gesture
 #   copy-mode-wheel             the copy cursor's line
 #   copy-mode-drag              `#{selection_present}` and the copy cursor
 #   copy-mode-double-click      the paste buffer
@@ -1021,6 +1022,16 @@ case_status_clicks() {
   send_bytes tmux $'\033'
   both_screen_lacks 'Rename' 'the window menu closed'
   send_mouse_both 2 "$column" "$row" m
+
+  send_mouse_both 10 "$column" "$row" M
+  wait_for 'the pin raised its window menu on the alt right click' \
+    screen_has tmux 'Rename'
+  settle_both 'second' 'the alt status right click'
+  check_screen STATUS_MENU status-clicks/alt-right-click-screen
+  send_bytes zz $'\033'
+  send_bytes tmux $'\033'
+  both_screen_lacks 'Rename' 'the alt window menu closed'
+  send_mouse_both 10 "$column" "$row" m
   respawn_shell_both
   run_on_both kill-window -t "=$INNER_SESSION:1"
   wait_for 'the pin back to one window' pin_window_count_is 1
@@ -1343,8 +1354,8 @@ BORDER_MODE=same
 BORDER_REASON=""
 STATUS_MODE=same
 STATUS_REASON=""
-STATUS_MENU_MODE=record
-STATUS_MENU_REASON="MouseDown3Status raises the pin's window menu through a root binding whose command is a display-menu of eleven items over swap-window, kill-window, respawn-window, select-pane -m and a command-prompt rename, positioned with -x W -y W, which answers the status range the pointer landed in and not the screen centre the raw TUI answers today; the row is not installed (keys.root-native-mouse key:root:MouseDown3Status)"
+STATUS_MENU_MODE=same
+STATUS_MENU_REASON=""
 PASTE_MENU_MODE=record
 PASTE_MENU_REASON="the same direct write: under a menu the pin's overlay key handler consumes the paste-start key and the characters behind it, the pane sees the tail as ordinary keys and the unmatched paste-end sequence leaves a trailing ~ on its row, while the raw TUI hands the tail over as a fresh bracketed paste (input.rs handle_paste, zz-client menu.rs resolve_menu_paste); the menu ITEM the paste's characters select is identical on both, and the only row that differs is the pane's own"
 FOCUS_OFF_MODE=same
@@ -1533,6 +1544,42 @@ sc_one_sided_double_click() {
     'select-pane -t= ; if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" { send-keys -M } { copy-mode -H ; send-keys -X select-word ; run-shell -d 0.3 ; send-keys -X copy-pipe-and-cancel }' \
     >/dev/null 2>&1
 }
+# `key-bindings.c`'s own `DEFAULT_WINDOW_MENU`, the eleven items the pin's
+# `MouseDown3Status` raises. It is spelled out once here so the position
+# sabotage below can rebind zz with the SAME menu and nothing but the position
+# changed.
+WINDOW_MENU_ITEMS=(
+  '#{?#{>:#{session_windows},1},,-}Swap Left' l '{ swap-window -t :-1 }'
+  '#{?#{>:#{session_windows},1},,-}Swap Right' r '{ swap-window -t :+1 }'
+  '#{?pane_marked_set,,-}Swap Marked' s '{ swap-window }'
+  ''
+  Kill X '{ kill-window }'
+  Respawn R '{ respawn-window -k }'
+  '#{?pane_marked,Unmark,Mark}' m '{ select-pane -m }'
+  Rename n '{ command-prompt -F -I "#W" { rename-window -t "#{window_id}" "%%" } }'
+  ''
+  'New After' w '{ new-window -a }'
+  'New At End' W '{ new-window }'
+)
+bind_window_menu_on_zz() {
+  local key
+  for key in MouseDown3Status M-MouseDown3Status; do
+    side_command zz bind-key -T root "$key" display-menu -t = \
+      -x "$1" -y "$2" -T '#[align=centre]#{window_index}:#{window_name}' \
+      "${WINDOW_MENU_ITEMS[@]}" >/dev/null 2>&1
+  done
+}
+# zz's window menu raised at the screen CENTRE instead of over the status
+# range the gesture landed in. The eleven items, the title and the borders are
+# the pin's on both sides and only where the menu sits differs, so
+# status-clicks/right-click-screen is the only channel that can carry it and it
+# carries exactly the `-x W` and `-y W` this landing made answer from the
+# invoking event.
+sc_one_sided_status_menu_position() {
+  bind_window_menu_on_zz C C
+  case_status_clicks
+  bind_window_menu_on_zz W W
+}
 # The pin's own `MouseDown1Border` unbound on zz only, so zz's border click
 # runs nothing and the pane it had marked stays marked. This has to run before
 # the border-binding sabotage: that one's case rebinds `MouseDown1Border` and
@@ -1611,6 +1658,8 @@ run_self_check() {
     sc_one_sided_mouse_context
   self_check_case "zz's border drag released four cells short" catches \
     sc_one_sided_border_drag
+  self_check_case "zz's window menu centred instead of over its status range" \
+    catches sc_one_sided_status_menu_position
   self_check_case 'WheelDownStatus unbound on zz only' catches \
     sc_one_sided_status_wheel
   self_check_case 'WheelUpPane unbound on zz only' catches \

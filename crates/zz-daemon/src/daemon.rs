@@ -32772,9 +32772,6 @@ fn client_colour_count(inner: &ServerState, client: ClientId) -> Option<u32> {
     client_colour_count_with(inner, client, client_feature_mask(inner, client))
 }
 
-/// `c->term_features`: what the client's flags asked for and what its terminal
-/// has since answered, folded with the set `tty_term_create` derives from the
-/// terminfo entry, the `terminal-features` array and `COLORTERM`.
 /// `tty_update_features`: a feature a client's terminal answered for goes on
 /// that client's own `tty_term`, so `#{I/f:<name>}` sees it beside the ones the
 /// `terminal-features` option asked for. The option array is the pin's channel
@@ -32790,6 +32787,9 @@ fn client_terminal_features_option(inner: &ServerState, client: ClientId) -> Vec
     features
 }
 
+/// `c->term_features`: what the client's flags asked for and what its terminal
+/// has since answered, folded with the set `tty_term_create` derives from the
+/// terminfo entry, the `terminal-features` array and `COLORTERM`.
 fn client_feature_mask(inner: &ServerState, client: ClientId) -> u32 {
     let mut features = inner.client_features.get(&client).copied().unwrap_or(0);
     if let Some(term) = client_terminal_facts(

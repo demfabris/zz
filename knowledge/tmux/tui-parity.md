@@ -19,7 +19,7 @@ Existing tmux gap decisions remain in `compat/tmux-gaps.json`. Accepted or close
 
 Fixed baseline: **8/12 verified**. Added scope: **0/6 verified**.
 
-Status counts: unmeasured: 5, different: 0, active: 3, review: 2, blocked: 0, verified: 8.
+Status counts: unmeasured: 3, different: 0, active: 4, review: 3, blocked: 0, verified: 8.
 
 Dependency-ready obligations, by priority: TUI-006, TUI-008, TUI-013, TUI-014, TUI-015, TUI-016, TUI-017, TUI-018.
 
@@ -52,8 +52,8 @@ Dependency-ready obligations, by priority: TUI-006, TUI-008, TUI-013, TUI-014, T
 | TUI-012: Superset commands beside tmux behavior | review | 12 | TUI-003, TUI-004, TUI-008, TUI-009, TUI-010 |
 | TUI-014: Client mode tools in the raw TUI | active | 14 | TUI-003 |
 | TUI-015: A lock surface a client can draw | unmeasured | 15 | none |
-| TUI-016: Server log and terminal introspection | unmeasured | 16 | none |
-| TUI-017: Rich capture transports and the snapshot residues | unmeasured | 17 | none |
+| TUI-016: Server log and terminal introspection | review | 16 | none |
+| TUI-017: Rich capture transports and the snapshot residues | active | 17 | none |
 | TUI-018: Caller stream forms | unmeasured | 18 | none |
 
 ## Obligation details
@@ -740,7 +740,7 @@ Next action: Decided by fabrico on 2026-09-14 under the superset principle that 
 
 ### TUI-016: Server log and terminal introspection
 
-Status: unmeasured.
+Status: review.
 
 Acceptance:
 
@@ -752,18 +752,28 @@ Sources:
 - `compat/tui-client-commands.sh`
 - `crates/zz-protocol/src/catalog.rs`
 - `crates/zz-daemon/src/daemon.rs`
+- `crates/zz-daemon/src/status.rs`
+- `crates/zz-mux/src/terminfo.rs`
 
 Tmux gap references: `clients.interactive-refresh`.
 
-SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT, 2026-09-13: show-messages itself is the same shape on both - `HH:MM: <client> command: <text>` and `HH:MM: <client> message: <text>`, newest first - but no run can match byte for byte, because every row names the invoking client, client-<pid> on the pin and device-<n> on zz, and the pin reprints each command through args_print, so `capture-pane -pa` comes back as `capture-pane -ap`. show-messages -J and -T are refused with `unsupported command: show-messages -J` and `-T` against a pin that prints the running jobs and, for -T, 234 lines of terminal capabilities per attached terminal; -t is refused against a pin that accepts it and prints the same log. CYCLE 8 DID NOT REACH THIS: the commands lane's budget went to TUI-014's first clause, which held TUI-006 open, and the punch list puts the rest of TUI-014 ahead of this record. The measurement above is unchanged and still the starting point.
+LANDED 2026-09-14, attempt-01, cycle 9 introspection lane. BOTH CLAUSES ASSERT. compat/tui-client-commands.sh prints `all 78 asserted comparisons identical, 29 recorded not asserted (0 for a sibling lane)` on three runs at the branch tip, against `all 61 asserted comparisons identical, 37 recorded not asserted` at BASE, and its --self-check catches every sabotage in its own channel. None of the 29 recorded cases is this obligation's except messages-log, which IS clause 2's registration.
 
-GATE, 2026-09-14, cycle 6 commands. Unchanged and still unmeasured. The commands lane's budget went to TUI-014 clause 1, which the punch list puts ahead of this record, and clause 1 did not close either - it holds the info preview open, measured at this gate. Nothing in this landing touches this obligation's surfaces, and no clause of it asserts.
+CLAUSE 1. show-messages -T prints `Terminal <n>: <term> for <client>, flags=0x<n>:` per terminal the daemon has open, newest first the way LIST_INSERT_HEAD leaves tty_terms, and tty_term_describe for each of the 233 codes under it. Measured 2026-09-14 with a client per side attached inside one outer pinned tmux at 80x24 on TERM=tmux-256color: 234 lines on both sides and an empty diff once each client's own pts number is collapsed, where zz answered `unsupported command: show-messages -T` at exit 1 before. Three things had to move for that: tty_term_codes now keeps enum tty_code_code's order, because the description prints that index and the port had sorted it; the tty_features table carries the capability VALUES the pin writes rather than bare names, which is where Dsbp, Dseks, Dsfcs, Enbp, Eneks, Enfcs, fsl, Hls, ol, setab, setaf, setrgbb, setrgbf, Setulc, Setulc1, Smol, Spb and tsl were empty or missing; and TtyTerm::create now takes the features the client negotiated, which the daemon already held in client_features and tty_update_features applies to the same term on the pin. Both sides answer the same client_termfeatures roster in that scene, so the interrogate moved toward the pin rather than away. -J prints job_print_summary's `Job <n>: <cmd> [fd=<n>, pid=<n>, status=<n>]` over the status shell cache; empty on both sides with no job. -t names a client under CMD_CLIENT_CANFAIL: -T -t <client> is that client's 234 lines on both sides, -T -t /dev/zzcc-nope is every terminal on both, each exit 0 with empty stderr. Cases: messages-terminals, messages-terminals-target, messages-terminals-missing-target, messages-jobs, messages-jobs-and-terminals. A pts number and a job's fd and pid are normalized in the comparison, the SAME substitution over both sides, and the self-check plants a one-sided line beside a normalized number and requires it reported.
 
-Next action: Start with -T: the daemon already knows each client's terminal features, so the missing half is the pin's print shape. -J needs the format job table. The client naming question is a decision to record before either is written.
+CLAUSE 2, THE DECISION. Old behaviour: every row of zz's server log names its client device-<n>, including an attached terminal client. The pin's measured behaviour, 2026-09-14, same four commands on both sides: an attached terminal client is /dev/pts/<n> on BOTH sides already, and only a clientless CLI diverges - client-<pid> on the pin, device-<n> on zz - while the pin also reprints each command through args_print, so `capture-pane -pa` comes back as `capture-pane -ap`. THE DECISION: zz keeps device-<n> for a client with no tty of its own. client-<pid> names a process that has already exited by the time anyone reads the log, while device-<n> is the spelling every zz target, chooser row and #{client_name} uses, so closing it would either put a non-target in the log or hang every client target off a transient pid; and where the name is observable to a user, the attached client, zz already matches the pin. decided 2026-09-14 by the orchestrator under fabrico's TUI parity contract of 2026-09-09; reversible. Registered as the messages-log case, whose reason carries the decision and the args_print half, and in the fixture's DECLARED block.
+
+MEASURED AND NOT CLOSED, inside this obligation: zz runs a status format job once per shell-cache scope, so one #() in status-left is two child processes and two -J rows where the pin has one. The cache is keyed (scope, tag, command) in crates/zz-daemon/src/status.rs and the pin keys all_jobs by the expanded command and its tag; rekeying it moves every #() on every status surface, so it belongs to the status renderer and not to show-messages. -J reports what zz is actually running, which is what the clause asks. A live -J row cannot be a fixture case either: fd and pid belong to one process and a #(sleep) in the driver's scene would race every later case's status render.
+
+GAP: messages.tty-model closed 2026-09-14 with its three flag items, which is exactly what this landing makes the CLI and the raw TUI honour.
+
+History before this attempt: split from TUI-011 on 2026-09-13 with the roster's measurement; cycles 8 and the cycle 6 commands gate did not reach it. The 2026-09-13 measurement still reads true for everything this attempt did not change.
+
+Next action: Nothing for a worker. The gate re-runs compat/tui-client-commands.sh three times plus --self-check and reads its summary line, then verifies. If a later lane rekeys the status shell cache by the expanded command, the duplicate -J row goes with it.
 
 ### TUI-017: Rich capture transports and the snapshot residues
 
-Status: unmeasured.
+Status: active.
 
 Acceptance:
 
@@ -779,11 +789,21 @@ Sources:
 
 Tmux gap references: `capture.rich-transports`.
 
-SPLIT FROM TUI-011 on 2026-09-13. THE MEASUREMENT, 2026-09-13 at 80x24 on a pane holding three written rows: `capture-pane -p` prints 24 rows on the pin and 3 on zz; `-p -N -S 0 -E 0` prints the row padded with trailing spaces on the pin and trimmed at the last written cell on zz; `-p -M` prints the pane on the pin and answers `pane is not in a native mode` on zz; `-p -a` says `no alternate screen` on the pin and `alternate screen is not active` on zz; `-p -e -S 0 -E 2` differs in one trailing cell on the prompt row, because the -e transform runs through the vendored formatter in crates/zz-terminal/src/session.rs whose Vt format keeps a cell the pin trims. Every explicit-range form without -e is identical, and so are -J, -T, reversed bounds, a history start, -q on a missing target, the loud missing target and -b into a named buffer. The six rich flags are refused with `unsupported command: capture-pane -X`. The residues are terminal-owned: the capture path is CaptureOptions in crates/zz-terminal/src/session.rs, which is why the roster lane recorded them. CYCLE 8 DID NOT REACH THIS. One thing is re-measured at the cycle-8 tip: compat/scenarios/capture-pane.txt is green under --strict-geometry with 23 steps and no divergence, so the explicit-range floor the residues sit on has not moved.
+CLAUSE 2 CLOSED, CLAUSE 1 OPEN, 2026-09-14, attempt-01, cycle 9 introspection lane. compat/tui-client-commands.sh prints `all 78 asserted comparisons identical, 29 recorded not asserted (0 for a sibling lane)` on three runs at the branch tip, against `all 61 asserted comparisons identical, 37 recorded not asserted` at BASE. Six of the 29 are this obligation's clause 1 - capture-control, capture-flags, capture-hyperlinks, capture-line-numbers, capture-pending and capture-grid - and each keeps capture.rich-transports as its reason.
 
-GATE, 2026-09-14, cycle 6 commands. Unchanged and still unmeasured. The commands lane's budget went to TUI-014 clause 1, which the punch list puts ahead of this record, and clause 1 did not close either - it holds the info preview open, measured at this gate. Nothing in this landing touches this obligation's surfaces, and no clause of it asserts.
+CLAUSE 2. All five residues are closed and 26 capture forms are byte-identical on both sides, measured 2026-09-14 on an 80x24 pane holding three written rows against the pin d77c9dc6: every explicit -E from 0 to 30, the default range, -N, -N -T, -N -e, -J, -T, -e, -M with and without a range, -a, -a -q and a history start. Before: -p was 3 lines against 24, -p -N -S 0 -E 0 was 25 bytes against 41, -p -M answered `pane is not in a native mode` at exit 1 against the pane's text, -p -a said `alternate screen is not active` against `no alternate screen`, -p -e kept one trailing cell, and -p -a -q printed nothing against one empty line.
 
-Next action: The three residues are worth more than the six rich flags and are a smaller change: they live in the terminal worker's capture, not in a new transport. Take them first and keep compat/scenarios/capture-pane.txt green, since its explicit ranges already pass on both.
+TWO OF THE FIVE WERE NOT WHAT THE ROSTER WROTE DOWN. -N does not pad to the pane edge: grid_string_cells walks to gl->cellsize under GRID_STRING_EMPTY_CELLS and grid_expand_line rounds a row's cell array to a quarter, a half or the whole screen width, so on 80 columns a row holding 24 cells prints 40 and one holding 8 prints 20 while a row nothing wrote prints empty. The landing reads that bucket off the cells the row currently uses; the one fact it cannot reproduce is that the pin's allocation is a high-water mark, so a row once written wider and later erased keeps the wider width there and not here. And the default range was not the only range losing rows: every range past the last written row lost them, and the last row of ANY range was lost again in the printing, because cmd_capture_pane_exec drops one trailing newline off the buffer and then prints one while zz's writer adds a newline only when the text lacks one. That one byte is also the whole of the -a -q difference. Cases: capture-default-range, capture-default-range-escape, capture-past-last-row, capture-preserve-trailing and its three neighbours, capture-mode-screen, capture-mode-default, capture-escape, capture-alternate, capture-alternate-quiet.
+
+compat/scenarios/capture-pane.txt stays green under --strict-geometry at 23 steps with no divergence, and so do display-message and the six other corpus rows that capture a pane; compat/attached-client.sh PASSes.
+
+CLAUSE 1 IS UNTOUCHED AND OPEN: -C, -F, -H, -L, -P and -R stay `unsupported command: capture-pane -X`, each recorded under capture.rich-transports, which still owns them and the saved alternate grid -a would need. They are a terminal-owned rich snapshot, not another text transform, and were not this cycle's.
+
+GAP: semantic:capture-pane-trailing-blank-rows closed under capture.rich-transports 2026-09-14; the six flag items and semantic:capture-pane-saved-alternate keep the gap.
+
+History before this attempt: split from TUI-011 on 2026-09-13 with the roster's measurement, which cycle 8 did not reach.
+
+Next action: Clause 1 only: the six rich transports. -R and -P need the pin's grid and input-parser state, so they take a terminal-owned rich snapshot rather than another pass over the text the worker retains; -C, -F, -H and -L are smaller and read line flags, hyperlink ids and line numbers off the same snapshot. Decide per flag whether to build it or keep the refusal with the workload it would serve, which is what the clause asks.
 
 ### TUI-018: Caller stream forms
 

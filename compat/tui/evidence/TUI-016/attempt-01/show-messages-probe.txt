@@ -1,0 +1,30 @@
+zz -T rc=0
+pin -T rc=0
+  234 /tmp/zzprobeT.2307931/zz-T.txt
+  234 /tmp/zzprobeT.2307931/pin-T.txt
+  468 total
+--- stderr zz:
+--- normalized diff (pts numbers collapsed):
+--- termfeatures:
+zz  termfeatures=256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle colours=16777216
+pin termfeatures=256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle colours=16777216
+--- -J empty:
+zz rc=0 size=0
+pin rc=0 size=0
+--- -J with a job:
+Job 0: sleep 30; echo hi [fd=21, pid=2308468, status=0]
+Job 1: sleep 30; echo hi [fd=19, pid=2308439, status=0]
+zz rc=0
+Job 0: sleep 30; echo hi [fd=10, pid=2308473, status=0]
+pin rc=0
+--- -JT head:
+Terminal 0: tmux-256color for /dev/pts/11, flags=0x31:
+   0: acsc: (string) ++,,--..00``aaffgghhiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~
+--- -T -t CLIENT:
+234
+234
+--- -T -t bogus:
+zz rc=0 lines=234 err=
+pin rc=0 lines=234 err=
+--- -t log tolerated:
+zz rc=0 err=

@@ -1,0 +1,20 @@
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+
+date: 2026-09-14T10:57:30Z
+repo: /home/demfabris/dev/zz-tui-introspection (worktree of /home/demfabris/dev/zz)
+branch: campaign/tui-introspection
+base: origin/main 879b68fc (rebased onto it 2026-09-14 after a gate pushed 879b68fc)
+code tip at measurement: f0d34be75fd305827bbfaece93a2a5313912baf1 (the ledger and evidence commit that follows it changes no code)
+worktree: clean at measurement apart from the evidence files being written
+
+pin: tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+zz binary: /home/demfabris/dev/zz-tui-introspection/target/debug/zz
+sha256: 5b2cf54c218a191cef24dd531792772066e61af727866aa8c4ff800271c94d94
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+
+locale: LANG=en_US.UTF-8 LC_ALL=unset
+cargo wrapper: systemd-run --user --scope -q -p MemoryMax=5G -p MemorySwapMax=2G flock -w 540 /tmp/zz-cargo-slot-N.lock

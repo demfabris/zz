@@ -1,0 +1,104 @@
+=== -S 0 -E 0
+  pin rc=0 lines=1 bytes=25 err=[]
+  zz  rc=0 lines=1 bytes=25 err=[]
+  identical
+=== -S 0 -E 1
+  pin rc=0 lines=2 bytes=34 err=[]
+  zz  rc=0 lines=2 bytes=34 err=[]
+  identical
+=== -S 0 -E 2
+  pin rc=0 lines=3 bytes=36 err=[]
+  zz  rc=0 lines=3 bytes=36 err=[]
+  identical
+=== -S 0 -E 3
+  pin rc=0 lines=4 bytes=37 err=[]
+  zz  rc=0 lines=4 bytes=37 err=[]
+  identical
+=== -S 0 -E 4
+  pin rc=0 lines=5 bytes=38 err=[]
+  zz  rc=0 lines=5 bytes=38 err=[]
+  identical
+=== -S 0 -E 5
+  pin rc=0 lines=6 bytes=39 err=[]
+  zz  rc=0 lines=6 bytes=39 err=[]
+  identical
+=== -S 0 -E 6
+  pin rc=0 lines=7 bytes=40 err=[]
+  zz  rc=0 lines=7 bytes=40 err=[]
+  identical
+=== -S 0 -E 10
+  pin rc=0 lines=11 bytes=44 err=[]
+  zz  rc=0 lines=11 bytes=44 err=[]
+  identical
+=== -S 0 -E 23
+  pin rc=0 lines=24 bytes=57 err=[]
+  zz  rc=0 lines=24 bytes=57 err=[]
+  identical
+=== -S 0 -E 24
+  pin rc=0 lines=24 bytes=57 err=[]
+  zz  rc=0 lines=24 bytes=57 err=[]
+  identical
+=== -S 0 -E 30
+  pin rc=0 lines=24 bytes=57 err=[]
+  zz  rc=0 lines=24 bytes=57 err=[]
+  identical
+=== default range
+  pin rc=0 lines=24 bytes=57 err=[]
+  zz  rc=0 lines=24 bytes=57 err=[]
+  identical
+=== default range -N
+  pin rc=0 lines=24 bytes=104 err=[]
+  zz  rc=0 lines=24 bytes=104 err=[]
+  identical
+=== default range -J
+  pin rc=0 lines=24 bytes=58 err=[]
+  zz  rc=0 lines=24 bytes=58 err=[]
+  identical
+=== -N -S 0 -E 0
+  pin rc=0 lines=1 bytes=41 err=[]
+  zz  rc=0 lines=1 bytes=41 err=[]
+  identical
+=== -N -S 0 -E 2
+  pin rc=0 lines=3 bytes=83 err=[]
+  zz  rc=0 lines=3 bytes=83 err=[]
+  identical
+=== -e -S 0 -E 2
+  pin rc=0 lines=3 bytes=36 err=[]
+  zz  rc=0 lines=3 bytes=36 err=[]
+  identical
+=== -e -N -S 0 -E 2
+  pin rc=0 lines=3 bytes=83 err=[]
+  zz  rc=0 lines=3 bytes=83 err=[]
+  identical
+=== -M -S 0 -E 2
+  pin rc=0 lines=3 bytes=36 err=[]
+  zz  rc=0 lines=3 bytes=36 err=[]
+  identical
+=== -M default
+  pin rc=0 lines=24 bytes=57 err=[]
+  zz  rc=0 lines=24 bytes=57 err=[]
+  identical
+=== -a
+  pin rc=1 lines=0 bytes=0 err=[no alternate screen]
+  zz  rc=1 lines=0 bytes=0 err=[no alternate screen]
+  identical
+=== -a -q
+  pin rc=0 lines=1 bytes=1 err=[]
+  zz  rc=0 lines=1 bytes=1 err=[]
+  identical
+=== -S 0 -E 5
+  pin rc=0 lines=6 bytes=39 err=[]
+  zz  rc=0 lines=6 bytes=39 err=[]
+  identical
+=== -T -S 0 -E 5
+  pin rc=0 lines=6 bytes=39 err=[]
+  zz  rc=0 lines=6 bytes=39 err=[]
+  identical
+=== -e default
+  pin rc=0 lines=24 bytes=57 err=[]
+  zz  rc=0 lines=24 bytes=57 err=[]
+  identical
+=== -S - -E 0
+  pin rc=0 lines=1 bytes=25 err=[]
+  zz  rc=0 lines=1 bytes=25 err=[]
+  identical

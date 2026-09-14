@@ -1,0 +1,12 @@
+=== cargo clippy -p zz-protocol --all-targets --all-features -- -D warnings
+exit=0
+error+warning lines: 0
+=== cargo clippy -p zz-mux --all-targets --all-features -- -D warnings
+exit=0
+error+warning lines: 0
+=== cargo clippy -p zz-terminal --all-targets --all-features -- -D warnings
+exit=0
+error+warning lines: 0
+=== cargo clippy -p zz-daemon --all-targets --all-features -- -D warnings
+exit=0
+error+warning lines: 0

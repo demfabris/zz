@@ -1,0 +1,19 @@
+=== attached terminal client name, both sides
+zz  /dev/pts/95 tty=/dev/pts/95
+pin /dev/pts/96 tty=/dev/pts/96
+
+=== zz show-messages (newest first, first 6)
+08:08: device-10 command: show-messages
+08:08: device-9 command: list-clients -F #{client_name} tty=#{client_tty}
+08:08: device-8 message: can't find pane: =cli
+08:08: device-8 command: capture-pane -pa -t =cli
+08:08: device-7 command: list-clients -F #{client_session}
+08:08: device-6 command: show-options -sv focus-events
+
+=== pin show-messages (newest first, first 6)
+08:08: client-2317795 command: show-messages
+08:08: client-2317732 command: list-clients -F "#{client_name} tty=#{client_tty}"
+08:08: client-2317574 message: can't find pane: =cli
+08:08: client-2317574 command: capture-pane -ap -t =cli
+08:08: client-2317503 command: list-clients -F "#{client_session}"
+08:08: /dev/pts/96 command: attach-session -t =cli

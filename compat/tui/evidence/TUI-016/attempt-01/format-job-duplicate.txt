@@ -1,0 +1,13 @@
+clients: /dev/pts/20 kind-attached=cli|
+=== A: set status-left, no refresh-client, wait for the interval
+Job 0: sleep 40; echo hi [fd=19, pid=2667910, status=0]
+Job 1: sleep 40; echo hi [fd=20, pid=2667727, status=0]
+=== B: now one refresh-client -S from a clientless CLI
+Job 0: sleep 40; echo hi [fd=21, pid=2667927, status=0]
+Job 1: sleep 40; echo hi [fd=19, pid=2667910, status=0]
+=== C: a second refresh-client -S
+Job 0: sleep 40; echo hi [fd=21, pid=2668019, status=0]
+Job 1: sleep 40; echo hi [fd=19, pid=2667910, status=0]
+=== D: -S targeted at the attached client
+Job 0: sleep 40; echo hi [fd=22, pid=2668127, status=0]
+Job 1: sleep 40; echo hi [fd=19, pid=2667910, status=0]

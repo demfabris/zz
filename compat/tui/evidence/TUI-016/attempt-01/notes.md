@@ -21,6 +21,7 @@ CachyOS Linux, pin d77c9dc6.
 - `client-commands-self-check.txt` — the same fixture's `--self-check`.
 - `corpus-messages.txt` — `compat/run.sh --strict-geometry` over every corpus row
   that names show-messages or reads the terminal interrogate the landing moves.
+- `format-job-duplicate.txt` — the finding below, on the shipped build.
 - `tui-caps.txt` — `compat/tui-caps.sh`, because this landing changes the
   `TtyTerm` behind `#{I/c:}` and `#{I/f:}` and TUI-009 is verified on that
   fixture: 366 asserted rows, all identical, 0 recorded.
@@ -57,14 +58,28 @@ except `messages-log`, which is clause 2's registration.
 
 ## Finding, measured and not closed
 
-zz runs a status format job once per shell-cache scope, so one `#()` in
-status-left is two child processes and two `-J` rows where the pin has one. The
-cache is keyed `(scope, tag, command)` in `crates/zz-daemon/src/status.rs`, where
-scope is `Attached(client)` or `Unattached`; the pin keys `all_jobs` by the
-expanded command and its tag alone. That is the status renderer's key, not
-show-messages, and rekeying it would move every `#()` on every status surface, so
-it is recorded here rather than changed in this lane. `-J` reports what zz is
-actually running, which is the clause's ask.
+`format-job-duplicate.txt`: one `#(sleep 40; echo hi)` in status-left on a
+server with one attached client is TWO child processes and two `-J` rows where
+the pin has one. It is there before any refresh, it survives every refresh, and
+a refresh replaces only the other one.
+
+The cause, read off a one-line instrumentation of `shell()` on this same build
+and then removed: every clientless CLI invocation gets a status render of its
+own, and that render has no attached session, so `facts.client` is None and the
+shell cache takes the `Unattached` scope. All of them collapse into that one
+entry, which holds a second live job beside the attached client's:
+
+    JOBDBG scope=Attached(ClientId(3))  facts_client=true  cmd=sleep 40; echo hi   x16
+    JOBDBG scope=Unattached client=ClientId(11..19) facts_client=false cmd=sleep 40; echo hi
+
+ClientId 11 to 19 are nine separate `zz` CLI processes. The cache is keyed
+`(scope, tag, command)` in `crates/zz-daemon/src/status.rs` and the pin keys
+`all_jobs` by the expanded command and its tag alone, but the key is not really
+the defect: a command client that draws nothing should not be rendering a status
+line at all. Either way that is the status renderer's contract and not
+show-messages', it moves every `#()` on every status surface, and no punch-list
+item names it, so it is recorded here with its cause rather than changed in this
+lane. `-J` reports what zz is actually running, which is the clause's ask.
 
 A live `-J` row cannot be a fixture case: `fd` and `pid` belong to one process
 and no two servers share them, and a `#(sleep ...)` in the driver's scene would

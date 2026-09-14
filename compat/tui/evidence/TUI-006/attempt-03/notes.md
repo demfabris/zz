@@ -25,6 +25,10 @@ three are `same` now and the fixture records nothing.
 - environment.txt - the box, the pin, the revision, the binary's sha256. The proof outputs
   were captured at revision 0ecfd454; the commits after it are the GUI's prompt test states
   (test-only, no binary change), the help-box mask below and this record.
+- choosers-run-4.txt - a fourth run and a second --self-check, both taken after the last
+  commit, which adds the measurement below to the fixture's header and to the ledger and
+  changes no code: `all 78 asserted comparisons identical, 0 recorded not asserted (0 for a
+  sibling lane)` again, and the twelve sabotages again. copy-mode.txt was re-run there too.
 - choosers-run-1/2/3.txt - compat/tui-choosers.sh, three runs, each
   `all 78 asserted comparisons identical, 0 recorded not asserted (0 for a sibling lane)`,
   exit 0.

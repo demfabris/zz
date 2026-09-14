@@ -114,7 +114,7 @@ const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] = &[
     ("copy-mode", 68),
     ("copy-mode-vi", 79),
     ("prefix", 57),
-    ("root", 13),
+    ("root", 15),
 ];
 
 fn root() -> PathBuf {
@@ -1378,15 +1378,15 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         303,
         "pinned binding count changed"
     );
-    assert_eq!(zz_keys.len(), 345, "zz default binding count changed");
+    assert_eq!(zz_keys.len(), 347, "zz default binding count changed");
     assert_eq!(
         shared_keys.len(),
-        254,
+        256,
         "shared default binding count changed"
     );
     assert_eq!(
         missing_keys.len(),
-        49,
+        47,
         "missing default binding count changed"
     );
     assert_eq!(
@@ -1401,7 +1401,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         structurally_matching_bindings.len(),
-        217,
+        219,
         "structurally matching shared binding count changed"
     );
     assert_eq!(

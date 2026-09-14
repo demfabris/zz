@@ -10,7 +10,7 @@ use zz_protocol::{
 };
 use zz_terminal::{
     KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent, SearchQuery, TerminalColorScheme,
-    TerminalMouseButton, TerminalMouseInput, TerminalMousePhase, TerminalViewAction,
+    TerminalMode, TerminalMouseButton, TerminalMouseInput, TerminalMousePhase, TerminalViewAction,
 };
 
 use crate::{
@@ -1162,7 +1162,9 @@ fn handle_mouse(
         }
         MouseRouteOwner::Workspace => {}
     }
-    if let Some(bound) = bound_mouse_key(model, event, global_column, global_row) {
+    if let Some(bound) =
+        bound_mouse_key(model, event, global_column, global_row, global_x, global_y)
+    {
         client
             .send_input(bound)
             .map_err(|error| error.to_string())?;
@@ -1278,11 +1280,19 @@ fn bound_mouse_key(
     event: MouseEvent,
     global_column: u16,
     global_row: u16,
+    global_x: u32,
+    global_y: u32,
 ) -> Option<InputMessage> {
-    let latch = latched_mouse_location(model, event, global_column, global_row)?;
-    let key = mouse_key_name(event, &latch.location)?;
-    if !model.mouse_bindings.contains(&key) {
+    let latch =
+        latched_mouse_location(model, event, global_column, global_row, global_x, global_y)?;
+    let key = mouse_key_name(event, &latch.location, latch.dragging)?;
+    if !model.mouse_bindings.contains(&key) && !copy_mouse_key_is_reachable(model, &latch, &key) {
         return None;
+    }
+    if matches!(event.kind, MouseEventKind::Drag(_))
+        && let Some(latch) = model.mouse_drag.as_mut()
+    {
+        latch.bound = true;
     }
     Some(InputMessage::MouseKey {
         key,
@@ -1291,7 +1301,83 @@ fn bound_mouse_key(
         column: global_column,
         row: global_row,
         border: latch.border,
+        view_action: latch.pane.and_then(|pane| {
+            bound_mouse_view_action(
+                model,
+                pane,
+                event,
+                global_column,
+                global_row,
+                global_x,
+                global_y,
+            )
+        }),
+        press_action: latch.pane.and_then(|pane| {
+            bound_mouse_view_action(
+                model,
+                pane,
+                MouseEvent {
+                    kind: MouseEventKind::Down(latch.button),
+                    ..event
+                },
+                latch.press.0,
+                latch.press.1,
+                latch.press.2,
+                latch.press.3,
+            )
+        }),
     })
+}
+
+/// The pane input the gesture would have carried on its own, handed over with
+/// the event so a binding that runs `send -M` can replay it. The pin's
+/// `window_pane_key` re-encodes `m` inside the server; the cell grid and the
+/// pixel geometry that encoding needs live in the client here, so the client
+/// encodes and the daemon replays.
+fn bound_mouse_view_action(
+    model: &Model,
+    pane: zz_protocol::PaneId,
+    event: MouseEvent,
+    global_column: u16,
+    global_row: u16,
+    global_x: u32,
+    global_y: u32,
+) -> Option<TerminalViewAction> {
+    let content = model
+        .layout
+        .panes
+        .iter()
+        .find(|entry| entry.pane == pane)?
+        .content();
+    let viewport = model.viewports.get(&pane)?;
+    let force_selection = event.modifiers.contains(KeyModifiers::SHIFT) || !viewport.mouse_tracking;
+    pane_mouse_action(
+        &model.size,
+        event,
+        content,
+        global_column,
+        global_row,
+        global_x,
+        global_y,
+        force_selection,
+    )
+}
+
+/// The mode table half of `key_bindings_get`'s walk: the pane the pointer
+/// resolved to holds a mode, so a name the copy tables bind is reachable from
+/// this gesture even though root does not bind it.
+fn copy_mouse_key_is_reachable(
+    model: &Model,
+    latch: &crate::state::MouseDragLatch,
+    key: &str,
+) -> bool {
+    let pane_holds_a_mode = latch.pane.is_some_and(|pane| {
+        model
+            .viewports
+            .get(&pane)
+            .is_some_and(|viewport| !matches!(viewport.mode, TerminalMode::Live))
+    });
+    (pane_holds_a_mode || latch.dragging && latch.bound) && model.copy_mouse_bindings.contains(key)
 }
 
 /// `server_client_check_mouse` resolves a location once, on the press, and
@@ -1304,7 +1390,10 @@ fn latched_mouse_location(
     event: MouseEvent,
     global_column: u16,
     global_row: u16,
+    global_x: u32,
+    global_y: u32,
 ) -> Option<crate::state::MouseDragLatch> {
+    let press = (global_column, global_row, global_x, global_y);
     match event.kind {
         MouseEventKind::Down(button) => {
             let (location, pane, window) = mouse_key_location(model, global_column, global_row)?;
@@ -1314,23 +1403,29 @@ fn latched_mouse_location(
                 pane,
                 window,
                 border: divider_axis(model, global_column, global_row),
+                dragging: false,
+                bound: false,
+                press,
             };
             model.mouse_drag = Some(latch.clone());
             Some(latch)
         }
-        MouseEventKind::Drag(button) => match model.mouse_drag.as_ref() {
-            Some(latch) if latch.button == button => Some(latch.clone()),
-            _ => resolved_mouse_latch(model, global_column, global_row),
+        MouseEventKind::Drag(button) => match model.mouse_drag.as_mut() {
+            Some(latch) if latch.button == button => {
+                latch.dragging = true;
+                Some(latch.clone())
+            }
+            _ => resolved_mouse_latch(model, global_column, global_row, press),
         },
         MouseEventKind::Up(button) => {
             let latch = match model.mouse_drag.as_ref() {
                 Some(latch) if latch.button == button => Some(latch.clone()),
-                _ => resolved_mouse_latch(model, global_column, global_row),
+                _ => resolved_mouse_latch(model, global_column, global_row, press),
             };
             model.mouse_drag = None;
             latch
         }
-        _ => resolved_mouse_latch(model, global_column, global_row),
+        _ => resolved_mouse_latch(model, global_column, global_row, press),
     }
 }
 
@@ -1338,6 +1433,7 @@ fn resolved_mouse_latch(
     model: &Model,
     global_column: u16,
     global_row: u16,
+    press: (u16, u16, u32, u32),
 ) -> Option<crate::state::MouseDragLatch> {
     let (location, pane, window) = mouse_key_location(model, global_column, global_row)?;
     Some(crate::state::MouseDragLatch {
@@ -1346,6 +1442,9 @@ fn resolved_mouse_latch(
         pane,
         window,
         border: divider_axis(model, global_column, global_row),
+        dragging: false,
+        bound: false,
+        press,
     })
 }
 
@@ -1433,10 +1532,16 @@ fn divider_owner(
 }
 
 /// The event and button half of the name, in the pin's own spelling.
-fn mouse_key_name(event: MouseEvent, location: &str) -> Option<String> {
+/// `server_client_check_mouse` turns the release that ends a drag into
+/// `MouseDragEnd` for the button that started it, and leaves every other
+/// release a `MouseUp`.
+fn mouse_key_name(event: MouseEvent, location: &str, dragging: bool) -> Option<String> {
     let base = match event.kind {
         MouseEventKind::Down(button) => {
             format!("MouseDown{}{location}", mouse_button_index(button))
+        }
+        MouseEventKind::Up(button) if dragging => {
+            format!("MouseDragEnd{}{location}", mouse_button_index(button))
         }
         MouseEventKind::Up(button) => format!("MouseUp{}{location}", mouse_button_index(button)),
         MouseEventKind::Drag(button) => {
@@ -3492,7 +3597,8 @@ mod tests {
         assert_eq!(
             mouse_key_name(
                 event(MouseEventKind::Down(MouseButton::Left), KeyModifiers::NONE),
-                "Pane"
+                "Pane",
+                false
             )
             .as_deref(),
             Some("MouseDown1Pane")
@@ -3500,7 +3606,8 @@ mod tests {
         assert_eq!(
             mouse_key_name(
                 event(MouseEventKind::Drag(MouseButton::Left), KeyModifiers::ALT),
-                "Border"
+                "Border",
+                false
             )
             .as_deref(),
             Some("M-MouseDrag1Border")
@@ -3511,15 +3618,26 @@ mod tests {
                     MouseEventKind::Up(MouseButton::Right),
                     KeyModifiers::CONTROL
                 ),
-                "StatusLeft"
+                "StatusLeft",
+                false
             )
             .as_deref(),
             Some("C-MouseUp3StatusLeft")
         );
         assert_eq!(
             mouse_key_name(
+                event(MouseEventKind::Up(MouseButton::Left), KeyModifiers::NONE),
+                "Pane",
+                true
+            )
+            .as_deref(),
+            Some("MouseDragEnd1Pane")
+        );
+        assert_eq!(
+            mouse_key_name(
                 event(MouseEventKind::ScrollUp, KeyModifiers::NONE),
-                "Status"
+                "Status",
+                false
             )
             .as_deref(),
             Some("WheelUpStatus")
@@ -3527,13 +3645,18 @@ mod tests {
         assert_eq!(
             mouse_key_name(
                 event(MouseEventKind::ScrollDown, KeyModifiers::SHIFT),
-                "Pane"
+                "Pane",
+                false
             )
             .as_deref(),
             Some("S-WheelDownPane")
         );
         assert_eq!(
-            mouse_key_name(event(MouseEventKind::Moved, KeyModifiers::NONE), "Pane"),
+            mouse_key_name(
+                event(MouseEventKind::Moved, KeyModifiers::NONE),
+                "Pane",
+                false
+            ),
             None
         );
     }

@@ -1099,22 +1099,40 @@ fn refresh_terminal_options(model: &mut Model, core: &Mutex<ClientCore>, escape_
     model.mouse_option = mouse_option_enabled(options);
     model.focus_follows_mouse = focus_follows_mouse_enabled(options);
     model.mouse_bindings = mouse_binding_names(core.key_tables());
+    model.copy_mouse_bindings = copy_mouse_binding_names(core.key_tables());
 }
 
 /// Every mouse key name the ROOT table carries a binding for. The raw TUI only
 /// has to know WHETHER a gesture's name is bound before it hands the event to
 /// the daemon, which then walks the table stack itself the way
-/// `key_bindings_get` does. Root alone, because a gesture whose name the
-/// daemon then fails to find would have been swallowed here for nothing, and
-/// root is the one table a pointer event always reaches: a binding in a copy
-/// table or a custom `-T` table stays unreachable from the pointer and is
-/// recorded on compat/tui-mouse.sh.
+/// `key_bindings_get` does. A gesture whose name the daemon then fails to find
+/// would have been swallowed here for nothing, so the client offers exactly
+/// the names the daemon's own lookup can reach: root always, and the mode
+/// tables below when the pane the pointer landed on holds a mode.
 pub(crate) fn mouse_binding_names(
     tables: &[zz_protocol::KeyTableSnapshot],
 ) -> std::collections::HashSet<String> {
+    mouse_names_in(tables, |name| name == "root")
+}
+
+/// `server_client_handle_key`: with the client on its default key table and
+/// the pane the pointer resolved to in a mode, the table a mouse key is looked
+/// up in is that mode's own, `wme->mode->key_table(wme)`. Either copy table
+/// can be the effective one - the window's `mode-keys` decides - so a name
+/// bound in either is reachable from a gesture and the client offers both.
+pub(crate) fn copy_mouse_binding_names(
+    tables: &[zz_protocol::KeyTableSnapshot],
+) -> std::collections::HashSet<String> {
+    mouse_names_in(tables, |name| matches!(name, "copy-mode" | "copy-mode-vi"))
+}
+
+fn mouse_names_in(
+    tables: &[zz_protocol::KeyTableSnapshot],
+    wanted: impl Fn(&str) -> bool,
+) -> std::collections::HashSet<String> {
     tables
         .iter()
-        .filter(|table| table.name == "root")
+        .filter(|table| wanted(&table.name))
         .flat_map(|table| table.bindings.iter())
         .filter(|binding| is_mouse_key_name(&binding.key))
         .map(|binding| binding.key.clone())

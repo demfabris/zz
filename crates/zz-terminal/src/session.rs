@@ -289,6 +289,7 @@ impl EngineFilter {
             },
             cursor_y: terminal.cursor_y()?,
             alternate_on,
+            mouse_tracking: terminal.is_mouse_tracking()?,
         })
     }
 
@@ -1241,6 +1242,10 @@ pub struct TerminalFacts {
     pub cursor_x: u16,
     pub cursor_y: u16,
     pub alternate_on: bool,
+    /// `ALL_MOUSE_MODES`: the three tracking modes `format_cb_mouse_any_flag`
+    /// reads off `wp->base.mode`, which is what every stock pane-body row
+    /// guards its `send -M` branch on.
+    pub mouse_tracking: bool,
 }
 
 struct PublishedViewports {
@@ -13631,6 +13636,7 @@ mod tests {
                     cursor_x: 0,
                     cursor_y: 23,
                     alternate_on: true,
+                    mouse_tracking: false,
                 }
             );
             filter.write(
@@ -13654,6 +13660,7 @@ mod tests {
                     cursor_x: 80,
                     cursor_y: 23,
                     alternate_on: false,
+                    mouse_tracking: false,
                 }
             );
         }

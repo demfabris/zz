@@ -2097,6 +2097,17 @@ pub enum InputMessage {
         /// the button-down for the rest of the drag the way
         /// `c->tty.mouse_drag_flag` latches it. `resize-pane -M` reads it.
         border: Option<Axis>,
+        /// What this same gesture would have handed the pane had no binding
+        /// claimed it. `window_pane_key` re-encodes `m` for the pane when a
+        /// binding runs `send -M`, and the client is the side that owns the
+        /// cell grid and the pixel geometry the encoding needs, so it travels
+        /// with the event and `send-keys -M` replays it.
+        view_action: Option<TerminalViewAction>,
+        /// The same, for the press this gesture was latched from, which is
+        /// `m->lx`/`m->ly` on the pin's own event record. `copy-mode -M`
+        /// anchors its selection there (`cmd_mouse_at(wp, m, &x, &y, 1)`)
+        /// before the current cell extends it.
+        press_action: Option<TerminalViewAction>,
     },
 }
 

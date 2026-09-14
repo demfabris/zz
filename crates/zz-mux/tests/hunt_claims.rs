@@ -1311,8 +1311,8 @@ fn send_keys_reports_the_flags_it_cannot_honor() {
         .execute(&mut context, &command("send-keys", &["-M", "x"]))
         .unwrap_err();
     assert!(
-        matches!(&error, ServerError::UnsupportedCommand(message)
-            if message == "send-keys -M"),
+        matches!(&error, ServerError::InvalidCommand(message)
+            if message == "no mouse target"),
         "{error:?}"
     );
 

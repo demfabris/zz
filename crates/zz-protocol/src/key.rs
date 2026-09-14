@@ -258,6 +258,119 @@ impl Default for KeyTables {
                 },
             );
         }
+        tables.bind(
+            "root",
+            "MouseDown1Pane",
+            Binding {
+                commands: vec![
+                    CommandInvocation::new("select-pane", ["-t", "="]),
+                    CommandInvocation::new("send-keys", ["-M"]),
+                ],
+                repeat: false,
+                note: None,
+            },
+        );
+        for (key, guard, fallback) in [
+            (
+                "MouseDrag1Pane",
+                "#{||:#{pane_in_mode},#{mouse_any_flag}}",
+                "{ copy-mode -M }",
+            ),
+            (
+                "WheelUpPane",
+                "#{||:#{alternate_on},#{pane_in_mode},#{mouse_any_flag}}",
+                "{ copy-mode -e }",
+            ),
+        ] {
+            tables.bind(
+                "root",
+                key,
+                Binding {
+                    commands: vec![
+                        CommandInvocation::new(
+                            "if-shell",
+                            ["-F", guard, "{ send-keys -M }", fallback],
+                        )
+                        .with_command_blocks([2, 3]),
+                    ],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+        tables.bind(
+            "root",
+            "MouseDown2Pane",
+            Binding {
+                commands: vec![
+                    CommandInvocation::new("select-pane", ["-t", "="]),
+                    CommandInvocation::new(
+                        "if-shell",
+                        [
+                            "-F",
+                            "#{||:#{pane_in_mode},#{mouse_any_flag}}",
+                            "{ send-keys -M }",
+                            "{ paste-buffer -p }",
+                        ],
+                    )
+                    .with_command_blocks([2, 3]),
+                ],
+                repeat: false,
+                note: None,
+            },
+        );
+        for table in ["copy-mode", "copy-mode-vi"] {
+            tables.bind(
+                table,
+                "MouseDown1Pane",
+                Binding {
+                    commands: vec![CommandInvocation::new("select-pane", [] as [&str; 0])],
+                    repeat: false,
+                    note: None,
+                },
+            );
+            tables.bind(
+                table,
+                "MouseDrag1Pane",
+                Binding {
+                    commands: vec![
+                        CommandInvocation::new("select-pane", [] as [&str; 0]),
+                        CommandInvocation::new("send-keys", ["-X", "begin-selection"]),
+                    ],
+                    repeat: false,
+                    note: None,
+                },
+            );
+            tables.bind(
+                table,
+                "MouseDragEnd1Pane",
+                Binding {
+                    commands: vec![CommandInvocation::new(
+                        "send-keys",
+                        ["-X", "copy-pipe-and-cancel"],
+                    )],
+                    repeat: false,
+                    note: None,
+                },
+            );
+            for (key, action) in [
+                ("WheelUpPane", "scroll-up"),
+                ("WheelDownPane", "scroll-down"),
+            ] {
+                tables.bind(
+                    table,
+                    key,
+                    Binding {
+                        commands: vec![
+                            CommandInvocation::new("select-pane", [] as [&str; 0]),
+                            CommandInvocation::new("send-keys", ["-X", "-N", "5", action]),
+                        ],
+                        repeat: false,
+                        note: None,
+                    },
+                );
+            }
+        }
         for (table, key, action) in [
             ("copy-mode-vi", "h", "cursor-left"),
             ("copy-mode-vi", "Left", "cursor-left"),

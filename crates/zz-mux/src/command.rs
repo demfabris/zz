@@ -636,6 +636,13 @@ pub struct MouseEventTarget {
     pub column: u16,
     pub row: u16,
     pub border: Option<Axis>,
+    /// The pane input this gesture carries, encoded by the client that owns
+    /// the pointer. `send-keys -M` hands it to the pane the event landed on,
+    /// which is what `window_pane_key(wp, tc, s, wl, m->key, m)` does.
+    pub view_action: Option<TerminalViewAction>,
+    /// The press this gesture was latched from, the pin's `m->lx`/`m->ly`.
+    /// `copy-mode -M` anchors its selection there.
+    pub press_action: Option<TerminalViewAction>,
 }
 
 impl MouseEventTarget {
@@ -7883,6 +7890,23 @@ impl MuxEngine {
                 require_mode: true,
             }));
         }
+        if options.has("-M") {
+            let Some(mouse) = context.invoking_mouse() else {
+                return Err(ServerError::InvalidCommand("no mouse target".to_owned()));
+            };
+            let Some(target) = mouse.pane else {
+                return Err(ServerError::InvalidCommand("no mouse target".to_owned()));
+            };
+            let Some(action) = mouse.view_action.clone() else {
+                return Ok(Execution::default());
+            };
+            return Ok(Execution::effect(MuxEffect::TerminalView {
+                pane: target,
+                action,
+                target_client,
+                require_mode: false,
+            }));
+        }
         let reset = options.has("-R");
         if reset && positional.is_empty() {
             return Ok(Execution::effect(MuxEffect::ResetPane { pane }));
@@ -8003,7 +8027,36 @@ impl MuxEngine {
             }));
         }
         if options.has("-M") {
-            return Ok(Execution::default());
+            let Some(mouse) = context.invoking_mouse() else {
+                return Ok(Execution::default());
+            };
+            let Some(target) = mouse.pane else {
+                return Ok(Execution::default());
+            };
+            let mut effects = vec![MuxEffect::TerminalView {
+                pane: target,
+                action: TerminalViewAction::EnterCopyModeWith {
+                    scroll_exit: false,
+                    hide_position: true,
+                },
+                target_client: None,
+                require_mode: false,
+            }];
+            effects.extend(
+                [mouse.press_action.clone(), mouse.view_action.clone()]
+                    .into_iter()
+                    .flatten()
+                    .map(|action| MuxEffect::TerminalView {
+                        pane: target,
+                        action,
+                        target_client: None,
+                        require_mode: true,
+                    }),
+            );
+            return Ok(Execution {
+                output: RawText::default(),
+                effects,
+            });
         }
         let mut effects = Vec::new();
         if let Some(source) = options.value("-s") {
@@ -8015,9 +8068,10 @@ impl MuxEngine {
         if options.has("-k") {
             effects.push(MuxEffect::ArmCopyModeKill { pane });
         }
+        let hide_position = options.has("-H") || context.invoking_mouse().is_some();
         effects.push(MuxEffect::TerminalView {
             pane,
-            action: if options.has("-H") {
+            action: if hide_position {
                 TerminalViewAction::EnterCopyModeWith {
                     scroll_exit: options.has("-e"),
                     hide_position: true,

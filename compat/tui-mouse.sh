@@ -1215,10 +1215,10 @@ USER_BINDING_MODE=same
 USER_BINDING_REASON=""
 MOUSE_CONTEXT_MODE=same
 MOUSE_CONTEXT_REASON=""
-WHEEL_MODE=record
-WHEEL_REASON="WheelUpPane is a root binding running copy-mode -e on the pin; the raw TUI scrolls its own viewport instead (keys.root-native-mouse)"
-DRAG_MODE=record
-DRAG_REASON="MouseDrag1Pane is a root binding running copy-mode -M on the pin; the raw TUI drives zz-terminal's own selection, which does not put the pane in a mode (keys.root-native-mouse)"
+WHEEL_MODE=same
+WHEEL_REASON=""
+DRAG_MODE=same
+DRAG_REASON=""
 MULTI_CLICK_MODE=record
 MULTI_CLICK_REASON="input.rs sets click_count to 0 or 1 only, so no gesture ever becomes DoubleClick1Pane or TripleClick1Pane and zz-terminal's own multi-click path is unreachable from the raw TUI (keys.root-native-mouse)"
 BORDER_MODE=same
@@ -1382,6 +1382,25 @@ sc_one_sided_status_wheel() {
   case_status_clicks
   side_command zz bind-key -T root WheelDownStatus next-window >/dev/null 2>&1
 }
+# The pin's own `WheelUpPane` unbound on zz only, so the wheel enters the pin's
+# copy mode and leaves zz scrolling its own viewport, which is no mode at all.
+# Both wheel checks carry it.
+sc_one_sided_wheel_up_pane() {
+  side_command zz unbind-key -T root WheelUpPane >/dev/null 2>&1
+  case_wheel_up_pane
+  side_command zz bind-key -T root WheelUpPane \
+    'if-shell -F "#{||:#{alternate_on},#{pane_in_mode},#{mouse_any_flag}}" { send-keys -M } { copy-mode -e }' \
+    >/dev/null 2>&1
+}
+# The copy table's own `MouseDragEnd1Pane` unbound on zz only, so zz's drag
+# selects and stays in the mode where the pin's copies and leaves. All three
+# drag checks carry it.
+sc_one_sided_drag_end() {
+  side_command zz unbind-key -T copy-mode MouseDragEnd1Pane >/dev/null 2>&1
+  case_drag_selects
+  side_command zz bind-key -T copy-mode MouseDragEnd1Pane \
+    send-keys -X copy-pipe-and-cancel >/dev/null 2>&1
+}
 # The pin's own `MouseDown1Border` unbound on zz only, so zz's border click
 # runs nothing and the pane it had marked stays marked. This has to run before
 # the border-binding sabotage: that one's case rebinds `MouseDown1Border` and
@@ -1439,6 +1458,10 @@ run_self_check() {
     sc_one_sided_border_drag
   self_check_case 'WheelDownStatus unbound on zz only' catches \
     sc_one_sided_status_wheel
+  self_check_case 'WheelUpPane unbound on zz only' catches \
+    sc_one_sided_wheel_up_pane
+  self_check_case "the copy table's MouseDragEnd1Pane unbound on zz only" catches \
+    sc_one_sided_drag_end
   self_check_case "zz's mouse-target click aimed into the other pane" catches \
     sc_one_sided_mouse_target
   self_check_case 'zz out of copy mode before the paste' catches \

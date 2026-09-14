@@ -543,7 +543,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("keypad_flag", Terminal, Zero),
     variable!("last_window_index", Session, LastWindowIndex),
     variable!("mouse_all_flag", Terminal, Zero),
-    variable!("mouse_any_flag", Terminal, Zero),
+    variable!("mouse_any_flag", Terminal, StatusHook),
     variable!("mouse_button_flag", Terminal, Zero),
     variable!("mouse_hyperlink", Terminal, Empty),
     variable!("mouse_line", Terminal, Empty),

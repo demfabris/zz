@@ -44,18 +44,23 @@
 # refresh-client -t         target client, missing-client     same                           PROVED
 # refresh-client -c -D -L   pans a terminal client's view     loudly unsupported             DECLARED
 #   -R -U -l -r [adjust]                                                                      clients.interactive-refresh
-# capture-pane -p -S -E     the requested line range          the same range                 PROVED
+# capture-pane -p -S -E     the requested line range, one     same                           PROVED
+#                             line per row of it
 # capture-pane -J -q -T     join, quiet, trailing positions   same                           PROVED
 # capture-pane -b           fills a named buffer              same                           PROVED
-# capture-pane -e           the range with SGR, trimmed       one trailing cell kept         DECLARED, CHILD TUI-017
-# capture-pane (no -S -E)   every visible row, trailing       stops at the last written row  DECLARED, CHILD TUI-017
-#                             blanks included                                                 capture.rich-transports
-# capture-pane -N           trailing spaces to the pane edge  trailing spaces to the last    DECLARED, CHILD TUI-017
-#                                                               written cell
-# capture-pane -M           the mode screen, the pane when    errors when the pane is in no  DECLARED, CHILD TUI-017
-#                             there is no mode                  native mode
-# capture-pane -a           `no alternate screen`             `alternate screen is not       DECLARED, CHILD TUI-017
-#                                                               active`
+# capture-pane -e           the range with SGR, trimmed       same                           PROVED
+# capture-pane (no -S -E)   every visible row, trailing       same                           PROVED
+#                             blanks included
+# capture-pane -N           each line out to the cells its    same                           PROVED
+#                             grid row has allocated, which
+#                             grid_expand_line rounds up to
+#                             a quarter, a half or the whole
+#                             width; -T takes it back to the
+#                             cells the row used
+# capture-pane -M           the mode screen, the pane when    same                           PROVED
+#                             there is no mode
+# capture-pane -a           `no alternate screen`, and one    same                           PROVED
+#                             empty line under -q
 # capture-pane -C -F -H     grid internals and the pending    loudly unsupported             DECLARED, CHILD TUI-017
 #   -L -P -R                  input parser state                                              capture.rich-transports
 # load-buffer -             caller stdin into a buffer        adopted, same                  PROVED
@@ -711,7 +716,6 @@ RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker
 BINARY_STREAMS='protocol.binary-streams, accepted: typed UTF-8 arguments are the contract and the remaining - forms stay loudly refused rather than pretending the daemon process is the caller'
 LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. An attached terminal client is named by its tty on both sides, so this is the transient CLI alone, and it names a client that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape'
-ESCAPE_TRIM='capture.rich-transports, owner terminal: the -e transform runs through the vendored formatter in crates/zz-terminal/src/session.rs, whose Vt format keeps one trailing cell the pin trims, and that file is outside this lane'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
 
 refresh_client_cases() {
@@ -738,7 +742,8 @@ refresh_client_cases() {
 
 capture_pane_cases() {
   case_run capture-range same '' -- capture-pane -p -t PANE -S 0 -E 2
-  case_run capture-escape record "$ESCAPE_TRIM" -- capture-pane -p -e -t PANE -S 0 -E 2
+  case_run capture-past-last-row same '' -- capture-pane -p -t PANE -S 0 -E 5
+  case_run capture-escape same '' -- capture-pane -p -e -t PANE -S 0 -E 2
   case_run capture-join same '' -- capture-pane -p -J -t PANE -S 0 -E 2
   case_run capture-trailing same '' -- capture-pane -p -T -t PANE -S 0 -E 2
   case_run capture-reversed same '' -- capture-pane -p -t PANE -S 2 -E 0
@@ -748,10 +753,16 @@ capture_pane_cases() {
   case_run capture-buffer same '' -- capture-pane -b zzcap -t PANE -S 0 -E 2
   case_run capture-buffer-shown same '' -- show-buffer -b zzcap
   case_run capture-buffer-deleted same '' -- delete-buffer -b zzcap
-  case_run capture-default-range record "$RICH_CAPTURE" -- capture-pane -p -t PANE
-  case_run capture-preserve-trailing record "$RICH_CAPTURE" -- capture-pane -p -N -t PANE -S 0 -E 0
-  case_run capture-mode-screen record "$RICH_CAPTURE" -- capture-pane -p -M -t PANE -S 0 -E 2
-  case_run capture-alternate record "$RICH_CAPTURE" -- capture-pane -p -a -t PANE
+  case_run capture-default-range same '' -- capture-pane -p -t PANE
+  case_run capture-default-range-escape same '' -- capture-pane -p -e -t PANE
+  case_run capture-preserve-trailing same '' -- capture-pane -p -N -t PANE -S 0 -E 0
+  case_run capture-preserve-trailing-range same '' -- capture-pane -p -N -t PANE -S 0 -E 2
+  case_run capture-preserve-trailing-positions same '' -- capture-pane -p -N -T -t PANE -S 0 -E 2
+  case_run capture-preserve-trailing-default same '' -- capture-pane -p -N -t PANE
+  case_run capture-mode-screen same '' -- capture-pane -p -M -t PANE -S 0 -E 2
+  case_run capture-mode-default same '' -- capture-pane -p -M -t PANE
+  case_run capture-alternate same '' -- capture-pane -p -a -t PANE
+  case_run capture-alternate-quiet same '' -- capture-pane -p -a -q -t PANE
   case_run capture-control record "$RICH_CAPTURE" -- capture-pane -p -C -t PANE -S 0 -E 2
   case_run capture-flags record "$RICH_CAPTURE" -- capture-pane -p -F -t PANE -S 0 -E 2
   case_run capture-hyperlinks record "$RICH_CAPTURE" -- capture-pane -p -H -t PANE -S 0 -E 2

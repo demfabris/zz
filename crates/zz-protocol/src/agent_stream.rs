@@ -12,6 +12,15 @@ use crate::{AgentPaneWire, ClientId, ClientInstanceId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct AgentCatalogResult {
+    pub catalog_provider: crate::AgentProvider,
+    pub cwd: PathBuf,
+    pub request_id: u64,
+    pub config_options: Option<Value>,
+    pub error: Option<String>,
+}
+
 /// One stamped item of a pane's stream. `seq` counts from 1 per pane and never
 /// repeats, so a reattaching client replays from the last one it applied.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

@@ -35,6 +35,136 @@ pub struct AgentConfigOption {
     pub choices: Vec<AgentConfigChoice>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct AgentCatalogCache {
+    results: Vec<zz_protocol::agent_stream::AgentCatalogResult>,
+    next_request: u64,
+}
+
+impl AgentCatalogCache {
+    pub fn results(&self) -> &[zz_protocol::agent_stream::AgentCatalogResult] {
+        &self.results
+    }
+
+    pub fn request(
+        &mut self,
+        provider: zz_protocol::AgentProvider,
+        cwd: std::path::PathBuf,
+    ) -> Option<u64> {
+        if self.results.iter().any(|result| {
+            result.catalog_provider == provider
+                && (result.cwd == cwd || cwd.as_os_str().is_empty())
+                && result.error.is_none()
+        }) {
+            return None;
+        }
+        self.next_request = self.next_request.wrapping_add(1);
+        self.results
+            .retain(|result| result.catalog_provider != provider);
+        self.results
+            .push(zz_protocol::agent_stream::AgentCatalogResult {
+                catalog_provider: provider,
+                cwd,
+                request_id: self.next_request,
+                config_options: None,
+                error: None,
+            });
+        Some(self.next_request)
+    }
+
+    pub fn receive(&mut self, result: zz_protocol::agent_stream::AgentCatalogResult) -> bool {
+        let Some(pending) = self.results.iter_mut().find(|pending| {
+            pending.catalog_provider == result.catalog_provider
+                && (pending.cwd == result.cwd || pending.cwd.as_os_str().is_empty())
+                && pending.request_id == result.request_id
+        }) else {
+            return false;
+        };
+        *pending = result;
+        true
+    }
+
+    pub fn timeout(&mut self, request_id: u64) -> bool {
+        let Some(pending) = self.results.iter_mut().find(|pending| {
+            pending.request_id == request_id
+                && pending.config_options.is_none()
+                && pending.error.is_none()
+        }) else {
+            return false;
+        };
+        pending.error = Some("Timed out loading models.".into());
+        true
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentSettingsSelection {
+    pub provider: zz_protocol::AgentProvider,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AgentSettingsApply {
+    pub selection: AgentSettingsSelection,
+    awaiting: Option<(String, String)>,
+}
+
+impl AgentSettingsApply {
+    pub fn new(selection: AgentSettingsSelection) -> Self {
+        Self {
+            selection,
+            awaiting: None,
+        }
+    }
+
+    pub fn awaiting_setting(&self) -> Option<(&str, &str)> {
+        self.awaiting
+            .as_ref()
+            .map(|(id, value)| (id.as_str(), value.as_str()))
+    }
+
+    pub fn next_setting(
+        &mut self,
+        options: &[AgentConfigOption],
+    ) -> Result<Option<(String, String)>, String> {
+        if let Some((id, value)) = self.awaiting.take()
+            && !options
+                .iter()
+                .any(|option| option.id == id && option.current_value == value)
+        {
+            return Err("The agent did not apply the selected setting.".into());
+        }
+        for (category, requested) in [
+            (AgentConfigCategory::Model, &mut self.selection.model),
+            (
+                AgentConfigCategory::ThoughtLevel,
+                &mut self.selection.effort,
+            ),
+        ] {
+            let Some(value) = requested.take() else {
+                continue;
+            };
+            let option = options.iter().find(|option| option.category == category);
+            let Some(option) =
+                option.filter(|option| option.choices.iter().any(|choice| choice.value == value))
+            else {
+                return Err(match category {
+                    AgentConfigCategory::Model => "This agent no longer offers the selected model.",
+                    _ => "This model no longer offers the selected effort.",
+                }
+                .into());
+            };
+            if option.current_value != value {
+                let setting = (option.id.clone(), value);
+                self.awaiting = Some(setting.clone());
+                return Ok(Some(setting));
+            }
+        }
+        Ok(None)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct AgentMode {
     pub id: String,
@@ -157,4 +287,115 @@ pub fn rendered_error(error: &str) -> String {
         rendered.push('…');
     }
     rendered
+}
+
+#[cfg(test)]
+mod settings_apply_tests {
+    use super::*;
+
+    fn option(
+        id: &str,
+        category: AgentConfigCategory,
+        current: &str,
+        choices: &[&str],
+    ) -> AgentConfigOption {
+        AgentConfigOption {
+            id: id.into(),
+            name: id.into(),
+            description: None,
+            category,
+            current_value: current.into(),
+            choices: choices
+                .iter()
+                .map(|value| AgentConfigChoice {
+                    value: (*value).into(),
+                    name: (*value).into(),
+                    description: None,
+                })
+                .collect(),
+        }
+    }
+
+    fn selection() -> AgentSettingsSelection {
+        AgentSettingsSelection {
+            provider: zz_protocol::AgentProvider::Codex,
+            model: Some("large".into()),
+            effort: Some("high".into()),
+        }
+    }
+
+    #[test]
+    fn catalog_cache_deduplicates_requests_and_rejects_stale_scope_replies() {
+        let mut cache = AgentCatalogCache::default();
+        let provider = zz_protocol::AgentProvider::ClaudeCode;
+        let first = cache.request(provider, "/first".into()).unwrap();
+        assert!(cache.request(provider, "/first".into()).is_none());
+        let second = cache.request(provider, "/second".into()).unwrap();
+        assert!(
+            !cache.receive(zz_protocol::agent_stream::AgentCatalogResult {
+                catalog_provider: provider,
+                cwd: "/first".into(),
+                request_id: first,
+                config_options: Some(serde_json::json!([])),
+                error: None,
+            })
+        );
+        assert!(cache.timeout(second));
+        assert!(cache.request(provider, "/second".into()).is_some());
+    }
+
+    #[test]
+    fn model_acknowledgement_resolves_effort_using_the_refreshed_option_id() {
+        let mut apply = AgentSettingsApply::new(selection());
+        let model = option(
+            "model",
+            AgentConfigCategory::Model,
+            "small",
+            &["small", "large"],
+        );
+        assert_eq!(
+            apply.next_setting(&[model]).unwrap(),
+            Some(("model".into(), "large".into()))
+        );
+        let model = option(
+            "model",
+            AgentConfigCategory::Model,
+            "large",
+            &["small", "large"],
+        );
+        let effort = option(
+            "new-effort-id",
+            AgentConfigCategory::ThoughtLevel,
+            "low",
+            &["low", "high"],
+        );
+        assert_eq!(
+            apply.next_setting(&[model.clone(), effort]).unwrap(),
+            Some(("new-effort-id".into(), "high".into()))
+        );
+        let effort = option(
+            "new-effort-id",
+            AgentConfigCategory::ThoughtLevel,
+            "high",
+            &["low", "high"],
+        );
+        assert_eq!(apply.next_setting(&[model, effort]).unwrap(), None);
+    }
+
+    #[test]
+    fn unapplied_model_and_stale_cached_effort_stop_the_sequence() {
+        let mut apply = AgentSettingsApply::new(selection());
+        let model = option(
+            "model",
+            AgentConfigCategory::Model,
+            "small",
+            &["small", "large"],
+        );
+        apply.next_setting(std::slice::from_ref(&model)).unwrap();
+        assert!(apply.next_setting(&[model]).is_err());
+        let mut apply = AgentSettingsApply::new(selection());
+        let model = option("model", AgentConfigCategory::Model, "large", &["large"]);
+        let effort = option("effort", AgentConfigCategory::ThoughtLevel, "low", &["low"]);
+        assert!(apply.next_setting(&[model, effort]).is_err());
+    }
 }

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Div, ElementId, EntityId, IntoElement, SharedString, Stateful, Transformation,
-    div, ease_in_out, percentage, prelude::*, px,
+    AnyElement, App, Div, ElementId, EntityId, FontWeight, IntoElement, SharedString, Stateful,
+    Transformation, div, ease_in_out, percentage, prelude::*, px,
 };
 
 use crate::{
@@ -11,6 +11,37 @@ use crate::{
 };
 
 pub use zz_client::agent_config::{MAX_RENDERED_ERROR_BYTES, rendered_error};
+
+pub fn welcome_state(cx: &App) -> Div {
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .px_3()
+        .pb(px(32.0))
+        .text_center()
+        .child(
+            Icon::new(IconName::Zz)
+                .w(px(112.0))
+                .h(px(47.0))
+                .mb(px(24.0))
+                .text_color(cx.theme().foreground.muted()),
+        )
+        .child(
+            div()
+                .text_size(crate::rems_from_px(21.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(cx.theme().foreground)
+                .child("What are we working on?"),
+        )
+        .child(
+            div()
+                .mt(px(10.0))
+                .text_size(crate::rems_from_px(13.0))
+                .text_color(cx.theme().foreground.muted())
+                .child("Ask a question or describe a task."),
+        )
+}
 
 pub fn error_card(error: &str, cx: &App) -> Div {
     v_flex()

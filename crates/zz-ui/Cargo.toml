@@ -9,8 +9,6 @@ publish = false
 
 [features]
 default = []
-# The agent transcript widgets (timeline, tools, composer chrome). Off by
-# default: v1 ships without the agent pane; `zz/agent-pane` turns it on.
 agent = []
 # The code-editor widget stack. Off by default for standalone zz-ui users; the
 # desktop app enables it for the Multiplexer file editor in Settings even when
@@ -56,6 +54,7 @@ ropey = { version = "=2.0.0-beta.1", features = ["metric_lines_lf", "metric_utf1
 sum-tree = { version = "0.2.0", package = "zed-sum-tree" }
 tracing = "0.1.44"
 zz-client = { path = "../zz-client" }
+zz-protocol = { path = "../zz-protocol" }
 zz-terminal = { path = "../zz-terminal", default-features = false }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

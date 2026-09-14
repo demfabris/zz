@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 
 use gpui::{App, Entity, SharedString};
 use zz_protocol::{
-    Axis, CommandInvocation, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, SessionId,
-    WindowId,
+    AgentProvider, Axis, CommandInvocation, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot,
+    SessionId, WindowId,
 };
 
 use super::{
@@ -59,7 +59,7 @@ pub enum MuxTreePaneKind {
     Picker,
     Terminal,
     Browser,
-    Agent,
+    Agent(AgentProvider),
     Editor,
 }
 
@@ -508,7 +508,7 @@ impl MuxTreePane {
             PaneKindSnapshot::Picker => MuxTreePaneKind::Picker,
             PaneKindSnapshot::Terminal => MuxTreePaneKind::Terminal,
             PaneKindSnapshot::Browser(_) => MuxTreePaneKind::Browser,
-            PaneKindSnapshot::Agent(_) => MuxTreePaneKind::Agent,
+            PaneKindSnapshot::Agent(ref agent) => MuxTreePaneKind::Agent(agent.provider),
             PaneKindSnapshot::Editor(_) => MuxTreePaneKind::Editor,
         };
         Self {

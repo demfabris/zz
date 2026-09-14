@@ -2,6 +2,7 @@ pub mod composer;
 pub mod controls;
 pub mod presentation;
 pub mod slash;
+pub mod title;
 
 use std::{
     cell::Cell,
@@ -3250,16 +3251,19 @@ fn css_color(color: Hsla) -> String {
     )
 }
 
-/// Height of the agent pane's chrome bar, matching the browser toolbar.
-pub const AGENT_HEADER_HEIGHT: f32 = 40.0;
+pub const AGENT_HEADER_HEIGHT: f32 = 36.0;
 /// The agent pane's chrome bar: `leading` and `trailing` pinned to each end.
 /// The bar owns only the height, the inset, and the rule beneath it.
 pub fn agent_pane_header(
+    active: bool,
     leading: impl IntoElement,
     trailing: impl IntoElement,
+    show_separator: bool,
     cx: &App,
 ) -> impl IntoElement {
     h_flex()
+        .id("agent-pane-header")
+        .group("agent-pane-header")
         .w_full()
         .h(px(AGENT_HEADER_HEIGHT))
         .flex_none()
@@ -3267,10 +3271,20 @@ pub fn agent_pane_header(
         .justify_between()
         .gap_3()
         .px(px(CHROME_GAP))
-        .border_b_1()
-        .border_color(cx.theme().border())
-        .child(div().min_w_0().child(leading))
-        .child(div().flex_none().child(trailing))
+        .when(show_separator, |header| {
+            header.border_b_1().border_color(cx.theme().border())
+        })
+        .child(div().flex_1().min_w_0().overflow_hidden().child(leading))
+        .child(
+            h_flex()
+                .flex_none()
+                .when(!active, |actions| {
+                    actions
+                        .invisible()
+                        .group_hover("agent-pane-header", gpui::Styled::visible)
+                })
+                .child(trailing),
+        )
 }
 
 #[cfg(test)]

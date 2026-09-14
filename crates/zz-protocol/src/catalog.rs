@@ -556,6 +556,7 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
 ];
 
 pub static DAEMON_COMMAND_NAMES: &[&str] = &[
+    "agent-catalog",
     "capture-pane",
     "capturep",
     "run-shell",
@@ -784,6 +785,7 @@ static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
 ];
 
 pub static NATIVE_COMMAND_NAMES: &[&str] = &[
+    "agent-catalog",
     "agent-respond",
     "agent-send",
     "capture-browser",
@@ -812,6 +814,15 @@ pub static NATIVE_COMMAND_NAMES: &[&str] = &[
 ];
 
 pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "agent-catalog",
+        aliases: &[],
+        description: "Load a provider catalog without switching the agent pane",
+        usage: "[-t target-pane] provider request-id",
+        options: &[CommandOptionSpec::value("-t", Pane, "target agent pane")],
+        positionals: &[FreeForm, FreeForm],
+        variadic: None,
+    },
     CommandSpec {
         name: "capture-pane",
         aliases: &["capturep"],

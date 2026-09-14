@@ -4,7 +4,7 @@ title: Native Agent pane
 description: The daemon-addressable Agent pane, its daemon-owned ACP v1 runtime, flat transcript, approvals, session controls, and restore metadata.
 resource: crates/zz/src/agent/controller.rs
 tags: [agent, gpui, markdown, mermaid, acp, pane, sessions, persistence, keyboard]
-timestamp: 2026-09-03T00:00:00-03:00
+timestamp: 2026-09-13T00:00:00-03:00
 ---
 
 # Overview
@@ -377,17 +377,22 @@ slow shell is probed once rather than on every pane spawn.
 
 # Session history
 
-When an initialized adapter advertises `sessionCapabilities.list`, the pane header exposes a
-**History** picker. Starting a session is not one of the picker's controls: the header carries its
-own icon-only plus beside History, gated on the connection accepting a prompt rather than on the
-listing having loaded, so a new session never waits on a page of history. Every one of its verbs is an `AgentSessionOp` on the wire. `List` carries the cwd
+The desktop composer footer has one project-directory button. It opens a combined directory and
+session picker: one search field, Recent and All directories on the left, and the selected
+directory's sessions on the right. Below 560px of picker width, directories sit above sessions
+and the footer hides keyboard hints to keep the actions within the pane. Both lists scroll
+inside flex containers that fill their available height. `AgentView::render_history_overlay`
+and `render_project_directories` in `crates/zz/src/agent/view.rs` own this layout.
+**New session in <directory>** starts a fresh conversation in
+that directory, even when it already matches the pane cwd. The action remains available while
+history loads and for adapters without `sessionCapabilities.list`. The button requires an idle
+connection with no pending permission request. Every session action is an `AgentSessionOp` on the wire. `List` carries the cwd
 filter, opaque cursor, and replace/append intent; `New` carries the selected cwd; `Switch` carries
 the session ID, cwd, and additional directories; `Delete` carries the session ID. The daemon runs
 them against the pane's adapter. A
 listing comes back as `EventPayload::AgentSessions { pane, request_id: 0, result }` only to the
 client that asked; the daemon carries that connection's `ClientId` beside the ACP request instead
-of exposing it in the payload. Its default scope passes the pane cwd to `session/list`; **All projects** omits
-that filter. Opaque pagination cursors are returned to the adapter unchanged. Listed records are
+of exposing it in the payload. The desktop picker omits the cwd filter to group the catalog by directory, then filters sessions locally for the selected directory. Opaque pagination cursors are returned to the adapter unchanged. Listed records are
 accepted only when their session ID is bounded and control-free, their cwd and additional roots are
 absolute and within the wire byte limit, their additional-root count is at most 256, and their
 optional title/timestamp metadata is bounded. The picker searches title, cwd,
@@ -407,13 +412,13 @@ same post-success swap boundary.
 The picker supports explicit refresh, cursor-based **Load more**, and new-session creation. Delete
 is shown only when the adapter advertises `session/delete`, requires a second destructive
 confirmation, and refuses to delete the active session. A session already bound to another pane
-for the same provider cannot be opened twice. Its dense two-line rows reserve the first line for the
-provider title and flex the cwd across the remaining metadata line instead of letting technical
-fields collapse it. Updated timestamps are parsed from RFC 3339 and shown in the user's local time
-with compact calendar labels such as **Today, 18:01**; opaque IDs remain searchable but are not
-rendered. The narrower, headerless picker opens directly on its compact search and filter toolbar,
-keeps a compact labeled **New** action at the same scale as the filter controls, and dismisses
-through Escape or a backdrop click. Search refiltering listens only for content changes, so the
+for the same provider cannot be opened twice. Each session row shows the provider title and a timestamp, with a Delete action on the selected
+row and a checkmark for the current session. Updated timestamps use local time and compact labels
+such as **Today, 18:01**; opaque IDs remain searchable but are not rendered. Tab changes the active
+column, Up/Down select, Enter opens, Cmd/Ctrl+Enter starts a session, and Delete requests deletion.
+Backspace also requests deletion when the search field is empty. Escape dismisses the deletion
+confirmation first, then the picker; clicking the backdrop closes the picker.
+Search refiltering listens only for content changes, so the
 input's 500 ms caret repaint cannot reset selection or scroll. Async catalog updates preserve both
 keyboard selection by opaque session identity and the user's viewport when that identity survives,
 while only pointer movement can hand selection back to a hovered row. Its footer reuses the
@@ -505,7 +510,7 @@ With no prefix cards, the input overlaps the transcript by 12 px with no top gap
 behind its opaque edge. The transcript clips within that overlap, before reaching the footer.
 Permission, error, queue, and completion prefixes keep their top spacing without overlap.
 Only the input card paints an opaque background; its surroundings inherit the pane transparency.
-The footer remains present because it holds the working-directory picker. The transcript reserves
+The combined directory and session picker sits at the right end of the desktop composer footer. The transcript reserves
 12 px of bottom padding, and its scrollbar stops 12 px above the viewport bottom. Controller updates for other panes
 or unchanged pane metadata do not invalidate this view.
 
@@ -657,7 +662,8 @@ jump-to-latest control is its mirror: a 26 px `rounded_full()` disc carrying the
 Send's arrow-up, floated 24 px above the bottom of the clipped timeline viewport and labelled by
 tooltip alone. A separate
 compact footer under the card carries the current Git branch and `N files +A -D` summary on the
-left; its right side holds the 16 px context-usage ring and working-directory picker. The ring fills
+left, with the working directory, New session, and History on the right. The composer settings row
+holds the 16 px context-usage ring beside Send. The ring fills
 clockwise, exposes exact token counts and percentage in its tooltip and accessibility value, and
 clamps malformed over-capacity values to a full circle.
 
@@ -750,24 +756,55 @@ One clipboard limit comes from gpui: every platform's clipboard read returns the
 finds, text before images, so an image copied from a browser (which also offers its URL as text)
 pastes as that text. Screenshots and image-only boards are unaffected.
 
-The provider picker lives in the pane header. It offers Codex and Claude Code under their vendors'
+The combined vendor/model/effort picker lives in the composer. It offers Codex and Claude Code under their vendors'
 marks (the OpenAI and Claude glyphs, Simple Icons artwork beside the Tabler set that `zz-ui`
 otherwise ships, since Tabler draws no vendor logos), is disabled during an active turn, and starts
-a fresh provider-bound thread on selection. The mux persists the choice via `set-agent-provider`,
+a fresh provider-bound thread when the picker closes with a different vendor selected. The mux persists the choice via `set-agent-provider`,
 clears the old opaque session ID, and replaces the daemon-owned ACP child. Retry uses the same
 restart effect. Each replacement receives a new runtime generation, which prevents late output from
 the old process from entering the new stream while preserving the pane's monotonic wire sequence.
 The one retiring-generation payload still accepted is `PromptsReclaimed`, because it is the only
 copy of queued text and images that must return to the composer.
 
-The header's other end holds one square icon-only History control. The
-working-directory picker lives at the right end of the composer footer: the pane's cwd by its last
-component, its full path in the tooltip, and a native folder chooser behind a click on the local
-host. It is disabled on remote hosts because a native chooser sees the desktop filesystem, not the
-daemon's.
+The 36 px header starts with the provider icon and name followed by the session name, truncated to
+50 characters including the ellipsis, with the full name in a tooltip. Clicking the name replaces it with an inline input
+and selects the full name. Enter saves through `select-pane -T`; Escape or losing focus discards the
+edit. This names the mux pane and does not rename the provider's stored history entry.
+Both GPUI clients read the title from the mux snapshot. The sidebar pane row uses that same
+session name and the current provider icon, with “New session” for an unnamed conversation.
+Titlebar mode uses the active agent's session name for automatically named windows and the provider
+icon for its agent marker. Explicit window names stay in place. A terminal-focused mixed window
+keeps its window name and uses the first agent in layout order for the marker.
+The desktop controller uses a saved history title when a successful load carries no title metadata;
+provider title updates take precedence. New sessions and acknowledged provider switches clear the
+previous name, while failed history loads retain it. Replaying an already-open session without title
+metadata preserves its current name. The desktop header ends with Drag pane, Split bottom, Split
+right, and Close pane. The split buttons open a pane picker below or to the right, matching the
+terminal header. Pressing and moving the drag handle uses the existing split/swap previews without
+arming the mux prefix. Release drops the pane; Escape or window deactivation cancels. The handle
+stays disabled when zoomed or when the window has only one pane. Shared `pane::pane_drag_button`,
+`PaneDrag`, and `pane_drag_preview` in `crates/zz-ui` also support other pane types; desktop pane
+views emit `PaneDrag` to the workspace when the gesture starts. Prefix dragging keeps its existing
+behavior. The browser client has the split and close buttons but does not yet support pane drag reordering.
+The desktop composer footer places the combined project picker opposite the Git summary. Its
+button shows the cwd's last component and its full path in a tooltip. Local panes discover folders
+through `DirectoryCatalog`; remote panes offer directories from their provider session catalog.
+The browser client retains its daemon-backed directory picker and separate session controls.
+The desktop chooser in `crates/zz/src/file_picker.rs` uses `neo_frizbee`, fff's typo-tolerant
+matcher, directly for folders. The full `fff-search` index remains the editor file-search backend;
+its directory API also indexes files and cannot stream or bound discovery, so it is unsuitable for
+the home-folder chooser. Folder discovery uses `ignore` off the UI thread, visits shallow folders
+first, and publishes the first folder immediately. Later batches keep existing rows visible.
+Discovery respects ignore files, skips cache and media subtrees, stops at eight levels,
+50,000 visited entries or five seconds, and checks for cancellation between entries. The chooser
+indicates a limited search; typing an absolute path can select a folder outside these bounds.
+Empty searches prefer Git workspaces, then shallow folders, with at most 500 visible results.
+Root failures name the affected path; skipped child entries do not add a footer error. The standalone
+file picker validates clicked and typed paths before selection; `DirectoryCatalog` checks typed
+absolute directories off the UI thread before offering them in the combined picker.
 An ACP session is bound to
 the directory it was created in, so choosing another one is `session/new` there rather than an
-in-place move (the same boundary the History picker's **New** crosses), gated the same way on an
+in-place move (the same boundary the picker’s **New session** action crosses), gated the same way on an
 idle pane with no unresolved permission request. The pane's `cwd` is left alone until the agent
 answers, so a failed switch keeps the pane where it was. The header carries no connection badge:
 liveness reads off the composer, whose action morphs to Stop or Queue during a turn, and off the
@@ -784,13 +821,41 @@ Ellipsis-only ACP description placeholders are suppressed while meaningful descr
 visible. The menu closes once the user begins the command argument.
 
 The composer renders generic ACP `Select` options categorized as `Mode`, `Model`, and `ThoughtLevel`
-as the permission, model, and effort pickers (`ModelConfig` and `Other` categories are parsed and
+as the permission picker and combined model/effort picker (`ModelConfig` and `Other` categories are parsed and
 stored but never rendered; `Boolean` config options are discarded at `config_option_model`). It sends each opaque config ID/value through
 `session/set_config_option` and adopts the complete option vector returned by the agent. When an
 older agent supplies no generic config options, the permission picker falls back to legacy
 `SessionMode` and `session/set_mode`. The compact triggers use the same text scale as their entries,
-and each popover opens directly on the available choices without a redundant category heading.
-Neither provider's concrete values are hard-coded in zz.
+and the permission popover opens directly on the available choices. The combined picker shows
+vendors in a left column and model names with selection checks in the right column. The footer
+shows effort in one compact row: the Effort label, pills for the agent's advertised choices,
+and the selected value on the right. Pills fill with the theme accent through the selected level;
+hovering each pill shows its effort name in a tooltip. Clicking a pill or using arrow/Home/End
+keys changes the draft value. Model descriptions and vendor counts are omitted.
+The trigger shows the vendor icon, model name, and effort in muted foreground. Providers without
+effort choices omit the effort row and label.
+
+Vendor, model, and effort selections remain local drafts until the picker closes through an outside
+click, Escape, or its trigger. Closing applies once; an unchanged draft sends nothing. Each picker
+caches the last ready catalog for each vendor, scoped to its host/connection and working directory.
+Clicking an uncached vendor sends `agent-catalog [-t pane] provider request-id` to the daemon.
+The command returns immediately and loads the catalog through an isolated ACP connection with
+`session/new`, no prompt, no journal, and no pane registration. It shuts down that connection after
+reading the options. The active pane's provider, session, transcript, and runtime stay unchanged.
+The response uses the existing targeted `AgentSessions` JSON lane with `AgentCatalogResult`, so
+no binary protocol version change is needed. Catalog requests are bounded to four concurrent
+probes, time out, and expose a retryable error in the picker.
+
+Results appear in the open picker immediately. The shared `AgentCatalogCache` deduplicates requests
+and rejects replies for older requests or working directories. Cached tabs keep their draft choices,
+and the popup keeps its height while browsing known catalogs so the tabs stay in place.
+
+On apply, the client switches provider once and waits for readiness. The shared
+`zz-client::agent_config::AgentSettingsApply` resolves model first, waits for acknowledgement, then
+resolves effort against the returned options using their current opaque IDs. Rejected settings,
+unavailable cached choices, and a 30-second apply timeout stop the remaining changes. Desktop user
+picks take precedence over sticky preference restoration during this sequence.
+Neither provider's concrete model values are hard-coded in zz.
 
 Successful user selections for model, effort, and permission mode are sticky. They are stored in a
 bounded, versioned `agent-preferences.json` under zz's platform application-data directory, with

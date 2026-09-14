@@ -7,13 +7,16 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use gpui::{
-    Anchor, AnyElement, App, Context, Entity, FocusHandle, Focusable, IntoElement, ListAlignment,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable, IntoElement, ListAlignment,
     ListState, MouseButton, Render, Subscription, Window, div, prelude::*, px,
 };
 use serde_json::Value;
 use zz_client::agent_completion::{
     AgentCommand, CommandCompletion, active_command_hint, bare_command_name, completion_query,
     meaningful_command_description, ranked_completions,
+};
+use zz_client::agent_config::{
+    AgentCatalogCache, AgentSettingsApply, AgentSettingsSelection, config_option_models,
 };
 use zz_protocol::{
     AgentConnectionPhase, AgentDescriptor, AgentImage, AgentSessionOpKind, PaneId, ProtocolMessage,
@@ -27,15 +30,20 @@ use zz_ui::{
         agent_pane_header,
         composer::{AgentComposer, COMPOSER_OUTER_PADDING},
         controls::{
-            AgentControlChoice, ComposerAction, agent_chrome_button, agent_config_picker,
-            composer_action, composer_action_button, context_usage_meter, git_summary_footer,
+            AgentControlChoice, AgentControlSelection, ComposerAction, agent_chrome_button,
+            agent_config_picker, agent_directory_button, agent_header_icon_button,
+            agent_model_picker, composer_action, composer_action_button, context_usage_meter,
+            git_summary_footer,
         },
         fold_timeline_rows,
-        presentation::{empty_state, error_card, permission_card, permission_option},
+        presentation::{
+            empty_state, error_card, permission_card, permission_option, welcome_state,
+        },
+        title::{agent_thread_title_editor, agent_title_is_editing},
     },
     button::{Button, ButtonVariants as _},
     input::{IndentInline, InputEvent, InputState, MoveDown, MoveUp},
-    menu::{DropdownMenu as _, PopupMenuItem},
+    pane::pane_header_icon_button,
     scroll::Scrollbar,
 };
 
@@ -65,6 +73,10 @@ pub(super) struct AgentPane {
     choosing_images: bool,
     draft_error: Option<String>,
     settings_busy: bool,
+    settings_apply: Option<AgentSettingsApply>,
+    catalogs: AgentCatalogCache,
+    settings_apply_generation: u64,
+    control_sequence: u64,
     lifecycle_pending: bool,
     lifecycle_generation: u64,
     permission_request_id: Option<u64>,
@@ -127,9 +139,14 @@ impl AgentPane {
             if this.connected != connected {
                 this.connected = connected;
                 this.settings_busy = false;
+                this.settings_apply = None;
+                this.catalogs = AgentCatalogCache::default();
                 this.lifecycle_pending = false;
                 this.permission_answered = false;
                 cx.notify();
+            }
+            if this.settings_apply.is_some() {
+                this.synchronize_controls(cx);
             }
         });
         let events = cx.subscribe(
@@ -141,6 +158,8 @@ impl AgentPane {
                 ) {
                     this.transcript = Transcript::default();
                     this.settings_busy = false;
+                    this.settings_apply = None;
+                    this.control_sequence = 0;
                     this.lifecycle_pending = false;
                     this.usage = None;
                     this.last_sequence = 0;
@@ -158,7 +177,14 @@ impl AgentPane {
                 } = event
                 {
                     if *changed == pane {
-                        this.receive_sessions(result);
+                        if let Ok(catalog) = serde_json::from_str::<
+                            zz_protocol::agent_stream::AgentCatalogResult,
+                        >(result)
+                        {
+                            this.catalogs.receive(catalog);
+                        } else {
+                            this.receive_sessions(result);
+                        }
                         cx.notify();
                     }
                 } else if matches!(event,
@@ -224,6 +250,10 @@ impl AgentPane {
             choosing_images: false,
             draft_error: None,
             settings_busy: false,
+            settings_apply: None,
+            catalogs: AgentCatalogCache::default(),
+            settings_apply_generation: 0,
+            control_sequence: 0,
             lifecycle_pending: false,
             lifecycle_generation: 0,
             permission_request_id: None,
@@ -264,7 +294,11 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         if self.descriptor != *descriptor {
+            if self.descriptor.cwd != descriptor.cwd {
+                self.settings_apply = None;
+            }
             self.descriptor = descriptor.clone();
+            self.drive_settings_apply(cx);
             cx.notify();
         }
     }
@@ -331,6 +365,9 @@ impl AgentPane {
     }
 
     fn complete(&mut self, _: &IndentInline, window: &mut Window, cx: &mut Context<Self>) {
+        if agent_title_is_editing(window) {
+            return;
+        }
         if let Some(index) = self.completion_selected {
             self.accept_completion(index, window, cx);
             cx.stop_propagation();
@@ -354,14 +391,20 @@ impl AgentPane {
         cx.notify();
     }
 
-    fn move_completion_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
+    fn move_completion_up(&mut self, _: &MoveUp, window: &mut Window, cx: &mut Context<Self>) {
+        if agent_title_is_editing(window) {
+            return;
+        }
         if !self.completions.is_empty() {
             self.navigate_completion(-1, cx);
             cx.stop_propagation();
         }
     }
 
-    fn move_completion_down(&mut self, _: &MoveDown, _: &mut Window, cx: &mut Context<Self>) {
+    fn move_completion_down(&mut self, _: &MoveDown, window: &mut Window, cx: &mut Context<Self>) {
+        if agent_title_is_editing(window) {
+            return;
+        }
         if !self.completions.is_empty() {
             self.navigate_completion(1, cx);
             cx.stop_propagation();
@@ -426,7 +469,8 @@ impl AgentPane {
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let connection = self.connection.read(cx);
-        let allowed = connection.connected
+        let allowed = self.settings_apply.is_none()
+            && connection.connected
             && !connection.core.attached_read_only()
             && connection.core.agent_state(self.pane).is_some_and(|state| {
                 matches!(
@@ -468,10 +512,178 @@ impl AgentPane {
         cx.notify();
     }
 
+    fn request_catalog(&mut self, provider: zz_protocol::AgentProvider, cx: &mut Context<Self>) {
+        let cwd = self.descriptor.cwd.clone().unwrap_or_default();
+        let Some(request_id) = self.catalogs.request(provider, cwd) else {
+            return;
+        };
+        self.connection.update(cx, |connection, cx| {
+            connection.command(
+                "agent-catalog",
+                vec![
+                    "-t".into(),
+                    self.pane.to_string(),
+                    provider.as_str().into(),
+                    request_id.to_string(),
+                ],
+                cx,
+            )
+        });
+        cx.spawn(async move |view, cx| {
+            cx.background_executor()
+                .timer(Duration::from_secs(45))
+                .await;
+            let _ = view.update(cx, |view, cx| {
+                if view.catalogs.timeout(request_id) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn apply_settings(&mut self, selection: AgentSettingsSelection, cx: &mut Context<Self>) {
+        let connection = self.connection.read(cx);
+        if !connection.connected
+            || connection.core.attached_read_only()
+            || self.settings_busy
+            || self.lifecycle_pending
+            || self.settings_apply.is_some()
+            || connection.core.agent_state(self.pane).is_some_and(|state| {
+                matches!(
+                    state.phase,
+                    AgentConnectionPhase::Running | AgentConnectionPhase::AwaitingPermission
+                )
+            })
+        {
+            return;
+        }
+        let provider = selection.provider;
+        self.settings_apply = Some(AgentSettingsApply::new(selection));
+        self.settings_apply_generation = self.settings_apply_generation.wrapping_add(1);
+        let generation = self.settings_apply_generation;
+        if provider != self.descriptor.provider {
+            self.lifecycle_command(Some(provider), cx);
+        }
+        self.drive_settings_apply(cx);
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_secs(30))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.settings_apply_generation == generation
+                    && this.settings_apply.take().is_some()
+                {
+                    this.draft_error = Some("Timed out applying agent settings.".into());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn synchronize_controls(&mut self, cx: &mut Context<Self>) {
+        let journal = self.connection.read(cx).agent_events.get(&self.pane);
+        if journal
+            .and_then(|events| events.last())
+            .is_some_and(|(sequence, _)| *sequence < self.control_sequence)
+        {
+            self.control_sequence = 0;
+        }
+        let updates: Vec<_> = journal
+            .into_iter()
+            .flatten()
+            .filter(|(sequence, _)| *sequence > self.control_sequence)
+            .filter_map(|(sequence, bytes)| {
+                serde_json::from_slice::<Value>(bytes)
+                    .ok()
+                    .map(|value| (*sequence, value))
+            })
+            .collect();
+        for (sequence, update) in updates {
+            self.apply_control_update(&update);
+            self.control_sequence = sequence;
+        }
+        self.drive_settings_apply(cx);
+    }
+
+    fn drive_settings_apply(&mut self, cx: &mut Context<Self>) {
+        let Some(apply) = &mut self.settings_apply else {
+            return;
+        };
+        let connection = self.connection.read(cx);
+        if !connection.connected || connection.core.attached_read_only() {
+            self.settings_apply = None;
+            return;
+        }
+        let Some(state) = connection.core.agent_state(self.pane) else {
+            return;
+        };
+        if matches!(state.phase, AgentConnectionPhase::Failed { .. })
+            && self.descriptor.provider == apply.selection.provider
+        {
+            self.settings_apply = None;
+            return;
+        }
+        if self.settings_busy
+            || self.lifecycle_pending
+            || self.descriptor.provider != apply.selection.provider
+            || state.phase != AgentConnectionPhase::Ready
+            || state.pending_permission.is_some()
+        {
+            return;
+        }
+        let options = serde_json::from_str(&state.config_options)
+            .map(config_option_models)
+            .unwrap_or_default();
+        match apply.next_setting(&options) {
+            Ok(Some((id, value))) => {
+                if let Some(option) = config_controls(&state.config_options, &state.modes)
+                    .into_iter()
+                    .find(|option| option.id == id)
+                {
+                    self.set_config(&option, &value, cx);
+                    if !self.settings_busy {
+                        self.settings_apply = None;
+                    }
+                }
+            }
+            Ok(None) => self.settings_apply = None,
+            Err(error) => {
+                self.settings_apply = None;
+                self.draft_error = Some(error);
+            }
+        }
+    }
+
     fn apply_control_update(&mut self, update: &Value) {
+        if let Some((id, value)) = self
+            .settings_apply
+            .as_ref()
+            .and_then(AgentSettingsApply::awaiting_setting)
+        {
+            match update.get("item").and_then(Value::as_str) {
+                Some("configOptionsChanged")
+                    if update.get("option_id").and_then(Value::as_str) != Some(id)
+                        || update.get("value").and_then(Value::as_str) != Some(value) =>
+                {
+                    return;
+                }
+                Some("settingFailed")
+                    if update.get("option_id").and_then(Value::as_str) != Some(id) =>
+                {
+                    return;
+                }
+                Some("modeChanged") => return,
+                _ => {}
+            }
+        }
         match update.get("item").and_then(Value::as_str) {
             Some("configOptionsChanged" | "modeChanged") => self.settings_busy = false,
             Some("settingFailed") => {
+                self.settings_apply = None;
                 self.settings_busy = false;
                 self.draft_error = update
                     .get("message")
@@ -549,6 +761,7 @@ impl AgentPane {
             && !self.settings_busy;
         config_controls(&state.config_options, &state.modes)
             .into_iter()
+            .filter(|option| !matches!(option.category.as_str(), "model" | "thought_level"))
             .map(|option| {
                 let view = cx.entity();
                 let selected = option.clone();
@@ -580,6 +793,7 @@ impl AgentPane {
             .and_then(|events| events.last())
             .map_or(0, |(sequence, _)| *sequence);
         if newest == self.last_sequence && !self.transcript_dirty {
+            self.drive_settings_apply(cx);
             return;
         }
         let skipped = events
@@ -593,6 +807,7 @@ impl AgentPane {
                 timeline.clear(cx);
             });
             self.last_sequence = 0;
+            self.control_sequence = 0;
         }
         let old_first = self.transcript.entries.first().map(AgentEntry::id);
         let old_count = self.rows.len();
@@ -611,7 +826,10 @@ impl AgentPane {
             .collect();
         for (sequence, update) in updates {
             self.restore_prompts(&update, window, cx);
-            self.apply_control_update(&update);
+            if sequence > self.control_sequence {
+                self.apply_control_update(&update);
+                self.control_sequence = sequence;
+            }
             if matches!(
                 update.get("item").and_then(Value::as_str),
                 Some("sessionReset" | "sessionSwitched")
@@ -663,6 +881,7 @@ impl AgentPane {
                 }
             }
         });
+        self.drive_settings_apply(cx);
     }
 
     fn restore_prompts(&mut self, update: &Value, window: &mut Window, cx: &mut Context<Self>) {
@@ -1300,6 +1519,9 @@ impl AgentPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if agent_title_is_editing(window) {
+            return;
+        }
         if !self.history_open && !self.directory_open {
             if !self.completions.is_empty() {
                 let modifiers = event.keystroke.modifiers;
@@ -1553,6 +1775,9 @@ impl AgentPane {
         {
             return;
         }
+        if provider.is_none() {
+            self.settings_apply = None;
+        }
         self.lifecycle_pending = true;
         self.lifecycle_generation = self.lifecycle_generation.wrapping_add(1);
         let generation = self.lifecycle_generation;
@@ -1572,6 +1797,9 @@ impl AgentPane {
             let _ = this.update(cx, |this, cx| {
                 if this.lifecycle_generation == generation && this.lifecycle_pending {
                     this.lifecycle_pending = false;
+                    if this.settings_apply.take().is_some() {
+                        this.draft_error = Some("Timed out switching agent providers.".into());
+                    }
                     cx.notify();
                 }
             });
@@ -1734,7 +1962,10 @@ impl Render for AgentPane {
             if action_kind == ComposerAction::Stop {
                 writable
             } else {
-                ready && state.pending_permission.is_none() && has_content
+                ready
+                    && state.pending_permission.is_none()
+                    && has_content
+                    && self.settings_apply.is_none()
             },
         );
         let action = if action_kind == ComposerAction::Stop {
@@ -1756,6 +1987,50 @@ impl Render for AgentPane {
                 .into_any_element(),
         ];
         settings.extend(self.render_config_controls(&state, cx));
+        let controls = config_controls(&state.config_options, &state.modes);
+        let model = controls
+            .iter()
+            .find(|option| option.category == "model")
+            .cloned();
+        let effort = controls
+            .iter()
+            .find(|option| option.category == "thought_level")
+            .cloned();
+        let provider_view = cx.entity();
+        let catalog_view = cx.entity();
+        settings.push(agent_model_picker(
+            ("web-agent-model", self.pane.0),
+            (
+                format!("{:?}", self.connection.entity_id()),
+                self.descriptor.cwd.clone().unwrap_or_default(),
+            ),
+            self.descriptor.provider,
+            model
+                .map(|option| AgentControlSelection {
+                    current_value: option.current_value,
+                    choices: option.choices,
+                })
+                .unwrap_or_default(),
+            effort.map(|option| AgentControlSelection {
+                current_value: option.current_value,
+                choices: option.choices,
+            }),
+            writable
+                && !running
+                && !self.lifecycle_pending
+                && !self.settings_busy
+                && self.settings_apply.is_none(),
+            state.phase == AgentConnectionPhase::Ready && !self.lifecycle_pending,
+            self.catalogs.results().to_vec(),
+            move |provider, cx| {
+                catalog_view.update(cx, |view, cx| view.request_catalog(provider, cx));
+            },
+            move |selection, cx| {
+                provider_view.update(cx, |view, cx| view.apply_settings(selection, cx));
+            },
+            window,
+            cx,
+        ));
         let queued = (state.queued_prompts > 0).then(|| {
             agent_chrome_button("web-agent-restore-queue")
                 .label(format!("{} queued", state.queued_prompts))
@@ -1783,12 +2058,67 @@ impl Render for AgentPane {
         } else {
             None
         };
+        let directory = agent_directory_button(
+            "web-agent-directory",
+            self.descriptor.cwd.as_ref().map_or_else(
+                || "Daemon working directory".to_owned(),
+                |path| directory_label(path),
+            ),
+            self.can_change_session(cx),
+            cx,
+        )
+        .tooltip(self.descriptor.cwd.as_ref().map_or_else(
+            || "Agent working directory".to_owned(),
+            |path| path.to_string_lossy().into_owned(),
+        ))
+        .on_click(cx.listener(|this, _, window, cx| this.open_directory(window, cx)))
+        .into_any_element();
+        let pane = self.pane;
+        let connection = self.connection.clone();
+        let cwd = self.descriptor.cwd.clone();
+        let new_session = agent_header_icon_button(
+            "web-agent-new-session",
+            IconName::ChatPlus,
+            ready && !running && cwd.is_some(),
+            cx,
+        )
+        .tooltip("New conversation")
+        .on_click(move |_, _, cx| {
+            if let Some(cwd) = cwd.clone() {
+                connection.update(cx, |connection, cx| {
+                    connection.send(
+                        ProtocolMessage::AgentSessionOp {
+                            pane,
+                            op: AgentSessionOpKind::New { cwd },
+                        },
+                        cx,
+                    );
+                });
+            }
+        });
+        let history = agent_header_icon_button(
+            "web-agent-history-button",
+            IconName::History,
+            ready && !running && self.history_supported,
+            cx,
+        )
+        .tooltip(if self.history_supported {
+            "Browse sessions stored by this agent"
+        } else {
+            "This agent does not support conversation history"
+        })
+        .on_click(cx.listener(|this, _, window, cx| this.list_sessions(true, window, cx)));
         let composer =
             AgentComposer {
                 input: self.input.clone(),
                 action: action.into_any_element(),
                 settings,
                 usage,
+                footer_actions: vec![
+                    directory,
+                    new_session.into_any_element(),
+                    history.into_any_element(),
+                ],
                 git: state.git.as_ref().map(|git| {
                     git_summary_footer(
                         ("agent-git-summary", self.pane.0),
@@ -1799,19 +2129,6 @@ impl Render for AgentPane {
                         cx,
                     )
                 }),
-                directory: agent_chrome_button("web-agent-directory")
-                    .icon(IconName::Folder)
-                    .label(self.descriptor.cwd.as_ref().map_or_else(
-                        || "Daemon working directory".to_owned(),
-                        |path| directory_label(path),
-                    ))
-                    .disabled(!self.can_change_session(cx))
-                    .tooltip(self.descriptor.cwd.as_ref().map_or_else(
-                        || "Agent working directory".to_owned(),
-                        |path| path.to_string_lossy().into_owned(),
-                    ))
-                    .on_click(cx.listener(|this, _, window, cx| this.open_directory(window, cx)))
-                    .into_any_element(),
                 command_hint: active_command_hint(&self.last_input, &self.commands).map(Into::into),
                 prefix,
                 attachments: (!self.attachments.is_empty()).then(|| {
@@ -1856,87 +2173,61 @@ impl Render for AgentPane {
                         .into_any_element()
                 }),
             };
-        let pane = self.pane;
-        let connection = self.connection.clone();
-        let cwd = self.descriptor.cwd.clone();
-        let new_session = Button::compact_icon("web-agent-new-session", IconName::ChatPlus)
-            .tooltip("New conversation")
-            .disabled(!ready || running || cwd.is_none())
-            .on_click(move |_, _, cx| {
-                if let Some(cwd) = cwd.clone() {
-                    connection.update(cx, |connection, cx| {
-                        connection.send(
-                            ProtocolMessage::AgentSessionOp {
-                                pane,
-                                op: AgentSessionOpKind::New { cwd },
-                            },
+        let provider = self.descriptor.provider;
+        let title = self
+            .connection
+            .read(cx)
+            .core
+            .snapshot()
+            .sessions
+            .iter()
+            .flat_map(|session| &session.windows)
+            .find_map(|window| window.panes.get(&self.pane))
+            .map_or_else(|| "New session".to_owned(), |pane| pane.title.clone());
+        let title_connection = self.connection.clone();
+        let header_controls = zz_ui::h_flex()
+            .min_w_0()
+            .gap(px(zz_ui::CHROME_GAP))
+            .child(zz_ui::agent::controls::agent_provider_label(provider, cx))
+            .child(agent_thread_title_editor(
+                ("web-agent-title", pane.0),
+                &title,
+                writable,
+                move |title, cx| {
+                    title_connection.update(cx, |connection, cx| {
+                        connection.command(
+                            "select-pane",
+                            vec![
+                                "-t".to_owned(),
+                                pane.to_string(),
+                                "-T".to_owned(),
+                                title.to_owned(),
+                            ],
                             cx,
                         );
                     });
-                }
-            });
-        let history = Button::compact_icon("web-agent-history-button", IconName::History)
-            .tooltip(if self.history_supported {
-                "Browse sessions stored by this agent"
-            } else {
-                "This agent does not support conversation history"
-            })
-            .disabled(!ready || running || !self.history_supported)
-            .on_click(cx.listener(|this, _, window, cx| this.list_sessions(true, window, cx)));
-        let provider = self.descriptor.provider;
-        let provider_view = cx.entity();
-        let provider_picker = agent_chrome_button(("web-agent-provider", self.pane.0))
-            .icon(provider_icon(provider))
-            .label(provider.label())
-            .dropdown_caret(true)
-            .disabled(!writable || running || self.lifecycle_pending)
-            .tooltip(if self.lifecycle_pending {
-                "Waiting for the daemon to switch agents"
-            } else if running {
-                "Finish or cancel the current turn before switching agents"
-            } else {
-                "Choose an ACP agent"
-            })
-            .dropdown_menu(move |menu, _, _| {
-                zz_protocol::AgentProvider::ALL.iter().fold(
-                    menu.min_w(px(190.0)),
-                    |menu, choice| {
-                        let choice = *choice;
-                        let view = provider_view.clone();
-                        menu.item(
-                            PopupMenuItem::new(choice.label())
-                                .icon(provider_icon(choice))
-                                .checked(choice == provider)
-                                .on_click(move |_, _, cx| {
-                                    view.update(cx, |this, cx| {
-                                        this.lifecycle_command(Some(choice), cx);
-                                    });
-                                }),
-                        )
-                    },
-                )
-            })
-            .anchor(Anchor::TopLeft);
-        let empty_message = if connected {
-            match state.phase {
-                AgentConnectionPhase::Starting => format!("Starting {}…", provider.label()),
-                AgentConnectionPhase::Ready => {
-                    "Ask the agent to work in this workspace.".to_owned()
-                }
-                AgentConnectionPhase::Running => {
-                    format!("Waiting for {}’s first update…", provider.label())
-                }
-                AgentConnectionPhase::AwaitingPermission => {
-                    "The agent needs your permission.".to_owned()
-                }
-                AgentConnectionPhase::Failed { .. } => {
-                    "The agent could not start this session.".to_owned()
-                }
-            }
-        } else {
-            "The ACP agent is offline.".to_owned()
-        };
+                },
+                window,
+                cx,
+            ));
         let empty = self.rows.is_empty().then(|| {
+            let empty_message = if connected {
+                match state.phase {
+                    AgentConnectionPhase::Starting => format!("Starting {}…", provider.label()),
+                    AgentConnectionPhase::Ready => return welcome_state(cx),
+                    AgentConnectionPhase::Running => {
+                        format!("Waiting for {}’s first update…", provider.label())
+                    }
+                    AgentConnectionPhase::AwaitingPermission => {
+                        "The agent needs your permission.".to_owned()
+                    }
+                    AgentConnectionPhase::Failed { .. } => {
+                        "The agent could not start this session.".to_owned()
+                    }
+                }
+            } else {
+                "The ACP agent is offline.".to_owned()
+            };
             empty_state(
                 empty_message,
                 connected
@@ -1960,8 +2251,67 @@ impl Render for AgentPane {
                 .opaque()
                 .opacity(cx.theme().pane_background_opacity))
             .child(agent_pane_header(
-                provider_picker,
-                div().flex().gap(px(4.0)).child(new_session).child(history),
+                self.connection
+                    .read(cx)
+                    .core
+                    .snapshot()
+                    .sessions
+                    .iter()
+                    .flat_map(|session| &session.windows)
+                    .any(|window| window.active_pane == self.pane),
+                header_controls,
+                zz_ui::h_flex()
+                    .gap(px(zz_ui::CHROME_GAP))
+                    .children(
+                        [
+                            (
+                                "web-agent-split-bottom",
+                                IconName::PanelBottom,
+                                "Split bottom",
+                                "-v",
+                            ),
+                            (
+                                "web-agent-split-right",
+                                IconName::PanelRight,
+                                "Split right",
+                                "-h",
+                            ),
+                        ]
+                        .into_iter()
+                        .map(|(id, icon, label, flag)| {
+                            pane_header_icon_button(id, icon, writable, cx)
+                                .tooltip(label)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.connection.update(cx, |connection, cx| {
+                                        connection.command(
+                                            "split-picker",
+                                            vec![
+                                                flag.to_owned(),
+                                                "-t".to_owned(),
+                                                this.pane.to_string(),
+                                            ],
+                                            cx,
+                                        );
+                                    });
+                                    cx.stop_propagation();
+                                }))
+                        }),
+                    )
+                    .child(
+                        pane_header_icon_button("web-agent-close", IconName::Xmark, writable, cx)
+                            .tooltip("Close pane")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.connection.update(cx, |connection, cx| {
+                                    connection.command(
+                                        "kill-pane",
+                                        vec!["-t".to_owned(), this.pane.to_string()],
+                                        cx,
+                                    );
+                                });
+                                cx.stop_propagation();
+                            })),
+                    ),
+                !self.rows.is_empty(),
                 cx,
             ))
             .child(
@@ -2084,13 +2434,6 @@ fn permission_choices(payload: &Value) -> Vec<PermissionChoice> {
             })
         })
         .collect()
-}
-
-const fn provider_icon(provider: zz_protocol::AgentProvider) -> IconName {
-    match provider {
-        zz_protocol::AgentProvider::Codex => IconName::Openai,
-        zz_protocol::AgentProvider::ClaudeCode => IconName::Claude,
-    }
 }
 
 fn inbound_image(content: &Value) -> Option<AgentImage> {

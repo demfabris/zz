@@ -6,6 +6,7 @@
 //! the coalescing lane, the replay ring, and the publisher the daemon
 //! implements.
 
+pub(crate) mod catalog;
 #[cfg(unix)]
 pub(crate) mod claude_peers;
 #[cfg(unix)]

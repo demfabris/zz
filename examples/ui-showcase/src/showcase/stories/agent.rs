@@ -7,7 +7,7 @@ use zz_ui::agent::{
     AgentEntry, AgentTimeline, AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus,
     agent_pane_header,
 };
-use zz_ui::{ActiveTheme as _, Icon, IconName, Sizable as _};
+use zz_ui::{ActiveTheme as _, IconName};
 
 use super::{Showcase, gallery, specimen_block, specimens, story_stack};
 
@@ -18,12 +18,12 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
         .child(
             gallery(
                 "Pane header",
-                "The 40px header strip keeps the provider on the left, with icon-only History and the working directory grouped on the right.",
+                "The 36px header shows the provider and session name on the left, split controls, a six-dot drag handle, and Close on the right.",
                 cx,
             )
             .child(specimens().w_full().child(specimen_block(
                 "leading · trailing",
-                header("codex · zz", "zz", cx),
+                header("Improve agent pane controls", cx),
                 cx,
             ))),
         )
@@ -78,23 +78,63 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
         .into_any_element()
 }
 
-fn header(title: &'static str, directory: &'static str, cx: &App) -> impl IntoElement {
-    let slot = |icon: IconName, label: &'static str| {
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(Icon::new(icon).xsmall())
-            .child(div().text_sm().child(label))
-    };
+fn header(title: &'static str, cx: &App) -> impl IntoElement {
     agent_pane_header(
-        slot(IconName::Openai, title),
+        true,
+        div()
+            .flex()
+            .min_w_0()
+            .items_center()
+            .gap_2()
+            .child(zz_ui::agent::controls::agent_provider_label(
+                zz_protocol::AgentProvider::Codex,
+                cx,
+            ))
+            .child(zz_ui::agent::controls::agent_thread_button(
+                "gallery-thread-title",
+                title,
+                cx,
+            )),
         div()
             .flex()
             .items_center()
             .gap_2()
-            .child(Icon::new(IconName::History).xsmall())
-            .child(slot(IconName::Folder, directory)),
+            .child(
+                zz_ui::pane::pane_header_icon_button(
+                    "gallery-agent-split-bottom",
+                    IconName::PanelBottom,
+                    true,
+                    cx,
+                )
+                .tooltip("Split bottom"),
+            )
+            .child(
+                zz_ui::pane::pane_header_icon_button(
+                    "gallery-agent-split-right",
+                    IconName::PanelRight,
+                    true,
+                    cx,
+                )
+                .tooltip("Split right"),
+            )
+            .child(zz_ui::pane::pane_drag_button(
+                "gallery-pane-drag",
+                zz_protocol::PaneId(2),
+                title.to_owned(),
+                true,
+                |_, _, _| {},
+                cx,
+            ))
+            .child(
+                zz_ui::pane::pane_header_icon_button(
+                    "gallery-pane-close",
+                    IconName::Xmark,
+                    true,
+                    cx,
+                )
+                .tooltip("Close pane"),
+            ),
+        true,
         cx,
     )
 }

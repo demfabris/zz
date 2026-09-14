@@ -1,22 +1,26 @@
 //! Shared in-app fuzzy path picker.
 
 use std::{
-    cmp::Ordering,
+    collections::VecDeque,
     path::{Path, PathBuf},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
+#[cfg(any(feature = "editor-pane", test))]
+use fff_search::FilePickerOptions;
+use fff_search::{FilePicker, FuzzySearchOptions, PaginationArgs, QueryParser};
+#[cfg(any(feature = "editor-pane", test))]
 use gpui::{
-    App, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, KeyDownEvent,
-    MouseButton, Render, ScrollStrategy, SharedString, Subscription, Task, UniformListScrollHandle,
-    Window, div, prelude::*, px, uniform_list,
+    App, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton,
+    Render, ScrollStrategy, Subscription, UniformListScrollHandle, Window, div, prelude::*, px,
+    uniform_list,
 };
+use gpui::{Context, SharedString, Task};
 use ignore::WalkBuilder;
-use nucleo_matcher::{
-    Config, Matcher, Utf32Str,
-    pattern::{CaseMatching, Normalization, Pattern},
-};
+#[cfg(any(feature = "editor-pane", test))]
 use zz_ui::command::palette_shortcut_hint;
+#[cfg(any(feature = "editor-pane", test))]
 use zz_ui::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, IconName, h_flex,
     input::{InputEvent, InputState, MoveDown, MoveUp},
@@ -24,30 +28,14 @@ use zz_ui::{
     v_flex,
 };
 
-const MAX_PICKER_ENTRIES: usize = 50_000;
 const MAX_PICKER_ROWS: usize = 500;
-const WALK_BATCH: usize = 1024;
-const WALK_BATCH_QUEUE: usize = 8;
-const DIRECTORY_MAX_DEPTH: usize = 6;
-const NO_DESCEND_HOME_ROOTS: [&str; 9] = [
-    "Applications",
-    "Library",
-    "Movies",
-    "Music",
-    "Pictures",
-    "Public",
-    "Templates",
-    "Videos",
-    "snap",
-];
 const WORKSPACE_PRIOR: u32 = 1 << 10;
+const DIRECTORY_SCAN_LIMIT: usize = 50_000;
+const DIRECTORY_SCAN_DEPTH: usize = 8;
+const DIRECTORY_SCAN_BUDGET: Duration = Duration::from_secs(5);
+const DIRECTORY_BATCH_SIZE: usize = 64;
 
-const TRUNCATED_NOTE: &str = "truncated: showing the first 50,000 entries";
-const _: () = assert!(
-    MAX_PICKER_ENTRIES == 50_000,
-    "TRUNCATED_NOTE spells the cap out"
-);
-
+#[cfg(any(feature = "editor-pane", test))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FilePickerMode {
     #[cfg_attr(
@@ -58,9 +46,14 @@ pub(crate) enum FilePickerMode {
         )
     )]
     Files,
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "the agent picker uses DirectoryCatalog directly")
+    )]
     Directories,
 }
 
+#[cfg(any(feature = "editor-pane", test))]
 impl FilePickerMode {
     const fn icon(self) -> IconName {
         match self {
@@ -77,7 +70,12 @@ impl FilePickerMode {
     }
 }
 
+#[cfg(any(feature = "editor-pane", test))]
 #[derive(Clone, Debug)]
+#[cfg_attr(
+    not(feature = "editor-pane"),
+    allow(dead_code, reason = "only the editor pane consumes picker events")
+)]
 pub(crate) enum FilePickerEvent {
     Selected(PathBuf),
     Dismissed,
@@ -97,29 +95,6 @@ fn entry_prior(depth: usize, is_workspace: bool) -> u32 {
     } else {
         shallowness
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct Ranked {
-    score: u32,
-    prior: u32,
-    entry: usize,
-}
-
-fn ranked_order(left: &Ranked, right: &Ranked) -> Ordering {
-    right
-        .score
-        .cmp(&left.score)
-        .then(right.prior.cmp(&left.prior))
-        .then(left.entry.cmp(&right.entry))
-}
-
-enum WalkMessage {
-    Batch(Vec<PickerEntry>),
-    Finished {
-        truncated: bool,
-        error: Option<String>,
-    },
 }
 
 #[cfg(all(target_os = "macos", feature = "agent-pane"))]
@@ -144,156 +119,380 @@ pub(crate) fn directory_picker_root(fallback: &Path) -> PathBuf {
     }
 }
 
-fn walk_root(
+fn scan_directories(
     root: &Path,
-    mode: FilePickerMode,
     limit: usize,
-    batch_size: usize,
-    emit: &mut dyn FnMut(WalkMessage) -> bool,
-) {
-    let mut builder = WalkBuilder::new(root);
-    builder
-        .follow_links(false)
-        .require_git(false)
-        .sort_by_file_name(|left: &std::ffi::OsStr, right: &std::ffi::OsStr| left.cmp(right));
-    if mode == FilePickerMode::Directories {
-        builder.max_depth(Some(DIRECTORY_MAX_DEPTH));
-        builder.filter_entry(|entry| {
-            !(entry.depth() == 2
-                && entry
-                    .path()
-                    .parent()
-                    .and_then(Path::file_name)
-                    .is_some_and(|name| NO_DESCEND_HOME_ROOTS.iter().any(|root| name == *root)))
-        });
+    budget: Duration,
+    cancelled: &dyn Fn() -> bool,
+    emit: &mut dyn FnMut(Vec<PickerEntry>) -> bool,
+) -> Result<bool, String> {
+    if cancelled() {
+        return Ok(false);
     }
-
-    let mut batch = Vec::with_capacity(batch_size);
-    let mut produced = 0_usize;
-    let mut truncated = false;
-    let mut error = None;
-    for result in builder.build() {
-        let entry = match result {
-            Ok(entry) => entry,
-            Err(failure) => {
-                if error.is_none() {
-                    error = Some(failure.to_string());
-                }
-                continue;
-            }
-        };
-        if entry.depth() == 0 {
-            continue;
+    std::fs::read_dir(root).map_err(|error| format!("Cannot read {}: {error}", root.display()))?;
+    let start = Instant::now();
+    let mut last_batch = start;
+    let mut pending = VecDeque::from([(root.to_path_buf(), 0)]);
+    let mut batch = Vec::new();
+    let mut limited = false;
+    let mut published = false;
+    let mut visited = 0;
+    'scan: while let Some((directory, depth)) = pending.pop_front() {
+        if cancelled() {
+            return Ok(false);
         }
-        let is_directory = entry.file_type().is_some_and(|kind| kind.is_dir());
-        if is_directory != (mode == FilePickerMode::Directories) {
-            continue;
-        }
-        let Some(relative) = entry
-            .path()
-            .strip_prefix(root)
-            .ok()
-            .and_then(Path::to_str)
-            .filter(|relative| !relative.is_empty())
-        else {
-            continue;
-        };
-        let is_workspace = is_directory && entry.path().join(".git").exists();
-        batch.push(PickerEntry {
-            relative: SharedString::from(relative.to_owned()),
-            absolute: Arc::from(entry.path()),
-            prior: entry_prior(entry.depth(), is_workspace),
-        });
-        produced += 1;
-        if batch.len() >= batch_size {
-            let full = std::mem::replace(&mut batch, Vec::with_capacity(batch_size));
-            if !emit(WalkMessage::Batch(full)) {
-                return;
-            }
-        }
-        if produced >= limit {
-            truncated = true;
+        if visited >= limit || start.elapsed() >= budget {
+            limited = true;
             break;
         }
+        let mut builder = WalkBuilder::new(&directory);
+        builder
+            .follow_links(false)
+            .require_git(false)
+            .max_depth(Some(1));
+        for result in builder.build() {
+            if cancelled() {
+                return Ok(false);
+            }
+            if visited >= limit || start.elapsed() >= budget {
+                limited = true;
+                break 'scan;
+            }
+            let Ok(entry) = result else { continue };
+            if entry.depth() == 0 {
+                continue;
+            }
+            visited += 1;
+            if !entry.file_type().is_some_and(|kind| kind.is_dir()) {
+                continue;
+            }
+            let relative = entry.path().strip_prefix(root).unwrap_or(entry.path());
+            let name = entry.file_name().to_str().unwrap_or_default();
+            if matches!(name, "node_modules" | "target" | "__pycache__" | "venv")
+                || relative.ends_with("go/pkg/mod")
+            {
+                continue;
+            }
+            let Some(label) = relative.to_str() else {
+                continue;
+            };
+            batch.push(PickerEntry {
+                relative: SharedString::from(label.to_owned()),
+                absolute: Arc::from(entry.path()),
+                prior: entry_prior(depth + 1, entry.path().join(".git").exists()),
+            });
+            let media_root = depth == 0
+                && matches!(
+                    name,
+                    "Applications"
+                        | "Library"
+                        | "Movies"
+                        | "Music"
+                        | "Pictures"
+                        | "Public"
+                        | "Templates"
+                        | "Videos"
+                        | "snap"
+                );
+            if depth + 1 < DIRECTORY_SCAN_DEPTH && !media_root {
+                pending.push_back((entry.path().to_path_buf(), depth + 1));
+            }
+            if !published
+                || batch.len() >= DIRECTORY_BATCH_SIZE
+                || last_batch.elapsed() >= Duration::from_millis(30)
+            {
+                if !emit(std::mem::take(&mut batch)) {
+                    return Ok(false);
+                }
+                published = true;
+                last_batch = Instant::now();
+            }
+        }
     }
-    if !batch.is_empty() && !emit(WalkMessage::Batch(batch)) {
-        return;
+    if !batch.is_empty() {
+        emit(batch);
     }
-    emit(WalkMessage::Finished { truncated, error });
+    Ok(limited)
 }
 
-fn rank_entries(
-    entries: &[PickerEntry],
-    offset: usize,
-    query: &str,
-    matcher: &mut Matcher,
-) -> Vec<Ranked> {
-    if query.trim().is_empty() {
-        let mut ranked = (offset..entries.len())
-            .map(|entry| Ranked {
-                score: 0,
-                prior: entries[entry].prior,
-                entry,
-            })
-            .collect::<Vec<_>>();
-        ranked.sort_by(ranked_order);
-        return ranked;
-    }
-    let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
-    let mut buffer = Vec::new();
-    let mut ranked = entries
-        .iter()
-        .enumerate()
-        .skip(offset)
-        .filter_map(|(entry, candidate)| {
-            let path = candidate.relative.as_ref();
-            let score = pattern.score(Utf32Str::new(path, &mut buffer), matcher)?;
-            let name = path
-                .rsplit(std::path::MAIN_SEPARATOR)
-                .next()
-                .unwrap_or(path);
-            let name_bonus = pattern
-                .score(Utf32Str::new(name, &mut buffer), matcher)
-                .unwrap_or(0);
-            Some(Ranked {
-                score: score + name_bonus,
-                prior: candidate.prior,
-                entry,
-            })
+struct PickerIndex {
+    picker: Option<FilePicker>,
+    directories: Vec<PickerEntry>,
+}
+
+impl PickerIndex {
+    #[cfg(any(feature = "editor-pane", test))]
+    fn files(root: &Path) -> Result<Self, String> {
+        std::fs::read_dir(root)
+            .map_err(|error| format!("Cannot read {}: {error}", root.display()))?;
+        let base_path = root
+            .to_str()
+            .ok_or_else(|| format!("Cannot search a non-UTF-8 path: {}", root.display()))?;
+        let mut picker = FilePicker::new(FilePickerOptions {
+            base_path: base_path.to_owned(),
+            watch: false,
+            enable_home_dir_scanning: true,
+            enable_fs_root_scanning: true,
+            ..FilePickerOptions::default()
         })
-        .collect::<Vec<_>>();
-    ranked.sort_by(ranked_order);
-    ranked
-}
-
-fn merge_ranked(mut ranked: Vec<Ranked>, incoming: Vec<Ranked>, limit: usize) -> Vec<Ranked> {
-    if incoming.is_empty() {
-        return ranked;
+        .map_err(|error| format!("Cannot search {}: {error}", root.display()))?;
+        picker
+            .collect_files()
+            .map_err(|error| format!("Cannot search {}: {error}", root.display()))?;
+        Ok(Self {
+            picker: Some(picker),
+            directories: Vec::new(),
+        })
     }
-    ranked.extend(incoming);
-    ranked.sort_by(ranked_order);
-    ranked.truncate(limit);
-    ranked
+
+    fn search(&self, query: &str) -> Vec<PickerEntry> {
+        if let Some(picker) = &self.picker {
+            let parser = QueryParser::default();
+            let query = parser.parse(query);
+            return picker
+                .fuzzy_search(
+                    &query,
+                    None,
+                    FuzzySearchOptions {
+                        max_threads: 2,
+                        pagination: PaginationArgs {
+                            offset: 0,
+                            limit: MAX_PICKER_ROWS,
+                        },
+                        ..FuzzySearchOptions::default()
+                    },
+                )
+                .items
+                .iter()
+                .map(|file| {
+                    let relative = file.relative_path(picker);
+                    PickerEntry {
+                        absolute: Arc::from(picker.base_path().join(&relative)),
+                        relative: SharedString::from(relative),
+                        prior: 0,
+                    }
+                })
+                .collect();
+        }
+        let query = query.trim().trim_end_matches(['/', '\\']);
+        let mut ranked = if query.is_empty() {
+            self.directories
+                .iter()
+                .enumerate()
+                .map(|(index, _)| (index, 0))
+                .collect::<Vec<_>>()
+        } else {
+            let candidates = self
+                .directories
+                .iter()
+                .map(|entry| entry.relative.as_ref())
+                .collect::<Vec<_>>();
+            let config = neo_frizbee::Config {
+                max_typos: Some(u16::try_from(query.chars().count() / 4).unwrap_or(6).min(6)),
+                casing: neo_frizbee::CaseMatching::Smart,
+                sort: false,
+                ..neo_frizbee::Config::default()
+            };
+            neo_frizbee::match_list(query, &candidates, &config)
+                .into_iter()
+                .map(|matched| (matched.index as usize, matched.score))
+                .collect()
+        };
+        ranked.sort_unstable_by(|(left, left_score), (right, right_score)| {
+            right_score
+                .cmp(left_score)
+                .then(
+                    self.directories[*right]
+                        .prior
+                        .cmp(&self.directories[*left].prior),
+                )
+                .then(
+                    self.directories[*left]
+                        .relative
+                        .cmp(&self.directories[*right].relative),
+                )
+        });
+        ranked
+            .into_iter()
+            .take(MAX_PICKER_ROWS)
+            .map(|(index, _)| self.directories[index].clone())
+            .collect()
+    }
 }
 
-fn preserved_selection(ranked: &[Ranked], preferred: Option<usize>) -> Option<usize> {
+#[cfg(feature = "agent-pane")]
+pub(crate) struct DirectoryCatalog {
+    index: Arc<PickerIndex>,
+    pub(crate) entries: Vec<(SharedString, PathBuf)>,
+    pub(crate) scanning: bool,
+    pub(crate) limited: bool,
+    pub(crate) error: Option<SharedString>,
+    query: String,
+    generation: u64,
+    _walk: Task<()>,
+    _rank: Task<()>,
+}
+
+#[cfg(feature = "agent-pane")]
+impl DirectoryCatalog {
+    pub(crate) fn new(root: PathBuf, cx: &mut Context<Self>) -> Self {
+        let (sender, receiver) = async_channel::bounded(8);
+        cx.background_executor()
+            .spawn(async move {
+                let result = scan_directories(
+                    &root,
+                    DIRECTORY_SCAN_LIMIT,
+                    DIRECTORY_SCAN_BUDGET,
+                    &|| sender.is_closed(),
+                    &mut |batch| {
+                        sender
+                            .send_blocking(ScanMessage::Directories(batch))
+                            .is_ok()
+                    },
+                );
+                sender.send_blocking(ScanMessage::Finished(result)).ok();
+            })
+            .detach();
+        let walk = cx.spawn(async move |catalog, cx| {
+            while let Ok(message) = receiver.recv().await {
+                if catalog
+                    .update(cx, |catalog, cx| {
+                        match message {
+                            ScanMessage::Directories(batch) => {
+                                let mut directories = catalog.index.directories.clone();
+                                directories.extend(batch);
+                                catalog.index = Arc::new(PickerIndex {
+                                    picker: None,
+                                    directories,
+                                });
+                                catalog.rank(cx);
+                            }
+                            ScanMessage::Finished(result) => {
+                                catalog.scanning = false;
+                                match result {
+                                    Ok(limited) => catalog.limited = limited,
+                                    Err(error) => catalog.error = Some(error.into()),
+                                }
+                            }
+                            #[cfg(any(feature = "editor-pane", test))]
+                            ScanMessage::Files(_) => {}
+                        }
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        Self {
+            index: Arc::new(PickerIndex {
+                picker: None,
+                directories: Vec::new(),
+            }),
+            entries: Vec::new(),
+            scanning: true,
+            limited: false,
+            error: None,
+            query: String::new(),
+            generation: 0,
+            _walk: walk,
+            _rank: Task::ready(()),
+        }
+    }
+
+    pub(crate) fn search(&mut self, query: &str, cx: &mut Context<Self>) {
+        query.clone_into(&mut self.query);
+        self.entries.clear();
+        self.rank(cx);
+        cx.notify();
+    }
+
+    fn rank(&mut self, cx: &mut Context<Self>) {
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+        let index = self.index.clone();
+        let query = self.query.clone();
+        let ranking = cx.background_executor().spawn(async move {
+            let mut entries = index
+                .search(&query)
+                .into_iter()
+                .map(|entry| (entry.relative, entry.absolute.to_path_buf()))
+                .collect::<Vec<_>>();
+            let typed = PathBuf::from(query.trim());
+            if typed.is_absolute()
+                && typed.is_dir()
+                && !entries.iter().any(|(_, path)| *path == typed)
+            {
+                entries.insert(0, (typed.display().to_string().into(), typed));
+            }
+            entries
+        });
+        self._rank = cx.spawn(async move |catalog, cx| {
+            let entries = ranking.await;
+            catalog
+                .update(cx, |catalog, cx| {
+                    if catalog.generation == generation {
+                        catalog.entries = entries;
+                        cx.notify();
+                    }
+                })
+                .ok();
+        });
+    }
+}
+
+enum ScanMessage {
+    Directories(Vec<PickerEntry>),
+    #[cfg(any(feature = "editor-pane", test))]
+    Files(Arc<PickerIndex>),
+    Finished(Result<bool, String>),
+}
+
+#[cfg(any(feature = "editor-pane", test))]
+fn preserved_selection(entries: &[PickerEntry], preferred: Option<&Path>) -> Option<usize> {
     preferred
-        .and_then(|entry| ranked.iter().position(|row| row.entry == entry))
-        .or_else(|| (!ranked.is_empty()).then_some(0))
+        .and_then(|path| {
+            entries
+                .iter()
+                .position(|entry| entry.absolute.as_ref() == path)
+        })
+        .or_else(|| (!entries.is_empty()).then_some(0))
 }
 
+#[cfg(any(feature = "editor-pane", test))]
+fn validate_selection(path: &Path, mode: FilePickerMode) -> Result<(), String> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|error| format!("Cannot open {}: {error}", path.display()))?;
+    if match mode {
+        FilePickerMode::Files => metadata.is_file(),
+        FilePickerMode::Directories => metadata.is_dir(),
+    } {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} is not a {}.",
+            path.display(),
+            match mode {
+                FilePickerMode::Files => "file",
+                FilePickerMode::Directories => "folder",
+            }
+        ))
+    }
+}
+
+#[cfg(any(feature = "editor-pane", test))]
 pub(crate) struct FilePickerView {
     mode: FilePickerMode,
     input: Entity<InputState>,
     entries: Vec<PickerEntry>,
-    ranked: Vec<Ranked>,
+    index: Option<Arc<PickerIndex>>,
     rows: Arc<[SharedString]>,
     selected: Option<usize>,
     scroll: UniformListScrollHandle,
-    matcher: Matcher,
     query: String,
     scanning: bool,
-    truncated: bool,
+    limited: bool,
     error: Option<SharedString>,
     rank_generation: u64,
     accept_generation: u64,
@@ -303,6 +502,7 @@ pub(crate) struct FilePickerView {
     _subscriptions: Vec<Subscription>,
 }
 
+#[cfg(any(feature = "editor-pane", test))]
 impl FilePickerView {
     pub(crate) fn new(
         mode: FilePickerMode,
@@ -326,14 +526,13 @@ impl FilePickerView {
             mode,
             input,
             entries: Vec::new(),
-            ranked: Vec::new(),
+            index: None,
             rows: Arc::from([]),
             selected: None,
             scroll: UniformListScrollHandle::new(),
-            matcher: Matcher::new(Config::DEFAULT.match_paths()),
             query: String::new(),
             scanning: true,
-            truncated: false,
+            limited: false,
             error: None,
             rank_generation: 0,
             accept_generation: 0,
@@ -349,22 +548,35 @@ impl FilePickerView {
     }
 
     fn spawn_walk(mode: FilePickerMode, root: PathBuf, cx: &mut Context<Self>) -> Task<()> {
-        let (sender, receiver) = async_channel::bounded::<WalkMessage>(WALK_BATCH_QUEUE);
+        let (sender, receiver) = async_channel::bounded(8);
         cx.background_executor()
             .spawn(async move {
-                walk_root(
-                    &root,
-                    mode,
-                    MAX_PICKER_ENTRIES,
-                    WALK_BATCH,
-                    &mut |message| sender.send_blocking(message).is_ok(),
-                );
+                let result = match mode {
+                    FilePickerMode::Directories => scan_directories(
+                        &root,
+                        DIRECTORY_SCAN_LIMIT,
+                        DIRECTORY_SCAN_BUDGET,
+                        &|| sender.is_closed(),
+                        &mut |batch| {
+                            sender
+                                .send_blocking(ScanMessage::Directories(batch))
+                                .is_ok()
+                        },
+                    ),
+                    FilePickerMode::Files => PickerIndex::files(&root).map(|index| {
+                        sender
+                            .send_blocking(ScanMessage::Files(Arc::new(index)))
+                            .ok();
+                        false
+                    }),
+                };
+                sender.send_blocking(ScanMessage::Finished(result)).ok();
             })
             .detach();
         cx.spawn(async move |picker, cx| {
             while let Ok(message) = receiver.recv().await {
                 if picker
-                    .update(cx, |picker, cx| picker.apply_walk(message, cx))
+                    .update(cx, |picker, cx| picker.apply_scan(message, cx))
                     .is_err()
                 {
                     break;
@@ -373,28 +585,37 @@ impl FilePickerView {
         })
     }
 
-    fn apply_walk(&mut self, message: WalkMessage, cx: &mut Context<Self>) {
+    fn apply_scan(&mut self, message: ScanMessage, cx: &mut Context<Self>) {
         match message {
-            WalkMessage::Batch(batch) => self.append(batch),
-            WalkMessage::Finished { truncated, error } => {
+            ScanMessage::Directories(batch) => {
+                let mut directories = self
+                    .index
+                    .as_ref()
+                    .map(|index| index.directories.clone())
+                    .unwrap_or_default();
+                directories.extend(batch);
+                self.index = Some(Arc::new(PickerIndex {
+                    picker: None,
+                    directories,
+                }));
+                if self.rows.is_empty() && self.query.trim().is_empty() {
+                    self.set_entries(self.index.as_ref().unwrap().search(""), None);
+                }
+                self.search(false, cx);
+            }
+            ScanMessage::Files(index) => {
+                self.index = Some(index);
+                self.search(false, cx);
+            }
+            ScanMessage::Finished(result) => {
                 self.scanning = false;
-                self.truncated = truncated;
-                self.error = error.map(SharedString::from);
+                match result {
+                    Ok(limited) => self.limited = limited,
+                    Err(error) => self.error = Some(SharedString::from(error)),
+                }
             }
         }
         cx.notify();
-    }
-
-    fn append(&mut self, batch: Vec<PickerEntry>) {
-        if batch.is_empty() {
-            return;
-        }
-        let offset = self.entries.len();
-        self.entries.extend(batch);
-        let incoming = rank_entries(&self.entries, offset, &self.query, &mut self.matcher);
-        let preferred = self.selected_entry();
-        let ranked = merge_ranked(std::mem::take(&mut self.ranked), incoming, MAX_PICKER_ROWS);
-        self.set_ranked(ranked, preferred);
     }
 
     fn on_query_changed(&mut self, input: &Entity<InputState>, cx: &mut Context<Self>) {
@@ -403,37 +624,38 @@ impl FilePickerView {
             return;
         }
         self.query = query;
-        self.error = None;
+        if self.scanning || self.index.is_some() {
+            self.error = None;
+        }
         self.accept_generation = self.accept_generation.saturating_add(1);
-        let preferred = self.selected_entry();
-        self.ranked.clear();
-        self.rows = Arc::from([]);
-        self.selected = None;
+        self.search(true, cx);
+    }
+
+    fn search(&mut self, clear: bool, cx: &mut Context<Self>) {
+        let Some(index) = self.index.clone() else {
+            return;
+        };
+        let preferred = self.selected_path();
+        if clear {
+            self.entries.clear();
+            self.rows = Arc::from([]);
+            self.selected = None;
+        }
         self.rank_generation = self.rank_generation.saturating_add(1);
         let generation = self.rank_generation;
-        let entries = self.entries.clone();
-        let entry_count = entries.len();
         let query = self.query.clone();
-        let ranking = cx.background_executor().spawn(async move {
-            let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
-            let mut ranked = rank_entries(&entries, 0, &query, &mut matcher);
-            ranked.truncate(MAX_PICKER_ROWS);
-            ranked
-        });
+        let ranking = cx
+            .background_executor()
+            .spawn(async move { index.search(&query) });
         self._rank = cx.spawn(async move |picker, cx| {
-            let ranked = ranking.await;
+            let entries = ranking.await;
             picker
                 .update(cx, |picker, cx| {
                     if picker.rank_generation != generation {
                         return;
                     }
-                    let tail = picker
-                        .ranked
-                        .iter()
-                        .copied()
-                        .filter(|row| row.entry >= entry_count)
-                        .collect();
-                    picker.set_ranked(merge_ranked(ranked, tail, MAX_PICKER_ROWS), preferred);
+                    let preferred = picker.selected_path().or(preferred);
+                    picker.set_entries(entries, preferred.as_deref());
                     cx.notify();
                 })
                 .ok();
@@ -441,32 +663,27 @@ impl FilePickerView {
         cx.notify();
     }
 
-    fn set_ranked(&mut self, ranked: Vec<Ranked>, preferred: Option<usize>) {
-        self.rows = ranked
-            .iter()
-            .filter_map(|row| self.entries.get(row.entry))
-            .map(|entry| entry.relative.clone())
-            .collect();
-        let previous = self.selected;
-        self.selected = preserved_selection(&ranked, preferred);
-        self.ranked = ranked;
-        if self.selected != previous
-            && let Some(selected) = self.selected
-        {
+    fn set_entries(&mut self, entries: Vec<PickerEntry>, preferred: Option<&Path>) {
+        self.rows = entries.iter().map(|entry| entry.relative.clone()).collect();
+        self.selected = preserved_selection(&entries, preferred);
+        self.entries = entries;
+        if let Some(selected) = self.selected {
             self.scroll
                 .scroll_to_item(selected, ScrollStrategy::Nearest);
         }
     }
 
-    fn selected_entry(&self) -> Option<usize> {
-        self.ranked.get(self.selected?).map(|row| row.entry)
+    fn selected_path(&self) -> Option<Arc<Path>> {
+        self.entries
+            .get(self.selected?)
+            .map(|entry| entry.absolute.clone())
     }
 
     fn navigate(&mut self, direction: isize, cx: &mut Context<Self>) {
-        if self.ranked.is_empty() {
+        if self.entries.is_empty() {
             return;
         }
-        let count = self.ranked.len();
+        let count = self.entries.len();
         let current = self.selected.unwrap_or_default();
         let selected = if direction < 0 {
             current.checked_sub(1).unwrap_or(count - 1)
@@ -480,51 +697,42 @@ impl FilePickerView {
     }
 
     fn accept(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(entry) = self
-            .ranked
-            .get(index)
-            .and_then(|row| self.entries.get(row.entry))
-        else {
+        let Some(entry) = self.entries.get(index) else {
             return;
         };
-        cx.emit(FilePickerEvent::Selected(entry.absolute.to_path_buf()));
+        self.accept_path(entry.absolute.to_path_buf(), cx);
     }
 
     fn accept_selected(&mut self, cx: &mut Context<Self>) {
         let typed = PathBuf::from(self.query.trim());
-        if !typed.is_absolute() {
-            if let Some(index) = self.selected {
-                self.accept(index, cx);
-            }
-            return;
+        if typed.is_absolute() {
+            self.accept_path(typed, cx);
+        } else if let Some(index) = self.selected {
+            self.accept(index, cx);
         }
+    }
+
+    fn accept_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.accept_generation = self.accept_generation.saturating_add(1);
         let generation = self.accept_generation;
         let mode = self.mode;
         let validation = cx.background_executor().spawn({
-            let typed = typed.clone();
-            async move {
-                std::fs::metadata(&typed).is_ok_and(|metadata| match mode {
-                    FilePickerMode::Files => metadata.is_file(),
-                    FilePickerMode::Directories => metadata.is_dir(),
-                })
-            }
+            let path = path.clone();
+            async move { validate_selection(&path, mode) }
         });
         self._accept = cx.spawn(async move |picker, cx| {
-            let accepted = validation.await;
+            let result = validation.await;
             picker
                 .update(cx, |picker, cx| {
                     if picker.accept_generation != generation {
                         return;
                     }
-                    if accepted {
-                        cx.emit(FilePickerEvent::Selected(typed));
-                    } else {
-                        picker.error = Some(SharedString::from(match picker.mode {
-                            FilePickerMode::Files => "That path is not a file.",
-                            FilePickerMode::Directories => "That path is not a folder.",
-                        }));
-                        cx.notify();
+                    match result {
+                        Ok(()) => cx.emit(FilePickerEvent::Selected(path)),
+                        Err(error) => {
+                            picker.error = Some(SharedString::from(error));
+                            cx.notify();
+                        }
                     }
                 })
                 .ok();
@@ -611,7 +819,9 @@ impl FilePickerView {
             .text_size(zz_ui::rems_from_px(10.0))
             .text_color(cx.theme().foreground.muted())
             .when(listed && self.scanning, |this| this.child("Scanning…"))
-            .when(listed && self.truncated, |this| this.child(TRUNCATED_NOTE))
+            .when(self.limited, |this| {
+                this.child("Search limited. Enter a full path to open another folder.")
+            })
     }
 
     fn empty_message(&self, cx: &App) -> SharedString {
@@ -629,14 +839,17 @@ impl FilePickerView {
     }
 }
 
+#[cfg(any(feature = "editor-pane", test))]
 impl EventEmitter<FilePickerEvent> for FilePickerView {}
 
+#[cfg(any(feature = "editor-pane", test))]
 impl Focusable for FilePickerView {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         self.focus(cx)
     }
 }
 
+#[cfg(any(feature = "editor-pane", test))]
 impl Render for FilePickerView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let focus = self.focus(cx);
@@ -713,356 +926,373 @@ impl Render for FilePickerView {
             )
     }
 }
-
 #[cfg(test)]
 mod tests {
     use std::fs;
 
     use super::*;
 
-    fn entry_with_prior(relative: &str, prior: u32) -> PickerEntry {
-        PickerEntry {
-            relative: SharedString::from(relative.to_owned()),
-            absolute: Arc::from(Path::new("/root").join(relative)),
-            prior,
+    fn build_index(root: &Path, mode: FilePickerMode) -> Result<PickerIndex, String> {
+        if mode == FilePickerMode::Files {
+            return PickerIndex::files(root);
         }
+        let mut directories = Vec::new();
+        scan_directories(
+            root,
+            DIRECTORY_SCAN_LIMIT,
+            DIRECTORY_SCAN_BUDGET,
+            &|| false,
+            &mut |batch| {
+                directories.extend(batch);
+                true
+            },
+        )?;
+        Ok(PickerIndex {
+            picker: None,
+            directories,
+        })
     }
 
-    fn entry(relative: &str) -> PickerEntry {
-        entry_with_prior(relative, 0)
-    }
-
-    fn matcher() -> Matcher {
-        Matcher::new(Config::DEFAULT.match_paths())
-    }
-
-    fn labels(entries: &[PickerEntry], ranked: &[Ranked]) -> Vec<String> {
-        ranked
+    fn labels(entries: &[PickerEntry]) -> Vec<&str> {
+        entries
             .iter()
-            .map(|row| entries[row.entry].relative.to_string())
+            .map(|entry| entry.relative.as_ref())
             .collect()
     }
 
-    fn collect_walk(
-        root: &Path,
-        mode: FilePickerMode,
-        limit: usize,
-    ) -> (Vec<PickerEntry>, bool, Option<String>) {
-        let mut entries = Vec::new();
-        let mut truncated = false;
-        let mut error = None;
-        walk_root(root, mode, limit, 2, &mut |message| {
-            match message {
-                WalkMessage::Batch(batch) => entries.extend(batch),
-                WalkMessage::Finished {
-                    truncated: capped,
-                    error: failure,
-                } => {
-                    truncated = capped;
-                    error = failure;
-                }
-            }
-            true
-        });
-        (entries, truncated, error)
-    }
-
     #[test]
-    fn ranking_puts_the_path_the_query_abbreviates_first() {
-        let entries = vec![entry("Cargo.lock"), entry("src/main.rs"), entry("moon.rs")];
+    fn directories_include_empty_and_deep_folders_but_not_files() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("dev/empty")).unwrap();
+        fs::create_dir_all(root.path().join("a/b/c/d/e/f/g/workspace")).unwrap();
+        fs::write(root.path().join("dev/file.rs"), "").unwrap();
+        let index = build_index(root.path(), FilePickerMode::Directories).unwrap();
 
-        let ranked = rank_entries(&entries, 0, "mn", &mut matcher());
+        let entries = index.search("");
 
-        assert_eq!(
-            labels(&entries, &ranked).first().map(String::as_str),
-            Some("src/main.rs"),
-            "an fzf-style abbreviation ranks the file it abbreviates first"
-        );
-        assert!(
-            !labels(&entries, &ranked).contains(&"Cargo.lock".to_owned()),
-            "a path without the query's letters is not a match at all"
-        );
-    }
-
-    #[test]
-    fn an_empty_query_keeps_walk_order_between_equal_priors() {
-        let entries = vec![entry("z.rs"), entry("a.rs"), entry("m.rs")];
-
-        let ranked = rank_entries(&entries, 0, "  ", &mut matcher());
-
-        assert_eq!(labels(&entries, &ranked), ["z.rs", "a.rs", "m.rs"]);
-    }
-
-    #[test]
-    fn an_empty_query_ranks_workspaces_then_shallow_then_deep() {
-        let entries = vec![
-            entry_with_prior("go/pkg/mod/gopkg.in", entry_prior(4, false)),
-            entry_with_prior("Desktop", entry_prior(1, false)),
-            entry_with_prior("dev/zz", entry_prior(2, true)),
-        ];
-
-        let ranked = rank_entries(&entries, 0, "", &mut matcher());
-
-        assert_eq!(
-            labels(&entries, &ranked),
-            ["dev/zz", "Desktop", "go/pkg/mod/gopkg.in"],
-            "a checkout beats a shallower plain folder, which beats cache depth"
-        );
-    }
-
-    #[test]
-    fn a_name_match_outranks_an_equal_path_match() {
-        let path_match = format!("readme{}notes.md", std::path::MAIN_SEPARATOR);
-        let name_match = format!("docs{}readme.md", std::path::MAIN_SEPARATOR);
-        let entries = vec![entry(&path_match), entry(&name_match)];
-
-        let ranked = rank_entries(&entries, 0, "readme", &mut matcher());
-
-        assert_eq!(
-            labels(&entries, &ranked).first().map(String::as_str),
-            Some(name_match.as_str()),
-        );
-    }
-
-    #[test]
-    fn a_score_tie_falls_to_the_prior() {
-        let entries = vec![
-            entry_with_prior("dev/zz", entry_prior(2, false)),
-            entry_with_prior("dev/zz", entry_prior(2, true)),
-        ];
-
-        let ranked = rank_entries(&entries, 0, "zz", &mut matcher());
-
-        assert_eq!(
-            ranked.first().map(|row| row.entry),
-            Some(1),
-            "identical text, so only the workspace prior separates them"
-        );
-    }
-
-    #[test]
-    fn streamed_batches_rank_the_same_as_one_pass() {
-        let entries = (0..64)
-            .map(|index| entry(&format!("src/item{index}/main.rs")))
-            .collect::<Vec<_>>();
-
-        let one_pass = {
-            let mut ranked = rank_entries(&entries, 0, "main", &mut matcher());
-            ranked.truncate(MAX_PICKER_ROWS);
-            ranked
-        };
-        let streamed =
-            (0..entries.len())
-                .step_by(8)
-                .fold(Vec::new(), |ranked: Vec<Ranked>, offset: usize| {
-                    let visible = &entries[..(offset + 8).min(entries.len())];
-                    let incoming = rank_entries(visible, offset, "main", &mut matcher());
-                    merge_ranked(ranked, incoming, MAX_PICKER_ROWS)
-                });
-
-        assert_eq!(streamed, one_pass);
-    }
-
-    #[test]
-    fn the_row_cap_keeps_the_best_rows_only() {
-        let entries = (0..MAX_PICKER_ROWS + 100)
-            .map(|index| entry(&format!("file{index}.rs")))
-            .collect::<Vec<_>>();
-
-        let ranked = merge_ranked(
-            Vec::new(),
-            rank_entries(&entries, 0, "", &mut matcher()),
-            MAX_PICKER_ROWS,
-        );
-
-        assert_eq!(ranked.len(), MAX_PICKER_ROWS);
-        assert_eq!(ranked[0].entry, 0);
-    }
-
-    #[test]
-    fn the_cursor_holds_its_entry_across_a_rerank_and_otherwise_resets() {
-        let ranked = vec![
-            Ranked {
-                score: 9,
-                prior: 0,
-                entry: 4,
-            },
-            Ranked {
-                score: 5,
-                prior: 0,
-                entry: 1,
-            },
-        ];
-
-        assert_eq!(preserved_selection(&ranked, Some(1)), Some(1));
-        assert_eq!(
-            preserved_selection(&ranked, Some(7)),
-            Some(0),
-            "an entry the new results dropped sends the cursor to the top"
-        );
-        assert_eq!(preserved_selection(&ranked, None), Some(0));
-        assert_eq!(preserved_selection(&[], Some(1)), None);
-    }
-
-    #[test]
-    fn the_walk_lists_files_relative_to_the_root_and_honors_gitignore() {
-        let root = tempfile::tempdir().expect("temporary directory");
-        fs::write(root.path().join(".gitignore"), "ignored.rs\n").expect("gitignore fixture");
-        fs::write(root.path().join("kept.rs"), "").expect("kept fixture");
-        fs::write(root.path().join("ignored.rs"), "").expect("ignored fixture");
-        fs::create_dir(root.path().join("src")).expect("nested directory");
-        fs::write(root.path().join("src/main.rs"), "").expect("nested fixture");
-
-        let (entries, truncated, error) =
-            collect_walk(root.path(), FilePickerMode::Files, MAX_PICKER_ENTRIES);
-
-        let mut relatives = entries
-            .iter()
-            .map(|entry| entry.relative.to_string())
-            .collect::<Vec<_>>();
-        relatives.sort();
-        assert_eq!(
-            relatives,
-            [
-                "kept.rs".to_owned(),
-                format!("src{}main.rs", std::path::MAIN_SEPARATOR)
-            ]
-        );
-        assert!(!truncated);
-        assert_eq!(error, None);
+        assert!(labels(&entries).contains(&"dev/empty"));
+        assert!(labels(&entries).contains(&"a/b/c/d/e/f/g/workspace"));
+        assert!(entries.iter().all(|entry| entry.absolute.is_dir()));
         assert!(
             entries
                 .iter()
-                .all(|entry| entry.absolute.starts_with(root.path())),
-            "a selection returns an absolute path"
+                .all(|entry| entry.absolute.starts_with(root.path()))
         );
     }
 
     #[test]
-    fn directories_mode_lists_only_directories_within_the_depth_bound() {
-        let root = tempfile::tempdir().expect("temporary directory");
-        let mut deep = root.path().to_path_buf();
-        for level in 0..DIRECTORY_MAX_DEPTH + 2 {
-            deep = deep.join(format!("level{level}"));
-        }
-        fs::create_dir_all(&deep).expect("deep directory fixture");
-        fs::write(root.path().join("level0/file.rs"), "").expect("file fixture");
+    fn empty_directory_query_puts_workspaces_then_shallow_folders_first() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("dev/zz/.git")).unwrap();
+        fs::create_dir_all(root.path().join("other/deeper/folder")).unwrap();
+        fs::create_dir(root.path().join("Desktop")).unwrap();
+        let index = build_index(root.path(), FilePickerMode::Directories).unwrap();
 
-        let (entries, _, _) =
-            collect_walk(root.path(), FilePickerMode::Directories, MAX_PICKER_ENTRIES);
+        let entries = index.search("  ");
+        let names = labels(&entries);
 
-        let relatives = entries
-            .iter()
-            .map(|entry| entry.relative.to_string())
-            .collect::<Vec<_>>();
+        assert_eq!(names[0], "dev/zz");
         assert!(
-            relatives
-                .iter()
-                .all(|relative| !relative.ends_with("file.rs")),
-            "directories mode never offers a file: {relatives:?}"
-        );
-        assert_eq!(
-            relatives.len(),
-            DIRECTORY_MAX_DEPTH,
-            "the walk stops at the depth bound: {relatives:?}"
+            names.iter().position(|name| *name == "Desktop")
+                < names.iter().position(|name| *name == "other/deeper/folder")
         );
     }
 
     #[test]
-    fn directories_mode_lists_a_media_root_without_descending_into_it() {
-        let root = tempfile::tempdir().expect("temporary directory");
-        fs::create_dir_all(root.path().join("Music/Music/Media.localized")).expect("media fixture");
-        fs::create_dir_all(root.path().join("dev/project")).expect("project fixture");
+    fn fff_directory_search_tolerates_typos_and_trailing_separators() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("dev/terminal-workspace")).unwrap();
+        fs::create_dir_all(root.path().join("Documents/recipes")).unwrap();
+        let index = build_index(root.path(), FilePickerMode::Directories).unwrap();
 
-        let (entries, _, _) =
-            collect_walk(root.path(), FilePickerMode::Directories, MAX_PICKER_ENTRIES);
-
-        let relatives = entries
-            .iter()
-            .map(|entry| entry.relative.to_string())
-            .collect::<Vec<_>>();
-        assert!(relatives.contains(&"Music".to_owned()), "{relatives:?}");
-        assert!(
-            !relatives.iter().any(|relative| relative.contains("Media")),
-            "nothing below a media root is listed: {relatives:?}"
-        );
-        assert!(
-            relatives.contains(&format!("dev{}project", std::path::MAIN_SEPARATOR)),
-            "ordinary folders still descend: {relatives:?}"
-        );
-    }
-
-    #[test]
-    fn the_walk_marks_a_git_checkout_with_the_workspace_prior() {
-        let root = tempfile::tempdir().expect("temporary directory");
-        fs::create_dir_all(root.path().join("zebra/.git")).expect("checkout fixture");
-        fs::create_dir(root.path().join("apple")).expect("plain fixture");
-
-        let (entries, _, _) =
-            collect_walk(root.path(), FilePickerMode::Directories, MAX_PICKER_ENTRIES);
-
-        let prior_of = |name: &str| {
-            entries
-                .iter()
-                .find(|entry| entry.relative.as_ref() == name)
-                .unwrap_or_else(|| panic!("{name} is listed"))
-                .prior
-        };
-        assert_eq!(prior_of("zebra"), entry_prior(1, true));
-        assert_eq!(prior_of("apple"), entry_prior(1, false));
-        let ranked = rank_entries(&entries, 0, "", &mut matcher());
-        assert_eq!(
-            labels(&entries, &ranked).first().map(String::as_str),
-            Some("zebra"),
-            "the checkout outranks the alphabetically earlier plain folder"
-        );
-    }
-
-    #[test]
-    fn the_entry_cap_stops_the_walk_and_says_so() {
-        let root = tempfile::tempdir().expect("temporary directory");
-        for index in 0..8 {
-            fs::write(root.path().join(format!("file{index}.rs")), "").expect("fixture");
+        for query in ["termnal-workspace", "terminal-workspace/"] {
+            let entries = index.search(query);
+            assert_eq!(
+                labels(&entries).first(),
+                Some(&"dev/terminal-workspace"),
+                "{query}"
+            );
         }
-
-        let (entries, truncated, _) = collect_walk(root.path(), FilePickerMode::Files, 3);
-
-        assert_eq!(entries.len(), 3);
-        assert!(truncated);
     }
 
     #[test]
-    fn a_hung_up_receiver_ends_the_walk() {
-        let root = tempfile::tempdir().expect("temporary directory");
-        for index in 0..64 {
-            fs::write(root.path().join(format!("file{index}.rs")), "").expect("fixture");
-        }
+    fn file_search_honors_gitignore_and_prefers_filename_matches() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".git")).unwrap();
+        fs::create_dir(root.path().join("docs")).unwrap();
+        fs::create_dir(root.path().join("readme")).unwrap();
+        fs::write(root.path().join(".gitignore"), "ignored.rs\n").unwrap();
+        fs::write(root.path().join("ignored.rs"), "").unwrap();
+        fs::write(root.path().join("docs/readme.md"), "").unwrap();
+        fs::write(root.path().join("readme/notes.md"), "").unwrap();
+        let index = build_index(root.path(), FilePickerMode::Files).unwrap();
 
-        let mut emitted = 0_usize;
-        walk_root(
+        let entries = index.search("readme");
+
+        assert_eq!(labels(&entries).first(), Some(&"docs/readme.md"));
+        assert!(
+            index.search("").iter().all(|entry| {
+                entry.absolute.is_file() && entry.relative.as_ref() != "ignored.rs"
+            })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_child_links_do_not_fail_a_readable_root() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("workspace")).unwrap();
+        std::os::unix::fs::symlink(root.path().join("missing"), root.path().join("broken"))
+            .unwrap();
+
+        let index = build_index(root.path(), FilePickerMode::Directories).unwrap();
+
+        assert_eq!(labels(&index.search("")), ["workspace"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_children_do_not_turn_results_into_a_scan_error() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = tempfile::tempdir().unwrap();
+        let protected = root.path().join("protected");
+        fs::create_dir_all(protected.join("secret")).unwrap();
+        fs::create_dir(root.path().join("workspace")).unwrap();
+        fs::set_permissions(&protected, fs::Permissions::from_mode(0o0)).unwrap();
+        let unreadable = fs::read_dir(&protected).is_err();
+
+        let result = build_index(root.path(), FilePickerMode::Directories);
+
+        fs::set_permissions(&protected, fs::Permissions::from_mode(0o700)).unwrap();
+        let index = result.unwrap();
+        let entries = index.search("");
+        assert!(labels(&entries).contains(&"workspace"));
+        if unreadable {
+            assert!(!labels(&entries).contains(&"protected/secret"));
+        }
+    }
+
+    #[test]
+    fn missing_root_reports_the_path_that_failed() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("missing");
+
+        let error = build_index(&missing, FilePickerMode::Directories)
+            .err()
+            .unwrap();
+
+        assert!(error.starts_with("Cannot read "));
+        assert!(error.contains(missing.to_str().unwrap()));
+    }
+
+    #[test]
+    fn selections_revalidate_deleted_paths_and_the_requested_kind() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("workspace");
+        fs::create_dir(&folder).unwrap();
+        let index = build_index(root.path(), FilePickerMode::Directories).unwrap();
+        let entries = index.search("");
+        let selected = &entries[0].absolute;
+        assert!(validate_selection(selected, FilePickerMode::Directories).is_ok());
+        assert!(validate_selection(selected, FilePickerMode::Files).is_err());
+        fs::remove_dir(&folder).unwrap();
+
+        let error = validate_selection(selected, FilePickerMode::Directories).unwrap_err();
+
+        assert!(error.contains(folder.to_str().unwrap()));
+    }
+
+    #[test]
+    fn results_are_capped_and_selection_follows_the_path() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..MAX_PICKER_ROWS + 10 {
+            fs::create_dir(root.path().join(format!("folder{index:04}"))).unwrap();
+        }
+        let index = build_index(root.path(), FilePickerMode::Directories).unwrap();
+        let mut entries = index.search("folder");
+        assert_eq!(entries.len(), MAX_PICKER_ROWS);
+        let selected = entries[1].absolute.clone();
+        entries.swap(0, 1);
+
+        assert_eq!(preserved_selection(&entries, Some(&selected)), Some(0));
+        assert_eq!(preserved_selection(&entries, Some(root.path())), Some(0));
+        assert_eq!(preserved_selection(&[], Some(&selected)), None);
+    }
+
+    #[test]
+    fn first_batch_is_searchable_before_the_walk_finishes_and_can_stop_it() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..2_000 {
+            fs::create_dir_all(root.path().join(format!("workspace{index}/src"))).unwrap();
+        }
+        let mut batches = 0;
+        scan_directories(
             root.path(),
-            FilePickerMode::Files,
-            MAX_PICKER_ENTRIES,
-            2,
-            &mut |_| {
-                emitted += 1;
+            DIRECTORY_SCAN_LIMIT,
+            DIRECTORY_SCAN_BUDGET,
+            &|| false,
+            &mut |batch| {
+                batches += 1;
+                assert_eq!(batch.len(), 1);
+                let index = PickerIndex {
+                    picker: None,
+                    directories: batch,
+                };
+                assert!(!index.search("workspace").is_empty());
                 false
             },
-        );
-
-        assert_eq!(emitted, 1, "the first refusal ends the walk");
+        )
+        .unwrap();
+        assert_eq!(batches, 1);
     }
 
     #[test]
-    fn an_unreadable_root_reports_instead_of_listing() {
-        let root = tempfile::tempdir().expect("temporary directory");
-        let missing = root.path().join("nowhere");
+    fn discovery_honors_entry_time_and_cancellation_limits() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..20 {
+            fs::create_dir(root.path().join(format!("folder{index}"))).unwrap();
+        }
+        let mut found = Vec::new();
+        let limited = scan_directories(
+            root.path(),
+            3,
+            DIRECTORY_SCAN_BUDGET,
+            &|| false,
+            &mut |batch| {
+                found.extend(batch);
+                true
+            },
+        )
+        .unwrap();
+        assert!(limited);
+        assert_eq!(found.len(), 3);
+        assert!(
+            scan_directories(
+                root.path(),
+                DIRECTORY_SCAN_LIMIT,
+                Duration::ZERO,
+                &|| false,
+                &mut |_| panic!("expired scan published results")
+            )
+            .unwrap()
+        );
+        assert!(
+            !scan_directories(
+                &root.path().join("missing"),
+                DIRECTORY_SCAN_LIMIT,
+                DIRECTORY_SCAN_BUDGET,
+                &|| true,
+                &mut |_| panic!("cancelled scan published results")
+            )
+            .unwrap()
+        );
+    }
 
-        let (entries, truncated, error) =
-            collect_walk(&missing, FilePickerMode::Files, MAX_PICKER_ENTRIES);
+    #[test]
+    fn directory_discovery_prunes_caches_media_and_excess_depth() {
+        let root = tempfile::tempdir().unwrap();
+        for folder in [
+            "Library/cache/hidden",
+            "Music/Media/hidden",
+            "dev/project/node_modules/package",
+            "dev/project/target/debug",
+            "dev/project/src",
+            "go/pkg/mod/cache",
+            "a/b/c/d/e/f/g/h/i",
+        ] {
+            fs::create_dir_all(root.path().join(folder)).unwrap();
+        }
+        let index = build_index(root.path(), FilePickerMode::Directories).unwrap();
+        let entries = index.search("");
+        let names = labels(&entries);
+        assert!(names.contains(&"Library"));
+        assert!(names.contains(&"Music"));
+        assert!(names.contains(&"dev/project/src"));
+        assert!(!names.iter().any(|name| name.contains("cache")
+            || name.contains("Media")
+            || name.contains("node_modules")
+            || name.contains("target")));
+        assert!(!names.contains(&"a/b/c/d/e/f/g/h/i"));
+    }
 
-        assert!(entries.is_empty());
-        assert!(!truncated);
-        assert!(error.is_some(), "the overlay has a message to show");
+    #[gpui::test]
+    fn streamed_rows_stay_visible_before_scan_completion(cx: &mut gpui::TestAppContext) {
+        use std::{cell::RefCell, rc::Rc};
+        cx.update(zz_ui::init);
+        let root = tempfile::tempdir().unwrap();
+        let root_path = root.path().to_path_buf();
+        let slot = Rc::new(RefCell::new(None));
+        let captured = slot.clone();
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let picker = cx.new(|cx| {
+                let mut picker = FilePickerView::new(
+                    FilePickerMode::Directories,
+                    root_path,
+                    "Folder",
+                    window,
+                    cx,
+                );
+                picker._walk = Task::ready(());
+                picker
+            });
+            captured.replace(Some(picker.clone()));
+            zz_ui::Root::new(picker, window, cx)
+        });
+        let picker = slot.borrow().clone().unwrap();
+        cx.update(|_, cx| {
+            picker.update(cx, |picker, cx| {
+                let entry = PickerEntry {
+                    relative: "workspace".into(),
+                    absolute: Arc::from(root.path().join("workspace")),
+                    prior: 0,
+                };
+                picker.apply_scan(ScanMessage::Directories(vec![entry]), cx);
+                assert!(picker.scanning);
+                assert_eq!(picker.rows.as_ref(), &[SharedString::from("workspace")]);
+                assert_eq!(picker.selected, Some(0));
+                let other = PickerEntry {
+                    relative: "another".into(),
+                    absolute: Arc::from(root.path().join("another")),
+                    prior: 0,
+                };
+                picker.apply_scan(ScanMessage::Directories(vec![other]), cx);
+                assert_eq!(picker.rows.as_ref(), &[SharedString::from("workspace")]);
+                assert!(picker.scanning);
+                picker.apply_scan(ScanMessage::Finished(Ok(true)), cx);
+                assert!(!picker.scanning);
+                assert!(picker.limited);
+                assert!(!picker.rows.is_empty());
+            });
+        });
+    }
+
+    #[cfg(feature = "agent-pane")]
+    #[test]
+    #[ignore = "measures folder discovery against the real home directory"]
+    fn real_home_directory_discovery() {
+        let root = home_directory().unwrap();
+        let start = Instant::now();
+        let mut first = None;
+        let mut count = 0;
+        let limited = scan_directories(
+            &root,
+            DIRECTORY_SCAN_LIMIT,
+            DIRECTORY_SCAN_BUDGET,
+            &|| false,
+            &mut |batch| {
+                first.get_or_insert_with(|| start.elapsed());
+                count += batch.len();
+                true
+            },
+        )
+        .unwrap();
+        eprintln!(
+            "first batch: {:?}; total: {:?}; folders: {count}; limited: {limited}",
+            first.unwrap(),
+            start.elapsed()
+        );
+        assert!(count > 0);
+        assert!(start.elapsed() < DIRECTORY_SCAN_BUDGET + Duration::from_secs(2));
     }
 }

@@ -6,10 +6,13 @@ use gpui::{
 };
 
 use crate::{
-    ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Sizable as _,
+    ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Selectable as _,
+    Sizable as _,
     button::{Button, ButtonVariants},
     h_flex,
     menu::{DropdownMenu as _, PopupMenuItem},
+    pane::agent_provider_icon,
+    popover::Popover,
     tooltip::Tooltip,
     v_flex,
 };
@@ -51,6 +54,44 @@ pub fn composer_action_button(
 
 pub fn agent_chrome_button(id: impl Into<ElementId>) -> Button {
     Button::new(id).ghost().xsmall().h(px(24.0)).px_2()
+}
+
+pub fn agent_header_icon_button(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    enabled: bool,
+    cx: &App,
+) -> Button {
+    Button::compact_icon(id, icon)
+        .disabled(!enabled)
+        .when(enabled, |button| {
+            button.text_color(cx.theme().foreground.muted())
+        })
+}
+
+pub fn agent_directory_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    enabled: bool,
+    cx: &App,
+) -> Button {
+    agent_chrome_button(id)
+        .min_w_0()
+        .flex_shrink_1()
+        .max_w(px(140.0))
+        .overflow_hidden()
+        .disabled(!enabled)
+        .when(enabled, |button| {
+            button.text_color(cx.theme().foreground.muted())
+        })
+        .child(Icon::new(IconName::Folder).small().relative().top(px(0.5)))
+        .child(
+            div()
+                .min_w_0()
+                .text_ellipsis()
+                .when(enabled, |label| label.text_color(cx.theme().foreground))
+                .child(label.into()),
+        )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -117,6 +158,473 @@ pub fn agent_config_picker(
         })
         .anchor(Anchor::BottomLeft)
         .into_any_element()
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AgentControlSelection {
+    pub current_value: String,
+    pub choices: Vec<AgentControlChoice>,
+}
+
+impl AgentControlSelection {
+    fn selected(&self) -> Option<&AgentControlChoice> {
+        self.choices
+            .iter()
+            .find(|choice| choice.value == self.current_value)
+    }
+}
+
+fn agent_picker_row(id: impl Into<ElementId>, selected: bool, content: impl IntoElement) -> Button {
+    agent_chrome_button(id)
+        .flat()
+        .h_auto()
+        .min_h(px(32.0))
+        .px_2()
+        .py_1()
+        .selected(selected)
+        .child(content)
+}
+
+#[derive(Clone)]
+struct AgentPickerCatalog {
+    provider: zz_protocol::AgentProvider,
+    model: AgentControlSelection,
+    effort: Option<AgentControlSelection>,
+}
+
+impl AgentPickerCatalog {
+    fn selection(&self) -> zz_client::agent_config::AgentSettingsSelection {
+        zz_client::agent_config::AgentSettingsSelection {
+            provider: self.provider,
+            model: self.model.selected().map(|choice| choice.value.clone()),
+            effort: self
+                .effort
+                .as_ref()
+                .and_then(AgentControlSelection::selected)
+                .map(|choice| choice.value.clone()),
+        }
+    }
+}
+
+struct AgentPickerDraft {
+    initial: zz_client::agent_config::AgentSettingsSelection,
+    provider: zz_protocol::AgentProvider,
+    catalogs: Vec<AgentPickerCatalog>,
+}
+
+#[derive(Default)]
+struct AgentPickerState {
+    scope: (String, std::path::PathBuf),
+    catalogs: Vec<AgentPickerCatalog>,
+    draft: Option<AgentPickerDraft>,
+}
+
+pub fn agent_model_picker(
+    id: impl Into<ElementId>,
+    scope: (String, std::path::PathBuf),
+    provider: zz_protocol::AgentProvider,
+    model: AgentControlSelection,
+    effort: Option<AgentControlSelection>,
+    enabled: bool,
+    models_ready: bool,
+    mut catalog_results: Vec<zz_protocol::agent_stream::AgentCatalogResult>,
+    on_load: impl Fn(zz_protocol::AgentProvider, &mut App) + 'static,
+    on_apply: impl Fn(zz_client::agent_config::AgentSettingsSelection, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let id = id.into();
+    let state = window.use_keyed_state(format!("{id}:catalogs"), cx, |_, _| {
+        AgentPickerState::default()
+    });
+    catalog_results.retain(|result| scope.1.as_os_str().is_empty() || result.cwd == scope.1);
+    let live = AgentPickerCatalog {
+        provider,
+        model,
+        effort,
+    };
+    state.update(cx, |state, _| {
+        if state.scope != scope {
+            *state = AgentPickerState {
+                scope,
+                ..Default::default()
+            };
+        }
+        for result in &catalog_results {
+            if state
+                .catalogs
+                .iter()
+                .any(|catalog| catalog.provider == result.catalog_provider)
+            {
+                continue;
+            }
+            let Some(options) = result
+                .config_options
+                .clone()
+                .and_then(|options| serde_json::from_value(options).ok())
+            else {
+                continue;
+            };
+            let options = zz_client::agent_config::config_option_models(options);
+            let selection = |category| {
+                options
+                    .iter()
+                    .find(|option| option.category == category)
+                    .map(|option| AgentControlSelection {
+                        current_value: option.current_value.clone(),
+                        choices: option
+                            .choices
+                            .iter()
+                            .map(|choice| AgentControlChoice {
+                                value: choice.value.clone(),
+                                name: choice.name.clone(),
+                                description: None,
+                            })
+                            .collect(),
+                    })
+            };
+            state.catalogs.push(AgentPickerCatalog {
+                provider: result.catalog_provider,
+                model: selection(zz_client::agent_config::AgentConfigCategory::Model)
+                    .unwrap_or_default(),
+                effort: selection(zz_client::agent_config::AgentConfigCategory::ThoughtLevel),
+            });
+        }
+        if let Some(draft) = &mut state.draft {
+            for catalog in &state.catalogs {
+                if !draft
+                    .catalogs
+                    .iter()
+                    .any(|draft| draft.provider == catalog.provider)
+                {
+                    draft.catalogs.push(catalog.clone());
+                }
+            }
+        }
+        if models_ready {
+            if let Some(catalog) = state
+                .catalogs
+                .iter_mut()
+                .find(|catalog| catalog.provider == provider)
+            {
+                *catalog = live.clone();
+            } else {
+                state.catalogs.push(live.clone());
+            }
+        }
+    });
+    let label = live
+        .model
+        .selected()
+        .map_or_else(|| provider.label().to_owned(), |choice| choice.name.clone());
+    let trigger = agent_chrome_button(id.clone())
+        .debug_selector(|| "agent-model-trigger".into())
+        .icon(agent_provider_icon(provider))
+        .label(label)
+        .when_some(
+            live.effort
+                .as_ref()
+                .and_then(AgentControlSelection::selected),
+            |button, choice| {
+                button.child(
+                    div()
+                        .text_color(cx.theme().foreground.muted())
+                        .child(choice.name.clone()),
+                )
+            },
+        )
+        .tooltip("Choose vendor, model and effort")
+        .disabled(!enabled);
+    let dismiss_state = state.clone();
+    let on_load = Rc::new(on_load);
+    Popover::new(id)
+        .p_0()
+        .anchor(Anchor::BottomLeft)
+        .trigger(trigger)
+        .on_dismiss(move |_, cx| {
+            let selection = dismiss_state.update(cx, |state, _| {
+                let draft = state.draft.take()?;
+                let mut selection = draft
+                    .catalogs
+                    .iter()
+                    .find(|catalog| catalog.provider == draft.provider)
+                    .map(AgentPickerCatalog::selection)
+                    .unwrap_or(zz_client::agent_config::AgentSettingsSelection {
+                        provider: draft.provider,
+                        model: None,
+                        effort: None,
+                    });
+                if selection == draft.initial {
+                    return None;
+                }
+                if selection.provider == draft.initial.provider
+                    && selection.model == draft.initial.model
+                {
+                    selection.model = None;
+                    if selection.effort == draft.initial.effort {
+                        selection.effort = None;
+                    }
+                }
+                Some(selection)
+            });
+            if let Some(selection) = selection {
+                on_apply(selection, cx);
+            }
+        })
+        .content(move |_, window, cx| {
+            let (selected, catalog, rows, has_effort) = state.update(cx, |state, _| {
+                let draft = state.draft.get_or_insert_with(|| AgentPickerDraft {
+                    initial: live.selection(),
+                    provider,
+                    catalogs: state.catalogs.clone(),
+                });
+                (
+                    draft.provider,
+                    draft
+                        .catalogs
+                        .iter()
+                        .find(|catalog| catalog.provider == draft.provider)
+                        .cloned(),
+                    draft
+                        .catalogs
+                        .iter()
+                        .map(|catalog| catalog.model.choices.len())
+                        .max()
+                        .unwrap_or(0)
+                        .max(2),
+                    draft.catalogs.iter().any(|catalog| {
+                        catalog
+                            .effort
+                            .as_ref()
+                            .is_some_and(|effort| !effort.choices.is_empty())
+                    }),
+                )
+            });
+            let width = px(400.0).min((window.viewport_size().width - px(16.0)).max(px(240.0)));
+            let height = px(320.0).min((window.viewport_size().height - px(170.0)).max(px(100.0)));
+            let panel_height =
+                px(rows as f32 * 36.0 + 4.0).min(height) + px(if has_effort { 45.0 } else { 0.0 });
+            let muted = cx.theme().foreground.muted();
+            let mut vendors = v_flex()
+                .w(px(if width < px(400.0) { 112.0 } else { 124.0 }))
+                .flex_none()
+                .p_1()
+                .gap_1();
+            for vendor in zz_protocol::AgentProvider::ALL {
+                let state = state.clone();
+                let on_load = on_load.clone();
+                vendors = vendors.child(
+                    agent_picker_row(
+                        vendor.as_str(),
+                        vendor == selected,
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .gap_2()
+                            .child(Icon::new(agent_provider_icon(vendor)).xsmall().flex_none())
+                            .child(div().flex_1().min_w_0().child(vendor.label())),
+                    )
+                    .debug_selector(move || vendor.as_str().into())
+                    .disabled(!enabled)
+                    .on_click(move |_, window, cx| {
+                        let needs_catalog = state.update(cx, |state, _| {
+                            if let Some(draft) = &mut state.draft {
+                                draft.provider = vendor;
+                            }
+                            !state
+                                .catalogs
+                                .iter()
+                                .any(|catalog| catalog.provider == vendor)
+                        });
+                        if needs_catalog {
+                            on_load(vendor, cx);
+                        }
+                        window.refresh();
+                    }),
+                );
+            }
+            let mut models = v_flex()
+                .id("model-choices")
+                .flex_1()
+                .min_w_0()
+                .max_h(height)
+                .overflow_y_scroll()
+                .p_1()
+                .gap_1();
+            if let Some(catalog) = &catalog {
+                for choice in &catalog.model.choices {
+                    let value = choice.value.clone();
+                    let selector = value.clone();
+                    let state = state.clone();
+                    let checked = value == catalog.model.current_value;
+                    models = models.child(
+                        agent_picker_row(
+                            value.clone(),
+                            checked,
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .gap_2()
+                                .child(div().flex_1().min_w_0().child(choice.name.clone()))
+                                .child(
+                                    Icon::new(IconName::Check)
+                                        .xsmall()
+                                        .flex_none()
+                                        .when(!checked, gpui::Styled::invisible),
+                                ),
+                        )
+                        .debug_selector(move || selector.clone())
+                        .disabled(!enabled)
+                        .on_click(move |_, window, cx| {
+                            state.update(cx, |state, _| {
+                                if let Some(draft) = &mut state.draft
+                                    && let Some(catalog) = draft
+                                        .catalogs
+                                        .iter_mut()
+                                        .find(|catalog| catalog.provider == selected)
+                                {
+                                    catalog.model.current_value.clone_from(&value);
+                                }
+                            });
+                            window.refresh();
+                        }),
+                    );
+                }
+            }
+            if catalog
+                .as_ref()
+                .is_none_or(|catalog| catalog.model.choices.is_empty())
+            {
+                let result = catalog_results
+                    .iter()
+                    .find(|result| result.catalog_provider == selected);
+                let message = if catalog.is_some() {
+                    "This agent uses its default model.".to_owned()
+                } else if let Some(error) = result.and_then(|result| result.error.as_deref()) {
+                    format!("{error} Click the vendor to retry.")
+                } else {
+                    "Loading models…".to_owned()
+                };
+                models = models.child(div().p_2().text_xs().text_color(muted).child(message));
+            }
+            let mut content = v_flex()
+                .id("agent-model-menu")
+                .debug_selector(|| "agent-model-menu".into())
+                .w(width)
+                .h(panel_height)
+                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(
+                    h_flex()
+                        .w_full()
+                        .flex_1()
+                        .min_h_0()
+                        .items_stretch()
+                        .child(vendors)
+                        .child(div().w(px(1.0)).flex_none().bg(cx.theme().border()))
+                        .child(models),
+                );
+            if let Some(effort) = catalog
+                .and_then(|catalog| catalog.effort)
+                .filter(|effort| !effort.choices.is_empty())
+            {
+                let index = effort
+                    .choices
+                    .iter()
+                    .position(|choice| choice.value == effort.current_value)
+                    .unwrap_or(0);
+                let labels = effort
+                    .choices
+                    .iter()
+                    .map(|choice| choice.name.clone().into())
+                    .collect();
+                let state = state.clone();
+                content = content.child(
+                    v_flex()
+                        .w_full()
+                        .px_3()
+                        .py_2()
+                        .gap_1()
+                        .border_t_1()
+                        .border_color(cx.theme().border())
+                        .child(crate::slider::DiscreteSlider::new(
+                            "agent-effort",
+                            "Effort",
+                            labels,
+                            index,
+                            move |index, window, cx| {
+                                if !enabled {
+                                    return;
+                                }
+                                state.update(cx, |state, _| {
+                                    if let Some(draft) = &mut state.draft
+                                        && let Some(catalog) = draft
+                                            .catalogs
+                                            .iter_mut()
+                                            .find(|catalog| catalog.provider == selected)
+                                        && let Some(current) = &mut catalog.effort
+                                    {
+                                        current
+                                            .current_value
+                                            .clone_from(&effort.choices[index].value);
+                                    }
+                                });
+                                window.refresh();
+                            },
+                        )),
+                );
+            }
+            content
+        })
+        .into_any_element()
+}
+
+pub fn agent_provider_label(provider: zz_protocol::AgentProvider, cx: &App) -> impl IntoElement {
+    h_flex()
+        .flex_none()
+        .h(px(24.0))
+        .gap(px(6.0))
+        .pl_2()
+        .text_size(crate::rems_from_px(12.0))
+        .line_height(px(16.0))
+        .text_color(cx.theme().foreground.muted())
+        .child(
+            Icon::new(agent_provider_icon(provider))
+                .small()
+                .relative()
+                .top(px(0.5)),
+        )
+        .child(provider.label())
+}
+
+pub fn agent_thread_title(title: &str) -> String {
+    let title = title.trim();
+    if title.is_empty() || title == "agent" {
+        return "New session".to_owned();
+    }
+    let mut chars = title.chars();
+    let mut label: String = chars.by_ref().take(50).collect();
+    if chars.next().is_some() {
+        label.pop();
+        label.push('…');
+    }
+    label
+}
+
+pub fn agent_thread_button(id: impl Into<ElementId>, title: &str, cx: &App) -> Button {
+    agent_chrome_button(id)
+        .text()
+        .flat()
+        .text_color(cx.theme().foreground.muted().opacity(0.45))
+        .flex_shrink_1()
+        .min_w_0()
+        .overflow_hidden()
+        .tooltip(format!("{title} · rename session"))
+        .child(
+            div()
+                .min_w_0()
+                .text_ellipsis()
+                .child(agent_thread_title(title)),
+        )
 }
 
 pub fn git_file_count_label(count: u32) -> String {
@@ -307,4 +815,238 @@ pub fn context_usage_meter(
         .tooltip(move |window, cx| Tooltip::new(hover_tooltip.clone()).build(window, cx))
         .child(ring)
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{Context, Modifiers, Render, TestAppContext, VisualTestContext};
+    use zz_protocol::AgentProvider;
+
+    #[test]
+    fn thread_titles_fit_fifty_characters_without_cutting_utf8() {
+        assert_eq!(agent_thread_title(""), "New session");
+        assert_eq!(agent_thread_title("agent"), "New session");
+        assert_eq!(
+            agent_thread_title("  Fix the composer  "),
+            "Fix the composer"
+        );
+        assert_eq!(agent_thread_title(&"界".repeat(50)), "界".repeat(50));
+        assert_eq!(
+            agent_thread_title(&"界".repeat(51)),
+            format!("{}…", "界".repeat(49))
+        );
+    }
+
+    struct ModelPickerTest {
+        provider: AgentProvider,
+        applied: Vec<zz_client::agent_config::AgentSettingsSelection>,
+        catalogs: Vec<zz_protocol::agent_stream::AgentCatalogResult>,
+        loads: Vec<zz_protocol::AgentProvider>,
+        scope: String,
+    }
+
+    impl Render for ModelPickerTest {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let view = cx.entity();
+            let catalog_view = view.clone();
+            let values = if self.provider == AgentProvider::Codex {
+                ["model-a", "model-b"]
+            } else {
+                ["claude-a", "claude-b"]
+            };
+            div().pt(px(400.0)).child(agent_model_picker(
+                "test-model-picker",
+                (self.scope.clone(), std::path::PathBuf::default()),
+                self.provider,
+                AgentControlSelection {
+                    current_value: values[0].into(),
+                    choices: values
+                        .into_iter()
+                        .map(|value| AgentControlChoice {
+                            value: value.into(),
+                            name: value.into(),
+                            description: Some("Hidden description".into()),
+                        })
+                        .collect(),
+                },
+                Some(AgentControlSelection {
+                    current_value: "low".into(),
+                    choices: ["low", "high"]
+                        .into_iter()
+                        .map(|value| AgentControlChoice {
+                            value: value.into(),
+                            name: value.into(),
+                            description: None,
+                        })
+                        .collect(),
+                }),
+                true,
+                true,
+                self.catalogs.clone(),
+                move |provider, cx| {
+                    catalog_view.update(cx, |view, cx| {
+                        view.loads.push(provider);
+                        cx.notify();
+                    });
+                },
+                move |selection, cx| {
+                    view.update(cx, |view, cx| {
+                        view.provider = selection.provider;
+                        view.applied.push(selection);
+                        cx.notify();
+                    });
+                },
+                window,
+                cx,
+            ))
+        }
+    }
+
+    fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+    }
+
+    fn click(cx: &mut VisualTestContext, selector: &'static str) {
+        draw(cx);
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("missing {selector}"));
+        cx.simulate_click(bounds.center(), Modifiers::default());
+        draw(cx);
+    }
+
+    #[gpui::test]
+    fn picker_stages_model_and_effort_pills_until_dismissed_once(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, _| ModelPickerTest {
+            provider: AgentProvider::Codex,
+            applied: Vec::new(),
+            catalogs: Vec::new(),
+            loads: Vec::new(),
+            scope: "local:/project".into(),
+        });
+        click(cx, "agent-model-trigger");
+        click(cx, "model-b");
+        click(cx, "agent-effort:pill-1");
+        assert!(view.read_with(cx, |view, _| view.applied.is_empty()));
+        assert!(cx.debug_bounds("agent-model-menu").is_some());
+        cx.simulate_keystrokes("escape");
+        draw(cx);
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.applied.len(), 1);
+            assert_eq!(view.applied[0].model.as_deref(), Some("model-b"));
+            assert_eq!(view.applied[0].effort.as_deref(), Some("high"));
+        });
+        assert!(cx.debug_bounds("agent-model-menu").is_none());
+        cx.simulate_keystrokes("escape");
+        draw(cx);
+        assert_eq!(view.read_with(cx, |view, _| view.applied.len()), 1);
+        click(cx, "agent-model-trigger");
+        click(cx, "agent-effort:pill-1");
+        cx.simulate_keystrokes("left");
+        draw(cx);
+        click(cx, "agent-model-trigger");
+        assert_eq!(view.read_with(cx, |view, _| view.applied.len()), 1);
+    }
+
+    #[gpui::test]
+    fn catalog_arrives_in_the_open_picker_without_switching_provider(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, _| ModelPickerTest {
+            provider: AgentProvider::Codex,
+            applied: Vec::new(),
+            catalogs: Vec::new(),
+            loads: Vec::new(),
+            scope: "local:/project".into(),
+        });
+        click(cx, "agent-model-trigger");
+        click(cx, "claude-code");
+        assert_eq!(
+            view.read_with(cx, |view, _| view.loads.clone()),
+            vec![AgentProvider::ClaudeCode]
+        );
+        assert!(view.read_with(cx, |view, _| view.applied.is_empty()));
+        view.update(cx, |view, cx| {
+            view.catalogs.push(zz_protocol::agent_stream::AgentCatalogResult {
+                catalog_provider: AgentProvider::ClaudeCode, cwd: std::path::PathBuf::default(), request_id: 1, error: None,
+                config_options: Some(serde_json::json!([{
+                    "id": "model", "name": "Model", "type": "select", "category": "model", "currentValue": "claude-a",
+                    "options": [{"value": "claude-a", "name": "Claude A"}, {"value": "claude-b", "name": "Claude B"}]
+                }])),
+            });
+            cx.notify();
+        });
+        click(cx, "claude-b");
+        assert!(view.read_with(cx, |view, _| view.applied.is_empty()));
+        assert_eq!(
+            view.read_with(cx, |view, _| view.provider),
+            AgentProvider::Codex
+        );
+        click(cx, "codex");
+        click(cx, "claude-code");
+        assert_eq!(view.read_with(cx, |view, _| view.loads.len()), 1);
+        cx.simulate_keystrokes("escape");
+        draw(cx);
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.applied.len(), 1);
+            assert_eq!(view.applied[0].provider, AgentProvider::ClaudeCode);
+            assert_eq!(view.applied[0].model.as_deref(), Some("claude-b"));
+        });
+    }
+
+    #[gpui::test]
+    fn vendor_tabs_use_cached_choices_without_applying_and_clear_on_scope_change(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, _| ModelPickerTest {
+            provider: AgentProvider::Codex,
+            applied: Vec::new(),
+            catalogs: Vec::new(),
+            loads: Vec::new(),
+            scope: "local:/project".into(),
+        });
+        click(cx, "agent-model-trigger");
+        let bounds = cx.debug_bounds("agent-model-menu").unwrap();
+        click(cx, "claude-code");
+        assert_eq!(cx.debug_bounds("agent-model-menu").unwrap(), bounds);
+        assert!(cx.debug_bounds("model-a").is_none());
+        assert!(view.read_with(cx, |view, _| view.applied.is_empty()));
+        click(cx, "codex");
+        assert!(cx.debug_bounds("model-a").is_some());
+        click(cx, "agent-model-trigger");
+        assert!(view.read_with(cx, |view, _| view.applied.is_empty()));
+        click(cx, "agent-model-trigger");
+        click(cx, "claude-code");
+        click(cx, "agent-model-trigger");
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.applied.len(), 1);
+            assert_eq!(view.provider, AgentProvider::ClaudeCode);
+            assert_eq!(view.applied[0].model, None);
+        });
+        click(cx, "agent-model-trigger");
+        assert!(cx.debug_bounds("claude-a").is_some());
+        click(cx, "codex");
+        assert!(cx.debug_bounds("model-a").is_some());
+        assert!(cx.debug_bounds("claude-a").is_none());
+        assert_eq!(view.read_with(cx, |view, _| view.applied.len()), 1);
+        click(cx, "model-b");
+        cx.simulate_click(point(px(700.0), px(450.0)), Modifiers::default());
+        draw(cx);
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.applied.len(), 2);
+            assert_eq!(view.applied[1].model.as_deref(), Some("model-b"));
+        });
+        view.update(cx, |view, cx| {
+            view.scope = "remote:/elsewhere".into();
+            cx.notify();
+        });
+        click(cx, "agent-model-trigger");
+        click(cx, "claude-code");
+        assert!(cx.debug_bounds("claude-a").is_none());
+    }
 }

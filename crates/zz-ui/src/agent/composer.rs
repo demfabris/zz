@@ -20,7 +20,7 @@ pub struct AgentComposer {
     pub settings: Vec<AnyElement>,
     pub usage: Option<AnyElement>,
     pub git: Option<AnyElement>,
-    pub directory: AnyElement,
+    pub footer_actions: Vec<AnyElement>,
     pub command_hint: Option<SharedString>,
     pub prefix: Vec<AnyElement>,
     pub attachments: Option<AnyElement>,
@@ -95,6 +95,7 @@ impl RenderOnce for AgentComposer {
                                                 h_flex()
                                                     .flex_none()
                                                     .gap(px(CHROME_GAP))
+                                                    .children(self.usage)
                                                     .child(self.action),
                                             ),
                                     ),
@@ -115,14 +116,22 @@ impl RenderOnce for AgentComposer {
                             .h(px(COMPOSER_FOOTER_HEIGHT))
                             .items_center()
                             .justify_between()
+                            .gap(px(CHROME_GAP))
                             .px_1()
-                            .child(h_flex().min_w_0().flex_1().children(self.git))
                             .child(
                                 h_flex()
-                                    .flex_none()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .overflow_hidden()
+                                    .children(self.git),
+                            )
+                            .child(
+                                h_flex()
+                                    .min_w_0()
+                                    .flex_shrink_1()
+                                    .max_w(gpui::relative(0.5))
                                     .gap(px(CHROME_GAP))
-                                    .children(self.usage)
-                                    .child(self.directory),
+                                    .children(self.footer_actions),
                             ),
                     ),
             )

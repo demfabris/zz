@@ -189,3 +189,20 @@ Shape it like `compat/tui/run-9b.js`:
 
 `compat/tui/agentwatch.py` raises SECOND HALF when a worker finishes short, so
 the opportunity does not depend on the orchestrator noticing.
+
+## The close-out runs every fixture
+
+A gate runs the fixture list its runner named, and that list rots: cycle 10's
+lint found the gate stage had gone three cycles without picking up
+`tui-mouse.sh`, `tui-client-commands.sh` or `tui-superset.sh`, so nothing ran
+them but the lane that owned them. A cross-lane regression, which is the exact
+thing a gate exists to catch, could have walked through.
+
+`lint-runner.py`'s `every-fixture` rule now reads `compat/tui-*.sh` out of the
+tree and fails a runner whose gate stage misses one, so a fixture added mid
+campaign joins every later gate on its own.
+
+It cannot fix a runner already launched. So the close-out, after the last gate
+pushes, builds zz at the final `origin/main` and runs every fixture in the tree
+with its `--self-check`, and the count goes in the close-out record beside the
+ledger count.

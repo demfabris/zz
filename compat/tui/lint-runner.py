@@ -88,6 +88,19 @@ def rule_cargo_wrapper(text):
     return True, "cargo slot-and-cap wrapper present"
 
 
+def rule_every_fixture(text):
+    here = Path(__file__).resolve().parent.parent
+    have = sorted(f.name for f in here.glob("tui-*.sh"))
+    have += ["status-row.sh", "attached-client.sh"]
+    stage = re.search(r"3\. Build zz.*?(?=\n4\. )", text, re.S)
+    if stage is None:
+        return False, "no gate stage that builds zz and runs the fixtures"
+    missing = [n for n in have if n not in stage.group(0)]
+    if missing:
+        return False, "the gate's own fixture stage never runs " + ", ".join(missing)
+    return True, f"the gate stage runs all {len(have)} proof fixtures in the tree"
+
+
 RULES = [
     ("zones-around-obligations",
      "cycles 4 to 7: an obligation stayed open only because its last fix sat in a crate the lane "
@@ -153,6 +166,10 @@ RULES = [
      rule_slots),
     ("cargo-caps", "the same crash: an uncapped cargo can take the whole machine down",
      rule_cargo_wrapper),
+    ("every-fixture",
+     "cycle 10: the gate's fixture list had gone three cycles without picking up tui-mouse.sh, "
+     "tui-client-commands.sh or tui-superset.sh, so nothing ran them but the lane that owned them",
+     rule_every_fixture),
 ]
 
 

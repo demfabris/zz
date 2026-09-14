@@ -1356,8 +1356,8 @@ STATUS_MODE=same
 STATUS_REASON=""
 STATUS_MENU_MODE=same
 STATUS_MENU_REASON=""
-PASTE_MENU_MODE=record
-PASTE_MENU_REASON="the same direct write: under a menu the pin's overlay key handler consumes the paste-start key and the characters behind it, the pane sees the tail as ordinary keys and the unmatched paste-end sequence leaves a trailing ~ on its row, while the raw TUI hands the tail over as a fresh bracketed paste (input.rs handle_paste, zz-client menu.rs resolve_menu_paste); the menu ITEM the paste's characters select is identical on both, and the only row that differs is the pane's own"
+PASTE_MENU_MODE=same
+PASTE_MENU_REASON=""
 FOCUS_OFF_MODE=same
 FOCUS_OFF_REASON=""
 PASTE_COPY_MODE=same
@@ -1544,6 +1544,16 @@ sc_one_sided_double_click() {
     'select-pane -t= ; if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" { send-keys -M } { copy-mode -H ; send-keys -X select-word ; run-shell -d 0.3 ; send-keys -X copy-pipe-and-cancel }' \
     >/dev/null 2>&1
 }
+# A longer paste on zz only. The menu eats the same leading characters on both
+# sides and `a` picks the same item on both, so the option is unmoved and the
+# tail the pane is left holding is the whole difference.
+# paste-under-menu/screen is the only channel that can carry it.
+sc_one_sided_menu_paste_tail() {
+  PASTE_BYTES_ZZ=$'\033[200~pasted-text-and-more\033[201~'
+  case_paste_under_menu
+  PASTE_BYTES_ZZ=""
+  respawn_shell_both
+}
 # zz's own pane marked and the pin's not. Both sides still raise the pin's pane
 # menu, so the case's waits are unmoved and the two rows the mark decides -
 # `#{?pane_marked_set,,-}Swap Marked` and `#{?pane_marked,Unmark,Mark}` - are
@@ -1668,6 +1678,8 @@ run_self_check() {
     sc_one_sided_mouse_context
   self_check_case "zz's border drag released four cells short" catches \
     sc_one_sided_border_drag
+  self_check_case 'a longer paste under the menu on zz only' catches \
+    sc_one_sided_menu_paste_tail
   self_check_case "zz's own pane marked and the pin's not" catches \
     sc_one_sided_marked_pane
   self_check_case "zz's window menu centred instead of over its status range" \

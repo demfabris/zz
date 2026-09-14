@@ -32660,9 +32660,6 @@ fn client_format_facts(
     }
 }
 
-/// `tty_window_offset1` reads `c->session->curw->window` and
-/// `server_client_get_pane(c)`, so the comparison is the client's own current
-/// window and the pane that window is showing, never the format's window.
 /// The `mouse_*` formats the pin fills from `ft->m`. `format_cb_mouse_x` and
 /// `format_cb_mouse_y` answer the event's cell inside the pane it landed on,
 /// `format_cb_mouse_pane` the pane id, and each of them answers NULL, which
@@ -32693,6 +32690,9 @@ fn mouse_format_variables(
     variables
 }
 
+/// `tty_window_offset1` reads `c->session->curw->window` and
+/// `server_client_get_pane(c)`, so the comparison is the client's own current
+/// window and the pane that window is showing, never the format's window.
 fn client_viewport_facts(
     inner: &ServerState,
     client: ClientId,

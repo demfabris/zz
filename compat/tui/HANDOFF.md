@@ -180,8 +180,11 @@ The campaign resumes from the repo and the board, not from a session. On a fresh
    the checkout is sound and now also proves the wire version is honest.
 2. `python3 compat/tui/tracker.py check` and `ready` read the real ledger state. Do not trust a
    remembered count.
-3. Re-point the board holder: `export ZZ_BOARD_HOLDER=<box>/orchestrator`. `F-TUI-CYCLE-9-LANES` is
-   held by `alienware/orchestrator` and its lease will lapse; claim it when it reads READY.
+3. Re-point the board holder: `export ZZ_BOARD_HOLDER=<box>/orchestrator`. `F-TUI-CYCLE-9-LANES`
+   was released when the session stopped. If `compat/board.py status` shows it CLAIMED by
+   `alienware/orchestrator` anyway, that is the hourly lease renewer this session left running
+   getting one last tick in before the session closed: release it and claim it yourself. Its lease
+   lapses on its own regardless.
 4. `knowledge/playbooks/tui-parity-campaign.md` carries every rule the cycles paid for, including
    the second-half lane and the close-out that runs every fixture.
 5. A macOS box also unblocks TUI-013, which has been waiting on one since cycle 2. Its runner and

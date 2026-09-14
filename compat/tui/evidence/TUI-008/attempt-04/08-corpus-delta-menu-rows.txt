@@ -1,0 +1,56 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-tui-menus-9/target/debug/zz
+[1;36m==>[0m running list-keys-padding
+list-keys-padding: 46 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running strict-key-validation
+strict-key-validation: 40 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running copy-mode-bindings
+copy-mode-bindings: 20 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running prefix2
+prefix2: 15 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/args-parse-display-menu
+smoke/args-parse-display-menu: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-menu-cell-layout
+smoke/display-menu-cell-layout: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-menu-shortcut-grammar
+smoke/display-menu-shortcut-grammar: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-menu-paste
+smoke/display-menu-paste: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-menu-mouse
+smoke/display-menu-mouse: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/display-popup-menu
+smoke/display-popup-menu: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/command-flag-errors
+smoke/command-flag-errors: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/args-parse-if-shell
+smoke/args-parse-if-shell: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| list-keys-padding | 46 | yes | 0 | yes | yes | yes |
+| strict-key-validation | 40 | yes | 0 | yes | yes | yes |
+| copy-mode-bindings | 20 | yes | 0 | yes | yes | yes |
+| prefix2 | 15 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-display-menu | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-cell-layout | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-shortcut-grammar | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-paste | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-menu-mouse | 3 | yes | 0 | yes | yes | yes |
+| smoke/display-popup-menu | 3 | yes | 0 | yes | yes | yes |
+| smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-if-shell | 3 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged

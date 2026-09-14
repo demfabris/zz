@@ -52,4 +52,5 @@ __pycache__/
 bench/agents/browser/out/
 bench/agents/browser/out-site.log
 bench/agents/browser/out-site.pid
+bench/agents/browser/.playwright-mcp/
 bench/agents/skill/out/

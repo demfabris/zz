@@ -8696,6 +8696,7 @@ dependencies = [
  "web-time",
  "zed-sum-tree",
  "zz-client",
+ "zz-protocol",
  "zz-terminal",
 ]
 
@@ -8710,5 +8711,6 @@ dependencies = [
  "serde_json",
  "wasm-bindgen",
  "web-sys",
+ "zz-protocol",
  "zz-ui",
 ]

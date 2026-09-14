@@ -8516,6 +8516,7 @@ dependencies = [
  "web-time",
  "zed-sum-tree",
  "zz-client",
+ "zz-protocol",
  "zz-terminal",
 ]
 

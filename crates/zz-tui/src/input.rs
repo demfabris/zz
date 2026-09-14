@@ -1171,7 +1171,6 @@ fn handle_mouse(
                 .map_err(|error| error.to_string())?;
             return Ok(InputOutcome::None);
         }
-        MouseKeyRoute::Consume => return Ok(InputOutcome::None),
         MouseKeyRoute::Native => {}
     }
     let sidebar_focus_changed =
@@ -1279,13 +1278,14 @@ fn handle_mouse(
 /// here and the daemon is asked to run the binding only when one exists; a
 /// name nothing is bound to leaves the client's own pointer handling alone,
 /// which is what the pin does with an unbound mouse key too.
-/// What the client does with a decoded pointer event: hand the daemon a key
-/// name it has a binding for, swallow a click-sequence name the pin gives no
-/// meaning of its own, or leave the event to the client's own pointer
-/// handling, which is where an unbound mouse key ends up on the pin too.
+/// What the client does with a decoded pointer event: hand the daemon the key
+/// name it resolved, or leave the event to the client's own pointer handling.
+/// A click-sequence name goes to the daemon whether or not anything is bound
+/// to it, because the daemon is the side that runs `server_client_handle_key`
+/// and the client's own pointer handling has no meaning of its own for a
+/// second or third press.
 enum MouseKeyRoute {
     Send(InputMessage),
-    Consume,
     Native,
 }
 
@@ -1312,12 +1312,11 @@ fn bound_mouse_key(
         key,
         (global_column, global_row, global_x, global_y),
     );
-    if !model.mouse_bindings.contains(&key) && !copy_mouse_key_is_reachable(model, &latch, &key) {
-        return if is_click_sequence_name(&key) {
-            MouseKeyRoute::Consume
-        } else {
-            MouseKeyRoute::Native
-        };
+    if !model.mouse_bindings.contains(&key)
+        && !copy_mouse_key_is_reachable(model, &latch, &key)
+        && !is_click_sequence_name(&key)
+    {
+        return MouseKeyRoute::Native;
     }
     if matches!(event.kind, MouseEventKind::Drag(_))
         && let Some(latch) = model.mouse_drag.as_mut()

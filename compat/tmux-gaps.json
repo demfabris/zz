@@ -970,35 +970,6 @@
       "reason": "The pin's comparator truncates 64-bit key differences into int, returns equality tests as ordering values, and relies on qsort for non-total ties; reproducing that in Rust would violate the ordering contract. Pin citation added 2026-09-06. The comparator is sort.c:299 sort_key_binding_cmp. Under SORT_INDEX it computes `result = a->key - b->key` on a key_code, which is 64-bit, into an int, so two keys whose difference exceeds an int wrap; under SORT_NAME it computes `result = strcasecmp(a->tablename, b->tablename) == 0`, which is an EQUALITY TEST returned as an ordering value, so equal tables sort as 1 and different tables as 0; and the same equality expression is the tie-break for every order. It is then handed to sort_qsort at sort.c:644, and qsort is not stable, so equal-base ties come out in whatever order the implementation leaves them. The stance is that zz cannot reproduce that and stay correct: Rust's sort requires a total order and a comparator that contradicts itself is undefined behaviour there, so zz matches the pin exactly where the comparator is well defined - distinct-base ordering, traversal order, reversal, per-table note ordering - and uses a documented deterministic order for the ties the pin leaves to qsort."
     },
     {
-      "id": "messages.tty-model",
-      "title": "Model tmux message and TTY reports",
-      "decision": "never",
-      "status": "accepted",
-      "priority": "none",
-      "ease": "none",
-      "impact": [
-        "admin",
-        "remote"
-      ],
-      "owner": "daemon",
-      "items": [
-        "flag:show-messages:-J",
-        "flag:show-messages:-T",
-        "flag:show-messages:-t"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz-protocol/src/catalog.rs",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "`show-messages` keeps the pin's message log behavior, and `-J`, `-T`, and `-t` stay loudly unsupported.",
-        "The divergence matrix keeps the absent TTY capability and job-report model visible as a permanent exclusion."
-      ],
-      "depends_on": [],
-      "reason": "`show-messages -T` prints one block per entry in the server's `tty_terms` list, naming the terminal, its owning client, and every terminfo capability tmux resolved for it; a probe against the pin answers `Terminal 0: tmux-256color for /dev/ttys033, flags=0x31:` followed by the capability dump, and `-t` filters that list to one client's terminal. zz's daemon never opens or drives a client terminal through terminfo, because clients receive published frames and render themselves, so there is no capability table to filter or print. `-J` belongs with them: zz's `shell_jobs` map is internal spawn-cap bookkeeping, and the pin's `Job n: cmd [fd=, pid=, status=]` line publishes libevent internals rather than a modeled job. A terminfo-driven server renderer or a published job registry would be new scope, not this gap reopening."
-    },
-    {
       "id": "mouse.bound-context",
       "title": "Carry bound mouse event context",
       "decision": "native",
@@ -3506,6 +3477,20 @@
         "scenario:compat/scenarios/list-keys-padding.txt"
       ],
       "resolution": "list-keys now implements the pin's optional positional key, -1, -O, and -r grammar, including clustered and attached options, --, repeated -O last-wins behavior, exact one-positional and missing -O errors, key-before-sort-before-table error precedence, valid-but-absent and note-filtered unknown-key errors, global and per-table note sorting, and reversal only when an order is selected. Sorting and filtering happen before -1, while repeat and width aggregates are computed after truncation. Literal stored space bases render as Space and C-Space, widths use those spellings, and positional matching compares base, type, and modifiers without stored spelling or key flags. Command and Control clients receive the selected line on stdout; attached Interactive clients receive a display-time-backed frozen status message without a command-output overlay. Stock copy-mode and copy-mode-vi bindings now publish no repeat bits while persistent copy-table movement, jump capture, and numeric repetition remain runtime key-engine behavior. Equal-base, cross-table, inapplicable-field, and four-byte Unicode comparator cases are bounded separately under list-keys.deterministic-sort-ties, and the existing long Ctrl-/Alt- spelling overacceptance remains under the strict-key divergence."
+    },
+    {
+      "id": "messages.tty-model",
+      "title": "Model tmux message and TTY reports",
+      "closed_on": "2026-09-14",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:crates/zz-mux/src/terminfo.rs",
+        "resource:crates/zz-daemon/src/status.rs",
+        "file:compat/tui-client-commands.sh"
+      ],
+      "resolution": "show-messages now answers -T, -J and -t the way cmd_show_messages_exec does. -T prints one `Terminal <n>: <term> for <client>, flags=0x<n>:` header per terminal the daemon has open, newest first the way LIST_INSERT_HEAD leaves tty_terms, and tty_term_describe for each of the 233 codes under it; the terminal object is the TtyTerm the daemon already built for #{I/c:}, now carrying the pin's tty_term_codes order, the capability values tty_features writes and the features the client negotiated. -J prints job_print_summary's `Job <n>: <cmd> [fd=<n>, pid=<n>, status=<n>]` over the status shell cache. -t names a client and, under CMD_CLIENT_CANFAIL, a name that matches nothing leaves every terminal in the list. Measured 2026-09-14 on Linux against pinned tmux d77c9dc6 with one client per side attached inside one outer tmux at 80x24 and TERM=tmux-256color: show-messages -T is 234 identical lines on both sides once each client's own pts number is collapsed, -J is empty on both with no job running, -T -t <client> is that client's 234 lines and -T -t /dev/zzcc-nope is all of them, each with exit 0 and empty stderr. The cases are messages-terminals, messages-terminals-target, messages-terminals-missing-target, messages-jobs and messages-jobs-and-terminals in compat/tui-client-commands.sh. The server log itself keeps its own decided difference: a clientless CLI is client-<pid> on the pin and device-<n> on zz, recorded as messages-log."
     },
     {
       "id": "mux.chain-parse-abort",

@@ -14003,9 +14003,35 @@ impl Shared {
         Ok(Execution::default())
     }
 
+    /// `cmd_show_messages_exec`. `-T` answers with the terminals the server has
+    /// open and `-J` with the running format jobs; either one replaces the log,
+    /// and both together print the terminals, a blank line and then the jobs.
+    /// `-t` names a client, and `CMD_CLIENT_CANFAIL` means a name that matches
+    /// nothing leaves the target unset rather than failing the command.
     fn show_messages(&self, name: &str, args: &[RawText]) -> Result<Execution, DaemonError> {
-        let parsed = parse_buffer_command_args(name, args, &[], &[])?;
+        let parsed = parse_buffer_command_args(name, args, &['t'], &['J', 'T'])?;
         require_no_positionals(name, &parsed)?;
+        if parsed.has('T') || parsed.has('J') {
+            let mut lines = Vec::new();
+            if parsed.has('T') {
+                let inner = self.inner.lock();
+                let target = parsed
+                    .value('t')
+                    .and_then(|target| find_attached_client_with_aliases(&inner, target, true));
+                lines = terminal_descriptions(&inner, parsed.value('t').is_some(), target);
+            }
+            if parsed.has('J') {
+                let summaries = self.status.lock().job_summaries();
+                if !lines.is_empty() && !summaries.is_empty() {
+                    lines.push(String::new());
+                }
+                lines.extend(summaries);
+            }
+            return Ok(Execution {
+                output: lines.join("\n").into(),
+                effects: Vec::new(),
+            });
+        }
         let mut inner = self.inner.lock();
         inner.engine.set_format_now(unix_timestamp());
         let context = server_format_context(&inner.engine, &inner.config_files, None, None, None);
@@ -32844,11 +32870,16 @@ fn client_terminal_features_option(inner: &ServerState, client: ClientId) -> Vec
 /// `c->term_features`: what the client's flags asked for and what its terminal
 /// has since answered, folded with the set `tty_term_create` derives from the
 /// terminfo entry, the `terminal-features` array and `COLORTERM`.
+fn client_negotiated_features(inner: &ServerState, client: ClientId) -> String {
+    terminal_features_list(inner.client_features.get(&client).copied().unwrap_or(0))
+}
+
 fn client_feature_mask(inner: &ServerState, client: ClientId) -> u32 {
     let mut features = inner.client_features.get(&client).copied().unwrap_or(0);
     if let Some(term) = client_terminal_facts(
         client_environment_value(inner, client, "TERM").unwrap_or_default(),
         client_environment_value(inner, client, "COLORTERM"),
+        &client_negotiated_features(inner, client),
         &inner.engine.terminal_features_option(),
         &inner.engine.terminal_overrides_option(),
     ) {
@@ -33193,6 +33224,7 @@ fn client_format_facts(
                 client_terminal_facts(
                     client_environment_value(inner, client, "TERM").unwrap_or_default(),
                     client_environment_value(inner, client, "COLORTERM"),
+                    &client_negotiated_features(inner, client),
                     &client_terminal_features_option(inner, client),
                     &inner.engine.terminal_overrides_option(),
                 )
@@ -33265,6 +33297,45 @@ fn client_viewport_facts(
         window_height: geometry.window_height?,
         cursor,
     })
+}
+
+/// `cmd_show_messages_terminals`: a header line per terminal the server has
+/// open, newest first the way `LIST_INSERT_HEAD` leaves `tty_terms`, with
+/// `tty_term_describe` for each of the 233 codes under it. A `-t` that named a
+/// client keeps only that client's terminal; a `-t` that named nothing keeps
+/// them all, because the target is NULL by then.
+fn terminal_descriptions(
+    inner: &ServerState,
+    targeted: bool,
+    target: Option<ClientId>,
+) -> Vec<String> {
+    let features = inner.engine.terminal_features_option();
+    let overrides = inner.engine.terminal_overrides_option();
+    let mut lines = Vec::new();
+    let mut number = 0;
+    for client in inner.client_terminals.iter().rev().copied() {
+        if targeted && target.is_some_and(|target| target != client) {
+            continue;
+        }
+        let term = client_environment_value(inner, client, "TERM").unwrap_or_default();
+        let Some(terminal) = client_terminal_facts(
+            term,
+            client_environment_value(inner, client, "COLORTERM"),
+            &client_negotiated_features(inner, client),
+            &features,
+            &overrides,
+        ) else {
+            continue;
+        };
+        lines.push(format!(
+            "Terminal {number}: {term} for {}, flags=0x{:x}:",
+            client_format_name(inner, client),
+            terminal.flags()
+        ));
+        lines.extend(terminal.describe());
+        number += 1;
+    }
+    lines
 }
 
 fn client_format_name(inner: &ServerState, client: ClientId) -> String {

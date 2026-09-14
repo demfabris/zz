@@ -40,7 +40,8 @@ struct TtyFeature {
 /// tty-term.c `tty_term_codes`: the 233 capability names tmux reads for a
 /// client terminal, with the type it reads each one as. `tty_term_has_name`
 /// answers 0 for every name outside this table, whatever the terminfo entry
-/// carries.
+/// carries. The order is `enum tty_code_code`'s, because the table is indexed
+/// by it and `tty_term_describe` prints that index.
 const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("acsc", CapabilityKind::Text),
     ("am", CapabilityKind::Flag),
@@ -57,32 +58,32 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("cnorm", CapabilityKind::Text),
     ("colors", CapabilityKind::Number),
     ("Cr", CapabilityKind::Text),
-    ("csr", CapabilityKind::Text),
     ("Cs", CapabilityKind::Text),
-    ("cub1", CapabilityKind::Text),
+    ("csr", CapabilityKind::Text),
     ("cub", CapabilityKind::Text),
-    ("cud1", CapabilityKind::Text),
+    ("cub1", CapabilityKind::Text),
     ("cud", CapabilityKind::Text),
-    ("cuf1", CapabilityKind::Text),
+    ("cud1", CapabilityKind::Text),
     ("cuf", CapabilityKind::Text),
+    ("cuf1", CapabilityKind::Text),
     ("cup", CapabilityKind::Text),
-    ("cuu1", CapabilityKind::Text),
     ("cuu", CapabilityKind::Text),
+    ("cuu1", CapabilityKind::Text),
     ("cvvis", CapabilityKind::Text),
-    ("dch1", CapabilityKind::Text),
     ("dch", CapabilityKind::Text),
+    ("dch1", CapabilityKind::Text),
     ("dim", CapabilityKind::Text),
-    ("dl1", CapabilityKind::Text),
     ("dl", CapabilityKind::Text),
+    ("dl1", CapabilityKind::Text),
+    ("Dsbp", CapabilityKind::Text),
     ("Dseks", CapabilityKind::Text),
     ("Dsfcs", CapabilityKind::Text),
-    ("Dsbp", CapabilityKind::Text),
     ("Dsmg", CapabilityKind::Text),
     ("E3", CapabilityKind::Text),
     ("ech", CapabilityKind::Text),
     ("ed", CapabilityKind::Text),
-    ("el1", CapabilityKind::Text),
     ("el", CapabilityKind::Text),
+    ("el1", CapabilityKind::Text),
     ("enacs", CapabilityKind::Text),
     ("Enbp", CapabilityKind::Text),
     ("Eneks", CapabilityKind::Text),
@@ -92,10 +93,10 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("Hls", CapabilityKind::Text),
     ("home", CapabilityKind::Text),
     ("hpa", CapabilityKind::Text),
-    ("ich1", CapabilityKind::Text),
     ("ich", CapabilityKind::Text),
-    ("il1", CapabilityKind::Text),
+    ("ich1", CapabilityKind::Text),
     ("il", CapabilityKind::Text),
+    ("il1", CapabilityKind::Text),
     ("indn", CapabilityKind::Text),
     ("invis", CapabilityKind::Text),
     ("kcbt", CapabilityKind::Text),
@@ -116,13 +117,14 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("kDN5", CapabilityKind::Text),
     ("kDN6", CapabilityKind::Text),
     ("kDN7", CapabilityKind::Text),
+    ("kend", CapabilityKind::Text),
     ("kEND", CapabilityKind::Text),
     ("kEND3", CapabilityKind::Text),
     ("kEND4", CapabilityKind::Text),
     ("kEND5", CapabilityKind::Text),
     ("kEND6", CapabilityKind::Text),
     ("kEND7", CapabilityKind::Text),
-    ("kend", CapabilityKind::Text),
+    ("kf1", CapabilityKind::Text),
     ("kf10", CapabilityKind::Text),
     ("kf11", CapabilityKind::Text),
     ("kf12", CapabilityKind::Text),
@@ -133,7 +135,7 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("kf17", CapabilityKind::Text),
     ("kf18", CapabilityKind::Text),
     ("kf19", CapabilityKind::Text),
-    ("kf1", CapabilityKind::Text),
+    ("kf2", CapabilityKind::Text),
     ("kf20", CapabilityKind::Text),
     ("kf21", CapabilityKind::Text),
     ("kf22", CapabilityKind::Text),
@@ -144,7 +146,7 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("kf27", CapabilityKind::Text),
     ("kf28", CapabilityKind::Text),
     ("kf29", CapabilityKind::Text),
-    ("kf2", CapabilityKind::Text),
+    ("kf3", CapabilityKind::Text),
     ("kf30", CapabilityKind::Text),
     ("kf31", CapabilityKind::Text),
     ("kf32", CapabilityKind::Text),
@@ -155,7 +157,7 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("kf37", CapabilityKind::Text),
     ("kf38", CapabilityKind::Text),
     ("kf39", CapabilityKind::Text),
-    ("kf3", CapabilityKind::Text),
+    ("kf4", CapabilityKind::Text),
     ("kf40", CapabilityKind::Text),
     ("kf41", CapabilityKind::Text),
     ("kf42", CapabilityKind::Text),
@@ -166,7 +168,7 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("kf47", CapabilityKind::Text),
     ("kf48", CapabilityKind::Text),
     ("kf49", CapabilityKind::Text),
-    ("kf4", CapabilityKind::Text),
+    ("kf5", CapabilityKind::Text),
     ("kf50", CapabilityKind::Text),
     ("kf51", CapabilityKind::Text),
     ("kf52", CapabilityKind::Text),
@@ -177,12 +179,11 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("kf57", CapabilityKind::Text),
     ("kf58", CapabilityKind::Text),
     ("kf59", CapabilityKind::Text),
-    ("kf5", CapabilityKind::Text),
+    ("kf6", CapabilityKind::Text),
     ("kf60", CapabilityKind::Text),
     ("kf61", CapabilityKind::Text),
     ("kf62", CapabilityKind::Text),
     ("kf63", CapabilityKind::Text),
-    ("kf6", CapabilityKind::Text),
     ("kf7", CapabilityKind::Text),
     ("kf8", CapabilityKind::Text),
     ("kf9", CapabilityKind::Text),
@@ -222,13 +223,13 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("kPRV5", CapabilityKind::Text),
     ("kPRV6", CapabilityKind::Text),
     ("kPRV7", CapabilityKind::Text),
+    ("kri", CapabilityKind::Text),
     ("kRIT", CapabilityKind::Text),
     ("kRIT3", CapabilityKind::Text),
     ("kRIT4", CapabilityKind::Text),
     ("kRIT5", CapabilityKind::Text),
     ("kRIT6", CapabilityKind::Text),
     ("kRIT7", CapabilityKind::Text),
-    ("kri", CapabilityKind::Text),
     ("kUP", CapabilityKind::Text),
     ("kUP3", CapabilityKind::Text),
     ("kUP4", CapabilityKind::Text),
@@ -242,11 +243,12 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("Rect", CapabilityKind::Text),
     ("rev", CapabilityKind::Text),
     ("RGB", CapabilityKind::Flag),
-    ("rin", CapabilityKind::Text),
     ("ri", CapabilityKind::Text),
+    ("rin", CapabilityKind::Text),
     ("rmacs", CapabilityKind::Text),
     ("rmcup", CapabilityKind::Text),
     ("rmkx", CapabilityKind::Text),
+    ("Se", CapabilityKind::Text),
     ("setab", CapabilityKind::Text),
     ("setaf", CapabilityKind::Text),
     ("setal", CapabilityKind::Text),
@@ -254,8 +256,6 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("setrgbf", CapabilityKind::Text),
     ("Setulc", CapabilityKind::Text),
     ("Setulc1", CapabilityKind::Text),
-    ("Se", CapabilityKind::Text),
-    ("Sxl", CapabilityKind::Flag),
     ("sgr0", CapabilityKind::Text),
     ("sitm", CapabilityKind::Text),
     ("smacs", CapabilityKind::Text),
@@ -263,10 +263,11 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("smkx", CapabilityKind::Text),
     ("Smol", CapabilityKind::Text),
     ("smso", CapabilityKind::Text),
-    ("Smulx", CapabilityKind::Text),
     ("smul", CapabilityKind::Text),
+    ("Smulx", CapabilityKind::Text),
     ("smxx", CapabilityKind::Text),
     ("Spb", CapabilityKind::Text),
+    ("Sxl", CapabilityKind::Flag),
     ("Ss", CapabilityKind::Text),
     ("Swd", CapabilityKind::Text),
     ("Sync", CapabilityKind::Text),
@@ -283,42 +284,46 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
 const TTY_FEATURES: [TtyFeature; 21] = [
     TtyFeature {
         name: "256",
-        capabilities: &["AX", "setab", "setaf"],
+        capabilities: &[
+            "AX",
+            "setab=\\E[%?%p1%{8}%<%t4%p1%d%e%p1%{16}%<%t10%p1%{8}%-%d%e48;5;%p1%d%;m",
+            "setaf=\\E[%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;m",
+        ],
         flags: TERM_256_COLOURS,
     },
     TtyFeature {
         name: "bpaste",
-        capabilities: &["Enbp", "Dsbp"],
+        capabilities: &["Enbp=\\E[?2004h", "Dsbp=\\E[?2004l"],
         flags: 0,
     },
     TtyFeature {
         name: "ccolour",
-        capabilities: &["Cs", "Cr"],
+        capabilities: &["Cs=\\E]12;%p1%s\\a", "Cr=\\E]112\\a"],
         flags: 0,
     },
     TtyFeature {
         name: "clipboard",
-        capabilities: &["Ms"],
+        capabilities: &["Ms=\\E]52;%p1%s;%p2%s\\a"],
         flags: 0,
     },
     TtyFeature {
         name: "hyperlinks",
-        capabilities: &["Hls"],
+        capabilities: &["Hls=\\E]8;%?%p1%l%tid=%p1%s%;;%p2%s\\E\\\\"],
         flags: 0,
     },
     TtyFeature {
         name: "cstyle",
-        capabilities: &["Ss", "Se"],
+        capabilities: &["Ss=\\E[%p1%d q", "Se=\\E[2 q"],
         flags: 0,
     },
     TtyFeature {
         name: "extkeys",
-        capabilities: &["Eneks", "Dseks"],
+        capabilities: &["Eneks=\\E[>4;2m", "Dseks=\\E[>4m"],
         flags: 0,
     },
     TtyFeature {
         name: "focus",
-        capabilities: &["Enfcs", "Dsfcs"],
+        capabilities: &["Enfcs=\\E[?1004h", "Dsfcs=\\E[?1004l"],
         flags: 0,
     },
     TtyFeature {
@@ -336,27 +341,32 @@ const TTY_FEATURES: [TtyFeature; 21] = [
     },
     TtyFeature {
         name: "margins",
-        capabilities: &["Enmg", "Dsmg", "Clmg", "Cmg"],
+        capabilities: &[
+            "Enmg=\\E[?69h",
+            "Dsmg=\\E[?69l",
+            "Clmg=\\E[s",
+            "Cmg=\\E[%i%p1%d;%p2%ds",
+        ],
         flags: TERM_DECSLRM,
     },
     TtyFeature {
         name: "mouse",
-        capabilities: &["kmous"],
+        capabilities: &["kmous=\\E[M"],
         flags: 0,
     },
     TtyFeature {
         name: "osc7",
-        capabilities: &["Swd", "fsl"],
+        capabilities: &["Swd=\\E]7;", "fsl=\\a"],
         flags: 0,
     },
     TtyFeature {
         name: "overline",
-        capabilities: &["Smol"],
+        capabilities: &["Smol=\\E[53m"],
         flags: 0,
     },
     TtyFeature {
         name: "progressbar",
-        capabilities: &["Spb"],
+        capabilities: &["Spb=\\E]9;4;%p1%d;%p2%d\\E\\\\"],
         flags: 0,
     },
     TtyFeature {
@@ -366,7 +376,13 @@ const TTY_FEATURES: [TtyFeature; 21] = [
     },
     TtyFeature {
         name: "RGB",
-        capabilities: &["AX", "setrgbf", "setrgbb", "setab", "setaf"],
+        capabilities: &[
+            "AX",
+            "setrgbf=\\E[38;2;%p1%d;%p2%d;%p3%dm",
+            "setrgbb=\\E[48;2;%p1%d;%p2%d;%p3%dm",
+            "setab=\\E[%?%p1%{8}%<%t4%p1%d%e%p1%{16}%<%t10%p1%{8}%-%d%e48;5;%p1%d%;m",
+            "setaf=\\E[%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;m",
+        ],
         flags: TERM_256_COLOURS | TERM_RGB_COLOURS,
     },
     TtyFeature {
@@ -376,22 +392,27 @@ const TTY_FEATURES: [TtyFeature; 21] = [
     },
     TtyFeature {
         name: "strikethrough",
-        capabilities: &["smxx"],
+        capabilities: &["smxx=\\E[9m"],
         flags: 0,
     },
     TtyFeature {
         name: "sync",
-        capabilities: &["Sync"],
+        capabilities: &["Sync=\\E[?2026%?%p1%{1}%-%tl%eh%;"],
         flags: 0,
     },
     TtyFeature {
         name: "title",
-        capabilities: &["tsl", "fsl"],
+        capabilities: &["tsl=\\E]0;", "fsl=\\a"],
         flags: 0,
     },
     TtyFeature {
         name: "usstyle",
-        capabilities: &["Smulx", "Setulc", "Setulc1", "ol"],
+        capabilities: &[
+            "Smulx=\\E[4::%p1%dm",
+            "Setulc=\\E[58::2::%p1%{65536}%/%d::%p1%{256}%/%{255}%&%d::%p1%{255}%&%d%;m",
+            "Setulc1=\\E[58::5::%p1%dm",
+            "ol=\\E[59m",
+        ],
         flags: 0,
     },
 ];
@@ -427,11 +448,15 @@ impl TtyTerm {
     /// `tty_term_create` for a client whose terminfo entry produced `entries`,
     /// each a `name=value` string the way `tty_term_read_list` writes them,
     /// with the global `terminal-features` and `terminal-overrides` arrays.
+    /// `negotiated` is the comma-separated `tty->term_features` the client's
+    /// own replies have already added, which `tty_update_features` applies to
+    /// the same term object after it is built.
     #[must_use]
     pub fn create(
         term_name: &str,
         entries: &[String],
         colour_term: Option<&str>,
+        negotiated: &str,
         terminal_features: &[String],
         terminal_overrides: &[String],
     ) -> Self {
@@ -462,6 +487,7 @@ impl TtyTerm {
         }
 
         let mut requested = BTreeSet::new();
+        add_features(&mut requested, negotiated, ',');
         for value in terminal_features {
             let mut offset = 0;
             let Some(first) = override_next(value, &mut offset) else {
@@ -533,6 +559,31 @@ impl TtyTerm {
     #[must_use]
     pub fn has_feature(&self, name: &str) -> bool {
         self.features.contains(name)
+    }
+
+    /// `term->flags`, which `show-messages -T` prints as `flags=0x%x` in each
+    /// terminal's header line.
+    #[must_use]
+    pub const fn flags(&self) -> u32 {
+        self.flags
+    }
+
+    /// `tty_term_describe` over every code in `tty_term_codes` order: the
+    /// lines `cmd_show_messages_terminals` prints under that header.
+    #[must_use]
+    pub fn describe(&self) -> Vec<String> {
+        TTY_TERM_CODES
+            .iter()
+            .enumerate()
+            .map(|(index, (name, _))| match self.codes.get(*name) {
+                None => format!("{index:4}: {name}: [missing]"),
+                Some(CodeValue::Text(value)) => {
+                    format!("{index:4}: {name}: (string) {}", strnvis(value))
+                }
+                Some(CodeValue::Number(number)) => format!("{index:4}: {name}: (number) {number}"),
+                Some(CodeValue::Flag(flag)) => format!("{index:4}: {name}: (flag) {flag}"),
+            })
+            .collect()
     }
 
     /// The features the pin would list for this client, which is what its own
@@ -648,6 +699,35 @@ impl TtyTerm {
             self.has(name)
         })
     }
+}
+
+/// `strnvis` under `VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL`: a graphic character
+/// and a space stand for themselves, a backslash doubles, the seven C escapes
+/// and NUL take their letter, and every other byte is octal. The pin writes
+/// into a 128-byte buffer and stops before the piece that would not fit.
+fn strnvis(value: &str) -> String {
+    const LIMIT: usize = 127;
+    let mut visible = String::new();
+    for byte in value.as_bytes() {
+        let piece = match *byte {
+            b'\\' => "\\\\".to_owned(),
+            0x20..=0x7e => char::from(*byte).to_string(),
+            0x00 => "\\0".to_owned(),
+            0x07 => "\\a".to_owned(),
+            0x08 => "\\b".to_owned(),
+            0x09 => "\\t".to_owned(),
+            0x0a => "\\n".to_owned(),
+            0x0b => "\\v".to_owned(),
+            0x0c => "\\f".to_owned(),
+            0x0d => "\\r".to_owned(),
+            other => format!("\\{other:03o}"),
+        };
+        if visible.len() + piece.len() > LIMIT {
+            break;
+        }
+        visible.push_str(&piece);
+    }
+    visible
 }
 
 fn code_entry(name: &str) -> Option<(&'static str, CapabilityKind)> {
@@ -1066,6 +1146,7 @@ mod tests {
             "screen-256color",
             &entries(&["clear=\u{1b}[H\u{1b}[J", "cup=x", "kf1=x"]),
             None,
+            "",
             &stock_terminal_features(),
             &stock_terminal_overrides(),
         );
@@ -1080,6 +1161,7 @@ mod tests {
             "linux",
             &entries(&["clear=\u{1b}[H\u{1b}[J", "cup=x", "AX=1", "kf1=x"]),
             None,
+            "",
             &stock_terminal_features(),
             &stock_terminal_overrides(),
         );
@@ -1091,6 +1173,7 @@ mod tests {
             "rxvt",
             &entries(&["clear=\u{1b}[H\u{1b}[2J", "cup=x", "kf1=x", "kf63=x"]),
             None,
+            "",
             &stock_terminal_features(),
             &stock_terminal_overrides(),
         );
@@ -1109,6 +1192,7 @@ mod tests {
             "xterm-256color",
             &xterm_256color_entries(),
             None,
+            "",
             &stock_terminal_features(),
             &entries(&["linux*:AX@", "xterm*:Tc", "xterm*:Ss=\\E[2 q:smcup@"]),
         );
@@ -1125,6 +1209,7 @@ mod tests {
             "xterm-256color",
             &xterm_256color_entries(),
             Some("truecolor"),
+            "",
             &stock_terminal_features(),
             &entries(&["xterm*:setrgbf@"]),
         );
@@ -1160,6 +1245,49 @@ mod tests {
         assert_eq!(strtonum("-1"), None);
     }
 
+    /// `tty_term_describe` over the same term, which is what `show-messages -T`
+    /// prints. The index is `enum tty_code_code`'s, a code the entry omits and
+    /// no feature writes reads `[missing]`, and a string is `strnvis`'d under
+    /// `VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL`.
+    #[test]
+    fn the_description_is_the_line_the_pin_prints_for_each_code() {
+        let term = TtyTerm::create(
+            "xterm-256color",
+            &xterm_256color_entries(),
+            Some("truecolor"),
+            "",
+            &stock_terminal_features(),
+            &stock_terminal_overrides(),
+        );
+        let lines = term.describe();
+        assert_eq!(lines.len(), 233);
+        assert_eq!(lines[1], "   1: am: (flag) true");
+        assert_eq!(lines[3], "   3: bce: (flag) true");
+        assert_eq!(lines[5], "   5: Bidi: [missing]");
+        assert_eq!(lines[13], "  13: colors: (number) 256");
+        assert_eq!(lines[232], " 232: XT: (flag) true");
+
+        let vt100 = TtyTerm::create(
+            "zzdescribe",
+            &[
+                "bel=\u{7}".to_owned(),
+                "clear=\u{1b}[H\u{1b}[J".to_owned(),
+                "cud1=\n".to_owned(),
+                "cup=x".to_owned(),
+            ],
+            None,
+            "",
+            &[],
+            &[],
+        );
+        let escapes = vt100.describe();
+        assert_eq!(escapes[4], "   4: bel: (string) \\a");
+        assert_eq!(escapes[9], "   9: clear: (string) \\033[H\\033[J");
+        assert_eq!(escapes[20], "  20: cud1: (string) \\n");
+        assert_eq!(strnvis("a\\b\u{1b}\u{7f}\u{9} z"), "a\\\\b\\033\\177\\t z");
+        assert_eq!(strnvis(&"x".repeat(200)).len(), 127);
+    }
+
     /// Measured against pinned tmux on 2026-09-02 with an attached 80x24 pty
     /// client on TERM=xterm-256color and COLORTERM=truecolor, one
     /// `display-message -p -c <client>` per name.
@@ -1169,6 +1297,7 @@ mod tests {
             "xterm-256color",
             &xterm_256color_entries(),
             Some("truecolor"),
+            "",
             &stock_terminal_features(),
             &stock_terminal_overrides(),
         );

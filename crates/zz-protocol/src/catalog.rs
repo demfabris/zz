@@ -544,7 +544,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "[-MTZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]",
     ),
     ("select-pane", "[-DdeLlMmRUZ] [-T title] [-t target-pane]"),
-    ("show-messages", "[-JT] [-t target-client]"),
     (
         "split-window",
         "[-bdefhIklPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
@@ -2233,11 +2232,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "show-messages",
         aliases: &["showmsgs"],
         description: "Show the daemon message log",
-        usage: "",
+        usage: "[-JT] [-t target-client]",
         options: &[
-            CommandOptionSpec::unsupported_flag("-J"),
-            CommandOptionSpec::unsupported_flag("-T"),
-            CommandOptionSpec::unsupported_value("-t"),
+            CommandOptionSpec::flag("-J", "list the running format jobs"),
+            CommandOptionSpec::flag("-T", "describe the terminals the server has open"),
+            CommandOptionSpec::value("-t", FreeForm, "target client"),
         ],
         positionals: &[],
         variadic: None,
@@ -2897,8 +2896,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 287), ("optional", 8), ("required", 220)])
         );
-        assert_eq!((supported, unsupported), (485, 30));
-        assert_eq!(usage_overrides.len(), 20);
+        assert_eq!((supported, unsupported), (488, 27));
+        assert_eq!(usage_overrides.len(), 19);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

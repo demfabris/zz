@@ -49,6 +49,6 @@ cp "$WEB_ROOT/clients/web/web/main.js" "$WEB_DIST/main.js"
 cp "$WEB_ROOT/clients/web/web/style.css" "$WEB_DIST/style.css"
 cp "$WEB_ROOT/assets/linux/hicolor/256x256/apps/zz.png" "$WEB_DIST/favicon.png"
 cp "$WEB_ROOT/clients/web/assets/fonts/inter/LICENSE.txt" "$WEB_DIST/licenses/inter.txt"
-cp "$WEB_ROOT/clients/web/web/licenses/"*.txt "$WEB_DIST/licenses/"
+cp "$WEB_ROOT/clients/web/assets/fonts/lilex/LICENSE.txt" "$WEB_DIST/licenses/lilex.txt"
 
 echo "browser client ready: $WEB_DIST"

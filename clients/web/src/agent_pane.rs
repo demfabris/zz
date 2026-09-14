@@ -527,7 +527,7 @@ impl AgentPane {
                     request_id.to_string(),
                 ],
                 cx,
-            )
+            );
         });
         cx.spawn(async move |view, cx| {
             cx.background_executor()

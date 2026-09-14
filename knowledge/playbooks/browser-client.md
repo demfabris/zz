@@ -9,7 +9,7 @@ tags:
 - client
 - websocket
 - gpui
-timestamp: 2026-09-07T22:26:00Z
+timestamp: 2026-09-14T13:00:00Z
 ---
 
 # Overview
@@ -87,7 +87,9 @@ Frame groups for gaps, inactive opacity, margins, pane radius, and border width.
 saved independently from widget radius. Sidebar rows share desktop labels, markers, layout and
 rename menus, add/split/close actions, and keyboard navigation. The window strip shares tabs,
 overflow, rename/close menus, session selection, agent count, and clock presentation. The browser
-client bundles Inter without CJK or emoji fallback; unsupported glyphs render as missing glyphs.
+client bundles Inter for chrome and Lilex for terminals, code, and command output; the font
+families named by the daemon's terminal appearance are host fonts and are ignored. It ships no
+CJK or emoji fallback, so unsupported glyphs render as missing glyphs.
 
 The command palette shares its input, result rows, and keyboard hints with desktop. Both clients
 use `zz-client` completion for commands, options, recent commands, and live session/window/pane

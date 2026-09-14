@@ -68,7 +68,6 @@ each face.
 | [0xProto](https://github.com/0xType/0xProto) | iPhone and iPad client | 0xType Project Authors |
 | [Fira Code](https://github.com/tonsky/FiraCode) | iPhone and iPad client | The Fira Code Project Authors |
 | [Geist Mono](https://github.com/vercel/geist-font) | iPhone and iPad client | The Geist Project Authors (Vercel) |
-| [IBM Plex Sans](https://github.com/IBM/plex) | Browser client | IBM Corp. |
 | [Lilex](https://github.com/mishamyrt/Lilex) | Browser client | The Lilex Project Authors |
 | [Inter](https://github.com/rsms/inter) | Browser client | The Inter Project Authors |
 | [Fantasque Sans Mono](https://github.com/belluzj/fantasque-sans) | zzmux.sh | Jany Belluz |

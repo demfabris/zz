@@ -17,6 +17,10 @@ fn launch(cx: &mut App) {
             Cow::Borrowed(include_bytes!(
                 "../assets/fonts/inter/InterVariable-Italic.ttf"
             )),
+            Cow::Borrowed(include_bytes!("../assets/fonts/lilex/Lilex-Regular.ttf")),
+            Cow::Borrowed(include_bytes!("../assets/fonts/lilex/Lilex-Bold.ttf")),
+            Cow::Borrowed(include_bytes!("../assets/fonts/lilex/Lilex-Italic.ttf")),
+            Cow::Borrowed(include_bytes!("../assets/fonts/lilex/Lilex-BoldItalic.ttf")),
         ])
         .expect("failed to load the interface fonts");
     zz_ui::init(cx);

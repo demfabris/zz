@@ -7,13 +7,15 @@ use gpui::{
     ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, canvas, div, prelude::*, px,
 };
 use zz_client::{
-    ChromeAction, ChromeKeymap, ChromeProfile, CoreEvent, TERMINAL_TABLE, ViewportDamage,
+    ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, TERMINAL_TABLE,
+    ViewportDamage,
 };
 use zz_protocol::{InputMessage, PaneId, PopupAction, TerminalUiCommand};
 use zz_terminal::{
     KeyAction, KeyCode, KeyInput, PointerCellEvent, SearchCase, SearchDirection, SearchMode,
-    SearchQuery, SearchStatus, SessionStatus, TerminalMode, TerminalMouseButton,
-    TerminalMouseInput, TerminalMousePhase, TerminalViewAction, TerminalViewport,
+    SearchQuery, SearchStatus, SessionStatus, TerminalAppearance, TerminalMode,
+    TerminalMouseButton, TerminalMouseInput, TerminalMousePhase, TerminalViewAction,
+    TerminalViewport,
 };
 use zz_ui::{
     ActiveTheme, Colorize as _,
@@ -28,6 +30,15 @@ use zz_ui::{
 };
 
 use crate::connection::Connection;
+
+fn bundled_font_appearance(core: &ClientCore) -> TerminalAppearance {
+    let mut appearance = core.appearance().cloned().unwrap_or_default();
+    appearance.font_families.clear();
+    appearance.font_families_bold.clear();
+    appearance.font_families_italic.clear();
+    appearance.font_families_bold_italic.clear();
+    appearance
+}
 
 pub struct TerminalPane {
     pane: PaneId,
@@ -668,7 +679,7 @@ impl TerminalPane {
                 let _ = window.drop_image(image);
             }
             let viewport = self.viewport(&connection.core)?;
-            let appearance = connection.core.appearance().cloned().unwrap_or_default();
+            let appearance = bundled_font_appearance(&connection.core);
             if self.row_revisions.len() != usize::from(viewport.rows) {
                 self.row_revisions.resize(usize::from(viewport.rows), 0);
                 self.all_dirty = true;
@@ -884,13 +895,7 @@ impl Render for TerminalPane {
             ));
         }
         self.sync_focus(window, cx);
-        let appearance = self
-            .connection
-            .read(cx)
-            .core
-            .appearance()
-            .cloned()
-            .unwrap_or_default();
+        let appearance = bundled_font_appearance(&self.connection.read(cx).core);
         let font = terminal_font_for_style(&appearance, &cx.theme().mono_font_family, false, false);
         let font_size = px((appearance.font_size_points + self.font_delta).clamp(7., 48.));
         let prepare = cx.entity();

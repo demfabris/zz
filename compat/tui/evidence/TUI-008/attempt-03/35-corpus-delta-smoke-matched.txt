@@ -1,0 +1,131 @@
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-tui-mouse/target/debug/zz
+[1;36m==>[0m running smoke/args-parse-bind-key
+smoke/args-parse-bind-key: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/cheap-flags
+smoke/cheap-flags: 22 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/clear-history-hyperlinks
+smoke/clear-history-hyperlinks: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-discovery-explicit
+smoke/config-discovery-explicit: 13 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-discovery-launcher
+smoke/config-discovery-launcher: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-discovery
+smoke/config-discovery: 12 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/config-non-utf8-byte-matrix
+smoke/config-non-utf8-byte-matrix: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-command-errors
+smoke/copy-mode-command-errors: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-copy-line
+smoke/copy-mode-copy-line: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-formats
+smoke/copy-mode-formats: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-kill-on-exit
+smoke/copy-mode-kill-on-exit: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-mode-keys-tail
+smoke/copy-mode-mode-keys-tail: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-mode-keys
+smoke/copy-mode-mode-keys: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-prompt-bindings
+smoke/copy-mode-prompt-bindings: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-refresh
+smoke/copy-mode-refresh: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-search
+smoke/copy-mode-search: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/copy-mode-source-pane
+smoke/copy-mode-source-pane: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/format-modifier-interrogate
+smoke/format-modifier-interrogate: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/args-parse-bind-key | 3 | yes | 0 | yes | yes | yes |
+| smoke/cheap-flags | 22 | yes | 0 | yes | yes | yes |
+| smoke/clear-history-hyperlinks | 3 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery-explicit | 13 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery-launcher | 12 | yes | 0 | yes | yes | yes |
+| smoke/config-discovery | 12 | yes | 0 | yes | yes | yes |
+| smoke/config-non-utf8-byte-matrix | 2 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-command-errors | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-copy-line | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-formats | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-mode-keys-tail | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-mode-keys | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-prompt-bindings | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-search | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-source-pane | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-modifier-interrogate | 3 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged
+[1;36m==>[0m checking pinned tmux
+[1;36m==>[0m checking tmux oracle and compatibility tracker
+compat/tmux-oracle.json matches tmux next-3.8 at d77c9dc6aa021e4bc61f0da128c591af695e6466
+compat/tmux-gaps.json is valid and knowledge/tmux/gaps.md is current
+[1;36m==>[0m checking pinned plugin corpus
+[1;36m==>[0m using prebuilt zz: /home/demfabris/dev/zz-tui-mouse/target/debug/zz
+[1;36m==>[0m running smoke/keys-prefix-stock
+smoke/keys-prefix-stock: 40 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/pane-runtime-facts
+smoke/pane-runtime-facts: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-fpp
+smoke/plugin-runtime-fpp: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-oh-my-tmux
+smoke/plugin-runtime-oh-my-tmux: 4 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-tpm-install
+smoke/plugin-runtime-tpm-install: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-vim-tmux-navigator
+smoke/plugin-runtime-vim-tmux-navigator: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/plugin-runtime-yank
+smoke/plugin-runtime-yank: 2 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/send-keys-client-selection
+smoke/send-keys-client-selection: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/send-keys-control
+smoke/send-keys-control: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/send-keys-inject
+smoke/send-keys-inject: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/vim-tmux-navigator
+smoke/vim-tmux-navigator: 8 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+[1;36m==>[0m running smoke/yank
+smoke/yank: 3 step(s), 0 TOPO divergence(s), 0 GEO divergence(s), 0 FMT divergence(s), 0 OUT divergence(s), 0 WARN divergence(s)
+
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| smoke/keys-prefix-stock | 40 | yes | 0 | yes | yes | yes |
+| smoke/pane-runtime-facts | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-fpp | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-oh-my-tmux | 4 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-tpm-install | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-vim-tmux-navigator | 2 | yes | 0 | yes | yes | yes |
+| smoke/plugin-runtime-yank | 2 | yes | 0 | yes | yes | yes |
+| smoke/send-keys-client-selection | 3 | yes | 0 | yes | yes | yes |
+| smoke/send-keys-control | 3 | yes | 0 | yes | yes | yes |
+| smoke/send-keys-inject | 3 | yes | 0 | yes | yes | yes |
+| smoke/vim-tmux-navigator | 8 | yes | 0 | yes | yes | yes |
+| smoke/yank | 3 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `not run`
+
+## Retries
+
+Nothing failed on the first pass.
+
+[1;36m==>[0m partial run complete; full summary left unchanged

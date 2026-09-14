@@ -14,6 +14,9 @@ desktop = []
 agent-pane = ["dep:agent-client-protocol", "dep:fff-search", "dep:ignore", "dep:neo_frizbee", "zz-ui/agent"]
 editor-pane = ["dep:fff-search", "dep:ignore", "dep:neo_frizbee", "zz-ui/editor"]
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [[bin]]
 name = "zz"
 path = "src/main.rs"

@@ -31,8 +31,23 @@ the previous one pushed.
 Every branch here is based on `879b68fc` and main has moved a long way past it: fabrico's two
 releases, a GPUI and CEF refresh, a third-party notice, and a clippy and test pass that touched
 `compat/tmux-gaps.json`, `crates/zz-daemon/src/daemon.rs` and `crates/zz-daemon/src/client.rs`,
-which are campaign zones. The choosers lane predicted a clean merge with `git merge-tree` before it
-stopped; predict it again at your tip rather than trusting that, and merge `tmux-gaps.json` by item.
+which are campaign zones.
+
+Predicted against `origin/main` at `e04bb980` with `git merge-tree --write-tree`, and the answer is
+better than the drift suggests:
+
+| Branch | Prediction |
+| --- | --- |
+| `campaign/tui-choosers-3` | clean |
+| `campaign/tui-mouse` | conflicts in `knowledge/tmux/gaps.md` only |
+| `campaign/tui-introspection` | conflicts in `knowledge/tmux/gaps.md` only |
+
+`knowledge/tmux/gaps.md` is generated. Never hand-merge it: take either side, then
+`python3 compat/tmux-tracker.py write-report` and commit what it produces. The file it is generated
+from, `compat/tmux-gaps.json`, auto-merges on both branches, as do
+`crates/zz-daemon/src/daemon.rs`, `crates/zz-protocol/src/message.rs`, `catalog.rs` and
+`crates/zz-terminal/src/session.rs`. Re-predict at your own tip anyway, since each gate pushes main
+under the next one.
 
 1. **The wire version moved under this cycle.** zz 0.9.0 shipped `PROTOCOL_VERSION` 102 while three
    lanes were appending to 102. The mouse branch adds `view_action` and `press_action` to

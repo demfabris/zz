@@ -3619,8 +3619,8 @@ pub enum ProtocolMessage {
     /// hello, the way `tty_keys_device_attributes`, `tty_keys_device_attributes2`
     /// and `tty_keys_extended_device_attributes` reach `c->term_features` once
     /// the replies arrive. The daemon folds them into the client's feature bits
-    /// for `#{client_termfeatures}` and `#{client_colours}`, stopping at the
-    /// first name it does not know. Appended in v102.
+    /// for `#{client_termfeatures}` and `#{client_colours}`; a name it does not
+    /// know is dropped and the rest of the batch still lands. Appended in v102.
     ClientTerminalFeatures {
         #[serde(deserialize_with = "deserialize_client_terminal_features")]
         features: Vec<String>,

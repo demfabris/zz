@@ -130,6 +130,25 @@ keeps its native one. A landing that makes the raw TUI honour an item closes tha
 measurement, as cycle 4 closed `options.theme-palette`; the gap's decision stands for the GUI and for
 every item still open. Cycle 4's gate held TUI-004 over exactly this question.
 
+Amendment 2026-09-14 (fabrico), under the superset principle that a niche or non-performant tmux
+behaviour is reconsidered rather than imitated:
+
+- **Locking is delegated to the OS session.** The pin arms `lock-after-time` and spawns
+  `lock-command` onto a client's tty, which works because its server owns that terminal. zz's daemon
+  publishes frames and each client draws them, so there is no terminal to spawn onto and a desktop
+  window running `lock -np` has no meaning. Building a zz lock surface would mean inventing an idle
+  timer, a per-client lock screen, and ownership and cancellation rules for a feature that protects
+  nobody who already holds the machine. zz does not build one. `lock-client`, `lock-server` and
+  `lock-session` keep the pin's exact stdout, stderr, exit status, target validation and
+  `after-lock-server` hook, and `lock-after-time` and `lock-command` stay accepted options that arm
+  nothing. TUI-015's acceptance clauses were amended to this decision, the way TUI-001's macOS clause
+  was amended on 2026-09-09.
+- **The caller stream channel is built, not trimmed.** TUI-018 keeps its full scope: one bounded
+  command-stream channel covering stdin, stdout, binary bytes, backpressure, cancellation and
+  process lifetime, carrying `source-file -`, `save-buffer -`, `display-message -I` and
+  `split-window -I` beside the `load-buffer -` pipe zz already supports. It is milestone 5 of the
+  superset roadmap and the last obligation between this campaign and its twelfth item.
+
 # Scope boundary
 
 This campaign covers terminal-client compatibility and composition of existing zz commands.

@@ -10,6 +10,7 @@ Exit 0 when every rule holds, 1 otherwise. Add a rule the moment a cycle teaches
 one; a lesson that lives only in prose gets forgotten, which is how three cycles
 in a row shipped a lane whose fix sat outside its own zones.
 """
+import os
 import re
 import subprocess
 import sys
@@ -35,6 +36,40 @@ def rule_wire(text):
     if forward:
         return False, f"names a version above the tree's {version}: {sorted(forward)}"
     return True, f"wire rule pinned at {version}"
+
+
+def rule_parses(text):
+    """A runner that does not parse wastes a launch and a permission prompt.
+
+    Earned by cycle 9: the compose script emitted `const SLOTS` twice, the lint
+    passed because it only reads prose, and the Workflow tool rejected the
+    script at launch. Checking the prose without checking the syntax is half a
+    check.
+    """
+    import shutil
+    import tempfile
+    node = shutil.which("node")
+    if node is None:
+        return True, "node not available, syntax unchecked"
+    dupes = [n for n in ("SLOTS", "LANES", "OPTS", "ORDER", "COMMON", "GATE_SCHEMA")
+             if len(re.findall(rf"^const {n}\b", text, re.M)) > 1]
+    if dupes:
+        return False, f"declared more than once: {', '.join(dupes)}"
+    with tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False) as fh:
+        fh.write("const agent=async()=>({});const log=()=>{};const args=undefined;\n"
+                 "async function __main(){\n"
+                 + re.sub(r"^export const meta", "const meta", text, count=1, flags=re.M)
+                 + "\n}\n")
+        tmp = fh.name
+    try:
+        r = subprocess.run([node, "--check", tmp], capture_output=True, text=True, timeout=60)
+    finally:
+        os.unlink(tmp)
+    if r.returncode != 0:
+        first = (r.stderr or "").strip().splitlines()
+        detail = next((l for l in first if "Error" in l or "error" in l), first[0] if first else "")
+        return False, f"does not parse as JavaScript: {detail[:150]}"
+    return True, "parses as JavaScript"
 
 
 def rule_slots(text):
@@ -112,6 +147,8 @@ RULES = [
 
     ("wire-version", "101 shipped in 0.8.0 mid-campaign and a stale rule would misdecode frames",
      rule_wire),
+    ("parses", "cycle 9: a duplicated const passed the prose rules and was rejected at launch",
+     rule_parses),
     ("agent-concurrency", "five uncapped lanes drove this box out of memory on 2026-09-11",
      rule_slots),
     ("cargo-caps", "the same crash: an uncapped cargo can take the whole machine down",

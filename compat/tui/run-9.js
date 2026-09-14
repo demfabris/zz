@@ -227,8 +227,6 @@ const LANES = [
 const OPTS = { model: 'opus', effort: 'xhigh' }
 
 const SLOTS = 3
-
-const SLOTS = 3
 let free = SLOTS
 const gateWaiters = []
 const laneWaiters = []

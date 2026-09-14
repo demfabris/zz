@@ -27,11 +27,12 @@ use zz_mux::{
     CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
     FormatClient, FormatMonitorScope, FormatMonitorTarget, KeyDecision, KeyEngine, KeyTables,
     MouseEventTarget, MuxEffect, MuxEngine, PaneKind, PaneRuntimeFacts, ParsedConfig,
-    ParsedConfigBytes, RetainedJobEnvironment, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder,
-    WindowSize, canonical_command, command_block_body, copy_mode_action_is_read_only_safe,
-    expand_format_bytes, expand_format_values, expand_status, format_command, format_true,
-    hook_format_variables, if_shell_truthy, parse_tmux_colour, sanitize_client_output,
-    send_keys_is_read_only_safe, send_keys_target_client, validate_static_command_chain,
+    ParsedConfigBytes, RetainedJobEnvironment, SourceStream, StatusHooks, TmuxColour, TmuxSort,
+    TmuxSortOrder, WindowSize, canonical_command, command_block_body,
+    copy_mode_action_is_read_only_safe, expand_format_bytes, expand_format_values, expand_status,
+    format_command, format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
+    sanitize_client_output, send_keys_is_read_only_safe, send_keys_target_client,
+    validate_static_command_chain,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
@@ -7911,7 +7912,12 @@ impl Shared {
                             env,
                         };
                         let session = Arc::new(if empty {
-                            TerminalSession::spawn_empty_with_appearance(history_limit, appearance)
+                            let session = TerminalSession::spawn_empty_with_appearance(
+                                history_limit,
+                                appearance,
+                            );
+                            session.feed(Arc::from(EMPTY_PANE_SCREEN_MODE.as_bytes()));
+                            session
                         } else {
                             TerminalSession::spawn(history_limit, appearance, spawn.clone())
                         });
@@ -8076,7 +8082,12 @@ impl Shared {
                             env,
                         };
                         let session = Arc::new(if *empty {
-                            TerminalSession::spawn_empty_with_appearance(history_limit, appearance)
+                            let session = TerminalSession::spawn_empty_with_appearance(
+                                history_limit,
+                                appearance,
+                            );
+                            session.feed(Arc::from(EMPTY_PANE_SCREEN_MODE.as_bytes()));
+                            session
                         } else {
                             TerminalSession::spawn(history_limit, appearance, spawn.clone())
                         });
@@ -9807,7 +9818,7 @@ impl Shared {
         for request in source_files {
             let path = request.path;
             if path == "-" {
-                if let Some(stream) = request.stdin {
+                if let Some(SourceStream::Bytes(stream)) = request.stdin {
                     source_path_matched = true;
                     control_source_matched |= control_target.is_some();
                     pending_source_files.push(PendingConfigFile {
@@ -9826,21 +9837,26 @@ impl Shared {
                     });
                     continue;
                 }
+                let text = if request.stdin.is_some() {
+                    spent_source_stream_error()
+                } else {
+                    STANDARD_INPUT_SOURCE_WARNING.to_owned()
+                };
                 source_path_error = true;
                 if captured_control_source {
-                    control_source_errors.push(STANDARD_INPUT_SOURCE_WARNING.to_owned());
+                    control_source_errors.push(text.clone());
                 } else {
                     self.publish_to_client(
                         control_client.unwrap_or(source_client),
                         EventPayload::ClientMessage {
                             pane: request.context.pane,
                             kind: ClientMessageKind::Warning,
-                            text: STANDARD_INPUT_SOURCE_WARNING.to_owned(),
+                            text: text.clone(),
                         },
                     );
                 }
                 if control_target.is_none() && source_kind == ClientKind::Command {
-                    self.record_command_stderr(source_client, STANDARD_INPUT_SOURCE_WARNING);
+                    self.record_command_stderr(source_client, &text);
                     self.record_command_failure(source_client);
                 }
                 continue;
@@ -27261,8 +27277,8 @@ struct SourceFileRequest {
     parse_only: bool,
     verbose: bool,
     context: ExecutionContext,
-    /// The caller's standard input when `path` is `-`.
-    stdin: Option<RawText>,
+    /// What `-` reads, when `path` is `-` and the caller brought a stream.
+    stdin: Option<SourceStream>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -40761,7 +40777,19 @@ struct SourceGlobMatches {
     errors: Vec<String>,
 }
 
+/// `spawn_pane`'s SPAWN_EMPTY branch in the pin (spawn.c) gives a pane with no
+/// process newline mode and no cursor, so a stream written into it starts each
+/// line at column 0 and nothing blinks where nobody can type.
+const EMPTY_PANE_SCREEN_MODE: &str = "\x1b[20h\x1b[?25l";
+
 const STANDARD_INPUT_SOURCE_WARNING: &str = "source-file from standard input is not supported";
+
+/// `file_read` on a `-` whose stream the caller already handed to an earlier
+/// `-` in the same invocation: the pin reopens a spent descriptor and reports
+/// what the kernel told it.
+fn spent_source_stream_error() -> String {
+    source_glob_error_warning(Path::new("-"), "Bad file descriptor")
+}
 const NESTED_SOURCE_LIMIT_ERROR: &str = "too many nested files";
 
 fn source_glob_error_warning(path: &Path, error: &str) -> String {

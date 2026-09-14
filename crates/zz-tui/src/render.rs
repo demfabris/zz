@@ -2150,7 +2150,7 @@ impl Renderer {
             self.output.extend_from_slice(b"\x1b[?25h");
             return;
         }
-        let Some(cursor) = viewport.cursor.filter(|cursor| cursor.visible()) else {
+        let Some(cursor) = viewport.cursor else {
             self.hide_cursor();
             return;
         };
@@ -2161,12 +2161,20 @@ impl Renderer {
             self.hide_cursor();
             return;
         }
+        // The pin leaves the terminal cursor on the pane's own cell whether or
+        // not the pane shows it: `tty_update_mode` turns DECTCEM off and
+        // `tty_cursor` still moves. A hidden cursor parked wherever the last
+        // paint ended is observable through an outer tmux.
         write_cursor_position(
             &mut self.output,
             rect.x.saturating_add(column),
             rect.y.saturating_add(cursor.row()),
         );
-        self.output.extend_from_slice(b"\x1b[?25h");
+        if cursor.visible() {
+            self.output.extend_from_slice(b"\x1b[?25h");
+        } else {
+            self.hide_cursor();
+        }
     }
 
     fn hide_cursor(&mut self) {

@@ -581,11 +581,7 @@ fn window_alert_notifications(
                     format!("{label} in window {window_index}")
                 };
                 let message_id = next_timed_message_id(inner);
-                let client_name = inner
-                    .client_names
-                    .get(&client)
-                    .cloned()
-                    .unwrap_or_else(|| format!("device-{}", client.0));
+                let client_name = server_log_client_name(inner, client);
                 push_server_message(inner, format!("{client_name} message: {text}"));
                 if duration_ms != 0 {
                     inner.message_ignore_keys.remove(&client);
@@ -5816,11 +5812,7 @@ impl Shared {
         }
         let client_name = {
             let mut inner = self.inner.lock();
-            let client_name = inner
-                .client_names
-                .get(&client)
-                .cloned()
-                .unwrap_or_else(|| format!("device-{}", client.0));
+            let client_name = server_log_client_name(&inner, client);
             let command_line = command_log_line(&command);
             push_server_message(&mut inner, format!("{client_name} command: {command_line}"));
             if kind == ClientKind::Command
@@ -10318,11 +10310,6 @@ impl Shared {
             Err(error) => return Err(ServerError::InvalidCommand(error.to_string()).into()),
         };
         if parsed.print {
-            // `cmd_capture_pane_exec` drops one trailing newline off the buffer
-            // and then prints one, so what reaches the caller is the buffer
-            // itself: one newline per captured row, the last row included. The
-            // writer only adds a newline when the text lacks one, so the row
-            // terminator belongs here or an empty last row is swallowed.
             let mut printed = output;
             printed.push('\n');
             return Ok(Execution {
@@ -13874,11 +13861,6 @@ impl Shared {
         Ok(Execution::default())
     }
 
-    /// `cmd_show_messages_exec`. `-T` answers with the terminals the server has
-    /// open and `-J` with the running format jobs; either one replaces the log,
-    /// and both together print the terminals, a blank line and then the jobs.
-    /// `-t` names a client, and `CMD_CLIENT_CANFAIL` means a name that matches
-    /// nothing leaves the target unset rather than failing the command.
     fn show_messages(&self, name: &str, args: &[RawText]) -> Result<Execution, DaemonError> {
         let parsed = parse_buffer_command_args(name, args, &['t'], &['J', 'T'])?;
         require_no_positionals(name, &parsed)?;
@@ -33027,11 +33009,6 @@ fn client_viewport_facts(
     })
 }
 
-/// `cmd_show_messages_terminals`: a header line per terminal the server has
-/// open, newest first the way `LIST_INSERT_HEAD` leaves `tty_terms`, with
-/// `tty_term_describe` for each of the 233 codes under it. A `-t` that named a
-/// client keeps only that client's terminal; a `-t` that named nothing keeps
-/// them all, because the target is NULL by then.
 fn terminal_descriptions(
     inner: &ServerState,
     targeted: bool,
@@ -33064,6 +33041,21 @@ fn terminal_descriptions(
         number += 1;
     }
     lines
+}
+
+fn server_log_client_name(inner: &ServerState, client: ClientId) -> String {
+    inner
+        .client_ttys
+        .get(&client)
+        .filter(|tty| !tty.is_empty())
+        .or_else(|| {
+            inner
+                .client_names
+                .get(&client)
+                .filter(|name| !name.is_empty())
+        })
+        .cloned()
+        .unwrap_or_else(|| format!("device-{}", client.0))
 }
 
 fn client_format_name(inner: &ServerState, client: ClientId) -> String {
@@ -61629,8 +61621,6 @@ set-option -g @alias-mixed-next yes
             .expect("seed capture terminal");
         let pane = context.pane.expect("capture pane");
         let target = pane.to_string();
-        // `cmd_capture_pane_exec` prints the buffer with its row terminators,
-        // so a printed capture ends with the newline of its last row.
         let expected = "zz-terminal-ready\nalpha\nbeta\ngamma\n";
         let deadline = Instant::now() + Duration::from_secs(5);
         let forward = loop {
@@ -61700,9 +61690,6 @@ set-option -g @alias-mixed-next yes
                 &CommandInvocation::new("capture-pane", ["-pSbogus", "-Ebogus", "-t", &target]),
             )
             .expect("capture invalid range defaults");
-        // `args_strtonum_and_expand` failing leaves the pin's own defaults, so
-        // the range is the whole visible screen: the four written rows and then
-        // one empty line per row after them.
         let fallback = fallback.output.to_string();
         assert!(fallback.starts_with(expected), "{fallback:?}");
         assert!(

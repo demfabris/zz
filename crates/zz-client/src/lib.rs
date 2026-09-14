@@ -27,7 +27,11 @@ pub use core::{
     AgentAttentionEdge, AgentAttentionStatus, ClientCore, CoreEvent, Outbound, ViewportDamage,
     agent_attention_status,
 };
-pub use layout::{NormalizedPaneRect, pane_rects};
+pub use layout::{
+    DropZone, NormalizedPaneRect, PaneRect, coerced_drop_zone, drop_preview_bounds, drop_zone_at,
+    pane_box, pane_drop_command, pane_join_command, pane_rects, pane_swap_command,
+    predicted_drop_layout, same_arrangement,
+};
 pub use menu::{
     MOUSE_BUTTON_1, MenuBox, MenuKeyResult, MenuPasteResult, MenuPointerKind, resolve_menu_key,
     resolve_menu_mouse, resolve_menu_paste,

@@ -3,11 +3,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(test)]
+use zz_protocol::LayoutNode;
+pub use zz_protocol::layout::{joined_layout, swapped_layout};
 use zz_protocol::{
-    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, EditorDescriptor, LayoutNode,
-    MAX_GUI_TEXT_BYTES, MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus,
-    PaneId, PaneKindSnapshot, PaneSnapshot, ServerError, SessionId, SessionSnapshot, SplitId,
-    WindowId, WindowSnapshot, normalize_browser_profile_name,
+    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, EditorDescriptor, MAX_GUI_TEXT_BYTES,
+    MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
+    PaneSnapshot, ServerError, SessionId, SessionSnapshot, SplitId, WindowId, WindowSnapshot,
+    normalize_browser_profile_name,
 };
 
 use crate::{
@@ -4156,147 +4159,6 @@ fn glob_class(characters: &[char], mut index: usize) -> Option<(GlobToken, usize
     None
 }
 
-/// Pure client-side predictor for `swap-pane` on a wire [`LayoutNode`].
-/// A client renders a drop optimistically through this same transform.
-#[must_use]
-pub fn swapped_layout(layout: &LayoutNode, source: PaneId, target: PaneId) -> LayoutNode {
-    let mut layout = layout.clone();
-    predict_swap_layout_panes(&mut layout, source, target);
-    layout
-}
-
-/// Pure client-side predictor for `join-pane` on a wire [`LayoutNode`].
-/// Its ratio-tree surgery approximates the engine's cell-derived result.
-/// Returns `None` when the panes are the same or either leaf is missing.
-#[must_use]
-pub fn joined_layout(
-    layout: &LayoutNode,
-    source: PaneId,
-    target: PaneId,
-    split: SplitId,
-    axis: Axis,
-    pane_ratio: f32,
-    before: bool,
-) -> Option<LayoutNode> {
-    if source == target {
-        return None;
-    }
-    let mut layout = layout.clone();
-    if !predict_remove_layout_leaf(&mut layout, source) {
-        return None;
-    }
-    predict_insert_layout_pane(
-        &mut layout,
-        target,
-        source,
-        split,
-        axis,
-        pane_ratio,
-        before,
-        false,
-    )
-    .then_some(layout)
-}
-
-fn predict_insert_layout_pane(
-    node: &mut LayoutNode,
-    target: PaneId,
-    pane: PaneId,
-    split: SplitId,
-    axis: Axis,
-    pane_ratio: f32,
-    before: bool,
-    full_size: bool,
-) -> bool {
-    if full_size {
-        if !node.contains(target) {
-            return false;
-        }
-        let existing = std::mem::replace(node, LayoutNode::Pane(pane));
-        let (ratio, first, second) = if before {
-            (
-                pane_ratio,
-                Box::new(LayoutNode::Pane(pane)),
-                Box::new(existing),
-            )
-        } else {
-            (
-                1.0 - pane_ratio,
-                Box::new(existing),
-                Box::new(LayoutNode::Pane(pane)),
-            )
-        };
-        *node = LayoutNode::Split {
-            id: split,
-            axis,
-            ratio,
-            first,
-            second,
-        };
-        return true;
-    }
-    match node {
-        LayoutNode::Pane(candidate) if *candidate == target => {
-            let existing = LayoutNode::Pane(target);
-            let (ratio, first, second) = if before {
-                (
-                    pane_ratio,
-                    Box::new(LayoutNode::Pane(pane)),
-                    Box::new(existing),
-                )
-            } else {
-                (
-                    1.0 - pane_ratio,
-                    Box::new(existing),
-                    Box::new(LayoutNode::Pane(pane)),
-                )
-            };
-            *node = LayoutNode::Split {
-                id: split,
-                axis,
-                ratio,
-                first,
-                second,
-            };
-            true
-        }
-        LayoutNode::Pane(_) => false,
-        LayoutNode::Split { first, second, .. } => {
-            predict_insert_layout_pane(first, target, pane, split, axis, pane_ratio, before, false)
-                || predict_insert_layout_pane(
-                    second, target, pane, split, axis, pane_ratio, before, false,
-                )
-        }
-    }
-}
-
-fn predict_remove_layout_leaf(node: &mut LayoutNode, target: PaneId) -> bool {
-    let promote_second = match node {
-        LayoutNode::Pane(_) => return false,
-        LayoutNode::Split { first, .. } if matches!(first.as_ref(), LayoutNode::Pane(pane) if *pane == target) => {
-            Some(true)
-        }
-        LayoutNode::Split { second, .. } if matches!(second.as_ref(), LayoutNode::Pane(pane) if *pane == target) => {
-            Some(false)
-        }
-        LayoutNode::Split { .. } => None,
-    };
-
-    if let Some(promote_second) = promote_second {
-        let removed = std::mem::replace(node, LayoutNode::Pane(target));
-        let LayoutNode::Split { first, second, .. } = removed else {
-            unreachable!("only split nodes can promote a sibling")
-        };
-        *node = if promote_second { *second } else { *first };
-        return true;
-    }
-
-    let LayoutNode::Split { first, second, .. } = node else {
-        unreachable!("pane nodes return before recursive removal")
-    };
-    predict_remove_layout_leaf(first, target) || predict_remove_layout_leaf(second, target)
-}
-
 fn activate_window_pane(window: &mut Window, pane: PaneId, preserve_zoom: bool) -> bool {
     if window.active_pane == pane {
         return false;
@@ -4417,18 +4279,6 @@ fn activate_relocated_window_pane(window: &mut Window, pane: PaneId, outgoing: P
         .truncate(window.panes.len().saturating_sub(1));
     window.active_pane = pane;
     previous != pane
-}
-
-fn predict_swap_layout_panes(node: &mut LayoutNode, source: PaneId, target: PaneId) {
-    match node {
-        LayoutNode::Pane(pane) if *pane == source => *pane = target,
-        LayoutNode::Pane(pane) if *pane == target => *pane = source,
-        LayoutNode::Pane(_) => {}
-        LayoutNode::Split { first, second, .. } => {
-            predict_swap_layout_panes(first, source, target);
-            predict_swap_layout_panes(second, source, target);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -6424,18 +6274,6 @@ mod tests {
         ));
         assert!(same_projected_geometry(layout, &predicted));
         assert_eq!(state.windows[&window].pane_order, [first, second]);
-        assert_eq!(
-            joined_layout(
-                &layout.project(),
-                first,
-                first,
-                SplitId(u64::MAX),
-                Axis::Vertical,
-                0.5,
-                true
-            ),
-            None
-        );
         assert!(state.validate().is_ok());
     }
 

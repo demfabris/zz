@@ -286,9 +286,7 @@ pub(super) fn handle_key(
     }
     match action {
         ChromeAction::SidebarCancel => {
-            view.focused_pane = None;
-            view.focus.focus(window, cx);
-            cx.notify();
+            view.release_sidebar_focus(window, cx);
         }
         ChromeAction::SidebarConfirm => {
             if let Some(target) = view.sidebar_selection {
@@ -296,9 +294,7 @@ pub(super) fn handle_key(
                     toggle(view, target, cx);
                 } else {
                     activate(&view.connection, target, cx);
-                    view.focused_pane = None;
-                    view.focus.focus(window, cx);
-                    cx.notify();
+                    view.release_sidebar_focus(window, cx);
                 }
             }
         }
@@ -646,12 +642,14 @@ fn render_row(entry: &TreeRow, active: bool, runtime: &Runtime, cx: &mut App) ->
     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
         focus.focus(window, cx);
     })
-    .on_click(move |_, _, cx| {
+    .on_click(move |_, window, cx| {
         view.update(cx, |view, cx| {
             view.sidebar_selection = Some(target);
             view.sidebar_pointer_selection = true;
             if target == Target::Host && connection.read(cx).connected {
                 toggle(view, target, cx);
+            } else if view.slideover && target != Target::Host && connection.read(cx).connected {
+                view.release_sidebar_focus(window, cx);
             }
             cx.notify();
         });

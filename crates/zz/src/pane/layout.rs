@@ -68,22 +68,6 @@ impl NormalizedPaneRect {
         vertical: SeparatorSpan::FULL,
     };
 
-    pub(crate) const fn left(self) -> f32 {
-        self.horizontal.start
-    }
-
-    pub(crate) const fn top(self) -> f32 {
-        self.vertical.start
-    }
-
-    pub(crate) const fn width(self) -> f32 {
-        self.horizontal.length
-    }
-
-    pub(crate) const fn height(self) -> f32 {
-        self.vertical.length
-    }
-
     const fn span(self, axis: Axis) -> SeparatorSpan {
         match axis {
             Axis::Horizontal => self.horizontal,
@@ -181,33 +165,6 @@ fn relative_pane_rect(
     }
 }
 
-pub(crate) fn pane_rects(node: &LayoutNode) -> Vec<(PaneId, NormalizedPaneRect)> {
-    let mut rects = Vec::new();
-    collect_pane_rects(node, NormalizedPaneRect::FULL, &mut rects);
-    rects
-}
-
-fn collect_pane_rects(
-    node: &LayoutNode,
-    rect: NormalizedPaneRect,
-    rects: &mut Vec<(PaneId, NormalizedPaneRect)>,
-) {
-    match node {
-        LayoutNode::Pane(pane) => rects.push((*pane, rect)),
-        LayoutNode::Split {
-            axis,
-            ratio,
-            first,
-            second,
-            ..
-        } => {
-            let ratio = resolved_ratio(*ratio);
-            collect_pane_rects(first, rect.placed_within(*axis, 0.0, ratio), rects);
-            collect_pane_rects(second, rect.placed_within(*axis, ratio, 1.0 - ratio), rects);
-        }
-    }
-}
-
 fn resolved_ratio(ratio: f32) -> f32 {
     if ratio.is_finite() {
         ratio.clamp(0.0, 1.0)
@@ -254,22 +211,6 @@ mod tests {
         }
     }
 
-    fn assert_rect(
-        actual: (PaneId, NormalizedPaneRect),
-        pane: PaneId,
-        left: f32,
-        top: f32,
-        width: f32,
-        height: f32,
-    ) {
-        assert_eq!(actual.0, pane);
-        let actual = actual.1;
-        assert!((actual.left() - left).abs() <= f32::EPSILON);
-        assert!((actual.top() - top).abs() <= f32::EPSILON);
-        assert!((actual.width() - width).abs() <= f32::EPSILON);
-        assert!((actual.height() - height).abs() <= f32::EPSILON);
-    }
-
     fn assert_separator(
         actual: Option<PaneSeparator>,
         start: f32,
@@ -280,41 +221,6 @@ mod tests {
         assert!((actual.span().start() - start).abs() <= f32::EPSILON);
         assert!((actual.span().length() - length).abs() <= f32::EPSILON);
         assert_eq!(actual.side(), side);
-    }
-
-    #[test]
-    fn pane_rects_map_a_single_pane_to_the_full_layout() {
-        let rects = pane_rects(&pane(7));
-
-        assert_eq!(rects.len(), 1);
-        assert_rect(rects[0], PaneId(7), 0.0, 0.0, 1.0, 1.0);
-    }
-
-    #[test]
-    fn pane_rects_preserve_split_ratios() {
-        let layout = split(1, Axis::Horizontal, 0.35, pane(1), pane(2));
-        let rects = pane_rects(&layout);
-
-        assert_eq!(rects.len(), 2);
-        assert_rect(rects[0], PaneId(1), 0.0, 0.0, 0.35, 1.0);
-        assert_rect(rects[1], PaneId(2), 0.35, 0.0, 0.65, 1.0);
-    }
-
-    #[test]
-    fn pane_rects_compose_nested_split_geometry() {
-        let layout = split(
-            1,
-            Axis::Horizontal,
-            0.4,
-            pane(1),
-            split(2, Axis::Vertical, 0.25, pane(2), pane(3)),
-        );
-        let rects = pane_rects(&layout);
-
-        assert_eq!(rects.len(), 3);
-        assert_rect(rects[0], PaneId(1), 0.0, 0.0, 0.4, 1.0);
-        assert_rect(rects[1], PaneId(2), 0.4, 0.0, 0.6, 0.25);
-        assert_rect(rects[2], PaneId(3), 0.4, 0.25, 0.6, 0.75);
     }
 
     #[test]

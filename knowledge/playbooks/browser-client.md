@@ -82,6 +82,18 @@ images. Popup terminals, command output, and search retain text paste behavior.
 Page blur and local dialogs cancel the daemon prefix; ordinary keys wait for the cancellation
 acknowledgement after the dialog closes or the page regains focus.
 
+Terminal panes show the shared desktop header with the pane title, split controls, drag handle,
+and close button. Inactive pane headers reveal their controls on hover. Drag the handle, or arm
+the daemon prefix and drag any pane, to swap at another pane's center or join at an edge. The
+browser draws the shared drop preview and predicts the resulting layout until the daemon sends
+its next snapshot. Both clients use `zz-client` for drop targets and commands, and `zz-protocol`
+for the layout transforms. Pointer movement selects inactive panes when the daemon's
+`focus-follows-mouse` option is on; dragging leaves focus unchanged.
+
+When the fixed sidebar is hidden, a sidebar focus request opens it over the workspace with a
+scrim. Escape, confirmation, or clicking the scrim dismisses it and returns focus to the workspace.
+Opening this panel leaves the saved sidebar preference unchanged.
+
 Session and window selection, terminal splits and divider dragging, pane zoom, daemon command
 prompts, choosers, menus, confirmations, popups, command output, and Agent prompt/permission
 controls use live daemon state. Agent panes use the shared history picker with project scope,

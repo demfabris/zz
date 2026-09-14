@@ -16,8 +16,13 @@ use gpui::{
     Keystroke, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels,
     Point, Render, Size, StyleRefinement, Window, div, ease_out_quint, prelude::*, px,
 };
-use zz_client::MenuPointerKind;
-use zz_mux::{display_width, joined_layout, swapped_layout};
+#[cfg(test)]
+use zz_client::pane_swap_command;
+use zz_client::{
+    DropZone, MenuPointerKind, NormalizedPaneRect, PaneRect, coerced_drop_zone,
+    drop_preview_bounds, drop_zone_at, pane_drop_command, pane_rects, predicted_drop_layout,
+};
+use zz_mux::display_width;
 use zz_protocol::{
     AgentCommand, Axis, ClientMessageKind, CommandInvocation, DisplayPanesAction, GuiResponse,
     InputMessage, LayoutNode, MenuState, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneIndicator,
@@ -72,18 +77,15 @@ use crate::{
         prefix::{PrefixClaim, PressDisposition, terminal_key_input},
     },
     pane::display::DisplayPanesView,
-    pane::layout::{NormalizedPaneRect, SeparatorSide, pane_rects, pane_separator},
+    pane::layout::{SeparatorSide, pane_separator},
     pane::picker::PanePickerView,
     terminal::view::{TERMINAL_FONT, TerminalView},
     window::corners::WindowCorners,
 };
 use zz_ui::Colorize as _;
 
-const MIN_DROP_EDGE: f32 = 80.0;
-const DROP_EDGE_FRACTION: f32 = 0.25;
 const DROP_PREVIEW_MORPH: Duration = Duration::from_millis(180);
 const DROP_PREVIEW_FADE: Duration = Duration::from_millis(140);
-const OPTIMISTIC_SPLIT: SplitId = SplitId(u64::MAX);
 
 gpui::actions!(zz, [ClosePane]);
 
@@ -245,29 +247,6 @@ impl Render for SplitDragPreview {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DropZone {
-    Left,
-    Right,
-    Top,
-    Bottom,
-    Center,
-}
-
-impl DropZone {
-    const fn axis(self) -> Option<Axis> {
-        match self {
-            Self::Left | Self::Right => Some(Axis::Horizontal),
-            Self::Top | Self::Bottom => Some(Axis::Vertical),
-            Self::Center => None,
-        }
-    }
-
-    const fn inserts_first(self) -> bool {
-        matches!(self, Self::Left | Self::Top)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PaneDragLayer {
     Idle,
     Armed,
@@ -341,7 +320,15 @@ impl PaneDragState {
             .slots
             .iter()
             .find(|(pane, slot)| *pane != self.source && slot.contains(&position))?;
-        let zone = drop_zone_at(*slot, position);
+        let zone = drop_zone_at(
+            PaneRect {
+                x: slot.origin.x.into(),
+                y: slot.origin.y.into(),
+                width: slot.size.width.into(),
+                height: slot.size.height.into(),
+            },
+            (position.x.into(), position.y.into()),
+        );
         Some((
             *target,
             coerced_drop_zone(&self.layout, self.source, *target, zone),
@@ -364,7 +351,20 @@ impl PaneDragState {
         self.preview = Some(match target {
             Some((pane, zone)) => {
                 let to = self.slot(pane).map_or(rendered.bounds, |slot| {
-                    drop_preview_bounds(slot, zone, self.divider)
+                    let rect = drop_preview_bounds(
+                        PaneRect {
+                            x: slot.origin.x.into(),
+                            y: slot.origin.y.into(),
+                            width: slot.size.width.into(),
+                            height: slot.size.height.into(),
+                        },
+                        zone,
+                        self.divider.into(),
+                    );
+                    Bounds::new(
+                        gpui::point(px(rect.x), px(rect.y)),
+                        gpui::size(px(rect.width), px(rect.height)),
+                    )
                 });
                 DropPreview {
                     from: if rendered.opacity > 0.0 {
@@ -3014,163 +3014,6 @@ fn pane_select_command(pane: PaneId) -> CommandInvocation {
     CommandInvocation::new("select-pane", ["-t", &pane.to_string()])
 }
 
-fn pane_swap_command(source: PaneId, target: PaneId) -> CommandInvocation {
-    CommandInvocation::new(
-        "swap-pane",
-        vec![
-            "-d".to_owned(),
-            "-s".to_owned(),
-            source.to_string(),
-            "-t".to_owned(),
-            target.to_string(),
-        ],
-    )
-}
-
-fn pane_join_command(source: PaneId, target: PaneId, zone: DropZone) -> Option<CommandInvocation> {
-    let axis = zone.axis()?;
-    let mut args = vec!["-d".to_owned()];
-    if zone.inserts_first() {
-        args.push("-b".to_owned());
-    }
-    args.push(
-        match axis {
-            Axis::Horizontal => "-h",
-            Axis::Vertical => "-v",
-        }
-        .to_owned(),
-    );
-    args.extend([
-        "-s".to_owned(),
-        source.to_string(),
-        "-t".to_owned(),
-        target.to_string(),
-    ]);
-    Some(CommandInvocation::new("join-pane", args))
-}
-
-fn pane_drop_command(source: PaneId, target: PaneId, zone: DropZone) -> Option<CommandInvocation> {
-    if source == target {
-        return None;
-    }
-    match zone {
-        DropZone::Center => Some(pane_swap_command(source, target)),
-        zone => pane_join_command(source, target, zone),
-    }
-}
-
-fn predicted_drop_layout(
-    layout: &LayoutNode,
-    source: PaneId,
-    target: PaneId,
-    zone: DropZone,
-) -> Option<LayoutNode> {
-    match zone.axis() {
-        None => Some(swapped_layout(layout, source, target)),
-        Some(axis) => joined_layout(
-            layout,
-            source,
-            target,
-            OPTIMISTIC_SPLIT,
-            axis,
-            0.5,
-            zone.inserts_first(),
-        ),
-    }
-}
-
-fn drop_zone_at(slot: Bounds<Pixels>, position: Point<Pixels>) -> DropZone {
-    let local = position - slot.origin;
-    let edge_x = px(MIN_DROP_EDGE.max(f32::from(slot.size.width) * DROP_EDGE_FRACTION));
-    let edge_y = px(MIN_DROP_EDGE.max(f32::from(slot.size.height) * DROP_EDGE_FRACTION));
-    if local.x < edge_x {
-        DropZone::Left
-    } else if local.x > slot.size.width - edge_x {
-        DropZone::Right
-    } else if local.y < edge_y {
-        DropZone::Top
-    } else if local.y > slot.size.height - edge_y {
-        DropZone::Bottom
-    } else {
-        DropZone::Center
-    }
-}
-
-fn coerced_drop_zone(
-    layout: &LayoutNode,
-    source: PaneId,
-    target: PaneId,
-    zone: DropZone,
-) -> DropZone {
-    if zone == DropZone::Center {
-        return zone;
-    }
-    let redundant = predicted_drop_layout(layout, source, target, zone)
-        .is_some_and(|predicted| same_arrangement(&predicted, layout));
-    if redundant { DropZone::Center } else { zone }
-}
-
-fn same_arrangement(left: &LayoutNode, right: &LayoutNode) -> bool {
-    match (left, right) {
-        (LayoutNode::Pane(left), LayoutNode::Pane(right)) => left == right,
-        (
-            LayoutNode::Split {
-                axis: left_axis,
-                first: left_first,
-                second: left_second,
-                ..
-            },
-            LayoutNode::Split {
-                axis: right_axis,
-                first: right_first,
-                second: right_second,
-                ..
-            },
-        ) => {
-            left_axis == right_axis
-                && same_arrangement(left_first, right_first)
-                && same_arrangement(left_second, right_second)
-        }
-        _ => false,
-    }
-}
-
-fn pane_box(slot: Bounds<Pixels>, divider: Pixels) -> Bounds<Pixels> {
-    let left = if slot.origin.x > px(0.0) {
-        divider
-    } else {
-        px(0.0)
-    };
-    let top = if slot.origin.y > px(0.0) {
-        divider
-    } else {
-        px(0.0)
-    };
-    Bounds::new(
-        gpui::point(slot.origin.x + left, slot.origin.y + top),
-        gpui::size(slot.size.width - left, slot.size.height - top),
-    )
-}
-
-fn drop_preview_bounds(slot: Bounds<Pixels>, zone: DropZone, divider: Pixels) -> Bounds<Pixels> {
-    let pane = pane_box(slot, divider);
-    let half_width = pane.size.width / 2.0;
-    let half_height = pane.size.height / 2.0;
-    match zone {
-        DropZone::Center => pane,
-        DropZone::Left => Bounds::new(pane.origin, gpui::size(half_width, pane.size.height)),
-        DropZone::Right => Bounds::new(
-            gpui::point(pane.origin.x + half_width + divider, pane.origin.y),
-            gpui::size(half_width - divider, pane.size.height),
-        ),
-        DropZone::Top => Bounds::new(pane.origin, gpui::size(pane.size.width, half_height)),
-        DropZone::Bottom => Bounds::new(
-            gpui::point(pane.origin.x, pane.origin.y + half_height + divider),
-            gpui::size(pane.size.width, half_height - divider),
-        ),
-    }
-}
-
 /// Toast tag for a daemon-timed message, so an explicit clear retires exactly
 /// the toast that message raised.
 fn timed_message_key(message_id: u64) -> String {
@@ -3189,8 +3032,8 @@ fn pane_bounds(rect: NormalizedPaneRect, canvas_size: Size<Pixels>) -> Bounds<Pi
     let width = f32::from(canvas_size.width);
     let height = f32::from(canvas_size.height);
     Bounds::new(
-        gpui::point(px(rect.left() * width), px(rect.top() * height)),
-        gpui::size(px(rect.width() * width), px(rect.height() * height)),
+        gpui::point(px(rect.x * width), px(rect.y * height)),
+        gpui::size(px(rect.width * width), px(rect.height * height)),
     )
 }
 
@@ -3581,139 +3424,6 @@ mod tests {
             }),
         };
         assert!(!drag.matches_layout(WindowId(5), &changed_layout));
-    }
-
-    #[test]
-    fn drop_zones_resolve_corners_horizontally_and_flood_narrow_panes() {
-        let slot = Bounds::new(point(px(100.0), px(50.0)), gpui::size(px(800.0), px(400.0)));
-        assert_eq!(
-            drop_zone_at(slot, point(px(150.0), px(250.0))),
-            DropZone::Left
-        );
-        assert_eq!(
-            drop_zone_at(slot, point(px(850.0), px(250.0))),
-            DropZone::Right
-        );
-        assert_eq!(
-            drop_zone_at(slot, point(px(500.0), px(80.0))),
-            DropZone::Top
-        );
-        assert_eq!(
-            drop_zone_at(slot, point(px(500.0), px(420.0))),
-            DropZone::Bottom
-        );
-        assert_eq!(
-            drop_zone_at(slot, point(px(500.0), px(250.0))),
-            DropZone::Center
-        );
-        assert_eq!(
-            drop_zone_at(slot, point(px(110.0), px(60.0))),
-            DropZone::Left
-        );
-        assert_eq!(
-            drop_zone_at(slot, point(px(890.0), px(440.0))),
-            DropZone::Right
-        );
-
-        let narrow = Bounds::new(point(px(0.0), px(0.0)), gpui::size(px(120.0), px(90.0)));
-        assert_eq!(
-            drop_zone_at(narrow, point(px(79.0), px(45.0))),
-            DropZone::Left
-        );
-        assert_eq!(
-            drop_zone_at(narrow, point(px(81.0), px(45.0))),
-            DropZone::Right
-        );
-    }
-
-    #[test]
-    fn pane_boxes_step_inside_interior_leading_edges_only() {
-        let divider = px(8.0);
-        let corner = Bounds::new(point(px(0.0), px(0.0)), gpui::size(px(400.0), px(800.0)));
-        assert_eq!(pane_box(corner, divider), corner);
-        let interior = Bounds::new(
-            point(px(400.0), px(400.0)),
-            gpui::size(px(600.0), px(400.0)),
-        );
-        assert_eq!(
-            pane_box(interior, divider),
-            Bounds::new(
-                point(px(408.0), px(408.0)),
-                gpui::size(px(592.0), px(392.0))
-            )
-        );
-
-        let pane = pane_box(interior, divider);
-        let left = drop_preview_bounds(interior, DropZone::Left, divider);
-        let right = drop_preview_bounds(interior, DropZone::Right, divider);
-        assert_eq!(left.origin, pane.origin);
-        assert_eq!(left.size.width, px(296.0));
-        assert_eq!(right.origin.x, px(712.0));
-        assert_eq!(right.size.width, px(288.0));
-        assert_eq!(
-            right.origin.x + right.size.width,
-            pane.origin.x + pane.size.width
-        );
-        assert_eq!(
-            drop_preview_bounds(interior, DropZone::Center, divider),
-            pane
-        );
-    }
-
-    #[test]
-    fn a_drop_that_rebuilds_the_same_arrangement_collapses_into_a_swap() {
-        let pair = LayoutNode::Split {
-            id: SplitId(1),
-            axis: Axis::Horizontal,
-            ratio: 0.35,
-            first: Box::new(LayoutNode::Pane(PaneId(3))),
-            second: Box::new(LayoutNode::Pane(PaneId(7))),
-        };
-        assert_eq!(
-            coerced_drop_zone(&pair, PaneId(3), PaneId(7), DropZone::Left),
-            DropZone::Center
-        );
-        assert_eq!(
-            coerced_drop_zone(&pair, PaneId(7), PaneId(3), DropZone::Right),
-            DropZone::Center
-        );
-        let stack = LayoutNode::Split {
-            id: SplitId(1),
-            axis: Axis::Vertical,
-            ratio: 0.5,
-            first: Box::new(LayoutNode::Pane(PaneId(3))),
-            second: Box::new(LayoutNode::Pane(PaneId(7))),
-        };
-        assert_eq!(
-            coerced_drop_zone(&stack, PaneId(3), PaneId(7), DropZone::Top),
-            DropZone::Center
-        );
-        assert_eq!(
-            coerced_drop_zone(&pair, PaneId(3), PaneId(7), DropZone::Right),
-            DropZone::Right
-        );
-        assert_eq!(
-            coerced_drop_zone(&pair, PaneId(3), PaneId(7), DropZone::Top),
-            DropZone::Top
-        );
-        assert_eq!(
-            coerced_drop_zone(&stack, PaneId(3), PaneId(7), DropZone::Left),
-            DropZone::Left
-        );
-
-        let layout = three_pane_layout();
-        assert_eq!(
-            coerced_drop_zone(&layout, PaneId(3), PaneId(7), DropZone::Left),
-            DropZone::Left
-        );
-        assert_eq!(
-            coerced_drop_zone(&layout, PaneId(3), PaneId(9), DropZone::Left),
-            DropZone::Left
-        );
-        assert_eq!(
-            coerced_drop_zone(&layout, PaneId(7), PaneId(9), DropZone::Top),
-            DropZone::Center
-        );
     }
 
     #[test]
@@ -5832,84 +5542,10 @@ mod tests {
     }
 
     #[test]
-    fn pane_drops_swap_at_the_center_and_join_at_every_edge() {
-        let expected_swap = CommandInvocation::new("swap-pane", ["-d", "-s", "%3", "-t", "%7"]);
+    fn pane_selection_targets_the_requested_pane() {
         assert_eq!(
             pane_select_command(PaneId(7)),
             CommandInvocation::new("select-pane", ["-t", "%7"])
-        );
-        assert_eq!(pane_swap_command(PaneId(3), PaneId(7)), expected_swap);
-        assert_eq!(
-            pane_drop_command(PaneId(3), PaneId(7), DropZone::Center),
-            Some(expected_swap)
-        );
-        assert_eq!(
-            pane_drop_command(PaneId(3), PaneId(3), DropZone::Left),
-            None
-        );
-
-        for (zone, flags) in [
-            (DropZone::Left, vec!["-d", "-b", "-h"]),
-            (DropZone::Right, vec!["-d", "-h"]),
-            (DropZone::Top, vec!["-d", "-b", "-v"]),
-            (DropZone::Bottom, vec!["-d", "-v"]),
-        ] {
-            let mut args = flags;
-            args.extend(["-s", "%3", "-t", "%7"]);
-            assert_eq!(
-                pane_drop_command(PaneId(3), PaneId(7), zone),
-                Some(CommandInvocation::new("join-pane", args))
-            );
-        }
-    }
-
-    #[test]
-    fn predicted_drops_reuse_the_daemon_layout_transforms() {
-        let layout = three_pane_layout();
-
-        assert_eq!(
-            predicted_drop_layout(&layout, PaneId(3), PaneId(9), DropZone::Center),
-            Some(swapped_layout(&layout, PaneId(3), PaneId(9)))
-        );
-        assert_eq!(
-            predicted_drop_layout(&layout, PaneId(3), PaneId(9), DropZone::Top),
-            joined_layout(
-                &layout,
-                PaneId(3),
-                PaneId(9),
-                OPTIMISTIC_SPLIT,
-                Axis::Vertical,
-                0.5,
-                true,
-            )
-        );
-        assert_eq!(
-            predicted_drop_layout(&layout, PaneId(3), PaneId(9), DropZone::Right),
-            joined_layout(
-                &layout,
-                PaneId(3),
-                PaneId(9),
-                OPTIMISTIC_SPLIT,
-                Axis::Horizontal,
-                0.5,
-                false,
-            )
-        );
-        assert_eq!(
-            predicted_drop_layout(&layout, PaneId(3), PaneId(9), DropZone::Bottom),
-            Some(LayoutNode::Split {
-                id: SplitId(2),
-                axis: Axis::Vertical,
-                ratio: 0.5,
-                first: Box::new(LayoutNode::Pane(PaneId(7))),
-                second: Box::new(LayoutNode::Split {
-                    id: OPTIMISTIC_SPLIT,
-                    axis: Axis::Vertical,
-                    ratio: 0.5,
-                    first: Box::new(LayoutNode::Pane(PaneId(9))),
-                    second: Box::new(LayoutNode::Pane(PaneId(3))),
-                }),
-            })
         );
     }
 

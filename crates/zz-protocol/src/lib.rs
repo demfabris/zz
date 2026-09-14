@@ -5,6 +5,7 @@ mod catalog;
 mod framing;
 mod id;
 mod key;
+pub mod layout;
 mod menu;
 mod message;
 mod snapshot;

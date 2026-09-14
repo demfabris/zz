@@ -66,12 +66,20 @@
 # display-message -I        caller stdin into the pane        loudly unsupported             DECLARED, CHILD TUI-018
 # split-window -I           caller stdin into the new pane    loudly unsupported             DECLARED, CHILD TUI-018
 # show-hooks [-Bgpw] [-t]   the hook table                    same                           PROVED
-# show-messages             the server log                    same shape, but the invoking   CHILD TUI-016, the log
+# show-messages             the server log                    same shape, but the invoking   DECLARED, the log
 #                                                               client is named device-<n>     carries client
 #                                                               and the pin reprints a         identity
 #                                                               command through args_print
-# show-messages -J -T       running jobs, known terminals     loudly unsupported             CHILD TUI-016
-# show-messages -t          tolerated, log unchanged          loudly unsupported             CHILD TUI-016
+# show-messages -J          the running format jobs           the same table                 PROVED (the empty
+#                                                                                             table; a live row's
+#                                                                                             fd and pid are its
+#                                                                                             own process's)
+# show-messages -T          Terminal <n>: <term> for          the same 234 lines             PROVED
+#                             <client>, flags=0x<n>, then
+#                             tty_term_describe per code
+# show-messages -T -t       that client's terminal, and a     same                           PROVED
+#                             name that matches nothing
+#                             leaves every terminal in
 # ---------------------------------------------------------------------------
 #
 # THE DRIVER is tui-choosers.sh's, which is tui-indicators.sh's widened: both
@@ -105,7 +113,17 @@
 # DECLARED, NOT PINNED: the server log names its clients, and a clientless CLI
 #   is client-<pid> on the pin and device-<n> on zz; the pin also reprints a
 #   command through its own argument printer. show-messages is recorded for
-#   exactly that and nothing else is masked.
+#   exactly that and nothing else is masked. zz names an attached terminal
+#   client by its tty the way the pin does - both sides answer /dev/pts/<n> -
+#   so only the transient CLI's own name diverges, and that is a recorded
+#   product decision, not an open measurement.
+#
+# NORMALIZED, ON BOTH SIDES: a pts number, a job's fd and a job's pid are
+#   handed out by the kernel to one process, so no two servers can print the
+#   same one and two runs of the pin cannot either. A case that prints one sets
+#   CASE_NORMALIZE and the same substitution runs over both sides before the
+#   comparison. Nothing else in the line moves, and the self-check plants a
+#   difference that survives the substitution to prove it.
 #
 # SETTLING. A command that draws nothing still has to be given the chance to
 # draw: after every invocation each screen is polled until it is unchanged
@@ -426,6 +444,15 @@ settle_screen() {
 CASE_NEEDLE_MODE=0
 CASE_STDIN=''
 
+# Two spellings a command prints belong to the process that printed them and no
+# two servers can share them: the pts number the kernel gave a client, and the
+# fd and pid of a job's own child. A case that prints either sets
+# CASE_NORMALIZE, and the SAME substitution runs over both sides, so nothing
+# one-sided is hidden - the text around the number is still compared byte for
+# byte, which the self-check's normalized-stdout sabotage proves.
+CASE_NORMALIZE=''
+PER_PROCESS_NUMBERS='s|/dev/pts/[0-9][0-9]*|/dev/pts/N|g;s|fd=[0-9][0-9]*|fd=N|g;s|pid=[0-9][0-9]*|pid=N|g'
+
 # Run the same clientless invocation against both servers and read all five
 # channels. CLIENT and PANE stand for each side's own attached client and
 # active pane, whose spellings are the one thing a command's arguments cannot
@@ -476,7 +503,14 @@ compare_channels() {
   LAST_SCREEN_DIFFERED=0
   LAST_STATE_DIFFERED=0
   [ "$zz_rc" = "$tmux_rc" ] || LAST_EXIT_DIFFERED=1
-  cmp -s "$SCRATCH_DIR/zz.out" "$SCRATCH_DIR/tmux.out" || LAST_STDOUT_DIFFERED=1
+  if [ -n "$CASE_NORMALIZE" ]; then
+    sed -e "$CASE_NORMALIZE" "$SCRATCH_DIR/zz.out" >"$SCRATCH_DIR/zz.cmp"
+    sed -e "$CASE_NORMALIZE" "$SCRATCH_DIR/tmux.out" >"$SCRATCH_DIR/tmux.cmp"
+  else
+    cp -- "$SCRATCH_DIR/zz.out" "$SCRATCH_DIR/zz.cmp"
+    cp -- "$SCRATCH_DIR/tmux.out" "$SCRATCH_DIR/tmux.cmp"
+  fi
+  cmp -s "$SCRATCH_DIR/zz.cmp" "$SCRATCH_DIR/tmux.cmp" || LAST_STDOUT_DIFFERED=1
   cmp -s "$SCRATCH_DIR/zz.err" "$SCRATCH_DIR/tmux.err" || LAST_STDERR_DIFFERED=1
   { [ "$zz_screen" = "$tmux_screen" ] && [ "$zz_cursor" = "$tmux_cursor" ]; } || LAST_SCREEN_DIFFERED=1
   [ "$zz_state" = "$tmux_state" ] || LAST_STATE_DIFFERED=1
@@ -497,7 +531,7 @@ compare_channels() {
     printf '      exit tmux: %s  zz: %s\n' "$tmux_rc" "$zz_rc"
   if [ "$LAST_STDOUT_DIFFERED" -eq 1 ]; then
     printf '      stdout differs\n'
-    diff <(cat -v "$SCRATCH_DIR/tmux.out") <(cat -v "$SCRATCH_DIR/zz.out") |
+    diff <(cat -v "$SCRATCH_DIR/tmux.cmp") <(cat -v "$SCRATCH_DIR/zz.cmp") |
       sed -e 's/^/        /' | head -40
   fi
   if [ "$LAST_STDERR_DIFFERED" -eq 1 ]; then
@@ -594,6 +628,7 @@ case_run() {
   *) die "unknown case mode $mode" ;;
   esac
   CASE_NEEDLE_MODE=0
+  CASE_NORMALIZE=''
 }
 
 # The pin's mode commands leave a mode open on the pane, and its lock draws over
@@ -636,6 +671,7 @@ restore_case() {
   : >"$SCRATCH_DIR/tmux.out"
   : >"$SCRATCH_DIR/zz.err"
   : >"$SCRATCH_DIR/tmux.err"
+  CASE_NORMALIZE=''
   CHECKS=$((CHECKS + 1))
   if compare_channels "$name"; then
     printf 'ok    %s\n' "$name"
@@ -673,10 +709,9 @@ INTERACTIVE_REFRESH='clients.interactive-refresh, accepted: every zz client rend
 LOCK_PROGRAM='options.lock-program, accepted: the pin spawns lock-command on the client tty and a daemon that only publishes frames cannot run a program on a client terminal'
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
 BINARY_STREAMS='protocol.binary-streams, accepted: typed UTF-8 arguments are the contract and the remaining - forms stay loudly refused rather than pretending the daemon process is the caller'
-LOG_IDENTITY='the server log names the client that ran each command - client-<pid> on the pin, device-<n> on zz - and the pin reprints the command through its own argument printer'
+LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. An attached terminal client is named by its tty on both sides, so this is the transient CLI alone, and it names a client that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape'
 ESCAPE_TRIM='capture.rich-transports, owner terminal: the -e transform runs through the vendored formatter in crates/zz-terminal/src/session.rs, whose Vt format keeps one trailing cell the pin trims, and that file is outside this lane'
-MESSAGES_CHILD='TUI-016: show-messages -J lists the running format jobs and -T the known terminals, neither of which zz publishes yet'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
 
 refresh_client_cases() {
@@ -756,9 +791,15 @@ message_hook_cases() {
   case_run hooks-show-missing same '' -- show-hooks -g no-such-hook
   case_run hooks-show-target same '' -- show-hooks -t PANE
   case_run messages-log record "$LOG_IDENTITY" -- show-messages
-  case_run messages-jobs record "$MESSAGES_CHILD" -- show-messages -J
-  case_run messages-terminals record "$MESSAGES_CHILD" -- show-messages -T
-  case_run messages-target record "$MESSAGES_CHILD" -- show-messages -t CLIENT
+  case_run messages-jobs same '' -- show-messages -J
+  CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
+  case_run messages-terminals same '' -- show-messages -T
+  CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
+  case_run messages-terminals-target same '' -- show-messages -T -t CLIENT
+  CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
+  case_run messages-terminals-missing-target same '' -- show-messages -T -t /dev/zzcc-nope
+  CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
+  case_run messages-jobs-and-terminals same '' -- show-messages -JT
 }
 
 lock_cases() {
@@ -920,6 +961,30 @@ run_self_check() {
   tmux_outer_command send-keys -t "=$OUTER_SESSION:zz" BSpace ||
     die 'the outer tmux refused send-keys'
   wait_for 'the space withdrawn' zz_cursor_is "$zz_before"
+
+  # The normalizer, in three steps. Each client sits on its own pts, so the
+  # same format really does print two different numbers, the comparison has to
+  # report that without CASE_NORMALIZE, and CASE_NORMALIZE has to collapse it.
+  self_check_run normalize-off list-clients -F 'tty #{client_tty}'
+  self_check_expect 'two pts numbers differ while nothing normalizes them' \
+    exit=0 stdout=1 stderr=0 screen=0 state=0
+  CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
+  self_check_run normalize-on list-clients -F 'tty #{client_tty}'
+  CASE_NORMALIZE=''
+  self_check_expect 'the same two numbers compare equal once normalized' \
+    exit=0 stdout=0 stderr=0 screen=0 state=0
+
+  # And the substitution must not swallow the line it sits in: a session only
+  # the zz side has, printed beside a pts path the substitution does collapse.
+  zz_command new-session -d -s zzcc-norm -x 80 -y 24 "$INNER_SHELL" >/dev/null ||
+    die 'zz refused new-session'
+  CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
+  self_check_run normalize-keeps-the-line \
+    list-sessions -F '#{session_name} /dev/pts/#{session_windows}'
+  CASE_NORMALIZE=''
+  self_check_expect 'a one-sided line beside a normalized number is still reported' \
+    exit=0 stdout=1 stderr=0
+  zz_command kill-session -t zzcc-norm >/dev/null || die 'zz refused kill-session'
 
   # The second equivalence: with every sabotage withdrawn the comparison is
   # silent again, so none of the four above was a difference the scene kept.

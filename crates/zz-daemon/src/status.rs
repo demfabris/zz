@@ -6,7 +6,10 @@ use std::{
     io::Read as _,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -35,6 +38,11 @@ enum ShellCacheScope {
 }
 
 type ShellCacheKey = (ShellCacheScope, FormatJobTag, String);
+
+/// The order `all_jobs` keeps: a fresh job goes on the head of the list, so a
+/// higher serial is printed first.
+static JOB_SERIAL: AtomicU64 = AtomicU64::new(0);
+
 #[derive(Default)]
 struct ShellCacheEntry {
     expanded: Option<String>,
@@ -46,6 +54,9 @@ struct ShellCacheEntry {
 struct ShellJob {
     child: Option<Child>,
     output: Arc<Mutex<ShellOutput>>,
+    fd: i32,
+    pid: u32,
+    serial: u64,
 }
 
 #[derive(Default)]
@@ -603,6 +614,7 @@ pub(crate) fn warm_terminfo_entries(environment: &[RawText]) {
 pub(crate) fn client_terminal_facts(
     term: &str,
     colour_term: Option<&str>,
+    negotiated: &str,
     terminal_features: &[String],
     terminal_overrides: &[String],
 ) -> Option<TtyTerm> {
@@ -611,6 +623,7 @@ pub(crate) fn client_terminal_facts(
         term,
         &entries,
         colour_term,
+        negotiated,
         terminal_features,
         terminal_overrides,
     ))
@@ -708,6 +721,33 @@ impl StatusRenderer {
         }
         published.modes = modes;
         Some(published.clone())
+    }
+
+    /// job.c `job_print_summary`: every job still running, newest first the way
+    /// `LIST_INSERT_HEAD` leaves `all_jobs`. `job->status` is the wait status a
+    /// dead job left behind, and a job this cache still holds has not been
+    /// waited for, so it is 0 here the way it is 0 there.
+    pub(crate) fn job_summaries(&self) -> Vec<String> {
+        let mut jobs = self
+            .shell_cache
+            .values()
+            .filter_map(|entry| {
+                let job = entry.job.as_ref()?;
+                Some((
+                    job.serial,
+                    entry.expanded.as_deref().unwrap_or_default(),
+                    job.fd,
+                    job.pid,
+                ))
+            })
+            .collect::<Vec<_>>();
+        jobs.sort_by_key(|(serial, ..)| std::cmp::Reverse(*serial));
+        jobs.iter()
+            .enumerate()
+            .map(|(number, (_, command, fd, pid))| {
+                format!("Job {number}: {command} [fd={fd}, pid={pid}, status=0]")
+            })
+            .collect()
     }
 
     pub(crate) fn poll_jobs(&mut self) -> BTreeSet<ClientId> {
@@ -2099,6 +2139,10 @@ fn run_shell(
     };
 
     let stdout = child.stdout.take()?;
+    #[cfg(unix)]
+    let fd = std::os::fd::AsRawFd::as_raw_fd(&stdout);
+    #[cfg(not(unix))]
+    let fd = -1;
     {
         let mut stdout = stdout;
         let output = Arc::new(Mutex::new(ShellOutput::default()));
@@ -2151,8 +2195,11 @@ fn run_shell(
             });
         if reader.is_ok() {
             Some(ShellJob {
+                pid: child.id(),
                 child: Some(child),
                 output,
+                fd,
+                serial: JOB_SERIAL.fetch_add(1, Ordering::Relaxed),
             })
         } else {
             terminate_shell(&mut child);
@@ -3761,6 +3808,7 @@ mod terminfo_tests {
         let term = client_terminal_facts(
             "xterm-256color",
             Some("truecolor"),
+            "",
             &["xterm*:clipboard:ccolour:cstyle:focus:title".to_owned()],
             &[],
         )
@@ -3780,7 +3828,7 @@ mod terminfo_tests {
         let engine = zz_mux::MuxEngine::default();
         let features = engine.terminal_features_option();
         let overrides = engine.terminal_overrides_option();
-        let facts = |term: &str| client_terminal_facts(term, None, &features, &overrides);
+        let facts = |term: &str| client_terminal_facts(term, None, "", &features, &overrides);
         if let Some(screen) = facts("screen-256color") {
             assert!(screen.has_feature("bpaste"));
             assert!(screen.has_feature("focus"));
@@ -3828,6 +3876,7 @@ mod terminfo_tests {
             "xterm-256color",
             &entries,
             None,
+            "",
             &[],
             &["linux*:AX@".to_owned()],
         );

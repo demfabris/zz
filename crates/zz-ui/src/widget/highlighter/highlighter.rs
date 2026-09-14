@@ -740,20 +740,6 @@ impl SyntaxHighlighter {
         })
     }
 
-    pub(crate) fn apply_background_tree(
-        &mut self,
-        tree: Tree,
-        text: &Rope,
-        injection_layers: Vec<InjectionLayer>,
-    ) {
-        if !self.text.eq(text) {
-            return;
-        }
-
-        self.tree = Some(tree);
-        self.injection_layers = injection_layers;
-    }
-
     fn parse_injection_layers(&mut self, tree: &Tree) {
         let Some(data) = self.injection_parse_data() else {
             self.injection_layers.clear();

@@ -14,7 +14,6 @@ use gpui::{
 mod drag;
 pub use drag::{PaneDrag, pane_drag_button, pane_drag_preview};
 
-pub const PANE_HEADER_HEIGHT: f32 = 40.0;
 pub const TERMINAL_HEADER_HEIGHT: f32 = 36.0;
 
 pub fn pane_header_icon_button(

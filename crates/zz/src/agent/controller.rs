@@ -24,13 +24,14 @@ use zz_protocol::{
 
 use crate::{
     agent::attachment,
-    agent::preferences::{AgentPreferenceKind, AgentPreferences},
     agent::sound::AgentPaneStatus,
     config::AgentConfig,
     mux::client::{AgentRequest, MuxClient},
 };
 
-use zz_config::agent_preferences::{LEGACY_MODE_PREFERENCE_ID, preference_kind_for_category};
+use zz_config::agent_preferences::{
+    AgentPreferenceKind, AgentPreferences, LEGACY_MODE_PREFERENCE_ID, preference_kind_for_category,
+};
 /// A skipped update is described by its `sessionUpdate` tag and nothing else:
 /// the payload behind it is adapter-supplied and can be megabytes of tool
 /// output, so neither it nor the serde error quoting it belongs in a log line.

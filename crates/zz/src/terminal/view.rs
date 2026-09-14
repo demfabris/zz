@@ -3430,7 +3430,7 @@ mod tests {
                 view.close_search(window, cx);
                 assert!(view.search_query.is_none());
                 assert!(view.focus_handle.is_focused(window));
-            })
+            });
         });
     }
 

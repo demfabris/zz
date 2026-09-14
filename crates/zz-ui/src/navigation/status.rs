@@ -9,7 +9,8 @@ use gpui::{
 };
 
 use crate::{
-    ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
+    ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Sizable as _,
+    StyledExt as _,
     button::{Button, ButtonVariants as _},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
 };

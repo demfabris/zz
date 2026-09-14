@@ -110,7 +110,7 @@ mod tests {
             Box::pin(async move {
                 assert!(channels.journal.is_none());
                 assert!(
-                    matches!(channels.commands.recv().await.unwrap(), RuntimeCommand::Open { cwd, resume_session: None } if cwd == PathBuf::from("/workspace"))
+                    matches!(channels.commands.recv().await.unwrap(), RuntimeCommand::Open { cwd, resume_session: None } if cwd == std::path::Path::new("/workspace"))
                 );
                 channels
                     .events

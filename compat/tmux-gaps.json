@@ -180,6 +180,7 @@
       ],
       "owner": "protocol",
       "items": [
+        "native-command:agent-catalog",
         "native-command:agent-respond",
         "native-command:agent-send",
         "native-command:capture-browser",

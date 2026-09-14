@@ -29852,7 +29852,10 @@ impl ChooseTreeSession {
         &mut self,
         branches: &[(SessionId, Vec<(zz_protocol::WindowId, Vec<PaneId>)>)],
     ) {
-        let sessions = branches.iter().map(|(session, _)| *session).collect();
+        let sessions = branches
+            .iter()
+            .map(|(session, _)| *session)
+            .collect::<BTreeSet<_>>();
         let windows = branches
             .iter()
             .flat_map(|(_, windows)| windows.iter().map(|(window, _)| *window))

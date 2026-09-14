@@ -1658,7 +1658,7 @@ mod tests {
     use zz_protocol::{
         ClientHello, ClientKind, ClientPath, MAX_CLIENT_ENVIRONMENT_BYTES,
         MAX_CLIENT_ENVIRONMENT_ENTRIES, MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES,
-        MAX_CLIENT_WORKING_DIRECTORY_BYTES,
+        MAX_CLIENT_WORKING_DIRECTORY_BYTES, RawText,
     };
 
     use super::{
@@ -1987,7 +1987,7 @@ mod tests {
                     .send(&ProtocolMessage::CommandResponse(CommandResponse::Error {
                         request_id: 0,
                         error: ServerError::Internal("handshake captured".to_owned()),
-                        output: Default::default(),
+                        output: RawText::default(),
                     }))
                     .expect("finish handshake");
                 hello

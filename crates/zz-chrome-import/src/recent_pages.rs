@@ -908,7 +908,10 @@ mod tests {
         let suggestions = restored.suggestions("work", "exa", 8);
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].title, "Example");
-        assert_eq!(restored.title("work", "https://example.com"), Some("Example"));
+        assert_eq!(
+            restored.title("work", "https://example.com"),
+            Some("Example")
+        );
         assert_eq!(restored.title("personal", "https://example.com"), None);
         assert!(restored.suggestions("personal", "exa", 8).is_empty());
         assert!(restored.remove("work", "https://example.com"));

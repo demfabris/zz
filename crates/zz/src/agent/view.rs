@@ -40,7 +40,8 @@ use zz_ui::agent::{
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
-    ActiveTheme as _, CHROME_GAP, Colorize as _, Disableable as _, ElementExt as _, IconName, Sizable as _,
+    ActiveTheme as _, CHROME_GAP, Colorize as _, Disableable as _, ElementExt as _, IconName,
+    Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{IndentInline, InputEvent, InputState, MoveDown, MoveUp},

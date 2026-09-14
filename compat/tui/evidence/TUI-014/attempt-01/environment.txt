@@ -1,5 +1,18 @@
 # environment
 
+SUPERSEDED CAPTURE, CORRECTED AT THE CYCLE 6 COMMANDS GATE, 2026-09-14.
+The block below was written by the lane and attests something that cannot be checked:
+its `revision: 6cc5e0b8...` is not an ancestor of the lane tip (git merge-base --is-ancestor
+exits 1), its `base: origin/main b17232ac...` is not the merge-base (that was 289c8a7c), and
+it attests runs taken from a worktree with 1 modified path. A debug zz build is not
+bit-reproducible on this box, so the revision plus a clean worktree is the only attestation
+a sha256 has, and that one pointed off the branch. It is kept, not deleted, because it still
+records the box and the pin the lane's own runs used.
+
+---8<--- the lane's capture, as written ---8<---
+
+# environment
+
 Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
 NAME="CachyOS Linux"
 PRETTY_NAME="CachyOS"
@@ -18,3 +31,31 @@ pin commit: d77c9dc6aa021e4bc61f0da128c591af695e6466 (next-3.8)
 
 locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8
 date: 2026-09-13T18:42:48-03:00
+
+---8<--- end of the lane's capture ---8<---
+
+GATE RE-CAPTURE. Everything in review.md and in the gate-*.txt logs beside it was measured
+here, from a clean worktree at a revision on this branch. The lane's own tip a3fc1651 rebased
+onto origin/main adc1a9d0 as fba6dcf6; the four commits after it carry no Rust, so the binary
+below - built at fba6dcf6 - is the code at every revision from fba6dcf6 to the one named here.
+
+Linux alienware 7.2.3-1-cachyos-deckify #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 23:17:42 +0000 x86_64 GNU/Linux
+NAME="CachyOS Linux"
+PRETTY_NAME="CachyOS"
+
+revision: 6c0d3b9d23fa688d60a7611819bb16eb116cf0bd
+worktree: 0 modified paths
+base: origin/main adc1a9d0f73f3c0d19a131d5e3aeb0ff86290001
+merge-base: adc1a9d0f73f3c0d19a131d5e3aeb0ff86290001
+
+zz:   /home/demfabris/dev/zz-gate-target/debug/zz
+-rwxr-xr-x 2 demfabris demfabris 791457152 set 14 03:51 zz-gate-target/debug/zz
+sha256: ef9914d490cf083c789c1be76e3c98050d6fb532f67f6216a21c53838055be0d
+
+pin:  /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+tmux next-3.8
+pin commit: d77c9dc6aa021e4bc61f0da128c591af695e6466 (next-3.8)
+pin sha256: df2cafcb212e8b69677dd57c2bd0c3bb59592eaf385d974ec0124526d6b63ee5
+
+locale: LANG=en_US.UTF-8 LC_TIME=pt_BR.UTF-8
+date: 2026-09-14T06:03:07-03:00

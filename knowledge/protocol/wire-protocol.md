@@ -665,6 +665,13 @@ terminal's own name out of its XTVERSION reply as `tty_keys_extended_device_attr
 in `c->term_type`; `term_type` is capped at `MAX_CLIENT_TERMINAL_TYPE_BYTES` (128) bytes, rejected
 during deserialization, and the daemon answers `#{client_termtype}` from it.
 
+v103 also appends `stdin: Option<RawText>` to `CommandInvocation` after `expanded_alias_group`:
+the caller's standard input, read once and bounded by `MAX_AGENT_SEND_BYTES`, carried with the
+invocation rather than in `args` for the commands whose payload is not an argument
+(`source-file -`, `display-message -I`, `split-window -I`). `format_command` never prints it, so
+the server log still records the command the caller typed. See
+[the command stream channel](/designs/command-stream-channel.md) for the sinks and the bound.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 103`** is stamped into every frame's envelope and re-checked inside
@@ -684,7 +691,10 @@ during deserialization, and the daemon answers `#{client_termtype}` from it.
   consumer of both, and it is the only client that draws the pane-cell prompt: the GPUI, iOS and
   web clients read neither field and keep the prompt on their own client surface. 102 shipped in
   zz 0.9.0 and 0.9.1 while the cycle-9 lanes were still appending to it, so the version moves
-  rather than the v102 entry growing.
+  rather than the v102 entry growing. `CommandInvocation` appends `stdin: Option<RawText>` after
+  `expanded_alias_group`, the caller's standard input read once and bounded by
+  `MAX_AGENT_SEND_BYTES`: the commands whose payload is not an argument carry it here instead of in
+  `args`, `format_command` never prints it, and the daemon is the consumer half in the same push.
 - v102 carries the colour class each style's two grounds came from, and the client's own terminal
   features. Viewport and patch payloads append one `u32` class word per style, per appended style
   for a patch, after the kitty placements; the word packs the two-bit class code and the palette

@@ -1950,6 +1950,7 @@ fn source_file_keeps_every_path_in_order() {
                 parse_only: false,
                 verbose: false,
                 context: context.clone(),
+                stdin: None,
             },
             MuxEffect::SourceFile {
                 path: "second".into(),
@@ -1957,6 +1958,7 @@ fn source_file_keeps_every_path_in_order() {
                 parse_only: false,
                 verbose: false,
                 context: context.clone(),
+                stdin: None,
             },
         ]
     );
@@ -1971,6 +1973,7 @@ fn source_file_keeps_every_path_in_order() {
             parse_only: false,
             verbose: false,
             context: context.clone(),
+            stdin: None,
         }]
     );
     let formatted = engine
@@ -1995,6 +1998,7 @@ fn source_file_keeps_every_path_in_order() {
                 parse_only: false,
                 verbose: false,
                 context: context.clone(),
+                stdin: None,
             },
             MuxEffect::SourceFile {
                 path: "work-0-0-second.conf".into(),
@@ -2002,6 +2006,7 @@ fn source_file_keeps_every_path_in_order() {
                 parse_only: false,
                 verbose: false,
                 context: context.clone(),
+                stdin: None,
             },
         ]
     );
@@ -2016,6 +2021,7 @@ fn source_file_keeps_every_path_in_order() {
             parse_only: false,
             verbose: false,
             context: context.clone(),
+            stdin: None,
         }]
     );
     let flags = engine
@@ -2032,6 +2038,7 @@ fn source_file_keeps_every_path_in_order() {
             parse_only: true,
             verbose: true,
             context: context.clone(),
+            stdin: None,
         }]
     );
 
@@ -2067,6 +2074,7 @@ fn source_file_keeps_every_path_in_order() {
             parse_only: false,
             verbose: true,
             context: target_context,
+            stdin: None,
         }]
     );
 

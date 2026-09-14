@@ -7524,6 +7524,7 @@ impl Shared {
         let mut deferred_direct_events = Vec::new();
         let mut targeted_events = Vec::new();
         let mut source_files = Vec::new();
+        let mut pane_stream_inputs: Vec<(PaneId, RawText)> = Vec::new();
         let mut removed_panes = Vec::new();
         let mut agent_panes_opened = Vec::new();
         #[cfg(feature = "agent")]
@@ -9283,13 +9284,18 @@ impl Shared {
                         parse_only,
                         verbose,
                         context,
+                        stdin,
                     } => source_files.push(SourceFileRequest {
                         path: path.clone(),
                         quiet: *quiet,
                         parse_only: *parse_only,
                         verbose: *verbose,
                         context: context.clone(),
+                        stdin: stdin.clone(),
                     }),
+                    MuxEffect::PaneStreamInput { pane, bytes } => {
+                        pane_stream_inputs.push((*pane, bytes.clone()));
+                    }
                     MuxEffect::RunHook {
                         name,
                         commands,
@@ -9717,6 +9723,9 @@ impl Shared {
         let cwd_client = replay_client
             .or_else(|| context.control_command_target().map(|(client, _)| client))
             .unwrap_or(client);
+        for (pane, bytes) in pane_stream_inputs {
+            self.feed_pane_stream_input(pane, bytes.as_bytes());
+        }
         let (
             source_kind,
             startup_source_client_working_directory,
@@ -9798,6 +9807,25 @@ impl Shared {
         for request in source_files {
             let path = request.path;
             if path == "-" {
+                if let Some(stream) = request.stdin {
+                    source_path_matched = true;
+                    control_source_matched |= control_target.is_some();
+                    pending_source_files.push(PendingConfigFile {
+                        path: PathBuf::from("-"),
+                        context: request.context.clone(),
+                        stdin: Some(stream),
+                        options: SourceFileLoadOptions {
+                            parse_only: request.parse_only,
+                            verbose: request.verbose && control_target.is_none(),
+                            suppress_verbose: control_target.is_some(),
+                            control_target,
+                            replay_client: (source_client != ClientId(u64::MAX))
+                                .then_some(source_client),
+                            suppress_replay_output: suppress_source_replay_output,
+                        },
+                    });
+                    continue;
+                }
                 source_path_error = true;
                 if captured_control_source {
                     control_source_errors.push(STANDARD_INPUT_SOURCE_WARNING.to_owned());
@@ -9857,6 +9885,7 @@ impl Shared {
                 pending_source_files.push(PendingConfigFile {
                     path,
                     context: request.context.clone(),
+                    stdin: None,
                     options: SourceFileLoadOptions {
                         parse_only: request.parse_only,
                         verbose: request.verbose && control_target.is_none(),
@@ -9909,7 +9938,20 @@ impl Shared {
             } else {
                 ConfigLoadReport::with_stdout_transcript()
             };
-            match self.parse_config_file(&pending.path, &mut report, pending.options, true) {
+            let parsed = if let Some(stream) = &pending.stdin {
+                self.parse_config_input(
+                    &pending.path,
+                    ConfigInput::sourced(stream.as_bytes()),
+                    &mut report,
+                    pending.options,
+                    true,
+                )
+                .map(Some)
+                .ok_or_else(|| DaemonError::from(non_utf8_config_error()))
+            } else {
+                self.parse_config_file(&pending.path, &mut report, pending.options, true)
+            };
+            match parsed {
                 Ok(parsed) => parsed_source_files.push((pending, parsed, report)),
                 Err(DaemonError::Io(error)) => {
                     if !pending
@@ -9960,6 +10002,7 @@ impl Shared {
                 path,
                 mut context,
                 options,
+                stdin: _,
             } = pending;
             let defer_command_error_hook_replay_issues = control_target.is_none()
                 && queue_execution.is_some()
@@ -23600,6 +23643,19 @@ impl Shared {
     }
 
     /// Append one line to the running Command request's stderr.
+    /// `window_pane_input_callback`: the caller's stream reaches a PTY-free
+    /// pane's parser as if a child had printed it. The mux has already refused
+    /// a pane that holds a process.
+    fn feed_pane_stream_input(&self, pane: PaneId, bytes: &[u8]) {
+        let terminal = {
+            let inner = self.inner.lock();
+            inner.terminals.get(&pane).cloned()
+        };
+        if let Some(terminal) = terminal {
+            terminal.feed(Arc::from(bytes));
+        }
+    }
+
     fn record_command_stderr(&self, client: ClientId, line: &str) {
         if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
             streams.stderr.push_str(line);
@@ -25695,12 +25751,14 @@ impl Shared {
                                 parse_only,
                                 verbose,
                                 context,
+                                stdin,
                             } => Some(SourceFileRequest {
                                 path,
                                 quiet,
                                 parse_only,
                                 verbose,
                                 context,
+                                stdin,
                             }),
                             _ => None,
                         })
@@ -25849,6 +25907,7 @@ impl Shared {
                             path: source,
                             context: source_request.context.clone(),
                             options: nested_options,
+                            stdin: None,
                         });
                     }
                 }
@@ -27202,6 +27261,8 @@ struct SourceFileRequest {
     parse_only: bool,
     verbose: bool,
     context: ExecutionContext,
+    /// The caller's standard input when `path` is `-`.
+    stdin: Option<RawText>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -27218,6 +27279,8 @@ struct PendingConfigFile {
     path: PathBuf,
     context: ExecutionContext,
     options: SourceFileLoadOptions,
+    /// Set when the file is the caller's standard input rather than a path.
+    stdin: Option<RawText>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -38042,6 +38105,74 @@ pub fn load_buffer_reads_stdin(args: &[RawText]) -> bool {
         .is_ok_and(|parsed| parsed.positional == ["-"])
 }
 
+/// Where the caller's standard input goes for one command, and whether that
+/// sink takes bytes that are not valid UTF-8. One resolver answers for every
+/// caller: `knowledge/designs/command-stream-channel.md` names the three sinks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandStdinSink {
+    /// The payload is the command's own text argument and the caller appends it
+    /// after the argument boundary.
+    Argument { binary: bool },
+    /// The payload is a configuration file named `-`.
+    Config,
+    /// The payload is written into a pane that holds no process.
+    PaneInput,
+}
+
+impl CommandStdinSink {
+    #[must_use]
+    pub const fn accepts_binary(self) -> bool {
+        match self {
+            Self::Argument { binary } => binary,
+            Self::Config => false,
+            Self::PaneInput => true,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_argument(self) -> bool {
+        matches!(self, Self::Argument { .. })
+    }
+}
+
+/// The one place that decides a command reads the caller's standard input.
+#[must_use]
+pub fn command_stdin_sink(canonical_name: &str, args: &[RawText]) -> Option<CommandStdinSink> {
+    match canonical_name {
+        "agent-send" => {
+            agent_send_reads_stdin(args).then_some(CommandStdinSink::Argument { binary: false })
+        }
+        "send-text" => {
+            send_text_reads_stdin(args).then_some(CommandStdinSink::Argument { binary: false })
+        }
+        "load-buffer" => {
+            load_buffer_reads_stdin(args).then_some(CommandStdinSink::Argument { binary: true })
+        }
+        "source-file" => source_file_reads_stdin(args).then_some(CommandStdinSink::Config),
+        "display-message" | "split-window" => {
+            command_has_flag(canonical_name, args, "-I").then_some(CommandStdinSink::PaneInput)
+        }
+        _ => None,
+    }
+}
+
+fn source_file_reads_stdin(args: &[RawText]) -> bool {
+    zz_protocol::command_spec("source-file").is_some_and(|spec| {
+        zz_protocol::parse_tmux_options(spec, args)
+            .is_ok_and(|parsed| parsed.positionals.iter().any(|path| path == "-"))
+    })
+}
+
+fn command_has_flag(canonical_name: &str, args: &[RawText], flag: &str) -> bool {
+    zz_protocol::command_spec(canonical_name).is_some_and(|spec| {
+        zz_protocol::parse_tmux_options(spec, args).is_ok_and(|parsed| {
+            parsed.options.iter().any(
+                |option| matches!(option, zz_protocol::TmuxOption::Flag(name) if *name == flag),
+            )
+        })
+    })
+}
+
 fn load_buffer_stdin_payload(args: &[RawText]) -> Option<&RawText> {
     let (payload, path_args) = args.split_last()?;
     load_buffer_reads_stdin(path_args).then_some(payload)
@@ -40748,6 +40879,63 @@ mod tests {
 
     use super::*;
     use crate::{CommandClient, InteractiveClient};
+
+    #[test]
+    fn one_resolver_answers_every_command_stream_sink() {
+        let args = |args: &[&str]| args.iter().copied().map(RawText::from).collect::<Vec<_>>();
+        for (name, arguments, expected) in [
+            (
+                "load-buffer",
+                &["-"][..],
+                Some(CommandStdinSink::Argument { binary: true }),
+            ),
+            (
+                "send-text",
+                &["-t", "%1"][..],
+                Some(CommandStdinSink::Argument { binary: false }),
+            ),
+            (
+                "agent-send",
+                &["--submit"][..],
+                Some(CommandStdinSink::Argument { binary: false }),
+            ),
+            ("source-file", &["-"][..], Some(CommandStdinSink::Config)),
+            (
+                "source-file",
+                &["-q", "one", "-"][..],
+                Some(CommandStdinSink::Config),
+            ),
+            ("source-file", &["one"][..], None),
+            (
+                "display-message",
+                &["-I"][..],
+                Some(CommandStdinSink::PaneInput),
+            ),
+            (
+                "display-message",
+                &["-I", "-t", "%1"][..],
+                Some(CommandStdinSink::PaneInput),
+            ),
+            ("display-message", &["-p", "#{pane_id}"][..], None),
+            (
+                "split-window",
+                &["-I", "-t", "%1"][..],
+                Some(CommandStdinSink::PaneInput),
+            ),
+            ("split-window", &["-h"][..], None),
+            ("list-sessions", &[][..], None),
+        ] {
+            assert_eq!(
+                command_stdin_sink(name, &args(arguments)),
+                expected,
+                "{name} {arguments:?}"
+            );
+        }
+        assert!(CommandStdinSink::Argument { binary: true }.accepts_binary());
+        assert!(!CommandStdinSink::Argument { binary: false }.accepts_binary());
+        assert!(!CommandStdinSink::Config.accepts_binary());
+        assert!(CommandStdinSink::PaneInput.accepts_binary());
+    }
 
     #[test]
     fn daemon_context_format_registration_matches_the_oracle() {

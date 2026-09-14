@@ -58,8 +58,8 @@ use zz_browser::{BrowserBootstrap, BrowserError, BrowserRuntime};
 use zz_daemon::default_socket_path;
 #[cfg(not(target_os = "ios"))]
 use zz_daemon::{
-    CommandClient, CommandOutcome, Daemon, Endpoint, classify_local_connect_error,
-    terminate_incompatible_daemon,
+    CommandClient, CommandOutcome, CommandStdinSink, Daemon, Endpoint,
+    classify_local_connect_error, terminate_incompatible_daemon,
 };
 use zz_daemon::{DaemonError, InteractiveClient};
 #[cfg(not(target_os = "ios"))]
@@ -1075,29 +1075,28 @@ fn run_command_mode(
         return Some(run_kill_server(socket_path, invocation.args, false));
     }
 
-    let reads_stdin = prepared.as_ref().map_or_else(
+    let stdin_sink = prepared.as_ref().map_or_else(
         || command_reads_stdin(&command_chain[0]),
         |prepared| {
             prepared
                 .commands
                 .first()
-                .is_some_and(prepared_command_reads_stdin)
+                .and_then(prepared_command_reads_stdin)
         },
     );
-    if reads_stdin {
-        let binary_stdin = prepared.as_ref().map_or_else(
-            || canonical_command(&command_chain[0].name) == "load-buffer",
-            |prepared| prepared.commands[0].canonical_name.as_deref() == Some("load-buffer"),
-        );
-        match read_stdin_payload(binary_stdin) {
-            Ok(payload) => {
-                if let Some(prepared) = prepared.as_mut() {
+    if let Some(sink) = stdin_sink {
+        match read_stdin_payload(sink.accepts_binary()) {
+            Ok(payload) => match (sink.is_argument(), prepared.as_mut()) {
+                (true, Some(prepared)) => {
                     append_prepared_command_stdin_payload(&mut prepared.commands[0], payload);
-                } else {
+                }
+                (true, None) => {
                     let canonical_name = canonical_command(&command_chain[0].name).to_owned();
                     append_stdin_payload(&canonical_name, &mut command_chain[0].args, payload);
                 }
-            }
+                (false, Some(prepared)) => prepared.commands[0].invocation.set_stdin(payload),
+                (false, None) => command_chain[0].set_stdin(payload),
+            },
             Err(error) => {
                 eprintln!("zz: {error}");
                 return Some(ExitCode::FAILURE);
@@ -1389,20 +1388,13 @@ fn prepared_command_error(commands: &[PreparedCommand]) -> Option<&ServerError> 
 }
 
 #[cfg(not(target_os = "ios"))]
-fn prepared_command_reads_stdin(command: &PreparedCommand) -> bool {
-    let Some(tail) = prepared_command_tail(command) else {
-        return false;
-    };
+fn prepared_command_reads_stdin(command: &PreparedCommand) -> Option<CommandStdinSink> {
+    let tail = prepared_command_tail(command)?;
     let canonical_name = command
         .canonical_name
         .as_deref()
         .unwrap_or_else(|| canonical_command(&tail.name));
-    match canonical_name {
-        "agent-send" => zz_daemon::agent_send_reads_stdin(&tail.args),
-        "send-text" => zz_daemon::send_text_reads_stdin(&tail.args),
-        "load-buffer" => zz_daemon::load_buffer_reads_stdin(&tail.args),
-        _ => false,
-    }
+    zz_daemon::command_stdin_sink(canonical_name, &tail.args)
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1544,13 +1536,8 @@ fn attach_prefix_uses_tui(command: &str) -> bool {
 }
 
 #[cfg(not(target_os = "ios"))]
-fn command_reads_stdin(invocation: &CommandInvocation) -> bool {
-    match canonical_command(&invocation.name) {
-        "agent-send" => zz_daemon::agent_send_reads_stdin(&invocation.args),
-        "send-text" => zz_daemon::send_text_reads_stdin(&invocation.args),
-        "load-buffer" => zz_daemon::load_buffer_reads_stdin(&invocation.args),
-        _ => false,
-    }
+fn command_reads_stdin(invocation: &CommandInvocation) -> Option<CommandStdinSink> {
+    zz_daemon::command_stdin_sink(canonical_command(&invocation.name), &invocation.args)
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -3174,29 +3161,17 @@ mod tests {
     #[test]
     fn agent_send_stdin_routing_uses_the_canonical_static_command() {
         for command in ["agent-send", "agent-s"] {
-            assert!(command_reads_stdin(&CommandInvocation::new(
-                command,
-                ["--submit"]
-            )));
-            assert!(!command_reads_stdin(&CommandInvocation::new(
-                command,
-                ["text"]
-            )));
+            assert!(command_reads_stdin(&CommandInvocation::new(command, ["--submit"])).is_some());
+            assert!(command_reads_stdin(&CommandInvocation::new(command, ["text"])).is_none());
         }
         for command in ["send-text", "send-t"] {
-            assert!(command_reads_stdin(&CommandInvocation::new(
-                command,
-                ["-t", "%1"]
-            )));
-            assert!(!command_reads_stdin(&CommandInvocation::new(
-                command,
-                ["hello"]
-            )));
+            assert!(command_reads_stdin(&CommandInvocation::new(command, ["-t", "%1"])).is_some());
+            assert!(command_reads_stdin(&CommandInvocation::new(command, ["hello"])).is_none());
         }
-        assert!(!command_reads_stdin(&CommandInvocation::new(
-            "list-sessions",
-            [] as [&str; 0]
-        )));
+        assert!(
+            command_reads_stdin(&CommandInvocation::new("list-sessions", [] as [&str; 0]))
+                .is_none()
+        );
     }
 
     #[test]
@@ -3204,14 +3179,17 @@ mod tests {
         let send = CommandInvocation::new("agent-send", ["--wait", "--on-block", "fail"]);
         let show = CommandInvocation::new("show-agent-permission", ["-t", "%1"]);
         let respond = CommandInvocation::new("agent-respond", ["-t", "%1", "--allow"]);
-        assert!(command_reads_stdin(&send));
-        assert!(!command_reads_stdin(&show));
-        assert!(!command_reads_stdin(&respond));
+        assert!(command_reads_stdin(&send).is_some());
+        assert!(command_reads_stdin(&show).is_none());
+        assert!(command_reads_stdin(&respond).is_none());
         zz_mux::validate_static_command_chain(&[send, show, respond]).expect("native preflight");
-        assert!(!command_reads_stdin(&CommandInvocation::new(
-            "agent-send",
-            ["--wait", "--on-block=fail", "hello"]
-        )));
+        assert!(
+            command_reads_stdin(&CommandInvocation::new(
+                "agent-send",
+                ["--wait", "--on-block=fail", "hello"]
+            ))
+            .is_none()
+        );
     }
 
     #[test]
@@ -3253,9 +3231,9 @@ mod tests {
         ));
 
         let live_send = prepared("pipe", "agent-send", true, &["-t", "%0"]);
-        assert!(prepared_command_reads_stdin(&live_send));
+        assert!(prepared_command_reads_stdin(&live_send).is_some());
         let shadowed_send = prepared("agent-send", "display-message", true, &["-p", "shadow"]);
-        assert!(!prepared_command_reads_stdin(&shadowed_send));
+        assert!(prepared_command_reads_stdin(&shadowed_send).is_none());
 
         let plain_kill = prepared("kill-server", "kill-server", false, &[]);
         let aliased_kill = prepared("kill-server", "kill-server", true, &[]);
@@ -3344,7 +3322,7 @@ mod tests {
         ] {
             let mut send_text =
                 prepared_alias("display-message -p before ; send-text", &["-t", "%1"]);
-            assert!(prepared_command_reads_stdin(&send_text));
+            assert!(prepared_command_reads_stdin(&send_text).is_some());
             append_prepared_command_stdin_payload(&mut send_text, payload.to_owned());
             let commands = MuxEngine::command_alias_group_commands(&send_text.invocation)
                 .expect("parse prepared alias group")
@@ -3356,7 +3334,7 @@ mod tests {
         }
 
         let mut bounded = prepared_alias("display-message -p before ; send-text -t %1 --", &[]);
-        assert!(prepared_command_reads_stdin(&bounded));
+        assert!(prepared_command_reads_stdin(&bounded).is_some());
         append_prepared_command_stdin_payload(&mut bounded, "piped".to_owned());
         let commands = MuxEngine::command_alias_group_commands(&bounded.invocation)
             .expect("parse prepared alias group")
@@ -3376,7 +3354,7 @@ mod tests {
             ),
         ] {
             let mut prepared = prepared_alias(body, &[]);
-            assert!(prepared_command_reads_stdin(&prepared));
+            assert!(prepared_command_reads_stdin(&prepared).is_some());
             append_prepared_command_stdin_payload(&mut prepared, payload.to_owned());
             let commands = MuxEngine::command_alias_group_commands(&prepared.invocation)
                 .expect("parse prepared alias group")
@@ -3385,10 +3363,10 @@ mod tests {
         }
 
         let agent_send = prepared_alias("display-message -p before ; agent-send --submit", &[]);
-        assert!(prepared_command_reads_stdin(&agent_send));
+        assert!(prepared_command_reads_stdin(&agent_send).is_some());
         let nonfinal_agent_send =
             prepared_alias("agent-send --submit ; display-message -p after", &[]);
-        assert!(!prepared_command_reads_stdin(&nonfinal_agent_send));
+        assert!(prepared_command_reads_stdin(&nonfinal_agent_send).is_none());
 
         let empty = prepared_alias("", &["agent-send", "--submit"]);
         assert!(!prepared_attach_uses_tui("route", &empty));
@@ -3396,7 +3374,7 @@ mod tests {
             &[CommandInvocation::new("route", [] as [&str; 0])],
             std::slice::from_ref(&empty)
         ));
-        assert!(!prepared_command_reads_stdin(&empty));
+        assert!(prepared_command_reads_stdin(&empty).is_none());
     }
 
     #[test]

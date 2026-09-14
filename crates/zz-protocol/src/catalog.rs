@@ -544,10 +544,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "[-MTZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]",
     ),
     ("select-pane", "[-DdeLlMmRUZ] [-T title] [-t target-pane]"),
-    (
-        "send-keys",
-        "[-FHKlMRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]",
-    ),
     ("show-messages", "[-JT] [-t target-client]"),
     (
         "split-window",
@@ -2050,7 +2046,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "send-keys",
         aliases: &["send"],
         description: "Send keys or a copy-mode command",
-        usage: "[-FHKlRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]",
+        usage: "[-FHKlMRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-N", FreeForm, "repeat count"),
@@ -2901,8 +2897,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 287), ("optional", 8), ("required", 220)])
         );
-        assert_eq!((supported, unsupported), (484, 31));
-        assert_eq!(usage_overrides.len(), 21);
+        assert_eq!((supported, unsupported), (485, 30));
+        assert_eq!(usage_overrides.len(), 20);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

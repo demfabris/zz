@@ -1219,8 +1219,8 @@ WHEEL_MODE=same
 WHEEL_REASON=""
 DRAG_MODE=same
 DRAG_REASON=""
-MULTI_CLICK_MODE=record
-MULTI_CLICK_REASON="input.rs sets click_count to 0 or 1 only, so no gesture ever becomes DoubleClick1Pane or TripleClick1Pane and zz-terminal's own multi-click path is unreachable from the raw TUI (keys.root-native-mouse)"
+MULTI_CLICK_MODE=same
+MULTI_CLICK_REASON=""
 BORDER_MODE=same
 BORDER_REASON=""
 STATUS_MODE=same
@@ -1401,6 +1401,18 @@ sc_one_sided_drag_end() {
   side_command zz bind-key -T copy-mode MouseDragEnd1Pane \
     send-keys -X copy-pipe-and-cancel >/dev/null 2>&1
 }
+# The pin's own `DoubleClick1Pane` unbound on zz only. The second press still
+# becomes a `SecondClick` on both sides and the timer still expires, so the
+# difference is only in what the expiring timer runs, and multi-click's double
+# check is the one that can carry it: the triple click that follows runs the
+# row that is still bound on both sides.
+sc_one_sided_double_click() {
+  side_command zz unbind-key -T root DoubleClick1Pane >/dev/null 2>&1
+  case_multi_click
+  side_command zz bind-key -T root DoubleClick1Pane \
+    'select-pane -t= ; if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" { send-keys -M } { copy-mode -H ; send-keys -X select-word ; run-shell -d 0.3 ; send-keys -X copy-pipe-and-cancel }' \
+    >/dev/null 2>&1
+}
 # The pin's own `MouseDown1Border` unbound on zz only, so zz's border click
 # runs nothing and the pane it had marked stays marked. This has to run before
 # the border-binding sabotage: that one's case rebinds `MouseDown1Border` and
@@ -1462,6 +1474,8 @@ run_self_check() {
     sc_one_sided_wheel_up_pane
   self_check_case "the copy table's MouseDragEnd1Pane unbound on zz only" catches \
     sc_one_sided_drag_end
+  self_check_case 'DoubleClick1Pane unbound on zz only' catches \
+    sc_one_sided_double_click
   self_check_case "zz's mouse-target click aimed into the other pane" catches \
     sc_one_sided_mouse_target
   self_check_case 'zz out of copy mode before the paste' catches \

@@ -406,6 +406,10 @@ pub enum CopyModeAction {
     /// The six `search-` entry points that carry a string: `search-forward`,
     /// `search-backward`, their `-text` and `-incremental` spellings.
     Search(Box<CopyModeSearch>),
+    /// `window_copy_move_mouse`: put the copy cursor on the cell an invoking
+    /// mouse event landed on and touch nothing else. Every `send -X` run from
+    /// a mouse binding that is not a wheel does this first.
+    MouseCursor(PointerCellEvent),
 }
 
 /// `window_copy_cmd_table`'s `clear` column, which `window_copy_command` reads
@@ -521,6 +525,7 @@ impl CopyModeAction {
             | Self::RefreshOff
             | Self::RefreshToggle
             | Self::RefreshRevision
+            | Self::MouseCursor(_)
             | Self::SearchCursorWord { .. } => CopyModeClear::Never,
             Self::CopySelection(copy) => {
                 if copy.clear_selection || copy.cancel {
@@ -644,6 +649,7 @@ impl CopyModeAction {
             | Self::RefreshOff
             | Self::RefreshToggle
             | Self::RefreshRevision
+            | Self::MouseCursor(_)
             | Self::GotoLine(_) => CopyModeCountPolicy::Once,
         }
     }

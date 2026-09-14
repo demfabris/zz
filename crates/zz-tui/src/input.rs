@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use zz_client::{ChromeAction, MenuKeyResult, MenuPointerKind, SIDEBAR_TABLE, resolve_menu_key};
 use zz_daemon::{
     Endpoint, InteractiveClient, configured_fleet_hosts, validate_fleet_host, write_fleet_host,
@@ -1162,13 +1164,15 @@ fn handle_mouse(
         }
         MouseRouteOwner::Workspace => {}
     }
-    if let Some(bound) =
-        bound_mouse_key(model, event, global_column, global_row, global_x, global_y)
-    {
-        client
-            .send_input(bound)
-            .map_err(|error| error.to_string())?;
-        return Ok(InputOutcome::None);
+    match bound_mouse_key(model, event, global_column, global_row, global_x, global_y) {
+        MouseKeyRoute::Send(bound) => {
+            client
+                .send_input(bound)
+                .map_err(|error| error.to_string())?;
+            return Ok(InputOutcome::None);
+        }
+        MouseKeyRoute::Consume => return Ok(InputOutcome::None),
+        MouseKeyRoute::Native => {}
     }
     let sidebar_focus_changed =
         model.sidebar.focused && matches!(event.kind, MouseEventKind::Down(MouseButton::Left));
@@ -1275,6 +1279,16 @@ fn handle_mouse(
 /// here and the daemon is asked to run the binding only when one exists; a
 /// name nothing is bound to leaves the client's own pointer handling alone,
 /// which is what the pin does with an unbound mouse key too.
+/// What the client does with a decoded pointer event: hand the daemon a key
+/// name it has a binding for, swallow a click-sequence name the pin gives no
+/// meaning of its own, or leave the event to the client's own pointer
+/// handling, which is where an unbound mouse key ends up on the pin too.
+enum MouseKeyRoute {
+    Send(InputMessage),
+    Consume,
+    Native,
+}
+
 fn bound_mouse_key(
     model: &mut Model,
     event: MouseEvent,
@@ -1282,19 +1296,35 @@ fn bound_mouse_key(
     global_row: u16,
     global_x: u32,
     global_y: u32,
-) -> Option<InputMessage> {
-    let latch =
-        latched_mouse_location(model, event, global_column, global_row, global_x, global_y)?;
-    let key = mouse_key_name(event, &latch.location, latch.dragging)?;
+) -> MouseKeyRoute {
+    let Some(latch) =
+        latched_mouse_location(model, event, global_column, global_row, global_x, global_y)
+    else {
+        return MouseKeyRoute::Native;
+    };
+    let Some(key) = mouse_key_name(event, &latch.location, latch.dragging) else {
+        return MouseKeyRoute::Native;
+    };
+    let key = advance_click_sequence(
+        model,
+        event,
+        &latch,
+        key,
+        (global_column, global_row, global_x, global_y),
+    );
     if !model.mouse_bindings.contains(&key) && !copy_mouse_key_is_reachable(model, &latch, &key) {
-        return None;
+        return if is_click_sequence_name(&key) {
+            MouseKeyRoute::Consume
+        } else {
+            MouseKeyRoute::Native
+        };
     }
     if matches!(event.kind, MouseEventKind::Drag(_))
         && let Some(latch) = model.mouse_drag.as_mut()
     {
         latch.bound = true;
     }
-    Some(InputMessage::MouseKey {
+    MouseKeyRoute::Send(InputMessage::MouseKey {
         key,
         pane: latch.pane,
         window: latch.window,
@@ -1327,6 +1357,108 @@ fn bound_mouse_key(
             )
         }),
     })
+}
+
+fn is_click_sequence_name(key: &str) -> bool {
+    let base = key.rsplit_once('-').map_or(key, |(_, base)| base);
+    base.starts_with("SecondClick")
+        || base.starts_with("DoubleClick")
+        || base.starts_with("TripleClick")
+}
+
+/// `KEYC_CLICK_TIMEOUT`.
+const CLICK_TIMEOUT: Duration = Duration::from_millis(300);
+
+/// `server_client_check_mouse`'s press sequence. A press starts one and arms
+/// `KEYC_CLICK_TIMEOUT`; a press inside it on the same button, location and
+/// pane is a `SecondClick` and then a `TripleClick`; a press that matches none
+/// of that resets the sequence and is an ordinary `MouseDown` again. Nothing
+/// but a press moves it, so the release between two clicks leaves it alone.
+fn advance_click_sequence(
+    model: &mut Model,
+    event: MouseEvent,
+    latch: &crate::state::MouseDragLatch,
+    key: String,
+    cell: (u16, u16, u32, u32),
+) -> String {
+    let MouseEventKind::Down(button) = event.kind else {
+        return key;
+    };
+    let now = Instant::now();
+    let index = mouse_button_index(button);
+    let carried = model.click.as_ref().filter(|sequence| {
+        sequence.deadline > now
+            && sequence.button == button
+            && sequence.location == latch.location
+            && sequence.pane == latch.pane
+    });
+    let (key, arm) = match carried {
+        Some(sequence) if sequence.triple => {
+            (format!("TripleClick{index}{}", latch.location), None)
+        }
+        Some(_) => (format!("SecondClick{index}{}", latch.location), Some(true)),
+        None => (key, Some(false)),
+    };
+    model.click = arm.map(|triple| crate::state::ClickSequence {
+        deadline: now + CLICK_TIMEOUT,
+        triple,
+        button,
+        location: latch.location.clone(),
+        pane: latch.pane,
+        window: latch.window,
+        event,
+        cell,
+    });
+    key
+}
+
+/// `server_client_click_timer`: the timer expiring while the sequence is still
+/// waiting for a third press means the two that did arrive were a double
+/// click, so the stored event is replayed under that name.
+pub(crate) fn expire_click_sequence(
+    model: &mut Model,
+    client: &InteractiveClient,
+) -> Result<(), String> {
+    let Some(sequence) = model.click.take() else {
+        return Ok(());
+    };
+    if !sequence.triple {
+        return Ok(());
+    }
+    let key = format!(
+        "DoubleClick{}{}",
+        mouse_button_index(sequence.button),
+        sequence.location
+    );
+    let latch = crate::state::MouseDragLatch {
+        button: sequence.button,
+        location: sequence.location.clone(),
+        pane: sequence.pane,
+        window: sequence.window,
+        border: None,
+        dragging: false,
+        bound: false,
+        press: sequence.cell,
+    };
+    if !model.mouse_bindings.contains(&key) && !copy_mouse_key_is_reachable(model, &latch, &key) {
+        return Ok(());
+    }
+    let (column, row, x, y) = sequence.cell;
+    let action = sequence
+        .pane
+        .and_then(|pane| bound_mouse_view_action(model, pane, sequence.event, column, row, x, y));
+    client
+        .send_input(InputMessage::MouseKey {
+            key,
+            pane: sequence.pane,
+            window: sequence.window,
+            column,
+            row,
+            border: None,
+            view_action: action.clone(),
+            press_action: action,
+        })
+        .map_err(|error| error.to_string())
 }
 
 /// The pane input the gesture would have carried on its own, handed over with

@@ -1,0 +1,633 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling cfg-if v1.0.4
+   Compiling quote v1.0.47
+   Compiling memchr v2.8.3
+   Compiling libc v0.2.189
+   Compiling equivalent v1.0.2
+   Compiling bitflags v2.13.2
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling serde_core v1.0.229
+   Compiling libm v0.2.16
+   Compiling num-traits v0.2.19
+   Compiling once_cell v1.21.4
+   Compiling pin-project-lite v0.2.17
+   Compiling indexmap v2.14.2
+   Compiling itoa v1.0.18
+   Compiling foldhash v0.2.0
+   Compiling rustix v1.1.4
+   Compiling futures-core v0.3.34
+   Compiling siphasher v1.0.3
+   Compiling hashbrown v0.17.1
+   Compiling regex-syntax v0.8.11
+   Compiling zmij v1.0.23
+   Compiling zerocopy-derive v0.8.57
+   Compiling parking v2.2.1
+   Compiling scopeguard v1.2.0
+   Compiling adler2 v2.0.1
+   Compiling aho-corasick v1.1.5
+   Compiling serde_derive v1.0.229
+   Compiling bytemuck_derive v1.12.1
+   Compiling thiserror-impl v2.0.20
+   Compiling bytemuck v1.25.2
+   Compiling zerocopy v0.8.57
+   Compiling serde v1.0.229
+   Compiling smallvec v1.16.1
+   Compiling futures-io v0.3.34
+   Compiling regex-automata v0.4.18
+   Compiling anyhow v1.0.104
+   Compiling lock_api v0.4.14
+   Compiling event-listener v5.4.2
+   Compiling tracing-core v0.1.36
+   Compiling slab v0.4.12
+   Compiling event-listener-strategy v0.5.4
+   Compiling erased-serde v0.4.10
+   Compiling thiserror v2.0.20
+   Compiling serde_fmt v1.1.0
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling simd-adler32 v0.3.10
+   Compiling value-bag-serde1 v1.14.1
+   Compiling tracing-attributes v0.1.31
+   Compiling phf_shared v0.13.1
+   Compiling value-bag v1.14.1
+   Compiling unicode-width v0.2.2
+   Compiling log v0.4.34
+   Compiling getrandom v0.4.3
+   Compiling async-channel v2.5.0
+   Compiling synstructure v0.13.2
+   Compiling phf_generator v0.13.1
+   Compiling futures-lite v2.6.1
+   Compiling num-integer v0.1.47
+   Compiling zerofrom-derive v0.1.7
+   Compiling regex v1.13.1
+   Compiling tracing v0.1.44
+   Compiling libloading v0.8.9
+   Compiling yoke-derive v0.8.2
+   Compiling async-task v4.7.1
+   Compiling crc32fast v1.5.2
+   Compiling num-bigint v0.4.8
+   Compiling miniz_oxide v0.9.1
+   Compiling flate2 v1.1.10
+   Compiling num-rational v0.4.2
+   Compiling serde_json v1.0.151
+   Compiling zerofrom v0.1.8
+   Compiling uuid v1.26.1
+   Compiling toml_edit v0.25.15+spec-1.1.0
+   Compiling zerovec-derive v0.11.6
+   Compiling yoke v0.8.3
+   Compiling enumflags2_derive v0.7.12
+   Compiling rustc-hash v2.1.3
+   Compiling proc-macro-crate v3.5.0
+   Compiling uncased v0.9.10
+   Compiling dlib v0.5.3
+   Compiling zerovec v0.11.8
+   Compiling zvariant_utils v4.2.0
+   Compiling half v2.7.1
+   Compiling num-complex v0.4.6
+   Compiling displaydoc v0.2.7
+   Compiling polling v3.11.0
+   Compiling phf_macros v0.13.1
+   Compiling parking_lot_core v0.9.12
+   Compiling profiling-procmacros v1.0.18
+   Compiling phf v0.13.1
+   Compiling parking_lot v0.12.5
+   Compiling miniz_oxide v0.8.9
+   Compiling profiling v1.0.18
+   Compiling equator-macro v0.4.2
+   Compiling downcast-rs v1.2.1
+   Compiling futures-sink v0.3.34
+   Compiling atomic-waker v1.1.2
+   Compiling piper v0.2.5
+   Compiling wayland-sys v0.31.11
+   Compiling zvariant_derive v5.15.0
+   Compiling async-io v2.6.0
+   Compiling tinystr v0.8.4
+   Compiling errno v0.3.14
+   Compiling signal-hook-registry v1.4.8
+   Compiling icu_locale_core v2.3.0
+   Compiling derive_more-impl v2.1.1
+   Compiling equator v0.4.2
+   Compiling aligned-vec v0.6.4
+   Compiling blocking v1.7.0
+   Compiling futures-channel v0.3.34
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling async-lock v3.4.2
+   Compiling futures-macro v0.3.34
+   Compiling hashbrown v0.16.1
+   Compiling futures-task v0.3.34
+   Compiling icu_collections v2.3.0
+   Compiling icu_provider v2.3.1
+   Compiling v_frame v0.3.9
+   Compiling async-signal v0.2.14
+   Compiling enumflags2 v0.7.12
+   Compiling fdeflate v0.3.7
+   Compiling zcheapstr v1.1.0
+   Compiling generic-array v0.14.7
+   Compiling zvariant v5.15.0
+   Compiling futures-util v0.3.34
+   Compiling async-process v2.5.0
+   Compiling arg_enum_proc_macro v0.3.4
+   Compiling thiserror-impl v1.0.69
+   Compiling pulp v0.22.3
+   Compiling derive_more v2.1.1
+   Compiling nom v8.0.0
+   Compiling no_std_io2 v0.9.4
+   Compiling av-scenechange v0.14.1
+   Compiling av1-grain v0.2.5
+   Compiling bitstream-io v4.10.0
+   Compiling thiserror v1.0.69
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling zbus_names v4.3.4
+   Compiling maybe-rayon v0.1.1
+   Compiling async-executor v1.14.0
+   Compiling getrandom v0.2.17
+   Compiling ppv-lite86 v0.2.21
+   Compiling rgb v0.8.53
+   Compiling ref-cast-impl v1.0.27
+   Compiling zeroize_derive v1.5.0
+   Compiling num-derive v0.4.2
+   Compiling serde_derive_internals v0.30.0
+   Compiling simd_helpers v0.1.0
+   Compiling raw-cpuid v11.6.0
+   Compiling iana-time-zone v0.1.65
+   Compiling byteorder-lite v0.1.0
+   Compiling rav1e v0.8.1
+   Compiling image-webp v0.2.4
+   Compiling schemars_derive v1.2.2
+   Compiling chrono v0.4.45
+   Compiling zeroize v1.9.0
+   Compiling ref-cast v1.0.27
+   Compiling idna_adapter v1.2.2
+   Compiling zune-inflate v0.2.54
+   Compiling dyn-clone v1.0.20
+   Compiling pxfm v0.1.30
+   Compiling exr v1.74.2
+   Compiling schemars v1.2.2
+   Compiling moxcms v0.8.1
+   Compiling tiff v0.11.3
+   Compiling naga-types v30.0.1
+   Compiling ravif v0.13.0
+   Compiling idna v1.1.0
+   Compiling png v0.18.1
+   Compiling naga v30.0.1
+   Compiling qoi v0.4.1
+   Compiling euclid v0.22.14
+   Compiling image v0.25.10
+   Compiling url v2.5.8
+   Compiling getrandom v0.3.4
+   Compiling strum_macros v0.28.0
+   Compiling codespan-reporting v0.13.1
+   Compiling core_maths v0.1.1
+   Compiling spirv v0.4.0+sdk-1.4.341.0
+   Compiling darling_core v0.24.1
+   Compiling wgpu-types v30.0.1
+   Compiling strum v0.28.0
+   Compiling rand_core v0.9.5
+   Compiling ash v0.38.0+1.3.281
+   Compiling crypto-common v0.1.7
+   Compiling zbus_macros v5.19.0
+   Compiling filedescriptor v0.8.3
+   Compiling futures-executor v0.3.34
+   Compiling wgpu-hal v30.0.1
+   Compiling async-broadcast v0.7.2
+   Compiling async-trait v0.1.92
+   Compiling serde_repr v0.1.21
+   Compiling async-recursion v1.1.1
+   Compiling ordered-stream v0.2.0
+   Compiling gpu-allocator v0.28.0
+   Compiling futures v0.3.34
+   Compiling darling_macro v0.24.1
+   Compiling wgpu-naga-bridge v30.0.1
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling khronos-egl v6.0.0
+   Compiling pin-project-internal v1.1.13
+   Compiling zbus v5.19.0
+   Compiling ordered-float v5.5.0
+   Compiling slotmap v1.1.1
+   Compiling quick-xml v0.41.0
+   Compiling shell-words v1.1.1
+   Compiling wayland-backend v0.3.17
+   Compiling pin-project v1.1.13
+   Compiling wayland-scanner v0.31.11
+   Compiling kurbo v0.13.1
+   Compiling darling v0.24.1
+   Compiling nix v0.28.0
+   Compiling int-enum v1.2.0
+   Compiling rand_chacha v0.9.0
+   Compiling multiversion-macros v0.9.0
+   Compiling wgpu-core v30.0.1
+   Compiling phf_codegen v0.13.1
+   Compiling tempfile v3.27.0
+   Compiling serial2 v0.2.38
+   Compiling base64 v0.23.1
+   Compiling portable-pty v0.9.0
+   Compiling rand v0.9.5
+   Compiling libghostty-vt v0.2.1 (https://github.com/uzaaft/libghostty-rs?rev=46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0#46a9d2ac)
+   Compiling serde_with_macros v3.23.0
+   Compiling svgtypes v0.16.1
+   Compiling wayland-client v0.31.15
+   Compiling multiversion v0.9.0
+   Compiling wgpu-core-deps-windows-linux-android v30.0.1
+   Compiling ttf-parser v0.25.1
+   Compiling ring v0.17.14
+   Compiling block-buffer v0.10.4
+   Compiling http v1.5.0
+   Compiling csscolorparser v0.8.4
+   Compiling wgpu v30.0.1
+   Compiling cobs v0.3.0
+   Compiling memmap2 v0.9.11
+   Compiling fixedbitset v0.5.7
+   Compiling futures-concurrency v7.7.1
+   Compiling encoding_rs v0.8.41
+   Compiling zz-terminal v0.8.0 (/home/demfabris/dev/zz-tui-menus-9/crates/zz-terminal)
+   Compiling dirs-next v2.0.0
+   Compiling postcard v1.1.3
+   Compiling serde_with v3.23.0
+   Compiling digest v0.10.7
+   Compiling rustls-webpki v0.103.15
+   Compiling lyon_geom v1.0.19
+   Compiling zbus_xml v5.2.1
+   Compiling gpui_util v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling enumn v0.1.14
+   Compiling serde_spanned v1.1.1
+   Compiling fs-err v3.3.1
+   Compiling pest v2.9.1
+   Compiling accesskit v0.24.1
+   Compiling toml v1.1.6+spec-1.1.0
+   Compiling rustls v0.23.44
+   Compiling tiny-skia-path v0.11.4
+   Compiling ureq-proto v0.6.2
+   Compiling collections v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling zbus-lockstep v0.5.2
+   Compiling lyon_path v1.0.19
+   Compiling zz-protocol v0.8.0 (/home/demfabris/dev/zz-tui-menus-9/crates/zz-protocol)
+   Compiling agent-client-protocol-schema v1.7.0
+   Compiling term v0.7.0
+   Compiling fontdb v0.23.0
+   Compiling xattr v1.6.1
+   Compiling block-padding v0.3.3
+   Compiling async-fs v2.2.0
+   Compiling clap_derive v4.6.4
+   Compiling console v0.16.6
+   Compiling tracing-log v0.2.0
+   Compiling filetime v0.2.29
+   Compiling phf_shared v0.11.3
+   Compiling bstr v1.13.1
+   Compiling thread_local v1.1.10
+   Compiling rustybuzz v0.20.1
+   Compiling compression-codecs v0.4.41
+   Compiling tracing-subscriber v0.3.23
+   Compiling petgraph v0.6.5
+   Compiling indicatif v0.18.6
+   Compiling png v0.17.16
+   Compiling string_cache v0.8.9
+   Compiling tar v0.4.46
+   Compiling clap v4.6.6
+   Compiling ureq v3.4.1
+   Compiling inout v0.1.4
+   Compiling ascii-canvas v3.0.0
+   Compiling zbus-lockstep-macros v0.5.2
+   Compiling zlog v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling embed-resource v3.0.11
+   Compiling object v0.37.3
+   Compiling pest_meta v2.9.1
+   Compiling wayland-protocols v0.32.13
+   Compiling selectors v0.37.0
+   Compiling async-net v2.0.0
+   Compiling ena v0.14.4
+   Compiling spin v0.9.9
+   Compiling lalrpop-util v0.20.2
+   Compiling safe_arch v0.7.4
+   Compiling font-types v0.11.3
+   Compiling font-types v0.12.5
+   Compiling cssparser-macros v0.6.1
+   Compiling matrixmultiply v0.3.11
+   Compiling wait-timeout v0.2.1
+   Compiling roxmltree v0.21.1
+   Compiling ztracing v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling logos-codegen v0.14.4
+   Compiling backtrace v0.3.76
+   Compiling rusty-fork v0.3.1
+   Compiling usvg v0.46.0
+   Compiling lalrpop v0.20.2
+   Compiling lyon_tessellation v1.0.22
+   Compiling cssparser v0.36.0
+   Compiling read-fonts v0.41.0
+   Compiling read-fonts v0.37.0
+   Compiling wide v0.7.33
+   Compiling flume v0.12.0
+   Compiling htmlize v1.1.0
+   Compiling proptest-macro v0.5.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling smol v2.0.2
+   Compiling pest_generator v2.9.1
+   Compiling gpui v0.2.2 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling atspi-common v0.13.0
+   Compiling download-cef v3.0.0
+   Compiling cipher v0.4.4
+   Compiling perf v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling tiny-skia v0.11.4
+   Compiling async-compression v0.4.46
+   Compiling lyon_algorithms v1.0.21
+   Compiling hmac v0.12.1
+   Compiling http-body v1.1.0
+   Compiling serde_urlencoded v0.7.1
+   Compiling rand_core v0.6.4
+   Compiling rand_xorshift v0.4.0
+   Compiling num-iter v0.1.46
+   Compiling derive_refineable v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling approx v0.5.1
+   Compiling palette_derive v0.7.7
+   Compiling refineable v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling postage v0.5.0
+   Compiling dirs-sys v0.5.0
+   Compiling scheduler v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling etagere v0.2.15
+   Compiling proptest v1.10.0 (https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#3dca198a)
+   Compiling cef-dll-sys v152.2.0+152.0.6
+   Compiling simba v0.9.1
+   Compiling rand_chacha v0.3.1
+   Compiling http_client v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling lyon v1.0.19
+   Compiling resvg v0.46.0
+   Compiling util_macros v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling merman-core v0.6.2
+   Compiling pest_derive v2.9.1
+   Compiling sum_tree v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling skrifa v0.44.0
+   Compiling logos-derive v0.14.4
+   Compiling gpui_shared_string v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling zz-client v0.8.0 (/home/demfabris/dev/zz-tui-menus-9/crates/zz-client)
+   Compiling taffy v0.13.0
+   Compiling const-random-macro v0.1.16
+   Compiling rustls-pki-types v1.15.1
+   Compiling hdrhistogram v7.6.0
+   Compiling gpui_macros v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling spin v0.10.1
+   Compiling gethostname v1.1.0
+   Compiling ahash v0.8.12
+   Compiling num_cpus v1.17.0
+   Compiling palette v0.7.7
+   Compiling swash v0.2.10
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling x11rb v0.13.2
+   Compiling const-random v0.1.18
+   Compiling sha2 v0.11.0
+   Compiling logos v0.14.4
+   Compiling json5 v0.4.1
+   Compiling nalgebra v0.34.2
+   Compiling rand v0.8.8
+   Compiling nix v0.31.3
+   Compiling lol_html v2.9.0
+   Compiling dirs v6.0.0
+   Compiling num-bigint-dig v0.9.1
+   Compiling aes v0.8.4
+   Compiling sha2 v0.10.9
+   Compiling num v0.4.3
+   Compiling pbkdf2 v0.12.2
+   Compiling hkdf v0.12.4
+   Compiling cbc v0.1.2
+   Compiling atspi-proxies v0.13.0
+   Compiling yeslogic-fontconfig-sys v6.0.1
+   Compiling freetype-sys v0.20.1
+   Compiling skrifa v0.40.0
+   Compiling harfrust v0.5.2
+   Compiling ashpd v0.13.13
+   Compiling globset v0.4.20
+   Compiling accesskit_consumer v0.38.0
+   Compiling md-5 v0.10.6
+   Compiling dugong-graphlib v0.6.2
+   Compiling getopts v0.2.24
+   Compiling agent-client-protocol-derive v2.1.0
+   Compiling is-docker v0.2.0
+   Compiling glob v0.3.4
+   Compiling cosmic-text v0.19.0
+   Compiling agent-client-protocol v2.1.0
+   Compiling interprocess v2.4.4
+   Compiling pulldown-cmark v0.12.2
+   Compiling zed-font-kit v0.14.1-zed (https://github.com/zed-industries/font-kit?rev=94b0f28166665e8fd2f53ff6d268a14955c82269#94b0f281)
+   Compiling zz-mux v0.8.0 (/home/demfabris/dev/zz-tui-menus-9/crates/zz-mux)
+   Compiling cargo_metadata v0.23.1
+   Compiling is-wsl v0.4.0
+   Compiling dugong v0.6.2
+   Compiling oo7 v0.6.0
+   Compiling accesskit_atspi_common v0.19.1
+   Compiling rust-embed-utils v8.12.0
+   Compiling atspi v0.29.0
+   Compiling manatee v0.6.2
+   Compiling roughr-merman v0.12.3
+   Compiling xim-parser v0.2.1 (https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c)
+   Compiling xim-ctext v0.3.0 (https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c)
+   Compiling calloop v0.14.4
+   Compiling tree-sitter v0.26.13
+   Compiling sysinfo v0.39.6
+   Compiling xkbcommon v0.8.0
+   Compiling zed-xim v0.4.0-zed (https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#16f35a2c)
+   Compiling zz-daemon v0.8.0 (/home/demfabris/dev/zz-tui-menus-9/crates/zz-daemon)
+   Compiling calloop-wayland-source v0.4.1
+   Compiling rust-embed-impl v8.12.0
+   Compiling merman-render v0.6.2
+   Compiling cef v152.2.0+152.0.6
+   Compiling accesskit_unix v0.22.1
+   Compiling open v5.4.4
+   Compiling gpui_wgpu v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling inotify-sys v0.1.8
+   Compiling x11-clipboard v0.9.3
+   Compiling webpki-roots v1.0.9
+   Compiling wayland-cursor v0.31.14
+   Compiling wayland-protocols-plasma v0.3.12
+   Compiling wayland-protocols-wlr v0.3.12
+   Compiling notify-rust v4.18.0
+   Compiling zz-browser v0.8.0 (/home/demfabris/dev/zz-tui-menus-9/crates/zz-browser)
+   Compiling markdown v1.0.0
+   Compiling rusqlite v0.40.2
+   Compiling gpui_linux v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling rust-embed v8.12.0
+   Compiling inotify v0.11.5
+   Compiling merman v0.6.2
+   Compiling sha1 v0.11.0
+   Compiling env_filter v2.0.0
+   Compiling task-local v0.1.1
+   Compiling mio v1.2.3
+   Compiling notify-types v2.1.0
+   Compiling zz v0.8.0 (/home/demfabris/dev/zz-tui-menus-9/crates/zz)
+   Compiling zz-ui v0.8.0 (/home/demfabris/dev/zz-tui-menus-9/crates/zz-ui)
+   Compiling ksni v0.3.6
+   Compiling notify v8.2.0
+   Compiling env_logger v0.11.11
+   Compiling zz-chrome-import v0.8.0 (/home/demfabris/dev/zz-tui-menus-9/crates/zz-chrome-import)
+   Compiling gpui_platform v0.1.0 (https://github.com/demfabris/zed?rev=0a2dd78d9a0831a5f0383e5f0fc5f4b0425be7d0#0a2dd78d)
+   Compiling zz-config v0.8.0 (/home/demfabris/dev/zz-tui-menus-9/crates/zz-config)
+   Compiling zz-tui v0.8.0 (/home/demfabris/dev/zz-tui-menus-9/crates/zz-tui)
+   Compiling ignore v0.4.33
+   Compiling nucleo-matcher v0.3.1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8m 51s
+     Running tests/cli_binary.rs (target/debug/deps/cli_binary-945d0b5cefb341e3)
+
+running 125 tests
+test daemon_autostart::arbitrary_startup_alias_cannot_trigger_cold_autostart ... ok
+test daemon_autostart::agent_send_prefix_reads_stdin_before_dispatch ... ok
+test daemon_autostart::arbitrary_attach_alias_uses_the_tui_path ... ok
+test daemon_autostart::attach_prefix_defers_live_user_aliases_to_the_daemon ... ok
+test daemon_autostart::attach_restart_daemon_survives_missing_preflight_daemon ... ok
+test daemon_autostart::canonical_attach_startup_alias_shadow_is_prepared_after_config ... ok
+test daemon_autostart::canonical_startup_alias_shadow_is_prepared_after_config ... ok
+test daemon_autostart::attached_tui_renders_daemon_authored_styled_status_labels ... ok
+test daemon_autostart::chain_error_after_attachment_is_rendered_inside_the_tui ... ok
+test daemon_autostart::attaching_new_session_inside_a_later_alias_enters_the_alternate_screen ... ok
+test daemon_autostart::cli_prepare_freezes_aliases_for_the_whole_command_chain ... ok
+test daemon_autostart::cold_cli_parse_errors_do_not_start_or_mutate_a_daemon ... ok
+test daemon_autostart::cold_autospawn_uses_the_launching_client_cwd_for_startup_sources ... ok
+test daemon_autostart::cold_cli_valid_builtin_alias_chain_still_starts_and_executes ... ok
+test daemon_autostart::control_mode::attached_control_executes_stdin_until_empty_line ... ok
+test daemon_autostart::control_mode::bare_control_defaults_to_attached_new_session ... ok
+test daemon_autostart::control_mode::config_file_bytes_load_like_the_pinned_signed_buffer ... ok
+test daemon_autostart::control_mode::control_alias_groups_inherit_flags_and_continue_after_shell_status ... ok
+test daemon_autostart::cargo_launcher_pair_routes_bare_new_and_attach_across_empty_and_existing_daemons ... ok
+test daemon_autostart::control_mode::control_attached_eof_releases_the_queue_at_the_first_parked_command ... ok
+test daemon_autostart::control_mode::control_background_inserted_commands_use_flags_zero_after_later_input ... ok
+test daemon_autostart::control_mode::control_chains_frame_each_command_and_abort_only_the_failing_line ... ok
+test daemon_autostart::control_mode::control_background_malformed_lists_and_shell_jobs_stay_unframed ... ok
+test daemon_autostart::control_mode::control_command_error_uses_the_inner_server_message ... ok
+test daemon_autostart::control_mode::control_config_error_keeps_the_source_line_and_inner_message ... ok
+test daemon_autostart::control_mode::control_command_hook_frames_are_inserted_and_retain_failure_status ... ok
+test daemon_autostart::control_mode::control_config_file_bytes_keep_the_pinned_hidden_item_numbering ... ok
+test daemon_autostart::control_mode::control_disconnect_cancels_background_inserted_side_effects ... ok
+test daemon_autostart::control_mode::control_first_sourced_construction_failure_uses_config_error ... ok
+test daemon_autostart::control_mode::control_foreground_run_shell_closes_before_raw_output_and_continues ... ok
+test daemon_autostart::control_mode::control_eof_drops_a_parked_wrappers_later_failure_and_detach_eof_is_zero ... ok
+test daemon_autostart::control_mode::control_if_shell_config_file_bytes_continue_the_root_file ... ok
+test daemon_autostart::control_mode::control_detach_aliases_follow_the_authoritative_self_victim ... ok
+test daemon_autostart::control_mode::control_hook_source_diagnostics_keep_trigger_frames_and_status ... ok
+test daemon_autostart::control_mode::control_immediate_eof_keeps_a_direct_source_failure_status ... ok
+test daemon_autostart::control_mode::control_kill_server_closes_its_block_before_exit ... ok
+test daemon_autostart::control_mode::control_initial_command_uses_a_live_daemon_alias ... ok
+test daemon_autostart::control_mode::control_list_commands_autostarts_and_frames_the_initial_command ... ok
+test daemon_autostart::control_mode::control_ls_with_a_daemon_frames_session_output ... ok
+test daemon_autostart::control_mode::control_nested_source_depth_limit_uses_sourced_command_guards ... ok
+test daemon_autostart::control_mode::control_parse_and_generic_nonzero_results_do_not_set_retval ... ok
+test daemon_autostart::control_mode::control_read_only_connect_failure_has_no_framing_or_exit ... ok
+test daemon_autostart::control_mode::control_replayed_runtime_errors_use_bare_error_blocks_and_continue ... ok
+test daemon_autostart::control_mode::control_notifications_layout_and_output_follow_the_live_socket_stream ... ok
+test daemon_autostart::control_mode::control_server_stop_preserves_the_completed_return_code ... ok
+test daemon_autostart::control_mode::control_source_diagnostics_keep_tmux_chain_semantics ... ok
+test daemon_autostart::control_mode::control_source_read_error_follows_the_parent_guard_and_sets_retval ... ok
+test daemon_autostart::control_mode::control_nonself_detach_stays_attached_and_preserves_queued_return ... ok
+test daemon_autostart::control_mode::control_sourced_run_shell_closes_before_raw_output_and_same_line_continues ... ok
+test daemon_autostart::control_mode::control_stdin_parse_error_is_framed_and_the_loop_continues ... ok
+test daemon_autostart::control_mode::control_sourced_success_quiet_and_partial_guards_keep_fifo_status ... ok
+test daemon_autostart::control_mode::control_stdin_preflight_errors_abort_the_whole_line ... ok
+test daemon_autostart::control_mode::control_stdin_prepares_each_complete_alias_chain_once ... ok
+test daemon_autostart::control_mode::control_unknown_initial_command_is_bare_after_connect ... ok
+test daemon_autostart::control_mode::detached_control_new_session_exits_without_reading_stdin ... ok
+test daemon_autostart::control_mode::double_control_wraps_stdout_in_dcs_and_st ... ok
+test daemon_autostart::control_mode::foreground_callback_error_prevents_later_shutdown_without_losing_guards ... ok
+test daemon_autostart::control_mode::draining_alias_shutdown_tears_down_panes_and_rejects_late_commands_cleanly ... ok
+test daemon_autostart::control_mode::held_control_detached_shutdown_drains_callback_guards_before_exit ... ok
+test daemon_autostart::control_mode::pause_after_emits_extended_output_then_pauses_a_slow_control_client ... ok
+test daemon_autostart::control_mode::refresh_client_c_sizes_a_control_target_for_menu_gating ... ok
+test daemon_autostart::control_mode::refresh_client_b_reports_initial_change_and_exact_removal ... ok
+test daemon_autostart::control_mode::shutdown_hook_source_yields_locally_without_replaying_the_after_hook ... ok
+test daemon_autostart::control_mode::startup_config_bytes_keep_the_pinned_file_command_name ... ok
+test daemon_autostart::control_mode::refresh_client_pane_states_gate_the_live_control_stream ... ok
+test daemon_autostart::control_mode::wait_exit_holds_the_control_process_until_a_second_blank_line ... ok
+test daemon_autostart::detached_new_session_accepts_dash_dimensions ... ok
+test daemon_autostart::detached_new_session_still_autostarts_the_daemon ... ok
+test daemon_autostart::duplicate_new_session_error_is_exact_and_precedes_the_terminal_check ... ok
+test daemon_autostart::detached_new_session_prints_default_and_custom_formats ... ok
+test daemon_autostart::event_hooks_are_clientless_and_command_hooks_retain_the_command_client ... ok
+test daemon_autostart::exact_attach_aliases_bypass_the_native_attach_wrapper ... ok
+test daemon_autostart::exact_native_attach_executes_a_valid_command_chain_tail_after_a_positional_session ... ok
+test daemon_autostart::explicit_attach_can_fall_back_to_new_session ... ok
+test daemon_autostart::failed_preflight_handshake_still_runs_the_cold_static_gate ... ok
+test daemon_autostart::explicit_targetless_attach_autostarts_then_reports_no_sessions ... ok
+test daemon_autostart::failing_kill_server_alias_does_not_enter_recovery ... ok
+test daemon_autostart::has_session_on_a_fresh_socket_leaves_no_daemon ... ok
+test daemon_autostart::gui_style_default_attach_uses_its_working_directory_with_an_empty_daemon ... ok
+test daemon_autostart::headless_attaching_new_session_fails_without_creating_the_session ... ok
+test daemon_autostart::headless_attach_resolves_the_target_before_rejecting_the_terminal ... ok
+test daemon_autostart::invalid_startup_alias_shadows_abort_before_cold_effects ... ok
+test daemon_autostart::headless_dash_a_ignores_detach_for_existing_but_not_new_sessions ... ok
+test daemon_autostart::live_agent_send_aliases_control_stdin_capture ... ok
+test daemon_autostart::ls_or_new_session_idiom_starts_one_fresh_daemon ... ok
+test daemon_autostart::native_attach_accepts_targets_and_stops_options_at_positional_sessions ... ok
+test daemon_autostart::mouse_option_gates_the_outer_terminal_mouse_modes ... ok
+test daemon_autostart::native_attach_flag_errors_match_tmux_for_both_spellings ... ok
+test daemon_autostart::native_attach_rejects_unsupported_x_like_the_engine ... ok
+test daemon_autostart::native_attach_e_preserves_the_session_environment ... ok
+test daemon_autostart::new_session_immediately_after_kill_server_starts_a_fresh_daemon ... ok
+test daemon_autostart::no_start_server_suppresses_new_session_autostart ... ok
+test daemon_autostart::non_start_server_commands_do_not_spawn_a_daemon ... ok
+test daemon_autostart::option_value_errors_match_pinned_tmux_stderr ... ok
+test daemon_autostart::prepared_cli_chain_rejects_later_alias_parse_errors_before_effects ... ok
+test daemon_autostart::prepared_cli_chain_rejects_later_unaliased_argument_errors_before_effects ... ok
+test daemon_autostart::prepared_kill_server_stops_the_daemon_without_recovery ... ok
+test daemon_autostart::raw_kill_server_flag_ignores_the_live_alias_table ... ok
+test daemon_autostart::read_only_attach_renders_but_typed_keys_never_reach_the_pane ... ok
+test daemon_autostart::read_only_command_without_a_daemon_uses_the_pin_connect_error ... ok
+test daemon_autostart::nested_attach_inside_a_pane_prints_the_pinned_refusal ... FAILED
+test daemon_autostart::reload_config_of_the_default_config_stays_silent_and_resets_keys ... ok
+test daemon_autostart::slash_label_never_creates_intermediate_directories ... ok
+test daemon_autostart::runtime_config_commands_keep_the_command_client_terminal_state ... ok
+test daemon_autostart::source_file_diagnoses_a_malformed_refused_invocation_instead_of_the_depth_limit ... ok
+test daemon_autostart::source_file_allows_fifty_invocations_and_refuses_the_fifty_first ... ok
+test daemon_autostart::control_mode::control_return_and_explicit_detach_follow_the_full_retval_matrix ... ok
+test daemon_autostart::source_file_diagnostics_split_stdout_stderr_and_the_exit_code ... ok
+test daemon_autostart::source_file_replayed_runtime_errors_are_bare_and_propagate_outward ... ok
+test daemon_autostart::source_file_treats_the_default_config_as_an_ordinary_ordered_path ... ok
+test daemon_autostart::source_file_replayed_output_batches_top_level_paths ... ok
+test daemon_autostart::startup_config_reenters_through_the_private_tmux_shim ... ok
+test daemon_autostart::source_file_resolves_relative_paths_from_the_command_client_cwd ... ok
+test daemon_autostart::startup_config_shares_a_fifty_source_command_budget ... ok
+test daemon_autostart::status_position_top_puts_the_status_block_at_row_zero ... ok
+test daemon_autostart::startup_config_new_session_is_forced_detached ... ok
+test daemon_autostart::stock_eighty_column_attach_draws_the_whole_status_row ... ok
+test daemon_autostart::switch_client_from_a_plain_shell_reports_the_pinned_client_errors ... ok
+test daemon_autostart::styled_multi_row_status_renders_two_rows_without_literal_markers ... ok
+test daemon_autostart::tty_new_session_error_is_bare_and_does_not_start_the_browser ... ok
+test tmux_version_is_exact ... ok
+test tmux_without_a_zz_socket_fails_before_dialing_a_foreign_server ... ok
+test unknown_tmux_flag_uses_tmux_usage_shape ... ok
+test daemon_autostart::target_and_unknown_command_errors_match_pinned_tmux_stderr ... ok
+test daemon_autostart::tui_handoff_executes_the_prepared_alias_snapshot ... ok
+
+failures:
+
+---- daemon_autostart::nested_attach_inside_a_pane_prints_the_pinned_refusal stdout ----
+
+thread 'daemon_autostart::nested_attach_inside_a_pane_prints_the_pinned_refusal' (2817107) panicked at crates/zz/tests/cli_binary.rs:3685:13:
+nested refusal did not appear; pane content: 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[]
+demfabris@ubuntu:/home/demfabris/dev/zz-tui-menus-9/crates/zz$
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    daemon_autostart::nested_attach_inside_a_pane_prints_the_pinned_refusal
+
+test result: FAILED. 124 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 67.72s
+
+error: test failed, to rerun pass `-p zz --test cli_binary`

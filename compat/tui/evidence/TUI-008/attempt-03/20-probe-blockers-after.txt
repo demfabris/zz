@@ -1,0 +1,11 @@
+# The same probe at the fix (e2a613dd)
+#
+# Same driver, same gestures, same three-second read. Both blockers are gone:
+# the drag's release reaches the pane and the two clicks reach it in the
+# order they happened.
+
+PROBE mouse_any_flag tmux: 1 zz: 1
+PROBE drag tmux: ^[[<0;2;3M^[[<32;8;3M^[[<0;8;3m|L0:win*|
+PROBE drag zz:   ^[[<0;2;3M^[[<32;8;3M^[[<0;8;3m|L0:win*|
+PROBE double tmux: ^[[<0;5;3M^[[<0;5;3m^[[<0;5;3M^[[<0;5;3m|L0:win*|
+PROBE double zz:   ^[[<0;5;3M^[[<0;5;3m^[[<0;5;3M^[[<0;5;3m|L0:win*|

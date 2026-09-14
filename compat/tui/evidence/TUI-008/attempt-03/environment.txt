@@ -46,3 +46,30 @@ re-run at the rebased tip, all three clean:
   compat/tui-mouse.sh --self-check every sabotage caught in its own channel
                                    (18-tui-mouse-self-check-after-rebase.txt)
   compat/attached-client.sh        PASS (17-attached-client-after-rebase.txt)
+
+# The cycle-9 fix pass, ubuntu box, 2026-09-14
+
+date: 2026-09-14T18:14:38-03:00
+host: ubuntu
+Linux ubuntu 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 26.04.1 LTS"
+NAME="Ubuntu"
+
+repo: /home/demfabris/dev/zz-tui-mouse (worktree of /home/demfabris/dev/zz)
+branch: campaign/tui-mouse
+review tip taken over: 142139fd
+tip at every run below: 8bef1252c4cfc8c96e021aed010b52af247e5ef2
+base: origin/main 45481a72b9ef300365eec484a0c293552dd8acfe
+worktree: 17 modified paths at the time of this file
+
+zz: /home/demfabris/dev/zz-tui-mouse/target/debug/zz
+tmux 3.8-zz
+sha256: e3effb407ae64734a6b7b5746c3b292ce5c3a9a3c2ad1f0684c6758208053b4a
+
+pin: /home/demfabris/dev/zz/compat/.cache/tmux-src/tmux
+tmux next-3.8
+pin commit: d77c9dc6
+
+toolchain: cargo 1.97.0 (c980f4866 2026-06-30), rustc 1.97.0 (2d8144b78 2026-07-07)
+locale: LANG=en_US.UTF-8
+python: Python 3.14.4

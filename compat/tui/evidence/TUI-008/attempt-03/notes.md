@@ -133,3 +133,131 @@ Under emacs `mode-keys`, a BACKWARD word selection ends on the word's last cell
 and zz's exclusive emacs end drops it: the pin copies `beta` where zz would copy
 `bet`. No fixture or corpus row drives it and it is not on this batch's punch
 list, so it is named here rather than fixed or recorded as a case.
+
+# The cycle-9 fix pass, ubuntu box, 2026-09-14
+
+The adversarial review of `142139fd` came back REJECT with two blockers, one
+wire blocker and one honesty must-fix. A fresh agent took the branch over on
+the ubuntu box and committed on top; nothing above this line was rebased,
+amended or reordered. `environment.txt` carries this box's block at its end;
+every file numbered 19 and above is a real run at `8bef1252`, the tip of the
+two fix commits, and the ledger commit that follows them touches only
+`compat/tui/` and the two generated reports.
+
+## Files this pass added
+
+- `19-probe-blockers-before.txt`, `20-probe-blockers-after.txt` — the two
+  gestures the review names, driven at `142139fd` and at the fix. The probe is
+  this fixture's own driver with `run_cases` replaced.
+- `21-wire-version.txt` — `compat/wire-version.py`, read out of `origin/main`
+  because this branch's base predates it, exit 0.
+- `22`, `23`, `24-tui-mouse-run-*.txt` — three runs, byte-identical at md5
+  `76e3cc87`, each `35 asserted checks, 3 recorded checks` and `all 35
+  asserted checks identical`, where `142139fd` left 33 and 3.
+- `25-tui-mouse-self-check.txt` — three quiet controls and NINETEEN one-sided
+  sabotages, each caught in its own channel; two are new this pass.
+- `26`, `27-tui-stock-keys*.txt` — 50 cases agree, 8 recorded elsewhere; every
+  sabotage caught. See "the eighth recorded row" below.
+- `28-tui-copy-mode.txt` — 147 cases, 0 recorded.
+- `29-tui-caps.txt` — 366 asserted rows, 0 recorded.
+- `30-attached-client.txt` — `attached-client compatibility: PASS`.
+- `31-corpus-delta-non-smoke.txt` — the 21 non-smoke rows of the delta
+  selection, every channel clean on every row.
+- `32-cargo-clippy.txt`, `33-cargo-test.txt`, `34-compat-check.txt`.
+
+## What the two blockers were, and the one fix
+
+Both are the same hole. `server_client_handle_key` ends an unmatched mouse key
+at `forward_key`, where `window_pane_key` re-encodes the event for the pane
+and `input_key_mouse` writes it while that pane has a mouse mode armed. The
+daemon consumed it instead.
+
+1. A drag lost its release. With a pane on `\033[?1002h\033[?1006h`, the pin's
+   pane printed `\e[<0;2;3M`, `\e[<32;8;3M`, `\e[<0;8;3m` and the tip's printed
+   the first two. `MouseDown1Pane` and `MouseDrag1Pane` are stock root rows
+   that run `send -M` while the pane tracks; the release is
+   `MouseDragEnd1Pane`, which `key-bindings.c` installs in the two copy tables
+   and in no root table, so root is the first and only table tried and the pin
+   forwards it.
+2. A double click reported out of order. The pin gave press, release, press,
+   release; the tip gave press, release, release, press. `SecondClick1Pane` is
+   bound nowhere in root either, so the pin's second press reaches the pane the
+   moment it arrives, where the client was swallowing it and the 300 ms click
+   timer delivered it behind its own release, through `DoubleClick1Pane`'s
+   `send -M`.
+
+The fix, in three hunks:
+
+- `crates/zz-daemon/src/daemon.rs` `input_mouse_key` forwards
+  `mouse.view_action` to the pane when no binding matched AND root was the
+  first table tried — `mode_table` empty and the client's active table root —
+  which is the pin's `first != table` guard. It forwards only a
+  `TerminalViewAction::Mouse`, because `input_key_mouse` writes only while
+  `ALL_MOUSE_MODES` is set and what the client encoded for its own pointer
+  handling is not a report.
+- `crates/zz-tui/src/input.rs` drops `MouseKeyRoute::Consume`: a click-sequence
+  name with no binding now goes to the daemon like any other, and the daemon
+  decides.
+- `crates/zz-mux/src/command.rs` `send-keys -M` writes nothing when the
+  invoking key is a `DoubleClick` name. That is `m->ignore`, which
+  `server_client_check_mouse` sets on the replayed event and on nothing else
+  (`server-client.c:838,908`, `input-keys.c:805`), and it is why the pin's
+  pane sees four reports and not five. `window_copy_command`'s own cursor move
+  reads `m` regardless of `ignore` (`window-copy.c:3725`), so the copy-mode
+  half of the same binding is untouched and `multi-click` stays green.
+
+## The two new cases and their sabotages
+
+`app-mouse-drag` and `app-mouse-double-click` drive exactly those gestures with
+`\033[?1002h\033[?1006h` armed on both sides and compare the reports the pane's
+own program printed, read off the one row it prints them on. The double-click
+case waits for the pin's report count to HOLD for twelve consecutive polls,
+which is longer than `KEYC_CLICK_TIMEOUT`, so the reading is taken after the
+replay has or has not happened rather than racing it.
+
+Each has a one-sided sabotage that binds the name the pin leaves unbound, in
+zz's root table only, to a silent `set-option`:
+
+- `MouseDragEnd1Pane` bound on zz: `tmux: ^[[<0;2;3M^[[<32;8;3M^[[<0;8;3m`
+  against `zz: ^[[<0;2;3M^[[<32;8;3M`.
+- `SecondClick1Pane` bound on zz:
+  `tmux: ^[[<0;5;3M^[[<0;5;3m^[[<0;5;3M^[[<0;5;3m` against
+  `zz: ^[[<0;5;3M^[[<0;5;3m^[[<0;5;3m`.
+
+Both name exactly the event the fix restored. The two cases read one screen row
+rather than the four `program_output` reads, because a message an earlier
+sabotage left on the row below would otherwise ride along in a channel that is
+about the reports.
+
+## The wire
+
+`compat/wire-version.py` on `origin/main` found it: the branch appended
+`view_action` and `press_action` to `InputMessage::MouseKey` while
+`PROTOCOL_VERSION` stayed at 102, and 102 shipped in zz 0.9.0 and 0.9.1. The
+number is 103 now, the two appends moved out of the v102 entry of
+`knowledge/protocol/wire-protocol.md` into a v103 one, and THREE assertions
+moved with it, not two: `crates/zz-protocol/src/message.rs`,
+`crates/zz-protocol/tests/hunt_claims.rs` line 18 (whose test name carried the
+number and was renamed) and the byte-for-byte hello frame in the same file,
+which carries the version twice as `0x66` and now carries it as `0x67`.
+
+## The eighth recorded row in tui-stock-keys
+
+`application-reader` recorded this pass where attempt-03 had it `ok`, with the
+fixture's own reason: zz reports `#{pane_current_command}` a beat later than
+the pin when a pane's child starts. It is a recorded channel, so the run still
+exits 0, and nothing in this pass's diff touches `pane_current_command`: the
+three hunks are the daemon's mouse-key fallthrough, the client's mouse-key
+route and `send-keys -M`. It is this box under four agents, not a regression.
+
+## Coverage this pass did not reach
+
+The delta selection for `send-keys`, `copy-mode` and `list-keys` is 167
+scenarios, 146 of them the smoke set that comes in whole with any delta. The 21
+non-smoke rows are in `31-corpus-delta-non-smoke.txt`, every channel clean. The
+smoke set was run by attempt-03 at the pre-fix tip and is named in
+`10-corpus-delta.txt`; this pass's three hunks cannot reach a corpus row at all,
+because every one of them is on a path a decoded POINTER opens — `input_mouse_key`
+runs only for `InputMessage::MouseKey`, which only a client with a pointer
+sends, and the `send-keys -M` gate needs an invoking key named `DoubleClick`,
+which only the click timer produces.

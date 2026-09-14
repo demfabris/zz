@@ -1,0 +1,17 @@
+# The two blockers at 142139fd, the tip the review rejected
+#
+# compat/tui/evidence/TUI-008/attempt-03/notes.md names this file. The probe
+# is compat/tui-mouse.sh's own driver with run_cases replaced by three
+# measurements: it starts both binaries attached inside one outer pinned
+# tmux, arms a pane with \033[?1002h\033[?1006h on both sides, drives the two
+# gestures the review names and reads the reports off each pane's own
+# decoded screen after three seconds, which is well past the pin's 300 ms
+# KEYC_CLICK_TIMEOUT.
+#
+# zz built at 142139fd, tmux the pin d77c9dc6.
+
+PROBE mouse_any_flag tmux: 1 zz: 1
+PROBE drag tmux: ^[[<0;2;3M^[[<32;8;3M^[[<0;8;3m|L0:win*|
+PROBE drag zz:   ^[[<0;2;3M^[[<32;8;3M|L0:win*|
+PROBE double tmux: ^[[<0;5;3M^[[<0;5;3m^[[<0;5;3M^[[<0;5;3m|L0:win*|
+PROBE double zz:   ^[[<0;5;3M^[[<0;5;3m^[[<0;5;3m^[[<0;5;3M|L0:win*|

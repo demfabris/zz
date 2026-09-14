@@ -33,6 +33,20 @@ carry the history and nothing here restates it.
   touched crates. `12` shows `daemon_autostart::nested_attach_inside_a_pane_
   prints_the_pinned_refusal` failing under load; `13` is the same test alone,
   passing, which is this box's load-flake rule.
+- `16-compat-check.txt` — compat/check.sh, exit 0, with the pinned tmux build
+  lines dropped. `17-verify-claims.txt` — compat/tui/verify-claims.py:
+  "every verified obligation holds up".
+
+## One thing this lane touched outside the repo
+
+compat/check.sh's first run rebuilt the pinned tmux in the SHARED checkout's
+cache, because this worktree had no compat/.cache of its own and the run was
+given a symlink to the shared one. The source tree is untouched and still
+clean at d77c9dc6; only the binary was relinked, which a cargo-style build is
+not reproducible across, so compat/.cache/tmux-build.stamp was rewritten from
+the same fetch-tmux.sh formula and compat/fetch-tmux.sh now accepts the cache
+without rebuilding. Every fixture run listed here was taken before that
+relink, against the same pinned source.
 
 ## What moved
 

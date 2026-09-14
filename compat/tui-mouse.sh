@@ -1341,6 +1341,14 @@ sc_one_sided_border_drag() {
   case_border_drag
   BORDER_SABOTAGE_COLUMN=""
 }
+# The pin's own `WheelDownStatus` unbound on zz only, so a wheel over the
+# status row steps the pin's window and leaves zz's where it was. Both wheel
+# checks carry it: the wheel up then steps zz back from window 0.
+sc_one_sided_status_wheel() {
+  side_command zz unbind-key -T root WheelDownStatus >/dev/null 2>&1
+  case_status_clicks
+  side_command zz bind-key -T root WheelDownStatus next-window >/dev/null 2>&1
+}
 # zz out of copy mode before the paste, so its pane takes the text the mode
 # would have eaten. paste-into-copy-mode/after-cancel-screen is where the two
 # screens part.
@@ -1384,6 +1392,8 @@ run_self_check() {
     sc_one_sided_mouse_context
   self_check_case "zz's border drag released four cells short" catches \
     sc_one_sided_border_drag
+  self_check_case 'WheelDownStatus unbound on zz only' catches \
+    sc_one_sided_status_wheel
   self_check_case "zz's mouse-target click aimed into the other pane" catches \
     sc_one_sided_mouse_target
   self_check_case 'zz out of copy mode before the paste' catches \

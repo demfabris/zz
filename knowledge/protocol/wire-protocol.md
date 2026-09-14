@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v102)
+title: zz wire protocol (v103)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 102`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 103`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (102) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (103) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -640,11 +640,10 @@ end of those enums, and `PreviewCycle` at the end of each of the two before them
 `EventPayload::ChooserPresentation { presentation: Option<Box<ChooserPresentation>> }` at tail tag
 52, with the payload types `ChooserPresentation`, `ChooserRow`, `ChooserPreview`,
 `ChooserPreviewSize` and `ChooserPreviewTile` the daemon fills from the mode tree. v102 also
-appends `InputMessage::MouseKey { key, pane, window, column, row, border, view_action,
-press_action }` after
+appends `InputMessage::MouseKey { key, pane, window, column, row, border }` after
 `DismissClientMessage`, the pin's own mouse key name a client resolved from a decoded pointer event
-together with the pane and window that event landed on, its cell in the client's screen, the
-axis of the divider a `Border` gesture grabbed and the pane input the gesture and its press carry. v102 also appends
+together with the pane and window that event landed on, its cell in the client's screen and the
+axis of the divider a `Border` gesture grabbed. v102 also appends
 `ProtocolMessage::ClientTerminalFeatures { features: Vec<String> }` at the tail of the message
 enum, the terminal features a client learned from its own terminal after the hello; `features` is
 capped at `MAX_CLIENT_TERMINAL_FEATURES` (64) entries of `MAX_CLIENT_TERMINAL_FEATURE_BYTES` (64)
@@ -654,11 +653,14 @@ opens: `ChooseTreeKind` gains a trailing `Clients`, `ChooseTreeTarget` a trailin
 status_width }` and `Markup { lines }` that `window_client_draw` and `window_client_draw_info`
 fill, and `ChooseTreeAction` the trailing `ClientDetach`, `ClientDetachTagged` and `ClientInfo`
 the daemon resolves `d`, `D` and `i` to inside that mode. All five are pure end-appends with both
-halves in the same push.
+halves in the same push. v103 appends `view_action: Option<TerminalViewAction>` and
+`press_action: Option<TerminalViewAction>` to `InputMessage::MouseKey` after `border`, the pane
+input the gesture carries and the one its press carried, which are the pin's own `m->x`/`m->y` and
+`m->lx`/`m->ly`.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 102`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 103`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - v102 carries the colour class each style's two grounds came from, and the client's own terminal
@@ -692,11 +694,24 @@ halves in the same push.
   already carried. The daemon publishes them and the raw TUI paints the prompt row; GUI clients read
   the same state through their own chooser. Pure appends; the cycle's gate folds every lane's 102
   appends into one entry.
+- v103 carries the pane input a pointer gesture would have handed the pane on its own.
+  `InputMessage::MouseKey` appends `view_action: Option<TerminalViewAction>` and
+  `press_action: Option<TerminalViewAction>` after `border`, the pin's own `m->x`/`m->y` and
+  `m->lx`/`m->ly`. `send-keys -M` hands the first to the pane the event landed on, the way
+  `window_pane_key(wp, tc, s, wl, m->key, m)` re-encodes the event through `input_key_pane`, and
+  the daemon hands the same field over when a mouse key matched no binding in the first table it
+  tried, which is `server_client_handle_key`'s own `forward_key`. `copy-mode -M` anchors its
+  selection on the second before the first extends it, the way `window_copy_start_drag` reads
+  `cmd_mouse_at(wp, m, &x, &y, 1)`. The client encodes both because it owns the cell grid and the
+  pixel geometry the encoding needs. Pure end-appends with their consumer halves in the same push;
+  GUI clients send the message never and are unchanged. The cycle-9 mouse lane wrote them against
+  102, which shipped in zz 0.9.0 and 0.9.1 while the lane was running: a released version cannot
+  take appends, because two builds would both claim it and disagree about the bytes, so the version
+  moves rather than the 102 entry growing.
 - v102 also carries a decoded pointer event that resolved to one of the pin's mouse key names.
   `InputMessage` appends `MouseKey { key: String, pane: Option<PaneId>, window: Option<WindowId>,
-  column: u16, row: u16, border: Option<Axis>, view_action: Option<TerminalViewAction>,
-  press_action: Option<TerminalViewAction> }` after `DismissClientMessage`. The client owns
-  the pointer and names the
+  column: u16, row: u16, border: Option<Axis> }` after `DismissClientMessage`. The client owns the
+  pointer and names the
   key the way `server_client_check_mouse` does, from the gesture, its button and where on the
   client's screen it landed; the daemon looks that name up in the table the client is in and then
   in the session's root table, the way `key_bindings_get` walks them, and runs the binding with the
@@ -705,15 +720,8 @@ halves in the same push.
   pointer handling. `border` is the trailing field, appended within 102 by the cycle-8 keys lane:
   a press latches the location it resolved to for the drag and the release that follow it, the way
   `c->tty.mouse_drag_flag` latches them, and `resize-pane -M` reads the latched axis to know which
-  edge of the pane the drag is moving. `view_action` and `press_action` are the two trailing
-  fields appended within 102 by the cycle-9 mouse lane: the pane input this gesture carries and the
-  one its press carried, which are the pin's own `m->x`/`m->y` and `m->lx`/`m->ly`. `send-keys -M`
-  hands the first to the pane the event landed on, the way
-  `window_pane_key(wp, tc, s, wl, m->key, m)` re-encodes the event through `input_key_pane`, and
-  `copy-mode -M` anchors its selection on the second before the first extends it, the way
-  `window_copy_start_drag` reads `cmd_mouse_at(wp, m, &x, &y, 1)`. The client encodes both because
-  it owns the cell grid and the pixel geometry the encoding needs. Pure appends with their consumer
-  halves in the same push; GUI clients send the message never and are unchanged.
+  edge of the pane the drag is moving. Pure appends with their consumer halves in the same push;
+  GUI clients send the message never and are unchanged.
 - v102 also carries what a client learned from its own terminal after the hello.
   `ProtocolMessage` appends `ClientTerminalFeatures { features: Vec<String> }` at the tail. The pin
   has no wire here: its client and its server share one process, so `tty_keys_device_attributes`,

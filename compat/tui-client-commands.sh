@@ -71,14 +71,13 @@
 # display-message -I        caller stdin into the pane        loudly unsupported             DECLARED, CHILD TUI-018
 # split-window -I           caller stdin into the new pane    loudly unsupported             DECLARED, CHILD TUI-018
 # show-hooks [-Bgpw] [-t]   the hook table                    same                           PROVED
-# show-messages             the server log                    same shape, but the invoking   DECLARED, the log
-#                                                               client is named device-<n>     carries client
-#                                                               and the pin reprints a         identity
+# show-messages             the server log                    same shape and the same tty    DECLARED, the log
+#                                                               for an attached client, but a  carries client
+#                                                               clientless CLI is device-<n>   identity
+#                                                               and the pin reprints a
 #                                                               command through args_print
-# show-messages -J          the running format jobs           the same table                 PROVED (the empty
-#                                                                                             table; a live row's
-#                                                                                             fd and pid are its
-#                                                                                             own process's)
+# show-messages -J          the running format jobs           the same table, empty and      PROVED
+#                                                               with one job armed
 # show-messages -T          Terminal <n>: <term> for          the same 234 lines             PROVED
 #                             <client>, flags=0x<n>, then
 #                             tty_term_describe per code
@@ -115,13 +114,12 @@
 #                        the pin draws while it runs is the declared part.
 #   the inner shell      ENV= PS1='$ ' exec /bin/sh: no rc file, and a prompt
 #                        with no host, user, path or clock.
-# DECLARED, NOT PINNED: the server log names its clients, and a clientless CLI
-#   is client-<pid> on the pin and device-<n> on zz; the pin also reprints a
-#   command through its own argument printer. show-messages is recorded for
-#   exactly that and nothing else is masked. zz names an attached terminal
-#   client by its tty the way the pin does - both sides answer /dev/pts/<n> -
-#   so only the transient CLI's own name diverges, and that is a recorded
-#   product decision, not an open measurement.
+# DECLARED, NOT PINNED: the server log names its clients. The pin names any
+#   tty-bearing client by that tty and a clientless CLI by client-<pid>; zz now
+#   names a tty-bearing client by its tty too, and keeps device-<n> for a client
+#   with no tty of its own. The pin also reprints a command through its own
+#   argument printer. show-messages is recorded for exactly that pair and
+#   nothing else is masked.
 #
 # NORMALIZED, ON BOTH SIDES: a pts number, a job's fd and a job's pid are
 #   handed out by the kernel to one process, so no two servers can print the
@@ -714,7 +712,7 @@ INTERACTIVE_REFRESH='clients.interactive-refresh, accepted: every zz client rend
 LOCK_PROGRAM='options.lock-program, accepted: the pin spawns lock-command on the client tty and a daemon that only publishes frames cannot run a program on a client terminal'
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
 BINARY_STREAMS='protocol.binary-streams, accepted: typed UTF-8 arguments are the contract and the remaining - forms stay loudly refused rather than pretending the daemon process is the caller'
-LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. An attached terminal client is named by its tty on both sides, so this is the transient CLI alone, and it names a client that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
+LOG_IDENTITY='DECIDED 2026-09-14: zz keeps device-<n> for a client with no tty of its own, where the pin prints client-<pid>. Measured 2026-09-14 on both sides: the pin names ANY tty-bearing client by that tty, including the attached terminal client whose attach-session row reads /dev/pts/<n>, and zz named none of them - it spelled every row by the device name the client sent, which for an interactive client is the hostname. That half is closed: the server log now names a client by its tty whenever it has one. What stays is the clientless CLI, which names a process that has already exited by the time anyone reads the log while device-<n> is the spelling every zz target, chooser row and #{client_name} uses. The pin also reprints each command through args_print, so capture-pane -pa comes back as capture-pane -ap. Registered, not masked'
 SERVER_ACCESS='zz has no multi-user socket access list: the daemon socket is the invoking user, so there is no user or group to add, and TUI-014 carries the refusal shape'
 CLIENT_TREE_CLIENTLESS='clients.interactive-refresh, accepted: a chooser is per client in zz, so a clientless CLI answers the same attached-client error choose-tree and choose-buffer answer, while the pin exits 0 with no output and, alone among the three, opens no mode either: cmd_choose_tree_exec returns CMD_RETURN_NORMAL before window_pane_set_mode when server_client_how_many() == 0 (cmd-choose-tree.c), so the exit status and the error text are what diverge here, measured 2026-09-14. The raw TUI opens the pin client mode on prefix D, asserted whole in compat/tui-choosers.sh as client-tree-open'
 
@@ -811,6 +809,33 @@ message_hook_cases() {
   case_run messages-terminals-missing-target same '' -- show-messages -T -t /dev/zzcc-nope
   CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
   case_run messages-jobs-and-terminals same '' -- show-messages -JT
+  message_live_job_cases
+}
+
+# A -J table that is not empty. What puts a row in the pin's is format_job_get:
+# one job tree per client plus one for a clientless expansion, keyed by the
+# format tag and the command, and job_print_summary walks job.c `all_jobs` over
+# all of them. One #() in status-left with one client attached is therefore ONE
+# row on the pin, and arming the same one on zz is the only way to compare a
+# live table. The job's fd and pid belong to its own child, so they go through
+# the same PER_PROCESS_NUMBERS substitution on both sides; the command beside
+# them does not. `sleep` outlives the case, so what the status draws is the
+# pin's own `<'cmd' not ready>` placeholder on both sides.
+LIVE_JOB_COMMAND='#(sleep 40; echo zzcc-job)'
+
+job_rows_are() {
+  [ "$(side_command "$1" show-messages -J 2>/dev/null | grep -c '^Job ')" = "$2" ]
+}
+
+message_live_job_cases() {
+  CASE_LABEL=messages-jobs-live
+  set_on_both status-left "$LIVE_JOB_COMMAND"
+  wait_for 'the pin armed one format job' job_rows_are tmux 1
+  wait_for 'zz armed one format job' job_rows_are zz 1
+  CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
+  case_run messages-jobs-live same '' -- show-messages -J
+  set_on_both status-left L
+  restore_case messages-jobs-live-restored
 }
 
 lock_cases() {
@@ -917,6 +942,10 @@ self_check_run() {
   compare_channels "$name" || true
 }
 
+zz_status_left_is() {
+  [ "$(zz_command display-message -p '#{status-left}' 2>/dev/null)" = "$1" ]
+}
+
 zz_cursor_is() {
   [ "$(cursor_tuple zz)" = "$1" ]
 }
@@ -997,8 +1026,24 @@ run_self_check() {
     exit=0 stdout=1 stderr=0
   zz_command kill-session -t zzcc-norm >/dev/null || die 'zz refused kill-session'
 
+  # The live -J table: one #() armed in status-left on the zz side alone. The
+  # two tables then hold a different number of rows, and PER_PROCESS_NUMBERS
+  # collapses the fd and the pid but not the command beside them, so the
+  # difference has to reach stdout. The status draws the job on one side too,
+  # which is the screen channel doing its own job.
+  zz_command set-option -g status-left "$LIVE_JOB_COMMAND" >/dev/null ||
+    die 'zz refused set-option -g status-left'
+  wait_for 'the one-sided format job' job_rows_are zz 1
+  CASE_NORMALIZE="$PER_PROCESS_NUMBERS"
+  self_check_run live-job-sabotage show-messages -J
+  CASE_NORMALIZE=''
+  self_check_expect 'a format job armed on one side only' exit=0 stdout=1 stderr=0
+  zz_command set-option -g status-left L >/dev/null ||
+    die 'zz refused set-option -g status-left'
+  wait_for 'the one-sided format job withdrawn from the status' zz_status_left_is L
+
   # The second equivalence: with every sabotage withdrawn the comparison is
-  # silent again, so none of the four above was a difference the scene kept.
+  # silent again, so none of the five above was a difference the scene kept.
   self_check_run equivalence-after display-message -p -t PANE '#{window_index}.#{pane_index}'
   self_check_expect 'equivalence: every sabotage withdrawn' \
     exit=0 stdout=0 stderr=0 screen=0 state=0

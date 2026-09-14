@@ -31,16 +31,8 @@ use zz_terminal::{
 
 use crate::{configure_shell_job_environment, paths::home_directory, shell_process};
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum ShellCacheScope {
-    Attached(ClientId),
-    Unattached,
-}
+type ShellCacheKey = (ClientId, FormatJobTag, String);
 
-type ShellCacheKey = (ShellCacheScope, FormatJobTag, String);
-
-/// The order `all_jobs` keeps: a fresh job goes on the head of the list, so a
-/// higher serial is printed first.
 static JOB_SERIAL: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Default)]
@@ -723,10 +715,6 @@ impl StatusRenderer {
         Some(published.clone())
     }
 
-    /// job.c `job_print_summary`: every job still running, newest first the way
-    /// `LIST_INSERT_HEAD` leaves `all_jobs`. `job->status` is the wait status a
-    /// dead job left behind, and a job this cache still holds has not been
-    /// waited for, so it is 0 here the way it is 0 there.
     pub(crate) fn job_summaries(&self) -> Vec<String> {
         let mut jobs = self
             .shell_cache
@@ -755,10 +743,8 @@ impl StatusRenderer {
         self.shell_cache
             .retain(|_, entry| now.saturating_sub(entry.last) < 3600);
         let mut changed = BTreeSet::new();
-        for ((scope, _, _), entry) in &mut self.shell_cache {
-            if entry.poll()
-                && let ShellCacheScope::Attached(client) = scope
-            {
+        for ((client, _, _), entry) in &mut self.shell_cache {
+            if entry.poll() {
                 changed.insert(*client);
             }
         }
@@ -827,9 +813,8 @@ impl StatusRenderer {
 
     pub(crate) fn forget(&mut self, client: ClientId) {
         self.published.remove(&client);
-        self.shell_cache.retain(|(scope, _, _), _| {
-            !matches!(scope, ShellCacheScope::Attached(cached) if *cached == client)
-        });
+        self.shell_cache
+            .retain(|(cached, _, _), _| *cached != client);
     }
 
     pub(crate) fn set_tmux_shim(&mut self, directory: PathBuf, executable: PathBuf) {
@@ -1558,7 +1543,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     }
 
     fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String {
-        let Some(context) = self.status_context else {
+        let (Some(context), Some(_)) = (self.status_context, self.facts.client.as_ref()) else {
             return String::new();
         };
         let mut expansion = DaemonFormatHooks::command(self.facts);
@@ -1572,12 +1557,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             return String::new();
         };
         let cwd = status_working_directory(context);
-        let scope = if self.facts.client.is_some() {
-            ShellCacheScope::Attached(client)
-        } else {
-            ShellCacheScope::Unattached
-        };
-        let key = (scope, tag.clone(), command.to_owned());
+        let key = (client, tag.clone(), command.to_owned());
         let first_reference = touched.insert(key.clone());
         let entry = cache.entry(key).or_default();
         let now = shell_second();
@@ -2287,7 +2267,10 @@ mod tests {
                 session_name: "work".to_owned(),
                 ..StatusContext::default()
             },
-            facts: FormatHookFacts::default(),
+            facts: FormatHookFacts {
+                client: Some(ClientFormatFacts::default()),
+                ..FormatHookFacts::default()
+            },
             client_scheme: None,
             message_styles: (String::new(), String::new()),
             modes: Vec::new(),
@@ -2314,7 +2297,10 @@ mod tests {
             default_terminal: engine.default_terminal_for_spawn().to_owned(),
             startup: false,
             context: status_context(&snapshot, engine, session, None),
-            facts: FormatHookFacts::default(),
+            facts: FormatHookFacts {
+                client: session.map(|_| ClientFormatFacts::default()),
+                ..FormatHookFacts::default()
+            },
             client_scheme: None,
             message_styles: engine.message_styles_for_session(session),
             modes: Vec::new(),
@@ -3377,24 +3363,28 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn status_command_cache_survives_transient_clients_in_the_same_directory() {
+    fn a_client_with_no_attached_session_runs_no_status_job() {
         let directory = tempfile::tempdir().expect("working directory fixture");
         let source = directory.path().join("value");
         std::fs::write(&source, "first\n").expect("the first value is written");
         let format = format!("#(cat '{}')", source.display());
         let cwd = std::fs::canonicalize(directory.path()).expect("working directory resolves");
-        let mut first = request(1, &format, "");
-        first.context.session_path = cwd.to_string_lossy().into_owned();
+        let mut attached = request(1, &format, "");
+        attached.context.session_path = cwd.to_string_lossy().into_owned();
+        let mut clientless = request(2, &format, "");
+        clientless.context.session_path = cwd.to_string_lossy().into_owned();
+        clientless.facts.client = None;
         let mut renderer = StatusRenderer::default();
 
-        assert_eq!(settled(&mut renderer, &first).left, "first");
-        renderer.forget(ClientId(1));
-        std::fs::write(&source, "second\n").expect("the second value is written");
-        let mut second = request(2, &format, "");
-        second.context.session_path = cwd.to_string_lossy().into_owned();
-
-        assert_eq!(settled(&mut renderer, &second).left, "first");
+        assert_eq!(settled(&mut renderer, &attached).left, "first");
         assert_eq!(renderer.shell_cache.len(), 1);
+        assert_eq!(settled(&mut renderer, &clientless).left, "");
+        assert_eq!(renderer.shell_cache.len(), 1);
+        assert_eq!(
+            renderer.shell_cache.keys().next().unwrap().0,
+            ClientId(1),
+            "a clientless render adds no second job for the same command"
+        );
     }
 
     #[cfg(unix)]
@@ -3448,10 +3438,7 @@ mod tests {
         renderer.render_changed(&[remaining], true);
 
         assert_eq!(renderer.shell_cache.len(), 1);
-        assert_eq!(
-            renderer.shell_cache.keys().next().unwrap().0,
-            ShellCacheScope::Attached(ClientId(1))
-        );
+        assert_eq!(renderer.shell_cache.keys().next().unwrap().0, ClientId(1));
     }
 
     #[cfg(unix)]
